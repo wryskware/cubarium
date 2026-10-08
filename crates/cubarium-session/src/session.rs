@@ -779,6 +779,7 @@ impl Loop {
         {
             let (world, flora, fauna) = r.sim.layers();
             t.update(world);
+            t.update_surfaces(world, flora);
             chunks = t.take_dirty();
             frame = Some(Arc::new(Frame::of(world, flora, fauna)));
             r.feed_ns += at.elapsed().as_nanos() as u64;
@@ -907,6 +908,7 @@ impl Loop {
         let (chunks, frame) = match tracker.as_mut() {
             Some(t) => {
                 let (world, flora, fauna) = sim.layers();
+                t.update_surfaces(world, flora);
                 (t.take_dirty(), Some(Arc::new(Frame::of(world, flora, fauna))))
             }
             None => (Vec::new(), None),
@@ -1050,5 +1052,57 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod surface_union_tests {
+    use super::*;
+    use crate::feed_tests::{deposit, flora, world};
+    use cubarium_voxel_flora::DepositKind;
+
+    /// Feed messages use exactly the terrain's union, including an empty replacement.
+    #[test]
+    fn surface_updates_between_takes_union_and_latest_removal_wins() {
+        let session = Session::new(SessionOptions::default());
+        let w = world();
+        let mut f = flora();
+        let mut t = Tracker::new(&w, FeedConfig::default());
+        let (tx, rx) = mpsc::channel();
+        tx.send(ToReader::Reset {
+            generation: 1,
+            label: "fixture".into(),
+            dims: t.dims().0,
+            chunk_dims: t.dims().1,
+            voxel_m: w.config().voxel_m,
+            history: HistoryConfig::default(),
+            chunks: t.take_dirty(),
+            frame: None,
+        })
+        .unwrap();
+        drop(tx);
+        ingest_main(rx, &session.shared, 16);
+        assert!(session.take_view().full);
+
+        let (tx, rx) = mpsc::channel();
+        for x in [3, 20] {
+            deposit(&mut f, x, DepositKind::DeadWood, 1.0);
+            t.update_surfaces(&w, &f);
+            tx.send(ToReader::Feed { chunks: t.take_dirty(), frame: None, events: Vec::new() }).unwrap();
+        }
+        // Remove the first log after it was queued, before the reader takes anything.
+        let mut state = toml::Value::try_from(&f).unwrap();
+        state["ground"][0]["dead_wood"] = toml::Value::Float(0.0);
+        f = state.try_into().unwrap();
+        t.update_surfaces(&w, &f);
+        tx.send(ToReader::Feed { chunks: t.take_dirty(), frame: None, events: Vec::new() }).unwrap();
+        drop(tx);
+        ingest_main(rx, &session.shared, 16);
+        let view = session.take_view();
+        assert!(!view.full);
+        assert_eq!(view.chunks.len(), 2);
+        assert!(view.chunks[0].marks.is_empty(), "empty list clears the earlier mark");
+        assert_eq!(view.chunks[1].marks.len(), 1, "the other chunk was retained");
+        assert!(session.take_view().chunks.is_empty());
     }
 }

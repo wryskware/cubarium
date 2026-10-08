@@ -73,3 +73,63 @@ everything). Changes between takes are unioned, so a slow reader never misses on
 - What the ids and codes mean: `query("species", null)` (lineages, plant species, states,
   mobility modes, life stages, flag bits, materials). A new species is a new row there, not a
   binding change.
+
+The additional view columns are packed as follows. `I32`, `I64`, `F32`, `F64` and `Byte`
+below mean Godot's corresponding `Packed*Array`. Animal, plant and carcass columns are
+complete newest-tick lists on every take with a frame; absent ids remove the old records.
+
+- `animals.flags` adds `starving` (named in `species.flags`), using the legacy presenter's
+  reserve/body condition. `animals.riding_host: I64` holds the host id, or −1.
+- `animals.wall_toward: I32` has two values per animal `(dx, dz)`, the unit direction into
+  its wall; `(0, 0)` without a wall climb. Heading describes travel, and on descent the
+  wall is behind that direction. These are world x/z directions, not face codes.
+- `plants.moisture: F32` is the simulation's last moisture factor (0–1).
+  `plants.wilt: Byte` is the legacy quantised wilt level, named by `species.wilt_levels`
+  (0 turgid, last level fully wilted).
+- `plants.ripeness: F64` is the legacy accent input: nectar present (0/1), else
+  fruit/full fruit capacity (0–1), else parcel/propagule package (may exceed 1).
+  `species.plant_ripe_at` names the shared threshold at which the bloom opens.
+- `plants.parcel_fullness: F64` is parcel/propagule package (0 for a zero package);
+  this remains the seed parcel even for nectar/fruit species.
+- `plants.foliage_offsets: I32` has plant-count + 1 entries, beginning with 0.
+  Plant i's model layer indices run bottom-up through
+  `[offsets[i], offsets[i+1])` of `foliage_stock: F64` and `foliage_capacity: F64`.
+  Divide stock by capacity, or use 0 for nonpositive capacity, for the exact fraction
+  the old `keeps` rule reads. Entries include all supported model indices (currently 4);
+  an index absent from the current growth stage carries whole-stand stock/capacity,
+  preserving the old fallback when a neighbouring model step has another layer.
+- `carcasses` has `ids: I64`, `species: I32` (animal lineage ids), `pos: F32`
+  (three metres x/y/z each, y at the support cell's top), `heading: F32` (radians),
+  `state: Byte` (named by `species.decay_states`), `remaining: F32` (carrion/original
+  organic matter, clamped 0–1; decreases as decay advances), and `organic: F32`
+  (original organic matter for body sizing). A carcass id is its support-cell address
+  `(y · depth + z) · width + x`, scoped to the generation, **not** the dead animal id:
+  the simulation retains no animal identity on a carcass and a replacement at that site
+  reuses the address.
+
+`marks` and `vines` are sparse **replacement lists per returned terrain chunk**. Each has
+`offsets: I32`, chunk-count + 1 entries beginning with 0; records for `chunk_coords` entry i
+are `[offsets[i], offsets[i+1])` in every column (three times that range for `site`).
+Replace that chunk's whole list, including with an empty list. Chunks resend when terrain,
+water, any mark, or any vine record changes; all share the same union between takes.
+Sparse records avoid dense empty surface planes and use the established generation/load
+reset contract. Coordinates below name the **support/rock voxel**, in global voxels.
+
+- `marks.site: I32` is x/y/z, three each; `kind: Byte` is named by
+  `species.mark_kinds` (log, litter, carrion, glassfilm, seed_bank), `species: I32` is the
+  seed mark's plant species or −1, `stock: F32` is organic stock (the named seed species'
+  summed bank stock), and `strength: F32` is glassfilm's stock/capacity clamped 0–1,
+  otherwise 1. Logs/litter/carrion use the legacy minimum visible stock; seed banks use
+  the simulation's recent-landing/sprouting rule. Film strength is the uneased target;
+  easing belongs to the presenter.
+- `vines.site: I32` is rock x/y/z, three each; `direction: Byte` names its outward face
+  via `species.vine_directions`; `owner: I64` is the vine id; `density: Byte` and
+  `accent: Byte` are named by `species.vine_densities` and `species.vine_accents`.
+  `flags: Byte` is named by `species.vine_flags`: rooted, hanging, emissive (flower
+  mouth). The emissive bit identifies the accent's luminous texels, not the whole face.
+- `vines.tile: I32` is the shared legacy `VineCell::tile` selection, flattened as
+  `row · 256 + column`, where `row = 3 · set + density` and
+  `column = 16 · mask + (exits & mask)`. The layout is named by `species.vine_tiles`;
+  its accent row is separate, with bud/flower/fruit in columns 0/1/2. The feed retains
+  every covered face, including inside corners sharing an air voxel. A face's tile can
+  change when a neighbour changes, including across chunk borders.

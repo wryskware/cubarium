@@ -25,10 +25,11 @@
 
 use std::sync::Arc;
 
+use crate::view_state;
 use cubarium_observatory::query;
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Fauna;
-use cubarium_voxel_flora::Flora;
+use cubarium_voxel_flora::{Flora, Site};
 use serde::{Deserialize, Serialize};
 
 /// Voxels along a chunk's edge.
@@ -65,6 +66,56 @@ pub struct ChunkData {
     pub at: [u32; 3],
     /// [`CHUNK_BYTES`]: the material, free-water and pore-water planes.
     pub bytes: Box<[u8]>,
+    /// Sparse surface records in this chunk; replacement lists, including empty ones.
+    pub marks: Vec<GroundMark>,
+    pub vines: Vec<VineFace>,
+}
+
+/// A visible surface mark, on its support cell (not the cell above it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroundMark {
+    pub site: [i32; 3],
+    pub kind: u8,
+    /// Plant species, or -1 for unspecialised detritus.
+    pub species: i32,
+    /// Organic stock; for seeds, the named species' total bank stock.
+    pub stock: f32,
+    /// Glassfilm coverage strength, otherwise 1.
+    pub strength: f32,
+}
+
+pub const MARK_KINDS: [&str; 5] = ["log", "litter", "carrion", "glassfilm", "seed_bank"];
+pub const VINE_ROOTED: u8 = 1;
+pub const VINE_HANGING: u8 = 2;
+pub const VINE_EMISSIVE: u8 = 4;
+
+pub const DECAY_STATES: [&str; 2] = ["carcass", "remains"];
+
+/// One covered rock face, addressed by its rock voxel and outward face direction.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VineFace {
+    pub site: [i32; 3],
+    pub direction: u8,
+    pub owner: i64,
+    pub density: u8,
+    pub accent: u8,
+    /// Bit 0 rooted, bit 1 hanging, bit 2 emissive accent.
+    pub flags: u8,
+    /// Atlas index: row * 256 + column (16 * mask + exits).
+    pub tile: i32,
+}
+
+/// The newest complete carcass list; ids are support-cell addresses within a generation.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Carcasses {
+    pub ids: Vec<i64>,
+    pub species: Vec<i32>,
+    pub pos: Vec<f32>,
+    pub heading: Vec<f32>,
+    pub state: Vec<u8>,
+    /// Carrion / original organic stock, clamped to 0..1 (decreases with decay).
+    pub remaining: Vec<f32>,
+    pub organic: Vec<f32>,
 }
 
 /// The animals, one entry per body in each column (structure of arrays).
@@ -78,6 +129,10 @@ pub struct Animals {
     pub pos: Vec<f32>,
     /// Radians from +z toward +x.
     pub heading: Vec<f32>,
+    /// Riding host id, or -1.
+    pub riding_host: Vec<i64>,
+    /// Wall-facing unit (dx, dz); (0, 0) without a WallClimb.
+    pub wall_toward: Vec<i32>,
     /// The behaviour state ([`crate::species_table`]'s `states`).
     pub state: Vec<u8>,
     /// How it moves: ground, wall, climb, fly, glide, perched.
@@ -85,7 +140,7 @@ pub struct Animals {
     /// Life stage ([`crate::species_table`]'s `stages`).
     pub stage: Vec<u8>,
     /// Bits ([`crate::species_table`]'s `flags`): striking, riding, hunkered, yielding,
-    /// alert, wounded.
+    /// alert, wounded, starving.
     pub flags: Vec<u8>,
     /// Body over its lineage's breeding size: below 1 is a juvenile's share of it.
     pub size: Vec<f32>,
@@ -103,6 +158,14 @@ pub struct Plants {
     pub growth: Vec<f32>,
     /// Foliage, the species' own units (0 is bare).
     pub foliage: Vec<f32>,
+    pub moisture: Vec<f32>,
+    pub wilt: Vec<u8>,
+    pub ripeness: Vec<f64>,
+    pub parcel_fullness: Vec<f64>,
+    /// n+1 offsets into the two packed layer columns, one pair per model layer.
+    pub foliage_offsets: Vec<i32>,
+    pub foliage_stock: Vec<f64>,
+    pub foliage_capacity: Vec<f64>,
 }
 
 /// The weather, the light and the day clock.
@@ -126,12 +189,13 @@ pub struct Sky {
     pub strike: Option<[u64; 4]>,
 }
 
-/// Everything but the terrain, as of one tick.
+/// Complete organism lists and the sky, as of one tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Frame {
     pub tick: u64,
     pub animals: Animals,
     pub plants: Plants,
+    pub carcasses: Carcasses,
     pub sky: Sky,
 }
 
@@ -146,6 +210,8 @@ impl Frame {
             species: Vec::with_capacity(n),
             pos: Vec::with_capacity(3 * n),
             heading: Vec::with_capacity(n),
+            riding_host: Vec::with_capacity(n),
+            wall_toward: Vec::with_capacity(2 * n),
             state: Vec::with_capacity(n),
             mobility: Vec::with_capacity(n),
             stage: Vec::with_capacity(n),
@@ -157,6 +223,9 @@ impl Frame {
             a.species.push(b.founder.map_or(-1, |f| f.index() as i32));
             a.pos.extend([b.pose.x as f32, b.pose.y_m as f32, b.pose.z as f32]);
             a.heading.push(b.pose.heading_rad as f32);
+            a.riding_host.push(b.attached.map_or(-1, |attachment| attachment.host as i64));
+            let (dx, dz) = b.mobility.climb.as_ref().map_or((0, 0), view_state::wall_toward);
+            a.wall_toward.extend([dx, dz]);
             a.state.push(b.state as u8);
             a.mobility.push(b.mobility.mode as u8);
             a.stage.push(stage_code(query::stage_of(config, b)));
@@ -179,6 +248,9 @@ impl Frame {
             if b.wound > 0.0 {
                 flags |= FLAG_WOUNDED;
             }
+            if view_state::is_starving(b) {
+                flags |= FLAG_STARVING;
+            }
             a.flags.push(flags);
             let breed = match b.founder {
                 Some(f) => config.founder(f).core.birth_body,
@@ -195,6 +267,13 @@ impl Frame {
             site: Vec::with_capacity(3 * m),
             growth: Vec::with_capacity(m),
             foliage: Vec::with_capacity(m),
+            moisture: Vec::with_capacity(m),
+            wilt: Vec::with_capacity(m),
+            ripeness: Vec::with_capacity(m),
+            parcel_fullness: Vec::with_capacity(m),
+            foliage_offsets: vec![0],
+            foliage_stock: Vec::with_capacity(m * cubarium_voxel_flora::MAX_FOLIAGE_LAYERS),
+            foliage_capacity: Vec::with_capacity(m * cubarium_voxel_flora::MAX_FOLIAGE_LAYERS),
         };
         for s in fv.stands {
             p.ids.push(s.id as i64);
@@ -203,8 +282,41 @@ impl Frame {
             let max = fc.species(s.species).wood_max;
             p.growth.push(if max > 0.0 { (s.wood / max).clamp(0.0, 1.0) as f32 } else { 1.0 });
             p.foliage.push(s.foliage as f32);
+            p.moisture.push(s.moisture as f32);
+            p.wilt.push(view_state::wilt_level(s.moisture));
+            let sc = fc.species(s.species);
+            p.ripeness.push(view_state::ripeness(s, sc));
+            p.parcel_fullness.push(view_state::parcel_fullness(s, sc));
+            let (stocks, capacities) = view_state::foliage_layers(s, sc);
+            p.foliage_stock.extend(stocks);
+            p.foliage_capacity.extend(capacities);
+            p.foliage_offsets.push(p.foliage_stock.len() as i32);
         }
-        Frame { tick: world.tick(), animals: a, plants: p, sky: sky_of(world) }
+        let mut carcasses = Carcasses::default();
+        let c = world.config();
+        for g in fv.ground {
+            let Some(body) = g.carcass else { continue };
+            carcasses.ids.push(
+                (u64::from(g.site.y) * u64::from(c.depth) * u64::from(c.width)
+                    + u64::from(g.site.z) * u64::from(c.width)
+                    + u64::from(g.site.x)) as i64,
+            );
+            carcasses.species.push(i32::from(body.lineage));
+            carcasses.pos.extend([
+                g.site.x as f32 * c.voxel_m as f32,
+                (g.site.y + 1) as f32 * c.voxel_m as f32,
+                g.site.z as f32 * c.voxel_m as f32,
+            ]);
+            carcasses.heading.push(body.heading_rad as f32);
+            carcasses.state.push(u8::from(body.remains(g.carrion, fc)));
+            carcasses.remaining.push(if body.organic > 0.0 {
+                (g.carrion / body.organic).clamp(0.0, 1.0) as f32
+            } else {
+                0.0
+            });
+            carcasses.organic.push(body.organic as f32);
+        }
+        Frame { tick: world.tick(), animals: a, plants: p, carcasses, sky: sky_of(world) }
     }
 }
 
@@ -215,14 +327,11 @@ pub const FLAG_HUNKERED: u8 = 4;
 pub const FLAG_YIELDING: u8 = 8;
 pub const FLAG_ALERT: u8 = 16;
 pub const FLAG_WOUNDED: u8 = 32;
+pub const FLAG_STARVING: u8 = 64;
 
 /// [`Animals::stage`]'s codes, in this order.
-pub const STAGES: [query::LifeStage; 4] = [
-    query::LifeStage::Rider,
-    query::LifeStage::Pup,
-    query::LifeStage::Juvenile,
-    query::LifeStage::Adult,
-];
+pub const STAGES: [query::LifeStage; 4] =
+    [query::LifeStage::Rider, query::LifeStage::Pup, query::LifeStage::Juvenile, query::LifeStage::Adult];
 
 fn stage_code(s: query::LifeStage) -> u8 {
     STAGES.iter().position(|&x| x == s).unwrap_or(0) as u8
@@ -252,11 +361,7 @@ fn sky_of(world: &World) -> Sky {
 /// The free-water byte of a cell holding `free` of its void.
 #[inline]
 pub fn water_byte(free: f64) -> u8 {
-    if free > WATER_EPSILON {
-        ((free.min(1.0) * 255.0).round() as u8).max(1)
-    } else {
-        0
-    }
+    if free > WATER_EPSILON { ((free.min(1.0) * 255.0).round() as u8).max(1) } else { 0 }
 }
 
 /// The pore-water byte of a cell holding `pore` of its pore space.
@@ -285,6 +390,8 @@ pub struct Tracker {
     dirty: Vec<u32>,
     pore_cursor: usize,
     config: FeedConfig,
+    marks: Vec<Vec<GroundMark>>,
+    vines: Vec<Vec<VineFace>>,
 }
 
 impl Tracker {
@@ -320,6 +427,8 @@ impl Tracker {
             dirty: Vec::new(),
             pore_cursor: 0,
             config,
+            marks: vec![Vec::new(); chunks],
+            vines: vec![Vec::new(); chunks],
         };
         for i in 0..chunks as u32 {
             t.mark_chunk(i);
@@ -327,12 +436,90 @@ impl Tracker {
         t
     }
 
+    /// Update sparse surface state without writing to any simulation layer.
+    pub fn update_surfaces(&mut self, world: &World, flora: &Flora) {
+        let fv = flora.view();
+        let mut marks = vec![Vec::new(); self.marks.len()];
+        for g in fv.ground {
+            let bits = view_state::ground_marks(g, fv.tick, fv.config);
+            let mut add = |kind: u8, species: i32, stock: f32, strength: f32| {
+                let c = self.chunk_of_site(g.site);
+                marks[c].push(GroundMark {
+                    site: [g.site.x as i32, g.site.y as i32, g.site.z as i32],
+                    kind,
+                    species,
+                    stock,
+                    strength,
+                });
+            };
+            for (kind, stock) in [g.dead_wood, g.litter, g.carrion].into_iter().enumerate() {
+                if bits[kind] != 0 {
+                    add(kind as u8, -1, stock as f32, 1.0);
+                }
+            }
+            if let Some(sp) = bits[3].checked_sub(1).and_then(|i| cubarium_voxel_flora::Species::ALL.get(i as usize)) {
+                add(4, sp.index() as i32, g.seed_organic(*sp) as f32, 1.0);
+            }
+        }
+        for film in view_state::film_marks(fv) {
+            marks[self.chunk_of_site(film.site)].push(GroundMark {
+                site: [film.site.x as i32, film.site.y as i32, film.site.z as i32],
+                kind: 3,
+                species: -1,
+                stock: fv.ground_at(film.site).map_or(0.0, |g| g.film as f32),
+                strength: film.strength,
+            });
+        }
+        for (c, entries) in marks.into_iter().enumerate() {
+            if self.marks[c] != entries {
+                self.marks[c] = entries;
+                self.mark_chunk(c as u32);
+            }
+        }
+        self.update_vines(world, flora);
+    }
+
+    fn chunk_of_site(&self, site: Site) -> usize {
+        let k = CHUNK as usize;
+        (site.z as usize / k * self.ch + site.y as usize / k) * self.cw + site.x as usize / k
+    }
+
+    fn update_vines(&mut self, world: &World, flora: &Flora) {
+        use view_state::vine;
+        let fv = flora.view();
+        let draws = fv.cover.draw();
+        let covered: rustc_hash::FxHashSet<_> = draws.iter().map(|d| d.face).collect();
+        let mut chunks = vec![Vec::new(); self.vines.len()];
+        for d in &draws {
+            let f = d.face;
+            let root = fv.cover.vine(d.owner).map(|v| v.root);
+            let Some(cell) = vine::face_cell(d, world.config(), root, |n| covered.contains(&n)) else { continue };
+            let (set, density, mask, exits) = cell.tile();
+            let site = Site { x: f.x, y: f.y, z: f.z };
+            chunks[self.chunk_of_site(site)].push(VineFace {
+                site: [f.x as i32, f.y as i32, f.z as i32],
+                direction: f.dir as u8,
+                owner: d.owner as i64,
+                density: density as u8,
+                accent: cell.accent as u8,
+                flags: u8::from(cell.rooted) * VINE_ROOTED
+                    | u8::from(cell.hanging) * VINE_HANGING
+                    | u8::from(cell.accent.emissive()) * VINE_EMISSIVE,
+                tile: (256 * vine::tile_row(set, density) + vine::tile_column(mask, exits)) as i32,
+            });
+        }
+        for (c, mut faces) in chunks.into_iter().enumerate() {
+            faces.sort_unstable_by_key(|f| (f.site, f.direction));
+            if self.vines[c] != faces {
+                self.vines[c] = faces;
+                self.mark_chunk(c as u32);
+            }
+        }
+    }
+
     /// The world's `[width, height, depth]` and the chunk grid's.
     pub fn dims(&self) -> ([u32; 3], [u32; 3]) {
-        (
-            [self.w as u32, self.h as u32, self.d as u32],
-            [self.cw as u32, self.ch as u32, self.cd as u32],
-        )
+        ([self.w as u32, self.h as u32, self.d as u32], [self.cw as u32, self.ch as u32, self.cd as u32])
     }
 
     #[inline]
@@ -463,11 +650,15 @@ impl Tracker {
                 let dst = (lz * k + ly) * k;
                 bytes[dst..dst + xs].copy_from_slice(&self.material[src..src + xs]);
                 bytes[CHUNK_CELLS + dst..CHUNK_CELLS + dst + xs].copy_from_slice(&self.free[src..src + xs]);
-                bytes[2 * CHUNK_CELLS + dst..2 * CHUNK_CELLS + dst + xs]
-                    .copy_from_slice(&self.pore[src..src + xs]);
+                bytes[2 * CHUNK_CELLS + dst..2 * CHUNK_CELLS + dst + xs].copy_from_slice(&self.pore[src..src + xs]);
             }
         }
-        ChunkData { at: [cx as u32, cy as u32, cz as u32], bytes }
+        ChunkData {
+            at: [cx as u32, cy as u32, cz as u32],
+            bytes,
+            marks: self.marks[c].clone(),
+            vines: self.vines[c].clone(),
+        }
     }
 }
 
@@ -493,7 +684,8 @@ impl View {
     /// A whole view of the world in hand: every chunk and its frame. What a candidate's
     /// thumbnail is drawn from.
     pub fn whole(world: &World, flora: &Flora, fauna: &Fauna, generation: u64) -> View {
-        let t = Tracker::new(world, FeedConfig::default());
+        let mut t = Tracker::new(world, FeedConfig::default());
+        t.update_surfaces(world, flora);
         let (dims, chunk_dims) = t.dims();
         View {
             generation,

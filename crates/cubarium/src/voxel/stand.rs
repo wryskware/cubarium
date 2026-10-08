@@ -223,28 +223,7 @@ pub fn carrion_style() -> Style {
 /// capacity (`film_capacity_per_m2 × cell area`, the plant layer's own), in `[0, 1]`. A
 /// grazed trail shows as less tint; the drawn strength fades toward this on the frame
 /// clock, so nothing pops.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FilmMark {
-    pub site: cubarium_voxel_flora::Site,
-    pub strength: f32,
-}
-
-/// Every film site's floor mark, in site order ([`FilmMark`]).
-pub fn film_marks(flora: FloraView<'_>) -> Vec<FilmMark> {
-    let c = flora.config;
-    let capacity = c.film_capacity_per_m2 * c.voxel_m * c.voxel_m;
-    flora
-        .film_sites()
-        .map(|(site, film)| FilmMark {
-            site,
-            strength: if capacity > 0.0 {
-                (film / capacity).clamp(0.0, 1.0) as f32
-            } else {
-                1.0
-            },
-        })
-        .collect()
-}
+pub use cubarium_session::view_state::{FilmMark, film_marks};
 
 /// Drawn film strengths are quantized to this many levels, so every film mark shares a
 /// handful of styles (the GPU renderer has 256 style slots for the whole scene). A
@@ -846,7 +825,7 @@ impl Stands {
         self.placing = 0;
         // Dead wood (fallen logs): rendered where dead_wood is above threshold.
         for g in flora.ground {
-            if g.dead_wood >= 0.05 {
+            if cubarium_session::view_state::detritus_visible(g.dead_wood) {
                 let Some(style) = self.new_style(StyleId::Log, log_style()) else {
                     break;
                 };
@@ -863,7 +842,7 @@ impl Stands {
         }
         // Leaf litter and organic detritus on the soil.
         for g in flora.ground {
-            if g.litter >= 0.05 {
+            if cubarium_session::view_state::detritus_visible(g.litter) {
                 let Some(style) = self.new_style(StyleId::Litter, litter_style()) else {
                     break;
                 };
@@ -883,7 +862,7 @@ impl Stands {
         self.place_film(view, flora);
         // Carrion / remains.
         for g in flora.ground {
-            if g.carrion >= 0.05 {
+            if cubarium_session::view_state::detritus_visible(g.carrion) {
                 let Some(style) = self.new_style(StyleId::Carrion, carrion_style()) else {
                     break;
                 };
@@ -995,40 +974,9 @@ impl Stands {
     /// What a stand's model stamp reads of the stand, beside its model's cells.
     fn model_inputs(&self, flora: FloraView<'_>, stand: &Stand) -> ModelInputs {
         let sc = flora.config.species(stand.species);
-        // Each foliage layer's `stock / capacity`, as `layers_of` resolves them: the stage
-        // the stand's wood is in, `share · α · W` each. A layer index the stage does not
-        // have (a model step from a neighbouring stage) reads the stand's whole fill.
-        let cap = sc.alpha * stand.wood.max(0.0);
-        let whole = if cap > 0.0 { stand.foliage / cap } else { 0.0 };
-        let mut foliage = [whole; MAX_FOLIAGE_LAYERS];
-        for (fi, (_, layer)) in sc
-            .profile_at(stand.wood)
-            .foliage_layers()
-            .take(MAX_FOLIAGE_LAYERS)
-            .enumerate()
-        {
-            let c = layer.share * cap;
-            foliage[fi] = if c > 0.0 {
-                stand.layer_stock[fi] / c
-            } else {
-                0.0
-            };
-        }
+        let foliage = cubarium_session::view_state::foliage_fractions(stand, sc);
         let wilt = model::wilt_level(stand.moisture);
-        let package = sc.propagule_package();
-        // The warm accents show what the stand carries (plants-flowering-vines
-        // 2026-10-03): a species that makes nectar is in flower while it holds any (a
-        // bloomcrown, always, once adult); one that hangs fruit shows a berry per share of
-        // its crop (`fruit / fruit_cap`). Any other reads its seed parcel, as before.
-        let ripe = if sc.nectar_cap > 0.0 && sc.nectar_per_s > 0.0 {
-            if stand.nectar > 0.0 { 1.0 } else { 0.0 }
-        } else if sc.fruit_cap > 0.0 && sc.fruit_per_s > 0.0 {
-            (stand.fruit / sc.fruit_cap).clamp(0.0, 1.0)
-        } else if package > 0.0 {
-            stand.parcel / package
-        } else {
-            0.0
-        };
+        let ripe = cubarium_session::view_state::ripeness(stand, sc);
         let fruit = stand.species == Species::Lanternberry;
         // A glowcap's lip by its colony state (D1): none on a button (wood at most
         // 0.02), full once the parcel holds half a package, half while fruiting between.
@@ -1050,7 +998,7 @@ impl Stands {
             && flora
                 .ground
                 .binary_search_by_key(&stand.site, |g| g.site)
-                .is_ok_and(|i| flora.ground[i].dead_wood >= 0.05);
+                .is_ok_and(|i| cubarium_session::view_state::detritus_visible(flora.ground[i].dead_wood));
         let anchor = Cell {
             x: i64::from(stand.site.x),
             y: stand.site.y + 1 + u32::from(on_log),
@@ -1359,7 +1307,7 @@ pub fn parts_of(flora: FloraView<'_>, stand: &Stand, style: u16) -> Vec<(Cell, P
             .ground
             .iter()
             .find(|g| g.site == site)
-            .map_or(false, |g| g.dead_wood >= 0.05);
+            .map_or(false, |g| cubarium_session::view_state::detritus_visible(g.dead_wood));
     let base_y = site.y + if on_log { 1 } else { 0 };
 
     // The interim glowcap glyph is its own shape and not a profile: one stem cell and

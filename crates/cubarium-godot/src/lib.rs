@@ -205,6 +205,60 @@ fn view_dict(v: &View) -> VarDictionary {
     }
     put(&mut d, "chunk_coords", PackedInt32Array::from(coords.as_slice()));
     put(&mut d, "voxels", PackedByteArray::from(bytes.as_slice()));
+    let mut marks = VarDictionary::new();
+    let mut offsets = vec![0i32];
+    let mut site: Vec<i32> = Vec::new();
+    let mut kind: Vec<u8> = Vec::new();
+    let mut species: Vec<i32> = Vec::new();
+    let mut stock: Vec<f32> = Vec::new();
+    let mut strength: Vec<f32> = Vec::new();
+    for c in &v.chunks {
+        for r in &c.marks {
+            site.extend(r.site);
+            kind.push(r.kind);
+            species.push(r.species);
+            stock.push(r.stock);
+            strength.push(r.strength);
+        }
+        offsets.push(kind.len() as i32);
+    }
+    put(&mut marks, "offsets", PackedInt32Array::from(offsets.as_slice()));
+    put(&mut marks, "site", PackedInt32Array::from(site.as_slice()));
+    put(&mut marks, "kind", PackedByteArray::from(kind.as_slice()));
+    put(&mut marks, "species", PackedInt32Array::from(species.as_slice()));
+    put(&mut marks, "stock", PackedFloat32Array::from(stock.as_slice()));
+    put(&mut marks, "strength", PackedFloat32Array::from(strength.as_slice()));
+    put(&mut d, "marks", marks);
+    let mut vines = VarDictionary::new();
+    let mut offsets = vec![0i32];
+    let mut site: Vec<i32> = Vec::new();
+    let mut direction: Vec<u8> = Vec::new();
+    let mut owner: Vec<i64> = Vec::new();
+    let mut density: Vec<u8> = Vec::new();
+    let mut accent: Vec<u8> = Vec::new();
+    let mut flags: Vec<u8> = Vec::new();
+    let mut tile: Vec<i32> = Vec::new();
+    for c in &v.chunks {
+        for r in &c.vines {
+            site.extend(r.site);
+            direction.push(r.direction);
+            owner.push(r.owner);
+            density.push(r.density);
+            accent.push(r.accent);
+            flags.push(r.flags);
+            tile.push(r.tile);
+        }
+        offsets.push(direction.len() as i32);
+    }
+    put(&mut vines, "offsets", PackedInt32Array::from(offsets.as_slice()));
+    put(&mut vines, "site", PackedInt32Array::from(site.as_slice()));
+    put(&mut vines, "direction", PackedByteArray::from(direction.as_slice()));
+    put(&mut vines, "owner", PackedInt64Array::from(owner.as_slice()));
+    put(&mut vines, "density", PackedByteArray::from(density.as_slice()));
+    put(&mut vines, "accent", PackedByteArray::from(accent.as_slice()));
+    put(&mut vines, "flags", PackedByteArray::from(flags.as_slice()));
+    put(&mut vines, "tile", PackedInt32Array::from(tile.as_slice()));
+    put(&mut d, "vines", vines);
     if let Some(f) = &v.frame {
         put(&mut d, "tick", f.tick as i64);
         let a = &f.animals;
@@ -218,6 +272,8 @@ fn view_dict(v: &View) -> VarDictionary {
         put(&mut animals, "stage", PackedByteArray::from(a.stage.as_slice()));
         put(&mut animals, "flags", PackedByteArray::from(a.flags.as_slice()));
         put(&mut animals, "size", PackedFloat32Array::from(a.size.as_slice()));
+        put(&mut animals, "riding_host", PackedInt64Array::from(a.riding_host.as_slice()));
+        put(&mut animals, "wall_toward", PackedInt32Array::from(a.wall_toward.as_slice()));
         put(&mut d, "animals", animals);
         let p = &f.plants;
         let mut plants = VarDictionary::new();
@@ -226,7 +282,24 @@ fn view_dict(v: &View) -> VarDictionary {
         put(&mut plants, "site", PackedInt32Array::from(p.site.as_slice()));
         put(&mut plants, "growth", PackedFloat32Array::from(p.growth.as_slice()));
         put(&mut plants, "foliage", PackedFloat32Array::from(p.foliage.as_slice()));
+        put(&mut plants, "moisture", PackedFloat32Array::from(p.moisture.as_slice()));
+        put(&mut plants, "wilt", PackedByteArray::from(p.wilt.as_slice()));
+        put(&mut plants, "ripeness", PackedFloat64Array::from(p.ripeness.as_slice()));
+        put(&mut plants, "parcel_fullness", PackedFloat64Array::from(p.parcel_fullness.as_slice()));
+        put(&mut plants, "foliage_offsets", PackedInt32Array::from(p.foliage_offsets.as_slice()));
+        put(&mut plants, "foliage_stock", PackedFloat64Array::from(p.foliage_stock.as_slice()));
+        put(&mut plants, "foliage_capacity", PackedFloat64Array::from(p.foliage_capacity.as_slice()));
         put(&mut d, "plants", plants);
+        let c = &f.carcasses;
+        let mut carcasses = VarDictionary::new();
+        put(&mut carcasses, "ids", PackedInt64Array::from(c.ids.as_slice()));
+        put(&mut carcasses, "species", PackedInt32Array::from(c.species.as_slice()));
+        put(&mut carcasses, "pos", PackedFloat32Array::from(c.pos.as_slice()));
+        put(&mut carcasses, "heading", PackedFloat32Array::from(c.heading.as_slice()));
+        put(&mut carcasses, "state", PackedByteArray::from(c.state.as_slice()));
+        put(&mut carcasses, "remaining", PackedFloat32Array::from(c.remaining.as_slice()));
+        put(&mut carcasses, "organic", PackedFloat32Array::from(c.organic.as_slice()));
+        put(&mut d, "carcasses", carcasses);
         put(&mut d, "sky", to_variant(&serde_json::to_value(&f.sky).unwrap_or(Value::Null)));
     }
     d

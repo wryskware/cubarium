@@ -97,6 +97,17 @@ func _process(delta: float) -> bool:
 			var chunk_bytes: int = view["chunk_size"] * view["chunk_size"] * view["chunk_size"] * 3
 			check(view["chunk_coords"].size() > 0 and view["voxels"].size() == view["chunk_coords"].size() / 3 * chunk_bytes, "the view holds %d chunks" % (view["chunk_coords"].size() / 3))
 			check(view.has("animals") and view["animals"]["ids"].size() > 0, "the view holds %d animals and %d plants" % [view["animals"]["ids"].size(), view["plants"]["ids"].size()])
+			var codes: Dictionary = session.query("species", null)
+			check(codes["flags"].has("starving") and codes.has("mark_kinds") and codes.has("decay_states") and codes.has("vine_accents"), "new view codes are named")
+			check(view["animals"]["riding_host"] is PackedInt64Array and view["animals"]["wall_toward"].size() == 2 * view["animals"]["ids"].size(), "riders and wall directions reach Godot")
+			var plants: Dictionary = view["plants"]
+			check(plants["wilt"].size() == plants["ids"].size() and plants["ripeness"] is PackedFloat64Array and plants["parcel_fullness"].size() == plants["ids"].size(), "plant wilt and ripeness reach Godot")
+			check(plants["foliage_offsets"].size() == plants["ids"].size() + 1 and plants["foliage_offsets"][-1] == plants["foliage_stock"].size() and plants["foliage_stock"].size() == plants["foliage_capacity"].size(), "foliage layer columns are aligned")
+			check(view["carcasses"]["pos"].size() == 3 * view["carcasses"]["ids"].size(), "carcass columns reach Godot")
+			for key in ["marks", "vines"]:
+				var surface: Dictionary = view[key]
+				check(surface["offsets"].size() == view["chunk_coords"].size() / 3 + 1 and surface["site"].size() == 3 * surface["offsets"][-1], "%s replacement lists align with chunks" % key)
+
 			check(view.has("sky"), "the view holds the sky (%s, daylight %.2f)" % [view["sky"]["rain"], view["sky"]["daylight"]])
 			var events = session.take_events()
 			print("     %d life events so far" % events.size())
