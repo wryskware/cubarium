@@ -129,17 +129,7 @@ AZ = {"eyes": 0.0, "tusks": 0.0, "fronds": 30.0, "feet": 30.0}
 def sectors(cells, part):
     """How many of the part's six azimuths hold a cell of its slots within 15 degrees (cells
     on the axis do not count): six when every one survives the grid."""
-    seen = set()
-    for (i, j, k), s in cells.items():
-        if s not in PARTS[part]:
-            continue
-        x, y = i * VOX, j * VOX         # the anchor is the cell (0, 0)'s centre
-        if math.hypot(x, y) < 0.09:
-            continue
-        a = (math.degrees(math.atan2(y, x)) - AZ[part]) % 60.0
-        if a <= 15.0 or a >= 45.0:
-            seen.add(round((math.degrees(math.atan2(y, x)) - AZ[part]) / 60.0) % 6)
-    return len(seen)
+    return B.loftstrider_sectors(cells, VOX)[part]
 
 
 def build(p):

@@ -1160,6 +1160,42 @@ mod non_finite {
 mod tests {
     use super::*;
 
+    #[test]
+    fn loftstrider_bins_follow_the_founder_length_rule_at_each_voxel_size() {
+        let fauna = FaunaConfig::default();
+        let phys = fauna.founder(Founder::Loftstrider);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        for vox in SourceDump::from_model(&FloraConfig::default(), &fauna).voxel_sizes_m {
+            let lib = ModelLibrary::load(&root, vox).unwrap();
+            let model = lib.animals[Founder::Loftstrider.index()]
+                .as_ref()
+                .expect("founder bake");
+            assert_eq!(model.bins.len(), 5);
+            let s0 = (phys.core.body_min / phys.core.body_max).cbrt();
+            for (n, bin) in model.bins.iter().enumerate() {
+                let s = s0 + (1.0 - s0) * n as f64 / (model.bins.len() - 1) as f64;
+                let length = phys.adult_length_m * s;
+                assert!((bin.length_m - length).abs() < 1e-12);
+                assert!(!bin.cells.is_empty());
+                assert!(std::ptr::eq(
+                    model.select(length).unwrap().as_ptr(),
+                    bin.cells.as_ptr()
+                ));
+            }
+            assert_ne!(
+                model.bins.first().unwrap().cells,
+                model.bins.last().unwrap().cells
+            );
+            assert!(std::ptr::eq(
+                model
+                    .select(phys.body_at(phys.core.body_min).length_m)
+                    .unwrap()
+                    .as_ptr(),
+                model.bins[0].cells.as_ptr(),
+            ));
+        }
+    }
+
     /// One animal file, one bin of one cell in `material`, as the bake writes a specimen.
     fn one_bin_animal(material: &str, length_m: f64) -> Vec<u8> {
         let mut b = b"CVM2".to_vec();

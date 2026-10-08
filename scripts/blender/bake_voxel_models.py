@@ -23,6 +23,11 @@ facing +x, one pose, centred on the anchor cell, from `animal_models.py`'s build
 pass MP-A); the unsimulated specimens (`SPECIMENS`) as one adult model each, under the
 manifest's `specimens` key.
 
+The loftstrider uses Wrysk's calf-l38 rig blended linearly to the adult across the
+five bins, at the original founder length keys. Its six landmark directions are
+checked after voxelization at every grid size; coarse-grid aliases claim the nearest
+cell in the authored direction, like the existing sub-voxel accent fallback.
+
 Foliage states (`design/handoffs/foliage-states-implementation-2026-10-08.md`): a species
 with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4) is baked in
 every state at every step and variant, the builder's cuts applied to the smaller steps too
@@ -526,16 +531,107 @@ def animal_cells(objs, vox, floor=0):
     return cells_of(cells, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
 
 
+LOFTSTRIDER_PARTS = {"eyes": ({"a_eye"}, 0.0), "tusks": ({"a_head"}, 0.0),
+                    "fronds": ({"a_membrane", "a_glow"}, 30.0), "feet": ({"a_foot"}, 30.0)}
+
+
+def loftstrider_direction(i, j, vox, az):
+    if math.hypot(i * vox, j * vox) < 0.09:
+        return None
+    angle = math.degrees(math.atan2(j, i)) - az
+    a = angle % 60.0
+    if a <= 15.0 + 1e-9 or a >= 45.0 - 1e-9:
+        return round(angle / 60.0) % 6
+    return None
+
+
+def loftstrider_sectors(cells, vox):
+    """Count surviving part directions, as in the calf sheet, on the anchor-centred grid."""
+    counts = {}
+    for part, (slots, az) in LOFTSTRIDER_PARTS.items():
+        seen = {loftstrider_direction(i, j, vox, az)
+                for (i, j, _), slot in cells.items() if slot in slots}
+        seen.discard(None)
+        counts[part] = len(seen)
+    return counts
+
+
+def loftstrider_cells(objs, vox):
+    """Preserve six authored directions when small landmarks alias on a coarse grid.
+
+    Like the accent fallback, a missing landmark claims one cell. Choose the closest
+    cell to its mesh in its authored direction, without displacing another landmark.
+    Mesh proportions stay untouched; a fine grid that already retains them is unchanged.
+    """
+    cells = voxelize_animal(objs, vox)
+    landmark_slots = set().union(*(s for s, _ in LOFTSTRIDER_PARTS.values()))
+    for part, (slots, az) in LOFTSTRIDER_PARTS.items():
+        seen = {loftstrider_direction(i, j, vox, az)
+                for (i, j, _), slot in cells.items() if slot in slots}
+        for direction in sorted(set(range(6)) - seen):
+            candidates = []
+            for ob in objs:
+                me = ob.data
+                face_slots = [A.slot_of(m.name) for m in me.materials]
+                if not set(face_slots) & slots:
+                    continue
+                vs = [ob.matrix_world @ v.co for v in me.vertices]
+                mid = sum(vs, Vector()) / len(vs) - Vector((vox / 2, vox / 2, 0))
+                angle = math.degrees(math.atan2(mid.y, mid.x)) - az
+                if round(angle / 60) % 6 != direction:
+                    continue
+                bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+                lo = [math.floor(min(v[k] for v in vs) / vox) - 1 for k in range(3)]
+                hi = [math.ceil(max(v[k] for v in vs) / vox) + 1 for k in range(3)]
+                for i in range(lo[0], hi[0]):
+                    for j in range(lo[1], hi[1]):
+                        if loftstrider_direction(i, j, vox, az) != direction:
+                            continue
+                        for k in range(max(0, lo[2]), hi[2]):
+                            key = (i, j, k)
+                            if cells.get(key) in landmark_slots:
+                                continue
+                            c = Vector(((i + .5) * vox, (j + .5) * vox, (k + .5) * vox))
+                            _, _, face, dist = bvh.find_nearest(c)
+                            if face is not None and face_slots[me.polygons[face].material_index] in slots:
+                                candidates.append((dist, key, face_slots[me.polygons[face].material_index]))
+            if not candidates:
+                raise ValueError(f"no voxel for loftstrider {part} direction {direction}")
+            _, key, slot = min(candidates)
+            cells[key] = slot
+    return cells
+
+
+def build_founder_bin(f, n, vox):
+    """Keep founder length keys; the chosen loftstrider rig blends in absolute metres."""
+    adult = (f["adult_length_m"], f["adult_width_m"], f["adult_height_m"])
+    t = n / (BINS - 1)
+    s0 = (f["body_min"] / f["body_max"]) ** (1.0 / 3.0)
+    s = s0 + (1.0 - s0) * t
+    if f["name"] == "loftstrider":
+        reset_scene()
+        objs = A.build_loftstrider(A.ls_blend(A.LS_CALVES_R2["calf-l38"], t),
+                                  0.5 * vox, 0.5 * vox)
+    else:
+        objs = build_animal(f["name"], s, adult, vox)
+    return adult[0] * s, adult[1] * s, objs
+
+
 def bake_animal(f, vox, out_dir):
     name = f["name"]
-    adult = (f["adult_length_m"], f["adult_width_m"], f["adult_height_m"])
-    s0 = (f["body_min"] / f["body_max"]) ** (1.0 / 3.0)
     steps, meta = [], []
     for n in range(BINS):
-        s = s0 + (1.0 - s0) * n / (BINS - 1)
-        cells = animal_cells(build_animal(name, s, adult, vox), vox)
-        steps.append((adult[0] * s, adult[1] * s, [cells]))
-        meta.append({"length_m": round(adult[0] * s, 4), "cells": len(cells)})
+        length, width, objs = build_founder_bin(f, n, vox)
+        raw = loftstrider_cells(objs, vox) if name == "loftstrider" else voxelize_animal(objs, vox)
+        counts = loftstrider_sectors(raw, vox) if name == "loftstrider" else None
+        if counts is not None:
+            if any(count != 6 for count in counts.values()):
+                raise ValueError(f"{name} bin {n} at {vox} m lost a part: {counts}")
+            print(f"{name} bin {n} at {vox} m: {counts}", flush=True)
+        cells = cells_of(raw, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
+        steps.append((length, width, [cells]))
+        meta.append({"length_m": round(length, 4), "cells": len(cells)} |
+                    ({"sectors": counts} if counts is not None else {}))
     file = f"{name}.cvm"
     size = write_cvm(os.path.join(out_dir, file), 1, steps)
     return file, size, meta
@@ -589,6 +685,8 @@ def main():
                 continue
             file, size, meta = bake_animal(f, vox, out_dir)
             manifest["founders"][f["name"]] = file
+            if f["name"] in SPECIMENS:
+                manifest["specimens"][f["name"]] = file  # gallery alias; never overwrite the bins
             manifest["detail"][f["name"]] = {"bytes": size, "bins": meta}
             print(f"{vox} m {f['name']}: {len(meta)} bins, {size} bytes", flush=True)
         for name, base in FOUNDER_POSES.items():
@@ -600,7 +698,8 @@ def main():
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: {base}'s pose, {len(meta)} bins, {size} bytes", flush=True)
         for name in SPECIMENS:
-            if (ONLY and name not in ONLY) or name not in A.REF:
+            if (ONLY and name not in ONLY) or name not in A.REF or any(
+                    f["name"] == name for f in src["founders"]):
                 continue
             file, size, meta = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
