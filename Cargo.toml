@@ -17,6 +17,7 @@ members = [
     "crates/cubarium-webmodel",
     "crates/cubarium-observatory",
     "crates/cubarium-session",
+    "crates/cubarium-godot",
 ]
 
 [workspace.package]

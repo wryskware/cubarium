@@ -1,0 +1,4 @@
+# Godot's import cache and the extension's built library (scripts/build-godot-ext.sh).
+/.godot/
+/bin/*
+!/bin/.gitkeep
