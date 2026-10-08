@@ -163,6 +163,31 @@ pub struct Terrarium {
     pub lake_m: [f64; 2],
     /// Depth of the lake's middle below the ground.
     pub lake_depth_m: f64,
+    /// The lake's outline in plan. Its middle line wanders across the ring by up to
+    /// `lake_meander_m` (metres, either way) and its half-width swells and narrows by up to
+    /// `lake_width_waver` (a share of half its length), both over `lake_wavelength_m`
+    /// (metres) from the glass to the back; the shore itself wavers by up to
+    /// `lake_shore_m` (metres) over `lake_shore_wavelength_m` (metres). Through an added
+    /// lowland the lake opens into a bay: its half-width grows by up to `lake_bay` (a
+    /// share) halfway between the glass and the massif. The bed's depth follows the
+    /// distance to the shore.
+    pub lake_meander_m: f64,
+    pub lake_width_waver: f64,
+    /// The outline's mean half-width, as a share of half the lake's drawn length: a
+    /// little over one makes up for the water its rounded shore and end give back.
+    pub lake_width_share: f64,
+    pub lake_wavelength_m: f64,
+    pub lake_shore_m: f64,
+    pub lake_shore_wavelength_m: f64,
+    pub lake_bay: f64,
+    /// The banks: ground beside the lake is graded down toward the water, climbing
+    /// `lake_bank_slope` voxels per voxel away from the shore, out to `lake_bank_m`
+    /// (metres) from it.
+    pub lake_bank_slope: f64,
+    pub lake_bank_m: f64,
+    /// How far from its back end, metres, the lake starts to shoal: the end rounds off
+    /// short of the massif's foot.
+    pub lake_end_m: f64,
     /// Where the water stands, above the ground the lake is graded into. It is the water
     /// table: the lake is joined to the aquifer through a drain in its floor and rises and
     /// falls with it, and everything open below this line floods with the lake. Soil below
@@ -309,6 +334,16 @@ impl Terrarium {
         lake_m: [3.0, 4.5],
         water_level_m: 0.25,
         lake_depth_m: 0.375,
+        lake_meander_m: 0.25,
+        lake_width_waver: 0.2,
+        lake_width_share: 1.1,
+        lake_wavelength_m: 2.5,
+        lake_shore_m: 0.125,
+        lake_shore_wavelength_m: 0.75,
+        lake_bay: 0.5,
+        lake_bank_slope: 0.5,
+        lake_bank_m: 0.5,
+        lake_end_m: 0.25,
         yard: 0.35,
         pool_m: [0.5, 0.875],
         pool_depth_m: 0.25,
@@ -425,6 +460,16 @@ impl Terrarium {
         lake_m: [4.0, 6.0],
         water_level_m: 0.375,
         lake_depth_m: 0.5,
+        lake_meander_m: 0.375,
+        lake_width_waver: 0.2,
+        lake_width_share: 1.1,
+        lake_wavelength_m: 3.5,
+        lake_shore_m: 0.25,
+        lake_shore_wavelength_m: 1.25,
+        lake_bay: 0.5,
+        lake_bank_slope: 0.5,
+        lake_bank_m: 0.75,
+        lake_end_m: 0.25,
         yard: 0.32,
         pool_m: [0.75, 1.25],
         pool_depth_m: 0.375,
@@ -544,6 +589,9 @@ impl Terrarium {
             ("stream_depth_m", self.stream_depth_m),
             ("lowland_wavelength_m", self.lowland_wavelength_m),
             ("lowland_blend_m", self.lowland_blend_m),
+            ("lake_wavelength_m", self.lake_wavelength_m),
+            ("lake_width_share", self.lake_width_share),
+            ("lake_shore_wavelength_m", self.lake_shore_wavelength_m),
         ] {
             anyhow::ensure!(v > 0.0 && v.is_finite(), "terrarium.{name} must be positive");
         }
@@ -551,12 +599,22 @@ impl Terrarium {
             ("massif_depth_m", self.massif_depth_m),
             ("lowland_rise_m", self.lowland_rise_m),
             ("lowland_relief_m", self.lowland_relief_m),
+            ("lake_meander_m", self.lake_meander_m),
+            ("lake_shore_m", self.lake_shore_m),
+            ("lake_bay", self.lake_bay),
+            ("lake_bank_slope", self.lake_bank_slope),
+            ("lake_bank_m", self.lake_bank_m),
+            ("lake_end_m", self.lake_end_m),
         ] {
             anyhow::ensure!(
                 v >= 0.0 && v.is_finite(),
                 "terrarium.{name} must be nonnegative"
             );
         }
+        anyhow::ensure!(
+            (0.0..1.0).contains(&self.lake_width_waver),
+            "terrarium.lake_width_waver must be in 0..1"
+        );
         anyhow::ensure!(
             (0.0..1.0).contains(&self.lowland_plain_share),
             "terrarium.lowland_plain_share must be in 0..1"
@@ -832,6 +890,17 @@ impl<'a> Build<'a> {
     /// profile, rising from its foot to its crest, cut into terraces whose height, spacing,
     /// tread and riser all drift around the ring.
     fn terraced(&self, x: f64, z: f64) -> f64 {
+        self.massif(x, z).max(self.shelf_at(x, z))
+    }
+
+    /// The highest shelf at a point of the plan, zero off every shelf.
+    fn shelf_at(&self, x: f64, z: f64) -> f64 {
+        let (w, d) = (self.g.w as f64, self.g.d as f64);
+        self.shelves.iter().map(|s| s.height(x, z, w, d)).fold(0.0f64, f64::max)
+    }
+
+    /// The designed height without the shelves: the terraced profile and the spires.
+    fn massif(&self, x: f64, z: f64) -> f64 {
         let d = self.g.d as f64;
         let (crest, foot) = (Build::at(&self.crest, x), Build::at(&self.foot, x));
         let share = ((z - foot) / (d - foot)).clamp(0.0, 1.0);
@@ -857,9 +926,7 @@ impl<'a> Build<'a> {
                 }
             })
             .fold(0.0f64, f64::max);
-        let (w, d) = (self.g.w as f64, self.g.d as f64);
-        let shelf = self.shelves.iter().map(|s| s.height(x, z, w, d)).fold(0.0f64, f64::max);
-        terraced.max(spire).max(shelf)
+        terraced.max(spire)
     }
 
     /// The ground under everything at `(x, z)`, voxels: low at the glass, climbing gently
@@ -957,8 +1024,11 @@ pub fn build(world: &mut World, t: &Terrarium) -> Report {
 
 struct Site {
     centre: i64,
-    /// The lake's columns, `(first, last)` inclusive.
-    span: (i64, i64),
+    /// Half the lake's drawn length around the ring, voxels: its half-width before the
+    /// outline wavers.
+    half: f64,
+    /// The farthest the lake reaches from its centre column, voxels.
+    reach: i64,
 }
 
 /// A smooth field around the ring between `lo` and `hi`, pushed toward its ends when
@@ -1008,7 +1078,13 @@ fn layout(b: &mut Build) -> Site {
     order.sort_by(|&a, &c| (b.crest[a] - mid).abs().total_cmp(&(b.crest[c] - mid).abs()));
     let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
     let len = b.draw(t.lake_m) as i64;
-    let span = (centre - len / 2, centre + len / 2);
+    let half = ((len / 2) as f64).max(1.0);
+    // How far its wandering outline can reach from the centre column. The yard and the
+    // shelves' clearance stay measured from the drawn half-length, so the massif's plan
+    // is the one the rectangular lake had; the shelves' gap keeps them off the shore.
+    let wobble = v(t.lake_meander_m) + v(t.lake_shore_m) + 1.0;
+    let bay = if added > 0.0 { 1.0 + t.lake_bay } else { 1.0 };
+    let reach = (half * t.lake_width_share * (1.0 + t.lake_width_waver) * bay + wobble).ceil() as i64;
     let yard = added + t.yard * massif_d;
     let margin = (len / 2 + i64::from(t.yard_blend_voxels)) as f64;
     for x in 0..w {
@@ -1100,7 +1176,7 @@ fn layout(b: &mut Build) -> Site {
             edge_exponent: t.shelf_edge_exponent,
         });
     }
-    Site { centre, span }
+    Site { centre, half, reach }
 }
 
 #[cfg(test)]
@@ -1178,6 +1254,144 @@ mod lowland_tests {
         }
         assert!((0..a.g.w).any(|x| a.base_at(x, shift / 2) > b.base_at(x, shift / 2)));
     }
+
+    /// The lake's rows behind any lowland and short of every column's back end, each as
+    /// the first and last column it covers.
+    fn rows(b: &Build, site: &Site, from: i32, to: i32) -> Vec<(i32, i64, i64)> {
+        let bed = lake_bed(b, site);
+        (from..to)
+            .filter_map(|z| {
+                let xs: Vec<i64> = bed.iter().filter(|p| p.1 == z).map(|p| p.0).collect();
+                Some((z, *xs.iter().min()?, *xs.iter().max()?))
+            })
+            .collect()
+    }
+
+    fn still(t: Terrarium) -> Terrarium {
+        Terrarium {
+            lake_meander_m: 0.0,
+            lake_width_waver: 0.0,
+            lake_width_share: 1.0,
+            lake_shore_m: 0.0,
+            lake_bay: 0.0,
+            lake_end_m: 0.0,
+            ..t
+        }
+    }
+
+    #[test]
+    fn the_lake_outline_wanders_only_by_its_knobs() {
+        let c = config(24);
+        let still = still(shape());
+        let wander = Terrarium {
+            lake_meander_m: 1.0,
+            lake_shore_m: 0.5,
+            lake_width_waver: 0.3,
+            lake_wavelength_m: 2.0,
+            lake_shore_wavelength_m: 1.0,
+            ..still
+        };
+        for (t, wanders) in [(still, false), (wander, true)] {
+            let mut b = Build::new(&c, &t);
+            let site = layout(&mut b);
+            let back = (site.centre - site.reach..=site.centre + site.reach).map(|x| lake_back(&b, x)).min().unwrap();
+            let rows = rows(&b, &site, 0, back);
+            assert!(rows.len() > 4);
+            let mut spans: Vec<(i64, i64)> = rows.iter().map(|r| (r.1, r.2)).collect();
+            spans.dedup();
+            assert_eq!(spans.len() > 1, wanders, "{rows:?}");
+            // However it wanders, the bed shoals from its middle to its shore.
+            for &(z, lo, hi) in &rows {
+                let dep = |x: i64| lake_bed(&b, &site).iter().find(|p| p.0 == x && p.1 == z).map_or(0, |p| p.2);
+                let deepest = (lo..=hi).map(dep).max().unwrap();
+                assert!(dep(lo) <= deepest && dep(hi) <= deepest);
+                assert!(dep(lo - 1) == 0 && dep(hi + 1) == 0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_lowland_opens_the_lake_into_a_bay() {
+        let c = config(24);
+        for bay in [0.0, 0.6] {
+            let t = Terrarium { lake_bay: bay, ..still(shape()) };
+            let mut b = Build::new(&c, &t);
+            let site = layout(&mut b);
+            let added = b.foreground_depth() as i32;
+            let rows = rows(&b, &site, 0, added + 2);
+            let width = |r: &(i32, i64, i64)| r.2 - r.1;
+            let rear = rows.iter().filter(|r| r.0 >= added).map(width).max().unwrap();
+            let front = rows.iter().filter(|r| r.0 < added).map(width).max().unwrap();
+            if bay == 0.0 {
+                assert_eq!(front, rear);
+            } else {
+                assert!(front as f64 >= rear as f64 * (1.0 + bay * 0.8), "{front} vs {rear}");
+            }
+            // Back to its own width at the glass.
+            assert!(width(&rows[0]) <= rear + 2);
+        }
+    }
+
+    #[test]
+    fn the_lake_end_rounds_off_short_of_the_foot() {
+        let c = config(24);
+        for end in [0.0, 1.5] {
+            let t = Terrarium { lake_end_m: end, ..still(shape()) };
+            let mut b = Build::new(&c, &t);
+            let site = layout(&mut b);
+            let bed = lake_bed(&b, &site);
+            let x = site.centre;
+            let back = lake_back(&b, x);
+            let dep = |z: i32| bed.iter().find(|p| p.0 == x && p.1 == z).map_or(0, |p| p.2);
+            if end == 0.0 {
+                assert_eq!(dep(back), dep(back - 3));
+            } else {
+                assert!(dep(back) < dep(back - (end / c.voxel_m) as i32 - 1));
+            }
+        }
+    }
+
+    /// Lowland ground in front of row `lip`, the shelf's eroded lip on it, the shelf
+    /// behind; the cells its hall carved below the lip's top.
+    fn hall_under_lip(c: &Config, t: &Terrarium, lip: i32) -> (usize, usize) {
+        let mut b = Build::new(c, t);
+        let (w, d) = (b.g.w, b.g.d);
+        let slab = b.v(t.slab_m).max(2);
+        let (low, rim, shelf) = (10, 24, 34);
+        for z in 0..d {
+            for x in 0..w {
+                b.ground[(z as i64 * w + x) as usize] = if z < lip { low } else if z == lip { rim } else { shelf };
+            }
+        }
+        lay_ground(&mut b);
+        b.shelves.push(Shelf {
+            x0: 2,
+            len: 24,
+            front: lip as f64,
+            hall: 12,
+            top: (shelf + slab) as f64,
+            tilt: 0.0,
+            rise: 0.0,
+            edge_exponent: 1.0,
+        });
+        halls(&mut b);
+        let open = |z: i32| (2..26).flat_map(|x| (low + 1..rim).map(move |y| (x, y))).filter(|&(x, y)| !b.g.solid(x, y, z)).count();
+        (open(lip), open(lip + 1))
+    }
+
+    #[test]
+    fn a_shelf_face_on_the_lowland_opens_its_hall_onto_the_lowland() {
+        let (c, t) = (Config { height: 64, ..config(24) }, shape());
+        let added = Build::new(&c, &t).foreground_depth() as i32;
+        assert!(added > 4);
+        // Its face on the lowland's edge: the lip is cut through and the hall's floor
+        // carries on from the lowland.
+        let (lip, behind) = hall_under_lip(&c, &t, added);
+        assert!(lip > 0 && behind > 0, "{lip} {behind}");
+        // Behind the lowland's edge a hall still carries on from the row in front of its
+        // mouth, as on a map without a lowland.
+        assert_eq!(hall_under_lip(&c, &t, added + 2), (0, 0));
+    }
 }
 
 // --- the heightfield -----------------------------------------------------------------------------
@@ -1207,13 +1421,17 @@ fn heightfield(b: &mut Build) {
             b.base[(z as i64 * w + x) as usize] = ground;
             let px = x as f64 + 0.5 + warp * ring_noise(xm, zm, circ, warp_cells, seed ^ 1);
             let pz = z as f64 + 0.5 + warp * ring_noise(xm, zm + 50.0, circ, warp_cells, seed ^ 3);
-            let mut top = b.terraced(px, pz);
+            let mut top = b.massif(px, pz);
             let blend = if added == 0.0 {
                 1.0
             } else {
                 smoothstep(added - b.t.lowland_blend_m / vm, added, z as f64 + 0.5)
             };
             top = ground + (top - ground).max(0.0) * blend;
+            // A shelf is not blended into the lowland: its front stands sheer over the
+            // ground in front, as the glass cuts it on a map without a lowland, so its
+            // hall opens onto that ground rather than behind a ramp up to its top.
+            top = top.max(b.shelf_at(px, pz));
             if top > ground + 1.0 {
                 top += blend * roll * ring_noise(xm, zm, circ, roll_cells, seed ^ 0x52);
             }
@@ -1262,25 +1480,22 @@ fn heightfield(b: &mut Build) {
     b.report.eroded_m3 = ((field.budget.removed_bedrock_m + field.budget.removed_sediment_m) * vm * vm).round() as u64;
 }
 
-/// Grade the lake into the yard: deepest across its middle, shelving to nothing at its
-/// ends, from the glass back toward the massif's foot. Nothing may be built over it.
+/// Grade the lake into the yard: deepest along its wandering middle line, shelving to
+/// nothing at its shore, from the glass back toward the massif's foot, and the banks
+/// beside it graded down toward the water. Nothing may be built over it.
 fn lay_lake(b: &mut Build, site: &Site) {
     let w = b.g.w;
-    let (span, _) = (site.span, site.centre);
-    let reach = b.v(b.t.warp_m) + 2;
-    let back = |b: &Build, x: i64| -> i32 {
-        (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp((2 + b.foreground_depth() as i32).min(b.g.d - 4), b.g.d - 4)
-    };
+    let bed = lake_bed(b, site);
     // Graded from one flat reference, the lowest ground it is cut into, so the ground's
     // own relief leaves no bumps in its bed. Not the stream's trough: that runs under it.
-    let reference = (span.0..=span.1)
-        .flat_map(|x| (0..=back(b, x)).map(move |z| (x, z)))
-        .filter(|&(x, z)| !b.stream[(z as i64 * w + x.rem_euclid(w)) as usize])
-        .map(|(x, z)| b.ground_at(x, z))
+    let reference = bed
+        .iter()
+        .filter(|&&(x, z, _)| !b.stream[(z as i64 * w + x.rem_euclid(w)) as usize])
+        .map(|&(x, z, _)| b.ground_at(x, z))
         .min()
         .unwrap_or(0);
     b.water_y = reference + 1 + b.v(b.t.water_level_m);
-    for (x, z, dep) in lake_bed(b, site) {
+    for &(x, z, dep) in &bed {
         let i = (z as i64 * w + x.rem_euclid(w)) as usize;
         b.ground[i] = b.ground[i].min(reference - dep);
         b.lake[i] = true;
@@ -1289,23 +1504,86 @@ fn lay_lake(b: &mut Build, site: &Site) {
             b.g.keep(x, y, z);
         }
     }
+    // The banks: dry ground beside the shore, climbing away from it.
+    let bank = b.t.lake_bank_m / b.c.voxel_m;
+    if bank <= 0.0 {
+        return;
+    }
+    let reach = site.reach + bank.ceil() as i64;
+    for x in site.centre - reach..=site.centre + reach {
+        for z in 0..=lake_back(b, x) {
+            let i = (z as i64 * w + x.rem_euclid(w)) as usize;
+            if b.lake[i] {
+                continue;
+            }
+            let (u, hw) = lake_across(b, site, x, z);
+            let out = ((u.abs() - 1.0) * hw).max(0.0);
+            if out > bank {
+                continue;
+            }
+            let cap = b.water_y + 1 + (b.t.lake_bank_slope * out).round() as i32;
+            b.ground[i] = b.ground[i].min(cap);
+        }
+    }
 }
 
-/// The lake's columns and how deep each is graded: deepest across its middle, shelving
-/// to nothing at its ends, from the glass back to the massif's foot. Known from the
-/// layout alone, so the stream can be routed to it before erosion.
-fn lake_bed(b: &Build, site: &Site) -> Vec<(i64, i32, i32)> {
-    let (span, centre) = (site.span, site.centre);
-    let half = ((span.1 - span.0) as f64 / 2.0).max(1.0);
-    let depth = b.v(b.t.lake_depth_m).max(2) as f64;
+/// The lake's last row back from the glass at column `x`: short of the massif's foot.
+fn lake_back(b: &Build, x: i64) -> i32 {
     let reach = b.v(b.t.warp_m) + 2;
-    let back = |x: i64| -> i32 { (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp((2 + b.foreground_depth() as i32).min(b.g.d - 4), b.g.d - 4) };
+    (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach)
+        .clamp((2 + b.foreground_depth() as i32).min(b.g.d - 4), b.g.d - 4)
+}
+
+/// Where column `x` (unwrapped, near the lake's centre) stands across the lake at row
+/// `z`: its offset from the lake's wandering middle line as a share of the local
+/// half-width (inside the shore while below one either way), and that half-width, voxels.
+/// Behind any added lowland the outline is drawn in the rear plan's own coordinates, so
+/// it is the same lake at every depth; through the lowland it opens into a bay, widest
+/// halfway between the glass and the massif, back to its own width at both.
+fn lake_across(b: &Build, site: &Site, x: i64, z: i32) -> (f64, f64) {
+    let t = b.t;
+    let (w, vm) = (b.g.w, b.c.voxel_m);
+    let circ = w as f64 * vm;
+    let added = b.foreground_depth();
+    let seed = b.c.seed ^ STREAM ^ 0x4c41_4b45;
+    let zm = (z as f64 + 0.5 - added) * vm;
+    let cxm = (site.centre.rem_euclid(w) as f64 + 0.5) * vm;
+    let along = ring_cells(circ, t.lake_wavelength_m);
+    let wander = t.lake_meander_m / vm * ring_noise(cxm, zm, circ, along, seed).clamp(-1.0, 1.0);
+    let swell = t.lake_width_waver * ring_noise(cxm, zm, circ, along, seed ^ 1).clamp(-1.0, 1.0);
+    let mut hw = site.half * t.lake_width_share * (1.0 + swell);
+    if added > 0.0 && (z as f64) < added {
+        let s = ((z as f64 + 0.5) / added).clamp(0.0, 1.0);
+        hw *= 1.0 + t.lake_bay * (std::f64::consts::PI * s).sin();
+    }
+    let xm = (x.rem_euclid(w) as f64 + 0.5) * vm;
+    let shore = t.lake_shore_m / vm
+        * ring_noise(xm, zm, circ, ring_cells(circ, t.lake_shore_wavelength_m), seed ^ 2).clamp(-1.0, 1.0);
+    let hw = hw.max(1.0);
+    let u = ((x - site.centre) as f64 - wander + shore) / hw;
+    // Its back end rounds off short of the massif's foot instead of stopping on a line.
+    let end = t.lake_end_m / vm;
+    if end <= 0.0 {
+        return (u, hw);
+    }
+    let into = lake_back(b, x) as f64 + 0.5 - z as f64 + shore;
+    let e = (1.0 - into / end).max(0.0);
+    ((u * u + e * e).sqrt().copysign(u), hw)
+}
+
+/// The lake's columns and how deep each is graded: deepest along its middle line,
+/// shelving to nothing at its shore, from the glass back to the massif's foot. Known from
+/// the layout alone, so the stream can be routed to it before erosion.
+fn lake_bed(b: &Build, site: &Site) -> Vec<(i64, i32, i32)> {
+    let depth = b.v(b.t.lake_depth_m).max(2) as f64;
     let mut bed = Vec::new();
-    for x in span.0..=span.1 {
-        let u = (x - centre) as f64 / half;
-        let dep = (depth * (1.0 - u * u)).round() as i32;
-        if dep >= 1 {
-            bed.extend((0..=back(x)).map(|z| (x, z, dep)));
+    for x in site.centre - site.reach..=site.centre + site.reach {
+        for z in 0..=lake_back(b, x) {
+            let (u, _) = lake_across(b, site, x, z);
+            let dep = (depth * (1.0 - u * u)).round() as i32;
+            if dep >= 1 {
+                bed.push((x, z, dep));
+            }
         }
     }
     bed
@@ -1396,6 +1674,7 @@ fn apart(a: (i64, i64), b: (i64, i64), gap: i64, w: i64) -> bool {
 /// pillars, the back wall rounding into the ceiling.
 fn halls(b: &mut Build) {
     let (w, d) = (b.g.w, b.g.d);
+    let added = b.foreground_depth();
     let slab = b.v(b.t.slab_m).max(2);
     let span = (b.v(b.t.hall_span_m).max(8)) as i64;
     let shelves = b.shelves.clone();
@@ -1428,7 +1707,27 @@ fn halls(b: &mut Build) {
             let Some(mouth) = (0..d).find(|&z| at(x, z) >= s.top as i32 - slab) else {
                 continue;
             };
-            let floor = if mouth > 0 { at(x, mouth - 1) } else { b.base[x.rem_euclid(w) as usize].round() as i32 };
+            // Where a shelf reaches the front of the massif's plan, the glass cuts it
+            // sheer on a map without a lowland and its hall opens at the glass. In front
+            // of an added lowland the same face stands free and erosion rounds its lip,
+            // so the row in front of the mouth stands most of the way up the face. Walk
+            // down the face onto the lowland, a few rows at most: the hall's floor
+            // carries on from its foot and the lip over it is cut through, leaving the
+            // shelf's edge as its lintel. Behind the lowland's edge nothing changes.
+            let mut lip = mouth;
+            if mouth > 0 {
+                lip -= 1;
+                let most = (b.v(b.t.warp_m) + 2).max(1);
+                while lip > 0
+                    && mouth - lip < most
+                    && ((lip - 1) as f64) < added
+                    && at(x, lip - 1) < at(x, lip) - 1
+                {
+                    lip -= 1;
+                }
+            }
+            let floor = if mouth > 0 { at(x, lip) } else { b.base[x.rem_euclid(w) as usize].round() as i32 };
+            let start = if mouth > 0 { lip + 1 } else { 0 };
             // A hall stands above the water: its floor is dry ground, not a flooded bowl.
             let floor = floor.max(b.water_y);
             let arch = (hall * b.t.hall_arch_share).min(bay / 2.0);
@@ -1437,8 +1736,8 @@ fn halls(b: &mut Build) {
             // Every wall flares into the floor.
             let foot = round_in(b.t.hall_foot_flare, to_side).round() as i32;
             let deep = ((b.t.hall_depth_factor * head) as i32).min(d - 4 - mouth);
-            for z in mouth..mouth + deep {
-                let fl = floor + ((z - mouth) as f64 * b.t.hall_floor_rise) as i32;
+            for z in start..mouth + deep {
+                let fl = floor + ((z - start) as f64 * b.t.hall_floor_rise) as i32;
                 let to_back = (mouth + deep - z) as f64 - 0.5;
                 let ceil = (floor as f64 + head - round_in(head * b.t.hall_back_round, to_back)) as i32;
                 let ceil = ceil.min(at(x, z) - slab);
