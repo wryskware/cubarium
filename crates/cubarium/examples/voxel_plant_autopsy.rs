@@ -216,14 +216,14 @@ fn main() {
     }
 
     let cfg = VoxelConfig::default();
-    let mut world_cfg = cfg.world.clone();
+    let mut world_cfg = cfg.sim.world.clone();
     if wet {
         // A metre of head above the lowest support face of this very terrain, which is
         // how the arena charges its own aquifer.
-        let probe = scene::authored(cfg.world.clone());
+        let probe = scene::authored(cfg.sim.world.clone());
         let low = skyline_of(&probe).first().map_or(0, |s| s.y);
         world_cfg.rain_m_per_s = PROBE_RAIN_M_PER_S;
-        world_cfg.initial_aquifer_head_m = f64::from(low) * cfg.world.voxel_m + 1.0;
+        world_cfg.initial_aquifer_head_m = f64::from(low) * cfg.sim.world.voxel_m + 1.0;
         eprintln!(
             "--wet: the counterfactual probe — rain {} m/s, aquifer head {:.3} m. \
              The terrain, the seeder and every preset are untouched.",

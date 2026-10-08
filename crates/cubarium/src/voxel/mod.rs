@@ -78,15 +78,16 @@ use anyhow::{Context, Result, bail};
 use cubarium_render::Canvas;
 use cubarium_search::es::voxel::{EpisodeDriver, VoxelPolicyFile};
 use cubarium_surface::{Scale, Topology};
-use cubarium_voxel::{Command as VoxelCommand, Material, PoreBand, ViabilitySpec, World};
-use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Controller, Fauna, FaunaConfig, FaunaLedger, Founder, Response,
-    Senses,
-};
-use cubarium_voxel_flora::{
-    Command as FloraCommand, Flora, FloraConfig, FloraLedger, Site, Species,
-};
-use cubarium_voxel_sim::params::{Layers, Params};
+use cubarium_voxel::{PoreBand, ViabilitySpec, World};
+#[cfg(test)]
+use cubarium_voxel::{Command as VoxelCommand, Material};
+use cubarium_voxel_fauna::{Controller, Fauna, FaunaConfig, Founder, Response};
+#[cfg(test)]
+use cubarium_voxel_fauna::Command as FaunaCommand;
+use cubarium_voxel_flora::{Flora, FloraConfig, Species};
+#[cfg(test)]
+use cubarium_voxel_flora::Site;
+use cubarium_voxel_sim::params::Params;
 use cubarium_voxel_sim::{Arena, ArenaGrid, Sim, SimConfig};
 use serde::{Deserialize, Serialize};
 
@@ -98,32 +99,30 @@ use crate::sink::{FrameSink, GpuTargetKind, Output, PngSink, WebSink, WorldShape
 use present::VoxelPresenter;
 use project::Projection;
 
-/// The stdin commands, in the one place both the banner and the usage line read them
-/// from, so a new command cannot be added to only one of the two.
-const COMMANDS: &str = "p [on|off] pause/resume, s step, +/- speed, speed X set the speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
-                        h M3 add water to the atmosphere (closed budget only), \
-                        m X Y Z air|rock|soil|bedrock set material, \
-                        f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
-                        c X Z clear a stand, \
-                        g X Z introduce a frondgrazer, \
-                        e [N] bury N lanternjaw egg clutches where prey live, \
-                        j [N] introduce N adult lanternjaws where prey live, \
-                        k [N] found N chorister packs on covered dens near prey, \
-                        save [DIR] save the whole world (default saves/<time>-t<tick>/), \
-                        save-terrain PATH save the terrain only, \
-                        l PATH load a terrain only (refused once anything is alive), \
-                        i X Y Z inspect, o outlet, q quit";
-
-/// Default rain volume for the `r` command, in cubic metres.
-const DEFAULT_RAIN_M3: f64 = 1.0;
-/// `--speed` is clamped to this range; zero is `p` (pause), not a speed.
-const MIN_SPEED: f64 = 1.0 / 64.0;
-const MAX_SPEED: f64 = 64.0;
+// The console's commands, speeds and the one function that applies a line live in the
+// session crate (`cubarium_session::console`), shared with the Godot session.
+use cubarium_session::console::{COMMANDS, Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
+#[cfg(test)]
+use cubarium_session::console::{cell_state, ecology_state};
+use cubarium_session::create::{Populate, Scene, StartLayers, StartSpec};
+#[cfg(test)]
+use cubarium_session::create::random_seed;
+use cubarium_session::founders::FounderRecipe;
+#[cfg(test)]
+use cubarium_session::founders::{BUILT_IN_POLICIES, built_in_driver, install_founder_controllers};
+use cubarium_session::params::{SimParams, config_table};
+use cubarium_session::store::{save_voxel_snapshot, save_whole_world};
+#[cfg(test)]
+use cubarium_session::store::{layer_files, load_layers, parse_voxel_tick};
 
 // --- The config file -----------------------------------------------------------------
 
 /// `--config`: the presentation, plus the world to build. Missing fields take the
 /// defaults below and unknown fields are errors, so a typo is not silently ignored.
+///
+/// The simulation's half — `[world]`, `[flora]`, `[fauna]`, `threads`, `water_every`,
+/// `fast_forward_water_every`, `[observatory]` — is the session crate's
+/// [`SimParams`] ([`VoxelConfig::sim`]); the rest is the picture's and stays here.
 ///
 /// ```toml
 /// tilt_degrees = 30.0   # the chosen camera
@@ -142,7 +141,7 @@ const MAX_SPEED: f64 = 64.0;
 /// preset = "default"   # small | default | wide, or `landform = "ridge"`
 /// ```
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(remote = "Self", default, deny_unknown_fields)]
 pub struct VoxelConfig {
     /// Elevation of the orthographic view, in degrees. Reaches the picture only as
     /// `round(px_per_voxel · tan(tilt))` whole pixels of lift per voxel of depth. The
@@ -196,20 +195,6 @@ pub struct VoxelConfig {
     pub lighting: Lighting,
     /// The lit tier's numbers ([`LightConfig`]); ignored by the flat tier.
     pub light: LightConfig,
-    /// Worker threads for the in-phase splits of the tick
-    /// (`cubarium_voxel_sim::SimConfig::threads`); `0` means
-    /// [`std::thread::available_parallelism`]. Execution only — it reaches no rule, no
-    /// number and no picture. **Placeholder** (`design/backlog.md` §1).
-    pub threads: usize,
-    /// **The display's coarse water** ([`cubarium_voxel::World::set_water_every`],
-    /// `cubarium_voxel_sim::SimConfig::water_every`): the lateral and groundwater phases
-    /// on one tick in this many. `1`, the live water, is the display's setting (Wrysk,
-    /// 2026-10-04); training, search and experiment runs take their own preset.
-    pub water_every: u32,
-    /// **Hook, not read yet:** the coarse water a future fast-forward display mode would
-    /// switch to while it runs above 1× (and back to [`VoxelConfig::water_every`] at 1×),
-    /// with the plant clock and the rest of the speed settings beside it. No mode reads it.
-    pub fast_forward_water_every: u32,
     /// **Seconds a frondgrazer takes to hunker down under its shield, and to come back up**
     /// (HUNKER, [`hunker`]): the pose moves continuously over this, never in one step.
     /// Presentation only: the simulation's hunker is unchanged by it.
@@ -219,18 +204,6 @@ pub struct VoxelConfig {
     /// `animal::MEAL_FLASH_FADE_S` once the animal starts cropping and back out after; 0
     /// turns it off. Presentation only.
     pub meal_flash: f32,
-    /// The world to build. Extents follow the core; the ambient display uses 0.125 m
-    /// cells so organisms retain their physical size with more cells of visual detail.
-    #[serde(deserialize_with = "ambient_world_config")]
-    pub world: cubarium_voxel::Config,
-    /// `[flora]`: plant parameters by registry path over the defaults
-    /// (`cubarium_voxel_sim::params`), e.g. `[flora.springturf] foliage_rate = 0.0004`.
-    #[serde(skip_serializing_if = "toml::Table::is_empty")]
-    pub flora: toml::Table,
-    /// `[fauna]`: animal parameters by registry path, e.g.
-    /// `[fauna.founders.frondgrazer.core] maintenance_per_s = 0.002`.
-    #[serde(skip_serializing_if = "toml::Table::is_empty")]
-    pub fauna: toml::Table,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -238,9 +211,11 @@ pub struct VoxelConfig {
     /// overrides it for one run.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub serve: Option<String>,
-    /// `[observatory]`: the served history's sampling, in simulated seconds
-    /// (`sample_s` between samples, `span_s` kept). Read only while serving.
-    pub observatory: cubarium_observatory::HistoryConfig,
+    /// **The simulation's half** of the file ([`SimParams`]): the world to build, the
+    /// plant and animal parameters, the tick's threads and water fidelity, the served
+    /// history's sampling. Read from the same top-level keys as ever.
+    #[serde(skip)]
+    pub sim: SimParams,
 }
 
 impl Default for VoxelConfig {
@@ -261,102 +236,63 @@ impl Default for VoxelConfig {
             textures_dir: PathBuf::from("assets/voxel-textures"),
             lighting: Lighting::Flat,
             light: LightConfig::default(),
-            threads: 0,
-            water_every: 1,
-            fast_forward_water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
             hunker_s: hunker::DEFAULT_S,
             meal_flash: animal::MEAL_FLASH_DEFAULT,
-            // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
-            // TOML generates a staged world, not the ridge. `Config::default()` stays
-            // `Landform::Ridge` for fixtures and frozen arenas, and `landform = "ridge"`
-            // asks for it here.
-            world: cubarium_voxel::Preset::find("default")
-                .expect("the shipped presets include `default`")
-                .config(),
-            flora: toml::Table::new(),
-            fauna: toml::Table::new(),
             serve: None,
-            observatory: cubarium_observatory::HistoryConfig::default(),
+            sim: SimParams::default(),
         }
+    }
+}
+
+// The file is one flat table: its simulation keys go to [`SimParams`] (unknown ones there
+// refused), everything else to the presentation fields (unknown ones refused).
+impl<'de> Deserialize<'de> for VoxelConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<VoxelConfig, D::Error> {
+        use serde::de::Error;
+        let mut table = toml::Table::deserialize(d)?;
+        let sim = SimParams::split_from(&mut table).map_err(D::Error::custom)?;
+        let mut cfg = VoxelConfig::deserialize(toml::Value::Table(table)).map_err(D::Error::custom)?;
+        cfg.sim = sim;
+        Ok(cfg)
+    }
+}
+
+impl Serialize for VoxelConfig {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::Error;
+        struct Picture<'a>(&'a VoxelConfig);
+        impl Serialize for Picture<'_> {
+            fn serialize<S: serde::Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+                VoxelConfig::serialize(self.0, s)
+            }
+        }
+        let mut table = toml::Table::try_from(Picture(self)).map_err(S::Error::custom)?;
+        table.extend(toml::Table::try_from(&self.sim).map_err(S::Error::custom)?);
+        table.serialize(s)
     }
 }
 
 /// **The run's resolved parameter set** (package R1,
 /// `design/ecology-parameter-registry-2026-09-28.md`): the config's `[world]`, then its
-/// `[flora]` and `[fauna]` tables, then `--set`, every layer validated against the
-/// parameter registry. A fresh world's plants and animals are built from it.
+/// `[flora]` and `[fauna]` tables, then `--params`, then `--set`, every layer validated
+/// against the parameter registry ([`SimParams::resolve`]). A fresh world's plants and
+/// animals are built from it.
 pub fn resolve_params(args: &Voxel, cfg: &VoxelConfig) -> Result<Params> {
-    match &args.params {
-        None => params_of(cfg, &args.set),
-        Some(file) => params_with(cfg, file, &args.set),
-    }
+    cfg.sim.resolve(args.params.as_deref(), &args.set)
 }
 
 /// [`params_of`] with a co-training run's ecology between the config's tables and `sets`
 /// (`--params`, R1's genome layer): a genome is decoded over the tables, a resolved
 /// parameter file replaces the plants and animals whole.
 pub fn params_with(cfg: &VoxelConfig, file: &std::path::Path, sets: &[String]) -> Result<Params> {
-    use cubarium_search::es::voxel::live::ecology::EcologyParams;
-    let mut p = params_of(cfg, &[])?;
-    let ecology = EcologyParams::load(file).map_err(|e| anyhow::anyhow!("--params: {e}"))?;
-    match &ecology {
-        EcologyParams::Genome(g) => {
-            p.apply_genome(g)
-                .map_err(|e| anyhow::anyhow!("--params {}: {e}", file.display()))?;
-            let moved: Vec<String> = g
-                .genes
-                .iter()
-                .filter(|x| x.value != 1.0)
-                .map(|x| format!("{}={:.3}", x.name, x.value))
-                .collect();
-            static SAID: std::sync::Once = std::sync::Once::new();
-            SAID.call_once(|| eprintln!(
-                "--params {}: a genome of {} genes; off x1: {}",
-                file.display(),
-                g.genes.len(),
-                if moved.is_empty() { "none".into() } else { moved.join(" ") }
-            ));
-        }
-        EcologyParams::Resolved { flora, fauna } => {
-            p.flora = (**flora).clone();
-            p.fauna = **fauna;
-            eprintln!("--params {}: a resolved parameter file", file.display());
-        }
-    }
-    Params::resolve_over(
-        p,
-        &Layers {
-            file: None,
-            genome: None,
-            sets: sets.to_vec(),
-        },
-    )
-    .map_err(|e| anyhow::anyhow!("the parameter set: {e}"))
+    cfg.sim.resolve_with(file, sets)
 }
 
 /// [`resolve_params`] for a caller without a command line: `cfg`'s tables, then `sets`.
 pub fn params_of(cfg: &VoxelConfig, sets: &[String]) -> Result<Params> {
-    let mut file = toml::Table::new();
-    if !cfg.flora.is_empty() {
-        file.insert("flora".into(), toml::Value::Table(cfg.flora.clone()));
-    }
-    if !cfg.fauna.is_empty() {
-        file.insert("fauna".into(), toml::Value::Table(cfg.fauna.clone()));
-    }
-    let base = Params {
-        world: cfg.world.clone(),
-        ..Params::defaults()
-    };
-    Params::resolve_over(
-        base,
-        &Layers {
-            file: Some(file),
-            genome: None,
-            sets: sets.to_vec(),
-        },
-    )
-    .map_err(|e| anyhow::anyhow!("the parameter set: {e}"))
+    cfg.sim.resolve_sets(sets)
 }
+
 
 /// `lighting` in the config: the GPU renderer's lighting tier.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -771,13 +707,13 @@ pub fn load_models(cfg: &VoxelConfig) -> Option<std::sync::Arc<model::ModelLibra
         eprintln!("cubarium voxel: organisms = \"glyphs\": drawing the dev-mode glyphs");
         return None;
     }
-    match model::ModelLibrary::load(&cfg.models_dir, cfg.world.voxel_m) {
+    match model::ModelLibrary::load(&cfg.models_dir, cfg.sim.world.voxel_m) {
         Ok(lib) => {
             eprintln!(
                 "cubarium voxel: {} voxel models from {}/{}",
                 lib.len(),
                 cfg.models_dir.display(),
-                model::voxel_dir(cfg.world.voxel_m)
+                model::voxel_dir(cfg.sim.world.voxel_m)
             );
             Some(std::sync::Arc::new(lib))
         }
@@ -788,25 +724,8 @@ pub fn load_models(cfg: &VoxelConfig) -> Option<std::sync::Arc<model::ModelLibra
     }
 }
 
-// A partial [world] table must use the same cell size as an omitted table, which since
-// the ambient default became the shipped `default` landscape is that landscape's own
-// 0.25 m. `cubarium_voxel::Config::default()` is untouched, so frozen arenas and the
-// simulation fixtures keep theirs.
-fn ambient_world_config<'de, D>(
-    deserializer: D,
-) -> std::result::Result<cubarium_voxel::Config, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let table = toml::Table::deserialize(deserializer)?;
-    // The cell-size default and the landform-preset expansion live in the core now
-    // (`cubarium_voxel::world_table`), shared with the training harness.
-    cubarium_voxel::world_config_from_table(table).map_err(serde::de::Error::custom)
-}
-
-/// `[world]`: [`cubarium_voxel::Config`] with every field optional.
-///
-/// Load a [`VoxelConfig`] from TOML.
+/// Load a [`VoxelConfig`] from TOML, its `base` chain merged under it
+/// ([`cubarium_session::params::config_table`]).
 pub fn load_config(path: &Path) -> Result<VoxelConfig> {
     let table = config_table(path)?;
     table
@@ -814,64 +733,8 @@ pub fn load_config(path: &Path) -> Result<VoxelConfig> {
         .with_context(|| format!("parsing the voxel config {}", path.display()))
 }
 
-/// A config file's table with its `base` chain merged under it.
-///
-/// **`base = "<file>"`** (scenario maps, 2026-10-04): the file is read first, relative to
-/// this one, and this file's keys are laid over it — tables merged key by key, anything
-/// else replaced. A scenario map is its world and founding table over the desktop
-/// terrarium's ecology, not a copy of it.
-fn config_table(path: &Path) -> Result<toml::Table> {
-    config_chain(path, 0)
-}
-
-fn config_chain(path: &Path, depth: usize) -> Result<toml::Table> {
-    anyhow::ensure!(depth < 8, "the voxel config {}: `base` nests too deep", path.display());
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading the voxel config {}", path.display()))?;
-    let mut table: toml::Table =
-        toml::from_str(&text).with_context(|| format!("parsing the voxel config {}", path.display()))?;
-    let Some(base) = table.remove("base") else {
-        return Ok(table);
-    };
-    let base = base
-        .as_str()
-        .with_context(|| format!("the voxel config {}: `base` names a file", path.display()))?;
-    let base_path = path.parent().unwrap_or(Path::new(".")).join(base);
-    let mut merged = config_chain(&base_path, depth + 1)?;
-    merge_table(&mut merged, table);
-    Ok(merged)
-}
-
-fn merge_table(under: &mut toml::Table, over: toml::Table) {
-    for (k, v) in over {
-        match (under.get_mut(&k), v) {
-            (Some(toml::Value::Table(u)), toml::Value::Table(o)) => merge_table(u, o),
-            (_, v) => {
-                under.insert(k, v);
-            }
-        }
-    }
-}
-
 // --- The run -------------------------------------------------------------------------
 
-/// Generate a random 64-bit seed from `/dev/urandom` or fallback system time entropy.
-fn random_seed() -> u64 {
-    let mut buf = [0u8; 8];
-    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
-        use std::io::Read;
-        if f.read_exact(&mut buf).is_ok() {
-            let s = u64::from_le_bytes(buf);
-            if s != 0 {
-                return s;
-            }
-        }
-    }
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0x5EED_0001)
-}
 
 /// Read `[world].seed` from a TOML config file if explicitly declared there.
 fn cfg_seed_from_file(config_path: &Option<PathBuf>) -> Option<u64> {
@@ -884,154 +747,6 @@ fn cfg_seed_from_file(config_path: &Option<PathBuf>) -> Option<u64> {
         .map(|s| s as u64)
 }
 
-/// Parse tick from a snapshot filename like `world-1730.voxel`.
-fn parse_voxel_tick(name: &str) -> Option<u64> {
-    let name = name.strip_prefix("world-")?;
-    let name = name.strip_suffix(".voxel")?;
-    name.parse().ok()
-}
-
-/// Prune older voxel snapshots in `dir`, keeping the newest `keep` snapshots.
-fn prune_voxel_snapshots(dir: &Path, keep: usize) {
-    let keep = keep.max(1);
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut candidates: Vec<(u64, PathBuf)> = Vec::new();
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.is_file() {
-            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if let Some(tick) = parse_voxel_tick(name) {
-                candidates.push((tick, p));
-            }
-        }
-    }
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
-    let kept: Vec<u64> = candidates.iter().take(keep).map(|c| c.0).collect();
-    for (_, old_path) in candidates.into_iter().skip(keep) {
-        let _ = std::fs::remove_file(old_path);
-    }
-    // The layers go with their world: any whose world was pruned (or never landed) goes.
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for p in entries.flatten().map(|e| e.path()) {
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        let tick = ["flora-", "fauna-"]
-            .iter()
-            .find_map(|k| name.strip_prefix(k))
-            .and_then(|n| n.strip_suffix(".bin"))
-            .and_then(|n| n.parse::<u64>().ok());
-        if tick.is_some_and(|t| !kept.contains(&t)) {
-            let _ = std::fs::remove_file(p);
-        }
-    }
-}
-
-/// The plant and animal layers saved beside `world-N.voxel`: each layer's own
-/// always-fresh envelope (the same bytes `voxel_census save=` writes as `flora.bin` and
-/// `fauna.bin`).
-fn layer_files(dir: &Path, tick: u64) -> (PathBuf, PathBuf) {
-    (
-        dir.join(format!("flora-{tick}.bin")),
-        dir.join(format!("fauna-{tick}.bin")),
-    )
-}
-
-/// Write `bytes` to `path` through a synced `tmp-` file and a rename: whole or absent.
-fn write_whole(dir: &Path, path: &Path, bytes: &[u8]) -> bool {
-    use std::io::Write;
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("snapshot");
-    let tmp_file = dir.join(format!("tmp-{name}"));
-    let written = std::fs::File::create(&tmp_file).and_then(|mut f| {
-        f.write_all(bytes)?;
-        f.sync_all()
-    });
-    if written.is_ok() && std::fs::rename(&tmp_file, path).is_ok() {
-        true
-    } else {
-        let _ = std::fs::remove_file(&tmp_file);
-        false
-    }
-}
-
-/// Atomically write a snapshot to `dir` and prune older snapshots.
-///
-/// The bytes reach the disk before the rename makes them the snapshot: a
-/// `world-N.voxel` is either whole or absent, even across a power cut, and a crash
-/// mid-write leaves only a `tmp-` file nothing reads. The plant and animal layers
-/// (`flora-N.bin`, `fauna-N.bin`) are written first, so a world file never appears
-/// before the layers that go with it.
-fn save_voxel_snapshot(dir: &Path, world: &World, layers: Option<(&Flora, &Fauna)>) {
-    let tick = world.tick();
-    if let Some((flora, fauna)) = layers {
-        let (flora_file, fauna_file) = layer_files(dir, tick);
-        let _ = write_whole(
-            dir,
-            &flora_file,
-            &cubarium_voxel_flora::snapshot::encode(flora),
-        ) && write_whole(dir, &fauna_file, &fauna.save());
-    }
-    let snap_file = dir.join(format!("world-{tick}.voxel"));
-    if write_whole(dir, &snap_file, &world.save()) {
-        eprintln!("cubarium voxel: saved snapshot {}", snap_file.display());
-        prune_voxel_snapshots(dir, 5);
-    }
-}
-
-/// The whole world, plants and animals into `dir`, made if missing, in the layout
-/// `--load DIR` resumes. Says on stderr where it went, or why it did not.
-fn save_whole_world(dir: &Path, world: &World, flora: &Flora, fauna: &Fauna) {
-    if let Err(e) = std::fs::create_dir_all(dir) {
-        eprintln!("cubarium voxel: save to {}: {e}", dir.display());
-        return;
-    }
-    save_voxel_snapshot(dir, world, Some((flora, fauna)));
-    let tick = world.tick();
-    let (flora_file, fauna_file) = layer_files(dir, tick);
-    let world_file = dir.join(format!("world-{tick}.voxel"));
-    if world_file.is_file() && flora_file.is_file() && fauna_file.is_file() {
-        eprintln!(
-            "cubarium voxel: saved the whole world to {}/ — resume with `--load {}`",
-            dir.display(),
-            dir.display()
-        );
-    } else {
-        eprintln!("cubarium voxel: save to {} failed", dir.display());
-    }
-}
-
-/// The plant and animal layers saved with `world-N.voxel`, if both are there and load.
-/// `None` (said on stderr when the files exist) means the caller seeds afresh.
-fn load_layers(dir: &Path, tick: u64) -> Option<(Flora, Fauna)> {
-    let (flora_file, fauna_file) = layer_files(dir, tick);
-    if !flora_file.is_file() || !fauna_file.is_file() {
-        return None;
-    }
-    let loaded = std::fs::read(&flora_file)
-        .map_err(anyhow::Error::from)
-        .and_then(|b| cubarium_voxel_flora::snapshot::decode(&b))
-        .and_then(|flora| {
-            let fauna = std::fs::read(&fauna_file)
-                .map_err(anyhow::Error::from)
-                .and_then(|b| Fauna::load(&b))?;
-            Ok((flora, fauna))
-        });
-    match loaded {
-        Ok(layers) => Some(layers),
-        Err(e) => {
-            eprintln!(
-                "cubarium voxel: the plants and animals saved at tick {tick} do not load \
-                 ({e:#}); seeding afresh"
-            );
-            None
-        }
-    }
-}
 
 /// The running snapshot, off the loop.
 ///
@@ -1063,7 +778,9 @@ impl SnapshotWriter {
     fn save_in_background(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
         let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
         let dir = self.dir.clone();
-        self.spawn(move || save_voxel_snapshot(&dir, &world, Some((&flora, &fauna))))
+        self.spawn(move || {
+            save_voxel_snapshot(&dir, &world, Some((&flora, &fauna)));
+        })
     }
 
     /// Whether a write is still in flight.
@@ -1127,18 +844,8 @@ impl SnapshotWriter {
     }
 }
 
-/// A fresh generated world's founding: the layers the founding loop seeded it with.
-type Seeding = (Flora, Fauna, habitat::Seeded);
-
-/// The layers a run starts with, when they do not have to be seeded here.
-enum StartLayers {
-    /// A fresh generated world, seeded and judged by the founding loop.
-    Founded(Seeding),
-    /// A resumed world's own plants and animals, saved beside it.
-    Restored(Flora, Fauna),
-}
-
-/// Resume from a file/directory or create a fresh world according to CLI and config.
+/// Resume from a file/directory or create a fresh world according to CLI and config
+/// ([`cubarium_session::create::load_or_create_world`], the one copy).
 ///
 /// A **fresh generated** world that is going to be seeded goes through the founding loop
 /// ([`found`]) and comes back with its layers, already seeded; every other
@@ -1147,194 +854,20 @@ fn load_or_create_world(
     args: &Voxel,
     cfg: &VoxelConfig,
 ) -> Result<(World, String, bool, Option<StartLayers>)> {
-    let (world, label, resumed) = match load_world(args)? {
-        Some((world, label, resumed, layers)) => {
-            let layers = layers.map(|(flora, fauna)| StartLayers::Restored(flora, fauna));
-            return Ok((world, label, resumed, layers));
-        }
-        None => {
-            let params = resolve_params(args, cfg)?;
-            let world_cfg = params.world.clone();
-            match args.scene {
-                VoxelSceneArg::Authored => {
-                    (scene::authored(world_cfg), "authored".to_string(), false)
-                }
-                VoxelSceneArg::Generated => {
-                    let asked = args.seed.or_else(|| cfg_seed_from_file(&args.config));
-                    if args.empty {
-                        let (world, seed, rejected) =
-                            generate_with_a_lake(&world_cfg, asked, LAKE_SEED_TRIES, random_seed);
-                        let label = if rejected > 0 {
-                            format!("generated (seed {seed}, {rejected} rejected)")
-                        } else {
-                            format!("generated (seed {seed})")
-                        };
-                        (world, label, false)
-                    } else {
-                        let founded = found(
-                            &world_cfg,
-                            &LayerConfig::new(&params, world_cfg.voxel_m),
-                            args.founder_counts(&params.fauna),
-                            asked.map_or(Seeds::Drawn(random_seed), Seeds::Asked),
-                            false,
-                        );
-                        let rejected = founded.lake_rejected + founded.habitat_rejected;
-                        let label = if rejected > 0 {
-                            format!("generated (seed {}, {rejected} rejected)", founded.seed)
-                        } else {
-                            format!("generated (seed {})", founded.seed)
-                        };
-                        return Ok((
-                            founded.world,
-                            label,
-                            false,
-                            Some(StartLayers::Founded((
-                                founded.flora,
-                                founded.fauna,
-                                founded.seeded,
-                            ))),
-                        ));
-                    }
-                }
-            }
-        }
-    };
-    Ok((world, label, resumed, None))
-}
-
-/// Resume a world from `--load`, if there is one to resume: `None` means found a new one.
-/// A resumed world, its label, and its saved plants and animals when they load.
-type Resumed = (World, String, bool, Option<(Flora, Fauna)>);
-
-fn load_world(args: &Voxel) -> Result<Option<Resumed>> {
-    if let Some(path) = &args.load {
-        if path.is_file() {
-            let bytes = std::fs::read(path)
-                .with_context(|| format!("reading the world {}", path.display()))?;
-            let world =
-                World::load(&bytes).with_context(|| format!("loading {}", path.display()))?;
-            let label = path.display().to_string();
-            eprintln!("cubarium voxel: resumed world from {}", path.display());
-            return Ok(Some((world, label, true, None)));
-        } else if path.is_dir() {
-            let mut candidates: Vec<(u64, std::time::SystemTime, PathBuf)> = Vec::new();
-            for entry in std::fs::read_dir(path)
-                .with_context(|| format!("reading state directory {}", path.display()))?
-            {
-                let entry = entry?;
-                let p = entry.path();
-                if p.is_file() {
-                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    if name.ends_with(".voxel") {
-                        let tick = parse_voxel_tick(name).unwrap_or(0);
-                        let mtime = entry
-                            .metadata()
-                            .and_then(|m| m.modified())
-                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                        candidates.push((tick, mtime, p));
-                    }
-                }
-            }
-            candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
-            if !candidates.is_empty() {
-                // A refusal is *stale* when the file is a perfectly good snapshot of a
-                // format this build no longer speaks, and *damaged* when it is anything
-                // else. Told apart by the error's own type, never by its text.
-                let mut stale: Vec<(PathBuf, u32)> = Vec::new();
-                for (tick, _, cand_path) in &candidates {
-                    match std::fs::read(cand_path) {
-                        Ok(bytes) => match World::load(&bytes) {
-                            Ok(world) => {
-                                eprintln!(
-                                    "cubarium voxel: resuming {} at tick {tick}",
-                                    cand_path.display()
-                                );
-                                let label = format!("resumed from {}", cand_path.display());
-                                let layers = load_layers(path, *tick);
-                                if let Some((flora, fauna)) = &layers {
-                                    eprintln!(
-                                        "cubarium voxel: resumed its plants and animals — \
-                                         {} stands, {} latticevines, {} animals",
-                                        flora.view().stands.len(),
-                                        flora.view().cover.vines().len(),
-                                        fauna.view().animals.len(),
-                                    );
-                                }
-                                return Ok(Some((world, label, true, layers)));
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "cubarium voxel: skipping corrupt snapshot {}: {e}",
-                                    cand_path.display()
-                                );
-                                if let Some(m) = e.downcast_ref::<cubarium_voxel::SchemaMismatch>()
-                                {
-                                    stale.push((cand_path.clone(), m.found));
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!(
-                                "cubarium voxel: skipping unreadable snapshot {}: {e}",
-                                cand_path.display()
-                            );
-                        }
-                    }
-                }
-                // **Stale is not damaged.** A directory whose every snapshot is simply of
-                // an older format holds nothing that can be recovered — the standing rule
-                // is fresh, never migrate — and refusing to start leaves the panel showing
-                // the last frame it drew until somebody ssh's in. That is exactly what it
-                // did: five worlds of schema 13 against a build that speaks 15, and a
-                // crash loop (Wrysk, 2026-09-21, who does not want them kept). So they are
-                // discarded, loudly, and a fresh world founded. Anything else still
-                // refuses by name below.
-                if stale.len() == candidates.len() {
-                    let mut had: Vec<u32> = stale.iter().map(|(_, n)| *n).collect();
-                    had.sort_unstable();
-                    had.dedup();
-                    let names: Vec<String> = had.iter().map(|n| n.to_string()).collect();
-                    for (p, _) in &stale {
-                        std::fs::remove_file(p).with_context(|| {
-                            format!("discarding the stale snapshot {}", p.display())
-                        })?;
-                    }
-                    eprintln!(
-                        "cubarium voxel: discarded {} snapshot(s) of schema {} in {}; \
-                         founding a fresh world (schema {})",
-                        stale.len(),
-                        names.join(", "),
-                        path.display(),
-                        cubarium_voxel::snapshot::SCHEMA,
-                    );
-                } else {
-                    bail!(
-                        "{} snapshot file(s) are present in {} and none of them loaded",
-                        candidates.len(),
-                        path.display()
-                    );
-                }
-            }
-            eprintln!(
-                "cubarium voxel: no loadable snapshot in {}; creating a new world",
-                path.display()
-            );
-        } else {
-            // Path does not exist yet
-            if path.extension().is_some() {
-                bail!("cannot load world from {}: file not found", path.display());
-            } else {
-                std::fs::create_dir_all(path)
-                    .with_context(|| format!("creating state directory {}", path.display()))?;
-                eprintln!(
-                    "cubarium voxel: created state directory {}; creating a new world",
-                    path.display()
-                );
-            }
-        }
-    }
-
-    Ok(None)
+    let params = resolve_params(args, cfg)?;
+    cubarium_session::create::load_or_create_world(
+        &params,
+        &StartSpec {
+            load: args.load.as_deref(),
+            scene: match args.scene {
+                VoxelSceneArg::Authored => Scene::Authored,
+                VoxelSceneArg::Generated => Scene::Generated,
+            },
+            seed: args.seed.or_else(|| cfg_seed_from_file(&args.config)),
+            empty: args.empty,
+            founder_counts: args.founder_counts(&params.fauna),
+        },
+    )
 }
 
 /// Run `cubarium voxel`.
@@ -1352,12 +885,12 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // `World::new` and `World::empty` panic on a config no world can be built from —
     // building one from nonsense is a programming error. A config *file* is input, so the
     // boundary is here: a bad file is reported, not a backtrace.
-    cfg.world.validate().with_context(|| match &args.config {
+    cfg.sim.world.validate().with_context(|| match &args.config {
         Some(path) => format!("the `[world]` in {}", path.display()),
         None => "the built-in world defaults".to_string(),
     })?;
     let params = resolve_params(args, &cfg)?;
-    cfg.world = params.world.clone();
+    cfg.sim.world = params.world.clone();
     if args.textures {
         cfg.textures = true;
     }
@@ -1385,9 +918,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             }
         };
         cfg.px_per_voxel = if window {
-            cover_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out)
+            cover_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.sim.world, out)
         } else {
-            auto_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out)
+            auto_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.sim.world, out)
         };
         eprintln!(
             "cubarium voxel: px_per_voxel auto -> {} ({what}, {}x{})",
@@ -1403,15 +936,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // records, submits and presents the frame is not competing with the tick for the
     // last core. `SimConfig::default()` takes every core instead and is not what the
     // panel wants.
-    let sim_config = SimConfig {
-        threads: if cfg.threads == 0 {
-            cubarium_voxel::default_threads()
-        } else {
-            cfg.threads
-        },
-        water_every: cfg.water_every.max(1),
-        ..SimConfig::default()
-    };
+    let sim_config = cfg.sim.sim_config();
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
     // **The output is opened before the world exists.** Founding one is minutes of work
     // on the board — a seed gate of up to `LAKE_SEED_TRIES` candidates, each settled,
@@ -1430,13 +955,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 cfg.tilt_degrees,
                 cfg.px_per_voxel,
                 cfg.raster_height,
-                &cfg.world,
+                &cfg.sim.world,
             )?;
             let mut out = open_out(args, &cfg, proj, speed)?;
             // The GPU draws whatever was last staged, and nothing has been staged yet:
             // an empty world of this config makes the founding frame sky over nothing
             // rather than whatever the staging buffer happened to hold.
-            out.stage_empty(&cfg.world);
+            out.stage_empty(&cfg.sim.world);
             Some(out)
         }
     };
@@ -1488,209 +1013,24 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             stop,
             || {
             let (world, scene_label, resumed, founded) = load_or_create_world(args, &cfg)?;
-            let mut world = world;
             let recipes = founder_recipes(args)?;
-            let drivers: Vec<(Founder, EpisodeDriver)> = recipes
-                .iter()
-                .filter_map(|r| r.driver.clone().map(|d| (r.founder, d)))
-                .collect();
-            // A fresh generated world comes out of the founding loop **already seeded**
-            // and judged; an authored or resumed one is pre-rolled and seeded here — a
-            // resumed one without the opening shower, which it has had, and never redrawn.
-            let restored = matches!(founded, Some(StartLayers::Restored(..)));
-            let (flora, mut fauna, seeded) = match founded {
-                Some(StartLayers::Founded((flora, fauna, seeded))) => {
-                    (flora, fauna, Some(seeded))
-                }
-                // Resumed with its own plants and animals: nothing to seed.
-                Some(StartLayers::Restored(flora, fauna)) => (flora, fauna, None),
-                None => {
-                    let (mut flora, mut fauna) =
-                        LayerConfig::new(&params, world.config().voxel_m).layers();
-                    let seeded = (!args.empty).then(|| {
-                        let pre = habitat::pre_roll(&mut world, !resumed);
-                        habitat::seed_pre_rolled(
-                            &mut world,
-                            &mut flora,
-                            &mut fauna,
-                            &pre,
-                            args.founder_counts(&params.fauna),
-                        )
-                    });
-                    (flora, fauna, seeded)
-                }
-            };
-            if let Some(seeded) = seeded {
-                // The settle report, once, at startup: how long the water took to stop
-                // moving and whether it did. The ordinary display shows none of this.
-                let st = seeded.settle;
-                let wc = world.config().clone();
-                let lake = cubarium_voxel::hydrate::lake(&world);
-                let above = cubarium_voxel::hydrate::tier_pools(
-                    &cubarium_voxel::hydrate::pools(&world),
-                    lake.level_y,
-                );
-                eprintln!(
-                    "cubarium voxel: lake {:.2} m³ over {:.1} m², {:.1} m² visible, \
-                     {above} pool(s) above it, stream {:.4} m³/s",
-                    lake.volume_m3,
-                    lake.surface_cells.len() as f64 * world.config().cell_area(),
-                    lake.visible_m2,
-                    world.config().reentry_m3_per_s,
-                );
-                eprintln!(
-                    "cubarium voxel: {} — water settled in {} ticks ({}), {:.2} m³ pooled \
-                     in {} cells, {:.2} m³ pore, drift {:.2e} m³/100 ticks{}",
-                    if wc.closed_water_budget {
-                        format!(
-                            "closed cycle, {:.2} m³ aloft, {}, {:.0} mm/h rain, \
-                             {:.0} mm/h evaporation",
-                            world.atmosphere_m3(),
-                            format!(
-                                "climate {}, RH {:.2}, dry gap {:.0}-{:.0} min",
-                                wc.climate.preset.name(),
-                                world.rh(),
-                                wc.climate.dry_gap_min_s / 60.0,
-                                wc.climate.dry_gap_max_s / 60.0,
-                            ),
-                            wc.rain_m_per_s * 3600.0 * 1000.0,
-                            wc.evaporation_m_per_s * 3600.0 * 1000.0,
-                        )
-                    } else {
-                        "open budget, no cycle to report".to_string()
-                    },
-                    st.ticks,
-                    if st.converged {
-                        "converged"
-                    } else {
-                        "still moving at the cap"
-                    },
-                    st.pooled_m3,
-                    st.free_cells,
-                    st.pore_m3,
-                    st.drift_m3_per_100,
-                    if st.dry_locked {
-                        " — DRY LOCKED: water aloft and no pool on the ground"
-                    } else {
-                        ""
-                    },
-                );
-                let bodies: Vec<String> = Founder::ALL
-                    .into_iter()
-                    .filter(|f| seeded.founders[f.index()] > 0)
-                    .map(|f| format!("{} {}", seeded.founders[f.index()], f.name()))
-                    .collect();
-                eprintln!(
-                    "cubarium voxel: seeded the example habitat — {} stands, {} logs, \
-                     {} litter tiles, founders: {} (--empty for a bare world)",
-                    seeded.stands,
-                    seeded.logs,
-                    seeded.litter_tiles,
-                    bodies.join(", "),
-                );
-                match &seeded.founding_bank_refused {
-                    Some(why) => eprintln!("cubarium voxel: no lanternjaw egg bank — {why}"),
-                    None => eprintln!(
-                        "cubarium voxel: {} lanternjaw eggs buried where the prey live{}",
-                        seeded.founding_eggs,
-                        if args.no_egg_bank { " (--no-egg-bank)" } else { "" },
-                    ),
-                }
-                for founder in Founder::ALL {
-                    let short = seeded.shortfall[founder.index()];
-                    if short > 0 {
-                        eprintln!(
-                            "cubarium voxel: {} shortfall — {short} bodies not placed; \
-                             this habitat holds no site the lineage can live on",
-                            founder.name()
-                        );
-                    }
-                }
-                let pr = seeded.pre_roll;
-                eprintln!(
-                    "cubarium voxel: pre-roll {} ticks — {}; habitat {}",
-                    pr.ticks,
-                    if pr.opening_shower {
-                        format!(
-                            "opened with a {}-tick shower, drained in {} ticks ({}), lake \
-                             at rest after {} more",
-                            pr.shower_ticks,
-                            pr.drain.ticks,
-                            if pr.drain.converged { "converged" } else { "at the cap" },
-                            pr.lake_rest_ticks,
-                        )
-                    } else {
-                        "no opening shower".to_string()
-                    },
-                    if seeded.acceptance.accepted {
-                        "accepted".to_string()
-                    } else {
-                        format!("NOT accepted: {}", seeded.acceptance.reasons())
-                    },
-                );
-            } else {
-                if restored {
-                    // A restored layer's controllers are not saved: every standing body
-                    // gets its lineage's heuristic back, and the policy-driven lineages
-                    // are re-installed over it just below.
-                    habitat::reinstall_heuristics(&mut fauna);
-                } else {
-                    // An empty world grows its founders by hand; the lineages still need
-                    // their recipes registered so anything born is driven.
-                    habitat::install_heuristics(&mut fauna);
-                }
-            }
-            install_founder_controllers(&mut fauna, &drivers)?;
-            // `--introduce lanternjaw:N` (predation §2.9): adults where the prey live, or
-            // the reason there are none. `--introduce chorister:N` (roster R3): N packs,
-            // each on a covered den near the prey.
-            for (founder, n) in args.introductions()? {
-                anyhow::ensure!(
-                    matches!(founder, Founder::Lanternjaw | Founder::Chorister),
-                    "--introduce takes lanternjaw:N or chorister:N; the {} lineage is founded by the habitat",
-                    founder.name()
-                );
-                if founder == Founder::Chorister {
-                    match habitat::introduce_packs(&world, &flora, &mut fauna, founder, n) {
-                        Ok(ids) => eprintln!(
-                            "cubarium voxel: introduced {} chorister packs where the prey live",
-                            ids.len()
-                        ),
-                        Err(why) => eprintln!("cubarium voxel: --introduce chorister:{n} refused — {why}"),
-                    }
-                    continue;
-                }
-                match habitat::introduce_lanternjaws(&world, &flora, &mut fauna, n) {
-                    Ok(ids) => eprintln!(
-                        "cubarium voxel: introduced {} adult lanternjaws where the prey live",
-                        ids.len()
-                    ),
-                    Err(why) => eprintln!("cubarium voxel: --introduce lanternjaw:{n} refused — {why}"),
-                }
-            }
-            // Say what is actually driving each lineage, every run: the default is now a
-            // trained centre, and a trained animal and a reflex animal are told apart
-            // from outside only by being told apart here.
-            for recipe in &recipes {
-                eprintln!(
-                    "cubarium voxel: {} founders are driven by {} ({})",
-                    recipe.founder.name(),
-                    match &recipe.driver {
-                        Some(driver) => driver.name(),
-                        None => "the observation-only heuristic".to_string(),
-                    },
-                    recipe.source,
-                );
-            }
-            // The live schedule's own sensory state, settled against the layers as they
-            // stand before the first tick: the ambient world's founders smell the litter
-            // this flora actually drops and has eaten, at the field's own cadence. An
-            // `--empty` world has no litter, so the field is empty and its update is a
-            // walk over nothing.
-            let mut senses = Senses::with_cue(fauna.config().cue);
-            senses.settle(&world.view(), &flora.view());
+            let introductions = args.introductions()?;
+            // The one copy of seeding, driving and readying a world: the session crate's.
+            let (world, flora, fauna) = cubarium_session::create::populate(
+                world,
+                resumed,
+                founded,
+                &params,
+                &Populate {
+                    recipes: &recipes,
+                    introductions: &introductions,
+                    empty: args.empty,
+                    founder_counts: args.founder_counts(&params.fauna),
+                    no_egg_bank: args.no_egg_bank,
+                },
+            )?;
             Ok((
-                Sim::new(world, flora, fauna, sim_config, Some(senses)),
+                cubarium_session::create::ready_sim(world, flora, fauna, sim_config),
                 scene_label,
             ))
             },
@@ -1699,13 +1039,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 
     // The display's water fidelity is its config's (`water_every`, live by default); a
     // coarse one is said, since it changes how fast water spreads on screen.
-    sim.world_mut().set_water_every(cfg.water_every.max(1));
-    if sim.world().water_every() > 1 {
-        eprintln!(
-            "cubarium voxel: coarse water, the lateral phases once every {} ticks",
-            sim.world().water_every()
-        );
-    }
+    cubarium_session::create::set_water_every(&mut sim, cfg.sim.water_every);
 
     // The world that was built is the world the config drew, unless a snapshot was
     // resumed that describes a different one — then the founding output is on the wrong
@@ -1717,7 +1051,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         sim.world().config(),
     )?;
     let mut out = match out {
-        Some(out) if same_extent(&cfg.world, sim.world().config()) => out,
+        Some(out) if same_extent(&cfg.sim.world, sim.world().config()) => out,
         Some(old) => {
             let c = sim.world().config();
             eprintln!(
@@ -1726,9 +1060,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 c.width,
                 c.height,
                 c.depth,
-                cfg.world.width,
-                cfg.world.height,
-                cfg.world.depth,
+                cfg.sim.world.width,
+                cfg.sim.world.height,
+                cfg.sim.world.depth,
             );
             drop(old);
             open_out(args, &cfg, proj, speed)?
@@ -1758,18 +1092,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         cfg.tilt_degrees,
         proj.rise,
     );
-    // Under a closed budget the outlet is not an export: what it takes goes into the
-    // atmosphere store and comes back as a shower. It is the strongest of the two return
-    // flows, so a closed world starts with it open — otherwise the cycle never starts and
-    // the run reports a world that is only standing still. `o` still toggles it.
-    if sim.world().config().closed_water_budget && !sim.world().outlet_open() {
-        sim.world_mut()
-            .apply(VoxelCommand::SetOutlet { open: true });
-        eprintln!(
-            "cubarium voxel: closed water budget — the outlet is open as the return flow \
-             into the atmosphere, not an export"
-        );
-    }
+    // Under a closed budget the outlet is the return flow, so a closed world starts with
+    // it open; `o` still toggles it.
+    cubarium_session::create::open_closed_outlet(&mut sim);
     // `--weather-force MODE`: a development capture's rain, starting now.
     if let Some(mode) = &args.weather_force {
         use cubarium_voxel::weather::RainMode;
@@ -1818,7 +1143,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let mut budget = Budget::default();
     budget.mark(out.draw_split());
     let mut ctl = Control::new(speed, proj);
-    let mut debt = 0.0f64;
+    let mut pacer = Pacer::default();
     // Whether the world or the plant layer has moved since the last frame drawn. The CPU
     // presenter re-reads the world every frame and does not care; the GPU packs one
     // texture per *tick*, so it needs to be told.
@@ -1933,36 +1258,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
 
         match clock.next_step(now) {
             Step::Tick => {
-                if ctl.paused {
-                    // A single `s` still advances exactly one world tick.
-                    if ctl.pending_steps > 0 {
-                        ctl.pending_steps -= 1;
-                        let (at, before) = (Instant::now(), Phases::now());
-                        sim.step();
-                        let ns = at.elapsed().as_nanos() as u64;
-                        budget.tick(ns, before);
-                        if let Some(o) = observatory.as_mut() {
-                            o.observer.after_tick(sim.world(), sim.fauna(), ns);
-                        }
-                        ticks += 1;
-                        since_ticks += 1;
-                        moved = true;
+                // The world ticks this clock tick owes: the speed's, or a pending `s`.
+                for _ in 0..pacer.due(&mut ctl) {
+                    let (at, before) = (Instant::now(), Phases::now());
+                    sim.step();
+                    let ns = at.elapsed().as_nanos() as u64;
+                    budget.tick(ns, before);
+                    if let Some(o) = observatory.as_mut() {
+                        o.observer.after_tick(sim.world(), sim.fauna(), ns);
                     }
-                } else {
-                    debt += ctl.speed;
-                    while debt >= 1.0 {
-                        debt -= 1.0;
-                        let (at, before) = (Instant::now(), Phases::now());
-                        sim.step();
-                        let ns = at.elapsed().as_nanos() as u64;
-                        budget.tick(ns, before);
-                        if let Some(o) = observatory.as_mut() {
-                            o.observer.after_tick(sim.world(), sim.fauna(), ns);
-                        }
-                        ticks += 1;
-                        since_ticks += 1;
-                        moved = true;
-                    }
+                    ticks += 1;
+                    since_ticks += 1;
+                    moved = true;
                 }
                 out.observe_tick(sim.world().tick());
                 if let Some(o) = observatory.as_mut() {
@@ -2059,318 +1366,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-/// The trained centres the ambient run installs by default, carried inside the binary so
-/// the live world needs no files on disk. Provenance, and the rule that a centre is
-/// replaced and never edited, are in `crates/cubarium/assets/policies/README.md`.
-const BUILT_IN_POLICIES: [(Founder, &str, &str); 2] = [
-    (
-        Founder::Blind,
-        "littershredder-curio-c1-2026-10-02.json",
-        include_str!("../../assets/policies/littershredder-curio-c1-2026-10-02.json"),
-    ),
-    (
-        Founder::Browser,
-        "frondgrazer-curio-c1-2026-10-02.json",
-        include_str!("../../assets/policies/frondgrazer-curio-c1-2026-10-02.json"),
-    ),
-];
+// The trained centres, their installation and each lineage's recipe live in the session
+// crate (`cubarium_session::founders`), shared with the Godot session; re-exported here
+// for the examples.
+pub use cubarium_session::founders::{
+    install_default_founders, install_founders_with, policy_args, policy_founders,
+};
 
-/// Parse one embedded centre into a driver, with the same checks [`VoxelPolicyFile::load`]
-/// makes of a file on disk: the schema token first, then the file's own validation of
-/// lineage, weight count, finite weights and this build's founder-manifest digest.
-///
-/// A centre that no longer matches this build's manifest fails here rather than being
-/// reinterpreted, which is the point of shipping the trainer's own file untouched: the
-/// binary refuses to pretend that weights trained against another schema are its default.
-fn built_in_driver(founder: Founder) -> Result<EpisodeDriver> {
-    let (_, name, json) = BUILT_IN_POLICIES
-        .iter()
-        .find(|(f, _, _)| *f == founder)
-        .ok_or_else(|| anyhow::anyhow!("no built-in centre for the {} lineage", founder.name()))?;
-    let file: VoxelPolicyFile = serde_json::from_str(json)
-        .with_context(|| format!("the built-in centre {name} is not a policy file"))?;
-    anyhow::ensure!(
-        file.schema == cubarium_search::es::voxel::store::POLICY_SCHEMA,
-        "the built-in centre {name}: schema `{}` is not {}",
-        file.schema,
-        cubarium_search::es::voxel::store::POLICY_SCHEMA,
-    );
-    let declared = file
-        .founder()
-        .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))?;
-    anyhow::ensure!(
-        declared == founder,
-        "the built-in centre {name} declares the {} lineage, not {}",
-        declared.name(),
-        founder.name(),
-    );
-    file.driver()
-        .map_err(|e| anyhow::anyhow!("the built-in centre {name}: {e}"))
-}
-
-/// The built-in centre for `founder` if it validates against this build, else `None`
-/// with a **loud** line on stderr: the lineage falls back to the observation-only
-/// heuristic the seeder registered.
-///
-/// Contract v2 (`design/handoffs/voxel-retrain-2026-09-22.md`, P5-A item 10) moved both
-/// founder manifests' digests, so the centres shipped under schema 1 are refused until the
-/// retrain (P5-C) replaces them. A refused centre is never reinterpreted and never
-/// silently swapped: the run says which lineage is on the fallback and why.
-fn built_in_or_fallback(founder: Founder) -> Option<EpisodeDriver> {
-    match built_in_driver(founder) {
-        Ok(driver) => Some(driver),
-        Err(e) => {
-            eprintln!(
-                "WARNING: {e:#}\nWARNING: the {} founders fall back to the observation-only \
-                 heuristic: the built-in centre was trained against another founder manifest \
-                 and is refused, not reinterpreted.",
-                founder.name()
-            );
-            None
-        }
-    }
-}
-
-/// Install the ambient run's built-in trained centres on every founder lineage of an
-/// already-seeded layer, and say so on stderr — one line per lineage naming its driver,
-/// the same announcement `cubarium voxel`'s ambient run makes by default. An example that
-/// wants to measure the shipped world's founders, and not the seeder's bare
-/// observation-only heuristics, calls this once after `habitat::seed` (or
-/// `habitat::install_heuristics` on an empty world), before stepping the sim.
-///
-/// A lineage whose built-in centre this build refuses keeps the seeder's heuristic, with
-/// a loud line saying so ([`built_in_or_fallback`]).
-pub fn install_default_founders(fauna: &mut Fauna) -> Result<()> {
-    install_founders_with(fauna, &[])
-}
-
-/// [`install_default_founders`], with each lineage named in `policies` driven by that
-/// saved policy file instead of the built-in centre (P5-C: `policy=<lineage>=<file>` on
-/// the examples, so a candidate runs in the live tools). The file validates itself
-/// against this build exactly as `--founder-policy` does, and a file declaring another
-/// lineage than the one it is named for is refused.
-pub fn install_founders_with(fauna: &mut Fauna, policies: &[(Founder, PathBuf)]) -> Result<()> {
-    let mut drivers = Vec::with_capacity(Founder::ALL.len());
-    let mut sources = Vec::with_capacity(Founder::ALL.len());
-    for founder in Founder::ALL {
-        if let Some((_, path)) = policies.iter().find(|(f, _)| *f == founder) {
-            let file = VoxelPolicyFile::load(path).map_err(anyhow::Error::msg)?;
-            let declared = file.founder().map_err(anyhow::Error::msg)?;
-            anyhow::ensure!(
-                declared == founder,
-                "policy={}={}: the file declares the {} lineage",
-                founder.name(),
-                path.display(),
-                declared.name(),
-            );
-            drivers.push((founder, file.driver().map_err(anyhow::Error::msg)?));
-            sources.push(format!("the policy file {}", path.display()));
-        } else if !BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder) {
-            // No trained centre exists for this lineage (the lanternjaw, until P2): it
-            // keeps the heuristic the seeder registered, and nothing is refused.
-            continue;
-        } else if let Some(driver) = built_in_or_fallback(founder) {
-            drivers.push((founder, driver));
-            sources.push("the built-in centre".to_string());
-        }
-    }
-    install_founder_controllers(fauna, &drivers)?;
-    for ((founder, driver), source) in drivers.iter().zip(&sources) {
-        eprintln!(
-            "{} founders are driven by {} ({source})",
-            founder.name(),
-            driver.name(),
-        );
-    }
-    Ok(())
-}
-
-/// The lineages [`install_founders_with`] drives by a policy for these `policies`: each
-/// one named, and every lineage with a built-in centre. What a loader passes to
-/// `cubarium_voxel_sim::saved::load` before installing them.
-pub fn policy_founders(policies: &[(Founder, PathBuf)]) -> Vec<Founder> {
-    Founder::ALL
-        .into_iter()
-        .filter(|f| policies.iter().any(|(p, _)| p == f) || BUILT_IN_POLICIES.iter().any(|(b, _, _)| b == f))
-        .collect()
-}
-
-/// The examples' `policy=<lineage>=<file>` arguments, in order: one per lineage at most.
-pub fn policy_args(args: &[String]) -> Result<Vec<(Founder, PathBuf)>> {
-    let mut out: Vec<(Founder, PathBuf)> = Vec::new();
-    for spec in args.iter().filter_map(|a| a.strip_prefix("policy=")) {
-        let Some((name, path)) = spec.split_once('=') else {
-            bail!("policy= takes `<lineage>=<file>`, not `{spec}`");
-        };
-        let founder = cubarium_search::es::voxel::parse_founder(name)
-            .map_err(|e| anyhow::anyhow!("policy={spec}: {e}"))?;
-        anyhow::ensure!(!path.trim().is_empty(), "policy={spec} names no file");
-        anyhow::ensure!(
-            !out.iter().any(|(f, _)| *f == founder),
-            "policy= names {} twice; one policy per lineage",
-            founder.name()
-        );
-        out.push((founder, PathBuf::from(path.trim())));
-    }
-    Ok(out)
-}
-
-/// What one founder lineage of the ambient run is driven by, and how it was chosen. The
-/// source is carried so the run can say it out loud: a world whose animals are a trained
-/// policy and a world whose animals are a reflex look alike from outside.
-struct FounderRecipe {
-    founder: Founder,
-    /// `None` is the observation-only heuristic the seeder registered.
-    driver: Option<EpisodeDriver>,
-    source: String,
-}
-
-/// Choose each lineage's driver for the ambient run: `--founder-policy` first, then
-/// `--founder-heuristic` (the disclosed control), and otherwise the trained centre built
-/// into the binary, which is the default since Wrysk's 2026-09-20 decision — founders on
-/// these centres survived the generated closed world where the heuristics died.
-///
-/// A `--founder-policy` file is the trainer's own and validates itself — schema token,
-/// lineage, vector length, finite weights, and a digest that is that founder manifest's
-/// — so all this adds is the cross-check the user's spelling makes possible: a browser
-/// centre asked to drive the blind lineage is refused by name rather than run against a
-/// schema it was never trained on.
+/// Each lineage's driver for the ambient run, from the command line: `--founder-policy`
+/// first, then `--founder-heuristic`, otherwise the built-in centre
+/// ([`cubarium_session::founders::founder_recipes`]).
 fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
-    let policies = args.founder_policies()?;
-    let heuristics = args.founder_heuristics()?;
-    let mut out = Vec::new();
-    for founder in Founder::ALL {
-        if let Some((_, path)) = policies.iter().find(|(f, _)| *f == founder) {
-            let file = VoxelPolicyFile::load(path).map_err(anyhow::Error::msg)?;
-            let declared = file.founder().map_err(anyhow::Error::msg)?;
-            anyhow::ensure!(
-                declared == founder,
-                "--founder-policy {}={}: the file declares the {} lineage",
-                founder.name(),
-                path.display(),
-                declared.name(),
-            );
-            out.push(FounderRecipe {
-                founder,
-                driver: Some(file.driver().map_err(anyhow::Error::msg)?),
-                source: format!("--founder-policy {}", path.display()),
-            });
-        } else if heuristics.contains(&founder) {
-            out.push(FounderRecipe {
-                founder,
-                driver: None,
-                source: "--founder-heuristic, the disclosed control".to_string(),
-            });
-        } else if !BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder) {
-            out.push(FounderRecipe {
-                founder,
-                driver: None,
-                source: "no trained centre exists yet (predation P2)".to_string(),
-            });
-        } else {
-            let name = BUILT_IN_POLICIES
-                .iter()
-                .find(|(f, _, _)| *f == founder)
-                .map(|(_, n, _)| *n)
-                .unwrap_or("none");
-            let driver = built_in_or_fallback(founder);
-            let source = if driver.is_some() {
-                format!("the built-in centre {name}")
-            } else {
-                format!(
-                    "the observation-only heuristic — FALLBACK: the built-in centre {name} \
-                     is refused by this build's founder manifest"
-                )
-            };
-            out.push(FounderRecipe {
-                founder,
-                driver,
-                source,
-            });
-        }
-    }
-    Ok(out)
-}
-
-/// Install the ambient run's founder controllers over a whole layer: a lineage given a
-/// driver has its **birth factory and every standing body of that lineage** switched to
-/// it, and a lineage given none keeps the heuristic the seeder registered. One factory
-/// per lineage, and `EpisodeDriver::fresh` per body, so no two bodies share a hidden
-/// state. Since the trained centres became the default, "given none" means the run asked
-/// for the control with `--founder-heuristic`.
-///
-/// A layer that *remembers* being policy-driven — [`Fauna::policy_driven`], which a
-/// snapshot carries — and is given no driver for that lineage is **refused here**, not
-/// quietly demoted to a heuristic: a world whose animals were a trained policy is not
-/// the same world with the reflex put back, and silently substituting one is exactly
-/// the re-anchoring `always-fresh-never-migrate` forbids.
-///
-/// The record the layer carries is per lineage and a [`Fauna::policy_digest`]
-/// (`weights_fnv1a`, `0` for a heuristic), so what is refused is not only the demotion
-/// but a swap of one centre for another: a loaded world whose recorded digest is nonzero
-/// and does not match the digest of the driver offered for that lineage is refused by
-/// name, the same re-anchoring the bare-demotion refusal above forbids.
-fn install_founder_controllers(
-    fauna: &mut Fauna,
-    drivers: &[(Founder, EpisodeDriver)],
-) -> Result<()> {
-    for founder in Founder::ALL {
-        if fauna.policy_driven(founder) && !drivers.iter().any(|(f, _)| *f == founder) {
-            bail!(
-                "this world's {} founders were driven by a saved policy; drop \
-                 `--founder-heuristic {}` to run them on the built-in centre, or pass \
-                 `--founder-policy {}=<centre.json>` to name one, or start a fresh \
-                 world. They are not silently put back on the heuristic.",
-                founder.name(),
-                founder.name(),
-                founder.name(),
-            );
-        }
-    }
-    for (founder, driver) in drivers {
-        let digest = driver.digest();
-        let recorded = fauna.policy_digest(*founder);
-        if recorded != 0 && recorded != digest {
-            bail!(
-                "this world's {} founders were driven by a saved policy, centre digest \
-                 {recorded:#018x}; the centre supplied here is a different one (digest \
-                 {digest:#018x}). That is not the same world under a new centre, so the \
-                 policy is refused rather than swapped in silence — supply the same \
-                 centre, or start a fresh world.",
-                founder.name(),
-            );
-        }
-    }
-    // The reflexes a centre falls back on run on the layer's own numbers.
-    let teachers = fauna.config().teachers;
-    for (founder, driver) in drivers {
-        let digest = driver.digest();
-        let driver = driver.clone();
-        fauna.set_founder_factory(
-            *founder,
-            std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh(teachers) }),
-        );
-        fauna.set_policy_driven(*founder, true);
-        fauna.set_policy_digest(*founder, digest);
-    }
-    // Re-install over every standing founder body, so a loaded layer's bodies and the
-    // bodies a policy flag took over are both driven by the lineage's current recipe.
-    let bodies: Vec<(u64, Founder)> = fauna
-        .view()
-        .animals
-        .iter()
-        .filter_map(|a| a.founder.map(|f| (a.id, f)))
-        .collect();
-    for (id, founder) in bodies {
-        if drivers.iter().any(|(f, _)| *f == founder) {
-            anyhow::ensure!(
-                fauna.install_founder_controller(id, founder),
-                "the {} policy could not be installed on body {id}",
-                founder.name()
-            );
-        }
-    }
-    Ok(())
+    cubarium_session::founders::founder_recipes(&args.founder_policies()?, &args.founder_heuristics()?)
 }
 
 /// Select the exact controller body a sensing-arena run installs. Policy files validate
@@ -3010,563 +2017,42 @@ fn report_off_the_loop(probe: impl FnOnce() -> String + Send + 'static) -> JoinH
     std::thread::spawn(move || eprintln!("cubarium voxel: {}", probe()))
 }
 
-/// The run state a stdin command may change, and the one function that changes it.
+/// The run state a stdin command may change: the session's [`Console`], which holds the
+/// one copy of every command, printed the way this binary always has.
 ///
 /// It owns the scalars and borrows the world per call rather than the other way round,
 /// so the loop can read `paused` and `speed` while it still holds the world.
 struct Control {
-    speed: f64,
-    paused: bool,
-    pending_steps: u32,
-    outlet: bool,
-    quit: bool,
-    proj: Projection,
-    /// A whole-world save `save [DIR]` asked for, for the loop to start off the frame.
-    save_to: Option<PathBuf>,
+    console: Console,
+}
+
+impl std::ops::Deref for Control {
+    type Target = Console;
+    fn deref(&self) -> &Console {
+        &self.console
+    }
+}
+
+impl std::ops::DerefMut for Control {
+    fn deref_mut(&mut self) -> &mut Console {
+        &mut self.console
+    }
 }
 
 impl Control {
     fn new(speed: f64, proj: Projection) -> Control {
-        Control {
-            speed,
-            paused: false,
-            pending_steps: 0,
-            outlet: false,
-            quit: false,
-            proj,
-            save_to: None,
-        }
+        let mut console = Console::new(speed, (proj.width, proj.height, proj.depth));
+        console.default_save_dir = save::default_save_dir;
+        Control { console }
     }
 
-    /// Apply one stdin line. Anything unrecognised prints the usage and changes nothing;
-    /// a bad argument is reported and the world is left alone.
-    ///
-    /// The plant and animal layers come in as further borrows rather than living in
-    /// `Control`, for the same reason the world does: the loop reads `paused` and `speed`
-    /// while it still holds all three.
+    /// Apply one stdin line ([`Console::handle`]) and say what it had to say.
     fn handle(&mut self, world: &mut World, flora: &mut Flora, fauna: &mut Fauna, line: &str) {
-        let line = line.trim();
-        if line.is_empty() {
-            return;
-        }
-        let mut parts = line.split_whitespace();
-        let verb = parts.next().unwrap_or_default();
-        let rest: Vec<&str> = parts.collect();
-
-        match verb {
-            "q" | "quit" => self.quit = true,
-            "p" | "pause" => {
-                self.paused = match rest.first().copied() {
-                    None => !self.paused,
-                    Some("on") => true,
-                    Some("off") => false,
-                    Some(other) => {
-                        eprintln!("cubarium voxel: `p [on|off]` pauses or resumes, not {other:?}");
-                        return;
-                    }
-                };
-                eprintln!(
-                    "cubarium voxel: {}",
-                    if self.paused { "paused" } else { "running" }
-                );
-            }
-            "s" | "step" => {
-                self.paused = true;
-                self.pending_steps += 1;
-            }
-            "+" => {
-                self.speed = (self.speed * 2.0).min(MAX_SPEED);
-                eprintln!("cubarium voxel: speed {}", self.speed);
-            }
-            "-" => {
-                self.speed = (self.speed / 2.0).max(MIN_SPEED);
-                eprintln!("cubarium voxel: speed {}", self.speed);
-            }
-            "speed" => match rest.first().map(|t| t.parse::<f64>()) {
-                Some(Ok(v)) if v.is_finite() && v > 0.0 => {
-                    self.speed = v.clamp(MIN_SPEED, MAX_SPEED);
-                    eprintln!("cubarium voxel: speed {}", self.speed);
-                }
-                _ => eprintln!(
-                    "cubarium voxel: `speed X` wants a positive multiplier ({MIN_SPEED}..{MAX_SPEED}; pause with `p`)"
-                ),
-            },
-            "r" | "rain" => {
-                let volume = match rest.first() {
-                    None => DEFAULT_RAIN_M3,
-                    Some(text) => match text.parse::<f64>() {
-                        Ok(v) if v.is_finite() && v > 0.0 => v,
-                        _ => {
-                            eprintln!("cubarium voxel: `r [m3]` wants a positive volume");
-                            return;
-                        }
-                    },
-                };
-                let took = world.apply(VoxelCommand::RainPulse { volume_m3: volume });
-                eprintln!("cubarium voxel: rain {volume} m3, accepted {took} m3");
-            }
-            "a" | "aquifer" => {
-                let volume = match rest.first().map(|t| t.parse::<f64>()) {
-                    Some(Ok(v)) if v.is_finite() && v != 0.0 => v,
-                    _ => {
-                        eprintln!(
-                            "cubarium voxel: `a M3` wants a nonzero volume (negative withdraws)"
-                        );
-                        return;
-                    }
-                };
-                let took = world.apply(VoxelCommand::ChargeAquifer { volume_m3: volume });
-                eprintln!(
-                    "cubarium voxel: aquifer {volume:+} m3, accepted {took:+} m3, head now {:.3} m",
-                    world.aquifer_head_m()
-                );
-            }
-            // The closed budget's "make it rain": water goes **aloft**, and the shower
-            // scheduler brings it down when the store passes its trigger. `r` still
-            // drops a pulse on the world now; this is the lever that feeds the cycle.
-            "h" | "atmosphere" => {
-                let volume = match rest.first().map(|t| t.parse::<f64>()) {
-                    Some(Ok(v)) if v.is_finite() && v > 0.0 => v,
-                    _ => {
-                        eprintln!("cubarium voxel: `h M3` wants a positive volume");
-                        return;
-                    }
-                };
-                let took = world.apply(VoxelCommand::AddAtmosphere { volume_m3: volume });
-                if took > 0.0 {
-                    eprintln!(
-                        "cubarium voxel: atmosphere +{took} m3, store now {:.3} m3",
-                        world.atmosphere_m3()
-                    );
-                } else {
-                    eprintln!(
-                        "cubarium voxel: refused — this world runs the open water budget \
-                         and has no atmosphere store"
-                    );
-                }
-            }
-            "o" | "outlet" => {
-                self.outlet = !world.outlet_open();
-                world.apply(VoxelCommand::SetOutlet { open: self.outlet });
-                eprintln!(
-                    "cubarium voxel: outlet {}",
-                    if self.outlet { "open" } else { "closed" }
-                );
-            }
-            "w" | "save" => {
-                let dir = rest.first().map_or_else(
-                    || save::default_save_dir(std::time::SystemTime::now(), world.tick()),
-                    PathBuf::from,
-                );
-                self.save_to = Some(dir);
-            }
-            "save-terrain" => match rest.first() {
-                // Terrain only, and the message says so: `World::save` holds the voxels,
-                // the water and the world's tick, and neither layer of the ecology.
-                Some(path) => match std::fs::write(path, world.save()) {
-                    Ok(()) => eprintln!(
-                        "cubarium voxel: saved {path} — terrain and water only, no plants \
-                         and no animals"
-                    ),
-                    Err(e) => eprintln!("cubarium voxel: saving {path}: {e}"),
-                },
-                None => eprintln!("cubarium voxel: `save-terrain PATH` needs a path"),
-            },
-            "l" | "load" => match rest.first() {
-                Some(path) => {
-                    // A terrain load is not an ecosystem restore (Astra R9.6): refuse it
-                    // in place while anything of the ecology is standing, and say what.
-                    if let Some(why) = ecology_state(flora, fauna) {
-                        eprintln!(
-                            "cubarium voxel: `l` loads the **terrain only** and this run has \
-                             {why}; an in-place load would leave them on another world's \
-                             terrain with ledgers describing this one. Restart with \
-                             `--load {path}`, which starts the ecology fresh on that terrain."
-                        );
-                        return;
-                    }
-                    let read = std::fs::read(path)
-                        .map_err(anyhow::Error::from)
-                        .and_then(|b| World::load(&b));
-                    match read {
-                        Ok(loaded) => {
-                            // The projection is fixed for the life of the run, so a world
-                            // of a different shape would draw into the wrong raster.
-                            let c = loaded.config();
-                            if (c.width, c.height, c.depth)
-                                != (self.proj.width, self.proj.height, self.proj.depth)
-                            {
-                                eprintln!(
-                                    "cubarium voxel: {path} is {}x{}x{}, this run draws \
-                                     {}x{}x{}; restart with a matching config",
-                                    c.width,
-                                    c.height,
-                                    c.depth,
-                                    self.proj.width,
-                                    self.proj.height,
-                                    self.proj.depth
-                                );
-                            } else {
-                                *world = loaded;
-                                self.outlet = world.outlet_open();
-                                eprintln!(
-                                    "cubarium voxel: loaded the terrain of {path} at tick \
-                                     {} — the plants and the animals are this run's own",
-                                    world.tick()
-                                );
-                            }
-                        }
-                        Err(e) => eprintln!("cubarium voxel: loading {path}: {e:#}"),
-                    }
-                }
-                None => eprintln!("cubarium voxel: `l PATH` needs a path (terrain only)"),
-            },
-            "i" | "inspect" => {
-                let Some((x, y, z)) = coords(world, "i X Y Z", &rest) else {
-                    return;
-                };
-                eprintln!("cubarium voxel: {}", cell_state(world, x, y, z));
-                // The site is the cell itself, not the column's skyline: `i` on a
-                // support face reports what grows there and what the ground holds.
-                let site = site_of(world, x, y, z);
-                let fv = flora.view();
-                // A face holds a plant and a fungus (`FaceLayer`): each on its own line.
-                let here = fv.stands_on(site);
-                if here.is_empty() {
-                    eprintln!("cubarium voxel:   no stand");
-                }
-                for s in here {
-                    eprintln!(
-                        "cubarium voxel:   {} {:?} W {:.4} P {:.4} Q {:.4} mineral {:.5} \
-                         light {:.3} moisture {:.3} aeration stress {:.3}",
-                        s.species.name(),
-                        s.stage,
-                        s.wood,
-                        s.foliage,
-                        s.reserve,
-                        s.mineral,
-                        s.light,
-                        s.moisture,
-                        s.aeration_stress,
-                    );
-                }
-                // The animals standing on this face, in id order. More than one is
-                // ordinary: a newborn appears on its parent's face.
-                for a in fauna.view().animals_at(site) {
-                    eprintln!(
-                        "cubarium voxel:   {} #{} body {:.4} reserve {:.4} mineral {:.5} \
-                         energy {:.4} age {} ticks {:?}",
-                        a.species.name(),
-                        a.id,
-                        a.body,
-                        a.reserve,
-                        a.mineral,
-                        a.energy,
-                        a.age_ticks,
-                        a.state,
-                    );
-                }
-                if let Some(g) = fv.ground_at(site) {
-                    eprintln!(
-                        "cubarium voxel:   ground N {:.4} litter {:.4} ({:.4} energy, \
-                         {:.5} mineral) dead wood {:.4} ({:.5} mineral)",
-                        g.mineral,
-                        g.litter,
-                        g.litter_energy,
-                        g.litter_mineral,
-                        g.dead_wood,
-                        g.dead_wood_mineral,
-                    );
-                    // The seed bank, in the order the ground holds it: species, then
-                    // arrival bin, oldest first. The age is the bin's, measured from the
-                    // tick its window opened.
-                    for c in &g.seeds {
-                        eprintln!(
-                            "cubarium voxel:   seed {} organic {:.6} mineral {:.7} age {} ticks \
-                             (bin from tick {})",
-                            c.species.name(),
-                            c.organic,
-                            c.mineral,
-                            c.age_ticks(fv.tick),
-                            c.bin_start_tick,
-                        );
-                    }
-                    if g.seeds.is_empty() {
-                        eprintln!("cubarium voxel:   no seed cohort");
-                    }
-                }
-            }
-            "f" | "flora" => {
-                let usage = "f X Z bloomcrown|umbrellafrond [wood]";
-                let Some((x, z)) = column(world, usage, &rest) else {
-                    return;
-                };
-                let Some(species) = rest.get(2).and_then(|n| Species::parse(n)) else {
-                    eprintln!(
-                        "cubarium voxel: `{usage}` — `{}` is not a species",
-                        rest.get(2).copied().unwrap_or(""),
-                    );
-                    return;
-                };
-                // A founder with no wood named is a full-grown one: the picture this
-                // command exists for is a stand you can see.
-                let wood = match rest.get(3) {
-                    None => flora.config().species(species).wood_max,
-                    Some(text) => match text.parse::<f64>() {
-                        Ok(v) if v.is_finite() && v > 0.0 => v,
-                        _ => {
-                            eprintln!("cubarium voxel: `{usage}` wants a positive wood");
-                            return;
-                        }
-                    },
-                };
-                if flora.apply(
-                    world,
-                    FloraCommand::Seed {
-                        x,
-                        z,
-                        species,
-                        wood,
-                    },
-                ) {
-                    let site = highest_site(world, x, z);
-                    eprintln!(
-                        "cubarium voxel: seeded {} at {:?} with W {wood}",
-                        species.name(),
-                        site,
-                    );
-                } else {
-                    eprintln!(
-                        "cubarium voxel: no stand at ({x}, {z}): either the column has no \
-                         support face, one already grows there, or W {wood} is below \
-                         {}'s alive_min {}",
-                        species.name(),
-                        flora.config().species(species).alive_min,
-                    );
-                }
-            }
-            "c" | "clear" => {
-                let Some((x, z)) = column(world, "c X Z", &rest) else {
-                    return;
-                };
-                if flora.apply(world, FloraCommand::Clear { x, z }) {
-                    eprintln!("cubarium voxel: cleared the stand at ({x}, {z})");
-                } else {
-                    eprintln!("cubarium voxel: no stand to clear at ({x}, {z})");
-                }
-            }
-            // Development controls (predation §2.9): a clutch of lanternjaw eggs, or
-            // adult lanternjaws, where the prey live — refused with the reason when none do.
-            "e" | "eggs" | "j" | "lanternjaw" => {
-                let n = match rest.first().map(|t| t.parse::<usize>()) {
-                    None => 1,
-                    Some(Ok(n)) if n > 0 => n,
-                    _ => {
-                        eprintln!("cubarium voxel: `{verb} [N]` wants a positive count");
-                        return;
-                    }
-                };
-                if matches!(verb, "e" | "eggs") {
-                    match habitat::bury_founding_clutches(world, flora, fauna, Founder::Lanternjaw, n) {
-                        Ok(eggs) => eprintln!(
-                            "cubarium voxel: buried {eggs} lanternjaw eggs where the prey live"
-                        ),
-                        Err(why) => eprintln!("cubarium voxel: no clutch buried — {why}"),
-                    }
-                } else {
-                    match habitat::introduce_lanternjaws(world, flora, fauna, n) {
-                        Ok(ids) => eprintln!(
-                            "cubarium voxel: introduced {} adult lanternjaws (ids {ids:?})",
-                            ids.len()
-                        ),
-                        Err(why) => eprintln!("cubarium voxel: no lanternjaw introduced — {why}"),
-                    }
-                }
-            }
-            // Development control (roster R3): N chorister packs on covered dens near the
-            // prey, refused with the reason when none can be founded.
-            "k" | "chorister" => {
-                let n = match rest.first().map(|t| t.parse::<usize>()) {
-                    None => 1,
-                    Some(Ok(n)) if n > 0 => n,
-                    _ => {
-                        eprintln!("cubarium voxel: `{verb} [N]` wants a positive count");
-                        return;
-                    }
-                };
-                match habitat::introduce_packs(world, flora, fauna, Founder::Chorister, n) {
-                    Ok(ids) => eprintln!("cubarium voxel: founded {} chorister packs (ids {ids:?})", ids.len()),
-                    Err(why) => eprintln!("cubarium voxel: no chorister pack founded — {why}"),
-                }
-            }
-            "g" | "grazer" => {
-                let usage = "g X Z";
-                let Some((x, z)) = column(world, usage, &rest) else {
-                    return;
-                };
-                // A grown frondgrazer (the browser founder) with half a reserve, as the
-                // seeder founds one, with its lineage's controller.
-                if fauna.apply(
-                    world,
-                    FaunaCommand::IntroduceFounder {
-                        x,
-                        z,
-                        founder: Founder::Browser,
-                        stores: habitat::founder_arrival(&fauna.config().founding),
-                        heading_rad: 0.0,
-                    },
-                ) {
-                    let id = fauna.view().ledger.births - 1;
-                    fauna.install_founder_controller(id, Founder::Browser);
-                    eprintln!(
-                        "cubarium voxel: introduced a frondgrazer at {:?}",
-                        highest_site(world, x, z),
-                    );
-                } else {
-                    eprintln!(
-                        "cubarium voxel: no frondgrazer at ({x}, {z}): the column has no \
-                         support face"
-                    );
-                }
-            }
-            "m" | "material" => {
-                let usage = "m X Y Z air|rock|soil|bedrock";
-                let Some((x, y, z)) = coords(world, usage, &rest) else {
-                    return;
-                };
-                let material = match rest.get(3).map(|w| w.to_ascii_lowercase()).as_deref() {
-                    Some("air") => Material::Air,
-                    Some("rock") => Material::Rock,
-                    Some("soil") => Material::Soil,
-                    Some("bedrock") => Material::Bedrock,
-                    other => {
-                        eprintln!(
-                            "cubarium voxel: `{usage}` — `{}` is not a material",
-                            other.unwrap_or("")
-                        );
-                        return;
-                    }
-                };
-                // The core moves the water the old material held; the new state is the
-                // receipt, so a displaced cell says so itself.
-                world.apply(VoxelCommand::SetMaterial { x, y, z, material });
-                eprintln!(
-                    "cubarium voxel: set {material:?}, now {}",
-                    cell_state(world, x, y, z)
-                );
-            }
-            other => eprintln!("cubarium voxel: `{other}`? — {COMMANDS}"),
+        self.console.handle(world, flora, fauna, line);
+        for said in self.console.take_said() {
+            eprintln!("cubarium voxel: {said}");
         }
     }
-}
-
-/// `X Y Z` from a command's arguments, or `None` with the reason printed.
-///
-/// `x` wraps — the strip is a ring and has no end to fall off — so any integer is a
-/// column. `y` and `z` have real ends, so one outside the world is refused and named
-/// rather than folded into a cell the caller did not mean.
-/// What a terrain-only load would leave standing, in words, or `None` when this run holds
-/// no ecology at all and `World::load` can safely replace the terrain under it.
-///
-/// Astra R9.6: `World::save`/`World::load` carry the voxels, the water and the world's
-/// tick, and neither layer of the ecology — so an in-place load against living stands is
-/// not a restore of anything. The checks are the review's list: any stand, any animal, any
-/// seed bank, any provisioned ground, and a nonzero ledger on either layer (compared
-/// against `Default`, so a term added later is covered without touching this).
-fn ecology_state(flora: &Flora, fauna: &Fauna) -> Option<String> {
-    let fv = flora.view();
-    let av = fauna.view();
-    if !fv.stands.is_empty() {
-        return Some(format!("{} stand(s) growing", fv.stands.len()));
-    }
-    if !av.animals.is_empty() {
-        return Some(format!("{} animal(s) alive", av.animals.len()));
-    }
-    let banks = fv.ground.iter().filter(|g| !g.seeds.is_empty()).count();
-    if banks > 0 {
-        return Some(format!("{banks} site(s) holding a seed bank"));
-    }
-    if !fv.ground.is_empty() {
-        return Some(format!("{} provisioned ground site(s)", fv.ground.len()));
-    }
-    if *fv.ledger != FloraLedger::default() {
-        return Some("a nonzero plant ledger".to_string());
-    }
-    if *av.ledger != FaunaLedger::default() {
-        return Some("a nonzero animal ledger".to_string());
-    }
-    None
-}
-
-fn coords(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32, u32)> {
-    let triple = (
-        rest.first().and_then(|t| t.parse::<i64>().ok()),
-        rest.get(1).and_then(|t| t.parse::<u32>().ok()),
-        rest.get(2).and_then(|t| t.parse::<u32>().ok()),
-    );
-    let (Some(x), Some(y), Some(z)) = triple else {
-        eprintln!("cubarium voxel: `{usage}` wants three integers for X Y Z");
-        return None;
-    };
-    let c = world.config();
-    if y >= c.height || z >= c.depth {
-        eprintln!(
-            "cubarium voxel: ({x}, {y}, {z}) is outside a {}x{}x{} world",
-            c.width, c.height, c.depth
-        );
-        return None;
-    }
-    Some((x, y, z))
-}
-
-/// `X Z` from a command's arguments: a column, for the commands that act on whichever
-/// support face is the highest one in it. `x` wraps; `z` is refused if it is outside.
-fn column(world: &World, usage: &str, rest: &[&str]) -> Option<(i64, u32)> {
-    let pair = (
-        rest.first().and_then(|t| t.parse::<i64>().ok()),
-        rest.get(1).and_then(|t| t.parse::<u32>().ok()),
-    );
-    let (Some(x), Some(z)) = pair else {
-        eprintln!("cubarium voxel: `{usage}` wants two integers for X Z");
-        return None;
-    };
-    let c = world.config();
-    if z >= c.depth {
-        eprintln!(
-            "cubarium voxel: z = {z} is outside a {}-deep world",
-            c.depth
-        );
-        return None;
-    }
-    Some((x, z))
-}
-
-/// The flora site a cell names: the cell itself, with `x` wrapped as a site stores it.
-fn site_of(world: &World, x: i64, y: u32, z: u32) -> Site {
-    Site {
-        x: x.rem_euclid(i64::from(world.config().width)) as u32,
-        y,
-        z,
-    }
-}
-
-/// The site `f` and `c` act on: the highest support face of a column, which is what
-/// `cubarium_voxel_flora::highest_support` picks, so the echo names the cell the command
-/// really touched.
-fn highest_site(world: &World, x: i64, z: u32) -> Option<Site> {
-    cubarium_voxel_flora::highest_support(&world.view(), x, z)
-}
-
-/// One cell's state as `i` reports it, and as `m` echoes back after an edit.
-fn cell_state(world: &World, x: i64, y: u32, z: u32) -> String {
-    let view = world.view();
-    format!(
-        "({}, {y}, {z}) {:?} free {:.4} pore {:.4}",
-        x.rem_euclid(i64::from(view.config.width)),
-        view.material_at(x, y, z),
-        view.free_at(x, y, z),
-        view.pore_at(x, y, z),
-    )
 }
 
 /// Read stdin lines on a thread and hand them to the loop.
@@ -3594,19 +2080,6 @@ fn spawn_stdin_reader(tx: mpsc::Sender<String>) {
         .expect("spawning the voxel stdin reader");
 }
 
-/// A reader's [`cubarium_observatory::Command`] as the console line that does the same:
-/// the dashboard changes the run through the console's own path.
-fn console_line(command: cubarium_observatory::Command) -> String {
-    use cubarium_observatory::Command;
-    match command {
-        Command::SetSpeed(x) => format!("speed {x}"),
-        Command::Pause => "p on".into(),
-        Command::Resume => "p off".into(),
-        Command::Faster => "+".into(),
-        Command::Slower => "-".into(),
-    }
-}
-
 /// The observatory, while `--serve` or the config's `serve` asks for one: the loop-side
 /// recorder and publisher, the server it hands publications to, and the commands the
 /// server's readers send back.
@@ -3619,7 +2092,7 @@ struct Observatory {
 impl Observatory {
     fn start(addr: &str, cfg: &VoxelConfig, label: &str) -> Result<Observatory> {
         let (tx, commands) = mpsc::channel();
-        let server = cubarium_observatory::server::Server::start(addr, cfg.observatory, tx)
+        let server = cubarium_observatory::server::Server::start(addr, cfg.sim.observatory, tx)
             .with_context(|| format!("serving the observatory on {addr}"))?;
         eprintln!(
             "cubarium voxel: observatory at {} (bound {}): dashboard, JSON and an event stream",
@@ -3688,15 +2161,18 @@ mod tests {
         let frames = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let brightest = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let cfg = VoxelConfig {
-            world: cubarium_voxel::Config {
-                width: 16,
-                height: 8,
-                depth: 2,
-                ..Default::default()
+            sim: SimParams {
+                world: cubarium_voxel::Config {
+                    width: 16,
+                    height: 8,
+                    depth: 2,
+                    ..Default::default()
+                },
+                ..SimParams::default()
             },
             ..VoxelConfig::default()
         };
-        let proj = Projection::new(30.0, 4, 0, &cfg.world).unwrap();
+        let proj = Projection::new(30.0, 4, 0, &cfg.sim.world).unwrap();
         let mut out = Out::cpu(
             Box::new(CountingSink {
                 frames: frames.clone(),
@@ -3980,7 +2456,7 @@ mod tests {
             toml::from_str::<VoxelConfig>("px_per_voxel = 6").unwrap().px_per_voxel,
             6
         );
-        let w = &cfg.world;
+        let w = &cfg.sim.world;
         // 9: 2304 x (1152 + 48 * 5) = 1392. 10 is 1568 rows.
         assert_eq!(auto_px_per_voxel(30.0, 0, w, (2560, 1440)), 9);
         // 13: 3328 x 2048. 14 is 1792 + 48 * 8 = 2176 rows.
@@ -4033,12 +2509,12 @@ mod tests {
         // fail every time the generator tunes one.
         let shipped = cubarium_voxel::Preset::find("default").expect("a default preset");
         assert_eq!(
-            d.world.landform,
+            d.sim.world.landform,
             cubarium_voxel::Landform::Staged(shipped.recipe),
             "`cubarium voxel` with no TOML generates the shipped staged ring"
         );
         assert_eq!(
-            (d.world.width, d.world.height, d.world.depth),
+            (d.sim.world.width, d.sim.world.height, d.sim.world.depth),
             (shipped.width, shipped.height, shipped.depth),
             "and on the ring that landscape was written for"
         );
@@ -4050,12 +2526,12 @@ mod tests {
             cfg.px_per_voxel, d.px_per_voxel,
             "an unmentioned field keeps its default"
         );
-        assert_eq!(cfg.world.width, 64);
-        assert_eq!(cfg.world.depth, 8);
-        assert_eq!(cfg.world.voxel_m, d.world.voxel_m);
+        assert_eq!(cfg.sim.world.width, 64);
+        assert_eq!(cfg.sim.world.depth, 8);
+        assert_eq!(cfg.sim.world.voxel_m, d.sim.world.voxel_m);
         let explicit: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.125\n").unwrap();
-        assert_eq!(explicit.world.voxel_m, 0.125);
-        assert_eq!(cfg.world.height, cubarium_voxel::Config::default().height);
+        assert_eq!(explicit.sim.world.voxel_m, 0.125);
+        assert_eq!(cfg.sim.world.height, cubarium_voxel::Config::default().height);
 
         // A typo is an error, not a silently ignored key.
         assert!(toml::from_str::<VoxelConfig>("tilt_degree = 35.0\n").is_err());
@@ -4070,20 +2546,20 @@ mod tests {
         use cubarium_voxel::Landform;
 
         let plain: VoxelConfig = toml::from_str("[world]\nwidth = 64\n").unwrap();
-        assert_eq!(plain.world.landform, Landform::Ridge);
+        assert_eq!(plain.sim.world.landform, Landform::Ridge);
 
         let ridge: VoxelConfig = toml::from_str("[world]\nlandform = \"ridge\"\n").unwrap();
-        assert_eq!(ridge.world.landform, Landform::Ridge);
+        assert_eq!(ridge.sim.world.landform, Landform::Ridge);
 
         let wide: VoxelConfig =
             toml::from_str("[world]\n[world.landform]\npreset = \"wide\"\n").unwrap();
         let wanted = cubarium_voxel::Preset::find("wide").unwrap().recipe;
-        assert_eq!(wide.world.landform, Landform::Staged(wanted));
+        assert_eq!(wide.sim.world.landform, Landform::Staged(wanted));
 
         let tweaked: VoxelConfig =
             toml::from_str("[world]\n[world.landform]\npreset = \"small\"\nrelief_m = 2.0\n")
                 .unwrap();
-        let Landform::Staged(recipe) = tweaked.world.landform else {
+        let Landform::Staged(recipe) = tweaked.sim.world.landform else {
             panic!("a preset makes a staged landform");
         };
         assert_eq!(recipe.relief_m, 2.0, "the file overrides the preset");
@@ -4092,7 +2568,7 @@ mod tests {
             cubarium_voxel::Recipe::SMALL.relief_wavelength_m,
             "and leaves the rest of it alone"
         );
-        assert!(tweaked.world.validate().is_ok());
+        assert!(tweaked.sim.world.validate().is_ok());
 
         let err = toml::from_str::<VoxelConfig>("[world.landform]\npreset = \"huge\"\n")
             .expect_err("there is no huge preset");
@@ -4108,7 +2584,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("voxel.example.toml");
         let cfg = load_config(&path).unwrap();
         assert_eq!(cfg, VoxelConfig::default());
-        assert_eq!(cfg.world.depth, cubarium_voxel::Config::default().depth);
+        assert_eq!(cfg.sim.world.depth, cubarium_voxel::Config::default().depth);
 
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -4138,8 +2614,8 @@ mod tests {
             .canonicalize()
             .expect("the panel config is committed");
         let cfg = load_config(&path).unwrap();
-        assert!(landform(&cfg.world.landform), "{file}: {:?}", cfg.world.landform);
-        assert!(cfg.world.validate().is_ok(), "{file}");
+        assert!(landform(&cfg.sim.world.landform), "{file}: {:?}", cfg.sim.world.landform);
+        assert!(cfg.sim.world.validate().is_ok(), "{file}");
         let text = std::fs::read_to_string(&path).unwrap();
         for key in [
             "rain_m_per_s",
@@ -4355,14 +2831,14 @@ width = 64
         let cfg: VoxelConfig =
             toml::from_str("[world]\ndepth = 0\n").expect("it parses; it is just impossible");
         let err = cfg
-            .world
+            .sim.world
             .validate()
             .expect_err("a zero dimension must be refused");
         assert!(format!("{err}").contains("world.depth"), "{err}");
 
         let bad: VoxelConfig = toml::from_str("[world]\nvoxel_m = 0.0\n").unwrap();
-        assert!(bad.world.validate().is_err());
-        assert!(VoxelConfig::default().world.validate().is_ok());
+        assert!(bad.sim.world.validate().is_err());
+        assert!(VoxelConfig::default().sim.world.validate().is_ok());
     }
 
     /// Stdin commands reach the world: pause toggles, speed halves and doubles, a

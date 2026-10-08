@@ -41,4 +41,6 @@ pub enum Command {
     /// Double or halve the speed.
     Faster,
     Slower,
+    /// Pause, and advance exactly this many ticks.
+    Step(u32),
 }

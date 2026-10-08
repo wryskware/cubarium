@@ -1,0 +1,1052 @@
+//! **[`Session`]**: a world and its loop on a thread of its own.
+//!
+//! Three kinds of thread, and who may wait on whom:
+//! - **the loop** (one per session) owns the world, flora and fauna, steps them at 20 Hz
+//!   times the speed, applies commands at its command point, and builds the feed and the
+//!   publications. It never takes a lock a reader can hold: everything it produces goes
+//!   out over a channel. Loads run here too, so a load never races a tick.
+//! - **the ingest thread** files what the loop sends into the [`Hub`] under its lock:
+//!   chunk changes are unioned, the frame and the snapshot replaced, events appended. A
+//!   slow reader holding the lock only delays this thread.
+//! - **readers** (Godot's main thread) lock the hub briefly to swap out what they take.
+//!
+//! Candidates are founded on threads of their own and never touch the loop until one is
+//! promoted.
+
+use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use cubarium_observatory::{Cadence, Controls, History, HistoryConfig, LifeBook, LifeEvent, Observer, Sample, Snapshot};
+use cubarium_voxel::World;
+use cubarium_voxel_fauna::{Fauna, Founder};
+use cubarium_voxel_flora::Flora;
+use cubarium_voxel_sim::Sim;
+use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+
+use crate::console::{Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
+use crate::create::{self, Populate, Scene, StartLayers, StartSpec};
+use crate::feed::{ChunkData, FeedConfig, Frame, Tracker, View};
+use crate::founders::founder_recipes;
+use crate::params::{SimParams, WorldSpec};
+use crate::store::{self, SaveMeta};
+
+/// How a session runs.
+#[derive(Clone, Debug)]
+pub struct SessionOptions {
+    /// Execution settings (threads, water fidelity, history sampling) for worlds that are
+    /// loaded rather than made from a [`WorldSpec`].
+    pub exec: SimParams,
+    /// Build the view feed. Off, the loop pays nothing for it and [`Session::take_view`]
+    /// returns only the world's shape.
+    pub feed: bool,
+    pub feed_config: FeedConfig,
+    /// When snapshots for queries are published.
+    pub cadence: Cadence,
+    /// The speed a session's first world starts at; later worlds keep the current one.
+    pub speed: f64,
+    /// Life events held for [`Session::take_events`] before the oldest are dropped.
+    pub max_events: usize,
+}
+
+impl Default for SessionOptions {
+    fn default() -> SessionOptions {
+        SessionOptions {
+            exec: SimParams::default(),
+            feed: true,
+            feed_config: FeedConfig::default(),
+            cadence: Cadence::default(),
+            speed: 1.0,
+            max_events: 4096,
+        }
+    }
+}
+
+/// A world ready to run.
+pub struct Prepared {
+    pub world: World,
+    pub flora: Flora,
+    pub fauna: Fauna,
+    pub label: String,
+    pub exec: SimParams,
+}
+
+/// Something a reader is told: a console reply, a save landing or failing, a load.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Notice {
+    /// `console`, `saved`, `save_failed`, `loaded`, `load_failed`, `closed`.
+    pub kind: String,
+    pub text: String,
+    pub path: Option<String>,
+    pub meta: Option<SaveMeta>,
+}
+
+impl Notice {
+    fn say(kind: &str, text: impl Into<String>) -> Notice {
+        Notice { kind: kind.into(), text: text.into(), path: None, meta: None }
+    }
+}
+
+/// The run as it stands, read without waiting on anything.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Status {
+    /// A world is installed (running or paused).
+    pub running: bool,
+    pub paused: bool,
+    pub speed: f64,
+    /// The world's tick.
+    pub tick: u64,
+    /// Ticks this session's loop has stepped, over every world.
+    pub stepped: u64,
+    /// Counts installed worlds.
+    pub generation: u64,
+    /// A load is being read.
+    pub loading: bool,
+    /// A save is being written.
+    pub saving: bool,
+    pub label: String,
+    pub last_error: Option<String>,
+    /// Mean milliseconds a tick took to step, and a feed update to build, over this world.
+    pub step_ms: f64,
+    pub feed_ms: f64,
+    /// Feed updates built over this world.
+    pub feed_updates: u64,
+}
+
+/// What a candidate is doing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CandidateInfo {
+    pub index: usize,
+    /// `generating`, `ready` or `failed`.
+    pub state: String,
+    /// The seed asked for, if one was.
+    pub seed: Option<u64>,
+    pub label: Option<String>,
+    pub error: Option<String>,
+    pub summary: Option<cubarium_observatory::query::WorldSummary>,
+    pub populations: Option<cubarium_observatory::query::Populations>,
+}
+
+enum Slot {
+    Generating,
+    Ready(Box<Prepared>),
+    Failed(String),
+}
+
+struct Candidate {
+    slot: Slot,
+    info: CandidateInfo,
+}
+
+#[derive(Default)]
+struct Candidates {
+    /// Bumped on every new batch and every promotion, so a founding that finishes late
+    /// files into nothing.
+    batch: u64,
+    list: Vec<Candidate>,
+}
+
+enum ToSim {
+    Install(Box<Prepared>),
+    Load(PathBuf, Option<Sender<Result<(), String>>>),
+    Line(String),
+    Save(PathBuf, Option<Sender<Result<SaveMeta, String>>>),
+    Close,
+    Shutdown,
+}
+
+enum ToReader {
+    Reset {
+        generation: u64,
+        label: String,
+        dims: [u32; 3],
+        chunk_dims: [u32; 3],
+        voxel_m: f64,
+        history: HistoryConfig,
+        chunks: Vec<ChunkData>,
+        frame: Option<Arc<Frame>>,
+    },
+    Closed,
+    Feed { chunks: Vec<ChunkData>, frame: Option<Arc<Frame>>, events: Vec<LifeEvent> },
+    Publication(Box<Snapshot>),
+    Notice(Notice),
+    Error(Option<String>),
+}
+
+/// What readers read, filled by the ingest thread.
+struct Hub {
+    generation: u64,
+    snapshot: Option<Arc<Snapshot>>,
+    book: LifeBook,
+    history: History,
+    dims: [u32; 3],
+    chunk_dims: [u32; 3],
+    voxel_m: f64,
+    full: bool,
+    chunks: FxHashMap<u32, ChunkData>,
+    frame: Option<Arc<Frame>>,
+    events: VecDeque<LifeEvent>,
+    dropped_events: u64,
+    notices: VecDeque<Notice>,
+}
+
+impl Hub {
+    fn new() -> Hub {
+        Hub {
+            generation: 0,
+            snapshot: None,
+            book: LifeBook::default(),
+            history: History::new(HistoryConfig::default()),
+            dims: [0; 3],
+            chunk_dims: [0; 3],
+            voxel_m: 0.0,
+            full: false,
+            chunks: FxHashMap::default(),
+            frame: None,
+            events: VecDeque::new(),
+            dropped_events: 0,
+            notices: VecDeque::new(),
+        }
+    }
+}
+
+struct Shared {
+    hub: Mutex<Hub>,
+    /// The run's label and last error: their own lock, so [`Session::status`] never waits
+    /// on a reader holding the hub.
+    text: Mutex<(String, Option<String>)>,
+    running: AtomicBool,
+    paused: AtomicBool,
+    speed_bits: AtomicU64,
+    tick: AtomicU64,
+    stepped: AtomicU64,
+    generation: AtomicU64,
+    loading: AtomicBool,
+    saving: AtomicBool,
+    step_ns: AtomicU64,
+    steps: AtomicU64,
+    feed_ns: AtomicU64,
+    feed_updates: AtomicU64,
+}
+
+/// **A world and its loop on a thread of its own.** Every call returns at once: the slow
+/// ones (founding candidates, loading, saving) run off the caller's thread and report
+/// through [`Session::status`], [`Session::candidates`] and [`Session::take_notices`].
+pub struct Session {
+    to_sim: Sender<ToSim>,
+    shared: Arc<Shared>,
+    sim: Option<JoinHandle<()>>,
+    ingest: Option<JoinHandle<()>>,
+    candidates: Arc<Mutex<Candidates>>,
+}
+
+impl Session {
+    /// A session with no world yet.
+    pub fn new(options: SessionOptions) -> Session {
+        let shared = Arc::new(Shared {
+            hub: Mutex::new(Hub::new()),
+            text: Mutex::new((String::new(), None)),
+            running: AtomicBool::new(false),
+            paused: AtomicBool::new(false),
+            speed_bits: AtomicU64::new(options.speed.to_bits()),
+            tick: AtomicU64::new(0),
+            stepped: AtomicU64::new(0),
+            generation: AtomicU64::new(0),
+            loading: AtomicBool::new(false),
+            saving: AtomicBool::new(false),
+            step_ns: AtomicU64::new(0),
+            steps: AtomicU64::new(0),
+            feed_ns: AtomicU64::new(0),
+            feed_updates: AtomicU64::new(0),
+        });
+        let (to_sim, sim_rx) = mpsc::channel();
+        let (to_reader, reader_rx) = mpsc::channel();
+        let ingest = {
+            let shared = shared.clone();
+            let max = options.max_events;
+            std::thread::Builder::new()
+                .name("cubarium-session-ingest".into())
+                .spawn(move || ingest_main(reader_rx, &shared, max))
+                .expect("spawning the session's ingest thread")
+        };
+        let sim = {
+            let shared = shared.clone();
+            std::thread::Builder::new()
+                .name("cubarium-session-loop".into())
+                .spawn(move || Loop::new(options, to_reader, shared).main(sim_rx))
+                .expect("spawning the session's loop")
+        };
+        Session {
+            to_sim,
+            shared,
+            sim: Some(sim),
+            ingest: Some(ingest),
+            candidates: Arc::new(Mutex::new(Candidates::default())),
+        }
+    }
+
+    fn send(&self, m: ToSim) {
+        let _ = self.to_sim.send(m);
+    }
+
+    // --- Lifecycle ------------------------------------------------------------------
+
+    /// Start founding `count` candidate worlds from `spec`, in parallel, without running
+    /// any. Candidate `k` takes `spec.seed + k` when a seed is given, else its own drawn
+    /// one. Replaces any earlier candidates. Refused at once only for a spec that does not
+    /// parse.
+    pub fn generate_candidates(&self, spec: &WorldSpec, count: usize) -> Result<(), String> {
+        let params = spec.sim_params().map_err(|e| format!("{e:#}"))?;
+        let mut c = self.candidates.lock().map_err(|_| "the candidate list is poisoned")?;
+        c.batch += 1;
+        let batch = c.batch;
+        c.list = (0..count)
+            .map(|index| {
+                let seed = spec.seed.map(|s| s.wrapping_add(index as u64));
+                Candidate {
+                    slot: Slot::Generating,
+                    info: CandidateInfo {
+                        index,
+                        state: "generating".into(),
+                        seed,
+                        label: None,
+                        error: None,
+                        summary: None,
+                        populations: None,
+                    },
+                }
+            })
+            .collect();
+        drop(c);
+        for index in 0..count {
+            let mut spec = spec.clone();
+            spec.seed = spec.seed.map(|s| s.wrapping_add(index as u64));
+            let params = params.clone();
+            let list = self.candidates.clone();
+            std::thread::Builder::new()
+                .name(format!("cubarium-candidate-{index}"))
+                .spawn(move || {
+                    let made = prepare_new(&params, &spec);
+                    let Ok(mut c) = list.lock() else { return };
+                    if c.batch != batch {
+                        return;
+                    }
+                    let Some(cand) = c.list.get_mut(index) else { return };
+                    match made {
+                        Ok(p) => {
+                            cand.info.state = "ready".into();
+                            cand.info.label = Some(p.label.clone());
+                            cand.info.summary = Some(cubarium_observatory::query::summary(&p.world, &p.label));
+                            cand.info.populations = Some(cubarium_observatory::query::populations(&p.flora, &p.fauna));
+                            cand.slot = Slot::Ready(Box::new(p));
+                        }
+                        Err(e) => {
+                            cand.info.state = "failed".into();
+                            cand.info.error = Some(format!("{e:#}"));
+                            cand.slot = Slot::Failed(format!("{e:#}"));
+                        }
+                    }
+                })
+                .map_err(|e| format!("spawning a candidate: {e}"))?;
+        }
+        Ok(())
+    }
+
+    /// The candidates and what each is doing.
+    pub fn candidates(&self) -> Vec<CandidateInfo> {
+        self.candidates
+            .lock()
+            .map(|c| c.list.iter().map(|x| x.info.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// A whole view of a ready candidate (every chunk and its organisms), for a thumbnail
+    /// or to pan across before choosing. `None` while it is still being founded.
+    pub fn candidate_view(&self, index: usize) -> Option<View> {
+        let c = self.candidates.lock().ok()?;
+        match &c.list.get(index)?.slot {
+            Slot::Ready(p) => Some(View::whole(&p.world, &p.flora, &p.fauna, 0)),
+            _ => None,
+        }
+    }
+
+    /// Run candidate `index` in place of whatever was running, and drop every other
+    /// candidate (one still being founded is discarded when it finishes).
+    pub fn promote(&self, index: usize) -> Result<(), String> {
+        let mut c = self.candidates.lock().map_err(|_| "the candidate list is poisoned")?;
+        let Some(cand) = c.list.get(index) else {
+            return Err(format!("no candidate {index}"));
+        };
+        match &cand.slot {
+            Slot::Generating => return Err(format!("candidate {index} is still being founded")),
+            Slot::Failed(e) => return Err(format!("candidate {index} failed: {e}")),
+            Slot::Ready(_) => {}
+        }
+        let list = std::mem::take(&mut c.list);
+        c.batch += 1;
+        drop(c);
+        for (i, cand) in list.into_iter().enumerate() {
+            if i == index
+                && let Slot::Ready(p) = cand.slot
+            {
+                self.send(ToSim::Install(p));
+            }
+        }
+        Ok(())
+    }
+
+    /// Install a world made elsewhere (a tool, a test) in place of whatever was running.
+    pub fn install(&self, prepared: Prepared) {
+        self.send(ToSim::Install(Box::new(prepared)));
+    }
+
+    /// Load the save in `dir` in place of whatever is running. Returns at once; the world
+    /// changes when it has loaded ([`Status::generation`]), and a failure — a save from
+    /// another version is refused with a plain error — leaves the running world alone and
+    /// is told as a `load_failed` notice.
+    pub fn load(&self, dir: &Path) {
+        self.shared.loading.store(true, Ordering::SeqCst);
+        self.send(ToSim::Load(dir.to_path_buf(), None));
+    }
+
+    /// [`Session::load`], waiting up to `timeout` for the outcome.
+    pub fn load_blocking(&self, dir: &Path, timeout: Duration) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel();
+        self.shared.loading.store(true, Ordering::SeqCst);
+        self.send(ToSim::Load(dir.to_path_buf(), Some(tx)));
+        rx.recv_timeout(timeout).map_err(|_| "the load did not finish in time".to_string())?
+    }
+
+    /// Save the whole world into `dir` (made if missing), with its `meta.json`. Returns at
+    /// once; the world is copied at the loop's next command point and written off it, and
+    /// the outcome is told as a `saved` or `save_failed` notice.
+    pub fn save(&self, dir: &Path) {
+        self.send(ToSim::Save(dir.to_path_buf(), None));
+    }
+
+    /// [`Session::save`], waiting up to `timeout` for the write.
+    pub fn save_blocking(&self, dir: &Path, timeout: Duration) -> Result<SaveMeta, String> {
+        let (tx, rx) = mpsc::channel();
+        self.send(ToSim::Save(dir.to_path_buf(), Some(tx)));
+        rx.recv_timeout(timeout).map_err(|_| "the save did not finish in time".to_string())?
+    }
+
+    /// Stop and drop the running world; the session stays, empty.
+    pub fn close(&self) {
+        self.send(ToSim::Close);
+    }
+
+    // --- Run control ----------------------------------------------------------------
+
+    /// A run command, the dashboard's and the console's own.
+    pub fn command(&self, command: cubarium_observatory::Command) {
+        self.send(ToSim::Line(console_line(command)));
+    }
+
+    /// A console line ([`crate::COMMANDS`]); its reply comes back as a `console` notice.
+    pub fn console(&self, line: &str) {
+        self.send(ToSim::Line(line.to_string()));
+    }
+
+    // --- Reading --------------------------------------------------------------------
+
+    /// The run as it stands.
+    pub fn status(&self) -> Status {
+        let s = &self.shared;
+        let (label, last_error) = s.text.lock().map(|t| t.clone()).unwrap_or_default();
+        let steps = s.steps.load(Ordering::Relaxed).max(1);
+        let feeds = s.feed_updates.load(Ordering::Relaxed);
+        Status {
+            running: s.running.load(Ordering::SeqCst),
+            paused: s.paused.load(Ordering::SeqCst),
+            speed: f64::from_bits(s.speed_bits.load(Ordering::SeqCst)),
+            tick: s.tick.load(Ordering::SeqCst),
+            stepped: s.stepped.load(Ordering::SeqCst),
+            generation: s.generation.load(Ordering::SeqCst),
+            loading: s.loading.load(Ordering::SeqCst),
+            saving: s.saving.load(Ordering::SeqCst),
+            label,
+            last_error,
+            step_ms: s.step_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
+            feed_ms: s.feed_ns.load(Ordering::Relaxed) as f64 / feeds.max(1) as f64 / 1e6,
+            feed_updates: feeds,
+        }
+    }
+
+    /// The chunks that changed since the last take — every chunk on the first take after a
+    /// world is installed — and the newest frame.
+    pub fn take_view(&self) -> View {
+        let Ok(mut h) = self.shared.hub.lock() else {
+            return View::default();
+        };
+        let chunks = std::mem::take(&mut h.chunks);
+        let full = std::mem::replace(&mut h.full, false);
+        let view = View {
+            generation: h.generation,
+            dims: h.dims,
+            chunk_dims: h.chunk_dims,
+            voxel_m: h.voxel_m,
+            full,
+            chunks: Vec::new(),
+            frame: h.frame.clone(),
+        };
+        drop(h);
+        let mut list: Vec<(u32, ChunkData)> = chunks.into_iter().collect();
+        list.sort_unstable_by_key(|(k, _)| *k);
+        View { chunks: list.into_iter().map(|(_, c)| c).collect(), ..view }
+    }
+
+    /// The life events (birth, meal, kill, injury, death and the rest) since the last take,
+    /// oldest first.
+    pub fn take_events(&self) -> Vec<LifeEvent> {
+        self.shared
+            .hub
+            .lock()
+            .map(|mut h| h.events.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    /// Console replies and save and load outcomes since the last take, oldest first.
+    pub fn take_notices(&self) -> Vec<Notice> {
+        self.shared
+            .hub
+            .lock()
+            .map(|mut h| h.notices.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    /// **A query** over the latest published snapshot, as a serde value:
+    /// `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`,
+    /// `animal` (`{"id": N}`: the body and its life history), `history`
+    /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `saves`
+    /// (`{"dir": path}`: the save slots under it, read without loading any).
+    pub fn query(&self, name: &str, args: &Value) -> Result<Value, String> {
+        match name {
+            "species" => return Ok(crate::species_table()),
+            "status" => return Ok(to(&self.status())),
+            "candidates" => return Ok(to(&self.candidates())),
+            "saves" => {
+                let dir = args.get("dir").and_then(Value::as_str).ok_or("`saves` wants {\"dir\": path}")?;
+                return Ok(to(&store::list_saves(Path::new(dir))));
+            }
+            _ => {}
+        }
+        let h = self.shared.hub.lock().map_err(|_| "the session hub is poisoned")?;
+        match name {
+            "history" => {
+                let since = args.get("since").and_then(Value::as_u64);
+                let samples: Vec<&Sample> = h.history.since(since).collect();
+                return Ok(json!({ "config": h.history.config(), "samples": to(&samples) }));
+            }
+            "animal" => {
+                let id = args.get("id").and_then(Value::as_u64).ok_or("`animal` wants {\"id\": N}")?;
+                let life = h.book.record(id).cloned();
+                let snap = h.snapshot.clone();
+                drop(h);
+                let body = snap.as_ref().and_then(|s| s.animals.iter().find(|a| a.row.id == id).cloned());
+                if body.is_none() && life.is_none() {
+                    return Err(format!("no animal {id} is alive or remembered"));
+                }
+                return Ok(json!({ "animal": to(&body), "life": to(&life) }));
+            }
+            _ => {}
+        }
+        let snap = h.snapshot.clone().ok_or("nothing has been published yet")?;
+        drop(h);
+        Ok(match name {
+            "summary" => to(&snap.summary),
+            "clock" => to(&snap.clock),
+            "environment" => to(&snap.environment),
+            "populations" => to(&snap.populations),
+            "run" => to(&snap.run),
+            "animals" => to(&snap.animals),
+            "snapshot" => to(&*snap),
+            other => {
+                return Err(format!(
+                    "unknown query `{other}`; known: summary clock environment populations run \
+                     snapshot animals animal history species status candidates saves"
+                ));
+            }
+        })
+    }
+
+    /// The tick of the frame waiting for the next take, without taking it.
+    #[cfg(test)]
+    pub(crate) fn pending_frame_tick(&self) -> Option<u64> {
+        self.shared.hub.lock().ok()?.frame.as_ref().map(|f| f.tick)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn hold_hub_for(&self, d: Duration) {
+        let _h = self.shared.hub.lock();
+        std::thread::sleep(d);
+    }
+}
+
+/// A serde value of `v` (`null` for one that does not serialize).
+fn to<T: Serialize + ?Sized>(v: &T) -> Value {
+    serde_json::to_value(v).unwrap_or(Value::Null)
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        self.send(ToSim::Shutdown);
+        if let Some(h) = self.sim.take() {
+            let _ = h.join();
+        }
+        if let Some(h) = self.ingest.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Found a new world from a spec, seeded and driven, ready to run.
+pub fn prepare_new(params: &SimParams, spec: &WorldSpec) -> anyhow::Result<Prepared> {
+    let p = params.resolve_sets(&spec.sets)?;
+    let recipes = founder_recipes(&[], &[])?;
+    let founder_counts = p.fauna.founder_counts();
+    let start = StartSpec {
+        load: None,
+        scene: Scene::Generated,
+        seed: spec.seed,
+        empty: spec.empty,
+        founder_counts,
+    };
+    let (world, label, resumed, layers) = create::load_or_create_world(&p, &start)?;
+    let (world, flora, fauna) = create::populate(
+        world,
+        resumed,
+        layers,
+        &p,
+        &Populate { recipes: &recipes, introductions: &[], empty: spec.empty, founder_counts, no_egg_bank: false },
+    )?;
+    Ok(Prepared { world, flora, fauna, label, exec: params.clone() })
+}
+
+/// A save read back, seeded with its own layers and its drivers put back.
+pub fn prepare_loaded(exec: &SimParams, dir: &Path) -> Result<Prepared, String> {
+    let loaded = store::load_save(dir).map_err(|e| e.to_string())?;
+    let p = exec.resolve_sets(&[]).map_err(|e| format!("{e:#}"))?;
+    let recipes = founder_recipes(&[], &[]).map_err(|e| format!("{e:#}"))?;
+    let (world, flora, fauna) = create::populate(
+        loaded.world,
+        true,
+        Some(StartLayers::Restored(loaded.flora, loaded.fauna)),
+        &p,
+        &Populate {
+            recipes: &recipes,
+            introductions: &[],
+            empty: false,
+            founder_counts: [0; Founder::COUNT],
+            no_egg_bank: false,
+        },
+    )
+    .map_err(|e| format!("{e:#}"))?;
+    Ok(Prepared { world, flora, fauna, label: format!("loaded {}", dir.display()), exec: exec.clone() })
+}
+
+// --- The loop ---------------------------------------------------------------------------
+
+struct Run {
+    sim: Sim,
+    console: Console,
+    pacer: Pacer,
+    observer: Observer,
+    tracker: Option<Tracker>,
+    events: Vec<LifeEvent>,
+    /// The world or its layers moved since the last feed update.
+    moved: bool,
+    step_ns: u64,
+    steps: u64,
+    feed_ns: u64,
+    feed_updates: u64,
+}
+
+struct Loop {
+    options: SessionOptions,
+    out: Sender<ToReader>,
+    shared: Arc<Shared>,
+    run: Option<Run>,
+    generation: u64,
+    speed: f64,
+    /// A world installed over a paused one starts paused (a load from a pause menu stays
+    /// paused until the menu resumes it); the first world runs.
+    paused: bool,
+    writer: Option<JoinHandle<()>>,
+    next: Instant,
+}
+
+const PERIOD: Duration = Duration::from_millis(1000 / cubarium_voxel::TICK_HZ as u64);
+
+impl Loop {
+    fn new(options: SessionOptions, out: Sender<ToReader>, shared: Arc<Shared>) -> Loop {
+        let speed = options.speed.clamp(MIN_SPEED, MAX_SPEED);
+        Loop { options, out, shared, run: None, generation: 0, speed, paused: false, writer: None, next: Instant::now() }
+    }
+
+    fn main(mut self, rx: Receiver<ToSim>) {
+        loop {
+            let first = if self.run.is_none() {
+                match rx.recv() {
+                    Ok(m) => Some(m),
+                    Err(_) => break,
+                }
+            } else {
+                let now = Instant::now();
+                if now < self.next {
+                    match rx.recv_timeout(self.next - now) {
+                        Ok(m) => Some(m),
+                        Err(RecvTimeoutError::Timeout) => None,
+                        Err(RecvTimeoutError::Disconnected) => break,
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(m) = first {
+                if !self.handle(m) {
+                    break;
+                }
+                // Everything else already waiting, at the same command point.
+                let mut go_on = true;
+                while let Ok(m) = rx.try_recv() {
+                    if !self.handle(m) {
+                        go_on = false;
+                        break;
+                    }
+                }
+                if !go_on {
+                    break;
+                }
+            }
+            if self.run.is_some() && Instant::now() >= self.next {
+                self.period();
+            }
+        }
+        if let Some(w) = self.writer.take() {
+            let _ = w.join();
+        }
+    }
+
+    /// One clock period: the ticks it owes, the feed, a publication if one is due.
+    fn period(&mut self) {
+        let now = Instant::now();
+        self.next += PERIOD;
+        if self.next + Duration::from_secs(1) < now {
+            // Behind by more than a second (a slow machine at a high speed): re-base rather
+            // than chase a schedule that will never be met.
+            self.next = now + PERIOD;
+        }
+        let Some(r) = self.run.as_mut() else { return };
+        let n = r.pacer.due(&mut r.console);
+        for _ in 0..n {
+            let at = Instant::now();
+            r.sim.step();
+            let ns = at.elapsed().as_nanos() as u64;
+            r.step_ns += ns;
+            r.steps += 1;
+            r.observer.after_tick(r.sim.world(), r.sim.fauna(), ns);
+            r.events.extend(r.observer.take_events());
+            self.shared.tick.store(r.sim.world().tick(), Ordering::SeqCst);
+            self.shared.stepped.fetch_add(1, Ordering::SeqCst);
+        }
+        if n > 0 {
+            r.moved = true;
+        }
+        self.feed();
+        self.publish(false);
+        self.store_status();
+    }
+
+    fn feed(&mut self) {
+        let Some(r) = self.run.as_mut() else { return };
+        if !r.moved && r.events.is_empty() {
+            return;
+        }
+        let at = Instant::now();
+        let mut chunks = Vec::new();
+        let mut frame = None;
+        if r.moved
+            && let Some(t) = r.tracker.as_mut()
+        {
+            let (world, flora, fauna) = r.sim.layers();
+            t.update(world);
+            chunks = t.take_dirty();
+            frame = Some(Arc::new(Frame::of(world, flora, fauna)));
+            r.feed_ns += at.elapsed().as_nanos() as u64;
+            r.feed_updates += 1;
+        }
+        r.moved = false;
+        let events = std::mem::take(&mut r.events);
+        let _ = self.out.send(ToReader::Feed { chunks, frame, events });
+    }
+
+    fn publish(&mut self, force: bool) {
+        let Some(r) = self.run.as_mut() else { return };
+        if force {
+            r.observer.request();
+        }
+        let now = Instant::now();
+        if r.observer.due(r.sim.world().tick(), now, r.console.paused) {
+            let controls = Controls { speed: r.console.speed, paused: r.console.paused, min_speed: MIN_SPEED, max_speed: MAX_SPEED };
+            let (world, flora, fauna) = r.sim.layers();
+            let p = r.observer.publish(world, flora, fauna, controls, now);
+            // The observer's events are taken tick by tick for the feed, which files them
+            // into the life book; what a publication still carries (the bodies standing
+            // when the record began) goes the same way, with the next feed.
+            r.events.extend(p.events);
+            let _ = self.out.send(ToReader::Publication(Box::new(p.snapshot)));
+        }
+    }
+
+    fn store_status(&self) {
+        let s = &self.shared;
+        match &self.run {
+            Some(r) => {
+                s.running.store(true, Ordering::SeqCst);
+                s.paused.store(r.console.paused, Ordering::SeqCst);
+                s.speed_bits.store(r.console.speed.to_bits(), Ordering::SeqCst);
+                s.tick.store(r.sim.world().tick(), Ordering::SeqCst);
+                s.step_ns.store(r.step_ns, Ordering::Relaxed);
+                s.steps.store(r.steps, Ordering::Relaxed);
+                s.feed_ns.store(r.feed_ns, Ordering::Relaxed);
+                s.feed_updates.store(r.feed_updates, Ordering::Relaxed);
+            }
+            None => s.running.store(false, Ordering::SeqCst),
+        }
+        s.saving.store(self.writer.as_ref().is_some_and(|w| !w.is_finished()), Ordering::SeqCst);
+    }
+
+    fn notice(&self, n: Notice) {
+        let _ = self.out.send(ToReader::Notice(n));
+    }
+
+    /// Apply one message; `false` ends the loop.
+    fn handle(&mut self, m: ToSim) -> bool {
+        match m {
+            ToSim::Shutdown => return false,
+            ToSim::Install(p) => self.install(*p),
+            ToSim::Load(dir, reply) => {
+                let made = prepare_loaded(&self.options.exec, &dir);
+                self.shared.loading.store(false, Ordering::SeqCst);
+                let result = match made {
+                    Ok(p) => {
+                        self.install(p);
+                        self.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("loaded", "loaded") });
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let _ = self.out.send(ToReader::Error(Some(e.clone())));
+                        self.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("load_failed", e.clone()) });
+                        Err(e)
+                    }
+                };
+                if let Some(tx) = reply {
+                    let _ = tx.send(result);
+                }
+            }
+            ToSim::Save(dir, reply) => self.save(dir, reply),
+            ToSim::Close => {
+                self.run = None;
+                let _ = self.out.send(ToReader::Closed);
+                self.notice(Notice::say("closed", "closed"));
+                self.store_status();
+            }
+            ToSim::Line(line) => {
+                let Some(r) = self.run.as_mut() else {
+                    self.notice(Notice::say("console", "no world is running"));
+                    return true;
+                };
+                let Run { sim, console, observer, .. } = r;
+                sim.with_layers_mut(|world, flora, fauna| console.handle(world, flora, fauna, &line));
+                observer.request();
+                r.moved = true;
+                let said = r.console.take_said();
+                let quit = std::mem::take(&mut r.console.quit);
+                let save = r.console.save_to.take();
+                for text in said {
+                    self.notice(Notice::say("console", text));
+                }
+                if let Some(dir) = save {
+                    self.save(dir, None);
+                }
+                if quit {
+                    return self.handle(ToSim::Close);
+                }
+                self.store_status();
+            }
+        }
+        true
+    }
+
+    fn install(&mut self, p: Prepared) {
+        if let Some(r) = &self.run {
+            self.speed = r.console.speed;
+            self.paused = r.console.paused;
+        }
+        self.run = None;
+        let c = p.world.config();
+        let dims = (c.width, c.height, c.depth);
+        let voxel_m = c.voxel_m;
+        let mut sim = create::ready_sim(p.world, p.flora, p.fauna, p.exec.sim_config());
+        create::set_water_every(&mut sim, p.exec.water_every);
+        create::open_closed_outlet(&mut sim);
+        self.generation += 1;
+        let mut tracker = self.options.feed.then(|| Tracker::new(sim.world(), self.options.feed_config));
+        let chunk_dims = tracker.as_ref().map_or([0; 3], |t| t.dims().1);
+        // The first feed travels with the reset, so no reader can take the new world's
+        // generation without its chunks.
+        let (chunks, frame) = match tracker.as_mut() {
+            Some(t) => {
+                let (world, flora, fauna) = sim.layers();
+                (t.take_dirty(), Some(Arc::new(Frame::of(world, flora, fauna))))
+            }
+            None => (Vec::new(), None),
+        };
+        let _ = self.out.send(ToReader::Reset {
+            generation: self.generation,
+            label: p.label.clone(),
+            dims: [dims.0, dims.1, dims.2],
+            chunk_dims,
+            voxel_m,
+            history: p.exec.observatory,
+            chunks,
+            frame,
+        });
+        let mut console = Console::new(self.speed, dims);
+        console.paused = self.paused;
+        console.default_save_dir = crate::console::tick_save_dir;
+        let observer = Observer::new(p.label, self.options.cadence);
+        self.shared.tick.store(sim.world().tick(), Ordering::SeqCst);
+        self.run = Some(Run {
+            sim,
+            console,
+            pacer: Pacer::default(),
+            observer,
+            tracker,
+            events: Vec::new(),
+            moved: false,
+            step_ns: 0,
+            steps: 0,
+            feed_ns: 0,
+            feed_updates: 0,
+        });
+        self.shared.generation.store(self.generation, Ordering::SeqCst);
+        // The first publication at once, whatever the speed or pause.
+        self.publish(true);
+        self.store_status();
+        self.next = Instant::now() + PERIOD;
+    }
+
+    fn save(&mut self, dir: PathBuf, reply: Option<Sender<Result<SaveMeta, String>>>) {
+        let refuse = |why: String, this: &Loop| {
+            this.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("save_failed", why.clone()) });
+            if let Some(tx) = &reply {
+                let _ = tx.send(Err(why));
+            }
+        };
+        let Some(r) = &self.run else {
+            refuse("no world is running".into(), self);
+            return;
+        };
+        if self.writer.as_ref().is_some_and(|w| !w.is_finished()) {
+            refuse("the last save is still writing; ask again".into(), self);
+            return;
+        }
+        if let Some(w) = self.writer.take() {
+            let _ = w.join();
+        }
+        let (world, flora, fauna) = r.sim.layers();
+        let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
+        let out = self.out.clone();
+        self.writer = Some(std::thread::spawn(move || {
+            let result = store::save_whole(&dir, &world, &flora, &fauna).map_err(|e| format!("{e:#}"));
+            let path = Some(dir.display().to_string());
+            let notice = match &result {
+                Ok(meta) => Notice { path, meta: Some(meta.clone()), ..Notice::say("saved", "saved") },
+                Err(e) => Notice { path, ..Notice::say("save_failed", e.clone()) },
+            };
+            let _ = out.send(ToReader::Notice(notice));
+            if let Some(tx) = reply {
+                let _ = tx.send(result);
+            }
+        }));
+        self.store_status();
+    }
+}
+
+fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
+    while let Ok(m) = rx.recv() {
+        let Ok(mut h) = shared.hub.lock() else { return };
+        match m {
+            ToReader::Reset { generation, label, dims, chunk_dims, voxel_m, history, chunks, frame } => {
+                if let Ok(mut t) = shared.text.lock() {
+                    *t = (label, None);
+                }
+                h.generation = generation;
+                h.snapshot = None;
+                h.book = LifeBook::default();
+                h.history = History::new(history);
+                h.dims = dims;
+                h.chunk_dims = chunk_dims;
+                h.voxel_m = voxel_m;
+                h.full = true;
+                h.chunks.clear();
+                for c in chunks {
+                    let k = c.at[0] + chunk_dims[0] * (c.at[1] + chunk_dims[1] * c.at[2]);
+                    h.chunks.insert(k, c);
+                }
+                h.frame = frame;
+                h.events.clear();
+            }
+            ToReader::Closed => {
+                h.snapshot = None;
+                h.chunks.clear();
+                h.frame = None;
+                h.full = false;
+                h.dims = [0; 3];
+                h.chunk_dims = [0; 3];
+                if let Ok(mut t) = shared.text.lock() {
+                    t.0.clear();
+                }
+            }
+            ToReader::Feed { chunks, frame, events } => {
+                for c in chunks {
+                    let k = c.at[0] + h.chunk_dims[0] * (c.at[1] + h.chunk_dims[1] * c.at[2]);
+                    h.chunks.insert(k, c);
+                }
+                if frame.is_some() {
+                    h.frame = frame;
+                }
+                h.book.apply(&events);
+                h.events.extend(events);
+                while h.events.len() > max_events {
+                    h.events.pop_front();
+                    h.dropped_events += 1;
+                }
+            }
+            ToReader::Publication(s) => {
+                let sample = Sample::of(&s.clock, &s.populations, &s.environment);
+                h.history.offer(sample);
+                h.snapshot = Some(Arc::from(s));
+            }
+            ToReader::Notice(n) => {
+                h.notices.push_back(n);
+                while h.notices.len() > 256 {
+                    h.notices.pop_front();
+                }
+            }
+            ToReader::Error(e) => {
+                if let Ok(mut t) = shared.text.lock() {
+                    t.1 = e;
+                }
+            }
+        }
+    }
+}

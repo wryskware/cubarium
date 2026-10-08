@@ -63,7 +63,12 @@ fn plain() -> World {
 fn every_live_preset_loads_and_resolves() {
     for file in [
         "config/desktop/terrarium.toml",
+        "config/desktop/terrarium-d72.toml",
+        "config/desktop/terrarium-d96.toml",
+        "config/desktop/terrarium-wide.toml",
         "config/voidrunner/terrarium.toml",
+        "config/voidrunner/terrarium-d72.toml",
+        "config/voidrunner/terrarium-d96.toml",
         "config/desktop/voxel.toml",
         "config/tachyon/voxel.toml",
     ] {

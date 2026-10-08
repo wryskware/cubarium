@@ -276,9 +276,9 @@ fn main() {
         (world, founded.flora, founded.fauna, founded.seeded, label)
     } else {
         let world = if generated {
-            let mut world_cfg = cfg.world.clone();
+            let mut world_cfg = cfg.sim.world.clone();
             if closed {
-                let dry = VoxelConfig::default().world;
+                let dry = VoxelConfig::default().sim.world;
                 let basin_floor_m = World::new(dry.clone())
                     .outlet_cell()
                     .map_or(0.0, |(_, y, _)| f64::from(y) * dry.voxel_m);
@@ -296,7 +296,7 @@ fn main() {
             }
             world
         } else {
-            scene::authored(cfg.world.clone())
+            scene::authored(cfg.sim.world.clone())
         };
         let flora = Flora::new(if lollipop {
             FloraConfig::default().one_layer_species()

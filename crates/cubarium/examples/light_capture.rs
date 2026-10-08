@@ -192,8 +192,8 @@ fn found(a: &Args, cfg: &VoxelConfig) -> Result<(World, Flora, Fauna)> {
     let started = Instant::now();
     let params = params_of(cfg, &[])?;
     let founded = found_habitat(
-        &cfg.world,
-        &LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &LayerConfig::new(&params, cfg.sim.world.voxel_m),
         cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         Seeds::from(a.seed),
         false,
@@ -238,7 +238,7 @@ fn main() -> Result<()> {
             cubarium::voxel::auto_px_per_voxel(
                 base.tilt_degrees,
                 base.raster_height,
-                &base.world,
+                &base.sim.world,
                 screen,
             )
         });
@@ -270,7 +270,7 @@ fn capture(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
         cfg.raster_height,
-        &cfg.world,
+        &cfg.sim.world,
     )?;
     let mut sink = VoxelGpuSink::new(
         cfg,

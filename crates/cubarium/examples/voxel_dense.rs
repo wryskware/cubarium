@@ -66,8 +66,8 @@ fn found(config: &Path, seed: u64, threads: usize) -> (Sim, u64) {
     let cfg = cubarium::voxel::load_config(config).expect("a host config");
     let params = cubarium::voxel::params_of(&cfg, &[]).expect("the config's parameter set");
     let founded = cubarium::voxel::found(
-        &cfg.world,
-        &cubarium::voxel::LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &cubarium::voxel::LayerConfig::new(&params, cfg.sim.world.voxel_m),
         cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         cubarium::voxel::Seeds::from(seed),
         false,

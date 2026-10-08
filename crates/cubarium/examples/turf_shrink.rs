@@ -44,11 +44,11 @@ fn resolve(args: &[String]) -> Params {
     let path = arg(args, "config=").unwrap_or("config/desktop/terrarium.toml");
     let cfg = cubarium::voxel::load_config(Path::new(path)).unwrap_or_else(|e| panic!("config {path}: {e}"));
     let mut file = toml::Table::new();
-    if !cfg.flora.is_empty() {
-        file.insert("flora".into(), toml::Value::Table(cfg.flora));
+    if !cfg.sim.flora.is_empty() {
+        file.insert("flora".into(), toml::Value::Table(cfg.sim.flora));
     }
-    if !cfg.fauna.is_empty() {
-        file.insert("fauna".into(), toml::Value::Table(cfg.fauna));
+    if !cfg.sim.fauna.is_empty() {
+        file.insert("fauna".into(), toml::Value::Table(cfg.sim.fauna));
     }
     let mut sets: Vec<String> = args.iter().filter_map(|a| a.strip_prefix("set=").map(str::to_string)).collect();
     if let Some(f) = arg(args, "sets=") {
@@ -57,7 +57,7 @@ fn resolve(args: &[String]) -> Params {
     }
     Params::resolve_over(
         Params {
-            world: cfg.world,
+            world: cfg.sim.world,
             ..Params::defaults()
         },
         &Layers {

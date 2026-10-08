@@ -365,7 +365,7 @@ fn main() -> Result<()> {
     let terrarium_mode = !prefix.is_empty();
     let wc = world.config().clone();
     let base = VoxelConfig {
-        world: wc.clone(),
+        sim: cubarium_session::SimParams { world: wc.clone(), ..Default::default() },
         raster_height: 0,
         haze: if terrarium_mode { 0.55 } else { 0.25 },
         ..VoxelConfig::default()

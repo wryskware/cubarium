@@ -50,7 +50,7 @@ fn the_shaders_slab_lookup_names_the_voxel_the_projection_gave_the_pixel() {
             &VoxelConfig {
                 tilt_degrees: tilt,
                 px_per_voxel: s,
-                world: c.clone(),
+                sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
                 ..VoxelConfig::default()
             },
             proj,
@@ -97,7 +97,7 @@ fn the_shaders_slab_lookup_names_the_voxel_the_projection_gave_the_pixel() {
 fn the_gpu_draws_the_same_small_world_as_the_cpu_presenter() {
     let c = config();
     let cfg = VoxelConfig {
-        world: c.clone(),
+        sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
         ..VoxelConfig::default()
     };
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &c).unwrap();

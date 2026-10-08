@@ -30,7 +30,7 @@ use cubarium_voxel_sim::{Sim, SimConfig};
 #[test]
 fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     let cfg = VoxelConfig::default();
-    let mut world = scene::authored(cfg.world.clone());
+    let mut world = scene::authored(cfg.sim.world.clone());
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     habitat::seed(&mut world, &mut flora, &mut fauna);

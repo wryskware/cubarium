@@ -162,12 +162,12 @@ fn main() -> Result<()> {
     let mut cfg = cubarium::voxel::load_config(&config)?;
     let params = cubarium::voxel::params_of(&cfg, &[])?;
     ensure!(
-        cfg.water_every == 1,
+        cfg.sim.water_every == 1,
         "cost study needs the desktop's live water"
     );
     let founded = cubarium::voxel::found(
-        &cfg.world,
-        &LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &LayerConfig::new(&params, cfg.sim.world.voxel_m),
         params.fauna.founder_counts(),
         Seeds::Asked(seed),
         false,
@@ -190,14 +190,14 @@ fn main() -> Result<()> {
     );
     if cfg.px_per_voxel == cubarium::voxel::PX_AUTO {
         cfg.px_per_voxel =
-            cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.world, raster);
+            cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.sim.world, raster);
     }
     cfg.raster_height = raster.1 as u16;
     let proj = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
         cfg.raster_height,
-        &cfg.world,
+        &cfg.sim.world,
     )?;
     let mut sink = VoxelGpuSink::new(
         &cfg,
@@ -217,7 +217,7 @@ fn main() -> Result<()> {
     let mut report = Report {
         config: config.display().to_string(),
         seed,
-        depth: cfg.world.depth,
+        depth: cfg.sim.world.depth,
         threads,
         cpus: std::fs::read_to_string("/proc/self/status")?
             .lines()
@@ -289,7 +289,7 @@ fn main() -> Result<()> {
             let row = window.row(label.into(), &sim);
             eprintln!(
                 "d{} t{threads} {label}: step {:.3} world {:.3} flora {:.3} fauna {:.3} pack {:.3} render {:.3} ms; {:.2}x tick budget",
-                cfg.world.depth,
+                cfg.sim.world.depth,
                 row.step_ms,
                 row.world_ms,
                 row.flora_ms,

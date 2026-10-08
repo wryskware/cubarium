@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         cfg.px_per_voxel = px;
     }
     let (world, flora, fauna) = load_or_found(&cfg, seed, found_ticks, state.as_ref())?;
-    let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.world)?;
+    let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.sim.world)?;
     let mut sink = VoxelGpuSink::new(
         &cfg,
         proj,
@@ -202,8 +202,8 @@ fn load_or_found(cfg: &VoxelConfig, seed: u64, ticks: u64, state: Option<&PathBu
     }
     let params = params_of(cfg, &[])?;
     let founded = found_habitat(
-        &cfg.world,
-        &LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &LayerConfig::new(&params, cfg.sim.world.voxel_m),
         params.fauna.founder_counts(),
         Seeds::from(seed),
         false,

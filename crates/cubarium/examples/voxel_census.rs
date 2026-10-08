@@ -230,11 +230,11 @@ fn main() {
             let cfg = cubarium::voxel::load_config(std::path::Path::new(p))
                 .unwrap_or_else(|e| panic!("config {p:?}: {e}"));
             let mut file = toml::Table::new();
-            if !cfg.flora.is_empty() {
-                file.insert("flora".into(), toml::Value::Table(cfg.flora));
+            if !cfg.sim.flora.is_empty() {
+                file.insert("flora".into(), toml::Value::Table(cfg.sim.flora));
             }
-            if !cfg.fauna.is_empty() {
-                file.insert("fauna".into(), toml::Value::Table(cfg.fauna));
+            if !cfg.sim.fauna.is_empty() {
+                file.insert("fauna".into(), toml::Value::Table(cfg.sim.fauna));
             }
             file
         });
@@ -344,7 +344,7 @@ fn main() {
         .map(|p| {
             let cfg = cubarium::voxel::load_config(std::path::Path::new(p))
                 .unwrap_or_else(|e| panic!("config {p:?}: {e}"));
-            (p.to_string(), cfg.world)
+            (p.to_string(), cfg.sim.world)
         });
     let arm: Option<(String, cubarium_voxel::Config)> =
         file_arm.or_else(|| {
@@ -434,14 +434,14 @@ fn main() {
         run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
         return;
     }
-    let params = resolve(cfg.world.clone());
+    let params = resolve(cfg.sim.world.clone());
     let mut world = if generated {
         // The closed budget's water is the retired flora study's: the shower rate it ran on,
         // the aquifer charged a metre above the basin floor, and the outlet open — which
         // in a closed world is the return flow into the atmosphere, not an export.
         let mut world_cfg = params.world.clone();
         if closed {
-            let dry = VoxelConfig::default().world;
+            let dry = VoxelConfig::default().sim.world;
             let basin_floor_m = World::new(dry.clone())
                 .outlet_cell()
                 .map_or(0.0, |(_, y, _)| f64::from(y))
