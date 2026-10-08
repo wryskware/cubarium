@@ -136,7 +136,7 @@ def profile_config(document, profile='screen-2h', text=None):
         raise ValueError('every active component needs required_data')
     if spec['aggregation'] != 'mean + sd_weight * sample_sd of soft P (L excluded); feasibility first':
         raise ValueError('unsupported aggregation')
-    if spec['start_kind'] != 'mature saved start':
+    if spec['start_kind'] not in ('mature saved start', 'fresh founding'):
         raise ValueError('unsupported start kind')
     if len(set(spec['active'])) != len(spec['active']):
         raise ValueError('duplicate active component')
@@ -469,13 +469,18 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
         rate = kills / ((end - begin) / 60) if kills is not None else None
         put('H', rate, d(rate, targets['hunts_per_hour_lo'], targets['hunts_per_hour_hi']) if rate is not None else None, unit='kills/world-hour')
         f_values = [condition[name] for name in sorted(body_exposed)]
-        s_values = [stuck[name] for name in sorted(body_exposed)]
+        # A lineage observed with no eligible stuck exposure (asleep, fed or voluntarily
+        # resting through every trailing window) was not stuck: it counts 0 and is listed.
+        # Missing vitals are caught by the required-data check, not here.
+        unexposed = sorted(name for name in body_exposed if stuck[name] is None)
+        s_values = [0.0 if stuck[name] is None else stuck[name] for name in sorted(body_exposed)]
         structural_na = sorted(set(active_names) - body_exposed)
         put('F', fullness, average(f_values) if all(v is not None for v in f_values) else None,
             per_lineage_penalty=condition, per_stage_penalty=stage_penalties,
             structural_na_lineages=structural_na, note='No living bodies: structural NA; retained in the loss/egg-bank gate')
-        put('S', stuck, average(s_values) if all(v is not None for v in s_values) else None,
-            structural_na_lineages=structural_na, note='No living bodies: structural NA; living bodies need observed stuck exposure')
+        put('S', stuck, average(s_values) if s_values else None,
+            structural_na_lineages=structural_na, unexposed_lineages=unexposed,
+            note='No living bodies: structural NA; a living lineage with no stuck exposure counts 0 (listed as unexposed)')
         for name in species:
             pr = [r for r in plants if r['species'] == name and begin < number(r, 'minute') <= end]
             if plants and name in required_plants and set(number(r, 'minute') for r in pr) != set(range(begin + 1, end + 1)):
@@ -653,6 +658,8 @@ def build_report(out, cfg, baseline=None, start=None, stop=None, allow_mixed_bin
     for out, manifest in zip(paths, manifests):
         if manifest.get('start_kind') == 'fresh founding' and cfg['profile']['start_kind'] == 'mature saved start':
             raise ValueError('this profile requires mature saved starts, not a fresh founding batch')
+        if manifest.get('start_kind') == 'saved start' and cfg['profile']['start_kind'] == 'fresh founding':
+            raise ValueError('this profile scores fresh foundings, not a saved-start batch')
         states = {}
         if (out / 'STATE.tsv').exists():
             with (out / 'STATE.tsv').open(newline='') as stream:

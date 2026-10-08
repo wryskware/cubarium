@@ -226,13 +226,17 @@ class StudyKitTests(unittest.TestCase):
         self.assertLess(world['trends']['frondgrazer']['count_slope_per_minute_per_N_ref'], 0)
         self.assertEqual(world['trends']['frondgrazer']['drawdown_per_N_ref'], 3.5)
 
-    def test_no_stuck_exposure_stays_NA_and_unrankable(self):
+    def test_no_stuck_exposure_is_NA_per_lineage_and_not_stuck(self):
+        # No eligible exposure (asleep, fed or resting all window) is measured data, not
+        # missing telemetry: the lineage's share stays NA, it counts as not stuck in S, and
+        # it is listed as unexposed.
         fixture(self.root)
         self.mutate('vitals/vitals.csv', lambda rows: [dict(r, stuck_n='', stuck_observed_n=0) for r in rows])
         world = self.rescore()
-        self.assertFalse(world['rankable'])
+        self.assertTrue(world['rankable'])
         self.assertIsNone(world['health']['frondgrazer']['stuck_share'])
-        self.assertIsNone(world['components']['S']['penalty'])
+        self.assertEqual(world['components']['S']['penalty'], 0.0)
+        self.assertIn('frondgrazer', world['components']['S']['unexposed_lineages'])
 
     def test_nonfinite_negative_duplicate_and_gap_telemetry(self):
         for file, mutate in (

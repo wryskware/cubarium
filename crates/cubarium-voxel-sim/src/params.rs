@@ -360,3 +360,48 @@ fn with_seeds_masked(
 pub fn load_genome(text: &str) -> Result<Genome, String> {
     Params::defaults().expand_genome(SearchFile::parse(text)?)
 }
+
+/// **A genome as `set=` assignments** (`voxel_census genome=FILE gene=NAME=VALUE`): `text`
+/// expanded over `base` ([`Params::expand_genome`]), each named gene (its expanded name,
+/// `upkeep@frondgrazer`) set inside its box, then decoded over `base` with the ties
+/// followed ([`Genome::resolve`]); every leaf that changes comes back as `path=value`.
+///
+/// The assignments go through the ordinary `set=` layer, so a fresh run and a loaded one
+/// (whose `set=` resolves over the save's own configs) take a genome the same way. `base`
+/// carries the plants as authored, as [`Params`] always does.
+pub fn genome_sets(
+    base: &Params,
+    text: &str,
+    genes: &[(String, f64)],
+) -> Result<(Genome, Vec<String>), String> {
+    let mut genome = base.expand_genome(SearchFile::parse(text)?)?;
+    for (name, value) in genes {
+        genome.set(name, *value)?;
+    }
+    let flora = registry::to_value(&base.flora)?;
+    let fauna = registry::to_value(&base.fauna)?;
+    let edits = genome.resolve(&[
+        (cubarium_voxel_flora::registry(), &flora),
+        (cubarium_voxel_fauna::registry(), &fauna),
+    ])?;
+    let sets = edits
+        .into_iter()
+        .flatten()
+        .map(|(path, value)| format!("{path}={value}"))
+        .collect();
+    Ok((genome, sets))
+}
+
+/// `gene=NAME=VALUE`'s `(NAME, VALUE)`.
+pub fn parse_gene_arg(s: &str) -> Result<(String, f64), String> {
+    let (name, value) = s
+        .rsplit_once('=')
+        .ok_or_else(|| format!("gene={s}: expected NAME=VALUE"))?;
+    let value: f64 = value
+        .parse()
+        .map_err(|_| format!("gene={s}: {value} is not a number"))?;
+    if name.is_empty() || !value.is_finite() {
+        return Err(format!("gene={s}: expected NAME=finite value"));
+    }
+    Ok((name.to_string(), value))
+}
