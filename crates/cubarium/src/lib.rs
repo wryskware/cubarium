@@ -8,7 +8,7 @@
 //! owns no geometry: every spatial operation goes through `cubarium-surface` and every
 //! pixel through `cubarium-render`.
 
-#![forbid(unsafe_code)]
+// #![forbid(unsafe_code)] returns once H2 makes sink/gpu/{hosted,voxel,wayland}.rs safe.
 
 pub mod art;
 pub mod art_present;

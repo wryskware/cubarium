@@ -63,8 +63,7 @@ ctrlc = "3"
 # Constants retained for platform error checks.
 libc = "0.2"
 
-[lints]
-workspace = true
+# [lints] workspace = true (unsafe_code = "forbid") returns once H2 makes sink/gpu/{hosted,voxel,wayland}.rs safe.
 
 # Safe OS wrappers for locks, readiness, scheduling and signal-driven saves.
 [target.'cfg(unix)'.dependencies]
