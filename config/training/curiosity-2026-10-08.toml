@@ -1,0 +1,21 @@
+# Brain curiosity recalibrated 2026-10-08 (brain pilot, part 1): weight x sd(N) = share x sd(E),
+# E = delta + given, both within-world sds over the scored bodies, averaged over the windows of
+# p1-noise (train-flat-nopred, C1 centres, sigma 0, curiosity weight 0).
+# Shares: frondgrazer 0.5, littershredder 0.3 (design/training-plan-2026-10-08.md 2a).
+
+#   frondgrazer: sdE 0.4017 sdN 0.07236 share 0.5 -> 2.776
+[frondgrazer]
+weight = 2.77571
+memory_min = 30.0
+cell_bl = 1.0
+
+#   littershredder: sdE 0.067 sdN 0.04135 share 0.3 -> 0.4861
+[littershredder]
+weight = 0.486095
+memory_min = 30.0
+cell_bl = 1.0
+
+[lanternjaw]
+weight = 0.0
+memory_min = 30.0
+cell_bl = 1.0
