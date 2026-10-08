@@ -69,7 +69,7 @@ impl LineageCuriosity {
 
 /// Every lineage's curiosity, in [`Founder::ALL`] order. The default (no file) is weight 0
 /// everywhere: today's score exactly.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Curiosity {
     pub lineages: [LineageCuriosity; Founder::COUNT],
 }
@@ -180,7 +180,23 @@ pub struct Memory {
     bodies: FxHashMap<u64, BodyMemory>,
 }
 
+/// JSON-friendly familiarity state; spatial keys remain coordinate pairs.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MemoryState {
+    now: u64,
+    bodies: Vec<(u64, Option<(i64, i64)>, Vec<((i64, i64), u64)>)>,
+}
+
 impl Memory {
+    pub fn state(&self) -> MemoryState {
+        MemoryState { now: self.now, bodies: self.bodies.iter().map(|(id, b)|
+            (*id, b.cell, b.left.iter().map(|(c, t)| (*c, *t)).collect())).collect() }
+    }
+    pub fn from_state(state: MemoryState) -> Self {
+        Self { now: state.now, bodies: state.bodies.into_iter().map(|(id, cell, left)|
+            (id, BodyMemory { cell, left: left.into_iter().collect() })).collect() }
+    }
+
     /// One tick passes.
     pub fn advance(&mut self) {
         self.now += 1;

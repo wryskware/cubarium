@@ -27,7 +27,7 @@ use std::time::Instant;
 
 use cubarium_voxel_fauna::Founder;
 use cubarium_voxel_sim::Sim;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::ecology::EcologyParams;
 use super::readout;
@@ -58,6 +58,8 @@ pub struct LiveSpec {
     pub generations: u32,
     /// Stop after the generation that crosses this.
     pub wall_seconds: f64,
+    /// Calibration deadline for the first boundary, wall seconds including setup.
+    pub first_generation_seconds: f64,
     pub sigma: f64,
     pub learning_rate: f64,
     pub train_seed: u64,
@@ -70,6 +72,8 @@ pub struct LiveSpec {
     /// Write the centres every this many generations (and at the end).
     pub save_every: u32,
     pub out: PathBuf,
+    /// Restore centres, Adam, persistent worlds and curiosity from this run.
+    pub resume: Option<PathBuf>,
     /// The ecology every world is founded under (training only; defaults: the shipped
     /// world).
     pub ecology: EcologyParams,
@@ -245,9 +249,9 @@ pub(crate) fn parallel<T: Send, R: Send>(
         .collect()
 }
 
-fn save_centres(spec: &LiveSpec, lineages: &[Lineage], generation: u32, tag: &str) {
+fn save_centres(spec: &LiveSpec, lineages: &[Lineage], generation: u32, tag: &str) -> Result<(), String> {
     let dir = spec.out.join("centres");
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for l in lineages {
         let file = VoxelPolicyFile {
             build: crate::evaluate::BUILD_ID.into(),
@@ -261,15 +265,142 @@ fn save_centres(spec: &LiveSpec, lineages: &[Lineage], generation: u32, tag: &st
             ..l.template.clone()
         };
         let path = dir.join(format!("{tag}-{}.json", l.founder.name()));
-        if let Err(e) = file.write(&path) {
-            eprintln!("WARNING: cannot save {}: {e}", path.display());
+        file.write(&path)?;
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct TrainingCheckpoint {
+    next_generation: u32,
+    next_fresh_seed: u64,
+    train_seed: u64,
+    pairs: usize,
+    window_ticks: u64,
+    sigma: f64,
+    curiosity: super::curiosity::Curiosity,
+    stomach_aware_reward: bool,
+    lineages: Vec<(Founder, Vec<f64>, Adam, VoxelPolicyFile)>,
+    worlds: Vec<WorldState>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WorldState {
+    id: usize,
+    windows: u32,
+    info: world::FoundInfo,
+    familiarity: super::curiosity::MemoryState,
+}
+
+fn save_checkpoint(spec: &LiveSpec, lineages: &[Lineage], worlds: &[LiveWorld], next_generation: u32, next_fresh_seed: u64) -> Result<(), String> {
+    let pointer = spec.out.join("checkpoint.json");
+    let old = std::fs::read_to_string(&pointer).ok();
+    let slot = if old.as_deref().is_some_and(|s| s.trim() == "checkpoint-a") { "checkpoint-b" } else { "checkpoint-a" };
+    let dir = spec.out.join(slot);
+    if dir.exists() { std::fs::remove_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?; }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    for world in worlds {
+        super::staging::save_world(&dir.join(format!("world-{}", world.id)), &world.sim)?;
+    }
+    let state = TrainingCheckpoint {
+        next_generation, next_fresh_seed, train_seed: spec.train_seed, pairs: spec.pairs,
+        window_ticks: spec.window_ticks, sigma: spec.sigma, curiosity: spec.curiosity.clone(),
+        stomach_aware_reward: spec.stomach_aware_reward,
+        lineages: lineages.iter().map(|l| (l.founder, l.theta.clone(), l.adam.clone(), l.template.clone())).collect(),
+        worlds: worlds.iter().map(|w| WorldState { id: w.id, windows: w.windows, info: w.info.clone(), familiarity: w.memory.state() }).collect(),
+    };
+    super::staging::atomic_text(&dir.join("state.json"), &serde_json::to_string(&state).map_err(|e| e.to_string())?)?;
+    // Commit only after every world and the matching optimizer/familiarity state exists.
+    super::staging::atomic_text(&pointer, slot)?;
+    if let Some(old) = old.filter(|s| s.trim() != slot) {
+        let old = old.trim();
+        if matches!(old, "checkpoint-a" | "checkpoint-b") {
+            std::fs::remove_dir_all(spec.out.join(old)).map_err(|e| e.to_string())?;
         }
     }
+    Ok(())
+}
+
+fn load_checkpoint(spec: &LiveSpec, dir: &Path, lineages: &mut Vec<Lineage>) -> Result<(Vec<LiveWorld>, u64, u32), String> {
+    let slot = std::fs::read_to_string(dir.join("checkpoint.json")).map_err(|e| format!("training checkpoint: {e}"))?;
+    if !matches!(slot.trim(), "checkpoint-a" | "checkpoint-b") { return Err("invalid training checkpoint pointer".into()); }
+    let dir = dir.join(slot.trim());
+    let state: TrainingCheckpoint = serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    if state.train_seed != spec.train_seed || state.pairs != spec.pairs || state.window_ticks != spec.window_ticks
+        || state.sigma != spec.sigma || state.stomach_aware_reward != spec.stomach_aware_reward
+        || serde_json::to_string(&state.curiosity).map_err(|e| e.to_string())? != serde_json::to_string(&spec.curiosity).map_err(|e| e.to_string())?
+        || state.worlds.len() != spec.worlds {
+        return Err("checkpoint training settings differ (seed, pairs, window, sigma, reward, curiosity or worlds)".into());
+    }
+    let policy: Vec<_> = lineages.iter().map(|l| l.founder).collect();
+    if state.lineages.iter().map(|l| l.0).collect::<Vec<_>>() != policy { return Err("checkpoint trained lineages differ".into()); }
+    *lineages = state.lineages.into_iter().map(|(founder, theta, adam, template)| Lineage { founder, theta, adam, template }).collect();
+    let mut worlds = Vec::new();
+    for state in state.worlds {
+        let saved = cubarium_voxel_sim::saved::load(&dir.join(format!("world-{}", state.id)), &policy)?;
+        let mut sim = Sim::ambient(saved.world, saved.flora, saved.fauna, cubarium_voxel_sim::SimConfig { threads: 1, overlap: false, water_every: 1 });
+        prepare(&mut sim, spec, lineages);
+        worlds.push(LiveWorld { id: state.id, sim, ecology: spec.ecology.clone(), info: state.info,
+            windows: state.windows, memory: super::curiosity::Memory::from_state(state.familiarity) });
+    }
+    Ok((worlds, state.next_fresh_seed, state.next_generation))
+}
+
+fn check_world(run: &super::staging::Run, world: &LiveWorld, window: Option<&cubarium_voxel_sim::staged::Window>) -> Result<String, String> {
+    let result = super::staging::instant(&world.sim).and_then(|()| match window {
+        Some(w) => w.verdict(&world.sim, &super::staging::check_config(&run.dir)),
+        None => Ok("drivers and ledgers OK".into()),
+    });
+    if let Err(why) = result {
+        let dir = run.dir.join("worlds").join(format!("world-{}", world.id));
+        let save = super::staging::save_world(&dir, &world.sim);
+        let why = format!("world {} seed {}: {why}{}", dir.display(), world.info.seed,
+            save.err().map_or(String::new(), |e| format!("; checkpoint failed: {e}")));
+        run.fail(why.clone());
+        Err(why)
+    } else { result }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn staged_window(world: &mut LiveWorld, tables: &[Option<VariantTable>], first: &[usize], spec: &LiveSpec,
+    run: &super::staging::Run, generation: u32, full: bool) -> Result<WindowResult, String> {
+    run.check()?;
+    check_world(run, world, None)?;
+    let started = Instant::now();
+    let mut check = full.then(|| cubarium_voxel_sim::staged::Window::open(&world.sim));
+    let memory = std::mem::take(&mut world.memory);
+    let mut w = window::Window::begin_with(&mut world.sim, tables, first, spec.window_ticks, &spec.curiosity, memory);
+    w.stomach_aware_reward = spec.stomach_aware_reward;
+    while !w.done() {
+        if let Err(why) = run.check() {
+            let mut r = w.finish(&world.sim, world.id);
+            world.memory = std::mem::take(&mut r.memory);
+            return Err(why);
+        }
+        w.step(&mut world.sim);
+        if let Some(check) = &mut check { check.watch(&world.sim); }
+    }
+    let mut result = w.finish(&world.sim, world.id);
+    world.memory = std::mem::take(&mut result.memory);
+    world.windows += 1;
+    let note = check_world(run, world, check.as_ref())?;
+    let dir = run.dir.join("worlds").join(format!("world-{}", world.id));
+    super::staging::save_world(&dir, &world.sim).and_then(|()| run.status(generation, u64::from(world.windows),
+        spec.window_ticks as f64 / started.elapsed().as_secs_f64().max(1e-9), &note, "RUNNING"))
+        .inspect_err(|why| run.fail(format!("world {} seed {}: checkpoint/status failed: {why}", dir.display(), world.info.seed)))?;
+    Ok(result)
 }
 
 /// Run the loop. Returns the records it wrote.
 pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
+    super::staging::execute(&spec.out, spec.resume.is_some(), spec.wall_seconds, spec.first_generation_seconds, |run| train_inner(spec, run))
+}
+
+fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Result<Vec<GenerationRecord>, String> {
     let run_started = Instant::now();
+    if spec.worlds == 0 || spec.pairs == 0 || spec.window_ticks == 0 { return Err("worlds, pairs and window length must be positive".into()); }
+    cubarium_voxel::world::set_thread_override(1);
+    println!("# pools: workers={} world-threads=1 tail-cores=1", spec.threads.max(1).min(spec.worlds));
     std::fs::create_dir_all(&spec.out)
         .map_err(|e| format!("cannot create {}: {e}", spec.out.display()))?;
     let mut lineages: Vec<Lineage> = Vec::new();
@@ -300,28 +431,33 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
     }
     lineages.sort_by_key(|l| l.founder.index());
 
-    // Found the worlds, in parallel.
-    let t = Instant::now();
-    let bases: Vec<(usize, u64)> = (0..spec.worlds)
-        .map(|i| (i, spec.world_seed + i as u64 * WORLD_SEED_STRIDE))
-        .collect();
-    let mut worlds: Vec<LiveWorld> = parallel(bases, spec.threads, |(slot, base)| {
-        found(spec, slot, base, &lineages)
-    });
-    let mut next_fresh_seed = spec.world_seed + spec.worlds as u64 * WORLD_SEED_STRIDE;
-    println!(
-        "# founded {} worlds in {:.1} s: seeds {:?}",
-        worlds.len(),
-        t.elapsed().as_secs_f64(),
-        worlds.iter().map(|w| w.info.seed).collect::<Vec<_>>()
-    );
-    let mut log = std::fs::File::create(spec.out.join("generations.jsonl"))
+    let (mut worlds, mut next_fresh_seed, first_generation) = if let Some(dir) = &spec.resume {
+        load_checkpoint(spec, dir, &mut lineages)?
+    } else {
+        let bases: Vec<_> = (0..spec.worlds).map(|i| (i, spec.world_seed + i as u64 * WORLD_SEED_STRIDE)).collect();
+        (parallel(bases, spec.threads, |(slot, base)| found(spec, slot, base, &lineages)),
+            spec.world_seed + spec.worlds as u64 * WORLD_SEED_STRIDE, 0)
+    };
+    for world in &worlds { check_world(run, world, None)?; }
+    println!("# {} {} worlds at generation {first_generation}: seeds {:?}",
+        if spec.resume.is_some() { "restored" } else { "founded" }, worlds.len(), worlds.iter().map(|w| w.info.seed).collect::<Vec<_>>());
+    if spec.resume.is_some() {
+        super::staging::repair_log(&spec.out.join("generations.jsonl"), |r| r["generation"].as_u64().is_some_and(|g| g < u64::from(first_generation)))?;
+    }
+    let mut log = std::fs::OpenOptions::new().create(true).write(true)
+        .append(spec.resume.is_some()).truncate(spec.resume.is_none()).open(spec.out.join("generations.jsonl"))
         .map_err(|e| format!("cannot write the generation log: {e}"))?;
-    save_centres(spec, &lineages, 0, "gen0");
+    save_centres(spec, &lineages, first_generation, "latest")?;
+    save_checkpoint(spec, &lineages, &worlds, first_generation, next_fresh_seed)?;
+    let mut last_gen_wall = 0.0;
+    let mut next_generation = first_generation;
 
     let mut records = Vec::new();
     let candidates = 2 * spec.pairs;
-    for generation in 0..spec.generations {
+    for generation in first_generation..spec.generations {
+        if run.boundary(generation, last_gen_wall) { break; }
+        run.check()?;
+        run.status(generation, 0, 0.0, "drivers and ledgers OK", "RUNNING")?;
         let started = Instant::now();
         // 1. This generation's tables, and where each world's placement starts.
         let mut tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
@@ -348,9 +484,11 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
         // 2. Every world runs its window.
         let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
         let tables_ref = &tables;
-        let results: Vec<WindowResult> = parallel(jobs, spec.threads, |(w, first)| {
-            window::run_window_with_reward(w, tables_ref, &first, spec.window_ticks, &spec.curiosity, spec.stomach_aware_reward)
+        let results: Vec<Result<WindowResult, String>> = parallel(jobs, spec.threads, |(w, first)| {
+            staged_window(w, tables_ref, &first, spec, run, generation, generation == first_generation || w.windows == 0)
         });
+        let results: Vec<WindowResult> = results.into_iter().collect::<Result<_, _>>()?;
+        run.check()?;
 
         // 3. One update per lineage, from the scores normalised within each world.
         let mut updates = Vec::new();
@@ -435,6 +573,7 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
             found(spec, slot, seed, &lineages)
         });
         for (((i, reason), (_, seed)), new) in bad.into_iter().zip(fresh).zip(founded) {
+            check_world(run, &new, None)?;
             worlds[i] = new;
             replaced.push(Replacement {
                 world: i,
@@ -457,28 +596,24 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
             readout: pooled,
         };
         println!("{}", summary_line(&record));
-        let _ = writeln!(
-            log,
-            "{}",
-            serde_json::to_string(&record).map_err(|e| e.to_string())?
-        );
-        let _ = log.flush();
+        writeln!(log, "{}", serde_json::to_string(&record).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("generation log: {e}"))?;
+        log.flush().map_err(|e| format!("generation log flush: {e}"))?;
+        next_generation = generation + 1;
         records.push(record);
-        if spec.save_every > 0 && (generation + 1) % spec.save_every == 0 {
-            save_centres(
-                spec,
-                &lineages,
-                generation + 1,
-                &format!("gen{}", generation + 1),
-            );
+        if spec.save_every > 0 && next_generation % spec.save_every == 0 {
+            save_centres(spec, &lineages, next_generation, "latest")?;
+            save_checkpoint(spec, &lineages, &worlds, next_generation, next_fresh_seed)?;
         }
-        if run_started.elapsed().as_secs_f64() > spec.wall_seconds {
-            println!("# wall budget reached after generation {generation}");
+        last_gen_wall = started.elapsed().as_secs_f64();
+        // STOP/wall pauses always commit the entire current boundary, even between saves.
+        if (next_generation < spec.generations || run.dir.join("STOP").exists()) && run.boundary(next_generation, last_gen_wall) {
+            save_checkpoint(spec, &lineages, &worlds, next_generation, next_fresh_seed)?;
             break;
         }
     }
-    let last = records.last().map_or(0, |r| r.generation + 1);
-    save_centres(spec, &lineages, last, "final");
+    save_centres(spec, &lineages, next_generation, "final")?;
+    save_checkpoint(spec, &lineages, &worlds, next_generation, next_fresh_seed)?;
     Ok(records)
 }
 
@@ -523,4 +658,100 @@ pub fn summary_line(r: &GenerationRecord) -> String {
 pub fn final_centre(out: &Path, founder: Founder) -> PathBuf {
     out.join("centres")
         .join(format!("final-{}.json", founder.name()))
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    fn setup(name: &str) -> (LiveSpec, Vec<Lineage>, Vec<LiveWorld>) {
+        let out = std::env::temp_dir().join(format!("cub-live-recovery-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).unwrap();
+        let path = PathBuf::from(format!("transfer:{}/../../config/training/centres/r2-littershredder-upd512.json", env!("CARGO_MANIFEST_DIR")));
+        let template = VoxelPolicyFile::load_or_transfer(&path).unwrap();
+        let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template }];
+        let cfg = cubarium_voxel::Config { width: 64, height: 24, depth: 6, ..Default::default() };
+        let mut world = cubarium_voxel_sim::scene::authored(cfg.clone());
+        let mut flora = cubarium_voxel_flora::Flora::new(Default::default());
+        let mut fauna = cubarium_voxel_fauna::Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
+        let mut counts = [0; Founder::COUNT];
+        counts[Founder::Blind.index()] = 1;
+        cubarium_voxel_sim::habitat::seed_with_founder_counts(&mut world, &mut flora, &mut fauna, counts);
+        let spec = LiveSpec { centres: vec![(Founder::Blind, path)], worlds: 1, threads: 1, pairs: 1,
+            window_ticks: 100, generations: 2, wall_seconds: 60.0, first_generation_seconds: 60.0,
+            sigma: 0.05, learning_rate: 0.01, train_seed: 3, world_seed: 7, water_every: 1,
+            population_cap: 100, save_every: 1, out, resume: None, ecology: EcologyParams::defaults(),
+            world: Some(cfg), curiosity: Default::default(), stomach_aware_reward: false };
+        let mut sim = Sim::ambient(world, flora, fauna, cubarium_voxel_sim::SimConfig { threads: 1, overlap: false, water_every: 1 });
+        prepare(&mut sim, &spec, &lineages);
+        for _ in 0..10 { sim.step(); }
+        let info = world::FoundInfo { seed: 7, accepted: true, lake_rejected: 0, habitat_rejected: 0,
+            founders: counts, stands: sim.flora().view().stands.len() };
+        let mut w = LiveWorld { id: 0, sim, ecology: spec.ecology.clone(), info, windows: 1, memory: Default::default() };
+        let id = w.sim.fauna().view().animals[0].id;
+        let c = super::super::curiosity::LineageCuriosity { weight: 1.0, memory_min: 2.0, cell_bl: 1.0 };
+        let g = super::super::curiosity::Geometry::of(w.sim.fauna().config().founder(Founder::Blind), &c);
+        w.memory.observe(id, &g, 0.0, 0.0);
+        w.memory.advance();
+        w.memory.observe(id, &g, 1.0, 0.0);
+        // Nonzero optimizer history and a changed centre must survive too.
+        let scores = [1.0, -1.0];
+        let l = &mut lineages[0];
+        ascend(&mut l.theta, &mut l.adam, &scores, spec.sigma, spec.train_seed, 0);
+        (spec, lineages, vec![w])
+    }
+
+    #[test]
+    fn pause_restores_same_ids_ticks_familiarity_and_optimizer() {
+        let (spec, mut lineages, worlds) = setup("pause");
+        let ids: Vec<_> = worlds[0].sim.fauna().view().animals.iter().map(|a| a.id).collect();
+        let tick = worlds[0].sim.world().tick();
+        let optimizer = serde_json::to_string(&lineages[0].adam).unwrap();
+        let theta = lineages[0].theta.clone();
+        super::super::staging::execute(&spec.out, false, 60.0, 60.0, |run| {
+            save_checkpoint(&spec, &lineages, &worlds, 1, 1007)?;
+            std::fs::write(spec.out.join("STOP"), "pause").unwrap();
+            assert!(run.boundary(1, 0.01));
+            Ok(())
+        }).unwrap();
+        assert!(spec.out.join("PAUSED").is_file());
+        super::super::staging::execute(&spec.out, true, 60.0, 60.0, |_| {
+            let (mut restored, seed, generation) = load_checkpoint(&spec, &spec.out, &mut lineages)?;
+            assert_eq!((seed, generation), (1007, 1));
+            assert_eq!(restored[0].sim.world().tick(), tick);
+            assert_eq!(restored[0].sim.fauna().view().animals.iter().map(|a| a.id).collect::<Vec<_>>(), ids);
+            assert_eq!(lineages[0].theta, theta);
+            assert_eq!(serde_json::to_string(&lineages[0].adam).unwrap(), optimizer);
+            assert_eq!(restored[0].memory.now(), worlds[0].memory.now());
+            assert!(restored[0].memory.knows(ids[0]));
+            let c = super::super::curiosity::LineageCuriosity { weight: 1.0, memory_min: 2.0, cell_bl: 1.0 };
+            let g = super::super::curiosity::Geometry::of(restored[0].sim.fauna().config().founder(Founder::Blind), &c);
+            let mut before = worlds[0].memory.clone();
+            assert_eq!(restored[0].memory.observe(ids[0], &g, 0.0, 0.0), before.observe(ids[0], &g, 0.0, 0.0));
+            cubarium_voxel_sim::saved::driven(restored[0].sim.fauna())?;
+            // Continue the restored world, rather than refounding it.
+            restored[0].sim.step();
+            assert_eq!(restored[0].sim.world().tick(), tick + 1);
+            Ok(())
+        }).unwrap();
+        assert!(spec.out.join("DONE").is_file());
+        std::fs::remove_dir_all(&spec.out).unwrap();
+    }
+
+    #[test]
+    fn failed_training_checkpoint_keeps_the_previous_boundary() {
+        let (spec, mut lineages, worlds) = setup("write-failure");
+        save_checkpoint(&spec, &lineages, &worlds, 1, 1007).unwrap();
+        let old = std::fs::read_to_string(spec.out.join("checkpoint.json")).unwrap();
+        // This is a deterministic unwritable destination even when the suite runs as root.
+        let target = if old == "checkpoint-a" { "checkpoint-b" } else { "checkpoint-a" };
+        std::fs::write(spec.out.join(target), "obstruction").unwrap();
+        let err = super::super::staging::execute(&spec.out, false, 60.0, 60.0, |_| save_checkpoint(&spec, &lineages, &worlds, 2, 2007)).unwrap_err();
+        assert!(err.contains(target), "{err}");
+        assert!(spec.out.join("FAILED").is_file());
+        assert_eq!(std::fs::read_to_string(spec.out.join("checkpoint.json")).unwrap(), old);
+        assert_eq!(load_checkpoint(&spec, &spec.out, &mut lineages).unwrap().2, 1);
+        std::fs::remove_dir_all(&spec.out).unwrap();
+    }
 }

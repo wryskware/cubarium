@@ -70,6 +70,7 @@ fn spec(out: PathBuf, generations: u32, resume: bool) -> SearchSpec {
         seeds_per_generation: 1,
         generations,
         wall_seconds: 1e9,
+        first_generation_seconds: 900.0,
         sigma0: 0.3,
         threads: 3,
         tail_cores: 1,
@@ -205,4 +206,32 @@ fn a_resumed_run_restores_the_cma_state_and_the_centres_exactly() {
             c.lineage
         );
     }
+}
+
+/// Boundary recovery with STOP, without requiring a tuned ecology to pass.
+#[test]
+fn stop_pauses_search_and_resume_runs_the_next_generation() {
+    let out = scratch("stop-resume");
+    std::fs::create_dir_all(&out).unwrap();
+    let mut spec = spec(out.clone(), 1, false);
+    // Mechanism-only empty fauna: three tiny worlds, a few ticks each.
+    spec.centres.clear();
+    spec.eval.founders = [0; Founder::COUNT];
+    spec.eval.asked_seed = true;
+    spec.eval.world.width = 32;
+    spec.eval.world.depth = 4;
+    spec.eval.horizon_ticks = 4;
+    spec.eval.window_ticks = 2;
+    spec.brain_pairs = 0;
+    spec.threads = 1;
+    std::fs::write(out.join("STOP"), "pause").unwrap();
+    assert!(search(&spec).unwrap().is_empty());
+    assert!(out.join("PAUSED").is_file());
+    assert_eq!(Checkpoint::load(&out).unwrap().next_generation, 0);
+    spec.resume = Some(out.clone());
+    assert_eq!(search(&spec).unwrap().len(), 1);
+    assert_eq!(Checkpoint::load(&out).unwrap().next_generation, 1);
+    assert!(out.join("DONE").is_file());
+    assert!(!out.join("PAUSED").exists());
+    std::fs::remove_dir_all(out).unwrap();
 }

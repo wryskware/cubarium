@@ -38,6 +38,7 @@ pub mod readout;
 pub mod screen;
 pub mod search;
 pub mod start;
+pub mod staging;
 pub mod targets;
 pub mod threads;
 pub mod trainer;

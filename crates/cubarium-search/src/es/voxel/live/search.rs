@@ -404,6 +404,9 @@ pub struct EvalSpec {
     pub start: super::start::StartSet,
     /// The burn-in before scoring.
     pub burn_in: super::start::BurnIn,
+    /// Runtime-only staged run protocol.
+    #[serde(skip)]
+    pub staging: Option<super::staging::Segment>,
 }
 
 impl EvalSpec {
@@ -429,6 +432,7 @@ impl EvalSpec {
             asked_seed: false,
             start: super::start::StartSet::E0,
             burn_in: super::start::BurnIn::default(),
+            staging: None,
         }
     }
 }
@@ -855,12 +859,28 @@ impl EvalRun {
             spec.burn_in.align_ticks,
             &sim.world().config().day,
         );
+        if let Some(stage) = &spec.staging {
+            if let Err(why) = stage.run.check().and_then(|()| stage.check_world(&sim, info.seed, None).map(|_| ())) {
+                record.burn_in_stopped = Some(why);
+            }
+        }
+        let mut burn_check = spec.staging.as_ref().filter(|s| s.full).map(|_| cubarium_voxel_sim::staged::Window::open(&sim));
         let mut burnt = 0u64;
-        while burnt < burn {
+        while burnt < burn && record.burn_in_stopped.is_none() {
+            if let Some(stage) = &spec.staging {
+                if let Err(why) = stage.run.check() { record.burn_in_stopped = Some(why); break; }
+            }
             sim.step();
             retain_losses(&mut lost_required_names, required_roster.losses(&Presence::of(&sim)));
             burnt += 1;
+            if let Some(check) = &mut burn_check { check.watch(&sim); }
             if burnt.is_multiple_of(TICKS_PER_MIN) {
+                if let Some(stage) = &spec.staging {
+                    if let Err(why) = stage.check_world(&sim, info.seed, burn_check.as_ref()).map(|_| ()) {
+                        record.burn_in_stopped = Some(why); break;
+                    }
+                    burn_check = None;
+                }
                 let total = sim.fauna().view().animals.len();
                 if total > spec.abort_animals {
                     record.burn_in_stopped = Some(format!(
@@ -1028,8 +1048,14 @@ impl EvalRun {
             Window::begin_with(&mut self.sim, tables, first_pair, ticks, &spec.curiosity, memory);
         w.stomach_aware_reward = spec.band.stomach_aware_reward;
         let mut halt = None;
+        let mut check = spec.staging.as_ref().filter(|s| s.full && self.elapsed == 0)
+            .map(|_| cubarium_voxel_sim::staged::Window::open(&self.sim));
         while !w.done() {
+            if let Some(stage) = &spec.staging {
+                if let Err(why) = stage.run.check() { halt = Some(why); break; }
+            }
             w.step(&mut self.sim);
+            if let Some(check) = &mut check { check.watch(&self.sim); }
             self.elapsed += 1;
             retain_losses(&mut self.trace.lost_required_names, self.required_roster.losses(&Presence::of(&self.sim)));
             self.trace.lost_required = self.trace.lost_required_names.len();
@@ -1095,6 +1121,23 @@ impl EvalRun {
         self.body_scores.extend(r.scores.iter().copied());
         self.readouts.push(r.readout);
         self.keys.push(key);
+        if let Some(stage) = &spec.staging {
+            let checked = if halt.as_ref().is_some_and(|why| why.starts_with("wall budget:")) {
+                Ok("deadline; partial window saved, boundary will be replayed".into())
+            } else { stage.check_world(&self.sim, self.info.seed, check.as_ref()) };
+            match checked {
+                Ok(note) => {
+                    let dir = stage.world_dir(self.info.seed);
+                    if let Err(why) = super::staging::save_world(&dir, &self.sim)
+                        .and_then(|()| stage.run.status(stage.generation, self.keys.len() as u64,
+                            self.elapsed as f64 / self.started.elapsed().as_secs_f64().max(1e-9), &note, "RUNNING")) {
+                        stage.run.fail(format!("world {} seed {}: checkpoint/status failed: {why}", dir.display(), self.info.seed));
+                        halt = Some(why);
+                    }
+                }
+                Err(why) => halt = Some(why),
+            }
+        }
         self.stopped = halt;
         let (w, fl, fa) = self.sim.layers();
         self.baselines.push(super::start::Baseline::of(w, fl, fa));
@@ -1502,6 +1545,8 @@ pub struct SearchSpec {
     pub seeds_per_generation: usize,
     pub generations: u32,
     pub wall_seconds: f64,
+    /// Calibration deadline for the first boundary, wall seconds including setup.
+    pub first_generation_seconds: f64,
     pub sigma0: f64,
     pub threads: usize,
     /// Cores a generation's worlds share once none is left queued ([`super::threads`]): a
@@ -1713,8 +1758,11 @@ fn lockstep(
     logs: &mut Vec<WindowLog>,
 ) -> Result<Vec<Evaluation>, String> {
     let mut runs: Vec<EvalRun> = parallel(jobs.to_vec(), spec.threads, |(k, seed)| {
-        EvalRun::begin(&params[k], seed, drivers, &spec.eval)
+        let mut eval = spec.eval.clone();
+        if let Some(s) = &mut eval.staging { s.arm = format!("candidate{k}"); }
+        EvalRun::begin(&params[k], seed, drivers, &eval)
     });
+    if let Some(s) = &spec.eval.staging { s.run.check()?; }
     let candidates = 2 * spec.brain_pairs;
     let budget = ThreadBudget::new(spec.tail_cores);
     let mut window = 0u32;
@@ -1757,6 +1805,7 @@ fn lockstep(
                 let scores = r.window(tables_ref, &first, key);
                 (scores, r.last_lineages().clone())
             });
+        if let Some(s) = &spec.eval.staging { s.run.check()?; }
         let mut lineages = Vec::new();
         for ((f, theta, adam), k) in thetas.iter_mut().zip(&keys) {
             let per_world: Vec<Vec<(usize, f64)>> = results
@@ -2007,11 +2056,19 @@ pub fn start_from(search: &Genome, start: &Genome) -> Result<Genome, String> {
 /// evaluated so far), `mean.toml` (the search mean), and each as a resolved parameter
 /// file (`best-params.toml`, `mean-params.toml`) under `out`.
 pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
+    super::staging::execute(&spec.out, spec.resume.is_some(), spec.wall_seconds, spec.first_generation_seconds, |run| search_inner(spec, run))
+}
+
+fn search_inner(spec: &SearchSpec, run: &std::sync::Arc<super::staging::Run>) -> Result<Vec<SearchRecord>, String> {
     let mut configured = spec.clone();
     configured.eval.required_roster = Some(spec.eval.required_roster.clone().unwrap_or_else(||
         RequiredRoster::declared(&spec.eval.founders, &EcologyParams::Genome(spec.genome.clone()).flora(spec.eval.world.voxel_m))));
     configured.eval.driver_sources = spec.centres.iter().map(|(f, p)| (*f, p.display().to_string())).collect();
-    let spec = &configured;
+    cubarium_voxel::world::set_thread_override(1);
+    configured.threads = spec.threads.max(1);
+    configured.tail_cores = spec.tail_cores.max(1).min(configured.threads);
+    let spec = &mut configured;
+    println!("# pool limits: workers={} tail-cores={} world-threads=1 while queued", spec.threads, spec.tail_cores);
     let run_started = Instant::now();
     std::fs::create_dir_all(&spec.out)
         .map_err(|e| format!("cannot create {}: {e}", spec.out.display()))?;
@@ -2087,6 +2144,9 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             cma.sigma()
         );
     }
+    if spec.resume.is_some() {
+        super::staging::repair_log(&spec.out.join("generations.jsonl"), |r| r["generation"].as_u64().is_some_and(|g| g < u64::from(first_generation)))?;
+    }
     let mut log = std::fs::OpenOptions::new()
         .create(true)
         .append(spec.resume.is_some())
@@ -2096,12 +2156,14 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         .map_err(|e| format!("cannot write the log: {e}"))?;
     let mut records = Vec::new();
     let mut last_gen_wall = 0.0;
+    save_checkpoint(&spec.out, first_generation, brain_step, &cma, &thetas, &best)?;
     for generation in first_generation..spec.generations {
-        if generation > first_generation && run_started.elapsed().as_secs_f64() + last_gen_wall > spec.wall_seconds
-        {
-            println!("# wall budget: stopping before generation {generation}");
-            break;
-        }
+        if run.boundary(generation, last_gen_wall) { break; }
+        run.check()?;
+        run.status(generation, 0, 0.0, "founding", "RUNNING")?;
+        spec.eval.staging = Some(super::staging::Segment {
+            run: run.clone(), generation, full: generation == first_generation, arm: String::new(),
+        });
         let started = Instant::now();
         let seeds: Vec<u64> = (0..spec.seeds_per_generation)
             .map(|s| {
@@ -2141,7 +2203,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .zip(&rosters)
             .map(|(s, r)| spec.screen.verdict_with(s, r))
             .collect();
-        let run: Vec<bool> = verdicts
+        let run_candidates: Vec<bool> = verdicts
             .iter()
             .enumerate()
             .map(|(k, v)| k == reference_k || *v != Verdict::Refused)
@@ -2151,9 +2213,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             .map(|(f, t, _)| (*f, EpisodeDriver::gru(t, *f).expect("a validated centre")))
             .collect();
         let jobs: Vec<(usize, u64)> = (0..candidates.len())
-            .filter(|&k| run[k])
+            .filter(|&k| run_candidates[k])
             .flat_map(|k| seeds.iter().map(move |&s| (k, s)))
             .collect();
+        println!("# pools: workers={} tail-cores={} compute-pool={} water-pool={} max-world-threads={}",
+            jobs.len().min(spec.threads), spec.tail_cores, if spec.tail_cores > 1 { spec.tail_cores } else { 0 },
+            if spec.tail_cores > 1 { spec.tail_cores } else { 0 }, spec.tail_cores);
         let mut windows = Vec::new();
         let mut evals: Vec<Evaluation> = if spec.brain_pairs > 0 {
             lockstep(
@@ -2170,9 +2235,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             let tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
             let budget = ThreadBudget::new(spec.tail_cores);
             parallel_shared(jobs.clone(), spec.threads, &budget, |(k, seed), b| {
-                evaluate_shared(&params[k], seed, &drivers, &tables, &spec.eval, Some(b))
+                let mut eval = spec.eval.clone();
+                if let Some(s) = &mut eval.staging { s.arm = format!("candidate{k}"); }
+                evaluate_shared(&params[k], seed, &drivers, &tables, &eval, Some(b))
             })
         };
+        run.check()?;
         let references: Vec<Evaluation> = jobs
             .iter()
             .zip(&evals)
@@ -2190,7 +2258,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
         // scores above the worst of them.
         let ran: Vec<Option<f64>> = (0..candidates.len())
             .map(|k| {
-                run[k].then(|| {
+                run_candidates[k].then(|| {
                     let pens: Vec<f64> = jobs
                         .iter()
                         .zip(&evals)
@@ -2226,7 +2294,7 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 refusals: rosters[k].refusals(),
                 roster: rosters[k].clone(),
                 screen: verdicts[k],
-                soft: if run[k] { spec.screen.soft_with(&screens[k], &rosters[k]) } else { 0.0 },
+                soft: if run_candidates[k] { spec.screen.soft_with(&screens[k], &rosters[k]) } else { 0.0 },
                 screened_out,
                 lost_required: mine.iter().map(|e| e.lost_required).sum(),
                 lost_required_names: {
@@ -2262,14 +2330,10 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
             elapsed_s: run_started.elapsed().as_secs_f64(),
             candidates: recs,
         };
-        last_gen_wall = record.wall_s;
         println!("{}", summary(&record, best.as_ref().map(|b| b.0)));
-        let _ = writeln!(
-            log,
-            "{}",
-            serde_json::to_string(&record).map_err(|e| e.to_string())?
-        );
-        let _ = log.flush();
+        writeln!(log, "{}", serde_json::to_string(&record).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("generation log: {e}"))?;
+        log.flush().map_err(|e| format!("generation log flush: {e}"))?;
         let mean = EcologyParams::Genome(start.from_search(cma.mean()));
         let note = format!("Ecology search mean after generation {generation}. Training only.");
         mean.save(&spec.out.join("mean.toml"), &note)?;
@@ -2294,26 +2358,25 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 out.write(&spec.out.join(format!("centre-{}.json", f.name())))?;
             }
         }
-        Checkpoint {
-            next_generation: generation + 1,
-            brain_step,
-            cma: cma.clone(),
-            centres: thetas
-                .iter()
-                .map(|(f, theta, adam)| CentreState {
-                    lineage: f.name().into(),
-                    theta: theta.clone(),
-                    adam: adam.clone(),
-                })
-                .collect(),
-            best: best
-                .as_ref()
-                .map(|(pen, g, gen_)| (*pen, g.to_toml("best so far"), *gen_)),
-        }
-        .save(&spec.out)?;
+        save_checkpoint(&spec.out, generation + 1, brain_step, &cma, &thetas, &best)?;
         records.push(record);
+        last_gen_wall = started.elapsed().as_secs_f64();
+        if (generation + 1 < spec.generations || run.dir.join("STOP").exists()) && run.boundary(generation + 1, last_gen_wall) { break; }
+        // Only the current generation's world checkpoints are retained.
+        for entry in std::fs::read_dir(spec.out.join("worlds")).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(&format!("g{generation}-")) { std::fs::remove_dir_all(entry.path()).map_err(|e| e.to_string())?; }
+        }
     }
     Ok(records)
+}
+
+fn save_checkpoint(out: &std::path::Path, next_generation: u32, brain_step: u32,
+    cma: &Cma, thetas: &[(Founder, Vec<f64>, Adam)], best: &Option<(f64, Genome, u32)>) -> Result<(), String> {
+    Checkpoint { next_generation, brain_step, cma: cma.clone(),
+        centres: thetas.iter().map(|(f, theta, adam)| CentreState { lineage: f.name().into(), theta: theta.clone(), adam: adam.clone() }).collect(),
+        best: best.as_ref().map(|(pen, g, generation)| (*pen, g.to_toml("best so far"), *generation)),
+    }.save(out)
 }
 
 fn summary(r: &SearchRecord, best: Option<f64>) -> String {
