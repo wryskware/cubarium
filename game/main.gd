@@ -334,8 +334,11 @@ func open_picker() -> void:
 	picker.open()
 
 
-## Back from a screen to the menu under it.
+## Back from a screen to the menu under it. Leaving the picker cancels what it was
+## drawing or founding.
 func close_screen(screen: Control) -> void:
+	if screen == picker:
+		picker.leave()
 	screen.visible = false
 	if not menu.visible:
 		open_menu()
@@ -345,6 +348,7 @@ func close_screen(screen: Control) -> void:
 
 func close_all() -> void:
 	dialog.cancel()
+	picker.leave()
 	picker.visible = false
 	slots.visible = false
 	menu.visible = false
@@ -461,17 +465,19 @@ func _on_notice(n: Dictionary) -> void:
 
 # --- New worlds ---------------------------------------------------------------------
 
-## Run candidate `i`: "" or why not.
-func promote_candidate(i: int) -> String:
-	var problem: String = session.promote(i)
-	if problem != "":
-		return problem
+## Found candidate `i` on its own terrain: "" once it has started, or why not. The
+## picker follows it (`session.founding()`) and calls `on_founded` when it runs.
+func found_candidate(i: int) -> String:
+	return session.promote(i)
+
+
+## The picked world is founded and installed: close everything over it and run it.
+func on_founded(_founding: Dictionary) -> void:
 	inspect.close()
 	close_all()
 	world_view.reset_framing()
 	set_player_paused(false)
 	notices.add("A new world.")
-	return ""
 
 
 # --- Inspect ------------------------------------------------------------------------

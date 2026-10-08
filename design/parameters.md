@@ -344,7 +344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.lake_shelf_depth_m` | (absent) | m under the water | [0, inf) | 0.125–0.5 | - | placeholder | the marsh shelf's depth at its lakeward edge (one voxel at the shore) |
 | `world.landform.terrarium.lake_flat_m` | (absent) | m | [0, inf) | 0–1.5 | - | placeholder | width of the wet flats outside the shore, graded to the water's surface |
 | `world.landform.terrarium.lake_scale` | (absent) | x | (0, inf) | 0.5–3 | - | placeholder | the lake's size: multiplies its length, width, bay, meander, depth (short of bedrock) and marsh; not the water level |
-| `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
+| `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1.125 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
 | `world.landform.terrarium.yard` | (absent) | fraction of the depth | [0, 1) | 0.2–0.5 | - | placeholder | how deep the yard held clear for the lake is |
 | `world.landform.terrarium.pool_m.*` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | a pool's radius around the ring |
 | `world.landform.terrarium.pool_depth_m` | (absent) | m | [0, inf) | 0.125–0.75 | - | placeholder | a pool's depth |

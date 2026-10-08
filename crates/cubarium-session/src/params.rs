@@ -235,7 +235,16 @@ pub struct WorldSpec {
     pub sets: Vec<String>,
     /// A bare world: no stands, no animals.
     pub empty: bool,
+    /// **The water table**, metres over the lowest yard ground: a terrarium landform's
+    /// `water_level_m` ([`cubarium_voxel::Terrarium::water_level_m`]), over the file's or
+    /// the preset's. The new-world picker's water slider (Wrysk 2026-10-08: Low, Medium
+    /// and High are 0.375, 0.75 and 1.125 m). Refused for a landform without one.
+    pub water_level_m: Option<f64>,
 }
+
+/// The new-world picker's water steps (Wrysk 2026-10-08): Low, Medium and High, the
+/// terrarium's `water_level_m` in metres — the tables compared on 2026-10-07.
+pub const WATER_LEVELS: [(&str, f64); 3] = [("low", 0.375), ("medium", 0.75), ("high", 1.125)];
 
 impl WorldSpec {
     /// The parameter set this spec names: the file's simulation half (or the defaults),
@@ -280,7 +289,19 @@ impl WorldSpec {
             };
             climate.insert("preset".into(), toml::Value::String(name.clone()));
         }
-        let params = SimParams::from_table(table).map_err(|e| anyhow::anyhow!("the world spec: {e}"))?;
+        let mut params = SimParams::from_table(table).map_err(|e| anyhow::anyhow!("the world spec: {e}"))?;
+        if let Some(level) = self.water_level_m {
+            anyhow::ensure!(
+                level.is_finite() && level >= 0.0,
+                "the world spec's water_level_m is {level}; it is metres over the yard's ground, 0 or more"
+            );
+            match &mut params.world.landform {
+                cubarium_voxel::Landform::Terrarium(t) => t.water_level_m = level,
+                _ => anyhow::bail!(
+                    "the world spec's water_level_m sets a terrarium's water table; this landform has none"
+                ),
+            }
+        }
         params
             .world
             .validate()

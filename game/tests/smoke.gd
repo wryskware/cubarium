@@ -1,8 +1,8 @@
 extends SceneTree
 ## Headless smoke test of the extension:
 ##   godot --headless --path game --script res://tests/smoke.gd [-- --out DIR] [--config PATH]
-## Loads the extension, founds 2 candidates of the smallest size (the desktop terrarium,
-## 256 x 128 x 48), promotes one, steps about 100 ticks, queries summary, populations and
+## Loads the extension, draws 2 terrain candidates of the smallest size (the desktop
+## terrarium, 256 x 128 x 48), founds and runs one, steps about 100 ticks, queries summary, populations and
 ## one animal, takes a view and checks it holds chunks and organisms, saves to a temp path
 ## and loads it back. Prints PASS or FAIL lines and exits 0 only if everything passed.
 
@@ -34,12 +34,15 @@ func _initialize() -> void:
 			out_dir = args[i + 1]
 		elif args[i] == "--config":
 			config = args[i + 1]
+	# A save directory keeps every tick's files and a load reads the newest, so a run
+	# saves into an empty one (an earlier run's later tick would be read back).
+	preload("res://ui/saves.gd").remove_tree(out_dir)
 	check(ClassDB.class_exists("CubariumSession"), "the extension is loaded")
 	if not ClassDB.class_exists("CubariumSession"):
 		state = "done"
 		return
 	session = ClassDB.instantiate("CubariumSession")
-	var refused: String = session.generate_candidates({"config": config, "seed": 7}, 2)
+	var refused: String = session.generate_candidates({"config": config, "seed": "5"}, 2)
 	check(refused == "", "two candidates started (%s)" % refused)
 	state = "founding"
 
@@ -61,12 +64,16 @@ func _process(delta: float) -> bool:
 				check(c[0]["summary"]["seed"] != c[1]["summary"]["seed"], "the two candidates are two worlds")
 				var thumb: Dictionary = session.candidate_view(1)
 				check(thumb.get("full", false) and thumb["voxels"].size() > 0, "a candidate has a whole view")
-				check(session.promote(0) == "", "candidate 0 promoted")
-				check(session.candidates().size() == 0, "the other candidate is dropped")
+				check(session.promote(0) == "", "candidate 0 is being founded")
 				state = "promoted"
 		"promoted":
+			var f: Dictionary = session.founding()
+			if f["state"] == "failed" or f["state"] == "cancelled":
+				check(false, "candidate 0 founded: %s" % f.get("error"))
+				state = "done"
 			var st: Dictionary = session.status()
 			if st["running"] and st["generation"] == 1:
+				check(session.candidates().size() == 0, "the other candidate is dropped")
 				session.pause()
 				state = "pausing"
 		"pausing":
