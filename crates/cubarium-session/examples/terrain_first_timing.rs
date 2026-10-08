@@ -3,7 +3,7 @@
 //! candidate's time, every founding stage's start, the total, and the process's resident
 //! memory before and after. Development measurement only.
 //!
-//! `terrain_first_timing CONFIG [count=4] [seed=N] [threads=0] [tries=3]`
+//! `terrain_first_timing CONFIG [count=4] [seed=N] [threads=0] [tries=3] [water=M]`
 
 use std::time::{Duration, Instant};
 
@@ -28,13 +28,14 @@ fn main() {
     let seed: Option<u64> = arg("seed").and_then(|v| v.parse().ok());
     let threads: usize = arg("threads").and_then(|v| v.parse().ok()).unwrap_or(0);
     let tries: usize = arg("tries").and_then(|v| v.parse().ok()).unwrap_or(3);
+    let water: Option<f64> = arg("water").and_then(|v| v.parse().ok());
     let session = Session::new(SessionOptions {
         exec: SimParams { threads, ..SimParams::default() },
         feed: false,
         placement_tries: tries,
         ..SessionOptions::default()
     });
-    let spec = WorldSpec { config: Some(config.into()), seed, ..WorldSpec::default() };
+    let spec = WorldSpec { config: Some(config.into()), seed, water_level_m: water, ..WorldSpec::default() };
     println!("rss at start {:.0} MB", rss_mb());
     let t0 = Instant::now();
     session.generate_candidates(&spec, count).expect("the spec parses");
