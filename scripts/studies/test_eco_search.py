@@ -7,7 +7,7 @@ import random
 import tempfile
 import unittest
 
-from eco_search import (SepCMA, candidate_order, decode, from_unit, gene_args, improvement,
+from eco_search import (COMPONENTS, SepCMA, candidate_order, decode, from_unit, gene_args, improvement,
                         read_genes, to_unit)
 
 
@@ -149,6 +149,73 @@ class ScorerAdapterTest(unittest.TestCase):
         self.assertEqual(improvement(r, "c0"), -1.5)
         self.assertIsNone(improvement(r, "c1"))
         self.assertIsNone(improvement(r, "c2"))
+
+
+class FakeSearch:
+    """Search with the batch, scorer and census replaced: the staging logic alone."""
+
+    @staticmethod
+    def make(out, generations=3, holdout_every=2, wall_hours=10.0):
+        import io
+        from eco_search import Search, SepCMA
+        genes = [dict(name="a", mode="scale", lo=0.5, hi=2.0, start=1.0)]
+        state = dict(version=1, generation=0, wall_used=0.0, sec_per_wave=None, best=None,
+                     holdout_due=None, genes=genes, es=SepCMA([0.5], 0.15, 2).to_dict(),
+                     args=dict(generations=generations, wall_hours=wall_hours, max_parallel=3,
+                               pool=[1, 2, 3], seeds_per_gen=1, holdout=[9], holdout_every=holdout_every,
+                               rng_seed=1, antithetic=False, genome="/g.toml", **{"lambda": 2}))
+        (out / "generations.tsv").write_text("")
+        (out / "holdout.tsv").write_text("")
+        search = Search(out, state, io.StringIO())
+        search.batches = []
+
+        def run_batch(directory, arms, seeds):
+            search.batches.append((directory.name, list(arms), list(seeds)))
+            state["wall_used"] += 3600.0
+            state["sec_per_wave"] = 3600.0
+            return {(arm, seed): "done" for arm in arms for seed in seeds}
+
+        def score(directory, report=None):
+            names = [arm for arm in search.batches[-1][1]]
+            ranks = {name: float(k) for k, name in enumerate(reversed(names))}
+            summary = lambda name: dict(feasible=True, rankable=True, total_losses=0, mean_P=ranks[name],
+                                        sd_P=0.0, rank=ranks[name],
+                                        components={t: dict(median=0.0) for t in COMPONENTS})
+            return dict(ranking=sorted(names, key=ranks.get), arms={n: summary(n) for n in names},
+                        paired={})
+
+        search.run_batch, search.score = run_batch, score
+        search.expand = lambda values, target: []
+        return search
+
+
+class StagingTest(unittest.TestCase):
+    def test_stop_pauses_and_resume_continues_with_holdouts_on_schedule(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            search = FakeSearch.make(out)
+            (out / "STOP").write_text("")
+            search.run()
+            self.assertTrue((out / "PAUSED").exists())
+            self.assertEqual(search.batches, [])
+            (out / "STOP").unlink()
+            search.run()
+            names = [name for name, _, _ in search.batches]
+            self.assertEqual(names, ["g000", "g001", "h001", "g002"])
+            self.assertTrue((out / "DONE").exists())
+            self.assertEqual(search.batches[2][2], [9], "the holdout runs on the holdout seeds")
+            self.assertEqual(search.batches[2][1], ["base", "mean", "best"])
+            self.assertNotIn(9, [seed for name, _, seeds in search.batches if name.startswith("g") for seed in seeds])
+            saved = json.loads((out / "state.json").read_text())
+            self.assertEqual(saved["generation"], 3)
+
+    def test_the_wall_budget_counts_generation_zero_and_predicts_the_next(self):
+        with tempfile.TemporaryDirectory() as directory:
+            out = Path(directory)
+            search = FakeSearch.make(out, generations=10, holdout_every=0, wall_hours=1.5)
+            search.run()
+            self.assertEqual([name for name, _, _ in search.batches], ["g000"])
+            self.assertIn("wall budget", (out / "DONE").read_text())
 
 
 if __name__ == "__main__":
