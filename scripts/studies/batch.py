@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Launch bounded paired, staged voxel_census runs on this host (stdlib only).
 
-Copy this script into scripts/studies and run-study.py into scripts on a remote
+Copy this script and study_contract.py into scripts/studies, and run-study.py
+into scripts on a remote
 host; no repository is needed. Inputs and the binary are supplied by path.
 --detach returns immediately; inspect STATE.tsv and wait for DONE externally.
 DONE means every child ended, including failures and pauses, not success.
@@ -12,7 +13,6 @@ a rate change branched from a save shows a transient first.
 import argparse
 import csv
 import glob
-import hashlib
 import importlib.util
 import json
 import math
@@ -23,6 +23,8 @@ import resource
 import shlex
 import subprocess
 import sys
+
+from study_contract import founding_required, load_census, read_required, sha256
 
 
 def atomic(path, content):
@@ -103,7 +105,15 @@ def verify_threads(pid, cpus):
             pass
 
 
-def execute(out, jobs, parallel, groups, threads):
+def mem_available():
+    with Path("/proc/meminfo").open() as stream:
+        for line in stream:
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    raise RuntimeError("cannot determine MemAvailable; refusing an unbounded memory envelope")
+
+
+def execute(out, jobs, parallel, groups, threads, mem_per_run_gb=3):
     active = {}
     pending = list(jobs)
     while active or pending:
@@ -124,7 +134,7 @@ def execute(out, jobs, parallel, groups, threads):
 
             def confine():
                 os.sched_setaffinity(0, cpus)
-                limit = 64 * 1024**3
+                limit = min(64 * 1024**3, int(mem_per_run_gb * 1024**3))
                 old_hard = resource.getrlimit(resource.RLIMIT_AS)[1]
                 if old_hard != resource.RLIM_INFINITY:
                     limit = min(limit, old_hard)
@@ -185,6 +195,9 @@ def main(argv=None):
     parser.add_argument("--slot-base", type=int, default=0)
     parser.add_argument("--stage", default="check_min=3 segment_min=15 keep=3")
     parser.add_argument("--detach", action="store_true")
+    parser.add_argument("--required", type=Path, help="TOML: [required] animals, plants; [required.N_ref] founding bodies + eggs")
+    parser.add_argument("--mem-per-run-gb", type=float, default=3)
+
     args = parser.parse_args(argv)
     try:
         if args.threads < 1 or args.slot_base < 0 or not math.isfinite(args.hours) or args.hours <= 0:
@@ -199,7 +212,19 @@ def main(argv=None):
         parallel = args.max_parallel if args.max_parallel is not None else ceiling
         if not 1 <= parallel <= ceiling:
             raise ValueError(f"--max-parallel must be between 1 and {ceiling} (CPU reserve)")
+        if not math.isfinite(args.mem_per_run_gb) or not 0 < args.mem_per_run_gb <= 64:
+            raise ValueError("--mem-per-run-gb must be positive, finite and <= 64")
+        available = mem_available()
+        memory_cap = math.floor(available * 0.8 / (args.mem_per_run_gb * 1024**3))
+        if memory_cap < 1:
+            raise ValueError("insufficient MemAvailable for one run under the 80% memory envelope")
+        parallel = min(parallel, memory_cap)
+        print(f"parallel cap: {parallel} (CPU ceiling {ceiling}, memory cap {memory_cap}; "
+              f"{args.mem_per_run_gb:g} GiB/run, 80% of {available / 1024**3:.2f} GiB MemAvailable)", flush=True)
         starts = {}
+        load_minutes = {}
+        required = read_required(args.required.resolve(strict=True)) if args.required else None
+
         if args.starts:
             for matched in sorted(glob.glob(args.starts)):
                 path = Path(matched).resolve(strict=True)
@@ -209,14 +234,27 @@ def main(argv=None):
                 if seed in starts:
                     raise ValueError(f"multiple starts for seed {seed}")
                 starts[seed] = str(path)
+                minute_value = float((path / "minute").read_text().strip())
+                if not math.isfinite(minute_value) or minute_value < 0 or not minute_value.is_integer():
+                    raise ValueError(f"invalid checkpoint minute: {path}")
+                load_minutes[str(seed)] = int(minute_value)
             if not starts:
                 raise ValueError("--starts matched no checkpoints")
             seeds = sorted(starts)
             start_args = {s: [f"load={starts[s]}"] for s in seeds}
+            rosters = {str(seed): dict(required or founding_required(Path(starts[seed]))) for seed in seeds}
+            for seed in seeds:
+                boundary = load_census(Path(starts[seed]), load_minutes[str(seed)])
+                if boundary:
+                    rosters[str(seed)]["load_census"] = boundary
         else:
             seeds = seed_list(args.seeds)
             config = args.config.resolve(strict=True)
             start_args = {s: [f"config={config}", f"seed={s}"] for s in seeds}
+            if required is None:
+                raise ValueError("fresh --config batches need --required; no founding census exists yet")
+            rosters = {str(seed): required for seed in seeds}
+            load_minutes = {str(seed): 0 for seed in seeds}
         arms = {}
         reserved = ("load=", "resume=", "seed=", "config=", "threads=", "run=", "vitals=", "save=", "check_min=", "segment_min=", "keep=", "pin=", "modes=")
         for arm in args.arm:
@@ -229,6 +267,22 @@ def main(argv=None):
             if args.starts and any(arg.startswith(("preset=", "eggbank=", "introduce=", "world=", "gap=", "night=")) or arg in {"generated", "closed", "nofauna", "still"} for arg in extra):
                 raise ValueError("voxel_census refuses founding overrides beside load= (set= is fine); use --config for these arms")
             arms[name] = extra
+        policies = {}
+        for name, extra in arms.items():
+            policies[name] = {}
+            for argument in extra:
+                if argument.startswith("policy="):
+                    lineage, separator, file = argument[len("policy="):].partition("=")
+                    if not separator or not lineage or not file:
+                        raise ValueError("policy needs policy=LINEAGE=FILE")
+                    path = Path(file).resolve(strict=True)
+                    policies[name][lineage] = dict(path=str(path), sha256=sha256(path))
+        identity = dict(config=dict(path=str(config), sha256=sha256(config)) if args.config else None,
+                        starts={str(seed): {name: sha256(Path(path) / name)
+                                           for name in ("world.bin", "flora.bin", "fauna.bin")}
+                                for seed, path in starts.items()},
+                        policies=policies,
+                        required=dict(path=str(args.required.resolve()), sha256=sha256(args.required)) if args.required else None)
         stage = shlex.split(args.stage)
         if any(not re.fullmatch(r"(check_min|segment_min|keep)=[1-9]\d*", arg) for arg in stage):
             raise ValueError("stage accepts positive check_min, segment_min and keep")
@@ -248,17 +302,20 @@ def main(argv=None):
             commit = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=5, text=True).strip()
         except (OSError, subprocess.SubprocessError):
             commit = None
-        digest = hashlib.sha256()
-        with binary.open("rb") as stream:
-            for block in iter(lambda: stream.read(1024**2), b""):
-                digest.update(block)
-        manifest = dict(arms=arms, seeds=seeds, starts=starts, args=vars(args) | {"out": str(out), "bin": str(binary), "config": str(args.config.resolve()) if args.config else None}, commit=commit, binary_sha256=digest.hexdigest(), l3_groups=groups, max_parallel=parallel, runs=jobs)
+        manifest = dict(arms=arms, seeds=seeds, starts=starts, load_minutes=load_minutes,
+                        start_kind="saved start" if args.starts else "fresh founding",
+                        required={"by_seed": rosters}, identity=identity,
+                        args=vars(args) | {"out": str(out), "bin": str(binary),
+                                           "config": str(args.config.resolve()) if args.config else None,
+                                           "required": str(args.required.resolve()) if args.required else None},
+                        commit=commit, binary_sha256=sha256(binary), l3_groups=groups,
+                        max_parallel=parallel, memory_available_bytes=available, runs=jobs)
         atomic(out / "batch.json", json.dumps(manifest, indent=2) + "\n")
         write_state(out, jobs)
         if args.detach and not detach(out):
             print(f"detached batch: {out}")
             return
-        execute(out, jobs, parallel, groups, args.threads)
+        execute(out, jobs, parallel, groups, args.threads, args.mem_per_run_gb)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"batch: {error}\n")
 
