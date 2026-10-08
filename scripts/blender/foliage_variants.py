@@ -1,25 +1,28 @@
-"""Browsed-foliage candidates, round 1 (design/handoffs/foliage-variants-and-calf-round1-2026-10-07.md,
-package A). **Candidates for Wrysk to pick, not a bake**: nothing here writes
-`assets/voxel-models/`.
+"""Browsed-foliage candidates, round 2 (design/handoffs/foliage-variants-and-calf-round1-2026-10-07.md,
+"Round 1 results and Wrysk's picks"; round 1 was package A of that brief, 9e2a9356).
+**Candidates for Wrysk to pick, not a bake**: nothing here writes `assets/voxel-models/`.
 
     blender -b -P scripts/blender/foliage_variants.py -- OUT_DIR [--only NAME[,NAME]]
 
 For bloomcrown and umbrellafrond, at the bake's adult step (variant 0's random phase), it
-builds the accepted model (full) and three browsed and three stripped candidates. Each
-candidate is the accepted builder's own geometry with parts removed or shortened, so the
-parts and palette are the accepted ones; nothing new is drawn. Browsed goes from the
-bottom up (browser height first) and keeps the crown (bloomcrown) or the top tier
-(umbrellafrond); stripped is the stem plus a remnant. The candidates differ in how much is
-removed and where; none is preferred.
+builds the accepted model (full) and the states Wrysk picked from round 1. The state count
+is per species (bloomcrown full / browsed / stripped, umbrellafrond full / browsed A /
+browsed B / stripped). Each candidate is the accepted builder's own geometry with parts
+removed, shortened or bared, so parts and palette are the accepted ones; the one addition
+is bloomcrown stripped's fallen crown voxels on the ground (the crown's p2 material and
+foliage tag).
 
 Writes, under OUT_DIR:
 
-- `panels/<species>-<state>-{mesh,vox}.png`: the Blender model and its 0.125 m voxels, one
+- `panels/<species>-<key>-{mesh,vox}.png`: the Blender model and its 0.125 m voxels, one
   fixed camera per species (fitted to the full model) so the states compare at one scale;
 - `models/125/`: a copy of the shipped 0.125 m library whose `<species>.cvm` adult step
-  holds the candidates as its variants, in CANDIDATE order (variant 0 = full), for
-  `voxel_specimens --gpu --models OUT_DIR/models --candidates SPECIES:0,1,...`;
-- `candidates.json`: per species, the variant index, label and cell counts by tag.
+  holds the candidates as its variants, in table order (variant 0 = full), for
+  `voxel_specimens --gpu --models OUT_DIR/models --candidates SPECIES:0,1,...`; its
+  `manifest.json` gains `candidate_states` (per species: state names, and rows of variant
+  indices, one per state), which nothing in the engine reads;
+- `candidates.json`: per species, the states, the rows (variant keys), and per variant its
+  index, label and cell counts by tag.
 
 `scripts/blender/foliage_variants_sheets.py` composes the labelled contact sheets.
 Headless; no windows.
@@ -39,7 +42,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 ARGV = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 OUT = ARGV[0] if ARGV and not ARGV[0].startswith("--") else os.path.join(
-    REPO, "art", "gen", "runs", "2026-10-07-foliage-variants")
+    REPO, "art", "gen", "runs", "2026-10-08-foliage-variants-r2")
 ONLY = set(filter(None, (ARGV[ARGV.index("--only") + 1] if "--only" in ARGV else "").split(",")))
 
 # plant_sheets.py minus its main(): the bake (growth rule, builders, voxelizer, tags, the
@@ -70,37 +73,53 @@ VOX = 0.125
 
 FULL = ("full", "full (accepted model)", {})
 
+# Round 2 (2026-10-08, Wrysk's picks from round 1): per species, the states (the sheet's
+# columns, left to right; their count is per species), the candidate models (the scratch
+# library's adult-step variants, in this order, variant 0 = full) and the rows (one key per
+# state; a row is one full-to-stripped sequence).
+#
+# `fallen` (bloomcrown stripped): cells (i, j) on the ground (k = 0) beside the stem that
+# get a fallen crown voxel: the crown's own pink material (p2, the vanes') and the crown's
+# foliage tag, drawn in the mesh as a vane piece lying flat.
+
+BROWSED_BASAL = [0.3] * 8                      # round-1 browsed 2's stubbed rosette
+CHEWED = [0.5] * 3 + [1.0] * 7                 # round-1 browsed 3's chewed crown
+CHEWED_MORE = [0.4] * 4 + [1.0] * 6            # the same, a bit more cut back
+STRIPPED_1 = {"basal": [0.0] * 8, "vanes": [0.0] * 10}   # round-1 stripped 1
+
+FULL_TIER = ("all", 1.0, True)
+RIBS = ("all", 1.0, False)                     # round-1 browsed 3's middle tier: bare ribs
+STUBS = [("all", 0.4, False), ("all", 0.45, False), ("all", 0.5, False)]  # round-1 stripped 3
+
 CANDIDATES = {
-    "bloomcrown": [
-        FULL,
-        ("browsed-1", "browsed 1: rosette nibbled (4 straps gone, 4 chewed)",
-         {"basal": [0.0, 0.6] * 4}),
-        ("browsed-2", "browsed 2: rosette grazed to stubs",
-         {"basal": [0.3] * 8}),
-        ("browsed-3", "browsed 3: rosette gone, 3 lowest vanes chewed",
-         {"basal": [0.0] * 8, "vanes": [0.5, 0.5, 0.5] + [1.0] * 7}),
-        ("stripped-1", "stripped 1: stem + pod + bloom",
-         {"basal": [0.0] * 8, "vanes": [0.0] * 10}),
-        ("stripped-2", "stripped 2: stem + pod + vane and strap stubs",
-         {"basal": [0.25] * 8, "vanes": [0.35] * 10}),
-        ("stripped-3", "stripped 3: stem + pod + top tuft (3 highest vanes)",
-         {"basal": [0.0] * 8, "vanes": [0.0] * 7 + [0.7] * 3}),
-    ],
-    "umbrellafrond": [
-        FULL,
-        ("browsed-1", "browsed 1: lower tier thinned (every other frond)",
-         {"tiers": [("alt", 1.0, True), ("all", 1.0, True), ("all", 1.0, True)]}),
-        ("browsed-2", "browsed 2: lower tier gone",
-         {"tiers": [None, ("all", 1.0, True), ("all", 1.0, True)]}),
-        ("browsed-3", "browsed 3: lower tier gone, middle tier bare ribs",
-         {"tiers": [None, ("all", 1.0, False), ("all", 1.0, True)]}),
-        ("stripped-1", "stripped 1: stem + bare-rib top tier",
-         {"tiers": [None, None, ("all", 1.0, False)]}),
-        ("stripped-2", "stripped 2: stem + small top tuft (4 short fronds)",
-         {"tiers": [None, None, (4, 0.6, True)]}),
-        ("stripped-3", "stripped 3: stem + rib stubs on every tier",
-         {"tiers": [("all", 0.4, False), ("all", 0.45, False), ("all", 0.5, False)]}),
-    ],
+    "bloomcrown": {
+        "states": ["full", "browsed", "stripped"],
+        "variants": [
+            FULL,
+            ("browsed-a", "browsed: stubbed rosette, chewed crown (r1 browsed 3 over browsed 2)",
+             {"basal": BROWSED_BASAL, "vanes": CHEWED}),
+            ("browsed-b", "browsed, cut back more: 4 lowest vanes at 0.4",
+             {"basal": BROWSED_BASAL, "vanes": CHEWED_MORE}),
+            ("stripped-a", "stripped: r1 stripped 1 + 1 fallen pink voxel",
+             dict(STRIPPED_1, fallen=[(1, 0)])),
+            ("stripped-b", "stripped: r1 stripped 1 + 2 fallen pink voxels",
+             dict(STRIPPED_1, fallen=[(1, 0), (-1, -1)])),
+        ],
+        "rows": [["full", "browsed-a", "stripped-a"], ["full", "browsed-b", "stripped-b"]],
+    },
+    "umbrellafrond": {
+        "states": ["full", "browsed A", "browsed B", "stripped"],
+        "variants": [
+            FULL,
+            ("browsed-a", "browsed A: lowest tier bare ribs, upper two full",
+             {"tiers": [RIBS, FULL_TIER, FULL_TIER]}),
+            ("browsed-b", "browsed B: lowest tier rib stubs, middle bare ribs, top full",
+             {"tiers": [STUBS[0], RIBS, FULL_TIER]}),
+            ("stripped", "stripped: r1 stripped 3, rib stubs on every tier",
+             {"tiers": STUBS}),
+        ],
+        "rows": [["full", "browsed-a", "browsed-b", "stripped"]],
+    },
 }
 
 # Views: (elevation, azimuth) in degrees. Three-quarter from a little above, like the
@@ -150,6 +169,13 @@ def bloomcrown(x, y, h, r, layers, i, rng, spec):
         if f > 0:
             p0, p1 = vanes[k]
             L.strap(p0, _scaled(p0, p1, f), 0.04, "p2")
+    for i, j in spec.get("fallen", []):
+        # a vane piece lying flat in ground cell (i, j); its cell is added by hand (main)
+        cx, cy = (i + 0.5) * VOX, (j + 0.5) * VOX
+        with L.Collect() as piece:
+            L.strap((cx - 0.05, cy - 0.025, 0.012), (cx + 0.05, cy + 0.025, 0.018), 0.04, "p2")
+        for ob in piece:
+            ob["fallen"] = True
 
 
 def frond(x, y, ang, zb, za, rr, top=False, n=14, keep=1.0, pinnae=True):
@@ -310,18 +336,28 @@ def main():
         aspect = 0.8
         built = []  # (key, label, mesh objs points, cells)
         cam = vcam = None
-        for key, label, spec in CANDIDATES[name]:
+        table = CANDIDATES[name]
+        for key, label, spec in table["variants"]:
             P["clear"]()
             B["reset_scene"]()
             rng = random.Random(f"{name}:0")
             BUILDERS[name](0.5 * VOX, 0.5 * VOX, h, r, B["lineup_layers"](stage), si, rng, spec)
             objs = [ob for ob in L.ORG if role(ob.active_material.name) is not None]
-            cells = B["voxelize"](objs, VOX, role)
+            cells = B["voxelize"]([ob for ob in objs if "fallen" not in ob], VOX, role)
 
             def tag_of(mat, k, h=h, stage=stage):
                 return B["plant_tag"](role(mat), (k + 0.5) * VOX, h, stage)
 
             cvm_cells = B["cells_of"](cells, tag_of)
+            if spec.get("fallen"):
+                # the crown's tag: the foliage layer of the highest foliage cell (the pod)
+                crown_tag = max((c for c in cvm_cells if P["tag_kind"](c[4]) == "foliage"),
+                                key=lambda c: c[1])[4]
+                taken = {(c[0], c[1], c[2]) for c in cvm_cells}
+                for i, j in spec["fallen"]:
+                    # world order (dx, dy up, dz away), as cells_of writes
+                    assert (i, 0, j) not in taken, f"{name} {key}: fallen cell {(i, j)} is occupied"
+                    cvm_cells.append((i, 0, j, B["PALETTE"].index("p2"), crown_tag))
             if key == "full":
                 # The accepted builder must give the same cells: the candidates are cut
                 # from exactly the shipped model.
@@ -361,11 +397,22 @@ def main():
             steps.append((sh, sr, [[(c[0], c[1], c[2], B["PALETTE"].index(c[3]), c[4]) for c in v]
                                    for v in variants]))
         steps[-1] = (steps[-1][0], steps[-1][1], [b[2] for b in built])
+        assert len(built) <= 255, "a step's variant count is a u8"
         B["write_cvm"](os.path.join(lib_dst, f"{name}.cvm"), 0, steps)
-        report[name] = {"adult_step": {"height_m": kh * VOX, "radius_m": kr * VOX / 2,
+        report[name] = {"states": table["states"], "rows": table["rows"],
+                        "adult_step": {"height_m": kh * VOX, "radius_m": kr * VOX / 2,
                                        "built_at": {"t": t, "height_m": h, "radius_m": r}},
                         "variants": [{"index": n, "key": b[0], "label": b[1], "cells": len(b[2]),
                                       "by_tag": b[3]} for n, b in enumerate(built)]}
+    man_path = os.path.join(lib_dst, "manifest.json")
+    man = json.load(open(man_path))
+    man["candidate_states"] = {
+        name: {"states": r["states"],
+               "rows": [[[v["key"] for v in r["variants"]].index(k) for k in row] for row in r["rows"]]}
+        for name, r in report.items()}
+    with open(man_path, "w") as fh:
+        json.dump(man, fh, indent=1)
+        fh.write("\n")
     with open(os.path.join(OUT, "candidates.json"), "w") as fh:
         json.dump(report, fh, indent=1)
         fh.write("\n")
