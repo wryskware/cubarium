@@ -272,6 +272,18 @@ impl LifeRecorder {
         self.pending.len()
     }
 
+    /// Intake already inferred in open bouts, for censored study life tables. Does
+    /// not close the bout or emit an event. No stomach reading is duplicated.
+    pub fn unfinished_meals(&self) -> impl Iterator<Item = (u64, [f64; Food::COUNT])> + '_ {
+        self.seen.iter().map(|s| (s.id, s.meal))
+    }
+
+    /// Open-bout intake of one body; zero after a bout closes or a body departs.
+    pub fn unfinished_meal(&self, id: u64) -> [f64; Food::COUNT] {
+        self.seen.binary_search_by_key(&id, |s| s.id)
+            .map_or([0.0; Food::COUNT], |i| self.seen[i].meal)
+    }
+
     /// Record `what` at the layer's `tick`, stamped on the world's clock.
     fn emit(&mut self, tick: u64, animal: u64, what: What) {
         let tick = (tick as i64 + self.stamp_offset).max(0) as u64;

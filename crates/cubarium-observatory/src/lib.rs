@@ -13,10 +13,13 @@
 //! Commands ([`Command`]) travel the other way, as values; the host applies them at its
 //! own command point through the same path its console uses.
 
+#![forbid(unsafe_code)]
+
 pub mod history;
 pub mod life;
 pub mod observer;
 pub mod query;
+pub mod vitals;
 #[cfg(feature = "server")]
 pub mod server;
 

@@ -67,6 +67,18 @@
 //! own columns (`temp_c` … `day_phase`, `stream_m3_s`, `moist`;
 //! `design/handoffs/voxel-weather-2026-09-24.md`).
 //!
+//! `vitals=DIR` opts into `vitals.csv`, `plants_vitals.csv` and `life.csv` in DIR.
+//! Activity is sampled each simulated second; life transitions and 3-D path length
+//! are polled each tick. `stuck_window_min=N` defaults to 5 simulated minutes and
+//! `stuck_body_lengths=N` defaults to 1 current body length. Stuck requires a complete
+//! trailing window, net displacement below that threshold, and a currently awake
+//! body that is not feeding, resting, perched or attached. Activity shares overlap
+//! (e.g. moving and fleeing); denominators are awake individual-seconds. Energy uses
+//! only bodies alive at both minute boundaries; path and displacement use that cohort.
+//! A load starts fresh Observed life histories and rewrites these three readout files;
+//! use a new vitals directory to retain previous segments. Checkpoints within the
+//! process retain the accumulator. Fractional final minutes get an endpoint row.
+//!
 //! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
 //! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
 //! two ticks are timed on one world. `modes=c,6:6,5:1` makes that rotation a list: `c` is
@@ -86,6 +98,8 @@ use cubarium_voxel_fauna::{
 use cubarium_voxel_flora::{Flora, Species as Plant};
 use cubarium_voxel_sim::params::{Layers, Params};
 use cubarium_voxel_sim::{Sim, SimConfig};
+use cubarium_observatory::vitals::{self, Options as VitalsOptions, Recorder as VitalsRecorder};
+use std::io::Write;
 
 /// One simulated minute, in ticks: 60 s at the fixed tick rate.
 const TICKS_PER_MIN: u64 = 60 * TICK_HZ as u64;
@@ -179,6 +193,16 @@ fn main() {
             .expect("pin=B needs more than B physical cores");
     }
     let timing = Timing {
+        vitals: args.iter().find_map(|a| a.strip_prefix("vitals=")).map(|dir| {
+            let number = |name: &str, default: f64| {
+                args.iter().find_map(|a| a.strip_prefix(name))
+                    .map_or(default, |v| v.parse().expect("vitals option needs a number"))
+            };
+            (dir.to_string(), VitalsOptions {
+                stuck_window_min: number("stuck_window_min=", 5.0),
+                stuck_body_lengths: number("stuck_body_lengths=", 1.0),
+            })
+        }),
         patch_min: args
             .iter()
             .find_map(|a| a.strip_prefix("meadow_patch_min_faces="))
@@ -502,6 +526,7 @@ fn main() {
 /// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
 #[derive(Clone)]
 struct Timing {
+    vitals: Option<(String, VitalsOptions)>,
     /// `--weather-log FILE`: one row per finished rain event.
     weather_log: Option<String>,
     overlap: Option<bool>,
@@ -563,12 +588,25 @@ fn run(
     let mut deaths = DeathLog::new(sim);
     let mut spells = SpellLog::new(sim);
     let mut lj = LjChain::new(sim);
+    let mut vitals = timing.vitals.as_ref().map(|(dir, options)| {
+        VitalsLog::new(dir, *options, sim, minute0 as f64).expect("create vitals readouts")
+    });
+    let mut vitals_time = std::time::Duration::ZERO;
+    let first_tick = tick;
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if let Some(v) = vitals.as_mut() {
+            let start = std::time::Instant::now();
+            v.recorder.observe(sim.fauna(), tick);
+            if tick % u64::from(TICK_HZ) == 0 || tick == total_ticks {
+                v.recorder.sample(sim.fauna(), tick as f64 / f64::from(TICK_HZ));
+            }
+            vitals_time += start.elapsed();
+        }
         weather.poll(sim);
         deaths.poll(sim, tick);
         if let Some(r) = runner.as_mut() {
@@ -577,6 +615,11 @@ fn run(
         if tick % TICKS_PER_MIN == 0 {
             let ms = since.elapsed().as_secs_f64() * 1e3 / TICKS_PER_MIN as f64;
             let minute = tick / TICKS_PER_MIN;
+            if let Some(v) = vitals.as_mut() {
+                let start = std::time::Instant::now();
+                v.minute(sim, minute as f64).expect("write vitals minute");
+                vitals_time += start.elapsed();
+            }
             print_row(minute, sim, ms, timing.patch_min);
             spells.minute(sim, minute);
             phases.report(minute, sim, ms);
@@ -610,9 +653,57 @@ fn run(
             window.report(tick, sim);
         }
     }
+    if let Some(v) = vitals.as_mut() {
+        let start = std::time::Instant::now();
+        if tick % TICKS_PER_MIN != 0 {
+            v.minute(sim, tick as f64 / TICKS_PER_MIN as f64).expect("write final vitals");
+        }
+        v.finish().expect("finish life table");
+        vitals_time += start.elapsed();
+        eprintln!("vitals: readout_ms_per_tick={:.6} ticks={}",
+            vitals_time.as_secs_f64() * 1e3 / (tick - first_tick).max(1) as f64,
+            tick - first_tick);
+    }
     weather.summary(sim);
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
+}
+
+/// Streaming deaths and minute snapshots; living life-table rows appear at run end.
+struct VitalsLog {
+    recorder: VitalsRecorder,
+    animals: std::io::BufWriter<std::fs::File>,
+    plants: std::io::BufWriter<std::fs::File>,
+    lives: std::io::BufWriter<std::fs::File>,
+}
+
+impl VitalsLog {
+    fn new(dir: &str, options: VitalsOptions, sim: &Sim, minute: f64) -> std::io::Result<Self> {
+        let dir = std::path::Path::new(dir);
+        std::fs::create_dir_all(dir)?;
+        let file = |name| std::fs::File::create(dir.join(name)).map(std::io::BufWriter::new);
+        let mut log = Self { recorder: VitalsRecorder::new(options, sim.fauna(), minute),
+            animals: file("vitals.csv")?, plants: file("plants_vitals.csv")?, lives: file("life.csv")? };
+        writeln!(log.animals, "{}", vitals::VITALS_HEADER)?;
+        writeln!(log.plants, "{}", vitals::PLANTS_HEADER)?;
+        vitals::LifeRow::write_header(&mut log.lives)?;
+        log.minute(sim, minute)?;
+        Ok(log)
+    }
+
+    fn minute(&mut self, sim: &Sim, minute: f64) -> std::io::Result<()> {
+        let (animals, plants) = self.recorder.minute(sim.flora(), sim.fauna(), minute);
+        for r in animals { r.write_csv(&mut self.animals)?; }
+        for r in plants { r.write_csv(&mut self.plants)?; }
+        for r in self.recorder.take_dead() { r.write_csv(&mut self.lives)?; }
+        self.animals.flush()?; self.plants.flush()?; self.lives.flush()
+    }
+
+    fn finish(&mut self) -> std::io::Result<()> {
+        for r in self.recorder.take_dead() { r.write_csv(&mut self.lives)?; }
+        for r in self.recorder.lives().filter(|r| r.died_minute.is_none()) { r.write_csv(&mut self.lives)?; }
+        self.lives.flush()
+    }
 }
 
 /// `SPELLLOG=path` (env, package DORMANCY): **dry spells under the turf**. Each minute,
