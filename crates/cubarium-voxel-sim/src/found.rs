@@ -73,7 +73,7 @@ pub enum Seeds {
     /// every time, and two bases never redraw into the same world (with `base + 1`
     /// redraws, seeds 1, 2 and 3 of `patch` all founded seed 4's world).
     Derived { base: u64 },
-    /// Whatever the function draws: the ambient run's fresh world.
+    /// Draw one fresh base seed, then deterministic redraws as in [`Seeds::Derived`].
     Drawn(fn() -> u64),
 }
 
@@ -92,6 +92,15 @@ fn derived_seed(base: u64, k: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
+}
+
+fn derived_seeds(base: u64) -> impl FnMut() -> u64 {
+    let mut k = 0u64;
+    move || {
+        let seed = if k == 0 { base } else { derived_seed(base, k) };
+        k = k.wrapping_add(1);
+        seed
+    }
 }
 
 /// A founded world: generated, lake-gated, pre-rolled, **already seeded** and judged.
@@ -159,18 +168,8 @@ fn found_judged(
                 }),
             )
         }
-        Seeds::Derived { base } => {
-            let mut k = 0u64;
-            (
-                None,
-                Box::new(move || {
-                    let seed = if k == 0 { base } else { derived_seed(base, k) };
-                    k += 1;
-                    seed
-                }),
-            )
-        }
-        Seeds::Drawn(draw) => (None, Box::new(draw)),
+        Seeds::Derived { base } => (None, Box::new(derived_seeds(base))),
+        Seeds::Drawn(draw) => (None, Box::new(derived_seeds(draw()))),
     };
     let mut lake_rejected = 0usize;
     let found = |world: World| {
@@ -370,7 +369,7 @@ pub fn generate_with_a_lake(
                      {tiers} pool(s) above it"
                 );
             } else {
-                eprintln!("cubarium voxel: procedural world generated with random seed {seed}");
+                eprintln!("cubarium voxel: procedural world generated with seed {seed}");
             }
             return (world, seed, k);
         }
@@ -846,9 +845,12 @@ mod tests {
             judged.set(judged.get() + 1);
             judged.get() > 1
         };
-        let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0, 0], Seeds::from(5), false, first_fails);
+        // A random draw supplies only the base; a refusal must derive its retry rather
+        // than call this draw again (which would return the same refused seed here).
+        let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0, 0], Seeds::Drawn(|| 5), false, first_fails);
         assert_eq!(judged.get(), 2, "two worlds were judged");
         assert_eq!(founded.seed, derived_seed(5, 1), "the refused first draw was replaced by the first redraw");
+        assert_eq!(founded.world.config().seed, founded.seed, "report the kept world's seed");
         assert!(founded.accepted && founded.habitat_rejected == 1);
         assert!(
             founded.seeded.stands > 0,

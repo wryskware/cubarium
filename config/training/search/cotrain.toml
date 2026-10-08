@@ -217,3 +217,11 @@ name = "decomposition"
 path = "flora.decomposition"
 range = [0.1, 4.0]
 what = "litter decay (dead wood and carrion follow); real: x0.1-0.38"
+
+# The minimal gut's digestion times, independent of the biological clock.
+[[gene]]
+name = "tau"
+path = "fauna.founders.*.gut.digestion_s.*"
+tie = "each"
+range = [0.25, 4.0]
+what = "digestion time per searched founder; a food pool empties at S / tau"

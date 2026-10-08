@@ -364,3 +364,77 @@ name = "night_bloom"
 path = "flora.*.night_bloom_scale"
 range = [0.1, 3.0]
 what = "nectar and fruit made at night, x the day rate (0.3 -> 0.03-0.9)"
+
+# Digestion time per food in each searched lineage's current diet.
+
+[[gene]]
+name = "tau_litter@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.litter"
+range = [0.25, 4.0]
+what = "tau: the litter pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@littershredder"
+path = "fauna.founders.littershredder.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_foliage@frondgrazer"
+path = "fauna.founders.frondgrazer.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+what = "tau: the foliage pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@lanternjaw"
+path = "fauna.founders.lanternjaw.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_cap_tissue@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.cap_tissue"
+range = [0.25, 4.0]
+what = "tau: the cap_tissue pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_litter@capgnawer"
+path = "fauna.founders.capgnawer.gut.digestion_s.litter"
+range = [0.25, 4.0]
+what = "tau: the litter pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_foliage@loftstrider"
+path = "fauna.founders.loftstrider.gut.digestion_s.foliage"
+range = [0.25, 4.0]
+what = "tau: the foliage pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_film@ripple-snail"
+path = "fauna.founders.ripple-snail.gut.digestion_s.film"
+range = [0.25, 4.0]
+what = "tau: the film pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_nectar@bellwing"
+path = "fauna.founders.bellwing.gut.digestion_s.nectar"
+range = [0.25, 4.0]
+what = "tau: the nectar pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_fruit@seedporter"
+path = "fauna.founders.seedporter.gut.digestion_s.fruit"
+range = [0.25, 4.0]
+what = "tau: the fruit pool empties at S / tau into the reserve's room"
+
+[[gene]]
+name = "tau_carrion@chorister"
+path = "fauna.founders.chorister.gut.digestion_s.carrion"
+range = [0.25, 4.0]
+what = "tau: the carrion pool empties at S / tau into the reserve's room"
