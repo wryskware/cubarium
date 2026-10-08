@@ -56,9 +56,11 @@ def founding_required(start):
             raise ValueError(f'{path}: invalid founding counts')
         references = {key.removeprefix('founders_'): value + stocks.get('eggs_' + key.removeprefix('founders_'), 0)
                       for key, value in stocks.items() if key.startswith('founders_')}
+        # Only lineages with a founders_ column: eggs_buried and the like are world counters.
         for key, value in stocks.items():
-            if key.startswith('eggs_'):
-                references.setdefault(key.removeprefix('eggs_'), value)
+            name = key.removeprefix('eggs_')
+            if key.startswith('eggs_') and f'founders_{name}' in stocks:
+                references.setdefault(name, value)
         required = dict(animals=sorted(name for name, count in references.items() if count > 0),
                         plants=sorted(key.removeprefix('stands_') for key, value in stocks.items()
                                       if key.startswith('stands_') and value > 0),
