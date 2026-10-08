@@ -1,21 +1,30 @@
-//! Save/load as postcard bytes behind a schema tag, the way
-//! [`cubarium_voxel::snapshot`] does it. A different tag is refused; there is no
-//! migration, ever.
+//! Save/load the way [`cubarium_voxel::snapshot`] does it: the animal layer's **state** as
+//! postcard bytes behind a schema tag, its **config** beside it as a named-field document
+//! ([`cubarium_voxel::savedoc`]). A different state tag is refused as another version.
 //!
-//! `always-fresh-never-migrate`: a new schema refuses old worlds and nothing is
-//! synthesized or re-anchored. A saved animal layer whose [`crate::FaunaConfig`] no animal
+//! `always-fresh-never-migrate` holds for the state and for meaning: a new state schema
+//! refuses old worlds and nothing is synthesized or re-anchored. A config knob added or
+//! dropped since the save is not a new version: the missing knob takes its default, the
+//! unknown one is dropped with a note. A saved animal layer whose [`crate::FaunaConfig`] no animal
 //! can live under is refused too, for the reason [`crate::Fauna::new`] panics on one: it is
 //! not a runtime condition.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::Fauna;
+use crate::{Fauna, FaunaConfig};
 
-/// The animal layer's snapshot format. Bumped whenever a serialized field, the config
-/// inside the snapshot, or what a saved field means changes. Postcard is not
-/// self-describing, so an older world is **refused**, not migrated
-/// (`always-fresh-never-migrate`): start a fresh world.
+/// The animal layer's state format.
+///
+/// **What needs a bump** (Wrysk, 2026-10-08): a change to the *state's* layout (a serialized
+/// field of `Fauna` or anything it holds, other than its config, added, removed, reordered or
+/// retyped — the ledger's lines and the percept records included), or a change to what a saved
+/// field or knob *means*. **What does not:** adding, removing or retuning a config knob
+/// (`FaunaConfig` and everything inside it: the founders' physiology, `TeacherConfig`,
+/// `HuntConfig`, …) — the document carries names, so an older save takes the new knob's
+/// default. Schemas 69–71 below would not have been bumps.
+///
+/// Before 72 the config sat inside the positional state and every knob was a bump:
 // 28: F1 (tests-first stubs) — `Pose::y_m`, `Mobility::{mode, perch}`, `Animal::last_bloom`,
 // `FounderPhysiology::flight`, the bellwing lineage and the nectar food class.
 // 29: F1 — `Perch::anchor`, `Mobility::falling`, `FounderState::lift`, `Flight::lift_speed_fraction`,
@@ -138,35 +147,89 @@ use crate::Fauna;
 // 70: HUNGRY-SEARCH — `TeacherConfig::{search_patience_s, search_leg_bl, search_cell_bl,
 //     search_memory_half_life_s}`; a hungry heuristic forager with nothing in sense ranges
 //     on legs away from ground it has covered.
-pub const SCHEMA: u32 = 70;
+// 71: LEADS-PAY — `TeacherConfig::lead_give_up_bl`; a heuristic body's lead (food in view, a
+//     scent, a still light) that never brings a taste is given up.
+// 72: SAVE-EXTENSIBLE — the config moved out of the positional state into a named-field
+//     document beside it.
+pub const SCHEMA: u32 = 72;
 
-#[derive(Serialize, Deserialize)]
-struct Envelope {
+/// **The one-version legacy reader's tag** ([`decode_legacy`]): schema 71, the last whose
+/// config sat positionally inside the state, kept so the 2026-10-08 training starts
+/// (`runs/starts3-2026-10-08`) load. Retire it (delete this, [`decode_legacy`] and its arm in
+/// [`decode`]) once those saves are rewritten in the current format (`voxel_resave`) or no
+/// longer wanted; it can read them only while `FaunaConfig`'s positional layout is still
+/// schema 71's, so the first animal knob added after SAVE-EXTENSIBLE retires it in practice.
+pub const LEGACY_SCHEMA: u32 = 71;
+
+#[derive(Serialize)]
+struct EnvelopeOut<'a> {
     schema: u32,
+    config: Vec<u8>,
+    fauna: &'a Fauna,
+}
+
+#[derive(Deserialize)]
+struct EnvelopeIn {
+    _schema: u32,
+    config: Vec<u8>,
     fauna: Fauna,
 }
 
 pub fn encode(fauna: &Fauna) -> Vec<u8> {
-    postcard::to_stdvec(&Envelope {
+    postcard::to_stdvec(&EnvelopeOut {
         schema: SCHEMA,
-        fauna: fauna.clone(),
+        config: cubarium_voxel::savedoc::to_doc(&fauna.config),
+        fauna,
     })
     .expect("a Fauna always serializes")
 }
 
 pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
-    let tag: u32 = postcard::from_bytes(bytes).context("not a voxel fauna snapshot")?;
-    if tag != SCHEMA {
-        bail!("voxel fauna snapshot schema {tag} is not {SCHEMA}; start a fresh world");
-    }
-    let env: Envelope = postcard::from_bytes(bytes).context("corrupt voxel fauna snapshot")?;
-    if let Err(e) = env.fauna.config().validate() {
+    let (tag, rest): (u32, &[u8]) =
+        postcard::take_from_bytes(bytes).context("not a voxel fauna snapshot")?;
+    let fauna = match tag {
+        SCHEMA => {
+            let env: EnvelopeIn = postcard::from_bytes(bytes).with_context(|| {
+                format!(
+                    "the voxel fauna state does not read as schema {SCHEMA} (a damaged file, or a \
+                     build that changed the state layout without bumping the schema)"
+                )
+            })?;
+            let (config, ignored) =
+                cubarium_voxel::savedoc::from_doc(&env.config, &FaunaConfig::default())
+                    .context("the voxel fauna snapshot's config")?;
+            cubarium_voxel::savedoc::note_ignored("voxel fauna", &ignored);
+            let mut fauna = env.fauna;
+            fauna.config = config;
+            fauna
+        }
+        LEGACY_SCHEMA => decode_legacy(rest)?,
+        found => bail!(
+            "voxel fauna snapshot schema {found} is not {SCHEMA}: made by another version of \
+             Cubarium whose animal state has another layout; start a fresh world"
+        ),
+    };
+    if let Err(e) = fauna.config().validate() {
         bail!("invalid voxel fauna snapshot — {e}");
     }
-    if let Err(e) = validate(&env.fauna) {
+    if let Err(e) = validate(&fauna) {
         bail!("invalid voxel fauna snapshot — {e}");
     }
-    Ok(env.fauna)
+    Ok(fauna)
+}
+
+/// **One-version legacy reader** ([`LEGACY_SCHEMA`]): a schema-71 animal layer, whose config
+/// sat positionally at the head of the state. Postcard frames nothing, so it is the config's
+/// bytes followed by exactly the state the current envelope carries.
+fn decode_legacy(rest: &[u8]) -> anyhow::Result<Fauna> {
+    let (config, state): (FaunaConfig, &[u8]) = postcard::take_from_bytes(rest).context(
+        "a schema-71 (legacy) animal layer whose config this build no longer reads positionally; \
+         rewrite it with voxel_resave from a build before the animal config changed",
+    )?;
+    let mut fauna: Fauna = postcard::from_bytes(state)
+        .context("the state of a schema-71 (legacy) animal layer does not read")?;
+    fauna.config = config;
+    Ok(fauna)
 }
 
 /// **Riders** (schema 22): every rider's host is present, is not of the rider's own
@@ -439,7 +502,11 @@ mod tests {
     /// A layer built by hand, which is the only way to write a snapshot this module has to
     /// refuse: a live layer's own bytes cannot fail these checks.
     fn layer(animals: Vec<Animal>, births: u64) -> Fauna {
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        layer_with(FaunaConfig::default(), animals, births)
+    }
+
+    fn layer_with(config: FaunaConfig, animals: Vec<Animal>, births: u64) -> Fauna {
+        let mut fauna = Fauna::new(config);
         fauna.ledger = FaunaLedger {
             births,
             ..FaunaLedger::default()
@@ -542,10 +609,114 @@ mod tests {
 
         let mut older = bytes.clone();
         assert_eq!(older[0], SCHEMA as u8, "the tag is the leading varint byte");
-        older[0] = SCHEMA as u8 - 1;
+        older[0] = SCHEMA as u8 - 2; // older than the one-version legacy reader covers
         let err = format!("{:#}", decode(&older).expect_err("an older world"));
         assert!(err.contains("start a fresh world"), "{err}");
         assert!(err.contains(&format!("is not {SCHEMA}")), "{err}");
+    }
+
+    fn with_doc(fauna: &Fauna, doc: Vec<u8>) -> Vec<u8> {
+        postcard::to_stdvec(&EnvelopeOut { schema: SCHEMA, config: doc, fauna }).unwrap()
+    }
+
+    /// The config document as a CBOR tree, edited by `f`.
+    fn edited_doc(config: &FaunaConfig, f: impl FnOnce(&mut ciborium::Value)) -> Vec<u8> {
+        let mut v = ciborium::Value::serialized(config).unwrap();
+        f(&mut v);
+        let mut doc = Vec::new();
+        ciborium::into_writer(&v, &mut doc).unwrap();
+        doc
+    }
+
+    /// The map at `key` in a map.
+    fn field<'a>(v: &'a mut ciborium::Value, key: &str) -> &'a mut ciborium::Value {
+        let ciborium::Value::Map(m) = v else { panic!("not a map") };
+        &mut m.iter_mut().find(|(k, _)| k.as_text() == Some(key)).expect(key).1
+    }
+
+    fn pop(v: &mut ciborium::Value) {
+        let ciborium::Value::Map(m) = v else { panic!("not a map") };
+        m.pop();
+    }
+
+    #[test]
+    fn a_round_trip_keeps_every_config_value() {
+        let mut config = FaunaConfig::default();
+        config.hatch_chance_per_dusk = 0.1 + 0.2;
+        let fauna = layer_with(config, vec![animal(0, 0.02)], 1);
+        let back = decode(&encode(&fauna)).expect("its own format");
+        assert_eq!(back.config(), &config);
+    }
+
+    /// **A save written before a knob existed takes the knob's default** — every knob of the
+    /// default config one at a time (`savedoc::knobs_a_save_cannot_lack`), and through the whole
+    /// envelope: a top-level knob, a teacher knob, and a knob of a lineage's `Some` table whose
+    /// default is `None` (it borrows another lineage's table as its base).
+    #[test]
+    fn a_save_without_a_knob_takes_its_default() {
+        assert_eq!(
+            cubarium_voxel::savedoc::knobs_a_save_cannot_lack(&FaunaConfig::default()),
+            Vec::<String>::new()
+        );
+        let fauna = layer(vec![animal(0, 0.02)], 1);
+        let config = *fauna.config();
+        let doc = edited_doc(&config, |v| {
+            pop(v);
+            pop(field(v, "teachers"));
+        });
+        let back = decode(&with_doc(&fauna, doc)).expect("a save without two knobs loads");
+        assert_eq!(back.config(), &config);
+
+        // A lineage given a hunter its default lacks, saved before a hunter knob existed.
+        let mut config = FaunaConfig::default();
+        let (with, without) = (0..crate::Founder::COUNT)
+            .map(|i| (i, config.founders[i].hunter.is_some()))
+            .fold((None, None), |(w, wo), (i, h)| {
+                (if h { w.or(Some(i)) } else { w }, if h { wo } else { wo.or(Some(i)) })
+            });
+        let (with, without) = (with.expect("a hunter lineage"), without.expect("a lineage without one"));
+        config.founders[without].hunter = config.founders[with].hunter;
+        let fauna = layer_with(config, vec![animal(0, 0.02)], 1);
+        let doc = edited_doc(&config, |v| {
+            let ciborium::Value::Array(f) = field(v, "founders") else { panic!("founders") };
+            pop(field(&mut f[without], "hunter"));
+        });
+        let back = decode(&with_doc(&fauna, doc)).expect("a hunter table without a knob loads");
+        assert_eq!(back.config(), &config);
+    }
+
+    #[test]
+    fn a_save_with_an_unknown_knob_loads() {
+        let fauna = layer(vec![animal(0, 0.02)], 1);
+        let doc = edited_doc(fauna.config(), |v| {
+            let ciborium::Value::Map(m) = field(v, "teachers") else { panic!("teachers") };
+            m.push(("a_knob_from_another_build".into(), 2.into()));
+        });
+        let back = decode(&with_doc(&fauna, doc)).expect("an unknown knob is dropped");
+        assert_eq!(back.config(), fauna.config());
+    }
+
+    /// A state that does not read under this schema's tag is named as that (another build's
+    /// layout, or damage), never a bare "corrupt snapshot".
+    #[test]
+    fn a_state_that_does_not_read_is_named() {
+        let bytes = encode(&layer(vec![animal(0, 0.02), animal(1, 0.03)], 2));
+        let err = format!("{:#}", decode(&bytes[..bytes.len() - 9]).expect_err("a cut state"));
+        assert!(err.contains("does not read as schema"), "{err}");
+    }
+
+    /// The one-version legacy reader: a schema-71 layer, its config positional at the head of
+    /// the state, loads whole.
+    #[test]
+    fn the_legacy_reader_loads_a_positional_config_layer() {
+        let mut config = FaunaConfig::default();
+        config.hatch_chance_per_dusk = 0.3;
+        let fauna = layer_with(config, vec![animal(0, 0.02), animal(4, 0.03)], 5);
+        let legacy = postcard::to_stdvec(&(LEGACY_SCHEMA, &config, &fauna)).unwrap();
+        let back = decode(&legacy).expect("a schema-71 layer");
+        assert_eq!(back.config(), &config);
+        assert_eq!(back.view().animals, fauna.view().animals);
+        assert_eq!(back.view().ledger, fauna.view().ledger);
     }
 
     /// A founder's held actions are bounded actions and its feedback is finite: the

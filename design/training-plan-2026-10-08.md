@@ -160,6 +160,63 @@ hour later, 2 h). This repeats bl3:
   - every snail and capgnawer juvenile is under the 0.05 starving line. That is growth by
     design (JUVENILE-FOOD), so for those lineages the starving count is not a health signal.
 
+### 1c. Brain pilot (eidolon, 09:35–14:15)
+
+Setup:
+- frondgrazer and littershredder brains, warm-started from C1;
+- train-flat-nopred, σ 0.02, learning rate 0.005, 8 pairs × 8 worlds, 10-min windows;
+- curiosity recalibrated (`config/training/curiosity-2026-10-08.toml`: frondgrazer 2.78,
+  littershredder 0.49; the old weights were 81 and 27);
+- training stopped at its wall budget after 21 generations.
+
+Tables: `runs/brain-pilot-2026-10-08/{p1-noise,p2-train}.tsv`. Gates: `runs/pilot-mid-2026-10-08/flat`
+and `runs/pilot-end-2026-10-08/{flat,d72}`, profile `gate-1h`, 8 seeds, 1 h fresh founding.
+
+**The loop works.** Staging, the wall budget, resume, gates and scoring all ran.
+
+**The gradient is at noise level.**
+- The spread of paired differences in training is 0.16–0.62 per generation. The σ = 0
+  placement-noise control gives 0.07–0.44.
+- The frondgrazer's mean raw reward shows no trend over 21 generations.
+- Stomach-aware energy barely changes the rankings (within-world ρ 0.93–0.96).
+
+**Yet behaviour drifted.** Final frondgrazer brain against C1:
+
+| Measure | Flat: trained | Flat: C1 | d72: trained | d72: C1 |
+|---|---|---|---|---|
+| Moving share | 0.60 | 0.33 | 0.59 | 0.47 |
+| Delivered BL/s | 0.117 | 0.049 | 0.125 | 0.063 |
+| Intake | 9.7 | 14.2 | 8.7 | 13.2 |
+| Fullness p10 | 0.08 | 0.13 | 0.07 | 0.11 |
+| Cohort energy gain | 0.150 | 0.235 | 0.128 | 0.217 |
+| Stuck observations | 52 | 22 | 66 | 15 |
+
+- Trained frondgrazers move twice as fast and eat about a third less. The midway gate sat
+  between C1 and the end (intake 11.5).
+- Littershredders are unchanged: intake 1.03 against 1.04, and both brains hold still on
+  litter (§1b).
+- P calls it a win: on flat 6/8 against C1 (median Δ −0.30); on d72 5/8 (median Δ −0.04,
+  a tie). V carries it.
+- The cause is either the reward's curiosity share (0.5 of the energy spread) or a
+  noise-driven drift. Either way, the brain reward and P both paid for motion over food.
+- The reward split points to curiosity:
+  - over generations 16–21 the frondgrazer's curiosity term rose from 0.15 to 0.21 while its
+    energy term fell from 0.80 to 0.70;
+  - curiosity's spread across bodies is 0.15–0.23 against energy's 0.4–0.5, enough for
+    the search to trade one for the other.
+- **Control running:** `p3-zero` on eidolon is the same training with curiosity 0, then the
+  same flat gate (results about 20:30). If its frondgrazers keep C1's intake, curiosity
+  caused the drift, and the share should drop to about 0.1 or fade with age.
+
+**What it means:**
+- Brain gradients need more signal than 8 pairs × 10-min windows give: more worlds (EC2), longer
+  windows, or a lower curiosity share. A σ-control rerun at the same scale would
+  only confirm the noise.
+- The V weight against F and the energy gain (§6 Q5) is now a concrete choice: as weighted, P
+  promotes a brain whose bodies gain energy 36 % slower than C1's.
+- The heuristic arm in these gates ran on the 09:27 binary, before today's heuristic fixes,
+  so it is out of date. Baseline v4 has the current heuristics.
+
 ## 2. The fitness score
 
 One rule from both reviews: **a vector first, a scalar second.** Every evaluation prints:
@@ -206,7 +263,7 @@ the band `[lo, hi]`.
 | Q | replenishment shortfall over one day cycle, `h(I/(I − ΔS))` | `targets.rs` cycle books | exists |
 | A | band: late counts within `[N0, 3N0]` per lineage | trace | exists, switched off by `counts_readout` |
 | K | peak above `5 N0` | trace | exists |
-| V | browser movement share below 0.30 | window meter | exists |
+| V | browser movement share below 0.30. **Proposed: drop from P, keep as a diagnostic.** Under WORKING_POLICY "Shape the situation" (Wrysk 2026-10-08), a movement term tells animals what to do; if they don't need to move to eat, the food is too abundant. Your call (Q5) | window meter | exists |
 | Z | lanternjaw share outside 5–15 % of animals (full-world checks only) | trace | exists |
 | M | largest meadow patch below its target area | census `meadow_patch_max` | in CSV |
 | G_b, G_v | lanternberry grove size; new established vaulttree sites | census grove/forest columns | partial |
@@ -358,7 +415,10 @@ control and the reward accounting; display targets after seeing results.
 8. **Founding birth pulse:** founders arrive at full reserve and breed at once. Bellwings went
    from 6 to 70 within 3 h and lose about 5 per seed to starvation. Leave it to the ecology
    search, or have founders earn their surplus first?
-9. **Saved starts and new knobs:** today every new serialised knob made every saved start
+9. **Saved starts and new knobs:** Wrysk 2026-10-08: "we need to do a better job about
+   changing save formats, or making them extensible, or migrations". SAVE-EXTENSIBLE is
+   running (option b below, plus a one-time reader so starts3 survives).
+   Background: today every new serialised knob made every saved start
    unloadable. For example, after DEN-FLOOD, loads failed with "corrupt snapshot", not even a
    clean refusal.
    - With "every number a knob", start libraries die on most merges.
@@ -381,10 +441,22 @@ control and the reward accounting; display targets after seeing results.
     - a stem climber with a carcass at its foot climbs down to it.
 
     These are motor fixes for deadlocks. Revert any you disagree with.
-13. **Leads that never pay** (HUNGRY-SEARCH): bellwings orbit a bloom or light they steer at,
-    over 2,000 body lengths of path for no net way, in both arms. A give-up rule for leads
-    that never reach a bite would break the orbit; it is a behaviour choice, so it waits for
-    you.
+13. **Leads that never pay** (merged c92ce6e7, LEADS-PAY; revert if you disagree).
+    - Hungry bellwings awake in the dark followed nectar scent to its peak at a bloomcrown's
+      rooting face, a metre off the flower, and circled there all night.
+    - Food was never short: supply by day is 2.3–5.9e-3/s against a demand of
+      3.6e-4/s.
+    - A heuristic forager now gives a lead up after 150 body lengths without a taste
+      (`lead_give_up_bl`).
+    - Over 12 min from minute 63: bellwing adult p10 fullness 0.068 → 0.111, starving adults
+      1.08 → 0.46, intake +19 %.
+    - Wrysk: why give up rather than fix scent lying on the ground? NECTAR-SCENT (9a5a6eba)
+      fixed the world:
+      - a flower's scent is now a plume in the air at its bloom, scaled by the nectar it
+        holds;
+      - starving juveniles 27.9 → 9.9, and give-ups fell from 293 to 6.
+
+      The give-up rule stays as "abandon food you can't reach".
 
 ## 7. Work log (2026-10-08)
 
@@ -420,5 +492,9 @@ control and the reward accounting; display targets after seeing results.
 | SHREDDER-PLATEAU: stillness is gut-limited feeding; litter is decay-limited | Opus (read-only) | 972306a7 |
 | TRAPS: off a face by turning, step no deeper, stem climber to carcass | Opus | 34ef1e71 |
 | HUNGRY-SEARCH: legs away from covered ground for hungry heuristic foragers (schema 70) | Opus | ea20a13c |
-| Brain pilot end gate: trained vs C1 vs heuristic, flat and d72, 1 h | desktop | running |
+| Brain pilot end gate: trained vs C1 vs heuristic, flat and d72, 1 h | desktop | done, §1c |
+| BELLWING-HUNGER (LEADS-PAY): leads given up after lead_give_up_bl without a taste (schema 71) | Opus | c92ce6e7 |
+| SAVE-EXTENSIBLE: configs saved as named-field documents over code defaults; a new knob needs no bump (§6 Q9) | Opus | aa6c4c2b |
+| NECTAR-SCENT: nectar scent is a plume at the bloom, scaled by the nectar held (the real fix behind Q13) | Opus | 9a5a6eba |
+| Start library v3 resaved in the new format: `runs/starts3r-2026-10-08` | desktop | chained after starts3 |
 | Start library v3 and baseline v4 (TRAPS + HUNGRY-SEARCH) | desktop | chained after the end gate |

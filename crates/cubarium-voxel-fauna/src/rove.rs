@@ -40,6 +40,25 @@
 //! - Legs steer a body walking, flying or gliding; on a terrain face, a stem or a perch its
 //!   own climb or take-off runs.
 //! - `search_leg_bl` 0 turns the rule off.
+//!
+//! **LEADS-PAY: a lead that never brings a taste is given up** (2026-10-08). HUNGRY-SEARCH
+//! left leads alone, and bellwings circled a flower they smelled but could not see for the
+//! rest of a night: the light layer's nectar-scent lead brought them over the plant's
+//! rooting face, a metre or two off its flower, and never to it (`juvenile_trace` at m063 of
+//! d72 seed 1: ten of seventy bellwings, 66–96 % of their samples on the scent lead, no
+//! taste in ten minutes, fullness to zero). The rule, over the same heuristics:
+//!
+//! - **The count.** A body wanting food sums the time it spends steering by leads — its own
+//!   heuristic's (food in view, a scent rising or falling) and, for the bellwing, its light
+//!   layer's (a still light's approach, the nectar scent's gradient) — since its last taste.
+//!   A taste, or the latch letting go, starts it over.
+//! - **Giving up.** At `lead_give_up_bl / cruise_body_lengths_per_s` seconds the lead is
+//!   given up and the count starts over: a light layer's lead marks its source (the still
+//!   light, or the nearest nectar source up the scent) "no reward here" for the light's
+//!   `mark_s`, so the scent and the light from it are passed by; a heuristic's own lead
+//!   becomes one search leg, turned at least square from the heading it was led along, and
+//!   held as the hungry search's legs are. The body's other answers run as before.
+//! - `lead_give_up_bl` 0 turns it off.
 
 use crate::controller::{Actions, Seek};
 use crate::Fauna;
@@ -61,6 +80,9 @@ pub(crate) struct Rove {
     /// The heading of the leg something in the way ended: the next leg turns at least
     /// square to it (the obstacle's side is closed), once.
     blocked: Option<f64>,
+    /// LEADS-PAY: the seconds it has steered by leads since its last taste or the last lead
+    /// it gave up.
+    lead_s: f64,
 }
 
 /// A remembered cell: its centre (x, z metres), its weight (seconds, faded to `at`).
@@ -77,6 +99,64 @@ struct Leg {
     heading: f64,
     from: (f64, f64),
     until: u64,
+    /// LEADS-PAY: set out from a lead given up, so it runs over the heuristic's leads too.
+    dropped: bool,
+}
+
+impl Leg {
+    /// Whether the leg has run out: its net way made, or its time up.
+    fn lapsed(&self, here: (f64, f64), now: u64, leg_m: f64, ring: f64) -> bool {
+        let (dx, dz) = crate::pose::wrapped_delta(self.from.0, self.from.1, here.0, here.1, ring);
+        now >= self.until || dx.hypot(dz) >= leg_m
+    }
+}
+
+/// The time a leg of `leg_bl` body lengths takes at `cruise` body lengths a second, twice
+/// over, in ticks from `now`.
+fn leg_until(now: u64, leg_bl: f64, cruise: f64) -> u64 {
+    let leg_s = if cruise > 0.0 { 2.0 * leg_bl / cruise } else { 0.0 };
+    now.saturating_add(cubarium_voxel::ticks_at_least_one(leg_s.max(DT)))
+}
+
+/// The leg's heading at the heuristic's own pace (`actions`'s forward and feed).
+fn along(a: &crate::Animal, leg: Option<Leg>, actions: Actions) -> Actions {
+    let heading = leg.map_or(a.pose.heading_rad, |leg| leg.heading);
+    let mut go = super::glider::walk_toward(a, heading.sin(), heading.cos(), actions.feed);
+    go.forward = if go.forward > 0.0 { actions.forward } else { 0.0 };
+    go
+}
+
+/// LEADS-PAY's budget: `lead_give_up_bl` body lengths at `cruise` body lengths a second,
+/// seconds; `None` with the rule off or no cruise.
+fn lead_budget_s(lead_give_up_bl: f64, cruise: f64) -> Option<f64> {
+    (lead_give_up_bl > 0.0 && cruise > 0.0).then(|| lead_give_up_bl / cruise)
+}
+
+/// **LEADS-PAY for a later layer's lead** (the bellwing's light and nectar scent): body `i`
+/// steers one controller sample (`period_s`) by a lead. `true` when that spends its budget:
+/// the caller gives the lead up, and the count starts over (counted in
+/// [`Fauna::lead_give_ups`]).
+pub(crate) fn lead_spent(fauna: &mut Fauna, i: usize, period_s: f64) -> bool {
+    let a = fauna.animals[i];
+    let Some(founder) = a.founder else { return false };
+    let Some(budget) = lead_budget_s(fauna.config.teachers.lead_give_up_bl, fauna.config.founder(founder).cruise_body_lengths_per_s) else {
+        return false;
+    };
+    let r = fauna.rove.entry(a.id).or_default();
+    r.lead_s += period_s;
+    if r.lead_s < budget {
+        return false;
+    }
+    r.lead_s = 0.0;
+    fauna.lead_give_ups[founder.index()] += 1;
+    true
+}
+
+/// LEADS-PAY: body `id` tasted food (a later layer saw it sip): the lead count starts over.
+pub(crate) fn tasted(fauna: &mut Fauna, id: u64) {
+    if let Some(r) = fauna.rove.get_mut(&id) {
+        r.lead_s = 0.0;
+    }
 }
 
 /// `w` faded from `at` to `now` at `half_ticks`.
@@ -187,6 +267,7 @@ pub(crate) fn search(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, 
         r.quiet_since = None;
         r.leg = None;
         r.blocked = None;
+        r.lead_s = 0.0;
         return None;
     }
     // A heading means something walking, flying or gliding; on a face, a stem or a perch the
@@ -199,13 +280,33 @@ pub(crate) fn search(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, 
             r.quiet_since = None;
             r.leg = None;
             r.blocked = None;
+            r.lead_s = 0.0;
             None
         }
         // A lead is followed as before; the patience runs on, as a lead that never
-        // reaches a bite is no food (the capgnawer shuttling in a scent).
+        // reaches a bite is no food (the capgnawer shuttling in a scent). LEADS-PAY: a leg
+        // set out from a lead given up runs out first, and a lead followed past its budget
+        // since the last taste is given up for a leg turned at least square from it.
         Seek::Lead => {
             r.quiet_since.get_or_insert(now);
-            None
+            if !steers {
+                return None;
+            }
+            if let Some(leg) = r.leg.filter(|l| l.dropped && !l.lapsed(here, now, leg_m, ring)) {
+                return Some(along(&a, Some(leg), actions));
+            }
+            let cruise = fauna.config.founder(founder).cruise_body_lengths_per_s;
+            r.lead_s += period_s;
+            if lead_budget_s(tc.lead_give_up_bl, cruise).is_none_or(|b| r.lead_s < b) {
+                return None;
+            }
+            r.lead_s = 0.0;
+            let heading = r.least_covered(here, a.pose.heading_rad, Some(a.pose.heading_rad), leg_m, now, half_ticks, ring);
+            r.leg = Some(Leg { heading, from: here, until: leg_until(now, tc.search_leg_bl, cruise), dropped: true });
+            r.blocked = None;
+            let leg = r.leg;
+            fauna.lead_give_ups[founder.index()] += 1;
+            Some(along(&a, leg, actions))
         }
         Seek::Obstacle => {
             // The leg it was on ran into something: the ground just ahead counts as
@@ -223,22 +324,14 @@ pub(crate) fn search(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, 
             if (now.saturating_sub(since) as f64) * DT < tc.search_patience_s {
                 return None;
             }
-            let lapsed = r.leg.is_none_or(|leg| {
-                let (dx, dz) = crate::pose::wrapped_delta(leg.from.0, leg.from.1, here.0, here.1, ring);
-                now >= leg.until || dx.hypot(dz) >= leg_m
-            });
+            let lapsed = r.leg.is_none_or(|leg| leg.lapsed(here, now, leg_m, ring));
             if lapsed {
                 let blocked = r.blocked.take();
                 let heading = r.least_covered(here, a.pose.heading_rad, blocked, leg_m, now, half_ticks, ring);
                 let cruise = fauna.config.founder(founder).cruise_body_lengths_per_s;
-                let leg_s = if cruise > 0.0 { 2.0 * tc.search_leg_bl / cruise } else { 0.0 };
-                let until = now.saturating_add(cubarium_voxel::ticks_at_least_one(leg_s.max(DT)));
-                r.leg = Some(Leg { heading, from: here, until });
+                r.leg = Some(Leg { heading, from: here, until: leg_until(now, tc.search_leg_bl, cruise), dropped: false });
             }
-            let heading = r.leg.map_or(a.pose.heading_rad, |leg| leg.heading);
-            let mut go = super::glider::walk_toward(&a, heading.sin(), heading.cos(), actions.feed);
-            go.forward = if go.forward > 0.0 { actions.forward } else { 0.0 };
-            Some(go)
+            Some(along(&a, r.leg, actions))
         }
     }
 }
@@ -265,6 +358,17 @@ impl Fauna {
     /// HUNGRY-SEARCH: the leg a body is on, `(heading radians, tick it lapses)`, if any.
     pub fn search_leg(&self, id: u64) -> Option<(f64, u64)> {
         self.rove.get(&id).and_then(|r| r.leg).map(|leg| (leg.heading, leg.until))
+    }
+
+    /// LEADS-PAY's readout: the leads given up per lineage, indexed by
+    /// [`crate::Founder::index`] (session state, not saved).
+    pub fn lead_give_ups(&self) -> [u64; crate::Founder::COUNT] {
+        self.lead_give_ups
+    }
+
+    /// LEADS-PAY: the seconds body `id` has steered by leads since its last taste.
+    pub fn lead_seconds(&self, id: u64) -> f64 {
+        self.rove.get(&id).map_or(0.0, |r| r.lead_s)
     }
 }
 

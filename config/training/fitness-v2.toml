@@ -153,3 +153,39 @@ count_drawdown = 0.0
 energy_trend = 0.0
 plant_stand_slope = 0.0
 plant_vigour_trend = 0.0
+
+# Brain gates (scripts/studies/batch.py, fresh founding, 1 h): a trained policy against the
+# built-in C1 and the heuristic on the same seeds. Slow clocks barely move in an hour, so J
+# and the band terms speak mostly to founding; read the per-lineage table for the trained
+# lineages first. On a no-predator map Z and H are the same penalty in every arm.
+[profiles.gate-1h]
+from_minute = 0
+to_minute = 60
+active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
+slow = ["chorister", "lanternjaw"]
+start_kind = "fresh founding"
+
+[profiles.gate-1h.disabled]
+Q = "Off: no cycle books in a one-hour gate."
+
+[profiles.gate-1h.required_data]
+L = ["census:stocks"]
+J = ["vitals:breeding_eligible_n", "life:recruits", "census:lifecycle"]
+A = ["census:stocks"]
+K = ["census:stocks"]
+V = ["vitals:moving_share", "vitals:awake_body_s"]
+Z = ["census:stocks"]
+M = ["census:meadow_patch_max"]
+G_b = ["census:grove_patch_max"]
+G_v = ["census:recruits_vaulttree"]
+H = ["census:kills"]
+F = ["vitals:fullness_p10", "vitals:n"]
+S = ["vitals:stuck_n", "vitals:stuck_observed_n"]
+
+[profiles.gate-1h.trend_weights]
+count_slope = 0.0
+count_drawdown = 0.0
+energy_trend = 0.0
+plant_stand_slope = 0.0
+plant_vigour_trend = 0.0

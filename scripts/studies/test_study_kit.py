@@ -171,6 +171,21 @@ class StudyKitTests(unittest.TestCase):
             score.pair_worlds([baseline, trial], 'base', self.cfg)
         self.assertFalse(score.score_world(self.root, 'base', 1, self.cfg, 0, 5, required=REQUIRED)['rankable'])
 
+    def test_redrawn_fresh_founding_scores_and_pairs_only_on_the_same_world(self):
+        fixture(self.root, seed=77)
+        self.assertFalse(self.rescore()['rankable'])
+        (self.root / 'err.log').write_text('cubarium voxel: seed 1 refused as a habitat: no room\n')
+        baseline = self.rescore()
+        self.assertTrue(baseline['rankable'], baseline['warnings'])
+        self.assertEqual(baseline['world_seed'], 77)
+        self.assertTrue(any('redrew' in w for w in baseline['warnings']))
+        trial = copy.deepcopy(baseline)
+        trial['arm'] = 'trial'
+        self.assertEqual(score.pair_worlds([baseline, trial], 'base', self.cfg)['trial']['invalid'], 0)
+        trial['world_seed'] = 78
+        with self.assertRaisesRegex(ValueError, 'different worlds'):
+            score.pair_worlds([baseline, trial], 'base', self.cfg)
+
     def test_extinction_cannot_hide_in_mean_sd(self):
         template = self.world()
         base, trial = [], []

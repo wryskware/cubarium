@@ -1,0 +1,23 @@
+---
+status: open
+last_reviewed: 2026-10-08
+synced_at: e66b92138e8a3aab6c5b15729b7195a0911f18a1
+---
+
+# Dossier sync: drift requiring Wrysk
+
+Compared with `e66b92138e8a3aab6c5b15729b7195a0911f18a1`; look content is retained. These are contradictions to reconcile, not new decisions. Founder status in the dossiers is scoped to `config/desktop/terrarium.toml`, not a live census.
+
+- ~~**Lanternjaw role:**~~ resolved 2026-10-08. Wrysk: newborn loftstriders are too big for a lanternjaw; it does eat bellwings. The sim already matches (bellwing at rest is on its list); the dossier now says so.
+- **Latticevine cycle:** rain-pulse starts became independent random rests; keep the rain intent labelled *not in the sim yet* (`design/art-direction/species-dossier-D15-latticevine-2026-09-23.md`, Revision 2; `crates/cubarium-voxel-flora/src/cover.rs:1312`; commit `51430f22`).
+- **Pollination/mutualism:** bellwing is still called a pollinator in the manifest, but only last_bloom and mineral-bearing Nectar exist; pollen carriage, outcrossing and visit-dependent vine fruit set are *not in the sim yet* (`crates/cubarium-voxel-fauna/src/manifest.rs:192`, `crates/cubarium-voxel-fauna/src/lib.rs:981`, `crates/cubarium-voxel-flora/src/cover.rs:1312`; D14/D15).
+- **Bower habitat:** pictured vine bowers have no dedicated nest/den occupancy rule; seedporter roosts are vaulttrees/ledges and bellwing egg sites use litter and air clearance (`design/art-direction/species-dossier-D15-latticevine-2026-09-23.md`, Poses/model request 4; `crates/cubarium-voxel-fauna/src/body.rs:1430`, `:2167`, `:2251`; commit `fb4cf71b`).
+- **Umbrellafrond state/look:** the retained sheet says waterlogged “does not exist” and the niche formerly claimed immunity; the sim has stress_rate_per_s 0.01 and drown_depth_m 0.5 (`design/art-direction/species-dossiers-2026-09-21.md`, D10 states; `crates/cubarium-voxel-flora/src/lib.rs:2036`).
+- **Grazer/shredder scale:** D3's model-body annotation 0.375 m and D4's 0.19 m differ from physical adult lengths 0.75 m and 0.375 m; retain drawn shell sizes and resolve the old model/shell convention (`design/art-direction/species-dossiers-2026-09-21.md`, D3/D4 size; `crates/cubarium-voxel-fauna/src/body.rs:1872`, `:1776`).
+- **Loftstrider scale/body:** the retained body need/alternatives use the old 1.5 × 0.55 × 0.45 m hull; current radial physiology is 2.2 × 2.2 × 3.4 m (`design/animal-body-reimagining-2026-09-24.md`, Loftstrider; `crates/cubarium-voxel-fauna/src/body.rs:2122`).
+- **Bloomcrown parts:** historical body/rig says six outer + four inner vanes, while the selected-pick builder uses ten outer vanes and eight basal straps; selection note leaves exact layout open (`design/art-direction/species-dossiers-2026-09-21.md`, D9; `scripts/blender/organism_lineup.py:517`).
+- **Siphonreed parts:** selected note shows four stems with growth-stage counts open; builder chooses three below h=0.9 m, four above; old siphon-head/body/rig remains historical (`design/art-direction/species-dossiers-2026-09-21.md`, D13; `scripts/blender/organism_lineup.py:824`).
+- **Seedporter selected-pose note:** “nothing selects it yet” is preserved as part of the look note, but the live presenter selects ground/stand/glide models by mobility (`design/animal-body-reimagining-2026-09-24.md`, Seedporter selected poses; `crates/cubarium/src/voxel/model.rs:272`).
+- **Reproductive art axes:** old ripe parcel-based fruit/bloom, fixed colony “spent” stages and D15 four cover sizes are retained look proposals; separate nectar/fruit stocks, Alive-only stand stage and unbounded cover now differ (`design/art-direction/species-dossiers-2026-09-21.md`, plant axes/D1/D12; D15 Size/States; `crates/cubarium-voxel-flora/src/lib.rs:242`, `:295`; `crates/cubarium-voxel-flora/src/cover.rs:1312`).
+- **Vine water intent:** leaf-held water and automatic death on root-pocket flooding have no matching mechanisms; current economy uses shared root uptake and dry/wet dormancy (`design/art-direction/species-dossier-D15-latticevine-2026-09-23.md`, Niche; `crates/cubarium-voxel-flora/src/cover.rs:1312`).
+- **Other retained behavior intent:** capgnawer spore carriage, seedporter hand-carried fruit/bower dens, deeper turf roots, adjacent-water-only reed establishment/water-driven sway, grazer drinking/birth animation and the fixed lone-versus-3–5 Veilhound hunt split remain *not in the sim yet* (`design/animal-body-reimagining-2026-09-24.md`, relevant body needs; D3/D6 model requests; `crates/cubarium-voxel-fauna/src/body.rs:2047`, `:2251`, `:896`; `crates/cubarium-voxel-flora/src/lib.rs:2198`, `:2915`).

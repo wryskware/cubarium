@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2424 rows)
+**`fauna.*`** (2425 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3817,6 +3817,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.search_leg_bl` | 12.0 | body lengths | [0, inf) | 3–40 log | - | placeholder | one hungry-search leg: the net way it holds a heading for (0 turns the search off) |
 | `fauna.teachers.search_cell_bl` | 2.0 | body lengths | (0, inf) | 0.5–6 | - | placeholder | the hungry search's visited-ground memory cell |
 | `fauna.teachers.search_memory_half_life_s` | 300.0 | s | (0, inf) | 30–1800 log | - | placeholder | half-life of the hungry search's visited-ground memory |
+| `fauna.teachers.lead_give_up_bl` | 150.0 | body lengths | [0, inf) | 30–600 log | - | placeholder | a hungry heuristic body that has followed leads this many of its lengths at cruise since its last taste gives the lead up: the light or scent source is marked, its own lead becomes a search leg (LEADS-PAY; 0 off) |
 | `fauna.hunt.cue_scan_m` | 6.0 | m | [0, inf) | 2–12 | - | placeholder | how far around itself a patroller reads its prey's food to choose the next patch |
 | `fauna.hunt.patch_m` | 1.0 | m | (0, inf) | 0.5–3 | - | placeholder | food cells are pooled into square patches this wide |
 | `fauna.hunt.patch_min_hop_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | the nearest a next patch may be |
@@ -3854,11 +3855,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.deposit_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what a standing body lays, by its organic matter |
 | `fauna.scent.carrion_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what carrion lays, by its stock |
 | `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
-| `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar lays on the surface under it (the nectar channel) |
+| `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding a full bloomcrown head of nectar gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar |
 | `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (UV) per unit of the light falling on it |
 | `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
 | `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light (cyan) |
-| `fauna.light.lure_scent` | 1.0 | x nectar_per_s | [0, inf) | 0–2 | - | placeholder | BELLWING: a lit lure lays this x a flower's nectar scent on its lanternjaw's face (0: light alone) |
+| `fauna.light.lure_scent` | 1.0 | x nectar_per_s | [0, inf) | 0–2 | - | placeholder | BELLWING: a lit lure gives off this x a flower's nectar scent at its lure point (0: light alone) |
 | `fauna.light.lure_uv` | 1.0 | x flower_reflectance | [0, inf) | 0–2 | - | placeholder | BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only |
 | `fauna.light.background_floor` | 0.05 | light | (0, inf) | 0.01–0.5 log | - | placeholder | a beacon's contrast is its brightness over the light around it plus this (the darkest background) |
 | `fauna.light.half_m` | 1.0 | m | (0, inf) | 0.25–4 | - | placeholder | a beacon's received level halves at this distance |

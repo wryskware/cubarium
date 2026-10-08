@@ -794,6 +794,9 @@ pub fn thread_override() -> Option<usize> {
 /// The world. Stepped at [`crate::TICK_HZ`]; pure given its inputs.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct World {
+    /// Saved beside the state as a named-field document (`crate::savedoc`), not in its
+    /// positional bytes: a new knob is not a new state layout.
+    #[serde(skip)]
     pub(crate) config: Config,
     pub(crate) material: Vec<Material>,
     pub(crate) free: Vec<f64>,

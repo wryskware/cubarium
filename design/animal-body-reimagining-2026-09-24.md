@@ -1,10 +1,20 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-25
+last_reviewed: 2026-10-08
+synced_at: e66b92138e8a3aab6c5b15729b7195a0911f18a1
 decision_refs: []
 ---
 
 # Body reimagining: six animals and four plant revisions
+
+> **Sim sync (2026-10-08):** ecology below is checked against `e66b92138e8a3aab6c5b15729b7195a0911f18a1`.
+> `Sim state` distinguishes shipped code defaults from the named desktop terrarium
+> preset; founder status means configured availability, not an observed population.
+> Other presets, saved worlds and trained brains can differ. Config keys refer to
+> `config/desktop/terrarium.toml` where stated; `design/parameters.md` lists code
+> defaults, not that preset's overrides. Numbers are tunable facts of this revision.
+> The look, body proposals and visual-review notes are retained. Missing ecological
+> intent is labelled *not in the sim yet*; implementation does not confer canon.
 
 > **Colour note (2026-09-24):** the hexes in this document are superseded by
 > `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
@@ -68,9 +78,29 @@ with twin tail lures, refined in a Blender/voxel round:
 **Body need.** The scorpid direction offers a useful separation between a stationary
 lure and a sudden capture, but needs a body whose jaw, supports and lure stay
 distinct. Keep the 1.0 × 0.25 × 0.45 m body, approximately 8 × 2 × 3.5 voxels:
-32–48 px long and 14–21 px high. It waits, strikes briefly, eats the agreed small
-prey and newborn loftstriders, and scavenges; the lure consumes reserve. At this
+32–48 px long and 14–21 px high. It patrols and ambushes eligible small prey,
+strikes and scavenges; its paid lure also mimics daytime flowers. Loftstriders, even
+newborn, are too big for it (Wrysk, 2026-10-08); bellwings it takes when it catches one
+at rest. At this
 scale a dark capture cleft and one cyan endpoint carry more than many fine claws.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `lanternjaw`; display name Lanternjaw (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 3 dormant clutches; code default 3 dormant clutches (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
+- diet: carrion from kills or scavenging; eligible prey list is littershredder, frondgrazer, capgnawer, ripple-snail, bellwing (at rest only) and grounded seedporter (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1539`)
+- size: adult length × width × height 1.0 × 0.25 × 0.45 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min 0.102, breeding threshold 0.63, full size 1.05 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.lanternjaw.core`; `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: dark-active, with daytime flower mimicry enabled (sources: `crates/cubarium-voxel-fauna/src/body.rs:1930`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
+- life_stages: optional attached rider → juvenile → adult; eggs are counted separately; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 86400 s (12 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.lanternjaw.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: surplus-sized dormant egg clutches up to 3; each dusk hatches probabilistically (code default 1/3), with optional host-riding hatchlings (sources: `config/desktop/terrarium.toml` → `fauna.founders.lanternjaw.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
+- senses: patrol prey tracks and substrate tremor; scent/food-patch search; UV/nectar-scent lure (sources: `crates/cubarium-voxel-fauna/src/body.rs:5987`; `crates/cubarium-voxel-fauna/src/knobs.rs:957`)
+- movement_habitat: ground patrol, ambush, strike, handle and carcass feeding; daytime flower ambush; adult step 0.45 m (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
+- defence: armour 0, agility 0 (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
+- predators: Veilhound; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
+- not_prey: loftstriders of any age, too big for it (Wrysk 2026-10-08; matches Hunter::LANTERNJAW.prey, source: `crates/cubarium-voxel-fauna/src/body.rs:1539`)
 
 ### LJ-D2 · Low scorpid with a sheltered lure
 
@@ -150,9 +180,29 @@ cyan jaw accent and magenta sensors follow the selected colourway.
 lid in the run; smooth bodies also give little sense of stored running force.
 Keep 1.4 × 0.35 m, shoulder 0.6 m, plus a 0.8 m tail: about 11 × 3 × 5
 voxels plus 6.5. The body reads at 44–66 × 20–30 px before the tail. It
-pursues frondgrazers alone and attacks feeding loftstriders in packs of 3–5.
+weighs reachable prey by defence, isolation, awareness and pack strength. A fixed
+alone-on-frondgrazer / 3–5-on-loftstrider split is *not in the sim yet*; the earlier
+proposal remains context for the anatomy.
 Both options need directional sensing, traction and a cyan call visible between
 animals; anatomy should expose the lateral jaw and break the smooth outline.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `chorister`; display name Veilhound (sources: `crates/cubarium-voxel-fauna/src/body.rs:2328`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 1 pack (4 adults); code default 0 (sources: `config/desktop/terrarium.toml` → `fauna.founders.chorister.founding_count`; `crates/cubarium-voxel-fauna/src/body.rs:2328`)
+- diet: carrion from hunting/scavenging; prey list frondgrazer, lanternjaw, loftstrider, bellwing and grounded seedporter (source: `crates/cubarium-voxel-fauna/src/body.rs:2328`)
+- size: adult length × width × height 1.4 × 0.35 × 0.6 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:2328`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min 0.26656, breeding threshold 1.6464, full size 2.744 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.chorister.core`; `crates/cubarium-voxel-fauna/src/body.rs:2328`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: diurnal (sources: `crates/cubarium-voxel-fauna/src/body.rs:2328`; `crates/cubarium-voxel-fauna/src/body.rs:2328`)
+- life_stages: pup → juvenile → adult; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 86400 s (12 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.chorister.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: one breeder per pack; up to one conception per Cubarium year, phase 0.2/window 0.15; 6000 s gestation at 1.5× upkeep, condition-sized 1–4 pup litter; independence 21600 s (sources: `config/desktop/terrarium.toml` → `fauna.founders.chorister.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2328`)
+- senses: live sight 16 m day / 9 m night, hearing 10 m, prey scent and tremor; pack target sharing (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- movement_habitat: ground route chase, stalk then rush, strike, feast and den rest; cruise 1.4 m/s, rush 3.5 m/s for 20 s; step 0.6 m (source: `crates/cubarium-voxel-fauna/src/body.rs:2328`)
+- defence: pack prey choice accounts for armour, isolation, awareness, wounds and reach; abandons/shuns failing targets (source: `crates/cubarium-voxel-fauna/src/body.rs:896`; rush `crates/cubarium-voxel-fauna/src/gait.rs:107`)
+- predators: none in the current founder prey lists; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
+- not_in_sim_yet: a fixed “alone on frondgrazer / 3–5 on loftstrider” rule (retained earlier body intent); membership and prey prospect decide (source: `crates/cubarium-voxel-fauna/src/body.rs:896`)
 
 ### CH-A2 · Six-footed split-jaw runner
 
@@ -232,6 +282,23 @@ voxel that is a 48–72 px hull and 112–168 px feeding reach. Route sensing
 and canopy sensing remain distinct; feeding leaves ground supports exposed
 to the pack. These options propose different feeding mechanics, all within
 that reach and diet.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `loftstrider`; display name Loftstrider (sources: `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 2 bodies; code default 0 (sources: `config/desktop/terrarium.toml` → `fauna.founders.loftstrider.founding_count`; `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- diet: vascular foliage within its high mouth band; some bite material spills to litter (source: `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- size: adult length × width × height 2.2 × 2.2 × 3.4 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min 0.528, breeding threshold 3.168, full size 5.28 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.loftstrider.core`; `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: diurnal (sources: `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- life_stages: juvenile → adult; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 115200 s (16 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.loftstrider.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: single paid calf, 3600 s gestation, 1800 s surplus hold, 21600 s birth interval (sources: `config/desktop/terrarium.toml` → `fauna.founders.loftstrider.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- senses: 360° live sight (12 m day / 6 m night), hearing, smell and tremor; high feeding cone (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- movement_habitat: ground canopy browser; mouth roughly 0.8–3.5 m above support at adult size, step 1.15 m; no wall climb (source: `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- defence: faces a lone hunter; flees converging group (group_min 2), armour/agility 0 (sources: `crates/cubarium-voxel-fauna/src/vigil.rs:458`; `crates/cubarium-voxel-fauna/src/body.rs:2099`)
+- predators: Veilhound; lanternjaw excludes this lineage even as a newborn; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
 
 ### LS-E · Rearing underside browser
 
@@ -344,10 +411,29 @@ the single rasping lip and original sensor treatment below. Outer halo needs cle
 D supplied appealing soft surfaces but added flight to a log-feeding niche.
 Keep the rounded 0.25 × 0.19 m envelope, about 2 × 1.5 voxels or only
 8–12 × 6–9 px. It eats glowcap tissue, takes conditioned litter as weaker
-fallback, visits logs and may carry spores. Both options walk and grip bark.
+fallback, visits logs and eats exposed mycelium after caps are cropped. Active
+spore carriage remains *not in the sim yet*. Both options walk and grip bark.
 A broad feeding notch, dark foot contact and one soft upper mass must carry
 the read; bristles and spores can merge into texture. Cyan fungal light can
 be sensed without making the animal's own body luminous.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `capgnawer`; display name Capgnawer (sources: `crates/cubarium-voxel-fauna/src/body.rs:2047`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 6 bodies; code default 0 (sources: `config/desktop/terrarium.toml` → `fauna.founders.capgnawer.founding_count`; `crates/cubarium-voxel-fauna/src/body.rs:2047`)
+- diet: glowcap caps and exposed mycelium (CapTissue); litter at weaker yield; no carrion (source: `crates/cubarium-voxel-fauna/src/body.rs:2047`)
+- size: adult length × width × height 0.25 × 0.21 × 0.19 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:2047`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min 0.076608, breeding threshold 0.25536, full size 0.6384 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.capgnawer.core`; `crates/cubarium-voxel-fauna/src/body.rs:2047`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: dark-active by its own face light (sources: `crates/cubarium-voxel-fauna/src/body.rs:2047`; `config/desktop/terrarium.toml` → `fauna.founders.capgnawer.active`)
+- life_stages: juvenile → adult; eggs are counted separately; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 43200 s (6 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.capgnawer.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: up to 3 eggs near a cap-bearing fungus within 0.5 m; 0.8 brood share, crowd brake, full-clutch wait up to 1800 s (sources: `config/desktop/terrarium.toml` → `fauna.founders.capgnawer.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2047`)
+- senses: fungal chemistry plus coarse sight, tremor and weak cyan light sense; fungal cue half-life 300 s in preset (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- movement_habitat: walks and inherits wall-climbing; fungus/log patches (source: `crates/cubarium-voxel-fauna/src/body.rs:2047`)
+- defence: flees its hunters’ footfall (history `22829a15`); armour 0, agility 0.3 inherited from shredder (source: `crates/cubarium-voxel-fauna/src/body.rs:2047`)
+- predators: lanternjaw; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
+- not_in_sim_yet: active spore carriage (retained body-dossier possibility); cyan sensitivity is implemented (sources: `crates/cubarium-voxel-fauna/src/body.rs:2047`; `crates/cubarium-voxel-fauna/src/body.rs:5987`)
 
 ### CG-A2 · Cleft-front nibbler
 
@@ -421,10 +507,29 @@ surface and silhouette when reconciling the detailed case construction below.
 **Body need.** B's ribbed dome reads well but risks becoming all shell and
 ornamental fringe; D's moving case gives a clearer front but can hide the
 feeding contact. Keep the approximately 0.19 m, 1.5 × 1.5 voxel footprint,
-only 6–9 px across. This slow aquatic grazer scrapes glassfilm from lit,
-shallow wet surfaces and leaves a cleared trail. The useful adjustments are
+only 6–9 px across. This slow amphibious grazer scrapes glassfilm in lit shallows
+and on damp shore ground, roams ashore in dark/rain hours, returns before drying,
+retracts from threats and lays its clutches above water on damp banks. It leaves
+a cleared trail through actual feeding. The useful adjustments are
 a directional opening, visible attachment to wet rock and a simple contour
 that survives fringe loss. Neither option acquires a land-foliage diet.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `ripple-snail`; display name Ripple-snail (sources: `crates/cubarium-voxel-fauna/src/body.rs:2387`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 8 bodies; code default 0 (sources: `config/desktop/terrarium.toml` → `fauna.founders.ripple-snail.founding_count`; `crates/cubarium-voxel-fauna/src/body.rs:2387`)
+- diet: glassfilm only, including wet land/shore film; no vascular foliage (source: `crates/cubarium-voxel-fauna/src/body.rs:2387`)
+- size: adult length × width × height 0.19 × 0.19 × 0.063 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:2387`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min ≈0.0174666, breeding threshold ≈0.0582221, full size 0.1455552 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.ripple-snail.core`; `crates/cubarium-voxel-fauna/src/body.rs:2387`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: dark-active by its own face light (sources: `crates/cubarium-voxel-fauna/src/body.rs:2387`; `config/desktop/terrarium.toml` → `fauna.founders.ripple-snail.active`)
+- life_stages: juvenile → adult; eggs are counted separately; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 43200 s (6 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.ripple-snail.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: paid shore clutches up to 3, near water but out of it; damp face ≥0.5 pore, within 0.5 m horizontal/vertical of water; eggs can drown or dry; full-clutch wait up to 1800 s (sources: `config/desktop/terrarium.toml` → `fauna.founders.ripple-snail.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2387`)
+- senses: film chemistry, taste, contact, shadow/looming and tremor (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- movement_habitat: amphibious crawl, inherited wall climb; wet-ground steps need pore ≥0.33; night/rain roaming, drying clock and return-to-water reflex; leaves poor film patches (source: `crates/cubarium-voxel-fauna/src/body.rs:2387`)
+- defence: retraction stops feeding and adds armour 0.5 (source: `crates/cubarium-voxel-fauna/src/body.rs:1288`)
+- predators: lanternjaw; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
 
 ### RS-B2 · Notched mineral disc
 
@@ -527,10 +632,30 @@ directly rather than chaining unaccepted iterations.
 tail; B's images repeatedly detached the membranes into familiar wings.
 Keep the 0.5 × 0.25 m body, 4 × 2 voxels or 16–24 × 8–12 px, with the
 tail and gliding posture shown separately. It climbs trunks and drapes,
-eats lanternberry pulp and some seeds, and carries seeds between groves.
+eats lanternberry and latticevine fruit, carries seeds in gut lots between groves,
+and can catch reachable bellwings. Free-hand fruit transport and bower dens are
+*not in the sim yet*.
 Both options combine grasping limbs, a prehensile tail and skin joined
 to those limbs. The visible priorities are fruit at the mouth, the tail's
 grip and the membrane outline; only carried ripe fruit receives warm colour.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- code_id: `seedporter`; display name Seedporter (sources: `crates/cubarium-voxel-fauna/src/body.rs:2251`; `crates/cubarium-observatory/src/query.rs:20`)
+- status: live founder in the desktop terrarium: 4 bodies; code default 0 (sources: `config/desktop/terrarium.toml` → `fauna.founders.seedporter.founding_count`; `crates/cubarium-voxel-fauna/src/body.rs:2251`)
+- diet: lanternberry and latticevine fruit; carrion via opportunistic bellwing catches (catch_bellwings enabled) (source: `crates/cubarium-voxel-fauna/src/body.rs:2251`)
+- size: adult length × width × height 0.5 × 0.25 × 0.2 m; juvenile dimensions scale with cube root of body / body_max (sources: `crates/cubarium-voxel-fauna/src/body.rs:2251`; `crates/cubarium-voxel-fauna/src/body.rs:2510`)
+- body: core.body_min ≈0.03556, breeding threshold ≈0.21333, full size ≈0.35556 org-units in the desktop preset; shipped mass scale 30 × placeholder quantities, not 30 × physical dimensions (sources: `config/desktop/terrarium.toml` → `fauna.founders.seedporter.core`; `crates/cubarium-voxel-fauna/src/body.rs:2251`; `crates/cubarium-voxel-fauna/src/lib.rs:2308`)
+- activity: diurnal (sources: `crates/cubarium-voxel-fauna/src/body.rs:2251`; `crates/cubarium-voxel-fauna/src/body.rs:2251`)
+- life_stages: juvenile → adult; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
+- lifespan: median 57600 s (8 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.seedporter.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
+- breeding: paid gestation; preset gestation ≈109.78 s, interval ≈1097.83 s and surplus hold ≈548.91 s; fruit seed fraction 0.1, gut transit 900 s (sources: `config/desktop/terrarium.toml` → `fauna.founders.seedporter.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2251`)
+- senses: live sight 16 m day / 3 m night, hearing, smell and tremor; fruit search (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- movement_habitat: walk, climb tall stems and vine faces, perch, glide; cruise 1.19 m/s, glide 2× cruise; roosts in vaulttrees or vine-climbed ledges (source: `crates/cubarium-voxel-fauna/src/body.rs:2251`)
+- defence: takes arboreal refuge from a ground threat; stamina-limited dash, no alarm-call behavior (sources: `crates/cubarium-voxel-fauna/src/vigil.rs:469`; `crates/cubarium-voxel-fauna/src/gait.rs:107`; history `fb4cf71b`)
+- predators: lanternjaw and Veilhound while grounded; climbing/perched/gliding bodies excluded; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)
+- not_in_sim_yet: free-hand fruit carrying between groves and bower dens (retained body and D15 intent); dispersal is through gut seed lots (source: `crates/cubarium-voxel-fauna/src/body.rs:2251`)
 
 ### SP-AB2 · Six-limbed grove glider
 
@@ -614,6 +739,19 @@ can change the form while preserving its leafy layers, young browsable
 growth and adult reach. Movement is passive sway and moisture-driven droop;
 the canopy itself supplies the light-gathering surface.
 
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- status: live founder species on eligible sites; counts are area/gate/cap dependent (source: `crates/cubarium-voxel-flora/src/lib.rs:2036`, `founder_per_m2`, `founder_colony`, `founder_cap`)
+- food: photosynthesis, root water and soluble mineral (source: `crates/cubarium-voxel-flora/src/lib.rs:2036`)
+- habitat: wet hollows; deep rooting_depth 4; establishment available water ≥1.2, light ≥0.1; saturation accepted but stress_rate_per_s 0.01, drown_depth_m 0.5 (source: `crates/cubarium-voxel-flora/src/lib.rs:2036`)
+- size: authored crown height × diameter 1.0–2.0 × 0.75–1.5 m; profile may cap seedlings below these envelopes (source: `crates/cubarium-voxel-flora/src/lib.rs:2036`)
+- life_stages: seed bank → living stand; morphology profiles by wood, dieback/death by stores and stress (sources: `crates/cubarium-voxel-flora/src/lib.rs:2036`; `crates/cubarium-voxel-flora/src/lib.rs:1585`; `crates/cubarium-voxel-flora/src/step.rs:3768`)
+- breeding: spores and runners, clonal share 0.5; woody recruitment above ground cover; paid parcels and species-specific seed-bank clocks; preset rates override defaults (sources: `crates/cubarium-voxel-flora/src/lib.rs:2036`; `config/desktop/terrarium.toml` → `flora.umbrellafrond`)
+- consumers: frondgrazer and loftstrider within their mouth bands (sources: `crates/cubarium-voxel-fauna/src/body.rs:1846`; `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-flora/src/lib.rs:2036`)
+- defence: induced grazing defence and a refuge floor (sources: `crates/cubarium-voxel-flora/src/lib.rs:2036`; `config/desktop/terrarium.toml` → `flora.umbrellafrond.defence_half_life_s`)
+- movement_senses: sessile; responds to light/water/stress; dispersal is not locomotion (source: `crates/cubarium-voxel-flora/src/lib.rs:2036`)
+
 ### UF-R2 · Offset drooping tiers
 
 **Silhouette:** three unequal leafy shelves stepping around a visibly bent stem.
@@ -694,6 +832,19 @@ its upper tissue; expansion follows coverage and thinning exposes substrate.
 Only small passive edge motion and moisture-driven flattening are needed.
 Irregular seams should join across neighbouring tiles into a continuous
 carpet, with the thickness visible chiefly at the exposed near edge.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- status: live founder species on eligible sites; counts are area/gate/cap dependent (source: `crates/cubarium-voxel-flora/src/lib.rs:2446`, `founder_per_m2`, `founder_colony`, `founder_cap`)
+- food: photosynthesis, root water and soluble mineral (source: `crates/cubarium-voxel-flora/src/lib.rs:2446`)
+- habitat: damp lit or shaded ground, saturation tolerated at establishment; early colonizer displaced by sun-loving turf (source: `crates/cubarium-voxel-flora/src/lib.rs:2446`)
+- size: authored crown height × diameter 0.125 × 0.375–0.75 m; profile may cap seedlings below these envelopes (source: `crates/cubarium-voxel-flora/src/lib.rs:2446`)
+- life_stages: seed bank → living stand; morphology profiles by wood, dieback/death by stores and stress (sources: `crates/cubarium-voxel-flora/src/lib.rs:2446`; `crates/cubarium-voxel-flora/src/lib.rs:1585`; `crates/cubarium-voxel-flora/src/step.rs:3768`)
+- breeding: spores (2 attempts), local runners (clonal share 0.3); not shade-exclusive; paid parcels and species-specific seed-bank clocks; preset rates override defaults (sources: `crates/cubarium-voxel-flora/src/lib.rs:2446`; `config/desktop/terrarium.toml` → `flora.velvetpad`)
+- consumers: frondgrazer and loftstrider within their mouth bands (sources: `crates/cubarium-voxel-fauna/src/body.rs:1846`; `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-flora/src/lib.rs:2446`)
+- defence: induced grazing defence and a refuge floor (sources: `crates/cubarium-voxel-flora/src/lib.rs:2446`; `config/desktop/terrarium.toml` → `flora.velvetpad.defence_half_life_s`)
+- movement_senses: sessile; responds to light/water/stress; dispersal is not locomotion (source: `crates/cubarium-voxel-flora/src/lib.rs:2446`)
 
 ### VP-R2 · Coalescing soft pads
 
@@ -780,6 +931,20 @@ to width. Rooted support, separated edible lobes, hanging growth and sky
 gaps matter; slow lobe sway supplies motion. The revisions move the crown
 mass vertically and expose its load-bearing branches. Canopy loss still
 widens light gaps and exposes wood rather than changing the species' job.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- status: live founder species on eligible sites; counts are area/gate/cap dependent (source: `crates/cubarium-voxel-flora/src/lib.rs:2720`, `founder_per_m2`, `founder_colony`, `founder_cap`)
+- food: photosynthesis, root water and soluble mineral (source: `crates/cubarium-voxel-flora/src/lib.rs:2720`)
+- habitat: lit gaps, deep aerated soil: rooting_depth 6, establishment light ≥0.9 and saturated share ≤0.2 (source: `crates/cubarium-voxel-flora/src/lib.rs:2720`)
+- size: authored crown height × diameter 2.25–3.5 × 1.25–2.0 m; profile may cap seedlings below these envelopes (source: `crates/cubarium-voxel-flora/src/lib.rs:2720`)
+- life_stages: seed bank → living stand; morphology profiles by wood, dieback/death by stores and stress (sources: `crates/cubarium-voxel-flora/src/lib.rs:2720`; `crates/cubarium-voxel-flora/src/lib.rs:1585`; `crates/cubarium-voxel-flora/src/step.rs:3768`)
+- breeding: wind seed, woody recruitment through cover; fall deposits conserved wood over a site line; paid parcels and species-specific seed-bank clocks; preset rates override defaults (sources: `crates/cubarium-voxel-flora/src/lib.rs:2720`; `config/desktop/terrarium.toml` → `flora.vaulttree`)
+- consumers: frondgrazer and loftstrider within their mouth bands (sources: `crates/cubarium-voxel-fauna/src/body.rs:1846`; `crates/cubarium-voxel-fauna/src/body.rs:2099`; `crates/cubarium-voxel-flora/src/lib.rs:2720`)
+- defence: induced grazing defence and a refuge floor (sources: `crates/cubarium-voxel-flora/src/lib.rs:2720`; `config/desktop/terrarium.toml` → `flora.vaulttree.defence_half_life_s`)
+- movement_senses: sessile; responds to light/water/stress; dispersal is not locomotion (source: `crates/cubarium-voxel-flora/src/lib.rs:2720`)
+- fall: line length follows current crown radius / voxel size, keyed direction; not hop count (source: `crates/cubarium-voxel-flora/src/step.rs:3859`)
 
 ### VT-R2 · Ascending chamber crown
 
@@ -868,6 +1033,21 @@ colony; movement is passive flex and growth or depletion changes fullness.
 The revisions use folded tops and recesses, with cyan confined to the
 tissue where the crown meets its underside shadow. Wood and colony stay
 a composite, and brightness still follows the existing reproductive state.
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- status: live founder species on eligible sites; counts are area/gate/cap dependent (source: `crates/cubarium-voxel-flora/src/lib.rs:2596`, `founder_per_m2`, `founder_colony`, `founder_cap`)
+- food: substrate-fed saprotroph; no photosynthesis; dead wood/litter carbon required, plus bounded dark seep income (source: `crates/cubarium-voxel-flora/src/lib.rs:2596`)
+- habitat: shade, caves and detritus patches; fungus slot shares a site with vascular plant; dark-biased establishment and dampness (source: `crates/cubarium-voxel-flora/src/lib.rs:2596`)
+- size: authored crown height × diameter 0.125–0.25 × 0.125 m; profile may cap seedlings below these envelopes (source: `crates/cubarium-voxel-flora/src/lib.rs:2596`)
+- life_stages: seed bank → living stand; morphology profiles by wood, dieback/death by stores and stress (sources: `crates/cubarium-voxel-flora/src/lib.rs:2596`; `crates/cubarium-voxel-flora/src/lib.rs:1585`; `crates/cubarium-voxel-flora/src/step.rs:3768`)
+- breeding: spores (hop 6), spore funding scales with cap fullness; body at death becomes litter when substrate_required; paid parcels and species-specific seed-bank clocks; preset rates override defaults (sources: `crates/cubarium-voxel-flora/src/lib.rs:2596`; `config/desktop/terrarium.toml` → `flora.glowcap`)
+- consumers: capgnawer; fungal mycelium exposed after caps are cropped; littershredder excluded by diet (sources: `crates/cubarium-voxel-fauna/src/body.rs:1827`; `crates/cubarium-voxel-fauna/src/body.rs:2047`; `crates/cubarium-voxel-flora/src/lib.rs:2596`)
+- defence: induced grazing defence and a refuge floor (sources: `crates/cubarium-voxel-flora/src/lib.rs:2596`; `config/desktop/terrarium.toml` → `flora.glowcap.defence_half_life_s`)
+- movement_senses: sessile; responds to light/water/stress; dispersal is not locomotion (source: `crates/cubarium-voxel-flora/src/lib.rs:2596`)
+- substrate: budgeted uptake; substrate_required true, mycelium_graze_fraction 0.5; open sun dries caps/mycelium above sun_shade_max 0.2, dark habitat shelters it (sources: `config/desktop/terrarium.toml` → `flora.glowcap`; `crates/cubarium-voxel-flora/src/step.rs:3768`)
+- not_in_sim_yet: explicit spent life stage or release-driven spore-puff animation (retained D1 request; source: `crates/cubarium-voxel-flora/src/lib.rs:242`, stage remains Alive)
 
 ### GC-R2 · Ridged asymmetric saddle
 

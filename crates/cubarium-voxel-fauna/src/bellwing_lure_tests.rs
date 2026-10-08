@@ -23,7 +23,8 @@ const BW_X: f64 = 3.0;
 const LJ_DX: f64 = 2.5;
 
 /// The default tables with remote senses read every tick, learning on, no forgetting, short
-/// inspections and marks; the lure's UV at `lure_uv` (a test value, not the default).
+/// inspections and marks; the lure's UV at `lure_uv` (a test value, not the default), its
+/// scent off.
 fn config(lure_uv: f64) -> FaunaConfig {
     let mut c = FaunaConfig::default();
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
@@ -33,6 +34,9 @@ fn config(lure_uv: f64) -> FaunaConfig {
     c.light.visit_s = 1.0;
     c.light.mark_s = 1.0;
     c.light.lure_uv = lure_uv;
+    // The light alone: since NECTAR-SCENT a lit lure's plume is smelled at once (no field to
+    // settle); the lure's scent has its own case.
+    c.light.lure_scent = 0.0;
     c
 }
 
@@ -207,9 +211,9 @@ fn a_body_without_uv_sees_the_lure_as_cyan() {
     assert!(l.beacon && got.is_some(), "control, a UV eye: drawn on UV: {l:?}");
 }
 
-/// **The lure's scent** (`lure_scent`): a still lanternjaw with its lure lit lays nectar scent
-/// on its face; the same with the lure dark, or with `lure_scent` 0, lays none. Read on the
-/// nectar channel over the lanternjaw after a few field updates, with no flower anywhere.
+/// **The lure's scent** (`lure_scent`): a still lanternjaw with its lure lit gives off nectar
+/// scent at its lure (NECTAR-SCENT: a plume in the air); the same with the lure dark, or with
+/// `lure_scent` 0, gives none. Read a metre over the lanternjaw, with no flower anywhere.
 #[test]
 fn a_lit_lure_lays_nectar_scent_and_a_dark_one_or_a_scentless_one_does_not() {
     let world = clock_off(407);
@@ -225,7 +229,8 @@ fn a_lit_lure_lays_nectar_scent_and_a_dark_one_or_a_scentless_one_does_not() {
             fauna.scent.update(&view, &fv, &fauna.animals, &fauna.config);
         }
         let a = animal(&fauna, lj);
-        fauna.scent.read_below(&view, a.pose.x, a.pose.z, a.pose.y_m + 1.0)[crate::ScentChannel::Nectar.index()].level
+        let sources = crate::scent::nectar_sources(&fauna, &view, None);
+        crate::scent::nectar_plume(&view, &fauna.config, &sources, (a.pose.x, a.pose.y_m + 1.0, a.pose.z), 0, 0.0).level
     };
     let lit = smell(1.0, 1.0);
     assert!(lit > 0.0, "a lit lure lays nectar scent: {lit}");

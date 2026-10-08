@@ -314,19 +314,24 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             raise ValueError('vitals observed horizon differs from profile')
         if plants and max(number(row, 'minute') for row in plants) != end:
             raise ValueError('plant vitals observed horizon differs from profile')
-        # A fresh founding must report the batch seed. A saved start reports the seed its
-        # world was founded on, which differs from the start's label when the founding
-        # redrew a refused seed (seed + k): it must be one seed throughout, recorded.
+        # A world reports the seed it was founded on. That differs from the batch seed when
+        # the founding refused the seed as a habitat and redrew (deterministically, so every
+        # arm of a fresh founding lands on the same world): one seed throughout, recorded;
+        # pairs must share it (pair_worlds). A fresh founding must show the refusal in its
+        # log, so a run filed under the wrong seed still fails.
         if not rows:
             raise ValueError('empty census')
         world_seeds = {number(row, 'seed') for row in rows}
         if len(world_seeds) != 1:
             raise ValueError('census seed changes within the run')
         if load_minute == 0 and world_seeds != {seed}:
-            raise ValueError('census seed differs from batch seed')
+            log = root / 'err.log'
+            refused = f'seed {seed} refused as a habitat'
+            if not (log.exists() and refused in log.read_text(errors='replace')):
+                raise ValueError('census seed differs from batch seed')
         result['world_seed'] = next(iter(world_seeds))
         if result['world_seed'] != seed:
-            result['warnings'].append(f"start labelled s{seed} holds world seed {result['world_seed']:.0f} (founding redrew a refused seed)")
+            result['warnings'].append(f"s{seed} holds world seed {result['world_seed']:.0f} (founding redrew a refused seed)")
         minutes = [number(row, 'sim_min') for row in rows]
         # A later invocation may have appended beyond the profile: it is a
         # different observed horizon, never silently clipped to fit this trial.
@@ -502,7 +507,7 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             raise ValueError('invalid meta voxel_m')
         if 'voxel_m' not in meta:
             result['warnings'].append('geometry fallback: voxel_m from scoring config')
-        if 'seed' in meta and meta['seed'] != seed:
+        if 'seed' in meta and meta['seed'] != seed and float(meta['seed']) != result.get('world_seed'):
             raise ValueError('vitals metadata seed differs from batch seed')
         for term, key, target in (('M', 'meadow_patch_max', 'meadow_m2'), ('G_b', 'grove_patch_max', 'grove_m2')):
             values = [number(row, key) for row in late]
@@ -663,6 +668,8 @@ def pair_worlds(worlds, baseline, cfg):
             valid = a is not None and b is not None and a['rankable'] and b['rankable']
             if a and b and (a['profile_id'], a['profile_hash'], a['horizon'], a['window']) != (b['profile_id'], b['profile_hash'], b['horizon'], b['window']):
                 raise ValueError(f'seed {seed}: refused pair with different profile or horizon')
+            if valid and a.get('world_seed') != b.get('world_seed'):
+                raise ValueError(f'seed {seed}: refused pair founded on different worlds ({a.get("world_seed")} vs {b.get("world_seed")})')
             deltas, contributions = {}, {}
             for term in COMPONENTS:
                 av = a['components'].get(term, {}) if a else {}
