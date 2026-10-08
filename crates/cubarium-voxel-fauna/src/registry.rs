@@ -407,6 +407,7 @@ fn founder_rows() -> Vec<Row> {
         r("pack.route_swing_voxels", "voxels per controller period", nonneg, "PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit)").optional(),
         r("pack.herd_shun_m", "m", nonneg, "STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone)").optional(),
         r("pack.route_reach_fraction", "fraction", fraction, "prey is taken only within this share of cruise x chase_give_up_s by route").optional(),
+        r("pack.den_flood_wade_fraction", "fraction of an adult's wade depth", nonneg, "DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth").optional(),
         r("pack.route_refresh_s", "s", nonneg, "a pack's walking route components (only prey in its own is taken) are rebuilt at most this often").optional(),
         r("pack.chase_reserve_floor", "fraction of reserve cap", fraction, "a chase is dropped when a member's reserve falls under this").optional(),
         r("pack.call_s", "s", nonneg, "a member calls this long after the target changes or it strikes").optional().prov("decision"),

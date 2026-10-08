@@ -636,7 +636,7 @@ impl RouteGraph {
         let mut at = self.next_toward(field, i)?;
         for _ in 1..max_steps {
             let Some(j) = self.next_toward(field, at) else { break };
-            if !self.walk_line(i, (x, z), self.centre(j)) {
+            if !self.walk_line_to(i, (x, z), self.centre(j), j) {
                 break;
             }
             at = j;
@@ -933,7 +933,7 @@ impl RouteGraph {
     /// to ([`RouteGraph::walk_line`]), else the next node.
     pub fn waypoint(&self, path: &[usize], xz: (f64, f64), lookahead: usize) -> Option<(f64, f64)> {
         let next = *path.get(1)?;
-        let far = path.iter().skip(2).take(lookahead.saturating_sub(1)).rev().find(|&&j| self.walk_line(path[0], xz, self.centre(j)));
+        let far = path.iter().skip(2).take(lookahead.saturating_sub(1)).rev().find(|&&j| self.walk_line_to(path[0], xz, self.centre(j), j));
         Some(self.centre(*far.unwrap_or(&next)))
     }
 
@@ -946,7 +946,26 @@ impl RouteGraph {
     /// Whether the straight line from node `from` at `(x0, z0)` to `(x1, z1)` is walkable on
     /// the graph: sampled each half voxel, every column it enters holds a node joined to the
     /// last one by an edge (a diagonal crossing by two).
-    pub fn walk_line(&self, from: usize, (x0, z0): (f64, f64), (x1, z1): (f64, f64)) -> bool {
+    pub fn walk_line(&self, from: usize, xz: (f64, f64), end: (f64, f64)) -> bool {
+        self.line_end(from, xz, end).is_some()
+    }
+
+    /// [`RouteGraph::walk_line`] to node `goal`'s level (DEN-FLOOD): the line is walkable
+    /// **and** the node it ends on is `goal` itself, or, ending in another column than
+    /// `goal`'s, a node within the mutual step of `goal`'s layer. The plain line test only
+    /// asks for a node in each column, on any layer: a pack standing on the roof straight
+    /// above its cave den had a "walkable" line of length zero to the den and stood there,
+    /// homing, for good.
+    pub fn walk_line_to(&self, from: usize, xz: (f64, f64), end: (f64, f64), goal: usize) -> bool {
+        self.line_end(from, xz, end).is_some_and(|j| {
+            let (f, g) = (self.faces[j], self.faces[goal]);
+            j == goal || ((f.x, f.z) != (g.x, g.z) && f.y.abs_diff(g.y) <= self.climb)
+        })
+    }
+
+    /// The node a walkable straight line from node `from` at `(x0, z0)` to `(x1, z1)` ends
+    /// on ([`RouteGraph::walk_line`]); `None` when it is not walkable.
+    fn line_end(&self, from: usize, (x0, z0): (f64, f64), (x1, z1): (f64, f64)) -> Option<usize> {
         let v = self.voxel_m;
         let ring = f64::from(self.width) * v;
         let (dx, dz) = crate::pose::wrapped_delta(x0, z0, x1, z1, ring);
@@ -958,7 +977,7 @@ impl RouteGraph {
             let (x, z) = (x0 + dx * t, z0 + dz * t);
             let cz = (z / v).floor();
             if !(0.0..f64::from(self.depth)).contains(&cz) {
-                return false;
+                return None;
             }
             let cx = ((x / v).floor() as i64).rem_euclid(i64::from(self.width)) as u32;
             let f = self.faces[cur];
@@ -976,10 +995,10 @@ impl RouteGraph {
                 });
             match next {
                 Some(j) => cur = j,
-                None => return false,
+                None => return None,
             }
         }
-        true
+        Some(cur)
     }
 }
 

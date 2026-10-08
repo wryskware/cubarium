@@ -671,6 +671,13 @@ pub struct Pack {
     /// placeholder: the terrain and its water change slowly). 60.
     #[serde(default = "pack_route_refresh_s")]
     pub route_refresh_s: f64,
+    /// **DEN-FLOOD**: a den counts as flooded (left for a dry site, and not walked home to)
+    /// when its standing water is deeper than this fraction of an adult's wade depth
+    /// ([`FounderPhysiology::wade_depth_m`]), dimensionless. Damp ground or a film of float
+    /// dust is not a flood: a den held 1.7e-18 m and the pack treated it as one. 0.1 (the
+    /// Veilhound wades 0.3 m, so 3 cm: a puddle a body lies in notices, a trace does not).
+    #[serde(default = "pack_den_flood_wade_fraction")]
+    pub den_flood_wade_fraction: f64,
     /// A pack takes prey only within this share of what it covers in a chase on foot:
     /// route distance at most `cruise × chase_give_up_s × route_reach_fraction`. 0.8.
     #[serde(default = "pack_route_reach_fraction")]
@@ -865,6 +872,10 @@ fn pack_route_refresh_s() -> f64 {
     Pack::CHORISTER.route_refresh_s
 }
 
+fn pack_den_flood_wade_fraction() -> f64 {
+    Pack::CHORISTER.den_flood_wade_fraction
+}
+
 fn pack_route_reach_fraction() -> f64 {
     Pack::CHORISTER.route_reach_fraction
 }
@@ -917,6 +928,7 @@ impl Pack {
         route_swing_voxels: 0.25,
         whelp_at_den: true,
         route_refresh_s: 60.0,
+        den_flood_wade_fraction: 0.1,
         route_reach_fraction: 0.8,
         chase_reserve_floor: 0.3,
         call_s: 1.0,

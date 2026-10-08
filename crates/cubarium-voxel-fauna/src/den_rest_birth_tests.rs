@@ -544,3 +544,113 @@ fn a_loftstrider_is_not_gravid_at_introduction_and_has_one_calf_before_its_birth
     }
     assert_eq!(newborns.len(), 2);
 }
+
+/// Standing water of `depth_m` on `s` (added to the empty cell above it).
+fn flood(world: &mut World, s: Site, depth_m: f64) {
+    let v = world.config().voxel_m;
+    world.apply(WorldCommand::AddWater { x: i64::from(s.x), y: s.y + 1, z: s.z, volume_m3: depth_m * v * v });
+}
+
+/// The depth over which a den of the pack lineage counts as flooded, as the config says.
+fn flood_limit(fauna: &Fauna) -> f64 {
+    let phys = fauna.config.founder(C);
+    phys.pack.unwrap().den_flood_wade_fraction * phys.wade_depth_m(&phys.adult_body())
+}
+
+#[test]
+fn a_den_floods_only_above_the_configured_share_of_the_wade_depth() {
+    let mut world = plain();
+    roof(&mut world, 9..=17, 2..=9);
+    let old = site(6, 6);
+    let (mut fauna, pack) = found(&world, old);
+    place(&mut fauna, site(7, 6));
+    let limit = flood_limit(&fauna);
+    assert!(limit > 0.0, "fixture: the default knob leaves a margin");
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    // Float dust, and a film under the knob: the den stays and is still walked home to.
+    for depth in [1e-18, 0.5 * limit] {
+        let now = world.view().water_depth_m(i64::from(old.x), old.y, old.z);
+        flood(&mut world, old, depth - now);
+        let d = world.view().water_depth_m(i64::from(old.x), old.y, old.z);
+        assert!(d > 0.0 && d <= limit, "fixture: wet but under the knob ({d})");
+        let (phys, t) = (*fauna.config.founder(C), fauna.config.founder(C).pack.unwrap());
+        assert!(!crate::pack::flooded(&world.view(), &phys, &t, old));
+        crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+        assert_eq!(fauna.pack(pack).unwrap().den, old);
+        assert!(crate::pack::must_walk_home(&mut fauna, 0, &world.view()));
+    }
+    // Over the knob: flooded, left for a site the knob calls dry.
+    flood(&mut world, old, limit);
+    assert!(world.view().water_depth_m(i64::from(old.x), old.y, old.z) > limit);
+    assert!(!crate::pack::must_walk_home(&mut fauna, 0, &world.view()));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    let den = fauna.pack(pack).unwrap().den;
+    assert_ne!(den, old);
+    assert!(world.view().water_depth_m(i64::from(den.x), den.y, den.z) <= limit);
+    // The knob decides: raised over the water's depth, the same den is no flood.
+    let deep = world.view().water_depth_m(i64::from(old.x), old.y, old.z);
+    let wade = { let p = fauna.config.founder(C); p.wade_depth_m(&p.adult_body()) };
+    fauna.config.founders[C.index()].pack.as_mut().unwrap().den_flood_wade_fraction = 2.0 * deep / wade;
+    let (phys, t) = (*fauna.config.founder(C), fauna.config.founder(C).pack.unwrap());
+    assert!(!crate::pack::flooded(&world.view(), &phys, &t, old));
+}
+
+#[test]
+fn an_adult_against_a_wall_anchors_its_packs_den_search() {
+    let mut world = plain();
+    wall(&mut world, 12);
+    let old = site(6, 6);
+    let (mut fauna, pack) = found(&world, old);
+    // The founding's clearance margin keeps the disc's graph off the face against the wall;
+    // the body itself (its own footprint) stands there.
+    let r = { let p = fauna.config.founder(C); p.adult_body().footprint_radius() };
+    fauna.config.founding.clearance_margin_m = V;
+    place(&mut fauna, site(11, 6));
+    let graph = fauna.pack_routes(&world.view(), C);
+    assert!(graph.face(site(11, 6)).is_none(), "fixture: the face against the wall is off the graph");
+    assert!(graph.face(site(10, 6)).is_some() || graph.face(site(9, 6)).is_some(), "fixture: the graph runs beside it");
+    assert!(r <= 0.5 * V, "fixture: the body fits its own face");
+    flood(&mut world, old, V);
+    // Rebuild: the flood changes what is standable.
+    fauna.pack_routes.clear();
+    let flora = Flora::new(FloraConfig::default());
+    crate::pack::renew_dens(&mut fauna, &world.view(), flora.config().species(Species::Glowcap));
+    let den = fauna.pack(pack).unwrap().den;
+    assert_ne!(den, old, "the adult beside the graph anchors the search for a dry den");
+    let (phys, t) = (*fauna.config.founder(C), fauna.config.founder(C).pack.unwrap());
+    assert!(!crate::pack::flooded(&world.view(), &phys, &t, den));
+}
+
+#[test]
+fn a_pack_on_the_roof_above_its_cave_den_walks_the_route_down() {
+    let mut world = plain();
+    // A slab roof over a cave, reached by a stair on its east side.
+    roof(&mut world, 9..=17, 2..=9);
+    for (x, top) in [(18i64, 7u32), (19, 6), (20, 5), (21, 4), (22, 3)] {
+        for z in 2..=9 {
+            for y in FLOOR + 1..=top {
+                world.apply(WorldCommand::SetMaterial { x, y, z, material: cubarium_voxel::Material::Soil });
+            }
+        }
+    }
+    let den = site(13, 6);
+    let (mut fauna, _) = found(&world, den);
+    let above = Site { y: 8, ..den };
+    place(&mut fauna, above);
+    let view = world.view();
+    let graph = fauna.pack_routes(&view, C);
+    let (from, to) = (graph.face(above).expect("fixture: the roof is walkable"), graph.face(den).expect("fixture: the cave floor is walkable"));
+    assert_eq!(graph.components[from], graph.components[to], "fixture: the stair joins roof and cave");
+    let xz = (fauna.animals[0].pose.x, fauna.animals[0].pose.z);
+    assert!(graph.walk_line(from, xz, graph.centre(to)), "fixture: the column-only line test passes on the wrong layer");
+    assert!(!graph.walk_line_to(from, xz, graph.centre(to), to));
+    assert!(crate::pack::must_walk_home(&mut fauna, 0, &view));
+    let a = fauna.animals[0];
+    let phys = *fauna.config.founder(C);
+    let geometry = phys.body_at(a.body);
+    let h = phys.active_hunter().unwrap();
+    let ((x, z), routed) = crate::pack::way_home(&mut fauna, &view, C, &a, &geometry, &h, den);
+    assert!(routed);
+    assert!((x - xz.0).hypot(z - xz.1) > 0.0, "it steers along its route, not at its own column");
+}

@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2405 rows)
+**`fauna.*`** (2414 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1722,6 +1722,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.littershredder.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.littershredder.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.littershredder.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -1967,6 +1968,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.frondgrazer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.frondgrazer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.frondgrazer.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2212,6 +2214,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.lanternjaw.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.lanternjaw.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.lanternjaw.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2457,6 +2460,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.capgnawer.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.capgnawer.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.capgnawer.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2702,6 +2706,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.loftstrider.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.loftstrider.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.loftstrider.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -2947,6 +2952,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.ripple-snail.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.ripple-snail.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.ripple-snail.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -3192,6 +3198,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.bellwing.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.bellwing.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.bellwing.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -3437,6 +3444,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.route_swing_voxels` | (absent) | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.seedporter.pack.herd_shun_m` | (absent) | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.seedporter.pack.route_reach_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.seedporter.pack.den_flood_wade_fraction` | (absent) | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
@@ -3682,6 +3690,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.route_swing_voxels` | 0.25 | voxels per controller period | [0, inf) |  | - | placeholder | PIT-2: turning onto its route's next leg, a member walks no faster than carries it this far across its line in a period (0: no limit) |
 | `fauna.founders.chorister.pack.herd_shun_m` | 3.0 | m | [0, inf) |  | - | placeholder | STRIKE-2: a pack dropping an armoured target alive also shuns its armoured kin within this (0: the target alone) |
 | `fauna.founders.chorister.pack.route_reach_fraction` | 0.8 | fraction | [0, 1] |  | - | placeholder | prey is taken only within this share of cruise x chase_give_up_s by route |
+| `fauna.founders.chorister.pack.den_flood_wade_fraction` | 0.1 | fraction of an adult's wade depth | [0, inf) |  | - | placeholder | DEN-FLOOD: a den counts as flooded when its standing water is deeper than this share of an adult's wade depth |
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
