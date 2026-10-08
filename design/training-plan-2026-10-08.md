@@ -450,6 +450,13 @@ control and the reward accounting; display targets after seeing results.
       (`lead_give_up_bl`).
     - Over 12 min from minute 63: bellwing adult p10 fullness 0.068 → 0.111, starving adults
       1.08 → 0.46, intake +19 %.
+    - Wrysk: why give up rather than fix scent lying on the ground? NECTAR-SCENT (9a5a6eba)
+      fixed the world:
+      - a flower's scent is now a plume in the air at its bloom, scaled by the nectar it
+        holds;
+      - starving juveniles 27.9 → 9.9, and give-ups fell from 293 to 6.
+
+      The give-up rule stays as "abandon food you can't reach".
 
 ## 7. Work log (2026-10-08)
 
@@ -487,4 +494,7 @@ control and the reward accounting; display targets after seeing results.
 | HUNGRY-SEARCH: legs away from covered ground for hungry heuristic foragers (schema 70) | Opus | ea20a13c |
 | Brain pilot end gate: trained vs C1 vs heuristic, flat and d72, 1 h | desktop | done, §1c |
 | BELLWING-HUNGER (LEADS-PAY): leads given up after lead_give_up_bl without a taste (schema 71) | Opus | c92ce6e7 |
+| SAVE-EXTENSIBLE: configs saved as named-field documents over code defaults; a new knob needs no bump (§6 Q9) | Opus | aa6c4c2b |
+| NECTAR-SCENT: nectar scent is a plume at the bloom, scaled by the nectar held (the real fix behind Q13) | Opus | 9a5a6eba |
+| Start library v3 resaved in the new format: `runs/starts3r-2026-10-08` | desktop | chained after starts3 |
 | Start library v3 and baseline v4 (TRAPS + HUNGRY-SEARCH) | desktop | chained after the end gate |
