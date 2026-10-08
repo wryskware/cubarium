@@ -24,8 +24,14 @@ func _initialize() -> void:
 func run() -> void:
 	var saves := out.path_join("saves")
 	preload("res://ui/saves.gd").remove_tree(saves)
+	var args := OS.get_cmdline_user_args()
+	var at := args.find("--open")
+	if at >= 0 and at + 1 < args.size():
+		await run_open(saves, args[at + 1])
+		return
 	main = load("res://main.tscn").instantiate()
 	main.saves_root = saves
+	main.settings_path = saves + ".cfg"
 	main.autoload = false
 	main.quit_hook = func(): pass
 	root.add_child(main)
@@ -44,10 +50,12 @@ func run() -> void:
 	main.picker.open_large(1)
 	await frames(2)
 	var big = main.picker.large_view()
-	if big != null and big.get_script() == preload("res://ui/world_views.gd").STUB:
+	if big != null and big.has_method("pan_by"):
+		big.pan_by(Vector2(0.35, 0.0))  # panned a third of the way round the ring
+	elif big != null:
 		big._zoom = 2.0
 		big._centre = Vector2(big._dims.x * 0.3, big._dims.y * 0.6)
-	await seconds(0.6)
+	await seconds(1.5)
 	await shot("03-candidate")
 	main.picker.close_large()
 
@@ -62,6 +70,8 @@ func run() -> void:
 		var wv = main.world_view
 		if wv.has_method("_to_screen"):
 			Input.warp_mouse(wv._to_screen(wv._animal_px(id)))
+		elif wv.get("camera") != null and wv.organisms.animal_at(id) != null:
+			Input.warp_mouse(wv.camera.unproject_position(wv.organisms.animal_at(id)))
 		main.world_view.animal_clicked.emit(id)
 		await seconds(0.3)
 		main.world_view.animal_hovered.emit(id)
@@ -94,6 +104,7 @@ func done() -> void:
 	print("SHOTS done in %d s: %s" % [(Time.get_ticks_msec() - started) / 1000, out])
 	preload("res://ui/saves.gd").remove_tree(out.path_join("saves"))
 	preload("res://ui/saves.gd").remove_tree(out.path_join("saves.staging"))
+	DirAccess.remove_absolute(out.path_join("saves.cfg"))
 	quit(0)
 
 
@@ -136,3 +147,41 @@ func _older_copy(from: String, to: String) -> void:
 	var f := FileAccess.open(meta, FileAccess.WRITE)
 	f.store_string(text)
 	f.close()
+
+
+## `--open SAVE`: copy a ready-made save in as a slot and let start-up open it (the wide
+## world founds for minutes); then the live world, the inspect panel, a save of it with
+## its thumbnail, and the slots.
+func run_open(saves: String, save: String) -> void:
+	_copy(save, saves.path_join("Wide world"))
+	main = load("res://main.tscn").instantiate()
+	main.saves_root = saves
+	main.settings_path = saves + ".cfg"
+	main.quit_hook = func(): pass
+	root.add_child(main)
+	await frames(3)
+	await until(func(): return main.has_world() and main.busy() == "", 120.0)
+	await seconds(3.0)
+	await shot("09-open-live")
+	var animals = main.session.query("animals", null)
+	if animals is Array and animals.size() > 0:
+		var id: int = animals[0]["id"]
+		main.world_view.animal_clicked.emit(id)
+		await seconds(2.5)
+		await shot("10-open-inspect")
+		main.inspect.close()
+	main.escape()
+	main._on_menu("save")
+	main.save_slot("Wide world")
+	await until(func(): return main.busy() == "", 60.0)
+	main.slots.refresh()
+	await seconds(0.5)
+	await shot("11-open-slots")
+	done()
+
+
+func _copy(from: String, to: String) -> void:
+	DirAccess.make_dir_recursive_absolute(to)
+	var d := DirAccess.open(from)
+	for f in d.get_files():
+		DirAccess.copy_absolute(from.path_join(f), to.path_join(f))

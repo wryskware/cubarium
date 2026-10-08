@@ -28,6 +28,8 @@ const THUMB := Vector2i(320, 160)
 var saves_root := ""
 var autoload := true
 var start_new := false
+## Where the shell keeps its own small settings (last slot, founding times).
+var settings_path := SETTINGS
 ## What Quit does; tests swap it for a recorder.
 var quit_hook: Callable
 
@@ -62,7 +64,7 @@ func _ready() -> void:
 	_actions()
 	if not quit_hook.is_valid():
 		quit_hook = func(): get_tree().quit()
-	settings.load(SETTINGS)
+	settings.load(settings_path)
 	session = CubariumSession.new()
 	var table = session.query("species", null)
 	if table is Dictionary:
@@ -143,17 +145,6 @@ func _build_ui() -> void:
 	inspect.closed.connect(_on_inspect_closed)
 	ui.add_child(inspect)
 
-	tooltip = PanelContainer.new()
-	tooltip.theme_type_variation = &"Tip"
-	tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	tooltip.visible = false
-	tooltip_label = Label.new()
-	tooltip.add_child(tooltip_label)
-	ui.add_child(tooltip)
-
-	notices = Notices.new()
-	ui.add_child(notices)
-
 	busy_panel = PanelContainer.new()
 	busy_panel.theme_type_variation = &"Tip"
 	busy_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
@@ -182,6 +173,18 @@ func _build_ui() -> void:
 
 	dialog = Dialog.new()
 	ui.add_child(dialog)
+
+	# On top of everything: the hover tooltip and the notices.
+	tooltip = PanelContainer.new()
+	tooltip.theme_type_variation = &"Tip"
+	tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tooltip.visible = false
+	tooltip_label = Label.new()
+	tooltip.add_child(tooltip_label)
+	ui.add_child(tooltip)
+
+	notices = Notices.new()
+	ui.add_child(notices)
 
 
 # --- State --------------------------------------------------------------------------
@@ -226,12 +229,12 @@ func founding_estimate_s(key: String) -> float:
 
 func record_founding_s(key: String, seconds: float) -> void:
 	settings.set_value("founding_s", key, seconds)
-	settings.save(SETTINGS)
+	settings.save(settings_path)
 
 
 func _remember_slot(name: String) -> void:
 	settings.set_value("shell", "last_slot", name)
-	settings.save(SETTINGS)
+	settings.save(settings_path)
 
 
 # --- Input --------------------------------------------------------------------------
@@ -374,7 +377,10 @@ func save_slot(name: String) -> String:
 	var problem: String = saves.name_problem(name)
 	if problem != "":
 		return problem
-	var thumb: Image = world_view.capture(THUMB) if world_view.has_method("capture") else null
+	# `--headless` renders nothing: no thumbnail rather than a blank one.
+	var thumb: Image = null
+	if world_view.has_method("capture") and DisplayServer.get_name() != "headless":
+		thumb = world_view.capture(THUMB)
 	var dir: String = saves.begin(name)
 	pending_save = {"name": name, "dir": dir, "thumb": thumb}
 	session.save(dir)

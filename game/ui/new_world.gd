@@ -170,7 +170,8 @@ func _build_large() -> void:
 	row.add_child(_large_pick)
 	var hint := Label.new()
 	hint.theme_type_variation = &"Small"
-	hint.text = "Pan: drag, WASD or the right stick. Zoom: wheel."
+	hint.text = ("Pan: drag, arrows, WASD or the left stick." if WorldViews.is_real()
+		else "Pan: drag, WASD or the right stick. Zoom: wheel.")
 	row.add_child(hint)
 
 
@@ -442,9 +443,7 @@ func _show_candidate(i: int, c: Dictionary) -> void:
 	if view.is_empty():
 		return
 	_views[i] = view
-	var framed := WorldViews.make_framed(view)
-	framed.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	card["holder"].add_child(framed)
+	WorldViews.make_framed(view, card["holder"])
 	card["open"].disabled = false
 	card["pick"].disabled = false
 	card["summary"].text = _populations_line(c.get("populations"))
@@ -470,9 +469,7 @@ func open_large(i: int) -> void:
 		return
 	close_large()
 	_large_index = i
-	var framed := WorldViews.make_framed(_views[i], true)
-	framed.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_large_holder.add_child(framed)
+	WorldViews.make_framed(_views[i], _large_holder, true)
 	_large_title.text = "Candidate %d  ·  %s" % [i + 1, _cards[i]["state"].text]
 	_large.visible = true
 	_large_pick.grab_focus()

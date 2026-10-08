@@ -23,9 +23,11 @@ static func make() -> Node:
 
 ## A WorldView drawing one static view inside its own SubViewport (its own 3D world, so
 ## candidates never share a scene with each other or the live world), wrapped in a
-## container that stretches it and passes pointer input through.
-static func make_framed(view: Dictionary, input := false) -> SubViewportContainer:
+## container that fills `parent`, stretches the view and passes pointer input through.
+## The view is shown once it is in the tree (WorldView's nodes are ready only then).
+static func make_framed(view: Dictionary, parent: Control, input := false) -> SubViewportContainer:
 	var box := SubViewportContainer.new()
+	box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	box.stretch = true
 	box.mouse_filter = Control.MOUSE_FILTER_STOP if input else Control.MOUSE_FILTER_IGNORE
 	var port := SubViewport.new()
@@ -38,6 +40,7 @@ static func make_framed(view: Dictionary, input := false) -> SubViewportContaine
 	if wv is Control:
 		(wv as Control).set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	wv.set("input_enabled", input)
+	parent.add_child(box)
 	wv.show_view(view)
 	return box
 

@@ -40,6 +40,7 @@ func _initialize() -> void:
 func run() -> void:
 	main = load("res://main.tscn").instantiate()
 	main.saves_root = saves_dir
+	main.settings_path = saves_dir + ".cfg"
 	main.quit_hook = func(): quits += 1
 	root.add_child(main)
 	await frames(3)
@@ -76,6 +77,7 @@ func run() -> void:
 	main.picker.open_large(1)
 	await frames(1)
 	check(main.picker.is_large_open() and main.picker.large_view() != null, "a candidate opens large")
+	print("     the world is drawn by %s" % ("package B's WorldView" if WorldViews.is_real() else "the shell's stub"))
 	esc()
 	await frames(1)
 	check(not main.picker.is_large_open() and main.picker.visible, "Esc closes the large candidate, the picker stays")
@@ -130,13 +132,11 @@ func run() -> void:
 	check(main.inspect.visible and main.inspect.animal_id == id, "clicking opens the inspect panel")
 	var body = main.inspect.last.get("animal")
 	check(body is Dictionary and body.get("id") == id and main.inspect._stats.get_child_count() > 0, "the panel shows the animal's stats from query(\"animal\")")
-	if main.world_view.get_script() == WorldViews.STUB:
-		check(main.world_view._highlight == id and main.world_view._following == id, "the panel highlights and follows it")
+	check(main.world_view.highlighted == id and main.world_view.following == id, "the panel highlights and follows it")
 	esc()
 	await frames(1)
 	check(not main.inspect.visible and not main.menu.visible, "Esc closes the panel first, without opening the menu")
-	if main.world_view.get_script() == WorldViews.STUB:
-		check(main.world_view._highlight == -1 and main.world_view._following == -1, "closing it clears the highlight and the follow")
+	check(main.world_view.highlighted == -1 and main.world_view.following == -1, "closing it clears the highlight and the follow")
 
 	# Save two slots through the slots screen.
 	esc()
@@ -154,7 +154,9 @@ func run() -> void:
 	check("Alpha" in names and "Beta" in names, "both slots listed: %s" % [names])
 	var alpha = listed.filter(func(s): return s["name"] == "Alpha")
 	check(alpha.size() == 1 and alpha[0]["meta"] != null and alpha[0]["meta"]["day"] >= 1 and alpha[0]["loadable"], "a slot has its day and species from meta.json")
-	if main.world_view.get_script() == WorldViews.STUB:
+	# `--headless` renders nothing, so only the stub can draw a thumbnail here; the pictures
+	# (tests/shots.gd) show the real view's.
+	if main.world_view.get_script() == WorldViews.STUB or DisplayServer.get_name() != "headless":
 		check(alpha.size() == 1 and alpha[0]["thumb"] != "", "a slot has its thumbnail")
 	check(main.notices.said.any(func(t): return t.begins_with("Saved")), "the save outcome is shown as a notice")
 	# Overwrite asks first.
@@ -225,6 +227,7 @@ func finish() -> void:
 	print("SHELL %s (%d failures, %d s)" % ["OK" if failures == 0 else "FAILED", failures, elapsed()])
 	_wipe(saves_dir)
 	_wipe(saves_dir + ".staging")
+	DirAccess.remove_absolute(saves_dir + ".cfg")
 	main.queue_free()
 	await frames(2)
 	quit(0 if failures == 0 else 1)

@@ -51,8 +51,8 @@ var _texture: ImageTexture
 var _animals := {}
 var _plants := {}
 var _hovered := -1
-var _highlight := -1
-var _following := -1
+var highlighted := -1
+var following := -1
 var _zoom := 1.0
 var _centre := Vector2.ZERO
 var _shown := Vector2.ZERO
@@ -91,16 +91,16 @@ func reset_framing() -> void:
 
 
 func set_highlight(id: int) -> void:
-	_highlight = id
+	highlighted = id
 	queue_redraw()
 
 
 func follow(id: int) -> void:
-	_following = id
+	following = id
 
 
 func stop_follow() -> void:
-	_following = -1
+	following = -1
 
 
 func capture(size: Vector2i) -> Image:
@@ -252,11 +252,11 @@ func _clamped(c: Vector2) -> Vector2:
 
 
 func _pan(delta: float) -> void:
-	if _following >= 0:
-		var p := _animal_px(_following)
+	if following >= 0:
+		var p := _animal_px(following)
 		if p.x >= 0.0:
 			_centre = p
-	if input_enabled and _following < 0:
+	if input_enabled and following < 0:
 		var v := Vector2(
 			Input.get_joy_axis(0, JOY_AXIS_RIGHT_X) if absf(Input.get_joy_axis(0, JOY_AXIS_RIGHT_X)) > 0.2 else 0.0,
 			Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y) if absf(Input.get_joy_axis(0, JOY_AXIS_RIGHT_Y)) > 0.2 else 0.0)
@@ -364,7 +364,7 @@ func _draw() -> void:
 		var p := _to_screen(Vector2(pos[i * 3] / _voxel_m, _dims.y - pos[i * 3 + 1] / _voxel_m))
 		var sp: int = species[i] if i < species.size() else 0
 		draw_rect(Rect2(p - Vector2(body, body) * 0.5, Vector2(body, body)), ANIMALS[sp % ANIMALS.size()])
-		if ids[i] == _highlight:
+		if ids[i] == highlighted:
 			draw_rect(Rect2(p - Vector2(body, body), Vector2(body, body) * 2.0), Color.WHITE, false, 2.0)
 		elif ids[i] == _hovered:
 			draw_rect(Rect2(p - Vector2(body, body) * 0.8, Vector2(body, body) * 1.6), Color(1, 1, 1, 0.6), false, 1.0)
