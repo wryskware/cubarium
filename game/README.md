@@ -31,6 +31,39 @@ steps 100 ticks, queries, takes a view, saves and loads; it prints `PASS`/`FAIL`
 exits non-zero on a failure. `--headless` never opens a window; anything that needs one goes
 through `scripts/hidden.sh`.
 
+## Making saves without Godot
+
+`cubarium-world` is a headless Rust tool in `cubarium-session`, with no GPU or
+presentation dependencies. Build and run it from the repository root:
+
+```sh
+cargo build --release -p cubarium-session --bin cubarium-world
+target/release/cubarium-world found --config config/desktop/terrarium.toml --seed 7 --out /tmp/world
+chrt -i 0 nice -n 19 scripts/run-study.py --slot 0 -- target/release/cubarium-world advance \
+  --threads 8 --load /tmp/world --stop dawn --stop midday --stop dusk --stop night --out-prefix /tmp/day
+```
+
+`found --spec world.toml` (or `.json`) accepts the same `WorldSpec` keys listed
+below; unknown keys fail. Spec paths are relative to the working directory.
+`--seed` overrides its seed; `--empty` leaves out plants and animals.
+
+`advance` steps unpaced using the normal simulation step. Stops run in argument
+order: `tick:N` is an absolute world tick, `minute:M` is absolute simulated minutes
+since tick 0, rounded up to a tick. `HH:MM` means the next crossing on the 24-hour
+day clock, strictly after the loaded state or preceding stop. Named stops use
+the world's sunrise and sunset phases: `dawn` is sunrise, `midday` is the midpoint
+of daylight, `dusk` is sunset, and `night` is the midpoint of the following night.
+Clock stops wrap as needed and require cycle mode; local/off clocks cannot be
+advanced by simulation ticks. Clock saves land within one tick of the target.
+
+Every stop writes a normal game-loadable save with `meta.json`, e.g.
+`/tmp/day-dawn`, `PREFIX-tick-2000`, `PREFIX-minute-2.5`, or `PREFIX-06-30`.
+Duplicate names and stops earlier than the current tick fail. Progress prints
+tick, simulated seconds and ms/tick every three seconds; final timing excludes
+load/save time. `--threads N` works on either command (0 uses config/default), and
+all workers inherit the launcher's CPU affinity without widening it. See
+`cubarium-world --help` and `cubarium-world advance --help`.
+
 ## `CubariumSession`
 
 `CubariumSession.new()` is an empty session. Every call returns at once; founding, loading
