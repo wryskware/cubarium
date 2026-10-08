@@ -34,7 +34,9 @@ pub use console::{COMMANDS, Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 pub use feed::{ChunkData, Frame, View};
 pub use params::{SimParams, WorldSpec};
 pub use hook::{HookClock, LoopHook};
-pub use session::{CandidateInfo, CandidateSource, Notice, Prepared, Session, SessionOptions, Status, prepare_loaded, prepare_new};
+pub use session::{
+    CandidateInfo, CandidateSource, Notice, Prepared, Session, SessionOptions, SessionStop, Status, prepare_loaded, prepare_new,
+};
 pub use store::{LoadError, SaveMeta, SlotInfo};
 
 use cubarium_voxel_fauna::{Founder, MobilityMode, State};

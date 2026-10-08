@@ -31,7 +31,10 @@
 //! running waits for it to finish. The first bake is drawn whole, before the founding
 //! frame ends.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::JoinHandle;
 use std::time::Instant;
 
 use cubarium_gpu::VoxelRenderer;
@@ -252,11 +255,18 @@ fn reaches(g: &Grid, l: [f32; 3], top: i32, x: u32, y: u32, z: u32) -> bool {
 /// Bake the volume: 255 where the sun (the direction **toward** it, any length) reaches a
 /// cell's air, 0 where it does not, in `g`'s order, over `threads` threads. A sun at or
 /// below the horizon reaches nothing, as it lights no face.
+#[cfg(test)]
 pub(crate) fn bake(g: &Grid, sun: [f32; 3], threads: usize, out: &mut [u8]) {
+    bake_until(g, sun, threads, out, &AtomicBool::new(false));
+}
+
+/// The bake above, given up as soon as `cancel` is set (each thread looks before every row).
+/// Returns whether the volume is whole.
+fn bake_until(g: &Grid, sun: [f32; 3], threads: usize, out: &mut [u8], cancel: &AtomicBool) -> bool {
     let len = (sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]).sqrt();
     if !len.is_finite() || len <= 0.0 || sun[1] <= 0.0 {
         out.fill(0);
-        return;
+        return true;
     }
     let l = sun.map(|k| k / len);
     let top = g.top() as i32;
@@ -266,6 +276,9 @@ pub(crate) fn bake(g: &Grid, sun: [f32; 3], threads: usize, out: &mut [u8]) {
         for (k, chunk) in out.chunks_mut(slab * per).enumerate() {
             s.spawn(move || {
                 for (j, row) in chunk.chunks_mut(g.width as usize).enumerate() {
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
                     let z = (k * per + j / g.height as usize) as u32;
                     let y = (j % g.height as usize) as u32;
                     for (x, o) in row.iter_mut().enumerate() {
@@ -275,6 +288,7 @@ pub(crate) fn bake(g: &Grid, sun: [f32; 3], threads: usize, out: &mut [u8]) {
             });
         }
     });
+    !cancel.load(Ordering::Relaxed)
 }
 
 /// The angle between two directions, in radians (zero for a zero vector).
@@ -422,16 +436,23 @@ enum Job {
 type Done = (Option<Vec<u8>>, f64);
 
 /// The baking thread: holds the last grid and sun it baked, and bakes only on a change.
+/// Dropping the worker cancels a bake in progress and joins the thread (as the sky plane's
+/// [`super::light::SkyWorker`] does, and for the same reason).
 struct Worker {
-    jobs: Sender<Job>,
+    /// `None` once the worker is dropping: the thread's `recv` then fails and it ends.
+    jobs: Option<Sender<Job>>,
     done: Receiver<Done>,
+    cancel: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl Worker {
     fn spawn(threads: usize) -> Worker {
         let (jobs, inbox) = mpsc::channel::<Job>();
         let (outbox, done) = mpsc::channel::<Done>();
-        std::thread::Builder::new()
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        let thread = std::thread::Builder::new()
             .name("cubarium-sunvis".into())
             .spawn(move || {
                 let mut grid: Option<Grid> = None;
@@ -451,7 +472,9 @@ impl Worker {
                     let out = match &grid {
                         Some(g) if changed || moved => {
                             let mut v = vec![0u8; g.occ.len()];
-                            bake(g, aim, threads, &mut v);
+                            if !bake_until(g, aim, threads, &mut v, &stop) {
+                                break;
+                            }
                             sun = Some(aim);
                             Some(v)
                         }
@@ -464,7 +487,27 @@ impl Worker {
                 }
             })
             .expect("spawning the sun-visibility thread");
-        Worker { jobs, done }
+        Worker {
+            jobs: Some(jobs),
+            done,
+            cancel,
+            thread: Some(thread),
+        }
+    }
+
+    /// Hand the thread a job; `false` when it has gone.
+    fn send(&self, job: Job) -> bool {
+        self.jobs.as_ref().is_some_and(|j| j.send(job).is_ok())
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.jobs = None;
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -537,7 +580,7 @@ impl SunVisDriver {
         self.land(now, renderer);
         if self.rebake.world_due(now) {
             let aim = self.aim(sun);
-            if self.worker.jobs.send(Job::World(snapshot(), aim)).is_ok() {
+            if self.worker.send(Job::World(snapshot(), aim)) {
                 self.rebake.started(now, aim, true);
             }
         }
@@ -553,7 +596,7 @@ impl SunVisDriver {
             renderer.set_sunvis_fade(f.clamp(0.0, 1.0) as f32);
         }
         let aim = self.aim(sun);
-        if self.rebake.sun_due(now, aim) && self.worker.jobs.send(Job::Sun(aim)).is_ok() {
+        if self.rebake.sun_due(now, aim) && self.worker.send(Job::Sun(aim)) {
             self.rebake.started(now, aim, false);
         }
     }

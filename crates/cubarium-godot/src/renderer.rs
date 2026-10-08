@@ -47,6 +47,7 @@ impl WorldRenderer {
         };
         match Hosted::new(options) {
             Ok(h) => {
+                crate::teardown::renderer(h.stopper());
                 self.hosted = Some(h);
                 GString::new()
             }

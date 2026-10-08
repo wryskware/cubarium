@@ -33,7 +33,54 @@ mod extension {
     struct CubariumExtension;
 
     #[gdextension]
-    unsafe impl ExtensionLibrary for CubariumExtension {}
+    unsafe impl ExtensionLibrary for CubariumExtension {
+        // Safe code only: the one call below, defined outside this module.
+        fn on_stage_deinit(_stage: godot::init::InitStage) {
+            super::teardown::stop_all();
+        }
+    }
+}
+
+/// **Every thread this library starts is joined before Godot unloads it.** At exit Godot
+/// unmaps the library; a thread still running its code then faults (SIGSEGV after "SHELL
+/// OK", 2026-10-08). Each session and renderer stops and joins its threads when it is
+/// dropped; this is the backstop for one still alive when the library is being torn down
+/// (a reference GDScript never released, or released only after the extension's
+/// deinitialisation): Godot calls [`stop_all`] at every deinit stage, the main loop's first.
+mod teardown {
+    use std::sync::Mutex;
+
+    use cubarium::sink::gpu::voxel::hosted::HostedStop;
+    use cubarium_session::SessionStop;
+
+    static SESSIONS: Mutex<Vec<SessionStop>> = Mutex::new(Vec::new());
+    static RENDERERS: Mutex<Vec<HostedStop>> = Mutex::new(Vec::new());
+
+    /// Remember a session to stop at teardown (only weakly: it is dropped as usual).
+    pub(crate) fn session(s: SessionStop) {
+        let mut all = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        all.retain(SessionStop::alive);
+        all.push(s);
+    }
+
+    /// Remember a renderer to stop at teardown (only weakly).
+    pub(crate) fn renderer(h: HostedStop) {
+        let mut all = RENDERERS.lock().unwrap_or_else(|e| e.into_inner());
+        all.retain(HostedStop::alive);
+        all.push(h);
+    }
+
+    /// Stop and join the threads of every session, then every renderer, still alive.
+    /// Sessions first: a session's loop runs its renderer's hook.
+    pub(crate) fn stop_all() {
+        let sessions = std::mem::take(&mut *SESSIONS.lock().unwrap_or_else(|e| e.into_inner()));
+        let renderers = std::mem::take(&mut *RENDERERS.lock().unwrap_or_else(|e| e.into_inner()));
+        let s = sessions.iter().filter(|s| s.shutdown()).count();
+        let r = renderers.iter().filter(|h| h.shutdown()).count();
+        if s + r > 0 {
+            eprintln!("cubarium: stopped {s} session(s) and {r} renderer(s) still running at unload");
+        }
+    }
 }
 
 /// A running Cubarium world. `CubariumSession.new()` starts an empty session; make a world
@@ -48,7 +95,9 @@ pub struct CubariumSession {
 #[godot_api]
 impl IRefCounted for CubariumSession {
     fn init(base: Base<RefCounted>) -> Self {
-        CubariumSession { base, session: Session::new(SessionOptions::default()) }
+        let session = Session::new(SessionOptions::default());
+        teardown::session(session.stopper());
+        CubariumSession { base, session }
     }
 }
 

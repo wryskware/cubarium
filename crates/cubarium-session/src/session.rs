@@ -243,9 +243,52 @@ struct Shared {
 pub struct Session {
     to_sim: Sender<ToSim>,
     shared: Arc<Shared>,
-    sim: Option<JoinHandle<()>>,
-    ingest: Option<JoinHandle<()>>,
+    threads: Arc<Threads>,
     candidates: Arc<Mutex<Candidates>>,
+}
+
+/// The loop and the ingest thread, and how to stop them: [`Threads::stop`] asks the loop to
+/// shut down and joins it (it joins a save's writer on the way out), then the ingest thread,
+/// which ends when the loop's channel closes.
+struct Threads {
+    to_sim: Sender<ToSim>,
+    /// The loop first, then the ingest thread.
+    handles: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl Threads {
+    /// Stop and join; returns whether anything was still to stop. Idempotent.
+    fn stop(&self) -> bool {
+        let _ = self.to_sim.send(ToSim::Shutdown);
+        let handles = std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()));
+        let live = !handles.is_empty();
+        for h in handles {
+            let _ = h.join();
+        }
+        live
+    }
+}
+
+/// A handle that stops a [`Session`]'s loop and ingest thread without owning it: for an
+/// owner whose drop may come too late (the Godot extension stops every session still alive
+/// when its library is being unloaded). Holds the session only weakly.
+///
+/// Candidate founding threads ([`Session::generate_candidates`]) are not stopped by it:
+/// founding has no point to give up at, and its threads run until they finish.
+#[derive(Clone)]
+pub struct SessionStop(std::sync::Weak<Threads>);
+
+impl SessionStop {
+    /// Stop the loop (and with it the running world) and join its threads, as dropping the
+    /// session would. Returns whether they were still running.
+    pub fn shutdown(&self) -> bool {
+        self.0.upgrade().is_some_and(|t| t.stop())
+    }
+
+    /// Whether the session has not been dropped yet.
+    pub fn alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
 }
 
 impl Session {
@@ -285,12 +328,19 @@ impl Session {
                 .expect("spawning the session's loop")
         };
         Session {
+            threads: Arc::new(Threads {
+                to_sim: to_sim.clone(),
+                handles: Mutex::new(vec![sim, ingest]),
+            }),
             to_sim,
             shared,
-            sim: Some(sim),
-            ingest: Some(ingest),
             candidates: Arc::new(Mutex::new(Candidates::default())),
         }
+    }
+
+    /// A handle that stops this session's threads from elsewhere ([`SessionStop`]).
+    pub fn stopper(&self) -> SessionStop {
+        SessionStop(Arc::downgrade(&self.threads))
     }
 
     fn send(&self, m: ToSim) {
@@ -630,13 +680,7 @@ fn to<T: Serialize + ?Sized>(v: &T) -> Value {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.send(ToSim::Shutdown);
-        if let Some(h) = self.sim.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.ingest.take() {
-            let _ = h.join();
-        }
+        self.threads.stop();
     }
 }
 

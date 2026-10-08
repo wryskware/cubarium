@@ -27,7 +27,7 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -415,6 +415,8 @@ struct Shared {
     error: Mutex<Option<String>>,
     generation: AtomicU64,
     quit: AtomicBool,
+    /// The presenter and the still-world stagers: joined by [`Shared::shutdown`].
+    threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl Shared {
@@ -452,10 +454,36 @@ impl Shared {
             flight: VecDeque::new(),
             highlight_drawn: None,
         };
-        // The old renderer goes outside the lock: dropping it waits for its GPU.
-        let old = self.sink.lock().map(|mut s| s.replace(state));
+        // The old renderer goes outside the lock: dropping it waits for its GPU. A renderer
+        // shut down ([`Shared::shutdown`]) takes no new one: checked under the lock its
+        // release takes, so none is left behind.
+        let old = self.sink.lock().map(|mut s| {
+            if self.quit.load(Ordering::SeqCst) {
+                Some(state)
+            } else {
+                s.replace(state)
+            }
+        });
         drop(old);
         Ok(())
+    }
+
+    /// Stop every thread of this renderer and free it: the presenter and any still-world
+    /// stager are told to quit, woken and joined, then the GPU renderer (with its sky-plane
+    /// and sun-visibility workers, which join their own threads) is dropped. Idempotent;
+    /// called from [`Hosted`]'s drop and from [`HostedStop::shutdown`]. Never from one of
+    /// those threads.
+    fn shutdown(&self) {
+        self.quit.store(true, Ordering::SeqCst);
+        let threads = std::mem::take(&mut *self.threads.lock().unwrap_or_else(|e| e.into_inner()));
+        for t in &threads {
+            t.thread().unpark();
+        }
+        for t in threads {
+            let _ = t.join();
+        }
+        let old = self.sink.lock().ok().and_then(|mut s| s.take());
+        drop(old);
     }
 
     /// Publish the pick map of the pack just staged.
@@ -581,9 +609,10 @@ fn presenter_main(shared: Arc<Shared>) {
                 false
             }
         };
-        // Poll finished frames often; otherwise sleep to the next frame.
+        // Poll finished frames often; otherwise sleep to the next frame. Parked, not slept,
+        // so a shutdown's unpark ends the wait at once.
         let until = next.saturating_duration_since(Instant::now());
-        std::thread::sleep(if busy { until.min(Duration::from_micros(500)) } else { until.min(period) });
+        std::thread::park_timeout(if busy { until.min(Duration::from_micros(500)) } else { until.min(period) });
     }
 }
 
@@ -591,9 +620,38 @@ fn presenter_main(shared: Arc<Shared>) {
 
 /// **The world's renderer for an app**: a presenter thread and the frames it draws. Draw a
 /// live session through [`Hosted::hook`], or a candidate through [`Hosted::show_static`].
+///
+/// Dropping it stops and joins every thread it started ([`HostedStop`] does the same from
+/// elsewhere): an app that unloads this code (the Godot extension, at exit) must not leave
+/// a thread of it running.
 pub struct Hosted {
     shared: Arc<Shared>,
-    presenter: Option<JoinHandle<()>>,
+}
+
+/// A handle that stops a [`Hosted`] renderer's threads without owning it: for an owner
+/// whose drop may come too late (the Godot extension stops every renderer still alive when
+/// its library is being unloaded). Holds the renderer only weakly.
+#[derive(Clone)]
+pub struct HostedStop(Weak<Shared>);
+
+impl HostedStop {
+    /// Stop and join the renderer's threads and free it, as dropping it would. Returns
+    /// whether it was still alive. The `Hosted` itself stays usable but draws nothing.
+    pub fn shutdown(&self) -> bool {
+        match self.0.upgrade() {
+            Some(s) => {
+                let live = !s.quit.load(Ordering::SeqCst);
+                s.shutdown();
+                live
+            }
+            None => false,
+        }
+    }
+
+    /// Whether anything of the renderer is still alive (the `Hosted` or a hook of it).
+    pub fn alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
 }
 
 impl Hosted {
@@ -619,6 +677,7 @@ impl Hosted {
             error: Mutex::new(None),
             generation: AtomicU64::new(0),
             quit: AtomicBool::new(false),
+            threads: Mutex::new(Vec::new()),
         });
         let presenter = {
             let shared = shared.clone();
@@ -627,7 +686,13 @@ impl Hosted {
                 .spawn(move || presenter_main(shared))
                 .context("spawning the presenter")?
         };
-        Ok(Hosted { shared, presenter: Some(presenter) })
+        shared.threads.lock().unwrap_or_else(|e| e.into_inner()).push(presenter);
+        Ok(Hosted { shared })
+    }
+
+    /// A handle that stops this renderer from elsewhere ([`HostedStop`]).
+    pub fn stopper(&self) -> HostedStop {
+        HostedStop(Arc::downgrade(&self.shared))
     }
 
     /// The hook a session's loop runs this renderer from ([`cubarium_session::Session::set_hook`]).
@@ -639,14 +704,27 @@ impl Hosted {
     /// (opening the renderer and the lit tier's sky plane take a moment). Its clock stands
     /// at its tick.
     pub fn show_static(&self, source: CandidateSource, index: usize) {
+        // Under the thread list's lock, so a shutdown either joins this stager or has
+        // already refused it.
+        let mut threads = self.shared.threads.lock().unwrap_or_else(|e| e.into_inner());
+        if self.shared.quit.load(Ordering::SeqCst) {
+            return;
+        }
+        // Stagers that have finished are joined here, so the list holds only live ones.
+        let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *threads).into_iter().partition(|t| t.is_finished());
+        *threads = live;
+        for t in done {
+            let _ = t.join();
+        }
         let shared = self.shared.clone();
         let spawned = std::thread::Builder::new().name("cubarium-hosted-static".into()).spawn(move || {
             if let Err(e) = stage_static(&shared, &source, index) {
                 shared.fail(e);
             }
         });
-        if let Err(e) = spawned {
-            self.shared.fail(e.into());
+        match spawned {
+            Ok(t) => threads.push(t),
+            Err(e) => self.shared.fail(e.into()),
         }
     }
 
@@ -741,11 +819,7 @@ impl Hosted {
 
 impl Drop for Hosted {
     fn drop(&mut self) {
-        self.shared.quit.store(true, Ordering::Relaxed);
-        if let Some(p) = self.presenter.take() {
-            let _ = p.join();
-        }
-        self.release();
+        self.shared.shutdown();
     }
 }
 
@@ -760,9 +834,18 @@ fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize) ->
         .context("the candidate is not ready")??;
     let (mut sink, proj, tick, solid) = opened;
     let started = Instant::now();
-    while sink.light_pending() && started.elapsed() < STATIC_LIGHT_WAIT {
-        std::thread::sleep(Duration::from_millis(50));
+    let quit = || shared.quit.load(Ordering::SeqCst);
+    while sink.light_pending() && started.elapsed() < STATIC_LIGHT_WAIT && !quit() {
+        // Parked, not slept: a shutdown unparks it and it gives up at once.
+        std::thread::park_timeout(Duration::from_millis(50));
+        if quit() {
+            break;
+        }
         source.with(index, |world, flora, fauna| sink.stage_world(world, flora, fauna));
+    }
+    if quit() {
+        // Dropping the renderer here cancels its sky plane and joins that worker.
+        return Ok(());
     }
     shared.publish_pick(&sink, &proj, solid);
     if let Ok(mut c) = shared.clock.lock() {
@@ -838,6 +921,9 @@ impl LiveHook {
 
 impl LoopHook for LiveHook {
     fn installed(&mut self, world: &World, flora: &Flora, fauna: &Fauna, clock: HookClock) {
+        if self.shared.quit.load(Ordering::SeqCst) {
+            return;
+        }
         self.terrain = None;
         if let Ok(mut c) = self.shared.clock.lock() {
             *c = Clock::still(clock.tick);
