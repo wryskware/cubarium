@@ -1,0 +1,160 @@
+//! **The Godot view's colours**, exported from the Rust presenter so the Godot dev view
+//! (`game/world/`, package B of `design/handoffs/godot-direction-2026-10-07.md`) paints with
+//! exactly the colours this presenter does and invents none.
+//!
+//! ```sh
+//! cargo run --release -p cubarium --example godot_palette -- --write game/world/data/palette.json
+//! ```
+//!
+//! What it writes:
+//! - `terrain`: the strata palette of `voxel::present` (sky, bedrock, rock, soil, deep and
+//!   surface water, light, haze) as sRGB hex, and its numbers (wet soil, water alpha, haze).
+//! - `rain`: the rain colour of `cubarium_gpu::palette`.
+//! - `model_palette`: `voxel::model::PALETTE`'s names, in order: what a `.cvm` material
+//!   name maps to.
+//! - `plants`: per species, `"tag:material:band" → #rrggbb`, the body colour
+//!   `voxel::colours::plant` gives every cell of every baked step and variant (unripe:
+//!   the feed carries no ripeness).
+//! - `animals`: per baked animal model (founders, specimens and pose models),
+//!   `"material:band" → #rrggbb` from `voxel::colours::animal` or `::specimen`; a pose
+//!   model with no coat of its own (`frondgrazer-hunker`) wears its lineage's.
+//!
+//! The band is `voxel::colours::band(dy, top)` with `top` the highest cell of the cell's
+//! own step, variant or bin, as the presenter computes it.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use cubarium::voxel::colours;
+use cubarium::voxel::model::{self, ModelCell, ModelLibrary};
+use cubarium::voxel::present;
+use cubarium_voxel_fauna::Founder;
+use cubarium_voxel_flora::Species;
+use serde_json::{Value, json};
+
+fn hex(rgb: u32) -> String {
+    format!("#{:06x}", rgb & 0xFF_FFFF)
+}
+
+fn top_of(cells: &[ModelCell]) -> i32 {
+    cells.iter().map(|m| m.offset[1]).max().unwrap_or(0)
+}
+
+/// The coat a baked animal model wears: its founder's, its specimen's, or for a pose model
+/// named `<lineage>-<pose>` its lineage's.
+fn animal_colour(name: &str, material: u8, band: u8) -> Option<u32> {
+    let founder = |n: &str| {
+        Founder::ALL
+            .into_iter()
+            .find(|f| model::same_name(f.name(), n))
+    };
+    if let Some(f) = founder(name) {
+        return Some(colours::animal(f, material, band, false, 0.0).body);
+    }
+    if let Some(sw) = colours::specimen(name, material, band) {
+        return Some(sw.body);
+    }
+    let lineage = name.rsplit_once('-').map(|(l, _)| l)?;
+    founder(lineage).map(|f| colours::animal(f, material, band, false, 0.0).body)
+}
+
+fn main() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let out = args
+        .iter()
+        .position(|a| a == "--write")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+    let voxel_m = 0.125;
+    let lib = ModelLibrary::load(&root, voxel_m).context("loading the baked models")?;
+
+    let mut plants = BTreeMap::new();
+    for s in Species::ALL {
+        let Some(m) = lib.plant(s) else { continue };
+        let mut table = BTreeMap::new();
+        for step in &m.steps {
+            for cells in &step.variants {
+                let top = top_of(cells);
+                for c in cells {
+                    let band = colours::band(c.offset[1], top);
+                    let sw = colours::plant(s, c.tag, c.material, band, false);
+                    table.insert(
+                        format!("{}:{}:{}", c.tag.to_byte(), c.material, band),
+                        hex(sw.body),
+                    );
+                }
+            }
+        }
+        plants.insert(s.name().to_string(), table);
+    }
+
+    let mut animals = BTreeMap::new();
+    let mut names: Vec<String> = Founder::ALL
+        .into_iter()
+        .filter(|f| lib.animal(*f).is_some())
+        .map(|f| f.name().to_string())
+        .collect();
+    names.extend(lib.specimen_names().map(str::to_string));
+    names.sort();
+    names.dedup_by(|a, b| model::same_name(a, b));
+    for name in names {
+        let m = Founder::ALL
+            .into_iter()
+            .find(|f| model::same_name(f.name(), &name))
+            .and_then(|f| lib.animal(f))
+            .or_else(|| lib.specimen(&name));
+        let Some(m) = m else { continue };
+        let mut table = BTreeMap::new();
+        for bin in &m.bins {
+            let top = top_of(&bin.cells);
+            for c in &bin.cells {
+                let band = colours::band(c.offset[1], top);
+                if let Some(rgb) = animal_colour(&name, c.material, band) {
+                    table.insert(format!("{}:{}", c.material, band), hex(rgb));
+                }
+            }
+        }
+        animals.insert(name.replace('_', "-"), table);
+    }
+
+    let d = cubarium::voxel::VoxelConfig::default();
+    let doc: Value = json!({
+        "about": "Generated by `cargo run --release -p cubarium --example godot_palette -- --write game/world/data/palette.json` from the Rust presenter's colours (crates/cubarium/src/voxel/present.rs, colours.rs, model.rs; crates/cubarium-gpu/src/palette.rs). Do not edit by hand.",
+        "voxel_m": voxel_m,
+        "terrain": {
+            "sky": hex(present::SKY_SRGB),
+            "sky_brightness": present::SKY_BRIGHTNESS,
+            "sky_horizon": hex(present::SKY_HORIZON_SRGB),
+            "sky_horizon_brightness": 0.35,
+            "bedrock": hex(present::BEDROCK_SRGB),
+            "rock": hex(present::ROCK_SRGB),
+            "soil": hex(present::SOIL_SRGB),
+            "water_deep": hex(present::WATER_DEEP_SRGB),
+            "water_surface": hex(present::WATER_SURFACE_SRGB),
+            "light": hex(present::LIGHT_SRGB),
+            "haze": hex(present::HAZE_SRGB),
+            "wet": present::WET,
+            "haze_amount": d.haze,
+            "water_alpha": d.water_alpha,
+            "skin_alpha_gain": present::SKIN_ALPHA_GAIN,
+            "water_top_alpha": present::WATER_TOP_ALPHA,
+            "top_gain": present::TOP_GAIN,
+            "top_tint": present::TOP_TINT,
+        },
+        "rain": hex(cubarium_gpu::palette::RAIN_SRGB),
+        "model_palette": model::PALETTE.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+        "plants": plants,
+        "animals": animals,
+    });
+    let text = serde_json::to_string_pretty(&doc)? + "\n";
+    match out {
+        Some(p) => {
+            std::fs::write(&p, text).with_context(|| format!("writing {}", p.display()))?;
+            eprintln!("wrote {}", p.display());
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
+}

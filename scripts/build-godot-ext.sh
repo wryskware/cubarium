@@ -25,3 +25,11 @@ cp -f "$target/$profile/$lib" "game/bin/$lib"
 grep -qx 'res://cubarium.gdextension' game/.godot/extension_list.cfg 2>/dev/null \
     || echo 'res://cubarium.gdextension' >> game/.godot/extension_list.cfg
 echo "built game/bin/$lib ($profile)"
+# Import once, headless (no window), so Godot's global class cache knows `class_name` types
+# such as WorldView on a project the editor has never opened.
+godot_bin="${GODOT_BIN:-$(command -v godot || command -v godot4 || true)}"
+if [[ -n "$godot_bin" ]]; then
+    "$godot_bin" --headless --path game --import >/dev/null 2>&1 \
+        && echo "imported game/ (class cache)" \
+        || echo "warning: headless import of game/ failed; run: $godot_bin --headless --path game --import" >&2
+fi
