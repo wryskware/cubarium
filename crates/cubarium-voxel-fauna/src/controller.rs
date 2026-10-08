@@ -924,6 +924,21 @@ impl Controller for BrowserForager {
             } else {
                 turn = 0.0;
             }
+        } else if front > 0.5 {
+            // FROZEN-PREY: a wall ahead with nothing in view. The flip below swung the
+            // heading back and forth through about 35° against it, creeping at
+            // `blocked_forward`, and the turn it delivered kept the motor's delivery over
+            // `motor_refused`, so no escape came: frondgrazers stood so for 50 sim minutes,
+            // starving. As the blind forager does, it turns away from the contacted side,
+            // or on its remembered side, without flipping, until the front clears.
+            self.wander_ticks = 0;
+            let (left, right) = (o[self.contact.offset + 1], o[self.contact.offset + 2]);
+            if left > right {
+                self.wander_bias = -1.0;
+            } else if right > left {
+                self.wander_bias = 1.0;
+            }
+            turn = self.wander_bias * cfg.browser_wander_turn;
         } else {
             self.wander_ticks += 1;
             if self.wander_ticks >= cfg.browser_wander_flip {
@@ -1740,6 +1755,42 @@ mod tests {
             panic!("bounded");
         };
         assert_eq!(a.feed, 1.0, "foliage at the mouth feeds");
+    }
+
+    /// **FROZEN-PREY: a browser blocked ahead with nothing in view keeps turning one way**
+    /// until its front clears — away from the contacted side, or its remembered side —
+    /// where the open-ground wander flips every `browser_wander_flip` samples.
+    #[test]
+    fn a_blocked_browser_turns_one_way_until_its_front_clears() {
+        let cfg = TeacherConfig::default();
+        let manifest = Founder::Browser.manifest();
+        let contact = module_slot(&manifest, "Contact(4)");
+        let turns = |browser: &mut BrowserForager, o: &[f64], n: u32| -> Vec<f64> {
+            (0..n)
+                .map(|_| match browser.drive(o) {
+                    Response::Bounded(a) => a.turn,
+                    _ => panic!("bounded"),
+                })
+                .collect()
+        };
+        let n = 4 * cfg.browser_wander_flip.max(1);
+        // Open ground: the wander flips.
+        let open = quiet(&manifest);
+        let t = turns(&mut BrowserForager::new(), &open, n);
+        assert!(t.iter().any(|&x| x > 0.0) && t.iter().any(|&x| x < 0.0), "open ground flips: {t:?}");
+        // Blocked ahead, no side contact: one sign throughout.
+        let mut blocked = quiet(&manifest);
+        blocked[contact.offset] = 1.0;
+        let t = turns(&mut BrowserForager::new(), &blocked, n);
+        assert!(t.iter().all(|&x| x != 0.0 && x.signum() == t[0].signum()), "blocked keeps one side: {t:?}");
+        // Blocked with contact on one side: it turns the way the blind forager turns from
+        // that side, every sample.
+        for (side, sign) in [(1usize, -1.0), (2usize, 1.0)] {
+            let mut o = blocked.clone();
+            o[contact.offset + side] = 1.0;
+            let t = turns(&mut BrowserForager::new(), &o, n);
+            assert!(t.iter().all(|&x| x.signum() == sign), "contact slot {side}: {t:?}");
+        }
     }
 
     /// The blind diagnostic keeps an observable approach straight, changes course
