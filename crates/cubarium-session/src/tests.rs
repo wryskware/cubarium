@@ -850,3 +850,92 @@ fn a_hand_built_surface_and_carcass_survive_a_full_take_after_load() {
     }
     assert_eq!(after.frame.as_ref().unwrap().carcasses, before.frame.as_ref().unwrap().carcasses);
 }
+
+/// Ticks between vitals rows in [`vitals_rows_cover_every_column_and_live_lineage`]: a
+/// "minute" short enough to pass two boundaries in a few dozen ticks.
+const VITALS_EVERY: u64 = 20;
+
+#[test]
+fn vitals_rows_cover_every_column_and_live_lineage() {
+    let scratch = Scratch::new("vitals");
+    let s = spec(&scratch.0, 5);
+    let prepared = prepare_new(&s.sim_params().unwrap(), &s).expect("a tiny world founds");
+    let cadence = cubarium_observatory::Cadence { paused_wall_s: 0.05, ..Default::default() };
+    let session = Session::new(SessionOptions { vitals_every: Some(VITALS_EVERY), cadence, speed: 32.0, ..options() });
+    session.install(prepared);
+    let start = wait(&session, "the world is installed", |st| st.running && st.generation == 1).tick;
+    // Three row intervals at speed, then paused on a boundary (steps run at the clock's
+    // own pace, so only the few to the boundary are stepped).
+    wait(&session, "three row intervals", |st| st.tick >= start + 3 * VITALS_EVERY);
+    let at = pause(&session);
+    std::thread::sleep(Duration::from_millis(50));
+    let at = session.status().tick.max(at);
+    let to_boundary = (VITALS_EVERY - at % VITALS_EVERY) % VITALS_EVERY;
+    session.command(Command::Step(to_boundary as u32));
+    let tick = wait(&session, "the steps to a boundary", |st| st.tick == at + to_boundary).tick;
+    assert_eq!(tick % VITALS_EVERY, 0);
+
+    let v = session.query("vitals", &json!({})).unwrap();
+    let names = |key: &str| -> Vec<String> {
+        v[key].as_array().unwrap().iter().map(|c| c["name"].as_str().unwrap().to_string()).collect()
+    };
+    let animal_columns = names("animal_columns");
+    let plant_columns = names("plant_columns");
+    assert_eq!(animal_columns.join(","), cubarium_observatory::vitals::VITALS_HEADER);
+    assert_eq!(plant_columns.join(","), cubarium_observatory::vitals::PLANTS_HEADER);
+    assert!(v["animal_columns"].as_array().unwrap().iter().all(|c| c["doc"].as_str().is_some_and(|d| !d.is_empty())));
+    let animals = v["animals"].as_array().unwrap();
+    let plants = v["plants"].as_array().unwrap();
+    assert!(animals.iter().all(|r| r.as_array().unwrap().len() == animal_columns.len()), "every animal row carries every column");
+    assert!(plants.iter().all(|r| r.as_array().unwrap().len() == plant_columns.len()), "every plant row carries every column");
+    let minute_of = |r: &Value| r[0].as_f64().unwrap();
+    let mut minutes: Vec<f64> = animals.iter().map(minute_of).collect();
+    minutes.dedup();
+    assert!(minutes.len() >= 3, "the start row and two boundaries: {minutes:?}");
+    assert_eq!(v["started_minute"].as_f64(), Some(minutes[0]));
+    assert_eq!(v["from_minute"].as_f64(), Some(minutes[0]));
+
+    // One row per lineage each minute, and every lineage alive at the last one has its row.
+    let lineage = animal_columns.iter().position(|c| c == "lineage").unwrap();
+    let n = animal_columns.iter().position(|c| c == "n").unwrap();
+    for m in &minutes {
+        let mut at: Vec<&str> = animals.iter().filter(|r| minute_of(r) == *m).map(|r| r[lineage].as_str().unwrap()).collect();
+        let len = at.len();
+        at.sort_unstable();
+        at.dedup();
+        assert_eq!(at.len(), len, "one row per lineage at minute {m}");
+    }
+    let last = *minutes.last().unwrap();
+    assert_eq!(last, tick as f64 / crate::vitals::VitalsRun::MINUTE as f64, "the newest row is the boundary the world stands on");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let live = loop {
+        let snap = session.query("snapshot", &json!({})).unwrap();
+        if snap["summary"]["tick"].as_u64() == Some(tick) {
+            let mut l: Vec<String> = snap["animals"].as_array().unwrap().iter().map(|a| a["species"].as_str().unwrap().to_string()).collect();
+            l.sort_unstable();
+            l.dedup();
+            break l;
+        }
+        assert!(Instant::now() < deadline, "no publication of the paused tick");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(!live.is_empty(), "the tiny world has animals");
+    let mut rows: Vec<String> = animals
+        .iter()
+        .filter(|r| minute_of(r) == last && r[n].as_u64().unwrap_or(0) > 0)
+        .map(|r| r[lineage].as_str().unwrap().to_string())
+        .collect();
+    rows.sort_unstable();
+    assert_eq!(rows, live, "the lineages with bodies at the boundary are the live ones");
+    let plant_species: Vec<&str> = plants.iter().filter(|r| minute_of(r) == last).map(|r| r[1].as_str().unwrap()).collect();
+    assert_eq!(plant_species.len(), cubarium_voxel_flora::Species::ALL.len(), "one plant row per species");
+
+    // `since` filters: only minutes after it.
+    let since = session.query("vitals", &json!({ "since": minutes[1] })).unwrap();
+    let after: Vec<f64> = since["animals"].as_array().unwrap().iter().map(minute_of).collect();
+    assert!(!after.is_empty() && after.iter().all(|m| *m > minutes[1]), "since {} gave {after:?}", minutes[1]);
+    assert!(since["plants"].as_array().unwrap().iter().all(|r| minute_of(r) > minutes[1]));
+    assert!(session.status().vitals_ms > 0.0, "the recorder's cost is reported");
+    let refused = session.query("no-such-query", &json!({})).unwrap_err();
+    assert!(refused.contains("vitals"), "the unknown-query error lists vitals: {refused}");
+}

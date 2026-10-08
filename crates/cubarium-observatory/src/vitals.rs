@@ -61,6 +61,14 @@ pub struct Options {
     pub starving_fullness: f64,
 }
 
+/// The census's own choices (`voxel_census vitals=` with no options given), so a row means
+/// the same thing wherever a recorder runs.
+impl Default for Options {
+    fn default() -> Options {
+        Options { stuck_window_min: 5.0, stuck_body_lengths: 1.0, starving_fullness: 0.05 }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Activity {
     pub body_s: f64,
@@ -867,6 +875,15 @@ impl Recorder {
             row
         })
     }
+    /// Drop the dead bodies' histories, for a host that keeps no life table (a live session
+    /// running for days): what [`Recorder::take_dead`] would have returned is discarded, and
+    /// a later birth to a forgotten parent starts at generation 0.
+    pub fn prune_dead(&mut self) {
+        for id in std::mem::take(&mut self.dead) {
+            self.tracks.remove(&id);
+        }
+    }
+
     /// Deaths are emitted once; final living rows are written separately at shutdown.
     pub fn take_dead(&mut self) -> Vec<LifeRow> {
         std::mem::take(&mut self.dead)
@@ -989,6 +1006,85 @@ fn csv(out: &mut impl Write, cells: impl IntoIterator<Item = String>) -> io::Res
 
 pub const VITALS_HEADER: &str = "minute,lineage,n,n_rider,n_pup,n_juvenile,n_adult,native_n,fullness_mean,fullness_p10,fullness_p50,fullness_p90,stomach_fill_mean,stomach_fill_p50,wound_mean,wounded_n,size_mean,energy_per_body_mean,emergency_n,eating_n,asleep_n,gestating_or_clutch_n,breeding_eligible_n,body_s,awake_body_s,moving_share,feeding_share,resting_share,fleeing_share,hunting_share,climbing_share,gliding_share,flying_share,energy_body_hours,survivor_stock_change_per_body_hour,path_m_per_body,displacement_m_per_body,stuck_n,stuck_observed_n,intake_organic,upkeep_organic,motor_organic,delivered_bl_per_s,cohort_energy_change,segment,fullness_p10_rider,fullness_p50_rider,n_fullness_rider,starving_n_rider,fullness_p10_pup,fullness_p50_pup,n_fullness_pup,starving_n_pup,fullness_p10_juvenile,fullness_p50_juvenile,n_fullness_juvenile,starving_n_juvenile,fullness_p10_adult,fullness_p50_adult,n_fullness_adult,starving_n_adult";
 pub const PLANTS_HEADER: &str = "minute,species,stands,vigour_mean,vigour_p10,vigour_p50,cured_n,drought_n,aeration_n,stressed_n,segment";
+/// Every [`VITALS_HEADER`] column in order, with its meaning and unit (for readers that show
+/// the rows: the Godot dev metrics panel's tooltips).
+pub const VITALS_COLUMNS: &[(&str, &str)] = &[
+    ("minute", "Simulated minutes since the world's tick 0 at this row's minute boundary; interval columns cover the minute ending here."),
+    ("lineage", "The lineage's code name (one row per founder lineage, extinct ones included, and any other species alive)."),
+    ("n", "Living bodies at the minute, every stage."),
+    ("n_rider", "Living riders (young carried on a parent) at the minute."),
+    ("n_pup", "Living pups at the minute."),
+    ("n_juvenile", "Living juveniles at the minute."),
+    ("n_adult", "Living adults at the minute."),
+    ("native_n", "Living bodies born in this world (not introduced founders)."),
+    ("fullness_mean", "Mean fullness: reserve over the reserve the body can hold, 0..1, over living bodies."),
+    ("fullness_p10", "10th percentile of fullness (reserve / reserve capacity, 0..1). score.py's F term (condition) reads it when no stage columns exist."),
+    ("fullness_p50", "Median fullness (reserve / reserve capacity, 0..1)."),
+    ("fullness_p90", "90th percentile of fullness (reserve / reserve capacity, 0..1)."),
+    ("stomach_fill_mean", "Mean stomach fill: stomach organic over the gut's capacity K for the body, 0..1."),
+    ("stomach_fill_p50", "Median stomach fill (stomach organic / gut capacity K, 0..1)."),
+    ("wound_mean", "Mean wound stock, 0..1 (dead at 1), over living bodies."),
+    ("wounded_n", "Living bodies with any wound."),
+    ("size_mean", "Mean size: organic structure over the lineage's full size (body / body_max)."),
+    ("energy_per_body_mean", "Mean energy in tissue per unit of organic structure (energy / body)."),
+    ("emergency_n", "Bodies with the emergency latch on (reserve hunger past wake_hunger: awake in any phase)."),
+    ("eating_n", "Bodies with the eating latch on (stomach fell to s_start x K: seeking food and biting)."),
+    ("asleep_n", "Bodies asleep or in a rest bout at the minute."),
+    ("gestating_or_clutch_n", "Bodies gestating (an offspring package in escrow)."),
+    ("breeding_eligible_n", "Bodies eligible to breed on their last tick."),
+    ("body_s", "Individual-seconds observed in the minute, every state (1 Hz samples)."),
+    ("awake_body_s", "Awake individual-seconds in the minute (not asleep, not resting): the activity shares' denominator."),
+    ("moving_share", "Share of awake body-seconds walking, climbing, flying or gliding (shares overlap). score.py's V term reads it."),
+    ("feeding_share", "Share of awake body-seconds whose activity reads feeding."),
+    ("resting_share", "Share of awake body-seconds in the Resting state."),
+    ("fleeing_share", "Share of awake body-seconds steering to flee."),
+    ("hunting_share", "Share of awake body-seconds striking or on patrol."),
+    ("climbing_share", "Share of awake body-seconds climbing (state or mobility)."),
+    ("gliding_share", "Share of awake body-seconds gliding."),
+    ("flying_share", "Share of awake body-seconds flying."),
+    ("energy_body_hours", "Survivor body-hours in the minute: bodies alive at both ends x the minute in hours (the energy readouts' denominator)."),
+    ("survivor_stock_change_per_body_hour", "Change in gross stored energy (tissue, gut, stomach, seeds, escrow) of bodies alive at both minute ends, per body-hour. Hides deaths; charges reproduction."),
+    ("path_m_per_body", "3-D path length per survivor in the minute, metres (ring-wrapped)."),
+    ("displacement_m_per_body", "Net displacement per survivor from the minute's start, metres (ring-wrapped)."),
+    ("stuck_n", "Eligible bodies that got under stuck_body_lengths (census 1 body length) of net displacement over the stuck window (census 5 min). Eligible: hungry, no reason to stand still and no bite in the whole window. Blank when none was eligible."),
+    ("stuck_observed_n", "Bodies eligible for the stuck rule at the minute (hungry, no chosen reason to stand still, nothing eaten over a fully observed window)."),
+    ("intake_organic", "Organic matter the lineage swallowed in the minute (the fauna ledger), organic units."),
+    ("upkeep_organic", "Organic matter the lineage paid in upkeep in the minute (the fauna ledger), organic units."),
+    ("motor_organic", "Organic matter the lineage paid for movement in the minute (the fauna ledger), organic units."),
+    ("delivered_bl_per_s", "Net displacement in each survivor's current body lengths, summed, over the survivors' awake body-seconds: body lengths per awake second actually delivered (pacing on the spot scores near 0)."),
+    ("cohort_energy_change", "Conserved budget of the cohort alive at the minute's start, organic units per cohort body-hour: change in body + reserve + escrow (a death counts its whole store as lost) plus organic given to offspring."),
+    ("segment", "0 for a fresh founding, +1 per load or resume."),
+    ("fullness_p10_rider", "10th percentile of fullness over the living riders at the minute (blank with none). score.py's F term reads the adults' when present."),
+    ("fullness_p50_rider", "Median fullness over the living riders at the minute (blank with none)."),
+    ("n_fullness_rider", "Living riders whose fullness was read at the minute (blank with none)."),
+    ("starving_n_rider", "Living riders below the starving fullness (Options::starving_fullness, census default 0.05) at the minute (blank with none)."),
+    ("fullness_p10_pup", "10th percentile of fullness over the living pups at the minute (blank with none). score.py's F term reads the adults' when present."),
+    ("fullness_p50_pup", "Median fullness over the living pups at the minute (blank with none)."),
+    ("n_fullness_pup", "Living pups whose fullness was read at the minute (blank with none)."),
+    ("starving_n_pup", "Living pups below the starving fullness (Options::starving_fullness, census default 0.05) at the minute (blank with none)."),
+    ("fullness_p10_juvenile", "10th percentile of fullness over the living juveniles at the minute (blank with none). score.py's F term reads the adults' when present."),
+    ("fullness_p50_juvenile", "Median fullness over the living juveniles at the minute (blank with none)."),
+    ("n_fullness_juvenile", "Living juveniles whose fullness was read at the minute (blank with none)."),
+    ("starving_n_juvenile", "Living juveniles below the starving fullness (Options::starving_fullness, census default 0.05) at the minute (blank with none)."),
+    ("fullness_p10_adult", "10th percentile of fullness over the living adults at the minute (blank with none). score.py's F term reads the adults' when present."),
+    ("fullness_p50_adult", "Median fullness over the living adults at the minute (blank with none)."),
+    ("n_fullness_adult", "Living adults whose fullness was read at the minute (blank with none)."),
+    ("starving_n_adult", "Living adults below the starving fullness (Options::starving_fullness, census default 0.05) at the minute (blank with none)."),
+];
+/// Every [`PLANTS_HEADER`] column in order, with its meaning and unit.
+pub const PLANTS_COLUMNS: &[(&str, &str)] = &[
+    ("minute", "Simulated minutes since the world's tick 0 at this row's minute boundary."),
+    ("species", "The plant species' code name."),
+    ("stands", "Living stands of the species at the minute."),
+    ("vigour_mean", "Mean vigour: reserve over (reserve_cap x living wood), over stands."),
+    ("vigour_p10", "10th percentile of vigour (reserve / (reserve_cap x wood))."),
+    ("vigour_p50", "Median vigour (reserve / (reserve_cap x wood))."),
+    ("cured_n", "Stands cured (drought dormancy: foliage dropped, waiting for water)."),
+    ("drought_n", "Stands with a drought clock running (dry below cure_water while green, or dormant once cured)."),
+    ("aeration_n", "Stands with waterlogged roots (aeration stress above 0: income cut by that share)."),
+    ("stressed_n", "Stands cured, in drought or waterlogged (any of the three)."),
+    ("segment", "0 for a fresh founding, +1 per load or resume."),
+];
 
 impl AnimalVitals {
     fn record_condition(&mut self, row: &query::AnimalRow, threshold: f64) {
@@ -1001,6 +1097,11 @@ impl AnimalVitals {
     }
 
     pub fn write_csv(&self, out: &mut impl Write) -> io::Result<()> {
+        csv(out, self.cells())
+    }
+
+    /// The row's cells in [`VITALS_HEADER`] order, as `vitals.csv` writes them: blank is NA.
+    pub fn cells(&self) -> Vec<String> {
         let r = self;
         let a = &r.activity;
         let mut c = vec![r.minute.to_string(), r.lineage.clone(), r.n.to_string()];
@@ -1065,27 +1166,30 @@ impl AnimalVitals {
                 val((!values.is_empty()).then_some(r.starving_by_stage[stage] as f64)),
             ]);
         }
-        csv(out, c)
+        c
     }
 }
 impl PlantVitals {
     pub fn write_csv(&self, out: &mut impl Write) -> io::Result<()> {
-        csv(
-            out,
-            [
-                self.minute.to_string(),
-                self.species.clone(),
-                self.stands.to_string(),
-                val(mean(&self.vigour)),
-                val(quantile(&self.vigour, 0.1)),
-                val(quantile(&self.vigour, 0.5)),
-                self.cured_n.to_string(),
-                self.drought_n.to_string(),
-                self.aeration_n.to_string(),
-                self.stressed_n.to_string(),
-                self.segment.to_string(),
-            ],
-        )
+        csv(out, self.cells())
+    }
+
+    /// The row's cells in [`PLANTS_HEADER`] order, as `plants_vitals.csv` writes them.
+    pub fn cells(&self) -> Vec<String> {
+        [
+            self.minute.to_string(),
+            self.species.clone(),
+            self.stands.to_string(),
+            val(mean(&self.vigour)),
+            val(quantile(&self.vigour, 0.1)),
+            val(quantile(&self.vigour, 0.5)),
+            self.cured_n.to_string(),
+            self.drought_n.to_string(),
+            self.aeration_n.to_string(),
+            self.stressed_n.to_string(),
+            self.segment.to_string(),
+        ]
+        .into()
     }
 }
 impl LifeRow {
@@ -1277,6 +1381,15 @@ mod tests {
         let before = r.starving_by_stage;
         r.record_condition(&row, options.starving_fullness);
         assert_eq!(r.starving_by_stage, before);
+    }
+
+    #[test]
+    fn every_column_has_a_meaning_in_header_order() {
+        for (header, docs) in [(VITALS_HEADER, VITALS_COLUMNS), (PLANTS_HEADER, PLANTS_COLUMNS)] {
+            let names: Vec<&str> = docs.iter().map(|(n, _)| *n).collect();
+            assert_eq!(names.join(","), header);
+            assert!(docs.iter().all(|(_, d)| !d.is_empty()));
+        }
     }
 
     #[test]
