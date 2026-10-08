@@ -2,7 +2,7 @@
 # Brain pilot 2026-10-08 (brief: brain-pilot.md; design/training-plan-2026-10-08.md 2a, 3):
 # frondgrazer + littershredder on today's v2 contract, train-flat-nopred, run on eidolon.
 #
-#   setsid nohup bash pilot.sh > pilot.log 2>&1 < /dev/null &
+#   cd R && setsid nohup bash scripts/pilot.sh > pilot.log 2>&1 < /dev/null &
 #
 # Run from the pilot directory R, which holds bin/cubarium-search, config/ (scenarios and
 # desktop maps), policies/ (the C1 centres), scripts/noise.py. One chained script:
@@ -13,19 +13,20 @@
 #   3. gates (whole-lineage deployment, voxel_census through the kit's batch.py, 1 h):
 #      midway (after 2 h of training, while it continues): trained-mid vs c1 vs heuristic,
 #      train-flat-nopred seeds 1-8; end: trained-final on the same seeds, and trained-final
-#      vs c1 on the d72 saved starts (seeds 1-8, minute-63 checkpoints).
+#      vs c1 on d72, freshly founded seeds 1-8 (not the saved starts: a load= freezes
+#      mid-climb heuristic seedporters, branch load-climb).
 # Writes DONE at the end, FAILED with the reason if a part fails.
 set -u
-R=$(cd "$(dirname "$0")" && pwd)
+R=$(cd "$(dirname "$0")/.." && pwd)   # the script lives in R/scripts
 cd "$R"
 ulimit -v $((64 * 1024 * 1024))   # 64 GiB address space, KiB
 KIT=$HOME/cubarium-train/kit
-CENSUS=$KIT/voxel_census.691d3f8e
+CENSUS=$KIT/voxel_census.1ea9dfce   # vitals v2
 BIN=$R/bin/cubarium-search
 MAP=$R/config/scenarios/train-flat-nopred.toml
 C1F=$R/policies/frondgrazer-curio-c1-2026-10-02.json
 C1L=$R/policies/littershredder-curio-c1-2026-10-02.json
-D72="$HOME/cubarium-train/starts-2026-10-08/runs/d72-s[1-8]/ckpt/m000063"
+D72=$R/config/desktop/terrarium-d72.toml
 TRAIN_WALL=${TRAIN_WALL:-14400}
 MID_AFTER=${MID_AFTER:-7200}
 
@@ -105,7 +106,7 @@ if [ -f gate-mid/flat/DONE ]; then extra=(); else extra=(--arm "c1=still=lantern
 GATE_PAR=6 gate_flat "$R/gate-end/flat" --arm "trained=$trained" "${extra[@]}" > gate-end-flat.log 2>&1 &
 FLAT=$!
 python3 "$KIT/scripts/studies/batch.py" "$R/gate-end/d72" --bin "$CENSUS" --arm "trained=$trained" --arm "c1=still=lanternjaw" \
-  --starts "$D72" --hours 1 --threads 1 --max-parallel 8 --slot-base 14 \
+  --config "$D72" --seeds 1-8 --hours 1 --threads 1 --max-parallel 8 --slot-base 14 \
   --stage "check_min=3 segment_min=15 keep=2" > gate-end-d72.log 2>&1 || log "d72 gate batch exited nonzero"
 wait $FLAT || log "end flat gate batch exited nonzero"
 score "$R/gate-end/d72" c1
