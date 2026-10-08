@@ -634,16 +634,16 @@ pub fn desktop_screen() -> Option<(u32, u32)> {
     desktop_screens(true)
 }
 
-/// The desktop's **largest** screen (by area), for the development window's
+/// The desktop's **largest physical** screen (by area), for the development window's
 /// `px_per_voxel = "auto"`: the window can be put on any of them, and the raster is drawn
 /// big enough for the largest and scaled down on the others. `CUBARIUM_SCREEN=WxH` still
-/// names the one screen outright.
+/// names the one screen outright, in physical pixels.
 pub fn largest_desktop_screen() -> Option<(u32, u32)> {
     desktop_screens(false)
 }
 
 /// The focused screen (`focused`), or the largest, from `CUBARIUM_SCREEN`, Hyprland or
-/// `xrandr`, in that order.
+/// `xrandr`, in that order. For the largest, query native Wayland output modes first.
 fn desktop_screens(focused: bool) -> Option<(u32, u32)> {
     let wxh = |t: &str| -> Option<(u32, u32)> {
         let (w, h) = t.split_once('x')?;
@@ -661,11 +661,20 @@ fn desktop_screens(focused: bool) -> Option<(u32, u32)> {
         let out = std::process::Command::new(cmd).args(args).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
+    if !focused
+        && let Some(sizes) = crate::sink::gpu::wayland::physical_outputs()
+    {
+        return largest(sizes);
+    }
     if let Some(json) = run("hyprctl", &["monitors", "-j"])
         && let Ok(serde_json::Value::Array(monitors)) = serde_json::from_str(&json)
     {
         let size = |m: &serde_json::Value| -> Option<(u32, u32)> {
-            let scale = m["scale"].as_f64().unwrap_or(1.0).max(0.1);
+            let scale = if focused {
+                m["scale"].as_f64().unwrap_or(1.0).max(0.1)
+            } else {
+                1.0
+            };
             Some((
                 (m["width"].as_f64()? / scale) as u32,
                 (m["height"].as_f64()? / scale) as u32,
@@ -2642,6 +2651,38 @@ mod tests {
         let s = auto_px_per_voxel(30.0, 0, &w, (1920, 1080));
         let exact = (strip(s).0, 4000);
         assert_eq!(cover_px_per_voxel(30.0, 0, &w, exact), s);
+    }
+
+    #[test]
+    fn auto_fit_and_cover_use_physical_pixels_at_fractional_scale() {
+        use cubarium_gpu::target::window::WindowScale;
+        let world = cubarium_voxel::Config {
+            width: 20,
+            height: 12,
+            depth: 4,
+            ..Default::default()
+        };
+        let logical = (103, 67);
+        for scale in [120, 150, 180, 240] {
+            let out = WindowScale::Fractional(scale).physical_size(logical);
+            let strip = |s| {
+                (world.width * s, world.height * s + world.depth * project::rise_for(30.0, s))
+            };
+            let fits = |s| {
+                let (w, h) = strip(s);
+                w <= out.0 && h <= out.1
+            };
+            let reaches = |s| {
+                let (w, h) = strip(s);
+                w >= out.0 || h >= out.1
+            };
+            let fit = auto_px_per_voxel(30.0, 0, &world, out);
+            assert!(fits(fit));
+            assert!(!fits(fit + 1));
+            let cover = cover_px_per_voxel(30.0, 0, &world, out);
+            assert!(reaches(cover));
+            assert!(!reaches(cover - 1));
+        }
     }
 
     /// With no TOML the ambient world is the shipped `default` landscape on the ring it

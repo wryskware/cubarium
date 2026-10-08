@@ -75,7 +75,18 @@ Workers read `design/handoffs/worker-rules-2026-10-07.md` first.
   instanced geometry at the pixel-scale raster: positions and headings **interpolated between
   ticks** on the frame clock, **free rotation** (heading now; pitch on climbs and slopes when the
   feed gives it), fades on birth and death.
-- Depth-tested against the voxel walk's depth, so terrain and animals occlude each other.
+- **Pixel look without pixel stepping** (Wrysk, 2026-10-08: "i would ideally keep the look
+  artificially without this limitation"):
+  - **Rasterizing:** each animal is rasterized at the coarse pixel scale into its own small
+    tile whose pixel grid moves with the animal.
+  - **Placing:** the tile goes at the animal's exact interpolated screen position. The animal
+    glides with no crawling pixels and keeps the same chunky pixels as the world.
+  - **Turning:** a turn re-rasterizes the animal (a few pixels change, like a turning sprite).
+    Fine angle steps blended over a few frames may calm it; the worker shows both.
+  - **Panning:** sub-pixel as well. The world raster is drawn with a one-pixel margin and the
+    upscaled image is shifted by the leftover fraction (asked of H1).
+- Tiles carry depth and are tested against the voxel walk's depth, so terrain and animals
+  occlude each other.
 - Lit by the renderer's own lighting model, evaluated with the model's real normals and sampled
   at the fragment's world position (sun visibility, sky visibility, glow volume, haze). The old
   baked light-imitating tones (lit column, rim) become real lighting; markings and eyes stay.
@@ -86,8 +97,22 @@ Workers read `design/handoffs/worker-rules-2026-10-07.md` first.
 
 ## H3: the pack off the critical path
 
-- Profile first (now): `examples/pack_profile.rs` with `--features pack-profile` on the wide
-  save, per phase, so the redesign follows the numbers.
+- Profiled 2026-10-07 (`examples/pack_profile.rs --features pack-profile`, 300 ticks, midday
+  saves at tick 24000, host load 50–60; full output in the session scratchpad `pp/{a,b}.out`).
+  Pack median / p95 ms per tick: 256×128×48 **1.04 / 1.46** (step 1.48); 640×128×96
+  **5.97 / 7.88** (step 12.0). Wide breakdown:
+  - **Water, about 40%:** pore water 1.47 and free water 0.92. Pore water is also the largest
+    phase on 256 (0.33).
+  - **Grid-sized phases:** compose 0.69, terrain 0.32, wet list 0.29, ground marks 0.24.
+  - **Organism-tied, about 1.5:** canopy 0.60, animals 0.46, stand keys 0.45. Animals and
+    stand keys cost the same even when no stand changed, so it looks like a per-tick overhead.
+  - **Small:** upload 0.07 (800 KiB per tick); light volumes about 0 at midday.
+
+  The example needed two local fixes to load these saves: founders' policies (load with
+  `Founder::ALL`), and the session store's `world-N.voxel` file names. See backlog item 10.
+- Levers in order: the double buffer below (a tick becomes max(step, pack): wide 12 ms instead
+  of 18); a sweep for pore water like the Godot feed's `pore_sweep` (it covers the grid over N
+  updates); dropping animal stamping with H2.
 - After H2 removes animal stamping: copy what the pack reads after each step, pack on its own
   thread while the next step runs (backlog item 9), so a tick costs about max(step, pack), and
   the presentation samples published snapshots.

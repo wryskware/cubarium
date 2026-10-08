@@ -72,7 +72,7 @@ pub mod pack_timer;
 mod sunvis;
 
 #[path = "gpu/wayland.rs"]
-mod wayland;
+pub(crate) mod wayland;
 
 #[path = "gpu/voxel.rs"]
 pub mod voxel;

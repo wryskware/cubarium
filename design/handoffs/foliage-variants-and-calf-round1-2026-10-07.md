@@ -79,3 +79,26 @@ into the simulation, the presenter, the bake outputs in `assets/voxel-models/`, 
 
 ≤40 lines: commits (branch only, explicit paths, never merge), sheet paths, the diagnosis or today's
 state, the proposal, and anything that looks wrong.
+
+## Round 1 results and Wrysk's picks (2026-10-08)
+
+Round 1: plants 9e2a9356 (branch `worktree-agent-a578908e8c16e7fa7`), calf fbd3d3c8 (branch
+`worktree-agent-a22f62e40bfde905b`). Sheets in `art/gen/runs/2026-10-07-{foliage-variants,loftstrider-calf}/`.
+
+Wrysk's words: "bloomcrown: do browsed 3 crown (maybe even a bit more cut back) with browsed 2's
+bottom. stripped 1 but add like one or two pink voxels at the ground so it looks like the foliage fell
+off and is laying there. umbrafrond take the idea from browsed 3 but add two stages. browsedA has the
+lowest tier light greeen, then browsedB makes the lowest tier look like stripped 3, but otherwise what
+browsed 3 currenrly looks like for the upper two. and then used stripped 3 as stripped. Loftstrider i
+feel like im not liking the long legs. shorter legs actually work for me. like more chibi. and then i
+would pick the middle for the rest of the body shape."
+
+Round 2, as read:
+- **Bloomcrown**: browsed = round-1 browsed 3's chewed crown, optionally cut back a little more (show
+  both), over browsed 2's stubbed rosette. Stripped = stripped 1 (stem + pod + bloom) plus one or two
+  pink fallen-foliage voxels on the ground beside it (show 1 and 2).
+- **Umbrellafrond gets four states**: full; browsed A = lowest tier as light-green bare ribs, upper two
+  full; browsed B = lowest tier as stripped 3's rib stubs, middle tier light-green bare ribs, top full
+  (browsed 3's upper two); stripped = round-1 stripped 3. So the state count is per species.
+- **Loftstrider calf**: body shape from B (neck 0.30, head 0.72, fronds 0.35, tusks 0.55), legs
+  **shorter**, chibi. Show a few leg lengths at or below the body's scale.
