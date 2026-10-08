@@ -1060,6 +1060,21 @@ impl PhaseWindow {
             line.push_str(&format!(" {name}={:.3}", ms(p)));
         }
         eprintln!("{line} stands={}", sim.flora().view().stands.len());
+        let fauna = [
+            ("terrain", Phase::FaunaTerrain),
+            ("maintenance", Phase::FaunaMaintenance),
+            ("field", Phase::FaunaField),
+            ("sense", Phase::FaunaSense),
+            ("act", Phase::FaunaAct),
+            ("births", Phase::FaunaBirths),
+            ("deaths", Phase::FaunaDeaths),
+            ("burrs", Phase::FaunaBurrs),
+        ];
+        let mut line = format!("fauna: min={minute} total={:.3}", ms(Phase::FaunaStep));
+        for (name, p) in fauna {
+            line.push_str(&format!(" {name}={:.3}", ms(p)));
+        }
+        eprintln!("{line} animals={}", sim.fauna().view().animals.len());
         self.nanos = now;
     }
 }

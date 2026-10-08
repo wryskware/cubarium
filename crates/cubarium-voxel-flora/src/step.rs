@@ -1393,6 +1393,16 @@ fn for_bands<F>(cell: &mut [[f64; 2]], touched: &mut [u64], threads: usize, f: F
 where
     F: Fn(usize, &mut [[f64; 2]], &mut [u64]) + Sync,
 {
+    if threads <= 1 {
+        for (b, (c, t)) in cell
+            .chunks_mut(DRINK_BAND)
+            .zip(touched.chunks_mut(DRINK_BAND / 64))
+            .enumerate()
+        {
+            f(b, c, t);
+        }
+        return;
+    }
     let bands: Vec<(usize, &mut [[f64; 2]], &mut [u64])> = cell
         .chunks_mut(DRINK_BAND)
         .zip(touched.chunks_mut(DRINK_BAND / 64))
