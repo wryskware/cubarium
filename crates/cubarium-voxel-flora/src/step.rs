@@ -1375,8 +1375,140 @@ struct DrinkChunk {
     out: Vec<Drink>,
     /// (voxel, stand, wanted) per [`DRINK_BAND`] of voxels, each in stand order.
     bands: Vec<Vec<(u32, u32, f64)>>,
-    box_: Vec<usize>,
     drinkable: Vec<f64>,
+    roots: RootGeometry,
+}
+
+/// Soil coordinates only, invalidated by the world's runtime identity and terrain
+/// revision. Water and material constants are read afresh on every plant step.
+#[derive(Default)]
+struct RootGeometry {
+    dims: (u32, u32, u32),
+    terrain: Option<(u64, u64)>,
+    boxes: Vec<RootCoords>,
+}
+
+struct RootCoords {
+    site: Site,
+    depth: u32,
+    radius: u32,
+    cells: Vec<usize>,
+}
+
+impl RootCoords {
+    fn matches(&self, stand: &Stand, sc: &SpeciesConfig) -> bool {
+        self.site == stand.site
+            && self.depth == sc.rooting_depth
+            && self.radius == sc.rooting_radius
+    }
+
+    fn new(view: &VoxelView<'_>, stand: &Stand, sc: &SpeciesConfig) -> Self {
+        let c = view.config;
+        let site = stand.site;
+        let depth = sc.rooting_depth;
+        let radius = sc.rooting_radius;
+        let span = depth.min(site.y + 1);
+        let mut cells = Vec::new();
+        if span > 0 {
+            let r = i64::from(radius);
+            let width = c.width as usize;
+            let west = (i64::from(site.x) - r).rem_euclid(i64::from(c.width)) as usize;
+            for dz in -r..=r {
+                let z = i64::from(site.z) + dz;
+                if z < 0 || z >= i64::from(c.depth) {
+                    continue;
+                }
+                for y in site.y + 1 - span..=site.y {
+                    let row = (y as usize * c.depth as usize + z as usize) * width;
+                    let mut x = west;
+                    for _ in 0..2 * r + 1 {
+                        if view.material[row + x] == Material::Soil {
+                            cells.push(row + x);
+                        }
+                        x += 1;
+                        if x == width {
+                            x = 0;
+                        }
+                    }
+                }
+            }
+        }
+        Self {
+            site,
+            depth,
+            radius,
+            cells,
+        }
+    }
+}
+
+impl RootGeometry {
+    fn sync(&mut self, view: &VoxelView<'_>, config: &FloraConfig, stands: &[Stand]) {
+        let c = view.config;
+        let dims = (c.width, c.height, c.depth);
+        let terrain = view.terrain_cache_key();
+        if self.dims != dims || terrain.is_none() || self.terrain != terrain {
+            self.boxes.clear();
+            self.dims = dims;
+            self.terrain = terrain;
+        }
+        if self.boxes.len() == stands.len()
+            && self
+                .boxes
+                .iter()
+                .zip(stands)
+                .all(|(b, s)| b.matches(s, config.species(s.species)))
+        {
+            return;
+        }
+        // Both lists are site sorted. Move surviving boxes, including their allocations,
+        // rather than copying their coordinates when births shift the stand indices.
+        let mut old = std::mem::take(&mut self.boxes).into_iter().peekable();
+        self.boxes.reserve(stands.len());
+        for stand in stands {
+            let sc = config.species(stand.species);
+            while old.peek().is_some_and(|b| b.site < stand.site) {
+                old.next();
+            }
+            let reused = if old.peek().is_some_and(|b| b.site == stand.site) {
+                old.next().filter(|b| b.matches(stand, sc))
+            } else {
+                None
+            };
+            self.boxes
+                .push(reused.unwrap_or_else(|| RootCoords::new(view, stand, sc)));
+        }
+    }
+}
+
+fn read_root_coords(
+    view: &VoxelView<'_>,
+    roots: &RootCoords,
+    saturated_pore: f64,
+    drinkable: &mut Vec<f64>,
+) -> (f64, f64, usize) {
+    drinkable.clear();
+    #[cfg(feature = "profile")]
+    cubarium_voxel::profile::add(
+        cubarium_voxel::profile::Count::BoxVoxels,
+        u64::from(roots.depth.min(roots.site.y + 1))
+            * u64::from(2 * roots.radius + 1)
+            * u64::from(2 * roots.radius + 1),
+    );
+    let mats = &view.config.materials;
+    let m = Material::Soil;
+    let (wp, cap) = (mats.wilting_point(m), mats.pore_capacity(m));
+    let w = (mats.field_capacity(m) - wp).max(0.0) * cap;
+    let volume = view.config.voxel_volume();
+    let (mut water, mut band, mut saturated) = (0.0, 0.0, 0);
+    for &i in &roots.cells {
+        let pore = view.pore[i];
+        water += available_water(mats, m, pore) * w;
+        band += w;
+        saturated += usize::from(pore >= saturated_pore);
+        drinkable.push((pore - wp).max(0.0) * cap * volume);
+    }
+    (water, band, saturated)
 }
 
 impl DrinkChunk {
@@ -1538,9 +1670,11 @@ fn drink_read(
     let DrinkChunk {
         out,
         bands,
-        box_,
         drinkable,
+        roots,
     } = chunk;
+    roots.sync(view, &flora.config, &flora.stands[range.clone()]);
+    let first = range.start;
     out.clear();
     let nb = view.config.cells().div_ceil(DRINK_BAND);
     bands.resize_with(nb, Vec::new);
@@ -1551,15 +1685,8 @@ fn drink_read(
         let stand = &flora.stands[i];
         let sc = flora.config.species(stand.species);
         let mut d = Drink::default();
-        let (water, band, saturated) = read_root_box(
-            view,
-            stand.site,
-            sc.rooting_depth,
-            sc.rooting_radius,
-            sc.saturated_pore,
-            box_,
-            drinkable,
-        );
+        let root = &roots.boxes[i - first];
+        let (water, band, saturated) = read_root_coords(view, root, sc.saturated_pore, drinkable);
         // `moisture_of`: the species' ramp over the box's mean available water, and an
         // empty box is a wilting one — unless it is dark and the species reads the cave
         // damp ([`SpeciesConfig::damp_available`]). The sky is the tick's memo, which the
@@ -1584,14 +1711,14 @@ fn drink_read(
             d.moisture = 0.0;
         }
         // `saturated_fraction`: an empty box is not waterlogged.
-        d.saturated = if box_.is_empty() {
+        d.saturated = if root.cells.is_empty() {
             0.0
         } else {
-            saturated as f64 / box_.len() as f64
+            saturated as f64 / root.cells.len() as f64
         };
         out.push(d);
         let demand = (sc.transpiration_m3_per_s * stand.foliage * d.moisture * dt).max(0.0);
-        share_over_box(demand, box_, drinkable, |v, share| {
+        share_over_box(demand, &root.cells, drinkable, |v, share| {
             bands[v / DRINK_BAND].push((v as u32, i as u32, share));
         });
     }
@@ -4504,6 +4631,159 @@ mod runner_support_tests;
 mod tests {
     use super::*;
     use crate::Species;
+
+    #[test]
+    fn cached_root_coordinates_read_live_material_and_water() {
+        let (mut flora, mut world) = crowded(3, 4, 0.0, 17);
+        let site = Site { x: 0, y: 3, z: 0 };
+        let stand = crate::seeds::newborn_stand(&flora.config, site, Species::Springturf);
+        let sc = flora.config.species_mut(stand.species);
+        sc.rooting_depth = 3;
+        // Wider than the ring: repeated wrapped coordinates must remain repeated.
+        sc.rooting_radius = 2;
+        let sc = flora.config.species(stand.species);
+        let mut roots = RootGeometry::default();
+        let (mut cached_water, mut walked_box, mut walked_water) =
+            (Vec::new(), Vec::new(), Vec::new());
+        for round in 0..3 {
+            if round > 0 {
+                world.apply(WorldCommand::SetMaterial {
+                    x: 0,
+                    y: 2,
+                    z: 0,
+                    material: if round == 1 {
+                        Material::Rock
+                    } else {
+                        Material::Soil
+                    },
+                });
+                world.apply(WorldCommand::AddWater {
+                    x: 1,
+                    y: 2,
+                    z: 0,
+                    volume_m3: world.config().voxel_volume(),
+                });
+            }
+            let view = world.view();
+            roots.sync(&view, &flora.config, &[stand]);
+            let cached =
+                read_root_coords(&view, &roots.boxes[0], sc.saturated_pore, &mut cached_water);
+            let walked = read_root_box(
+                &view,
+                site,
+                sc.rooting_depth,
+                sc.rooting_radius,
+                sc.saturated_pore,
+                &mut walked_box,
+                &mut walked_water,
+            );
+            assert_eq!(cached, walked);
+            assert_eq!(roots.boxes[0].cells, walked_box);
+            assert_eq!(cached_water, walked_water);
+        }
+    }
+
+    #[test]
+    fn root_coordinates_follow_stands_parameters_and_world_dimensions() {
+        let (mut flora, mut world) = crowded(6, 5, 0.0, 19);
+        let sites = [
+            Site { x: 0, y: 2, z: 0 },
+            Site { x: 1, y: 1, z: 1 },
+            Site { x: 2, y: 2, z: 2 },
+        ];
+        let mut stands: Vec<Stand> = sites
+            .iter()
+            .map(|&site| crate::seeds::newborn_stand(&flora.config, site, Species::Springturf))
+            .collect();
+        let mut roots = RootGeometry::default();
+        for round in 0..6 {
+            match round {
+                1 => {
+                    stands.remove(1);
+                }
+                2 => {
+                    stands.insert(
+                        1,
+                        crate::seeds::newborn_stand(&flora.config, sites[1], Species::Velvetpad),
+                    );
+                }
+                3 => {
+                    let sc = flora.config.species_mut(Species::Springturf);
+                    sc.rooting_depth = 0;
+                    sc.rooting_radius = 4;
+                }
+                4 => {
+                    world = crowded(3, 3, 0.0, 23).1;
+                }
+                _ => {}
+            }
+            let view = world.view();
+            let c = view.config;
+            roots.sync(&view, &flora.config, &stands);
+            assert_eq!(roots.boxes.len(), stands.len());
+            for (b, stand) in roots.boxes.iter().zip(&stands) {
+                let sc = flora.config.species(stand.species);
+                assert!(b.matches(stand, sc));
+                let span = sc.rooting_depth.min(stand.site.y + 1);
+                let r = i64::from(sc.rooting_radius);
+                let mut expected = Vec::new();
+                if span > 0 {
+                    for dz in -r..=r {
+                        let z = i64::from(stand.site.z) + dz;
+                        if z < 0 || z >= i64::from(c.depth) {
+                            continue;
+                        }
+                        for y in stand.site.y + 1 - span..=stand.site.y {
+                            for dx in -r..=r {
+                                let i = c.index(i64::from(stand.site.x) + dx, y, z as u32);
+                                if view.material[i] == Material::Soil {
+                                    expected.push(i);
+                                }
+                            }
+                        }
+                    }
+                }
+                assert_eq!(b.cells, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn root_geometry_does_not_reuse_another_worlds_same_revision() {
+        let (flora, mut a) = crowded(3, 3, 0.0, 31);
+        let mut b = a.clone();
+        a.apply(WorldCommand::SetMaterial {
+            x: 0,
+            y: 1,
+            z: 0,
+            material: Material::Rock,
+        });
+        b.apply(WorldCommand::SetMaterial {
+            x: 1,
+            y: 1,
+            z: 0,
+            material: Material::Rock,
+        });
+        assert_eq!(a.terrain_version(), b.terrain_version());
+        let stand = crate::seeds::newborn_stand(
+            &flora.config,
+            Site { x: 0, y: 1, z: 0 },
+            Species::Springturf,
+        );
+        let mut roots = RootGeometry::default();
+        for world in [&a, &b, &a] {
+            let view = world.view();
+            roots.sync(&view, &flora.config, &[stand]);
+            let mut expected = Vec::new();
+            root_box_into(
+                &view,
+                stand.site,
+                flora.config.species(stand.species),
+                &mut expected,
+            );
+            assert_eq!(roots.boxes[0].cells, expected);
+        }
+    }
 
     /// **The column walks find the site list's entries in its order** (SPEED-MATURE):
     /// a mycelium box's ground entries found column by column — through the site-sorted

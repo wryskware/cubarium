@@ -495,6 +495,7 @@ impl Sim {
         // The overlapped tick: the water leg on the thread that runs the schedule (its
         // exchange scratch is per thread and world-sized), the plant and animal leg on a
         // compute-pool worker beside it, reading the read copy; the barrier after both.
+        // At one thread, finish biology before water and settle its drink at that barrier.
         let mut overlap = Schedule::new(OverlapTick);
         if threads > 1 {
             overlap.set_executor(MultiThreadedExecutor::new());
@@ -522,8 +523,17 @@ impl Sim {
         );
         overlap.add_systems((sys_begin, sys_read_copy).chain().in_set(TickPhase::Begin));
         overlap.add_systems(sys_water_leg.in_set(TickPhase::Water));
-        overlap.add_systems((sys_bio_begin, sys_bio_reads).chain().in_set(TickPhase::Flora));
-        overlap.add_systems(sys_bio_finish.in_set(TickPhase::Fauna));
+        overlap.add_systems(
+            (sys_bio_begin, sys_bio_reads)
+                .chain()
+                .run_if(copied_overlap)
+                .in_set(TickPhase::Flora),
+        );
+        overlap.add_systems(
+            sys_bio_finish
+                .run_if(copied_overlap)
+                .in_set(TickPhase::Fauna),
+        );
         overlap.add_systems(
             sys_withdraw
                 .after(TickPhase::Water)
@@ -1035,13 +1045,62 @@ fn sys_advance(mut w: ResMut<VoxelWorld>) {
 
 // ------------------------------------------------------- the overlapped tick's systems
 
-/// The read copy made to read as the live world does: its water swapped in, the rest
-/// copied. The live world's water is stale until the water leg restores it.
+fn serial_overlap(config: &SimConfig) -> bool {
+    config.threads == 1 && config.overlap_split() == (1, 1)
+}
+
+fn copied_overlap(config: Res<SimConfig>) -> bool {
+    !serial_overlap(&config)
+}
+
+/// On one thread, finish every biological read before advancing water. This is the
+/// same pre-water world the read copy supplied. Keep the drink planned until water
+/// finishes, so withdrawals and shortfalls still settle at the original barrier.
+fn serial_bio(
+    world: &cubarium_voxel::World,
+    flora: &mut FloraLayer,
+    fauna: &mut FaunaLayer,
+    pending: &mut PendingDrink,
+    mut senses: Option<ResMut<SenseField>>,
+) {
+    let mut plant = flora.0.begin_planned_clocked(world, 1);
+    let animal = fauna.0.begin_tick(world, &mut flora.0);
+    if let Some(step) = plant.as_mut() {
+        flora.0.read_planned(step, world, 1);
+    }
+    fauna.0.read_tick(
+        &animal,
+        world,
+        &flora.0,
+        senses.as_deref_mut().map(|s| &mut s.0),
+        1,
+    );
+    if let Some(step) = plant.as_mut() {
+        flora.0.plan_drink(step, world, 1);
+    }
+    pending.0 = flora.0.take_drink_plan();
+    if let Some(step) = plant {
+        flora.0.finish_planned(step, world, 1);
+    }
+    fauna.0.finish_tick(animal, world, &mut flora.0);
+}
+
+/// Start biology in place at one thread. Otherwise make the read copy: its water
+/// swapped in, the rest copied. Live water is stale until the water leg restores it.
 fn sys_read_copy(
     mut w: ResMut<VoxelWorld>,
     mut lagged: ResMut<LaggedWorld>,
     mut lend: ResMut<Lend>,
+    mut flora: ResMut<FloraLayer>,
+    mut fauna: ResMut<FaunaLayer>,
+    mut pending: ResMut<PendingDrink>,
+    senses: Option<ResMut<SenseField>>,
+    config: Res<SimConfig>,
 ) {
+    if serial_overlap(&config) {
+        serial_bio(&w.0, &mut flora, &mut fauna, &mut pending, senses);
+        return;
+    }
     lagged.0.take_readable_from(&mut w.0, &mut lend.0);
 }
 
@@ -1060,30 +1119,36 @@ fn sys_water_leg(
     cubarium_voxel::voxel_phase!(WaterLeg, {
         // The water the read copy was lent at the tick's start, back before anything
         // reads it; the plants and animals are reading the copy meanwhile.
-        cubarium_voxel::voxel_phase!(ReadCopy, {
-            w.restore_water_from(&lagged.0, &mut lend.0, threads)
-        });
-        water::rain(w);
-        water::evaporate(w);
-        let substeps = w.config().water_substeps.max(1);
-        let sub_dt = cubarium_voxel::DT / substeps as f64;
-        // A training world's coarse water ([`cubarium_voxel::World::set_water_every`]):
-        // the lateral and groundwater phases on one tick in `every`, as the chained tick.
-        let due = w.water_due();
-        for _ in 0..substeps {
-            water::infiltrate(w, sub_dt, threads);
-            water::fall(w, threads);
-            if due {
-                water::exchange(w, threads);
-            }
+        if !serial_overlap(&config) {
+            cubarium_voxel::voxel_phase!(ReadCopy, {
+                w.restore_water_from(&lagged.0, &mut lend.0, threads)
+            });
         }
-        if due {
-            water::drain(w, threads);
-            water::water_table(w, threads);
-            water::spring(w);
-            water::outlet(w);
-        }
+        run_water_leg(w, threads);
     });
+}
+
+fn run_water_leg(w: &mut cubarium_voxel::World, threads: usize) {
+    water::rain(w);
+    water::evaporate(w);
+    let substeps = w.config().water_substeps.max(1);
+    let sub_dt = cubarium_voxel::DT / substeps as f64;
+    // A training world's coarse water ([`cubarium_voxel::World::set_water_every`]):
+    // the lateral and groundwater phases on one tick in `every`, as the chained tick.
+    let due = w.water_due();
+    for _ in 0..substeps {
+        water::infiltrate(w, sub_dt, threads);
+        water::fall(w, threads);
+        if due {
+            water::exchange(w, threads);
+        }
+    }
+    if due {
+        water::drain(w, threads);
+        water::water_table(w, threads);
+        water::spring(w);
+        water::outlet(w);
+    }
 }
 
 /// The bio leg's starts, against the read copy: the plant clock and, on a plant tick,

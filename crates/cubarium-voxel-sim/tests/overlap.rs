@@ -17,6 +17,74 @@ fn config(threads: usize, overlap: bool) -> SimConfig {
     SimConfig { threads, overlap, water_every: 1 }
 }
 
+#[test]
+fn one_thread_reads_in_place_like_the_copied_overlap_and_can_switch_threads() {
+    let world = slab(8, 4, 0.6);
+    let mut flora = Flora::new(FloraConfig {
+        step_every: 1,
+        ..FloraConfig::default()
+    });
+    for (x, z) in [(1, 1), (3, 2), (6, 1)] {
+        let wood = flora.config().species(Species::Springturf).wood_max * 0.5;
+        assert!(flora.apply(
+            &world,
+            FloraCommand::Seed {
+                x,
+                z,
+                species: Species::Springturf,
+                wood,
+            }
+        ));
+    }
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    assert!(fauna.apply(
+        &world,
+        FaunaCommand::IntroduceFounder {
+            x: 3,
+            z: 2,
+            founder: Founder::Browser,
+            stores: StartingStores::HUNGRY,
+            heading_rad: 0.0,
+        }
+    ));
+    let id = fauna.view().animals[0].id;
+    let teachers = fauna.config().teachers;
+    let mut direct = Sim::ambient(world.clone(), flora.clone(), fauna.clone(), config(1, true));
+    let mut copied = Sim::ambient(world, flora, fauna, config(2, true));
+    // Controllers are intentionally omitted by Fauna::clone; attach one to each arm.
+    for sim in [&mut direct, &mut copied] {
+        sim.with_layers_mut(|_, _, fauna| {
+            assert!(fauna.set_controller(
+                id,
+                cubarium_voxel_fauna::heuristic(Founder::Browser, teachers)
+            ));
+        });
+    }
+    for tick in 0..12 {
+        if tick == 4 {
+            direct.set_threads(2);
+        }
+        if tick == 8 {
+            direct.set_threads(1);
+        }
+        direct.step();
+        copied.step();
+        assert_eq!(direct.world(), copied.world());
+        assert_eq!(
+            format!("{:?}", direct.flora().view().stands),
+            format!("{:?}", copied.flora().view().stands)
+        );
+        assert_eq!(
+            format!("{:?}", direct.fauna().view().animals),
+            format!("{:?}", copied.fauna().view().animals)
+        );
+        assert_eq!(direct.flora().view().ledger, copied.flora().view().ledger);
+        assert_eq!(direct.fauna().view().ledger, copied.fauna().view().ledger);
+    }
+    assert!(direct.flora().view().ledger.transpired_m3 > 0.0);
+    assert!(direct.fauna().view().ledger.eaten_organic_in > 0.0);
+}
+
 fn rel(a: f64, b: f64) -> f64 {
     let scale = a.abs().max(b.abs()).max(1e-300);
     (a - b).abs() / scale
