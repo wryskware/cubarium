@@ -49,6 +49,20 @@ def seed_list(value):
     return seeds
 
 
+def physical_cores(allowed):
+    """Distinct (package, core) pairs among the allowed CPUs; the logical count if sysfs
+    topology is unreadable."""
+    cores = set()
+    for cpu in allowed:
+        base = Path(f"/sys/devices/system/cpu/cpu{cpu}/topology")
+        try:
+            cores.add((base.joinpath("physical_package_id").read_text().strip(),
+                       base.joinpath("core_id").read_text().strip()))
+        except OSError:
+            return len(allowed)
+    return len(cores) or len(allowed)
+
+
 def start_seed(path):
     # A checkpoint's sibling census is authoritative when available. For a
     # standalone start library accept sN / seedN directory names, with any
@@ -275,7 +289,11 @@ def main(argv=None):
             raise ValueError("--threads exceeds an assigned L3 group's CPU count")
         cpus = len(os.sched_getaffinity(0))
         ceiling = min(math.floor(cpus * 0.9), cpus - 1) // args.threads
-        parallel = args.max_parallel if args.max_parallel is not None else ceiling
+        # Default: one world per physical core. Measured 2026-10-08 on the desktop (16 cores,
+        # 32 threads, mature d72 at 1 thread): 16 worlds gave 35 sim-h per wall-h, 24 gave 26
+        # and 30 gave 31; SMT siblings add contention, not throughput.
+        physical = physical_cores(os.sched_getaffinity(0)) // args.threads
+        parallel = args.max_parallel if args.max_parallel is not None else max(1, min(ceiling, physical))
         if not 1 <= parallel <= ceiling:
             raise ValueError(f"--max-parallel must be between 1 and {ceiling} (CPU reserve)")
         if not math.isfinite(args.mem_per_run_gb) or not 0 < args.mem_per_run_gb <= 64:
