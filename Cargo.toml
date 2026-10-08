@@ -15,6 +15,7 @@ members = [
     "crates/cubarium-voxel-sim",
     "crates/cubarium-rules",
     "crates/cubarium-webmodel",
+    "crates/cubarium-observatory",
 ]
 
 [workspace.package]
@@ -35,6 +36,7 @@ cubarium-voxel-fauna = { path = "crates/cubarium-voxel-fauna" }
 cubarium-voxel-sim = { path = "crates/cubarium-voxel-sim" }
 cubarium-rules = { path = "crates/cubarium-rules" }
 cubarium-webmodel = { path = "crates/cubarium-webmodel" }
+cubarium-observatory = { path = "crates/cubarium-observatory" }
 # The tick's backbone (`crates/cubarium-voxel-sim`) and the in-phase task pool. Kept to
 # `std` only: `bevy_reflect` and `backtrace` are off, and the parallelism lives inside
 # phases (`design/handoffs/voxel-schedule-brief-2026-09-18.md`) — except the overlapped

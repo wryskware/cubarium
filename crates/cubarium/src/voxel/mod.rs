@@ -100,7 +100,7 @@ use project::Projection;
 
 /// The stdin commands, in the one place both the banner and the usage line read them
 /// from, so a new command cannot be added to only one of the two.
-const COMMANDS: &str = "p pause/resume, s step, +/- speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
+const COMMANDS: &str = "p [on|off] pause/resume, s step, +/- speed, speed X set the speed, r [m3] rain, a M3 charge the aquifer (negative withdraws), \
                         h M3 add water to the atmosphere (closed budget only), \
                         m X Y Z air|rock|soil|bedrock set material, \
                         f X Z bloomcrown|umbrellafrond [wood] seed a stand, \
@@ -225,6 +225,16 @@ pub struct VoxelConfig {
     /// `[fauna.founders.frondgrazer.core] maintenance_per_s = 0.002`.
     #[serde(skip_serializing_if = "toml::Table::is_empty")]
     pub fauna: toml::Table,
+    /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
+    /// stats and the companion dashboard over HTTP at this address, e.g.
+    /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
+    /// Absent, the default, serves nothing and the loop pays nothing. `--serve ADDR`
+    /// overrides it for one run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub serve: Option<String>,
+    /// `[observatory]`: the served history's sampling, in simulated seconds
+    /// (`sample_s` between samples, `span_s` kept). Read only while serving.
+    pub observatory: cubarium_observatory::HistoryConfig,
 }
 
 impl Default for VoxelConfig {
@@ -258,6 +268,8 @@ impl Default for VoxelConfig {
                 .config(),
             flora: toml::Table::new(),
             fauna: toml::Table::new(),
+            serve: None,
+            observatory: cubarium_observatory::HistoryConfig::default(),
         }
     }
 }
@@ -1705,7 +1717,22 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     let _probe = report_water_cycle(sim.world(), sim.flora(), sim.config().threads);
     eprintln!("cubarium voxel: stdin commands — {COMMANDS}");
 
-    let commands = spawn_stdin_reader();
+    let (command_tx, commands) = mpsc::channel();
+    spawn_stdin_reader(command_tx);
+    // `--serve` / `serve`: off by default, and then nothing below costs anything.
+    // A `--serve` that cannot bind ends the run; a config's `serve` that cannot (a second
+    // run on the same config, say) is said and the run goes on without one.
+    let mut observatory = match (&args.serve, &cfg.serve) {
+        (Some(addr), _) => Some(Observatory::start(addr, &cfg, &scene_label)?),
+        (None, Some(addr)) => match Observatory::start(addr, &cfg, &scene_label) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                eprintln!("cubarium voxel: no observatory — {e:#}");
+                None
+            }
+        },
+        (None, None) => None,
+    };
 
     let limit = (args.seconds > 0.0).then(|| Duration::from_secs_f64(args.seconds));
     let start = Instant::now();
@@ -1809,6 +1836,17 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
             // ones did is the command's business, and one extra pack is cheaper than a
             // rule here that has to be kept in step with `Control::handle`.
             moved = true;
+            if let Some(o) = observatory.as_mut() {
+                o.observer.request();
+            }
+        }
+        // The observatory's readers: the same console path, at the same point.
+        if let Some(o) = observatory.as_mut() {
+            while let Ok(command) = o.commands.try_recv() {
+                let line = console_line(command);
+                sim.with_layers_mut(|world, flora, fauna| ctl.handle(world, flora, fauna, &line));
+                o.observer.request();
+            }
         }
         if ctl.quit {
             break;
@@ -1831,7 +1869,11 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         ctl.pending_steps -= 1;
                         let (at, before) = (Instant::now(), Phases::now());
                         sim.step();
-                        budget.tick(at.elapsed().as_nanos() as u64, before);
+                        let ns = at.elapsed().as_nanos() as u64;
+                        budget.tick(ns, before);
+                        if let Some(o) = observatory.as_mut() {
+                            o.observer.after_tick(sim.fauna(), ns);
+                        }
                         ticks += 1;
                         since_ticks += 1;
                         moved = true;
@@ -1842,13 +1884,20 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         debt -= 1.0;
                         let (at, before) = (Instant::now(), Phases::now());
                         sim.step();
-                        budget.tick(at.elapsed().as_nanos() as u64, before);
+                        let ns = at.elapsed().as_nanos() as u64;
+                        budget.tick(ns, before);
+                        if let Some(o) = observatory.as_mut() {
+                            o.observer.after_tick(sim.fauna(), ns);
+                        }
                         ticks += 1;
                         since_ticks += 1;
                         moved = true;
                     }
                 }
                 out.observe_tick(sim.world().tick());
+                if let Some(o) = observatory.as_mut() {
+                    o.maybe_publish(&sim, &ctl);
+                }
                 if let Some(s) = snapshots.as_mut()
                     && ticks > 0
                     && ticks % 1200 == 0
@@ -1864,6 +1913,9 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 let at = Instant::now();
                 moved = out.render(world, flora, fauna, std::mem::take(&mut moved), f)?;
                 budget.frame(at.elapsed().as_nanos() as u64);
+                if let Some(o) = observatory.as_mut() {
+                    o.observer.after_frame();
+                }
                 frames += 1;
                 since_frames += 1;
             }
@@ -2934,7 +2986,15 @@ impl Control {
         match verb {
             "q" | "quit" => self.quit = true,
             "p" | "pause" => {
-                self.paused = !self.paused;
+                self.paused = match rest.first().copied() {
+                    None => !self.paused,
+                    Some("on") => true,
+                    Some("off") => false,
+                    Some(other) => {
+                        eprintln!("cubarium voxel: `p [on|off]` pauses or resumes, not {other:?}");
+                        return;
+                    }
+                };
                 eprintln!(
                     "cubarium voxel: {}",
                     if self.paused { "paused" } else { "running" }
@@ -2952,6 +3012,15 @@ impl Control {
                 self.speed = (self.speed / 2.0).max(MIN_SPEED);
                 eprintln!("cubarium voxel: speed {}", self.speed);
             }
+            "speed" => match rest.first().map(|t| t.parse::<f64>()) {
+                Some(Ok(v)) if v.is_finite() && v > 0.0 => {
+                    self.speed = v.clamp(MIN_SPEED, MAX_SPEED);
+                    eprintln!("cubarium voxel: speed {}", self.speed);
+                }
+                _ => eprintln!(
+                    "cubarium voxel: `speed X` wants a positive multiplier ({MIN_SPEED}..{MAX_SPEED}; pause with `p`)"
+                ),
+            },
             "r" | "rain" => {
                 let volume = match rest.first() {
                     None => DEFAULT_RAIN_M3,
@@ -3435,8 +3504,7 @@ fn cell_state(world: &World, x: i64, y: u32, z: u32) -> String {
 /// Detached on purpose: a blocking `read_line` cannot be cancelled portably, and the
 /// process is about to exit anyway. When stdin closes the thread ends and the loop
 /// simply stops getting commands.
-fn spawn_stdin_reader() -> Receiver<String> {
-    let (tx, rx) = mpsc::channel();
+fn spawn_stdin_reader(tx: mpsc::Sender<String>) {
     std::thread::Builder::new()
         .name("cubarium-voxel-stdin".into())
         .spawn(move || {
@@ -3454,7 +3522,62 @@ fn spawn_stdin_reader() -> Receiver<String> {
             }
         })
         .expect("spawning the voxel stdin reader");
-    rx
+}
+
+/// A reader's [`cubarium_observatory::Command`] as the console line that does the same:
+/// the dashboard changes the run through the console's own path.
+fn console_line(command: cubarium_observatory::Command) -> String {
+    use cubarium_observatory::Command;
+    match command {
+        Command::SetSpeed(x) => format!("speed {x}"),
+        Command::Pause => "p on".into(),
+        Command::Resume => "p off".into(),
+        Command::Faster => "+".into(),
+        Command::Slower => "-".into(),
+    }
+}
+
+/// The observatory, while `--serve` or the config's `serve` asks for one: the loop-side
+/// recorder and publisher, the server it hands publications to, and the commands the
+/// server's readers send back.
+struct Observatory {
+    observer: cubarium_observatory::Observer,
+    server: cubarium_observatory::server::Server,
+    commands: Receiver<cubarium_observatory::Command>,
+}
+
+impl Observatory {
+    fn start(addr: &str, cfg: &VoxelConfig, label: &str) -> Result<Observatory> {
+        let (tx, commands) = mpsc::channel();
+        let server = cubarium_observatory::server::Server::start(addr, cfg.observatory, tx)
+            .with_context(|| format!("serving the observatory on {addr}"))?;
+        eprintln!(
+            "cubarium voxel: observatory at {} (bound {}): dashboard, JSON and an event stream",
+            server.url(),
+            server.addr()
+        );
+        Ok(Observatory {
+            observer: cubarium_observatory::Observer::new(label, cubarium_observatory::Cadence::default()),
+            server,
+            commands,
+        })
+    }
+
+    /// Publish if one is due.
+    fn maybe_publish(&mut self, sim: &Sim, ctl: &Control) {
+        let now = Instant::now();
+        if self.observer.due(sim.world().tick(), now, ctl.paused) {
+            let (world, flora, fauna) = sim.layers();
+            let controls = cubarium_observatory::Controls {
+                speed: ctl.speed,
+                paused: ctl.paused,
+                min_speed: MIN_SPEED,
+                max_speed: MAX_SPEED,
+            };
+            let p = self.observer.publish(world, flora, fauna, controls, now);
+            self.server.publish(p);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3978,6 +4101,7 @@ mod tests {
             gpu_roof_walk: false,
             textures: false,
             weather_force: None,
+            serve: None,
         };
         // A snapshot of a schema this build does not speak: postcard's varint for the tag.
         let stale = |n: u8| vec![n, 0, 0, 0, 0, 0, 0, 0];
@@ -4173,6 +4297,37 @@ width = 64
         assert_eq!(ctl.speed, 2.0);
         ctl.handle(&mut world, &mut flora, &mut fauna, "s");
         assert!(ctl.paused && ctl.pending_steps == 1);
+        // `p on` / `p off` say which, whatever the state: what the observatory sends.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p on");
+        assert!(ctl.paused);
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p off");
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p off");
+        assert!(!ctl.paused);
+        ctl.handle(&mut world, &mut flora, &mut fauna, "p sideways");
+        assert!(!ctl.paused, "a bad argument changes nothing");
+        // `speed X` sets the multiplier, clamped to the range; nonsense changes nothing.
+        ctl.handle(&mut world, &mut flora, &mut fauna, "speed 3");
+        assert_eq!(ctl.speed, 3.0);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("speed {}", MAX_SPEED * 4.0));
+        assert_eq!(ctl.speed, MAX_SPEED);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &format!("speed {}", MIN_SPEED / 4.0));
+        assert_eq!(ctl.speed, MIN_SPEED);
+        for bad in ["speed", "speed 0", "speed -2", "speed fast"] {
+            ctl.handle(&mut world, &mut flora, &mut fauna, bad);
+            assert_eq!(ctl.speed, MIN_SPEED, "{bad}");
+        }
+        // Every observatory command is a console line that does the same.
+        use cubarium_observatory::Command as Obs;
+        ctl.handle(&mut world, &mut flora, &mut fauna, &console_line(Obs::SetSpeed(2.0)));
+        assert_eq!(ctl.speed, 2.0);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &console_line(Obs::Faster));
+        assert_eq!(ctl.speed, 4.0);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &console_line(Obs::Slower));
+        assert_eq!(ctl.speed, 2.0);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &console_line(Obs::Pause));
+        assert!(ctl.paused);
+        ctl.handle(&mut world, &mut flora, &mut fauna, &console_line(Obs::Resume));
+        assert!(!ctl.paused);
         ctl.handle(&mut world, &mut flora, &mut fauna, "o");
         assert!(ctl.outlet);
         // The aquifer takes a charge, gives back only what it holds, and is booked.
@@ -4965,6 +5120,7 @@ width = 64
             gpu_roof_walk: false,
             textures: false,
             weather_force: None,
+            serve: None,
         };
 
         // Explicit seed is respected
@@ -5022,6 +5178,7 @@ width = 64
             gpu_roof_walk: false,
             textures: false,
             weather_force: None,
+            serve: None,
         };
 
         // 1. Initial run into empty state dir creates a fresh world
