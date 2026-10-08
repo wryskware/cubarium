@@ -603,6 +603,10 @@ fn knob_rows() -> Vec<Row> {
         t("give_up_shun_s", "s", nonneg, "how long a patch given up is avoided").search(30.0, 1800.0).log(),
         t("give_up_zone_bl", "body lengths", nonneg, "a stay continues, and a given-up patch is avoided, within this of where the stay began").search(0.5, 6.0),
         t("give_up_leave_s", "s", nonneg, "after giving a patch up, any feeding answer of the heuristic becomes a walk straight on for this long").search(0.5, 15.0).log(),
+        t("search_patience_s", "s", nonneg, "this long after its last taste of food, a hungry heuristic forager's own no-signal search gives way to legs away from ground it has covered (HUNGRY-SEARCH)").search(5.0, 300.0).log(),
+        t("search_leg_bl", "body lengths", nonneg, "one hungry-search leg: the net way it holds a heading for (0 turns the search off)").search(3.0, 40.0).log(),
+        t("search_cell_bl", "body lengths", pos, "the hungry search's visited-ground memory cell").search(0.5, 6.0),
+        t("search_memory_half_life_s", "s", pos, "half-life of the hungry search's visited-ground memory").search(30.0, 1800.0).log(),
     ]);
 
     // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible

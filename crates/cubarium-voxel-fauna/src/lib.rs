@@ -98,7 +98,7 @@ pub use den::{DenQuality, den_quality};
 
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
-    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
+    FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, Seek, heuristic, resolve_actions,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
@@ -3730,6 +3730,10 @@ pub struct Fauna {
     /// patch it gave up (`step::forage`). Session state: not saved.
     #[serde(skip)]
     pub(crate) forage: FxHashMap<u64, step::forage::Patch>,
+    /// HUNGRY-SEARCH: per heuristic forager, its visited-ground memory, its patience and
+    /// the search leg it is on (`step::rove`). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) rove: FxHashMap<u64, step::rove::Rove>,
     /// FORAGE-LEAVE's readout per lineage ([`ForageTally`]). Session state: not saved.
     #[serde(skip)]
     pub(crate) forage_tally: [ForageTally; Founder::COUNT],
@@ -3780,11 +3784,13 @@ pub enum Steer {
     Drop,
     /// FORAGE-LEAVE: the walk off a patch given up.
     Leave,
+    /// HUNGRY-SEARCH: a hungry forager's search leg.
+    Search,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 14] = [
+    pub const ALL: [Steer; 15] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3799,6 +3805,7 @@ impl Steer {
         Steer::Light,
         Steer::Drop,
         Steer::Leave,
+        Steer::Search,
     ];
 
     /// A short name for tables.
@@ -3818,6 +3825,7 @@ impl Steer {
             Steer::Light => "light",
             Steer::Drop => "drop",
             Steer::Leave => "leave",
+            Steer::Search => "search",
         }
     }
 }
@@ -4080,6 +4088,7 @@ impl Fauna {
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
+            rove: FxHashMap::default(),
             forage_tally: [ForageTally::default(); Founder::COUNT],
             ledges: (None, Vec::new()),
         })

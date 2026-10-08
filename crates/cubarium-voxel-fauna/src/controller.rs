@@ -138,6 +138,32 @@ pub trait Controller: Send + Sync {
     fn rests_when_fed(&self) -> bool {
         false
     }
+
+    /// HUNGRY-SEARCH: what this controller's last answer was for ([`Seek`]), read by the
+    /// tick's hungry search (`step::rove`). The foraging heuristics answer it; every other
+    /// controller — a trained policy, a hunter, a test's script — answers
+    /// [`Seek::Unknown`], and the search leaves it alone.
+    fn seek(&self) -> Seek {
+        Seek::Unknown
+    }
+}
+
+/// HUNGRY-SEARCH: what a foraging heuristic's last answer was for ([`Controller::seek`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Seek {
+    /// Not a forager's answer, or none yet.
+    #[default]
+    Unknown,
+    /// Food at the mouth: it stops to feed (or tastes and bites).
+    Taste,
+    /// Steering by food it senses but cannot yet bite: food in view, a scent rising or
+    /// falling, the turn back toward a patch just left.
+    Lead,
+    /// Its own search: nothing to eat in sense and nothing in the way (the no-signal
+    /// wander, or a scent with no gradient to follow).
+    Search,
+    /// In the way: an escape from a refused motor or a drop, a blocked turn, a push out.
+    Obstacle,
 }
 
 /// The shared action adapter: transfer, clamp, deadband — in that order, identically
@@ -296,6 +322,14 @@ impl FounderControllers {
             .binary_search_by_key(&id, |e| e.0)
             .ok()
             .is_some_and(|at| self.entries[at].1.rests_when_fed())
+    }
+
+    /// What a body's controller's last answer was for ([`Controller::seek`]).
+    pub fn seek(&self, id: u64) -> Seek {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .map_or(Seek::Unknown, |at| self.entries[at].1.seek())
     }
 
     /// Whether a body's controller is at a carcass ([`Controller::at_carcass`]).
@@ -626,6 +660,8 @@ pub struct BlindForager {
     contact: crate::manifest::Module,
     taste: crate::manifest::Module,
     chem: crate::manifest::Module,
+    /// What the last answer was for (HUNGRY-SEARCH, [`Controller::seek`]).
+    seek: Seek,
     /// The reflexes' numbers ([`TeacherConfig`]).
     cfg: TeacherConfig,
 }
@@ -662,6 +698,7 @@ impl BlindForager {
             contact: module_slot(&manifest, "Contact(4)"),
             taste: module_slot(&manifest, "Taste(1)"),
             chem,
+            seek: Seek::Unknown,
         }
     }
 }
@@ -688,6 +725,7 @@ impl Controller for BlindForager {
         // face, and slowing for "a wall ahead" would only leave it hanging there.
         let (underside, contact_valid) = (o[c.offset + 3], o[c.offset + 4]);
         if contact_valid > 0.5 && underside < 0.5 {
+            self.seek = Seek::Unknown;
             return Response::Bounded(Actions {
                 forward: 1.0,
                 turn: 0.0,
@@ -719,6 +757,7 @@ impl Controller for BlindForager {
         if let Some((forward, turn)) = escape(&cfg, &mut self.escape, o[7] < cfg.motor_refused, away) {
             self.wander.interrupt(&cfg);
             self.on_food = false;
+            self.seek = Seek::Obstacle;
             return Response::Bounded(Actions {
                 forward,
                 turn,
@@ -732,6 +771,7 @@ impl Controller for BlindForager {
             self.on_food = true;
             self.turn_back = 0;
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Taste;
             return Response::Bounded(Actions {
                 forward: cfg.forage_stay_forward.clamp(0.0, 1.0),
                 turn: 0.0,
@@ -744,6 +784,7 @@ impl Controller for BlindForager {
         if self.turn_back > 0 && !front_blocked {
             self.turn_back -= 1;
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Lead;
             return Response::Bounded(Actions {
                 forward,
                 turn: self.turn_bias * cfg.blind_turn,
@@ -754,6 +795,7 @@ impl Controller for BlindForager {
             // A wall is a physical feature, not a target: turn away from the contacted
             // side, or fall back on the walk's last side.
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Obstacle;
             if left > right {
                 -1.0
             } else if right > left {
@@ -763,6 +805,11 @@ impl Controller for BlindForager {
             }
         } else if chem_valid > 0.5 && chem_resp >= cfg.chem_response_gate {
             self.wander.interrupt(&cfg);
+            // A scent with a gradient is a lead; one without (a flat trend) is not, and
+            // the hungry search may take over there (HUNGRY-SEARCH: capgnawer juveniles
+            // in a fungal scent held one heading between two walls that turned them back,
+            // for minutes).
+            self.seek = if chem_trend.abs() > cfg.chem_trend_gate { Seek::Lead } else { Seek::Search };
             if chem_trend > cfg.chem_trend_gate {
                 // A rising signal: hold the heading the body already faces.  The
                 // Stage-A arena deliberately starts aimed at the food; even the old
@@ -780,6 +827,7 @@ impl Controller for BlindForager {
             }
         } else {
             // No signal: cover ground with a correlated walk (S3).
+            self.seek = Seek::Search;
             self.wander.turn(o, &cfg)
         };
         Response::Bounded(Actions {
@@ -795,10 +843,15 @@ impl Controller for BlindForager {
         self.escape = 0;
         self.on_food = false;
         self.turn_back = 0;
+        self.seek = Seek::Unknown;
     }
 
     fn flees(&self) -> bool {
         true
+    }
+
+    fn seek(&self) -> Seek {
+        self.seek
     }
 }
 
@@ -833,6 +886,8 @@ pub struct BrowserForager {
     /// −40° ray ends 1.29 m down), whose drop reflex is off and whose refused motor still
     /// turns it away. Geometry, not a knob.
     reads_drops: bool,
+    /// What the last answer was for (HUNGRY-SEARCH, [`Controller::seek`]).
+    seek: Seek,
     /// The reflexes' numbers ([`TeacherConfig`]).
     cfg: TeacherConfig,
 }
@@ -874,6 +929,7 @@ impl BrowserForager {
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
             reads_drops,
+            seek: Seek::Unknown,
         }
     }
 }
@@ -931,6 +987,7 @@ impl Controller for BrowserForager {
         if self.push > 0 {
             self.push -= 1;
             self.wander_ticks = 0;
+            self.seek = Seek::Obstacle;
             return Response::Bounded(Actions {
                 forward: 1.0,
                 turn: 0.0,
@@ -940,6 +997,7 @@ impl Controller for BrowserForager {
         let away = self.wander_bias;
         if let Some((forward, turn)) = escape(&cfg, &mut self.escape, refused || drop, away) {
             self.wander_ticks = 0;
+            self.seek = Seek::Obstacle;
             return Response::Bounded(Actions {
                 forward,
                 turn,
@@ -954,6 +1012,7 @@ impl Controller for BrowserForager {
         // giving-up rule (`crate::forage`) read; that rule walks it off a spent stand.
         if feed > 0.5 {
             self.wander_ticks = 0;
+            self.seek = Seek::Taste;
             return Response::Bounded(Actions {
                 forward: cfg.forage_stay_forward.clamp(0.0, 1.0),
                 turn: 0.0,
@@ -969,6 +1028,7 @@ impl Controller for BrowserForager {
             || frac[2] > cfg.browser_sector_gate
         {
             self.wander_ticks = 0;
+            self.seek = Seek::Lead;
             if frac[0] >= frac[1] && frac[0] >= frac[2] {
                 turn = -cfg.browser_gaze_turn;
                 self.wander_bias = -1.0;
@@ -986,6 +1046,7 @@ impl Controller for BrowserForager {
             // starving. As the blind forager does, it turns away from the contacted side,
             // or on its remembered side, without flipping, until the front clears.
             self.wander_ticks = 0;
+            self.seek = Seek::Obstacle;
             let (left, right) = (o[self.contact.offset + 1], o[self.contact.offset + 2]);
             if left > right {
                 self.wander_bias = -1.0;
@@ -994,6 +1055,7 @@ impl Controller for BrowserForager {
             }
             turn = self.wander_bias * cfg.browser_wander_turn;
         } else {
+            self.seek = Seek::Search;
             self.wander_ticks += 1;
             if self.wander_ticks >= cfg.browser_wander_flip {
                 self.wander_ticks = 0;
@@ -1015,10 +1077,15 @@ impl Controller for BrowserForager {
         self.escape = 0;
         self.blocked_turned = 0.0;
         self.push = 0;
+        self.seek = Seek::Unknown;
     }
 
     fn flees(&self) -> bool {
         true
+    }
+
+    fn seek(&self) -> Seek {
+        self.seek
     }
 }
 
@@ -1045,6 +1112,8 @@ pub struct FruitForager {
     selfm: crate::manifest::Module,
     taste: crate::manifest::Module,
     cone: crate::manifest::Module,
+    /// What the last answer was for (HUNGRY-SEARCH, [`Controller::seek`]).
+    seek: Seek,
     cfg: TeacherConfig,
 }
 
@@ -1060,6 +1129,7 @@ impl FruitForager {
             selfm: module_slot(&manifest, "Self"),
             taste: module_slot(&manifest, "Taste(1)"),
             cone: module_slot(&manifest, "Cone(3, foliage/body)"),
+            seek: Seek::Unknown,
         }
     }
 }
@@ -1073,6 +1143,7 @@ impl Controller for FruitForager {
         let tasted = o[self.taste.offset + 2] > 0.5 && taste > cfg.feed_gate;
         if tasted && !full {
             self.wander_ticks = 0;
+            self.seek = Seek::Taste;
             return Response::Bounded(Actions {
                 forward: 0.0,
                 turn: 0.0,
@@ -1082,6 +1153,7 @@ impl Controller for FruitForager {
         let away = self.wander_bias;
         if let Some((forward, turn)) = escape(&cfg, &mut self.escape, o[self.selfm.offset + 7] < cfg.motor_refused, away) {
             self.wander_ticks = 0;
+            self.seek = Seek::Obstacle;
             return Response::Bounded(Actions { forward, turn, feed: 0.0 });
         }
         let base = self.cone.offset;
@@ -1089,6 +1161,7 @@ impl Controller for FruitForager {
         let frac = [o[base + 2], o[base + 8], o[base + 14]];
         let turn = if frac.iter().any(|&f| f > cfg.browser_sector_gate) {
             self.wander_ticks = 0;
+            self.seek = Seek::Lead;
             if frac[0] >= frac[1] && frac[0] >= frac[2] {
                 self.wander_bias = -1.0;
                 -cfg.browser_gaze_turn
@@ -1099,6 +1172,7 @@ impl Controller for FruitForager {
                 0.0
             }
         } else {
+            self.seek = Seek::Search;
             self.wander_ticks += 1;
             if self.wander_ticks >= cfg.browser_wander_flip {
                 self.wander_ticks = 0;
@@ -1119,10 +1193,15 @@ impl Controller for FruitForager {
         self.wander_bias = 1.0;
         self.wander_ticks = 0;
         self.escape = 0;
+        self.seek = Seek::Unknown;
     }
 
     fn flees(&self) -> bool {
         true
+    }
+
+    fn seek(&self) -> Seek {
+        self.seek
     }
 }
 
@@ -1159,6 +1238,8 @@ pub struct HoverSip {
     /// a bloom at the mouth stops it at once.
     since: u32,
     last: Actions,
+    /// What the last decision was for (HUNGRY-SEARCH, [`Controller::seek`]).
+    seek: Seek,
     cfg: TeacherConfig,
 }
 
@@ -1182,6 +1263,7 @@ impl HoverSip {
             lift: 0.0,
             since: 0,
             last: Actions::REST,
+            seek: Seek::Unknown,
             cfg,
         }
     }
@@ -1233,8 +1315,10 @@ impl Controller for HoverSip {
         };
 
         // A bloom at the mouth: sip.
+        self.seek = Seek::Unknown;
         if taste > cfg.feed_gate && !self.resting {
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Taste;
             return self.act(0.0, 0.0, 1.0, 0.0);
         }
         // Grounded by the weather (the `downpour` channel: a downpour, or rain over its
@@ -1284,6 +1368,7 @@ impl Controller for HoverSip {
         let blocked = delivery < cfg.motor_refused;
         if blocked && altitude < 1.0 - BAND_TOP_TOLERANCE && overhead >= cfg.bellwing_roost_ceiling {
             self.escape = 0;
+            self.seek = Seek::Obstacle;
             return self.act(cfg.bellwing_wander_forward, 0.0, 0.0, 1.0);
         }
         // Blocked with no room to rise (the band's top, cover overhead, the strip's
@@ -1291,12 +1376,14 @@ impl Controller for HoverSip {
         let side = self.wander.side();
         if let Some((forward, turn)) = escape(&cfg, &mut self.escape, blocked, side) {
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Obstacle;
             return self.act(forward, turn, 0.0, hold(altitude));
         }
         // A bloom in the fan: at it.
         let best = (0..3).max_by(|&a, &b| bloom[a].total_cmp(&bloom[b])).unwrap_or(1);
         if bloom[best] > cfg.bellwing_bloom_gate {
             self.wander.interrupt(&cfg);
+            self.seek = Seek::Lead;
             let turn = match best {
                 0 => -cfg.bellwing_gaze_turn,
                 2 => cfg.bellwing_gaze_turn,
@@ -1306,6 +1393,7 @@ impl Controller for HoverSip {
             let (forward, lift) = if near { (0.3, -0.6) } else { (1.0, hold(altitude)) };
             return self.act(forward, turn, 1.0, lift);
         }
+        self.seek = Seek::Search;
         let turn = self.wander.turn(o, &cfg);
         self.act(cfg.bellwing_wander_forward, turn, 0.0, hold(altitude))
     }
@@ -1317,6 +1405,7 @@ impl Controller for HoverSip {
         self.lift = 0.0;
         self.since = 0;
         self.last = Actions::REST;
+        self.seek = Seek::Unknown;
     }
 
     fn lift(&self) -> f64 {
@@ -1325,6 +1414,10 @@ impl Controller for HoverSip {
 
     fn rests_when_fed(&self) -> bool {
         true
+    }
+
+    fn seek(&self) -> Seek {
+        self.seek
     }
 }
 
@@ -2031,5 +2124,82 @@ mod tests {
             panic!("a scripted controller answers bounded");
         };
         assert_eq!(a.forward, 1.0, "reset rewound the script");
+    }
+
+    /// HUNGRY-SEARCH: each foraging heuristic says what its answer was for — its own
+    /// search with nothing in sense, food when it tastes or steers by it, an obstacle when
+    /// something is in its way — and a scent with no gradient is no lead.
+    #[test]
+    fn the_foragers_say_what_each_answer_was_for() {
+        let cfg = TeacherConfig::default();
+        let seek = |c: &mut dyn Controller, o: &[f64]| {
+            c.drive(o);
+            c.seek()
+        };
+        for founder in [Founder::Blind, Founder::Capgnawer, Founder::RippleSnail] {
+            let manifest = founder.manifest();
+            let (contact, taste) = (module_slot(&manifest, "Contact(4)"), module_slot(&manifest, "Taste(1)"));
+            let chem = *manifest.modules.iter().find(|m| m.name.starts_with("Chem(")).expect("a Chem module");
+            let mut c = BlindForager::for_founder(founder, cfg);
+            assert_eq!(c.seek(), Seek::Unknown, "{founder:?} before its first answer");
+            assert_eq!(seek(&mut c, &quiet(&manifest)), Seek::Search, "{founder:?} with nothing in sense");
+            let mut o = quiet(&manifest);
+            o[chem.offset] = 2.0 * cfg.chem_response_gate;
+            o[chem.offset + 2] = 1.0;
+            assert_eq!(seek(&mut c, &o), Seek::Search, "{founder:?} in a scent with no gradient");
+            o[chem.offset + 1] = 2.0 * cfg.chem_trend_gate;
+            assert_eq!(seek(&mut c, &o), Seek::Lead, "{founder:?} up a rising scent");
+            let mut o = quiet(&manifest);
+            o[taste.offset] = 2.0 * cfg.feed_gate;
+            o[taste.offset + 2] = 1.0;
+            assert_eq!(seek(&mut c, &o), Seek::Taste, "{founder:?} tasting food");
+            let mut c = BlindForager::for_founder(founder, cfg);
+            let mut o = quiet(&manifest);
+            o[contact.offset] = 1.0;
+            assert_eq!(seek(&mut c, &o), Seek::Obstacle, "{founder:?} blocked ahead");
+            let mut o = quiet(&manifest);
+            o[7] = 0.0;
+            assert_eq!(seek(&mut c, &o), Seek::Obstacle, "{founder:?} with its motor refused");
+            c.reset();
+            assert_eq!(c.seek(), Seek::Unknown, "{founder:?} after a reset");
+        }
+        for founder in [Founder::Browser, Founder::Loftstrider] {
+            let manifest = founder.manifest();
+            let (contact, taste) = (module_slot(&manifest, "Contact(4)"), module_slot(&manifest, "Taste(1)"));
+            let cone = module_slot(&manifest, "Cone(3, foliage/body)");
+            let mut c = BrowserForager::for_founder(founder, cfg);
+            assert_eq!(seek(&mut c, &quiet(&manifest)), Seek::Search, "{founder:?} with nothing in sense");
+            let mut o = quiet(&manifest);
+            o[cone.offset + 2] = 2.0 * cfg.browser_sector_gate;
+            assert_eq!(seek(&mut c, &o), Seek::Lead, "{founder:?} with foliage in view");
+            let mut o = quiet(&manifest);
+            o[taste.offset] = 2.0 * cfg.feed_gate;
+            o[taste.offset + 2] = 1.0;
+            assert_eq!(seek(&mut c, &o), Seek::Taste, "{founder:?} tasting food");
+            let mut o = quiet(&manifest);
+            o[contact.offset] = 1.0;
+            assert_eq!(seek(&mut c, &o), Seek::Obstacle, "{founder:?} blocked ahead");
+            let mut o = quiet(&manifest);
+            o[7] = 0.0;
+            assert_eq!(seek(&mut c, &o), Seek::Obstacle, "{founder:?} with its motor refused");
+        }
+        let manifest = Founder::Seedporter.manifest();
+        let cone = module_slot(&manifest, "Cone(3, foliage/body)");
+        let mut c = FruitForager::with_config(cfg);
+        assert_eq!(seek(&mut c, &quiet(&manifest)), Seek::Search, "seedporter with nothing in sense");
+        let mut o = quiet(&manifest);
+        o[cone.offset + 8] = 2.0 * cfg.browser_sector_gate;
+        assert_eq!(seek(&mut c, &o), Seek::Lead, "seedporter with fruit in view");
+        let manifest = Founder::Bellwing.manifest();
+        let fan = module_slot(&manifest, "Fan(3, bloom/foliage/body)");
+        let mut c = HoverSip::with_config(cfg);
+        assert_eq!(seek(&mut c, &quiet(&manifest)), Seek::Search, "bellwing with nothing in sense");
+        let mut c = HoverSip::with_config(cfg);
+        let mut o = quiet(&manifest);
+        o[fan.offset + 10] = 2.0 * cfg.bellwing_bloom_gate;
+        assert_eq!(seek(&mut c, &o), Seek::Lead, "bellwing with a bloom in its fan");
+        // Not a forager: the search leaves it alone.
+        let mut c = Scripted::new(vec![Actions { forward: 1.0, turn: 0.0, feed: 0.0 }]);
+        assert_eq!(seek(&mut c, &quiet(&manifest)), Seek::Unknown, "a scripted body");
     }
 }

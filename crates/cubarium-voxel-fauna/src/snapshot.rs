@@ -135,7 +135,10 @@ use crate::Fauna;
 // 69: FORAGE-LEAVE — `TeacherConfig::{give_up_fraction, give_up_min_s, give_up_window_s,
 //     give_up_shun_s, give_up_zone_bl, give_up_leave_s}`; a heuristic forager leaves a patch whose bites
 //     cannot end a meal.
-pub const SCHEMA: u32 = 69;
+// 70: HUNGRY-SEARCH — `TeacherConfig::{search_patience_s, search_leg_bl, search_cell_bl,
+//     search_memory_half_life_s}`; a hungry heuristic forager with nothing in sense ranges
+//     on legs away from ground it has covered.
+pub const SCHEMA: u32 = 70;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
