@@ -76,6 +76,81 @@ pub enum NativeWindow {
     Xlib { display: *mut c_void, window: u64 },
 }
 
+/// How a surface's logical coordinates map to swapchain pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowScale {
+    /// No scaling protocol (also the Xlib path).
+    Unscaled,
+    /// wl_surface buffer scale, a positive whole number.
+    Integer(u32),
+    /// wp_fractional_scale_v1 preferred_scale, in 120ths.
+    Fractional(u32),
+}
+
+impl WindowScale {
+    /// Rounded halfway up, as required by fractional-scale-v1. Integer arithmetic
+    /// preserves rounding on odd logical dimensions without float precision loss.
+    pub fn physical_size(self, logical: (u32, u32)) -> (u32, u32) {
+        let (numerator, denominator) = match self {
+            Self::Unscaled => (1, 1),
+            Self::Integer(n) => (n.max(1), 1),
+            Self::Fractional(n) => (n.max(1), 120),
+        };
+        let axis = |n| {
+            ((u64::from(n) * u64::from(numerator) + denominator / 2) / denominator)
+                .clamp(1, u64::from(u32::MAX)) as u32
+        };
+        (axis(logical.0), axis(logical.1))
+    }
+
+    pub fn factor(self) -> f64 {
+        match self {
+            Self::Unscaled => 1.0,
+            Self::Integer(n) => f64::from(n.max(1)),
+            Self::Fractional(n) => f64::from(n.max(1)) / 120.0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::*;
+
+    #[test]
+    fn fractional_size_rounds_each_axis_halfway_up() {
+        for scale in [120, 150, 180, 210, 240] {
+            for logical in [(1, 3), (17, 29), (1280, 800)] {
+                let physical = WindowScale::Fractional(scale).physical_size(logical);
+                let expected = |n| (f64::from(n) * f64::from(scale) / 120.0).round() as u32;
+                assert_eq!(physical, (expected(logical.0), expected(logical.1)));
+            }
+        }
+    }
+
+    #[test]
+    fn integer_scale_and_no_protocol_have_exact_sizes() {
+        let logical = (37, 23);
+        assert_eq!(WindowScale::Unscaled.physical_size(logical), logical);
+        for scale in 1..=4 {
+            assert_eq!(
+                WindowScale::Integer(scale).physical_size(logical),
+                (logical.0 * scale, logical.1 * scale)
+            );
+        }
+    }
+
+    #[test]
+    fn window_fit_uses_the_scaled_pixel_extent() {
+        let logical = (80, 50);
+        let physical = WindowScale::Fractional(180).physical_size(logical);
+        let raster = (160, 100);
+        let fit = WindowFit::fit(raster, physical, false);
+        assert_eq!(fit.size, physical);
+        assert_eq!(fit.origin, (0, 0));
+        assert!((f64::from(fit.step) - f64::from(raster.0) / f64::from(physical.0)).abs() < 1e-6);
+    }
+}
+
 /// Command buffers the recorder records into. Two is the whole pipeline: one on the
 /// presenting thread, one waiting or being recorded (a waiting frame is replaced in its
 /// own slot).
@@ -92,6 +167,11 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_millis(50);
 
 /// How long [`WindowPresenter::destroy`] waits for the thread before leaving it behind.
 const JOIN_WAIT: Duration = Duration::from_secs(2);
+
+/// Apply pending native surface geometry and return its physical size from the same
+/// snapshot. Called only by the presenter, before selecting its swapchain, so a scale
+/// request cannot race an old-buffer commit. Must not wait for window events.
+pub type SurfaceSizing = Box<dyn FnMut() -> (u32, u32) + Send>;
 
 /// A window size as one word, so the loop can hand it over without a lock.
 fn pack(size: (u32, u32)) -> u64 {
@@ -139,6 +219,17 @@ impl WindowPresenter {
         native: NativeWindow,
         size: (u32, u32),
     ) -> Result<WindowPresenter> {
+        Self::open_with_sizing(gpu, src, native, size, None)
+    }
+
+    /// Like `open`, with native surface state applied alongside swapchain resizing.
+    pub fn open_with_sizing<S: FrameSource>(
+        gpu: Arc<Gpu>,
+        src: &mut S,
+        native: NativeWindow,
+        size: (u32, u32),
+        sizing: Option<SurfaceSizing>,
+    ) -> Result<WindowPresenter> {
         let raster_view = src
             .raster_view()
             .ok_or_else(|| anyhow!("this renderer does not lend its raster to a presenter"))?;
@@ -161,6 +252,7 @@ impl WindowPresenter {
             slots.clone(),
             size_cell.clone(),
             stats.clone(),
+            sizing,
         ) {
             Ok(panel) => panel,
             Err(e) => {
@@ -379,12 +471,20 @@ struct WindowPanel {
     sampler: vk::Sampler,
     raster: (u32, u32),
     size: Arc<AtomicU64>,
+    sizing: Option<SurfaceSizing>,
     stats: Arc<PresentStats>,
     /// Slots whose world frame has finished, to hand back.
     freed: Vec<usize>,
 }
 
 impl WindowPanel {
+    fn wanted_size(&mut self) -> (u32, u32) {
+        match &mut self.sizing {
+            Some(sizing) => sizing(),
+            None => unpack(self.size.load(Ordering::Relaxed)),
+        }
+    }
+
     fn open(
         gpu: Arc<Gpu>,
         native: NativeWindow,
@@ -393,6 +493,7 @@ impl WindowPanel {
         slots: Vec<vk::CommandBuffer>,
         size: Arc<AtomicU64>,
         stats: Arc<PresentStats>,
+        sizing: Option<SurfaceSizing>,
     ) -> Result<WindowPanel> {
         if !gpu.has_instance_extension(ash::khr::surface::NAME) {
             bail!("the Vulkan loader has no VK_KHR_surface");
@@ -415,6 +516,7 @@ impl WindowPanel {
             sampler: vk::Sampler::null(),
             raster,
             size,
+            sizing,
             stats,
             freed: Vec::new(),
             gpu,
@@ -488,7 +590,8 @@ impl WindowPanel {
             )?;
         }
         self.pass = Some(PresentPass::new(&gpu, raster_view, self.sampler)?);
-        self.rebuild(unpack(self.size.load(Ordering::Relaxed)))?;
+        let want = self.wanted_size();
+        self.rebuild(want)?;
         if self.swap.is_none() {
             bail!("the window has no area to make a swapchain for");
         }
@@ -677,7 +780,7 @@ impl WindowPanel {
     /// a swapchain that has just gone out of date — which is a dropped present and not a
     /// failure.
     fn show(&mut self) -> Result<bool> {
-        let want = unpack(self.size.load(Ordering::Relaxed));
+        let want = self.wanted_size();
         let resized = self.swap.as_ref().is_none_or(|s| s.built_for != want);
         if self.stale || resized {
             self.rebuild(want)?;
