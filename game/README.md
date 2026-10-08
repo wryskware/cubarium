@@ -21,12 +21,14 @@ opened the project.
 ## Run the app
 
 ```sh
-scripts/run-game.sh            # Godot on the first-listed GPU (the display's); the renderer follows
+godot --path game              # or scripts/run-game.sh; either lands on the session's GPU
 ```
 
-Godot on its own picks the most powerful GPU, which on a two-GPU desktop is not the one the
-screen is on, so every frame would cross GPUs. The launcher passes `--gpu-index 0`
-(`CUBARIUM_GODOT_GPU` overrides) and asks for Wayland when it's there. The world's renderer
+The project asks for Godot's Wayland display driver (`display_server/driver.linuxbsd` in
+project.godot) and falls back to X11 where there is no Wayland. Under Godot's default, X11
+through XWayland, Godot picked the 5090 on the two-GPU desktop while the compositor runs on
+the 5080, so every frame crossed GPUs (2026-10-08); on Wayland it takes the compositor's GPU.
+The launcher also passes `--gpu-index 0` (`CUBARIUM_GODOT_GPU` overrides). The world's renderer
 opens whatever GPU Godot reports (`cubarium_gpu::vk::prefer_device`; `CUBARIUM_GPU=<name>`
 overrides). Agents' hidden captures on Xvfb need `CUBARIUM_GODOT_GPU=1`: the 5080 cannot
 present there.
