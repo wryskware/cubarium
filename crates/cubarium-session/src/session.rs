@@ -37,8 +37,9 @@ use crate::feed::{ChunkData, FeedConfig, Frame, Tracker, View};
 use crate::founding::{Busy, FoundingInfo, Job, Outcome, TERRAIN_TRIES, found_picked, shower_typical, terrain_candidate};
 use crate::hook::{HookClock, LoopHook};
 use crate::founders::founder_recipes;
-use crate::params::{SimParams, WorldSpec};
+use crate::params::{SimParams, VitalsConfig, WorldSpec};
 use crate::store::{self, SaveMeta};
+use crate::vitals::{VitalsMinute, VitalsRing, VitalsRun};
 
 /// How a session runs.
 #[derive(Clone, Debug)]
@@ -68,6 +69,10 @@ pub struct SessionOptions {
     /// Test only: the habitat verdict a founding is judged by, in place of its own.
     #[cfg(test)]
     pub(crate) accept: Option<fn(&cubarium_voxel_sim::habitat::Seeded) -> bool>,
+    /// Test only: ticks between vitals rows in place of a simulated minute, so a test
+    /// passes minute boundaries within a few hundred ticks.
+    #[cfg(test)]
+    pub(crate) vitals_every: Option<u64>,
 }
 
 impl Default for SessionOptions {
@@ -84,6 +89,8 @@ impl Default for SessionOptions {
             placement_tries: cubarium_voxel_sim::found::PLACEMENT_TRIES,
             #[cfg(test)]
             accept: None,
+            #[cfg(test)]
+            vitals_every: None,
         }
     }
 }
@@ -137,6 +144,11 @@ pub struct Status {
     pub feed_ms: f64,
     /// Feed updates built over this world.
     pub feed_updates: u64,
+    /// Mean milliseconds per tick the vitals recorder took on the loop, over this world
+    /// (0 with it off): beside `step_ms`, what the `vitals` query costs the sim thread.
+    pub vitals_ms: f64,
+    /// The recorder's slowest tick over this world, milliseconds (a minute's rows).
+    pub vitals_peak_ms: f64,
 }
 
 /// What a candidate is doing. A candidate is a **bare terrain**: nothing on it is founded
@@ -207,12 +219,14 @@ enum ToReader {
         chunk_dims: [u32; 3],
         voxel_m: f64,
         history: HistoryConfig,
+        vitals: VitalsConfig,
         chunks: Vec<ChunkData>,
         frame: Option<Arc<Frame>>,
     },
     Closed,
     Feed { chunks: Vec<ChunkData>, frame: Option<Arc<Frame>>, events: Vec<LifeEvent> },
     Publication(Box<Snapshot>),
+    Vitals(Box<VitalsMinute>),
     Notice(Notice),
     Error(Option<String>),
 }
@@ -223,6 +237,7 @@ struct Hub {
     snapshot: Option<Arc<Snapshot>>,
     book: LifeBook,
     history: History,
+    vitals: VitalsRing,
     dims: [u32; 3],
     chunk_dims: [u32; 3],
     voxel_m: f64,
@@ -241,6 +256,7 @@ impl Hub {
             snapshot: None,
             book: LifeBook::default(),
             history: History::new(HistoryConfig::default()),
+            vitals: VitalsRing::new(VitalsConfig::default()),
             dims: [0; 3],
             chunk_dims: [0; 3],
             voxel_m: 0.0,
@@ -271,6 +287,8 @@ struct Shared {
     steps: AtomicU64,
     feed_ns: AtomicU64,
     feed_updates: AtomicU64,
+    vitals_ns: AtomicU64,
+    vitals_peak_ns: AtomicU64,
 }
 
 /// **A world and its loop on a thread of its own.** Every call returns at once: the slow
@@ -393,6 +411,8 @@ impl Session {
             steps: AtomicU64::new(0),
             feed_ns: AtomicU64::new(0),
             feed_updates: AtomicU64::new(0),
+            vitals_ns: AtomicU64::new(0),
+            vitals_peak_ns: AtomicU64::new(0),
         });
         let (to_sim, sim_rx) = mpsc::channel();
         let (to_reader, reader_rx) = mpsc::channel();
@@ -799,6 +819,8 @@ impl Session {
             step_ms: s.step_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
             feed_ms: s.feed_ns.load(Ordering::Relaxed) as f64 / feeds.max(1) as f64 / 1e6,
             feed_updates: feeds,
+            vitals_ms: s.vitals_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
+            vitals_peak_ms: s.vitals_peak_ns.load(Ordering::Relaxed) as f64 / 1e6,
         }
     }
 
@@ -849,7 +871,8 @@ impl Session {
     /// `animal` (`{"id": N}`: the body and its life history), `history`
     /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `founding`, `saves`
     /// (`{"dir": path}`: the save slots under it, read without loading any), `presets`
-    /// (the landform and climate presets a [`WorldSpec`] can name).
+    /// (the landform and climate presets a [`WorldSpec`] can name), `vitals`
+    /// (`{"since": minute}` optional: the study recorder's per-minute rows, [`VitalsRing`]).
     pub fn query(&self, name: &str, args: &Value) -> Result<Value, String> {
         match name {
             "species" => return Ok(crate::species_table()),
@@ -871,6 +894,7 @@ impl Session {
                 let samples: Vec<&Sample> = h.history.since(since).collect();
                 return Ok(json!({ "config": h.history.config(), "samples": to(&samples) }));
             }
+            "vitals" => return Ok(h.vitals.query(args.get("since").and_then(Value::as_f64))),
             "animal" => {
                 let id = args.get("id").and_then(Value::as_u64).ok_or("`animal` wants {\"id\": N}")?;
                 let life = h.book.record(id).cloned();
@@ -897,7 +921,7 @@ impl Session {
             other => {
                 return Err(format!(
                     "unknown query `{other}`; known: summary clock environment populations run \
-                     snapshot animals animal history species status candidates founding spec saves presets"
+                     snapshot animals animal history vitals species status candidates founding spec saves presets"
                 ));
             }
         })
@@ -1038,6 +1062,8 @@ struct Run {
     steps: u64,
     feed_ns: u64,
     feed_updates: u64,
+    /// The study recorder, when `[vitals] enabled`.
+    vitals: Option<VitalsRun>,
 }
 
 struct Loop {
@@ -1161,6 +1187,11 @@ impl Loop {
             r.steps += 1;
             r.observer.after_tick(r.sim.world(), r.sim.fauna(), ns);
             r.events.extend(r.observer.take_events());
+            if let Some(v) = r.vitals.as_mut()
+                && let Some(m) = v.tick(&r.sim)
+            {
+                let _ = self.out.send(ToReader::Vitals(Box::new(m)));
+            }
             self.shared
                 .tick
                 .store(r.sim.world().tick(), Ordering::SeqCst);
@@ -1256,6 +1287,8 @@ impl Loop {
                 s.steps.store(r.steps, Ordering::Relaxed);
                 s.feed_ns.store(r.feed_ns, Ordering::Relaxed);
                 s.feed_updates.store(r.feed_updates, Ordering::Relaxed);
+                s.vitals_ns.store(r.vitals.as_ref().map_or(0, |v| v.ns), Ordering::Relaxed);
+                s.vitals_peak_ns.store(r.vitals.as_ref().map_or(0, |v| v.peak_ns), Ordering::Relaxed);
             }
             None => s.running.store(false, Ordering::SeqCst),
         }
@@ -1270,13 +1303,13 @@ impl Loop {
     fn handle(&mut self, m: ToSim) -> bool {
         match m {
             ToSim::Shutdown => return false,
-            ToSim::Install(p) => self.install(*p),
+            ToSim::Install(p) => self.install(*p, 0),
             ToSim::Load(dir, reply) => {
                 let made = prepare_loaded(&self.options.exec, &dir);
                 self.shared.loading.store(false, Ordering::SeqCst);
                 let result = match made {
                     Ok(p) => {
-                        self.install(p);
+                        self.install(p, 1);
                         self.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("loaded", "loaded") });
                         Ok(())
                     }
@@ -1335,7 +1368,8 @@ impl Loop {
         true
     }
 
-    fn install(&mut self, p: Prepared) {
+    /// Run `p`; `segment` is the vitals rows' (0 for a world made here, 1 for a load).
+    fn install(&mut self, p: Prepared, segment: u32) {
         if let Some(r) = &self.run {
             self.speed = r.console.speed;
             self.paused = r.console.paused;
@@ -1367,6 +1401,7 @@ impl Loop {
             chunk_dims,
             voxel_m,
             history: p.exec.observatory,
+            vitals: p.exec.vitals,
             chunks,
             frame,
         });
@@ -1375,6 +1410,15 @@ impl Loop {
         console.default_save_dir = crate::console::tick_save_dir;
         let pacer = Pacer::new(&console);
         let observer = Observer::new(p.label, self.options.cadence);
+        #[cfg(test)]
+        let every = self.options.vitals_every.unwrap_or(VitalsRun::MINUTE);
+        #[cfg(not(test))]
+        let every = VitalsRun::MINUTE;
+        let vitals = p.exec.vitals.enabled.then(|| {
+            let (run, first) = VitalsRun::new(&sim, &p.exec.vitals, segment, every);
+            let _ = self.out.send(ToReader::Vitals(Box::new(first)));
+            run
+        });
         self.shared.tick.store(sim.world().tick(), Ordering::SeqCst);
         self.run = Some(Run {
             sim,
@@ -1388,6 +1432,7 @@ impl Loop {
             steps: 0,
             feed_ns: 0,
             feed_updates: 0,
+            vitals,
         });
         self.shared.generation.store(self.generation, Ordering::SeqCst);
         self.hook_installed();
@@ -1438,7 +1483,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
     while let Ok(m) = rx.recv() {
         let Ok(mut h) = shared.hub.lock() else { return };
         match m {
-            ToReader::Reset { generation, label, dims, chunk_dims, voxel_m, history, chunks, frame } => {
+            ToReader::Reset { generation, label, dims, chunk_dims, voxel_m, history, vitals, chunks, frame } => {
                 if let Ok(mut t) = shared.text.lock() {
                     *t = (label, None);
                 }
@@ -1446,6 +1491,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 h.snapshot = None;
                 h.book = LifeBook::default();
                 h.history = History::new(history);
+                h.vitals = VitalsRing::new(vitals);
                 h.dims = dims;
                 h.chunk_dims = chunk_dims;
                 h.voxel_m = voxel_m;
@@ -1465,6 +1511,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 h.full = false;
                 h.dims = [0; 3];
                 h.chunk_dims = [0; 3];
+                h.vitals.clear();
                 if let Ok(mut t) = shared.text.lock() {
                     t.0.clear();
                 }
@@ -1484,6 +1531,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                     h.dropped_events += 1;
                 }
             }
+            ToReader::Vitals(m) => h.vitals.push(*m),
             ToReader::Publication(s) => {
                 let sample = Sample::of(&s.clock, &s.populations, &s.environment);
                 h.history.offer(sample);
@@ -1532,7 +1580,7 @@ mod command_point_tests {
                 threads: 1,
                 ..Default::default()
             },
-        });
+        }, 0);
         let (tx, rx) = mpsc::channel();
         (host, tx, rx, reader)
     }
@@ -1682,6 +1730,7 @@ mod surface_union_tests {
             chunk_dims: t.dims().1,
             voxel_m: w.config().voxel_m,
             history: HistoryConfig::default(),
+            vitals: VitalsConfig::default(),
             chunks: t.take_dirty(),
             frame: None,
         })

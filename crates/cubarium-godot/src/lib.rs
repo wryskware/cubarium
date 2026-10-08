@@ -270,8 +270,9 @@ impl CubariumSession {
     }
 
     /// A query over the latest published snapshot (`summary`, `clock`, `environment`,
-    /// `populations`, `run`, `animals`, `animal` {id}, `history` {since}, `species`,
-    /// `status`, `candidates`, `saves` {dir}). On a refusal: `{"error": reason}`.
+    /// `populations`, `run`, `animals`, `animal` {id}, `history` {since}, `vitals` {since
+    /// minute}, `species`, `status`, `candidates`, `saves` {dir}). On a refusal:
+    /// `{"error": reason}`.
     #[func]
     fn query(&self, name: GString, args: Variant) -> Variant {
         let mut args = to_json(&args);

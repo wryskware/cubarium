@@ -15,7 +15,7 @@ use cubarium_voxel_sim::params::{Layers, Params};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// The keys of a config file's top level that belong to the simulation.
-pub const SIM_KEYS: [&str; 7] = [
+pub const SIM_KEYS: [&str; 8] = [
     "world",
     "flora",
     "fauna",
@@ -23,6 +23,7 @@ pub const SIM_KEYS: [&str; 7] = [
     "water_every",
     "fast_forward_water_every",
     "observatory",
+    "vitals",
 ];
 
 /// The simulation half of a config file.
@@ -58,6 +59,56 @@ pub struct SimParams {
     /// `[observatory]`: the served history's sampling, in simulated seconds
     /// (`sample_s` between samples, `span_s` kept).
     pub observatory: cubarium_observatory::HistoryConfig,
+    /// `[vitals]`: the study recorder the session runs beside the world
+    /// (`cubarium_observatory::vitals`, as `voxel_census vitals=` runs it) and how many of
+    /// its per-minute rows the `vitals` query keeps.
+    pub vitals: VitalsConfig,
+}
+
+/// **The session's vitals recorder** (`[vitals]` in a config file): the same per-minute
+/// animal and plant rows the training harness reads (`vitals.csv`, `plants_vitals.csv`),
+/// served by the `vitals` query. Diagnostic choices, not ecology: nothing here reaches a
+/// rule.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct VitalsConfig {
+    /// Run the recorder. Off, the loop pays nothing for it and the query holds no rows.
+    pub enabled: bool,
+    /// Simulated seconds of per-minute rows kept; the oldest minutes go first.
+    pub span_s: f64,
+    /// The stuck rule's trailing window, simulated minutes
+    /// (`vitals::Options::stuck_window_min`).
+    pub stuck_window_min: f64,
+    /// Net displacement under this many current body lengths over the window is stuck
+    /// (`vitals::Options::stuck_body_lengths`).
+    pub stuck_body_lengths: f64,
+    /// Fullness (reserve / reserve capacity) below this counts as starving
+    /// (`vitals::Options::starving_fullness`).
+    pub starving_fullness: f64,
+}
+
+impl Default for VitalsConfig {
+    /// The census's own options (`vitals::Options::default()`), and the history's span.
+    fn default() -> VitalsConfig {
+        let o = cubarium_observatory::vitals::Options::default();
+        VitalsConfig {
+            enabled: true,
+            span_s: cubarium_observatory::HistoryConfig::default().span_s,
+            stuck_window_min: o.stuck_window_min,
+            stuck_body_lengths: o.stuck_body_lengths,
+            starving_fullness: o.starving_fullness,
+        }
+    }
+}
+
+impl VitalsConfig {
+    pub fn options(&self) -> cubarium_observatory::vitals::Options {
+        cubarium_observatory::vitals::Options {
+            stuck_window_min: self.stuck_window_min,
+            stuck_body_lengths: self.stuck_body_lengths,
+            starving_fullness: self.starving_fullness,
+        }
+    }
 }
 
 impl Default for SimParams {
@@ -75,6 +126,7 @@ impl Default for SimParams {
             water_every: 1,
             fast_forward_water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
             observatory: cubarium_observatory::HistoryConfig::default(),
+            vitals: VitalsConfig::default(),
         }
     }
 }

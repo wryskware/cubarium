@@ -25,6 +25,7 @@ pub mod params;
 mod session;
 pub mod store;
 pub mod view_state;
+pub mod vitals;
 
 #[cfg(test)]
 mod feed_tests;
@@ -33,7 +34,7 @@ mod tests;
 
 pub use console::{COMMANDS, Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 pub use feed::{ChunkData, Frame, View};
-pub use params::{SimParams, WorldSpec};
+pub use params::{SimParams, VitalsConfig, WorldSpec};
 pub use hook::{HookClock, LoopHook};
 pub use founding::FoundingInfo;
 pub use session::{
