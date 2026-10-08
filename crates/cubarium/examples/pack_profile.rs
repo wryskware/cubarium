@@ -4,8 +4,12 @@
 //! ```text
 //! cargo run --release -p cubarium --features pack-profile --example pack_profile -- \
 //!     [--config config/desktop/terrarium.toml] [--set LINE]... [--px 6] \
-//!     [--state DIR | --seed 1 --found-ticks N] [--ticks 1200] [--shower-at K] [--png PATH]
+//!     [--state DIR | --save DIR | --seed 1 --found-ticks N] [--ticks 1200] [--shower-at K] [--png PATH]
 //! ```
+//!
+//! `--save DIR` loads an app save (`world-N.voxel`, the session store's names) the way the
+//! app does (`cubarium_session::prepare_loaded`, founders' drivers put back) and steps it
+//! with the app's sim settings.
 //!
 //! `--png` writes the last frame, drawn from the change-only pack's last upload.
 //!
@@ -31,6 +35,7 @@ fn main() -> Result<()> {
     let mut config = PathBuf::from("config/desktop/terrarium.toml");
     let mut set: Vec<String> = Vec::new();
     let mut state: Option<PathBuf> = None;
+    let mut save: Option<PathBuf> = None;
     let mut png: Option<PathBuf> = None;
     let mut check = false;
     let (mut seed, mut found_ticks, mut ticks, mut shower_at, mut px) = (1u64, 0u64, 1200u64, None, None);
@@ -41,6 +46,7 @@ fn main() -> Result<()> {
             "--config" => config = v()?.into(),
             "--set" => set.push(v()?),
             "--state" => state = Some(v()?.into()),
+            "--save" => save = Some(v()?.into()),
             "--seed" => seed = v()?.parse()?,
             "--found-ticks" => found_ticks = v()?.parse()?,
             "--ticks" => ticks = v()?.parse()?,
@@ -67,7 +73,22 @@ fn main() -> Result<()> {
     if let Some(px) = px {
         cfg.px_per_voxel = px;
     }
-    let (world, flora, fauna) = load_or_found(&cfg, seed, found_ticks, state.as_ref())?;
+    let mut sim = match &save {
+        Some(dir) => {
+            let p = cubarium_session::prepare_loaded(&cfg.sim, dir).map_err(anyhow::Error::msg)?;
+            let mut sim = cubarium_session::create::ready_sim(p.world, p.flora, p.fauna, cfg.sim.sim_config());
+            cubarium_session::create::set_water_every(&mut sim, cfg.sim.water_every);
+            cubarium_session::create::open_closed_outlet(&mut sim);
+            sim
+        }
+        None => {
+            let (world, flora, fauna) = load_or_found(&cfg, seed, found_ticks, state.as_ref())?;
+            let mut senses = cubarium_voxel_fauna::Senses::with_cue(fauna.config().cue);
+            senses.settle(&world.view(), &flora.view());
+            let threads = cubarium_voxel::default_threads();
+            Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses))
+        }
+    };
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.sim.world)?;
     let mut sink = VoxelGpuSink::new(
         &cfg,
@@ -78,10 +99,6 @@ fn main() -> Result<()> {
             ..VoxelGpuSinkOptions::default()
         },
     )?;
-    let mut senses = cubarium_voxel_fauna::Senses::with_cue(fauna.config().cue);
-    senses.settle(&world.view(), &flora.view());
-    let threads = cubarium_voxel::default_threads();
-    let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses));
     // The lit tier's sky plane first.
     let started = Instant::now();
     loop {
