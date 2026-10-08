@@ -4751,6 +4751,41 @@ impl Fauna {
         true
     }
 
+    /// **A founder's stomach at arrival** (the founding fix, 2026-10-08): body `id`'s
+    /// stomach becomes `share · K` of its lineage's first food (`share` clamped to
+    /// `[0, 1]`), at its own tissue's mineral and energy densities, the change booked
+    /// introduced. A body introduced through [`Command::IntroduceFounder`] arrives at
+    /// `s0 · K` (repair 2 item 3), on its appetite floor; the seeder calls this with
+    /// [`FoundingConfig::arrival_stomach`] so a founded world's founders arrive fed. The
+    /// eating latch is left as it is. False if `id` is no living founder.
+    pub fn set_arrival_stomach(&mut self, id: u64, share: f64) -> bool {
+        let Some(i) = self.animals.iter().position(|a| a.id == id) else {
+            return false;
+        };
+        let Some(f) = self.animals[i].founder else {
+            return false;
+        };
+        let p = *self.config.founder(f);
+        let a = &mut self.animals[i];
+        let before = a.stomach.total();
+        a.stomach = Stomach::default();
+        if let Some(food) = p.diet.foods().next() {
+            let organic = share.clamp(0.0, 1.0) * p.gut.capacity(a.body);
+            if organic > 0.0 {
+                a.stomach.pools[food.index()] = Taken {
+                    organic,
+                    mineral: p.core.n_tissue * organic,
+                    energy: p.core.energy_density * organic,
+                };
+            }
+        }
+        let after = a.stomach.total();
+        self.ledger.introduced_organic_in += after.organic - before.organic;
+        self.ledger.introduced_mineral_in += after.mineral - before.mineral;
+        self.ledger.introduced_energy_in += after.energy - before.energy;
+        true
+    }
+
     /// The placement itself. `reserve` `None` is the full reserve `body` can carry;
     /// `Some(r)` is an explicit starting reserve.
     #[allow(clippy::too_many_arguments)]

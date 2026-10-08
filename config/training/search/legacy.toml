@@ -106,3 +106,11 @@ name = "founder.mass_scale"
 path = "fauna.founders.*.mass_scale"
 tie = "each"
 range = [1.0, 1000.0]
+
+# Digestion times for every food class, expanded over the searched founders.
+[[gene]]
+name = "tau"
+path = "fauna.founders.*.gut.digestion_s.*"
+tie = "each"
+range = [0.25, 4.0]
+what = "digestion time per searched founder; a food pool empties at S / tau"

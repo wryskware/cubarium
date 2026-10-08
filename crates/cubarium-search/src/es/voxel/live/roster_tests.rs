@@ -592,6 +592,52 @@ fn roster_genes_are_the_agreed_set() {
     assert!(g.names().iter().any(|n| n == "rider_take"));
 }
 
+/// Shipped searches decode, and every searched lineage has yield and digestion genes
+/// for its current diet. Check expanded gene globs, including neutral and zero-base genes.
+#[test]
+fn every_shipped_search_decodes_and_covers_current_diets() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../config/training/search");
+    let mut paths: Vec<_> = std::fs::read_dir(dir)
+        .expect("search directory")
+        .map(|entry| entry.expect("search file").path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+        .collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "shipped search files exist");
+    for path in paths {
+        let label = path.display();
+        let ecology = EcologyParams::load(&path).unwrap_or_else(|e| panic!("{label}: {e}"));
+        let params = ecology.params().unwrap_or_else(|e| panic!("{label}: {e}"));
+        let genome = ecology.genome().unwrap_or_else(|| panic!("{label}: a search genome"));
+        let globs: Vec<_> = genome.genes.iter()
+            .flat_map(|gene| gene.paths.iter().chain(&gene.inverse))
+            .map(|path| path.split('.').collect::<Vec<_>>())
+            .collect();
+        for founder in Founder::ALL {
+            // Search expansion omits unfounded founders (Params::expand_genome).
+            // Shared clock paths can still mention them, but they are not searched.
+            if params.fauna.founder(founder).founding_count == 0 {
+                continue;
+            }
+            let prefix = ["fauna", "founders", founder.name()];
+            if !globs.iter().any(|glob| glob.len() > prefix.len()
+                && glob.iter().zip(prefix).all(|(part, want)| *part == "*" || *part == want)) {
+                continue; // A flora-only starting mean has no searched lineages.
+            }
+            for food in params.fauna.founder(founder).diet.foods() {
+                for field in ["yield_by_food", "gut.digestion_s"] {
+                    let needed = format!("fauna.founders.{}.{field}.{}", founder.name(), food.name());
+                    let parts: Vec<_> = needed.split('.').collect();
+                    assert!(globs.iter().any(|glob| glob.len() == parts.len()
+                        && glob.iter().zip(&parts).all(|(part, want)| *part == "*" || part == want)),
+                        "{label}: no gene covers {needed}");
+                }
+            }
+        }
+    }
+}
+
 /// Every multiplier's search box holds x1 strictly inside.
 #[test]
 fn roster_ranges_hold_x1_inside() {

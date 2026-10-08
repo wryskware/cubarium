@@ -100,6 +100,58 @@ For the wide world choose `wide-s1-midday` in both and use
 given: e.g. `CUBARIUM_ANIMALS=crisp CUBARIUM_ANIMAL_TURN=free CUBARIUM_ANIMAL_SUBPIXEL=1
 scripts/run-game.sh`. Invalid values stop startup with the valid values named.
 
+## Plant rendering per run
+
+`CUBARIUM_PLANTS` overrides `[figures] plants` when the renderer starts:
+
+- `stamped` draws plants in the world's voxels, still, exactly as before.
+- `models` (the default since Wrysk picked it, 2026-10-08) draws every trunk and crown cell in the plant pass
+  (`crates/cubarium-gpu/src/plants.rs`). At rest it is the stamped picture, pixel for pixel.
+  - **Sway:** each plant leans in a breeze. The root stays put; the top moves most; a
+    short plant barely moves.
+  - **Grow-in:** a plant appearing, growing a model step, changing foliage state or going
+    changes voxel by voxel. Each voxel scales in or out from its own centre over
+    `[plants] grow_s`, staggered root up (`order = "centre_out"` for axis out). The whole
+    change takes `foliage_fade_s`, and the stamp's cell-by-cell foliage cross-fade is
+    off.
+
+Any other value stops startup with the valid values named. The startup log line
+`cubarium animals: …; plants=…` reports the effective setting. The setting needs a
+restart.
+
+The knobs live in `[plants]`; the defaults are in `crates/cubarium/src/voxel/plant_motion.rs`:
+
+- `supersample` (layer samples per pixel axis, 1–4)
+- `grow_s`, `order`, `jitter`
+- `bend`, `max_tip_voxels`, `bend_exponent`, `lag_s_per_voxel`, `direction`
+- `species.<name>` (sway multipliers; `glowcap = 0`)
+
+The breeze is in `[plants.wind]`:
+
+- `period_s`, `rise_s`, `hold_s`, `fall_s`: one gust packet a period, exactly calm
+  between packets
+- `flutter`, `flutter_s`, `peak_vary`, `peak_s`
+- `sweeps`: whole periods the gust front takes to go round the ring
+- `flutter_waves`
+- `shower_gain`, `storm_gain`: rain strengthens it
+
+From the repository root:
+
+```sh
+SAVES=/path/to/saves
+CUBARIUM_PLANTS=models scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_PLANTS=stamped scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+```
+
+With `cubarium voxel`:
+
+```sh
+CUBARIUM_PLANTS=models target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+```
+
+Plants behind water (a fall, a pool's surface) are drawn still by the walk, under the water's
+colour. Cells in water are drawn the same way.
+
 ## Run headless (no window)
 
 ```sh

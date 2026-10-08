@@ -89,7 +89,6 @@ impl Palette {
     }
 
     /// The slot holding `key`, if one does.
-    #[cfg(test)]
     pub(crate) fn find(&self, key: &StyleKey) -> Option<u8> {
         self.map.get(&key_bits(key)).copied()
     }

@@ -121,6 +121,12 @@ layout(constant_id = 8) const bool WEATHER_DEPTH = false;
 // occupancy on the desktop's RDNA) even where no animal is, so the rest of the time it is
 // dead code.
 layout(constant_id = 9) const bool POSE = false;
+// **Plants as models** (`[figures] plants = "models"`, `crate::plants`): the walk's ray passes
+// through every dry block plant cell (trunk, crown, heart), which the plant pass draws
+// instead, swaying and growing in. The cells stay in the volume for everything else (the sun
+// march, the sky plane, the canopy, the AO), so the plants light and shade as they did.
+// Fixed for a renderer's life; off, the walk is exactly what it was.
+layout(constant_id = 10) const bool PLANT_MODELS = false;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -189,6 +195,8 @@ int matOf(uvec4 v) { return int(v.r & 3u); }
 int partOf(uvec4 v) { return int((v.r >> 2) & 7u); }
 int glyphOf(uvec4 v) { return int(v.r >> 5); }
 bool isBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART || p == ANIMAL_INTERIM || p == LOG; }
+// A plant's own block cell: what the plant pass draws when plants are models.
+bool plantBlockPart(int p) { return p == TRUNK || p == CROWN || p == CROWN_HEART; }
 // A faceless animal cell of class torso (WX4 idle): an empty voxel under a dipping head,
 // there only so the walk looks for the head from it. It is air to everything else (no
 // crease, no shadow, no cover), so it can come and go with a head move unseen. The sleep's

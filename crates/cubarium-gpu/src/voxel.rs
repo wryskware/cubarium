@@ -60,9 +60,14 @@ const SMOOTH_SUN: f32 = 1.0 / 3.0;
 /// precision a near-black gradient needs.
 const BACKDROP_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
 
-/// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom; and
-/// either side of the model pass.
-const QUERY_SLOTS: u32 = 6;
+/// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom; either
+/// side of the model pass; after the plant pass's visibility layer; either side of its
+/// shade; and just before the walk.
+const QUERY_SLOTS: u32 = 10;
+const Q_PLANT_VIS: u32 = 6;
+const Q_SHADE_END: u32 = 7;
+const Q_WALK_START: u32 = 8;
+const Q_SHADE_START: u32 = 9;
 
 /// How many plant styles one frame may paint with.
 ///
@@ -801,6 +806,11 @@ pub struct VoxelParams {
     pub star_bloom: f32,
     /// The day sky and its clouds by day, times this (`[light] day_sky_brightness`).
     pub day_sky_brightness: f32,
+    /// **Plants as models** (`[figures] plants = "models"`, [`crate::plants`]): the walk
+    /// lets its ray through the dry block plant cells and the plant pass draws them,
+    /// swaying and growing in. `None` (the default) draws them in the walk as ever. Fixed
+    /// for a renderer's life.
+    pub plants: Option<crate::plants::PlantMotion>,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -1280,6 +1290,9 @@ impl Highlight {
 /// voxels once instead of filling a `Vec` and copying it. The roof table is indexed
 /// `(z · height + y) · width + x` — texture upload order, not the core's `Config::index`.
 pub struct VoxelStaging<'a> {
+    /// The plant pass's cell list for this buffer ([`crate::plants::PlantList`]), when
+    /// plants are models: the pack writes the whole list every time.
+    pub plants: Option<&'a mut crate::plants::PlantList>,
     /// The voxels this buffer carries up ([`VoxelStaging::carried`]): the whole volume in
     /// texture order, or the owed bricks one after another ([`write_upload`]).
     pub voxels: &'a mut [VoxelTexel],
@@ -1992,6 +2005,8 @@ pub struct VoxelRenderer {
     figure_frame: crate::figures::FigureFrame,
     /// Tiles the atlas had no room for, over the run.
     figures_dropped: u64,
+    /// The plant pass ([`crate::plants`]), when plants are models.
+    plants: Option<crate::plants::PlantPass>,
     pub command_pool: vk::CommandPool,
     queries: vk::QueryPool,
 }
@@ -2447,7 +2462,7 @@ impl VoxelRenderer {
         // pack has an animal posing.
         let walk = |depth: bool, pose: bool| -> Result<vk::Pipeline> {
             let mut flags: Vec<u32> = constants.to_vec();
-            flags.extend([0, 0, u32::from(depth), u32::from(pose)]);
+            flags.extend([0, 0, u32::from(depth), u32::from(pose), u32::from(params.plants.is_some())]);
             let entries: Vec<_> = (0..flags.len() as u32)
                 .map(|i| vk::SpecializationMapEntry::default().constant_id(i).offset(i * 4).size(4))
                 .collect();
@@ -2497,6 +2512,29 @@ impl VoxelRenderer {
             STAGING_RING,
             (params.width, params.height, params.depth),
         )?;
+        let plants = match params.plants {
+            Some(motion) => {
+                let pass = crate::plants::PlantPass::new(
+                    gpu,
+                    motion,
+                    (params.raster_w, params.raster_h),
+                    (params.width, params.height, params.depth),
+                    set_layout,
+                    &constants,
+                    (RASTER_FORMAT, raster_view),
+                    bloom.as_ref().map(|b| (EMIT_FORMAT, b.emit_view)),
+                    figures.walk_depth,
+                    figures.depth_format(),
+                    STAGING_RING,
+                    STAGING_RING,
+                )?;
+                // The animals meet the plants the pass draws texel by texel, as they met
+                // the stamped plants in the walk's depth.
+                figures.set_occluder(gpu, pass.occluder_view());
+                Some(pass)
+            }
+            None => None,
+        };
         let isun = image_info(figures.sun_view);
         unsafe { d.update_descriptor_sets(&[sampled_write(set, 13, &isun)], &[]) };
         let raster_framebuffer = match &bloom {
@@ -2603,6 +2641,7 @@ impl VoxelRenderer {
             figures,
             figure_frame: crate::figures::FigureFrame::default(),
             figures_dropped: 0,
+            plants,
             command_pool,
             queries,
         })
@@ -2679,6 +2718,11 @@ impl VoxelRenderer {
             let look = crate::weather::look(&eased, &self.params);
             redraw |= !look.same_picture(&self.look);
             self.look = look;
+            // The plants sway on the frame clock in the lit tier, once a tick in the flat
+            // tier (its redraw rate), and redraw while a tip moves or a cell changes size.
+            if let Some(p) = &mut self.plants {
+                redraw |= p.set_clock(clock.seconds, self.look.rain);
+            }
         }
         if redraw {
             self.raster_current = false;
@@ -2853,7 +2897,9 @@ impl VoxelRenderer {
         let carried = &mut self.carried[into];
         *carried = Carried::default();
         let mut styles_key = 0;
+        let plants = self.plants.as_mut().map(|p| p.staging(into));
         fill(VoxelStaging {
+            plants,
             owed: &mut self.owed,
             carried,
             styles_key: &mut styles_key,
@@ -2992,6 +3038,9 @@ impl VoxelRenderer {
         // This frame's own uniform block, written now and read by the GPU when it runs:
         // `set_params` and `update_weather` only moved `self.params`.
         if upload && let Some(i) = frame.staging {
+            if let Some(p) = &mut self.plants {
+                p.adopt(i);
+            }
             self.drawn_poses = self.pose_tables[i];
             self.posing = self.drawn_poses.posing();
             self.drawn_emit_curves = self.emit_curve_tables[i];
@@ -3193,8 +3242,12 @@ impl VoxelRenderer {
                 );
             }
             if redraw {
+                if let Some(p) = &mut self.plants {
+                    p.prepare(frame.slot);
+                }
                 // The figures' sun map, which the walk's sun march reads (H2).
                 self.figures.record_sun(d, cb, frame.slot, sun_map);
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_WALK_START);
                 // The pass leaves the raster in `SHADER_READ_ONLY_OPTIMAL`, which is
                 // where the present pass wants it — so a frame that skips this one finds
                 // the image in the right layout, holding the right picture, and only one
@@ -3227,15 +3280,18 @@ impl VoxelRenderer {
                 d.cmd_end_render_pass(cb);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 4);
                 let p = &self.params;
-                self.figures.record(
-                    d,
-                    cb,
-                    frame.slot,
-                    self.set,
-                    (self.uniform_stride * frame.slot as u64) as u32,
-                    p.s,
-                    p.rise,
-                );
+                let offset = (self.uniform_stride * frame.slot as u64) as u32;
+                let geom = (p.s, p.rise, p.base);
+                if let Some(pl) = &self.plants {
+                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x);
+                }
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_PLANT_VIS);
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_START);
+                if let Some(pl) = &self.plants {
+                    pl.record_shade(d, cb, frame.slot, self.set, offset, geom, self.view_x);
+                }
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_END);
+                self.figures.record(d, cb, frame.slot, self.set, offset, p.s, p.rise);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 5);
                 if let Some(w) = &self.weather_pass
                     && weather
@@ -3316,6 +3372,33 @@ impl VoxelRenderer {
         Some(ts[1].wrapping_sub(ts[0]) as f64 * f64::from(gpu.timestamp_period) / 1.0e6)
     }
 
+    /// The last retired frame's walk and plant pass (its visibility layer and its shade),
+    /// milliseconds; the plant pass is 0 when plants are stamped.
+    pub fn walk_plant_gpu_ms(&self, gpu: &Gpu) -> Option<(f64, f64)> {
+        let base = self.last_done? as u32 * QUERY_SLOTS;
+        let stamp = |k: u32| -> Option<u64> {
+            let mut ts = [0u64; 1];
+            let read = unsafe {
+                gpu.device.get_query_pool_results(self.queries, base + k, &mut ts, vk::QueryResultFlags::TYPE_64)
+            };
+            read.ok().map(|_| ts[0])
+        };
+        let ms = |a: u64, b: u64| b.wrapping_sub(a) as f64 * f64::from(gpu.timestamp_period) / 1.0e6;
+        let walked = stamp(4)?;
+        let walk = ms(stamp(Q_WALK_START)?, walked);
+        let plants = if self.plants.is_some() {
+            ms(walked, stamp(Q_PLANT_VIS)?) + ms(stamp(Q_SHADE_START)?, stamp(Q_SHADE_END)?)
+        } else {
+            0.0
+        };
+        Some((walk, plants))
+    }
+
+    /// The plant pass's latest list ([`crate::plants::PlantStats`]), when plants are models.
+    pub fn plant_stats(&self) -> Option<crate::plants::PlantStats> {
+        self.plants.as_ref().map(|p| p.stats())
+    }
+
     /// The figures the next frame draws (H2's model pass). A change redraws.
     pub fn set_figures(&mut self, frame: crate::figures::FigureFrame) {
         if frame != self.figure_frame {
@@ -3390,6 +3473,9 @@ impl VoxelRenderer {
     pub fn destroy(&mut self, gpu: &Gpu) {
         self.present.destroy(gpu);
         self.figures.destroy(gpu);
+        if let Some(p) = &mut self.plants {
+            p.destroy(gpu);
+        }
         if let Some(b) = &mut self.bloom {
             b.destroy(gpu);
         }
@@ -3934,6 +4020,7 @@ pub(crate) mod tests {
             day_sky: crate::weather::DaySky::Warm,
             star_bloom: 0.0,
             day_sky_brightness: 1.0,
+            plants: None,
         }
     }
 

@@ -519,6 +519,13 @@ pub struct FoundingConfig {
     pub arrival_body: f64,
     /// A seeded founder arrives with this fraction of its reserve cap.
     pub arrival_reserve: f64,
+    /// **The stomach a founder arrives with**, a fraction of its stomach capacity `K`
+    /// ([`crate::Gut::capacity`]) of its lineage's first food. Founders arrive fed, as
+    /// with the reserve (founding fix, 2026-10-08): at the old `s0 · K` every founder sat
+    /// on its appetite floor and opened with an eating bout at t = 0, so the founded
+    /// Veilhound pack hunted in minute 1. 1.0: full.
+    #[serde(default = "default_arrival_stomach")]
+    pub arrival_stomach: f64,
     /// Leaf litter laid under each seeded littershredder, organic units.
     pub starter_litter_organic: f64,
     /// Mineral share of that litter, fraction of organic.
@@ -546,6 +553,10 @@ pub struct FoundingConfig {
     pub reference_land_m2: f64,
 }
 
+fn default_arrival_stomach() -> f64 {
+    FoundingConfig::default().arrival_stomach
+}
+
 fn default_clearance_margin_m() -> f64 {
     FoundingConfig::default().clearance_margin_m
 }
@@ -557,6 +568,7 @@ impl Default for FoundingConfig {
             // Night survival 1a (2026-10-02): founders arrive full, so each enters its
             // first sleep at f0 = 1 (was 0.5).
             arrival_reserve: 1.0,
+            arrival_stomach: 1.0,
             starter_litter_organic: 0.2,
             starter_litter_mineral_fraction: 0.02,
             starter_litter_energy_density: 2.0,

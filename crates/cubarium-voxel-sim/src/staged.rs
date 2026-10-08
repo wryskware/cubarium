@@ -36,7 +36,10 @@
 //!   its bodies' summed path > 0 and at least two bodies (one, for a lineage of one)
 //!   ended half a voxel or more from where they started — or, standing still, it fed
 //!   (a body with no controller does neither);
-//! - the grazers (every lineage whose diet takes stand tissue) bit plants;
+//! - the grazers (every lineage whose diet takes stand tissue) bit plants, counting only
+//!   the lineages with a body that wanted food in the window (its eating latch on while
+//!   awake): founders arrive fed (`founding.arrival_stomach`) and a sated body is right not
+//!   to eat;
 //! - every `expect=` counter moved;
 //! - the ledgers conserve, and every body is still driven.
 //!
@@ -248,6 +251,9 @@ struct Window {
     flora: serde_json::Value,
     fauna: serde_json::Value,
     bites: [[u64; Food::COUNT]; Founder::COUNT],
+    /// Awake ticks with the eating latch on, per lineage, at the window's start: a lineage
+    /// that never wanted food in the window is not asked to have bitten a plant.
+    wanting: [u64; Founder::COUNT],
     /// Each lineage's bodies by state, sampled once a second: what a frozen lineage was
     /// doing instead.
     states: [std::collections::BTreeMap<String, u64>; Founder::COUNT],
@@ -274,6 +280,7 @@ impl Window {
             flora: counters_of(sim.flora().view().ledger),
             fauna: counters_of(v.ledger),
             bites: v.ledger.bites_by_founder_food,
+            wanting: v.ledger.wanting_ticks_by_founder,
             states: std::array::from_fn(|_| std::collections::BTreeMap::new()),
             ticks: 0,
         };
@@ -347,6 +354,7 @@ impl Window {
         let fauna = sim.fauna();
         let phys = |f: Founder| fauna.config().founder(f).diet;
         let now = fauna.view().ledger.bites_by_founder_food;
+        let wanting_now = fauna.view().ledger.wanting_ticks_by_founder;
         // Movement, per lineage present at the window's start: it moved, or (still) it fed.
         let mut bodies = [0usize; Founder::COUNT];
         let mut moved = [0usize; Founder::COUNT];
@@ -407,6 +415,10 @@ impl Window {
                 || self.awake_share(f) < AWAKE_SHARE_MIN
                 || self.idle_by_choice(f, fauna).is_some()
             {
+                continue;
+            }
+            if wanting_now[f.index()] == self.wanting[f.index()] {
+                notes.push(format!("{} sated (never wanted food)", f.name()));
                 continue;
             }
             let b: u64 = stand_foods.iter().map(|food| now[f.index()][food.index()] - self.bites[f.index()][food.index()]).sum();
