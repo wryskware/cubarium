@@ -1,3 +1,6 @@
+# Plumbing smoke genome for scripts/studies/eco_search.py (3 genes, deliberately partial: it
+# does not cover every diet, so it lives outside config/training/search/, whose files the
+# diet-coverage test requires to be complete).
 # A smoke genome for scripts/studies/eco_search.py: four related multipliers (plant
 # production against consumer upkeep), only to exercise the search loop end to end.
 # Not a proposal for the real genome (that is Wrysk's call). x1 = today's world.
