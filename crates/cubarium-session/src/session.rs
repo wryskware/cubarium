@@ -682,6 +682,8 @@ struct Loop {
     paused: bool,
     writer: Option<JoinHandle<()>>,
     next: Instant,
+    #[cfg(test)]
+    after_tick: Option<Box<dyn FnMut(u64) + Send>>,
 }
 
 const PERIOD: Duration = Duration::from_millis(1000 / cubarium_voxel::TICK_HZ as u64);
@@ -689,55 +691,73 @@ const PERIOD: Duration = Duration::from_millis(1000 / cubarium_voxel::TICK_HZ as
 impl Loop {
     fn new(options: SessionOptions, out: Sender<ToReader>, shared: Arc<Shared>) -> Loop {
         let speed = options.speed.clamp(MIN_SPEED, MAX_SPEED);
-        Loop { options, out, shared, run: None, generation: 0, speed, paused: false, writer: None, next: Instant::now() }
+        Loop {
+            options,
+            out,
+            shared,
+            run: None,
+            generation: 0,
+            speed,
+            paused: false,
+            writer: None,
+            next: Instant::now(),
+            #[cfg(test)]
+            after_tick: None,
+        }
     }
 
     fn main(mut self, rx: Receiver<ToSim>) {
-        loop {
-            let first = if self.run.is_none() {
-                match rx.recv() {
-                    Ok(m) => Some(m),
-                    Err(_) => break,
-                }
-            } else {
-                let now = Instant::now();
-                if now < self.next {
-                    match rx.recv_timeout(self.next - now) {
-                        Ok(m) => Some(m),
-                        Err(RecvTimeoutError::Timeout) => None,
-                        Err(RecvTimeoutError::Disconnected) => break,
-                    }
-                } else {
-                    None
-                }
-            };
-            if let Some(m) = first {
-                if !self.handle(m) {
-                    break;
-                }
-                // Everything else already waiting, at the same command point.
-                let mut go_on = true;
-                while let Ok(m) = rx.try_recv() {
-                    if !self.handle(m) {
-                        go_on = false;
-                        break;
-                    }
-                }
-                if !go_on {
-                    break;
-                }
-            }
-            if self.run.is_some() && Instant::now() >= self.next {
-                self.period();
-            }
-        }
+        while self.advance(&rx) {}
         if let Some(w) = self.writer.take() {
             let _ = w.join();
         }
     }
 
+    /// One pass through the command point and the clock.
+    fn advance(&mut self, rx: &Receiver<ToSim>) -> bool {
+        let first = if self.run.is_none() {
+            match rx.recv() {
+                Ok(m) => Some(m),
+                Err(_) => return false,
+            }
+        } else {
+            let now = Instant::now();
+            if now < self.next {
+                match rx.recv_timeout(self.next - now) {
+                    Ok(m) => Some(m),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => return false,
+                }
+            } else {
+                None
+            }
+        };
+        if !self.commands(rx, first) {
+            return false;
+        }
+        if self.run.is_some() && Instant::now() >= self.next {
+            return self.period(rx);
+        }
+        true
+    }
+
+    /// Drain even when no blocking receive was needed (including while catching up).
+    fn commands(&mut self, rx: &Receiver<ToSim>, first: Option<ToSim>) -> bool {
+        if let Some(m) = first {
+            if !self.handle(m) {
+                return false;
+            }
+        }
+        while let Ok(m) = rx.try_recv() {
+            if !self.handle(m) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// One clock period: the ticks it owes, the feed, a publication if one is due.
-    fn period(&mut self) {
+    fn period(&mut self, rx: &Receiver<ToSim>) -> bool {
         let now = Instant::now();
         self.next += PERIOD;
         if self.next + Duration::from_secs(1) < now {
@@ -745,9 +765,18 @@ impl Loop {
             // than chase a schedule that will never be met.
             self.next = now + PERIOD;
         }
-        let Some(r) = self.run.as_mut() else { return };
-        let n = r.pacer.due(&mut r.console);
-        for _ in 0..n {
+        let Some(r) = self.run.as_mut() else {
+            return true;
+        };
+        r.pacer.begin(&mut r.console);
+        loop {
+            if !self.commands(rx, None) {
+                return false;
+            }
+            let Some(r) = self.run.as_mut() else { break };
+            if !r.pacer.take_tick() {
+                break;
+            }
             let at = Instant::now();
             r.sim.step();
             let ns = at.elapsed().as_nanos() as u64;
@@ -755,15 +784,20 @@ impl Loop {
             r.steps += 1;
             r.observer.after_tick(r.sim.world(), r.sim.fauna(), ns);
             r.events.extend(r.observer.take_events());
-            self.shared.tick.store(r.sim.world().tick(), Ordering::SeqCst);
+            self.shared
+                .tick
+                .store(r.sim.world().tick(), Ordering::SeqCst);
             self.shared.stepped.fetch_add(1, Ordering::SeqCst);
-        }
-        if n > 0 {
             r.moved = true;
+            #[cfg(test)]
+            if let Some(hook) = &mut self.after_tick {
+                hook(r.sim.world().tick());
+            }
         }
         self.feed();
         self.publish(false);
         self.store_status();
+        true
     }
 
     fn feed(&mut self) {
@@ -866,8 +900,11 @@ impl Loop {
                     self.notice(Notice::say("console", "no world is running"));
                     return true;
                 };
-                let Run { sim, console, observer, .. } = r;
+                let Run { sim, console, pacer, observer, .. } = r;
                 sim.with_layers_mut(|world, flora, fauna| console.handle(world, flora, fauna, &line));
+                if pacer.sync(console) {
+                    self.next = Instant::now() + PERIOD;
+                }
                 observer.request();
                 r.moved = true;
                 let said = r.console.take_said();
@@ -926,12 +963,13 @@ impl Loop {
         let mut console = Console::new(self.speed, dims);
         console.paused = self.paused;
         console.default_save_dir = crate::console::tick_save_dir;
+        let pacer = Pacer::new(&console);
         let observer = Observer::new(p.label, self.options.cadence);
         self.shared.tick.store(sim.world().tick(), Ordering::SeqCst);
         self.run = Some(Run {
             sim,
             console,
-            pacer: Pacer::default(),
+            pacer,
             observer,
             tracker,
             events: Vec::new(),
@@ -1052,6 +1090,163 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod command_point_tests {
+    use super::*;
+
+    fn tiny_loop() -> (Loop, Sender<ToSim>, Receiver<ToSim>, Receiver<ToReader>) {
+        let options = SessionOptions {
+            feed: false,
+            speed: 8.0,
+            ..SessionOptions::default()
+        };
+        let session = Session::new(options.clone());
+        let (out, reader) = mpsc::channel();
+        let mut host = Loop::new(options, out, session.shared.clone());
+        drop(session);
+        host.install(Prepared {
+            world: World::empty(cubarium_voxel::Config {
+                width: 8,
+                height: 4,
+                depth: 2,
+                ..Default::default()
+            }),
+            flora: Flora::new(Default::default()),
+            fauna: Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder()),
+            label: "command point test".into(),
+            exec: SimParams {
+                threads: 1,
+                ..Default::default()
+            },
+        });
+        let (tx, rx) = mpsc::channel();
+        (host, tx, rx, reader)
+    }
+
+    fn behind(host: &mut Loop) {
+        // Model the clock after an unsustainable step without sleeping or depending on
+        // this machine's throughput. It is still behind after the next clock period.
+        host.next = Instant::now() - PERIOD * 4;
+    }
+
+    #[test]
+    fn catchup_applies_pause_speed_save_and_step_at_the_next_command_point() {
+        let (mut host, tx, rx, _reader) = tiny_loop();
+        let tick = host.run.as_ref().unwrap().sim.world().tick();
+        behind(&mut host);
+        tx.send(ToSim::Line(console_line(
+            cubarium_observatory::Command::Pause,
+        )))
+        .unwrap();
+        assert!(host.advance(&rx));
+        let r = host.run.as_ref().unwrap();
+        assert!(r.console.paused, "pause was starved by catch-up");
+        assert_eq!(
+            r.sim.world().tick(),
+            tick,
+            "pause stops at the command point"
+        );
+
+        behind(&mut host);
+        tx.send(ToSim::Line("speed 0.5".into())).unwrap();
+        assert!(host.advance(&rx));
+        assert_eq!(host.run.as_ref().unwrap().console.speed, 0.5);
+
+        let dir = std::env::temp_dir().join(format!("cubarium-command-point-paused-save-{}", std::process::id()));
+        let (reply, saved) = mpsc::channel();
+        behind(&mut host);
+        tx.send(ToSim::Save(dir.clone(), Some(reply))).unwrap();
+        assert!(host.advance(&rx));
+        host.writer.take().expect("save follows pause and speed at its command point").join().unwrap();
+        assert_eq!(saved.try_recv().unwrap().unwrap().tick, tick);
+        std::fs::remove_dir_all(dir).unwrap();
+
+        behind(&mut host);
+        tx.send(ToSim::Line(console_line(cubarium_observatory::Command::Resume))).unwrap();
+        let command_at = Instant::now();
+        assert!(host.advance(&rx));
+        assert!(!host.run.as_ref().unwrap().console.paused);
+        assert_eq!(host.run.as_ref().unwrap().sim.world().tick(), tick, "resume drops the backlog");
+        assert!(host.next > command_at);
+
+        behind(&mut host);
+        tx.send(ToSim::Line("speed 2".into())).unwrap();
+        let command_at = Instant::now();
+        assert!(host.advance(&rx));
+        assert_eq!(host.run.as_ref().unwrap().console.speed, 2.0);
+        assert_eq!(host.run.as_ref().unwrap().sim.world().tick(), tick, "speed drops the backlog");
+        assert!(host.next > command_at);
+
+        behind(&mut host);
+        tx.send(ToSim::Line(console_line(
+            cubarium_observatory::Command::Step(1),
+        )))
+        .unwrap();
+        assert!(host.advance(&rx));
+        assert!(host.run.as_ref().unwrap().console.paused);
+        behind(&mut host);
+        assert!(host.advance(&rx));
+        assert_eq!(host.run.as_ref().unwrap().sim.world().tick(), tick + 1);
+    }
+
+    #[test]
+    fn catchup_commands_interrupt_a_speed_batch_within_one_tick() {
+        for lines in [vec!["p on"], vec!["speed 0.5"], vec!["s 1"], vec!["p on", "p off"]] {
+            let (mut host, tx, rx, _reader) = tiny_loop();
+            let tick = host.run.as_ref().unwrap().sim.world().tick();
+            host.after_tick = Some(Box::new(move |_| {
+                for line in &lines {
+                    tx.send(ToSim::Line((*line).into())).unwrap();
+                }
+            }));
+            behind(&mut host);
+            let command_at = Instant::now();
+            assert!(host.advance(&rx));
+            assert_eq!(host.run.as_ref().unwrap().sim.world().tick(), tick + 1, "the command interrupts the batch");
+            assert!(host.next > command_at, "the clock has no stale backlog");
+        }
+    }
+
+    #[test]
+    fn catchup_save_inside_a_speed_batch_captures_within_one_tick() {
+        let (mut host, tx, rx, _reader) = tiny_loop();
+        let dir = std::env::temp_dir().join(format!("cubarium-command-point-batch-save-{}", std::process::id()));
+        let (reply, saved) = mpsc::channel();
+        let tick = host.run.as_ref().unwrap().sim.world().tick();
+        let target = dir.clone();
+        host.after_tick = Some(Box::new(move |now| {
+            if now == tick + 1 {
+                tx.send(ToSim::Save(target.clone(), Some(reply.clone()))).unwrap();
+            }
+        }));
+        behind(&mut host);
+        assert!(host.advance(&rx));
+        host.writer.take().expect("the save reached its command point").join().unwrap();
+        assert_eq!(saved.try_recv().unwrap().unwrap().tick, tick + 1);
+        assert!(host.run.as_ref().unwrap().sim.world().tick() > tick + 1, "catch-up continues after a save");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn catchup_save_captures_the_next_command_point() {
+        let (mut host, tx, rx, _reader) = tiny_loop();
+        let dir = std::env::temp_dir().join(format!(
+            "cubarium-command-point-save-{}",
+            std::process::id()
+        ));
+        let (reply, saved) = mpsc::channel();
+        let tick = host.run.as_ref().unwrap().sim.world().tick();
+        behind(&mut host);
+        tx.send(ToSim::Save(dir.clone(), Some(reply))).unwrap();
+        assert!(host.advance(&rx));
+        assert!(host.writer.is_some(), "save was starved by catch-up");
+        host.writer.take().unwrap().join().unwrap();
+        let meta = saved.try_recv().unwrap().unwrap();
+        assert_eq!(meta.tick, tick, "the save precedes the next tick");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
 
