@@ -10,11 +10,11 @@ void main() {
     Fig f = figs[gl_InstanceIndex];
     Tile a = tiles[f.tiles.x];
     vec2 lo = vec2(a.orig.xy);
-    vec2 hi = lo + vec2(a.rect.zw);
+    vec2 hi = lo + vec2(a.rect.zw) / float(a.faceSize.w);
     if (f.tiles.y >= 0) {
         Tile b = tiles[f.tiles.y];
         lo = min(lo, vec2(b.orig.xy));
-        hi = max(hi, vec2(b.orig.xy) + vec2(b.rect.zw));
+        hi = max(hi, vec2(b.orig.xy) + vec2(b.rect.zw) / float(b.faceSize.w));
     }
     // A texel's footprint reaches one raster pixel past its edge at a fractional anchor.
     lo = floor(f.anchor.xy + lo) - 1.0;

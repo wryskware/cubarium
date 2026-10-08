@@ -3278,6 +3278,11 @@ impl VoxelRenderer {
         self.figures_dropped
     }
 
+    /// The latest model pass's atlas occupancy and any quality fallback.
+    pub fn figure_atlas_stats(&self) -> crate::figures::FigureAtlasStats {
+        self.figures.atlas_stats()
+    }
+
     /// Copy the world raster into a host buffer, `w · 4` bytes per row.
     pub fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>> {
         let (w, h) = (self.params.raster_w, self.params.raster_h);

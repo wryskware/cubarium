@@ -92,18 +92,56 @@ fn quarter_headings_match_the_stamp_with_model_neighbours() {
         cfg.px_per_voxel = scale;
         for quarter in 0..4 {
             let stamp = draw(&cells, 0, quarter, true, &cfg).unwrap();
-            let model = draw(&cells, 0, quarter, false, &cfg).unwrap();
-            let worst = stamp
-                .pixels
-                .iter()
-                .zip(&model.pixels)
-                .map(|(a, b)| a.abs_diff(*b))
-                .max()
-                .unwrap();
-            assert!(
-                worst <= 1,
-                "{scale} px/voxel, quarter {quarter}: worst RGB code delta {worst}"
-            );
+            let mut models = Vec::new();
+            for supersample in [1, 2] {
+                cfg.figures.supersample = supersample;
+                let model = draw(&cells, 0, quarter, false, &cfg).unwrap();
+                let worst = stamp.pixels.iter().zip(&model.pixels)
+                    .map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+                assert!(worst <= 1,
+                    "{scale} px/voxel, S={supersample}, quarter {quarter}: worst RGB code delta {worst}");
+                models.push(model.pixels);
+            }
+            let changed = models[0].iter().zip(&models[1]).filter(|(a, b)| a != b).count();
+            let worst = models[0].iter().zip(&models[1]).map(|(a, b)| a.abs_diff(*b)).max().unwrap();
+            assert!(changed == 0,
+                "{scale} px/voxel, quarter {quarter}: aligned SSAA blocks change {changed} codes, max {worst}");
         }
     }
+}
+
+#[test]
+fn rotated_silhouettes_and_edging_gain_partial_coverage_at_whole_pixels() {
+    // Equal pigments, no sun/AO/haze: every opaque sample has one colour.
+    let cells = [Cell {
+        offset: [0, 0, 0],
+        colours: [[0.2; 3]; 3],
+    }];
+    let mut cfg = config(0.0);
+    cfg.figures.supersample = 1;
+    let hard = fixture::draw_angle(&cells, 0, 0, std::f64::consts::FRAC_PI_8, false, &cfg).unwrap();
+    cfg.figures.supersample = 2;
+    let aa = fixture::draw_angle(&cells, 0, 0, std::f64::consts::FRAC_PI_8, false, &cfg).unwrap();
+    let opaque = hard.pixels.chunks_exact(4).map(|p| p[0]).max().unwrap();
+    assert!(opaque > 0);
+    assert!(
+        hard.pixels
+            .chunks_exact(4)
+            .all(|p| p[0] == 0 || p[0] == opaque),
+        "the S=1 silhouette has binary coverage"
+    );
+    assert!(
+        aa.pixels.chunks_exact(4).any(|p| p[0] > 0 && p[0] < opaque),
+        "S=2 shades subpixel geometry and downsamples partial silhouette coverage"
+    );
+    cfg.figures.supersample = 1;
+    let hard_edged = fixture::draw_angle(&cells, 2, 0, std::f64::consts::FRAC_PI_8, false, &cfg).unwrap();
+    cfg.figures.supersample = 2;
+    let aa_edged = fixture::draw_angle(&cells, 2, 0, std::f64::consts::FRAC_PI_8, false, &cfg).unwrap();
+    let interior_codes: std::collections::BTreeSet<_> = hard_edged.pixels.chunks_exact(4)
+        .zip(aa.pixels.chunks_exact(4)).filter(|(_, p)| p[0] == opaque)
+        .map(|(p, _)| p[0]).collect();
+    assert!(aa_edged.pixels.chunks_exact(4).zip(aa.pixels.chunks_exact(4))
+        .any(|(edge, plain)| plain[0] == opaque && !interior_codes.contains(&edge[0])),
+        "fully covered pixels gain intermediate face-tone values: internal edging is AA too");
 }

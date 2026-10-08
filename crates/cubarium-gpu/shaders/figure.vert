@@ -90,7 +90,11 @@ void main() {
     // Half-voxel bounds otherwise sit on pixel centres at odd scales. Use the
     // stamp's sampling phase; pack adds it to the composite anchor before snap.
     screen -= vec2(pc.k.y & 1, pc.k.z & 1) * 0.5;
-    vec2 atlas = vec2(t.rect.xy) + screen - vec2(t.orig.xy);
+    // Keep the origin and face tones in output pixels. Only the raster lattice grows:
+    // a one-pixel outline therefore spans aa samples rather than becoming thinner.
+    vec2 atlas = t.faceSize.w == 1
+        ? vec2(t.rect.xy) + screen - vec2(t.orig.xy)
+        : vec2(t.rect.xy) + (screen - vec2(t.orig.xy)) * float(t.faceSize.w);
     float depth = clamp(0.5 + rel.z * t.depth.y, 0.0, 1.0);
     gl_Position = vec4(atlas / pc.atlas.xy * 2.0 - 1.0, depth, 1.0);
     vWorld = q;

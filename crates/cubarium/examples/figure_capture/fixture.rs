@@ -30,6 +30,18 @@ pub fn draw(
     stamped: bool,
     cfg: &VoxelConfig,
 ) -> Result<Picture> {
+    draw_angle(cells, glyph, quarter, 0.0, stamped, cfg)
+}
+
+/// Add a model-only angle to a quarter heading; stamps remain on their voxel grid.
+pub fn draw_angle(
+    cells: &[Cell],
+    glyph: u8,
+    quarter: u8,
+    angle_offset: f64,
+    stamped: bool,
+    cfg: &VoxelConfig,
+) -> Result<Picture> {
     let proj = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
@@ -41,7 +53,12 @@ pub fn draw(
     params.sky_horizon = [0.0; 3];
     params.day_sky_brightness = 0.0;
     params.effects.shadows = false;
-    let gpu = Gpu::open(&[])?;
+    // One headless device per capture/test process keeps repeated draws cheap and
+    // avoids repeated driver teardown. Serialize access to its queue.
+    static GPU: std::sync::OnceLock<Result<std::sync::Mutex<Gpu>, String>> = std::sync::OnceLock::new();
+    let gpu = GPU.get_or_init(|| Gpu::open(&[]).map(std::sync::Mutex::new).map_err(|e| e.to_string()))
+        .as_ref().map_err(|e| anyhow::anyhow!("{e}"))?
+        .lock().map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut renderer =
         VoxelRenderer::new(&gpu, params, &VoxelTextures::empty(params.s, params.rise))?;
     let mut target = Headless::new(&gpu, &renderer)?;
@@ -100,7 +117,7 @@ pub fn draw(
             })
             .collect();
         renderer.put_figure_models(0, &voxels);
-        let angle = std::f64::consts::FRAC_PI_2 * (1.0 + f64::from(quarter));
+        let angle = std::f64::consts::FRAC_PI_2 * (1.0 + f64::from(quarter)) + angle_offset;
         let axes = cubarium::voxel::figure::Orient::Ground(angle)
             .axes()
             .map(|v| v.map(|x| x as f32));
@@ -137,6 +154,7 @@ pub fn draw(
                 .flat_map(|c| c.map(|base| PaletteEntry { base, emit: None }))
                 .collect(),
             whole_pixels: true,
+            supersample: cfg.figures.supersample,
         });
     }
     target.draw(&gpu, &mut renderer, ())?;

@@ -45,6 +45,10 @@ fn figure(id: u64, a: FigureTile) -> FigureInstance {
 
 /// One headless frame of an empty world with `figures` drawn; `None` without a device.
 fn draw(figures: Vec<FigureInstance>) -> Option<(Vec<u8>, u32)> {
+    draw_at(figures, 0)
+}
+
+fn draw_at(mut figures: Vec<FigureInstance>, first: usize) -> Option<(Vec<u8>, u32)> {
     let gpu = match Gpu::open(&[]) {
         Ok(gpu) => gpu,
         Err(e) => {
@@ -65,7 +69,13 @@ fn draw(figures: Vec<FigureInstance>) -> Option<(Vec<u8>, u32)> {
     }));
     let mut cells = block(0);
     cells.extend(block(-4));
-    assert!(r.put_figure_models(0, &cells));
+    assert!(r.put_figure_models(first, &cells));
+    for figure in &mut figures {
+        figure.a.first += first as u32;
+        if let Some(b) = &mut figure.b {
+            b.first += first as u32;
+        }
+    }
     r.set_figures(FigureFrame {
         figures,
         palette: vec![
@@ -73,6 +83,7 @@ fn draw(figures: Vec<FigureInstance>) -> Option<(Vec<u8>, u32)> {
             PaletteEntry { base: [0.8, 0.0, 0.0], emit: None },
         ],
         whole_pixels: true,
+        supersample: 1,
     });
     let mut target = Headless::new(&gpu, &r).unwrap();
     target.draw(&gpu, &mut r, ()).unwrap();
@@ -80,6 +91,23 @@ fn draw(figures: Vec<FigureInstance>) -> Option<(Vec<u8>, u32)> {
     target.destroy(&gpu);
     r.destroy(&gpu);
     Some((rgba, params.raster_w))
+}
+
+#[test]
+fn cells_at_the_end_of_the_model_buffer_render_like_cells_at_the_start() {
+    let figure = figure(1, tile(0, [20.0, 10.0, 8.0], 0, 0.0));
+    let Some((start, _)) = draw(vec![figure]) else {
+        return;
+    };
+    let first = crate::figures::MAX_VOXELS - block(0).len() - block(-4).len();
+    let Some((end, _)) = draw_at(vec![figure], first) else {
+        return;
+    };
+    assert!(
+        start.chunks_exact(4).any(|px| px[1] > px[0]),
+        "the uploaded cells visibly render"
+    );
+    assert_eq!(start, end, "model buffer capacity includes its final cells");
 }
 
 #[test]

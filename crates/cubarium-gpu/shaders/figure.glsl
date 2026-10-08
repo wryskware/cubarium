@@ -16,7 +16,7 @@ struct Tile {
     ivec4 orig;  // the screen offset from P's projection to its texel (0, 0); its first
                  // palette entry; -
     vec4 depth;  // the in-tile depth: z at depth 0.5 (P's), 1 / span; the head's breath; -
-    ivec4 faceSize; // projected lengths of the local x, y, z axes, in raster pixels
+    ivec4 faceSize; // projected lengths of local x/y/z axes in raster pixels; samples per axis
 };
 
 struct Fig {

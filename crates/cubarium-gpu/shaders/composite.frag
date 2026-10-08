@@ -2,10 +2,10 @@
 // The model pass's composite (H2 of `design/handoffs/hybrid-renderer-2026-10-07.md`): each
 // figure's tile placed at its anchor's exact projection, over the walk's raster.
 //
-// **Sub-pixel placement.** A raster pixel's footprint covers up to four tile texels at a
-// fractional anchor; each counts by the share of the footprint it covers (the box filter
-// the window's present pass uses), so the figure glides between pixels with the tile's own
-// pixels intact, as the camera's sub-pixel pan does.
+// **Coverage AA.** A raster pixel covers aa*aa tile texels at a whole-pixel anchor, or
+// up to (aa+1)*(aa+1) at a fractional anchor. Every face tone is shaded on that finer
+// lattice. The box downsample preserves one-pixel axis-aligned lines and integrates
+// turned silhouettes, rims and creases rather than resampling a finished low-res tile.
 //
 // **Depth.** Each texel carries the z of the face it shows; it counts only where that is
 // in front of the walk's own hit at this pixel (`voxel.frag`'s `depthOut`), so terrain and
@@ -35,7 +35,7 @@ layout(location = 1) out vec4 outEmit;
 
 // One tile's coverage of this pixel: premultiplied colour and coverage, and emission.
 // `zNear` keeps the nearest z of the texels that count.
-void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec3 em, inout float zNear) {
+void tileOverOne(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec3 em, inout float zNear) {
     vec2 g = tc - 0.5;
     ivec2 i0 = ivec2(floor(g));
     vec2 f = g - vec2(i0);
@@ -53,6 +53,38 @@ void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec
         zNear = min(zNear, tz);
         col += w * vec4(c.rgb, 1.0);
         em += w * texelFetch(atlasEmit, at, 0).rgb;
+    }
+}
+
+void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec3 em, inout float zNear) {
+    int aa = t.faceSize.w;
+    if (aa == 1) {
+        // Preserve the original one-sample arithmetic as well as its sampling phase.
+        tileOverOne(t, tc, wz, weight, col, em, zNear);
+        return;
+    }
+    float scale = float(aa);
+    vec2 lo = (tc - 0.5) * scale;
+    vec2 hi = lo + scale;
+    ivec2 i0 = ivec2(floor(lo));
+    // The last row/column has zero area at a whole-pixel anchor. At a fractional
+    // anchor it accounts for the sample strip entering the shifted footprint.
+    for (int y = 0; y <= aa; ++y) {
+        for (int x = 0; x <= aa; ++x) {
+            ivec2 ti = i0 + ivec2(x, y);
+            if (any(lessThan(ti, ivec2(0))) || any(greaterThanEqual(ti, t.rect.zw))) { continue; }
+            vec2 area = max(min(hi, vec2(ti + 1)) - max(lo, vec2(ti)), vec2(0.0));
+            float w = area.x * area.y * weight / (scale * scale);
+            if (w <= 0.0) { continue; }
+            ivec2 at = t.rect.xy + ti;
+            vec4 c = texelFetch(atlasColour, at, 0);
+            if (c.a <= 0.0) { continue; }
+            float tz = texelFetch(atlasZ, at, 0).r;
+            if (tz > wz + pc.atlas.z) { continue; }
+            zNear = min(zNear, tz);
+            col += w * vec4(c.rgb * c.a, c.a);
+            em += w * c.a * texelFetch(atlasEmit, at, 0).rgb;
+        }
     }
 }
 

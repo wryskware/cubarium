@@ -51,6 +51,15 @@ moved) and turn in `turn_steps` headings (16 by default), each change a snap
 (`[figures] movement = "smooth" | "stepped"`). The renderer logs the effective settings
 once at startup.
 
+`CUBARIUM_ANIMAL_AA` overrides `[figures] supersample` (default **2**): a positive
+integer giving tile samples per pixel axis. `1` keeps the original model raster;
+`2` shades 2×2 samples, smoothing silhouettes and rotated face edging. The edging
+stays one output pixel wide. Whole-pixel and Stepped placement downsample aligned
+blocks; Smooth+Subpixel shifts the footprint with the anchor. This is a per-run
+setting, requiring a restart, and does not affect `animals = "stamped"`.
+The atlas lowers the sampling factor with a diagnostic if a frame cannot fit;
+exhausted hard budgets report the omitted figure count.
+
 **Settings page** (main menu or pause menu → Settings): Movement **Smooth / Stepped** and
 **Subpixel** on/off (Smooth only; greyed under Stepped) apply to the running world on its
 next frame, no restart, and are kept per viewer in `user://shell.cfg` (`[animals]`).
@@ -68,8 +77,8 @@ SAVES=/path/to/saves
 SAVE="$SAVES/t256-s7-midday"
 CUBARIUM_ANIMALS=classic scripts/run-game.sh -- --saves "$SAVES" --no-autoload
 CUBARIUM_ANIMALS=crisp scripts/run-game.sh -- --saves "$SAVES" --no-autoload
-CUBARIUM_ANIMALS=smooth scripts/run-game.sh -- --saves "$SAVES" --no-autoload
-CUBARIUM_ANIMALS=stepped scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=smooth CUBARIUM_ANIMAL_AA=2 scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=stepped CUBARIUM_ANIMAL_AA=2 scripts/run-game.sh -- --saves "$SAVES" --no-autoload
 ```
 
 After each app launch choose **Load** and the same slot (`t256-s7-midday` above). Quit

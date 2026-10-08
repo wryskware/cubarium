@@ -172,6 +172,17 @@ pub struct FigureConfig {
     /// pixels blended by how much of them it covers. `false`: at the nearest whole pixel,
     /// crisp, moving a pixel at a time.
     pub subpixel: bool,
+    /// Tile samples per raster-pixel axis (positive; 1 disables AA). Startup only.
+    #[serde(deserialize_with = "positive_supersample")]
+    pub supersample: u32,
+}
+
+fn positive_supersample<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    let n = u32::deserialize(d)?;
+    if n == 0 {
+        return Err(serde::de::Error::custom("figures.supersample must be a positive integer"));
+    }
+    Ok(n)
 }
 
 impl Default for FigureConfig {
@@ -186,6 +197,7 @@ impl Default for FigureConfig {
             fade_s: 0.5,
             swap_s: 0.3,
             subpixel: true,
+            supersample: 2,
         }
     }
 }
@@ -204,7 +216,7 @@ impl FigureConfig {
         FigureConfig { movement: m.movement, subpixel: m.subpixel, ..self.clone() }
     }
 
-    /// Apply a per-run preset, then the turn and placement overrides. Missing values
+    /// Apply a per-run preset, then the turn, placement and AA overrides. Missing values
     /// preserve the presentation config; this is pure so tools and tests need not edit
     /// the process environment.
     pub fn with_overrides(
@@ -212,6 +224,7 @@ impl FigureConfig {
         animals: Option<&str>,
         turn: Option<&str>,
         subpixel: Option<&str>,
+        supersample: Option<&str>,
     ) -> anyhow::Result<Self> {
         let mut cfg = self.clone();
         match animals {
@@ -261,6 +274,14 @@ impl FigureConfig {
                 "unknown CUBARIUM_ANIMAL_SUBPIXEL value {value:?}; valid values: 0, 1"
             ),
         }
+        if let Some(value) = supersample {
+            cfg.supersample = value.parse::<u32>().ok()
+                .filter(|&n| n > 0 && value.bytes().all(|b| b.is_ascii_digit()))
+                .ok_or_else(|| anyhow::anyhow!(
+                    "unknown CUBARIUM_ANIMAL_AA value {value:?}; valid values: a positive integer (1..={})",
+                    u32::MAX
+                ))?;
+        }
         Ok(cfg)
     }
 
@@ -282,9 +303,10 @@ impl FigureConfig {
             "free or a positive integer (1..=4294967295)",
         )?;
         let subpixel = read("CUBARIUM_ANIMAL_SUBPIXEL", "0, 1")?;
-        *self = self.with_overrides(animals.as_deref(), turn.as_deref(), subpixel.as_deref())?;
+        let supersample = read("CUBARIUM_ANIMAL_AA", "a positive integer (1..=4294967295)")?;
+        *self = self.with_overrides(animals.as_deref(), turn.as_deref(), subpixel.as_deref(), supersample.as_deref())?;
         eprintln!(
-            "cubarium animals: animals={} movement={} turn={} turn_steps={} turn_blend_s={} stepped_turn_blend_s={} subpixel={}",
+            "cubarium animals: animals={} movement={} turn={} turn_steps={} turn_blend_s={} stepped_turn_blend_s={} subpixel={} supersample={}",
             match self.animals {
                 AnimalDraw::Models => "models",
                 AnimalDraw::Stamped => "stamped",
@@ -298,6 +320,7 @@ impl FigureConfig {
             self.turn_blend_s,
             self.stepped_turn_blend_s,
             self.subpixel,
+            self.supersample,
         );
         Ok(EnvPins::of(animals.as_deref(), subpixel.as_deref()))
     }
@@ -318,23 +341,24 @@ mod preset_tests {
             fade_s: 1.25,
             swap_s: 2.5,
             subpixel: false,
+            supersample: 3,
         }
     }
 
     #[test]
     fn animal_presets_change_only_their_named_fields() {
         let base = config();
-        assert_eq!(base.with_overrides(None, None, None).unwrap(), base);
+        assert_eq!(base.with_overrides(None, None, None, None).unwrap(), base);
         let models = FigureConfig {
             animals: AnimalDraw::Models,
             ..base.clone()
         };
         assert_eq!(
-            models.with_overrides(Some("classic"), None, None).unwrap(),
+            models.with_overrides(Some("classic"), None, None, None).unwrap(),
             base
         );
         assert_eq!(
-            base.with_overrides(Some("crisp"), None, None).unwrap(),
+            base.with_overrides(Some("crisp"), None, None, None).unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
                 movement: Movement::Smooth,
@@ -345,7 +369,7 @@ mod preset_tests {
             }
         );
         assert_eq!(
-            base.with_overrides(Some("smooth"), None, None).unwrap(),
+            base.with_overrides(Some("smooth"), None, None, None).unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
                 movement: Movement::Smooth,
@@ -356,7 +380,7 @@ mod preset_tests {
         );
         let smooth = FigureConfig { movement: Movement::Smooth, ..base.clone() };
         assert_eq!(
-            smooth.with_overrides(Some("stepped"), None, None).unwrap(),
+            smooth.with_overrides(Some("stepped"), None, None, None).unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
                 movement: Movement::Stepped,
@@ -404,7 +428,7 @@ mod preset_tests {
     fn turn_and_subpixel_overrides_take_precedence_over_presets() {
         let base = config();
         assert_eq!(
-            base.with_overrides(Some("crisp"), Some("free"), Some("1"))
+            base.with_overrides(Some("crisp"), Some("free"), Some("1"), None)
                 .unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
@@ -417,9 +441,9 @@ mod preset_tests {
         );
         for steps in [1, 7, u32::MAX] {
             for preset in [None, Some("classic"), Some("crisp"), Some("smooth"), Some("stepped")] {
-                let selected = base.with_overrides(preset, None, None).unwrap();
+                let selected = base.with_overrides(preset, None, None, None).unwrap();
                 let cfg = base
-                    .with_overrides(preset, Some(&steps.to_string()), Some("0"))
+                    .with_overrides(preset, Some(&steps.to_string()), Some("0"), None)
                     .unwrap();
                 assert_eq!(
                     cfg,
@@ -433,7 +457,7 @@ mod preset_tests {
             }
         }
         assert_eq!(
-            base.with_overrides(None, Some("free"), Some("1")).unwrap(),
+            base.with_overrides(None, Some("free"), Some("1"), None).unwrap(),
             FigureConfig {
                 turn: Turn::Free,
                 subpixel: true,
@@ -443,11 +467,43 @@ mod preset_tests {
     }
 
     #[test]
+    fn aa_override_is_positive_and_preserves_other_settings() {
+        let base = config();
+        for factor in [1, 2, 7, u32::MAX] {
+            let cfg = base
+                .with_overrides(None, None, None, Some(&factor.to_string()))
+                .unwrap();
+            assert_eq!(
+                cfg,
+                FigureConfig {
+                    supersample: factor,
+                    ..base.clone()
+                }
+            );
+            let encoded = toml::to_string(&cfg).unwrap();
+            assert_eq!(toml::from_str::<FigureConfig>(&encoded).unwrap(), cfg);
+        }
+        for value in ["", "0", "-1", "+1", "1.5", " 2", "4294967296"] {
+            let error = base
+                .with_overrides(None, None, None, Some(value))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("CUBARIUM_ANIMAL_AA"), "{error}");
+            assert!(error.contains("positive integer"), "{error}");
+        }
+        assert!(toml::from_str::<FigureConfig>("supersample = 0").is_err());
+        assert_eq!(
+            toml::from_str::<FigureConfig>("").unwrap().supersample,
+            FigureConfig::default().supersample
+        );
+    }
+
+    #[test]
     fn bad_animal_overrides_name_the_variable_and_valid_values() {
         let base = config();
         for value in ["", "models", "Classic", " smooth"] {
             let error = base
-                .with_overrides(Some(value), None, None)
+                .with_overrides(Some(value), None, None, None)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("CUBARIUM_ANIMALS"), "{error}");
@@ -455,7 +511,7 @@ mod preset_tests {
         }
         for value in ["", "steps", "0", "-1", "+1", "1.5", " 8", "4294967296"] {
             let error = base
-                .with_overrides(None, Some(value), None)
+                .with_overrides(None, Some(value), None, None)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("CUBARIUM_ANIMAL_TURN"), "{error}");
@@ -463,7 +519,7 @@ mod preset_tests {
         }
         for value in ["", "true", "false", "2", "01"] {
             let error = base
-                .with_overrides(None, None, Some(value))
+                .with_overrides(None, None, Some(value), None)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("CUBARIUM_ANIMAL_SUBPIXEL"), "{error}");
@@ -1232,7 +1288,7 @@ impl FigureTrack {
     /// `mix`, from the models in `models`: what the model pass draws, and what a pick reads.
     pub fn frame(&mut self, t: f64, highlight: Option<(u64, f32)>, models: &FigureModels) -> (FigureFrame, Vec<PickFigure>) {
         let stepped = self.cfg.movement == Movement::Stepped;
-        let mut frame = FigureFrame { whole_pixels: stepped || !self.cfg.subpixel, ..FigureFrame::default() };
+        let mut frame = FigureFrame { whole_pixels: stepped || !self.cfg.subpixel, supersample: self.cfg.supersample, ..FigureFrame::default() };
         let mut picks = Vec::new();
         let Some(cur) = &self.cur else { return (frame, picks) };
         let now_s = t / f64::from(cubarium_voxel::TICK_HZ);

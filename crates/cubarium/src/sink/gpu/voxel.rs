@@ -248,6 +248,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         options: VoxelGpuSinkOptions,
         open: impl FnOnce(&std::sync::Arc<Gpu>, &mut VoxelRenderer) -> Result<T>,
     ) -> Result<Self> {
+        anyhow::ensure!(cfg.figures.supersample > 0, "figures.supersample must be positive");
         let params = params_of(cfg, proj, options.roof_from_texture);
         let gpu = std::sync::Arc::new(
             Gpu::open(options.target.instance_extensions())
@@ -601,6 +602,11 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
     /// The last frame's figures, for picking.
     pub fn figure_pick(&self) -> Arc<FigurePick> {
         self.figure_pick.clone()
+    }
+
+    /// Latest model tile packing, for explicit diagnostics and captures.
+    pub fn figure_atlas_stats(&self) -> cubarium_gpu::figures::FigureAtlasStats {
+        self.renderer.figure_atlas_stats()
     }
 
     /// The model pass's mean GPU milliseconds over the frames that drew it, and how many.

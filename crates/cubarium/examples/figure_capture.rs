@@ -16,9 +16,9 @@
 //! `--mp4` pipes each variant's frames (and each crop's) to `ffmpeg` instead of PNGs:
 //! `NAME.mp4` and `NAME-CROP.mp4`, x264 yuv444p crf 12 at `--fps`, real time.
 //!
-//! `--comparison --mp4` writes `comparison.mp4`: the three variants (by default classic | crisp |
-//! smooth; any three, e.g. `--variant classic= --variant smooth= --variant stepped=`) on one row,
-//! then a 2x nearest crop of the same three. The first `--crop` supplies the close-up;
+//! `--comparison --mp4` writes `comparison.mp4`: two or more variants (by default classic | crisp |
+//! smooth, e.g. `--variant classic= --variant smooth= --variant stepped=`) on one row,
+//! then a 2x nearest crop of the same columns. The first `--crop` supplies the close-up;
 //! absent one, it uses the central half of the raster. Labels live in the capture only.
 //! `--costs-only` renders the same frames without writing pictures.
 //! `--specimen capgnawer --quarter 0 --out DIR` writes a controlled whole-pixel
@@ -122,14 +122,14 @@ impl Encoder {
         let mut filters =
             vec!["scale=in_range=full:out_range=full:out_color_matrix=bt709".to_string()];
         if let Some(names) = names {
-            let panel = w / 3;
+            let panel = w / names.len() as u32;
             let labels: Vec<_> = names
                 .iter()
                 .enumerate()
                 .flat_map(|(i, name)| {
                     let name: String = name
                         .chars()
-                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .filter(|c| c.is_ascii_alphanumeric() || "_ +=".contains(*c))
                         .collect();
                     [4, h / 2 + 4].map(|y| {
                         format!(
@@ -214,7 +214,10 @@ fn main() -> Result<()> {
             "--costs-only" => costs_only = true,
             "--variant" => {
                 let s = v()?;
-                let (name, lines) = s.split_once('=').context("--variant NAME=SET[;SET]")?;
+                // A TOML section marks the delimiter even when the capture label
+                // contains '=' (for example "stepped S=2").
+                let sep = s.find("=[").or_else(|| s.find('=')).context("--variant NAME=SET[;SET]")?;
+                let (name, lines) = (&s[..sep], &s[sep + 1..]);
                 variants.push((
                     name.into(),
                     lines
@@ -238,7 +241,12 @@ fn main() -> Result<()> {
     }
     let out = out.context("--out DIR")?;
     if let Some(name) = specimen {
-        return specimen_still(&name, quarter, &out);
+        return specimen_still(
+            &name,
+            quarter,
+            &out,
+            configured(&config, &sets)?.figures.supersample,
+        );
     }
     let save = save.context("--save DIR")?;
     if !seconds.is_finite() || seconds < 0.0 || !fps.is_finite() || fps <= 0.0 || every == 0 {
@@ -247,8 +255,8 @@ fn main() -> Result<()> {
     if variants.is_empty() {
         variants.extend(["classic", "crisp", "smooth"].map(|n| (n.into(), Vec::new())));
     }
-    if comparison && (!mp4 || variants.len() != 3) {
-        bail!("--comparison needs --mp4 and exactly three variants");
+    if comparison && (!mp4 || variants.len() < 2) {
+        bail!("--comparison needs --mp4 and at least two variants");
     }
     std::fs::create_dir_all(&out)?;
     let base = configured(&config, &sets)?;
@@ -267,7 +275,7 @@ fn main() -> Result<()> {
         all.extend(lines.iter().cloned());
         let mut cfg = configured(&config, &all)?;
         if ["classic", "crisp", "smooth", "stepped"].contains(&name.as_str()) && lines.is_empty() {
-            cfg.figures = cfg.figures.with_overrides(Some(name), None, None)?;
+            cfg.figures = cfg.figures.with_overrides(Some(name), None, None, None)?;
         }
         cfg.sim.world = world_cfg.clone();
         if let Some(px) = px {
@@ -380,7 +388,7 @@ fn main() -> Result<()> {
         let names = sinks.iter().map(|v| v.name.clone()).collect::<Vec<_>>();
         Some(Encoder::labelled(
             &out.join("comparison.mp4"),
-            3 * w,
+            sinks.len() as u32 * w,
             2 * (h + 28),
             fps / every as f64,
             Some(&names),
@@ -529,6 +537,13 @@ fn main() -> Result<()> {
             (v.sink.draw_split().0 - p0) / ticks,
             ticks as u64,
         );
+        let atlas = v.sink.figure_atlas_stats();
+        let line = format!(
+            "{line}; atlas {}x{}, {} figures / {} tiles / {} composites (budgets {} tiles, {} composites), S={} requested={} dropped={} omitted_extras={}",
+            atlas.width, atlas.height, atlas.figures, atlas.tiles, atlas.composites,
+            atlas.tile_capacity, atlas.composite_capacity, atlas.supersample,
+            atlas.requested_supersample, atlas.dropped, atlas.omitted_extras,
+        );
         println!("{line}");
         writeln!(costs, "{line}")?;
     }
@@ -537,7 +552,7 @@ fn main() -> Result<()> {
 
 /// Whole rasters above; a nearest 2x crop below, centred in equally sized panels.
 fn comparison_frame(frames: &[Vec<u8>], w: u32, h: u32, crop: [u32; 4]) -> Vec<u8> {
-    let width = 3 * w;
+    let width = frames.len() as u32 * w;
     let mut out = vec![0; (width * 2 * (h + 28) * 4) as usize];
     for a in out.chunks_exact_mut(4) {
         a[3] = 255;
@@ -566,9 +581,10 @@ fn comparison_frame(frames: &[Vec<u8>], w: u32, h: u32, crop: [u32; 4]) -> Vec<u
 
 /// One baked animal at a quarter heading, without outside occluders or shadow-map
 /// approximation: isolates the face tones and local crease from world lighting.
-fn specimen_still(name: &str, quarter: u8, out: &std::path::Path) -> Result<()> {
+fn specimen_still(name: &str, quarter: u8, out: &std::path::Path, supersample: u32) -> Result<()> {
     use cubarium::voxel::{colours, model::ModelLibrary};
-    let cfg = fixture::config(0.5);
+    let mut cfg = fixture::config(0.5);
+    cfg.figures.supersample = supersample;
     let lib = ModelLibrary::load(
         std::path::Path::new("assets/voxel-models"),
         cfg.sim.world.voxel_m,
@@ -621,7 +637,7 @@ fn specimen_still(name: &str, quarter: u8, out: &std::path::Path) -> Result<()> 
         cubarium_gpu::target::write_png(&out.join(format!("{name}.png")), w, h, px)?;
     }
     let report = format!(
-        "{name}, quarter {quarter}: {changed} / {} pixels differ; max RGB code delta {max}, mean absolute RGB delta {:.6}\nControlled open sky, no sun/shadows, haze, terrain/plants or poses; same baked voxels and coat.\n",
+        "{name}, quarter {quarter}, S={supersample}: {changed} / {} pixels differ; max RGB code delta {max}, mean absolute RGB delta {:.6}\nControlled open sky, no sun/shadows, haze, terrain/plants or poses; same baked voxels and coat.\n",
         w * h,
         sum as f64 / f64::from(w * h * 3)
     );
