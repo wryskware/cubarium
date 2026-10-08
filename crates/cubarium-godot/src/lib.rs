@@ -182,6 +182,20 @@ impl CubariumSession {
         d
     }
 
+    /// What a world view drawn by the renderer needs of a ready candidate: `source` (this
+    /// session) and `candidate` (the index), for `WorldView.show_view`; an empty Dictionary
+    /// while it is being drawn. Unlike `candidate_view` it converts nothing of the world, so
+    /// it costs Godot's thread nothing on the widest world.
+    #[func]
+    fn candidate_ref(&self, index: i64) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        if usize::try_from(index).is_ok_and(|i| self.session.candidate_ready(i)) {
+            put(&mut d, "source", self.to_gd());
+            put(&mut d, "candidate", index);
+        }
+        d
+    }
+
     /// Found candidate `index` on its own terrain, and run it once founded (the others are
     /// dropped then); follow it through `founding()`. "" or the reason it can't start.
     #[func]

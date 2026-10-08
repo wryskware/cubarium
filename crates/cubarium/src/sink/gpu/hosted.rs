@@ -22,12 +22,17 @@
 //!
 //! A static world (a candidate in the new-world picker) is staged once from a
 //! [`CandidateSource`] on a thread of its own and drawn the same way; its clock stands
-//! still, and it redraws only when the view turns or the highlight moves.
+//! still, and it redraws only when the view turns or the highlight moves. The stager holds
+//! the candidate's world by its own handle, never the session's candidate list (which the
+//! picker reads every frame), and still worlds stage one at a time across the process, in
+//! the order they were asked for ([`StageTurns`]): each one's sky plane takes every core
+//! but one, so the first thumbnail is drawn in one plane's time rather than all of them
+//! together in four's.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -49,6 +54,98 @@ use crate::voxel::{PX_AUTO, VoxelConfig, cover_px_per_voxel, load_config, load_m
 const RING: usize = 2;
 /// How long a static world waits for the lit tier's sky plane before it is drawn anyway.
 const STATIC_LIGHT_WAIT: Duration = Duration::from_secs(20);
+/// How many still worlds stage at once in this process ([`StageTurns`]).
+const STATIC_STAGERS: usize = 1;
+/// How often a waiting stager looks at its quit flag (a shutdown joins it, on the app's
+/// thread).
+const STAGE_SLICE: Duration = Duration::from_millis(10);
+/// How often a still world waiting only for the light shafts' first bake packs again (the
+/// bake lands only through a pack).
+const RESTAGE_EVERY: Duration = Duration::from_millis(50);
+
+/// The process's still-world stagers take turns ([`StageTurns`]).
+static STAGE_TURNS: StageTurns = StageTurns::new(STATIC_STAGERS);
+
+// --- turns ----------------------------------------------------------------------------------
+
+/// **Still worlds stage a few at a time, first asked first served.** A stager's work is
+/// opening a renderer, packing the world and waiting for its sky plane, which is computed
+/// on every core but one; several at once only share the cores, so all of them finish late
+/// together. A stager that is told to quit while it waits leaves the queue at once.
+pub struct StageTurns {
+    state: Mutex<TurnQueue>,
+    moved: Condvar,
+}
+
+struct TurnQueue {
+    limit: usize,
+    held: usize,
+    next: u64,
+    waiting: VecDeque<u64>,
+}
+
+/// A turn taken from [`StageTurns::take`]; dropping it gives the turn back.
+pub struct StageTurn<'a>(&'a StageTurns);
+
+impl StageTurns {
+    /// At most `limit` turns held at once (at least one).
+    pub const fn new(limit: usize) -> StageTurns {
+        StageTurns {
+            state: Mutex::new(TurnQueue {
+                limit: if limit == 0 { 1 } else { limit },
+                held: 0,
+                next: 0,
+                waiting: VecDeque::new(),
+            }),
+            moved: Condvar::new(),
+        }
+    }
+
+    /// Wait for a turn, behind everyone who asked before; `None` once `give_up` says so
+    /// (looked at every [`STAGE_SLICE`] at least).
+    pub fn take(&self, give_up: impl Fn() -> bool) -> Option<StageTurn<'_>> {
+        let mut q = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let ticket = q.next;
+        q.next += 1;
+        q.waiting.push_back(ticket);
+        loop {
+            if give_up() {
+                q.waiting.retain(|&t| t != ticket);
+                drop(q);
+                self.moved.notify_all();
+                return None;
+            }
+            if q.waiting.front() == Some(&ticket) && q.held < q.limit {
+                q.waiting.pop_front();
+                q.held += 1;
+                drop(q);
+                // The next in line may fit too.
+                self.moved.notify_all();
+                return Some(StageTurn(self));
+            }
+            q = self.moved.wait_timeout(q, STAGE_SLICE).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+
+    /// Have every waiting stager look at its `give_up` now.
+    pub fn wake(&self) {
+        self.moved.notify_all();
+    }
+
+    /// Stagers waiting for a turn.
+    pub fn waiting(&self) -> usize {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).waiting.len()
+    }
+}
+
+impl Drop for StageTurn<'_> {
+    fn drop(&mut self) {
+        let mut q = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        q.held -= 1;
+        drop(q);
+        self.0.moved.notify_all();
+    }
+}
 
 // --- the mailbox ------------------------------------------------------------------------
 
@@ -343,6 +440,9 @@ pub struct HostedStats {
     pub packs_refused: u64,
     /// Frames posted over an untaken one.
     pub displaced: u64,
+    /// A still world was drawn before its lit tier's sky plane arrived (it waited
+    /// [`STATIC_LIGHT_WAIT`] and gave up), so its picture lacks the sky's shading.
+    pub unlit: bool,
 }
 
 struct Clock {
@@ -415,7 +515,10 @@ struct Shared {
     error: Mutex<Option<String>>,
     generation: AtomicU64,
     quit: AtomicBool,
-    /// The presenter and the still-world stagers: joined by [`Shared::shutdown`].
+    /// [`HostedStats::unlit`].
+    unlit: AtomicBool,
+    /// The presenter, the still-world stagers and renderers being released: joined by
+    /// [`Shared::shutdown`].
     threads: Mutex<Vec<JoinHandle<()>>>,
 }
 
@@ -475,6 +578,8 @@ impl Shared {
     /// those threads.
     fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
+        // A stager waiting for its turn looks at its quit flag now, not at its next slice.
+        STAGE_TURNS.wake();
         let threads = std::mem::take(&mut *self.threads.lock().unwrap_or_else(|e| e.into_inner()));
         for t in &threads {
             t.thread().unpark();
@@ -677,6 +782,7 @@ impl Hosted {
             error: Mutex::new(None),
             generation: AtomicU64::new(0),
             quit: AtomicBool::new(false),
+            unlit: AtomicBool::new(false),
             threads: Mutex::new(Vec::new()),
         });
         let presenter = {
@@ -702,27 +808,35 @@ impl Hosted {
 
     /// Draw one still world: candidate `index` of `source`, staged on a thread of its own
     /// (opening the renderer and the lit tier's sky plane take a moment). Its clock stands
-    /// at its tick.
-    pub fn show_static(&self, source: CandidateSource, index: usize) {
-        // Under the thread list's lock, so a shutdown either joins this stager or has
+    /// at its tick. A `queued` one (a thumbnail) waits its turn behind the other queued
+    /// stagers of the process ([`StageTurns`]); one that is not (a candidate opened large,
+    /// asked for by hand) starts at once.
+    pub fn show_static(&self, source: CandidateSource, index: usize, queued: bool) {
+        self.spawn("cubarium-hosted-static", move |shared| {
+            if let Err(e) = stage_static(shared, &source, index, queued) {
+                shared.fail(e);
+            }
+        });
+    }
+
+    /// Run `work` on a thread of this renderer's own, joined by [`Shared::shutdown`]. Nothing
+    /// runs after a shutdown, or when the thread can't be started (the failure is reported,
+    /// and `work` is dropped here).
+    fn spawn(&self, name: &str, work: impl FnOnce(&Arc<Shared>) + Send + 'static) {
+        // Under the thread list's lock, so a shutdown either joins this thread or has
         // already refused it.
         let mut threads = self.shared.threads.lock().unwrap_or_else(|e| e.into_inner());
         if self.shared.quit.load(Ordering::SeqCst) {
             return;
         }
-        // Stagers that have finished are joined here, so the list holds only live ones.
+        // Threads that have finished are joined here, so the list holds only live ones.
         let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *threads).into_iter().partition(|t| t.is_finished());
         *threads = live;
         for t in done {
             let _ = t.join();
         }
         let shared = self.shared.clone();
-        let spawned = std::thread::Builder::new().name("cubarium-hosted-static".into()).spawn(move || {
-            if let Err(e) = stage_static(&shared, &source, index) {
-                shared.fail(e);
-            }
-        });
-        match spawned {
+        match std::thread::Builder::new().name(name.into()).spawn(move || work(&shared)) {
             Ok(t) => threads.push(t),
             Err(e) => self.shared.fail(e.into()),
         }
@@ -796,6 +910,7 @@ impl Hosted {
     pub fn stats(&self) -> HostedStats {
         let mut s = self.shared.stats.lock().map(|s| *s).unwrap_or_default();
         s.displaced = self.shared.mailbox.counts().1;
+        s.unlit = self.shared.unlit.load(Ordering::SeqCst);
         if let Ok(g) = self.shared.sink.lock()
             && let Some(st) = g.as_ref()
         {
@@ -810,10 +925,12 @@ impl Hosted {
     }
 
     /// Drop the renderer (its GPU memory), keeping the last frame taken. A thumbnail that
-    /// will not move again does this.
+    /// will not move again does this. Returns at once: the renderer is freed on a thread of
+    /// this renderer's own (freeing it waits for its GPU, tens of milliseconds, which the
+    /// app's frame should not), joined like the others at shutdown.
     pub fn release(&self) {
-        let old = self.shared.sink.lock().ok().and_then(|mut s| s.take());
-        drop(old);
+        let Some(old) = self.shared.sink.lock().ok().and_then(|mut s| s.take()) else { return };
+        self.spawn("cubarium-hosted-release", move |_| drop(old));
     }
 }
 
@@ -823,30 +940,40 @@ impl Drop for Hosted {
     }
 }
 
-fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize) -> Result<()> {
-    let opened = source
-        .with(index, |world, flora, fauna| -> Result<_> {
-            let (mut sink, proj) = shared.open(world.config())?;
-            sink.set_clock(world.tick(), 0.0);
-            sink.stage_world(world, flora, fauna);
-            Ok((sink, proj, world.tick(), Arc::new(PickMap::solid_bits(world))))
-        })
-        .context("the candidate is not ready")??;
-    let (mut sink, proj, tick, solid) = opened;
-    let started = Instant::now();
+/// Stage candidate `index` of `source` as a still world: wait for a turn
+/// ([`STAGE_TURNS`]) when `queued`, open a renderer for it, pack it, wait for the lit tier's sky plane
+/// (up to [`STATIC_LIGHT_WAIT`]) and install it. The candidate's world is held by its own
+/// handle throughout, never under the session's candidate list.
+fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, queued: bool) -> Result<()> {
     let quit = || shared.quit.load(Ordering::SeqCst);
+    let turn = if queued { STAGE_TURNS.take(quit) } else { None };
+    if queued && turn.is_none() {
+        return Ok(());
+    }
+    let p = source.get(index).context("the candidate is not ready")?;
+    let (world, flora, fauna) = (&p.world, &p.flora, &p.fauna);
+    let (mut sink, proj) = shared.open(world.config())?;
+    sink.set_clock(world.tick(), 0.0);
+    sink.stage_world(world, flora, fauna);
+    let (tick, solid) = (world.tick(), Arc::new(PickMap::solid_bits(world)));
+    let started = Instant::now();
     while sink.light_pending() && started.elapsed() < STATIC_LIGHT_WAIT && !quit() {
-        // Parked, not slept: a shutdown unparks it and it gives up at once.
-        std::thread::park_timeout(Duration::from_millis(50));
-        if quit() {
-            break;
+        // Wait for the sky plane without packing again; a pack takes it in once it is done.
+        // (The light shafts' first bake lands only through packs: with only that pending,
+        // this packs every slice.)
+        if sink.wait_sky(STAGE_SLICE) && !quit() {
+            sink.stage_world(world, flora, fauna);
+            if sink.light_pending() {
+                // Parked, not slept: a shutdown unparks it and it gives up at once.
+                std::thread::park_timeout(RESTAGE_EVERY);
+            }
         }
-        source.with(index, |world, flora, fauna| sink.stage_world(world, flora, fauna));
     }
     if quit() {
         // Dropping the renderer here cancels its sky plane and joins that worker.
         return Ok(());
     }
+    shared.unlit.store(sink.light_pending(), Ordering::SeqCst);
     shared.publish_pick(&sink, &proj, solid);
     if let Ok(mut c) = shared.clock.lock() {
         *c = Clock::still(tick);
@@ -1005,6 +1132,86 @@ mod tests {
         // Every post returned while the reader still held its frame.
         go_tx.send(()).unwrap();
         assert_eq!(reader.join().unwrap(), Some(1000));
+    }
+
+    /// Wait until `turns` has `n` stagers queued.
+    fn queued(turns: &StageTurns, n: usize) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while turns.waiting() != n {
+            assert!(Instant::now() < deadline, "{} queued, not {n}", turns.waiting());
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn stagers_take_turns_first_asked_first_served() {
+        let turns = Arc::new(StageTurns::new(1));
+        let first = turns.take(|| false).expect("a free turn is taken at once");
+        let order = Arc::new(Mutex::new(Vec::new()));
+        let mut threads = Vec::new();
+        for k in 0..4 {
+            let (t, order) = (turns.clone(), order.clone());
+            threads.push(std::thread::spawn(move || {
+                let _turn = t.take(|| false).expect("a turn");
+                order.lock().unwrap().push(k);
+            }));
+            // Each asks only once the one before is in the queue.
+            queued(&turns, k + 1);
+        }
+        assert!(order.lock().unwrap().is_empty(), "nobody stages while the turn is held");
+        drop(first);
+        for t in threads {
+            t.join().unwrap();
+        }
+        assert_eq!(*order.lock().unwrap(), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn no_more_turns_are_held_than_the_limit() {
+        for limit in [1, 2, 3] {
+            let turns = Arc::new(StageTurns::new(limit));
+            let (now, most) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+            let threads: Vec<_> = (0..8)
+                .map(|_| {
+                    let (turns, now, most) = (turns.clone(), now.clone(), most.clone());
+                    std::thread::spawn(move || {
+                        let _turn = turns.take(|| false).expect("a turn");
+                        let n = now.fetch_add(1, Ordering::SeqCst) + 1;
+                        most.fetch_max(n, Ordering::SeqCst);
+                        std::thread::sleep(Duration::from_millis(5));
+                        now.fetch_sub(1, Ordering::SeqCst);
+                    })
+                })
+                .collect();
+            for t in threads {
+                t.join().unwrap();
+            }
+            let most = most.load(Ordering::SeqCst);
+            assert!(most >= 1 && most <= limit as u64, "{most} held at once, limit {limit}");
+        }
+    }
+
+    #[test]
+    fn a_stager_told_to_quit_leaves_the_queue_and_the_next_goes_on() {
+        let turns = Arc::new(StageTurns::new(1));
+        let held = turns.take(|| false).expect("a free turn");
+        let quit = Arc::new(AtomicBool::new(false));
+        let quitter = {
+            let (turns, quit) = (turns.clone(), quit.clone());
+            std::thread::spawn(move || turns.take(|| quit.load(Ordering::SeqCst)).is_some())
+        };
+        queued(&turns, 1);
+        let next = {
+            let turns = turns.clone();
+            std::thread::spawn(move || turns.take(|| false).is_some())
+        };
+        queued(&turns, 2);
+        quit.store(true, Ordering::SeqCst);
+        assert!(!quitter.join().unwrap(), "the quitter gave up without a turn");
+        queued(&turns, 1);
+        drop(held);
+        assert!(next.join().unwrap(), "the one behind it got its turn");
+        assert_eq!(turns.waiting(), 0);
     }
 
     /// A 4×2×3 world at 2 px a voxel, rise 1: raster 8 wide, base 2·2 + 3·1 = 7.

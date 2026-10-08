@@ -9,8 +9,10 @@ extends Control
 ## API (the shell's contract, design/handoffs/godot-direction-2026-10-07.md):
 ## - `attach(session)` draws a live `CubariumSession` (the renderer hooks into its loop);
 ##   `detach()` stops (the last frame stays).
-## - `show_view(view)` draws a candidate: `view` is `candidate_view(i)`, which names its
-##   session and index (`source`, `candidate`); the candidate's own world is rendered, once.
+## - `show_view(view)` draws a candidate: `view` is `candidate_ref(i)` (or `candidate_view(i)`),
+##   which names its session and index (`source`, `candidate`); the candidate's own world is
+##   rendered, once. With input off (a thumbnail) it is staged in its turn, one thumbnail at
+##   a time across the app, and its renderer is freed after the first frame.
 ## - `input_enabled`: false ignores pointer and pan input (a menu is open).
 ## - `reset_framing()`: the whole strip in view, the ring unturned.
 ## - Signals `animal_hovered(id)` (−1 for none) and `animal_clicked(id)` (−1 for empty
@@ -19,6 +21,8 @@ extends Control
 ##   clears). `follow(id)` keeps it in view, easing; `stop_follow()`. Panning by hand stops
 ##   following.
 ## - `capture(size) -> Image`: the latest frame as framed, fitted into `size`.
+## - `problem() -> String`: why nothing is drawn yet, when the renderer did not start or
+##   gave up ("" otherwise), so a thumbnail can say so instead of staying blank.
 ##
 ## Panning: mouse drag, arrows/WASD, the gamepad's left stick, eased. `x` turns round the
 ## ring without end: the renderer turns its raster by whole pixels and the frame is shifted
@@ -145,6 +149,8 @@ var _material: ShaderMaterial
 var _pending: Array = []
 var _static := false
 var _process_ms := 0.0
+## Why the renderer did not start, or "".
+var _refused := ""
 
 
 func _ready() -> void:
@@ -228,6 +234,16 @@ func capture(size: Vector2i) -> Image:
 	return out
 
 
+## Why nothing is drawn: the renderer refused to start, or reported an error before its
+## first frame. "" while it is on its way or once a frame is shown.
+func problem() -> String:
+	if _refused != "":
+		return _refused
+	if renderer != null and frames_shown == 0:
+		return renderer.error()
+	return ""
+
+
 ## One line of what the view costs, for the dev scene.
 func perf_line() -> String:
 	var s: Dictionary = renderer.stats() if renderer != null else {}
@@ -272,6 +288,7 @@ func _begin() -> void:
 		var refused: String = renderer.start(cfg, root, Vector2i(size), FPS)
 		if refused != "":
 			push_error("WorldView: no renderer (%s)" % refused)
+			_refused = refused
 			renderer = null
 			return
 		if highlighted >= 0:
@@ -280,7 +297,10 @@ func _begin() -> void:
 		"live":
 			renderer.attach(what[1])
 		"candidate":
-			renderer.show_candidate(what[1], what[2])
+			if input_enabled:
+				renderer.show_candidate(what[1], what[2])
+			else:
+				renderer.show_thumbnail(what[1], what[2])
 
 
 func _take_frame() -> void:
