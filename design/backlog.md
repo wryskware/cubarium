@@ -211,3 +211,14 @@ Each animal has a final colourway plus a kept alternate
 (the orchid-pink seedporter, the periwinkle frondgrazer), so keep them. Later, not now:
 either a heritable colour morph (a lineage trait the presenter reads, so a population
 visibly carries its founder's colouring) or an operator option to pick the colourway.
+
+## 9. Presentation decoupled from the sim (Wrysk, 2026-10-07)
+
+Pinned. On today's renderer the loop packs each tick right after the step, so a tick costs
+step + pack (wide 640×128×96 world at minute 60: 13 + 15 ms; about 1.6× speed headroom at
+the 20 fps this renderer needs). A plain double buffer — copy what the pack reads after
+each step, pack it on its own thread while the next step runs — would make it about
+max(step, pack) and roughly 3×. Wrysk: "ill pin it for now. with the new renderer we
+should support things like running uncapped by presentation and just sampling the world to
+render it." The Godot renderer should take that shape: the sim runs at its own speed and
+the presentation samples published snapshots.
