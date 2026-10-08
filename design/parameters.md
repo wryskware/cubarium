@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (376 rows)
+**`world.*`** (380 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -340,6 +340,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.lake_bank_slope` | (absent) | voxels per voxel | [0, inf) | 0.25–2 | - | placeholder | how steeply the graded bank climbs away from the shore |
 | `world.landform.terrarium.lake_bank_m` | (absent) | m | [0, inf) | 0–2 | - | placeholder | how far from the shore the bank is graded down toward the water |
 | `world.landform.terrarium.lake_end_m` | (absent) | m | [0, inf) | 0–2 | - | placeholder | how far from its back end the lake shoals, so the end rounds off |
+| `world.landform.terrarium.lake_shelf_m` | (absent) | m | [0, inf) | 0–2 | - | placeholder | width of the marsh shelf inside the shore, graded from the water's surface |
+| `world.landform.terrarium.lake_shelf_depth_m` | (absent) | m under the water | [0, inf) | 0.125–0.5 | - | placeholder | the marsh shelf's depth at its lakeward edge (one voxel at the shore) |
+| `world.landform.terrarium.lake_flat_m` | (absent) | m | [0, inf) | 0–1.5 | - | placeholder | width of the wet flats outside the shore, graded to the water's surface |
+| `world.landform.terrarium.lake_scale` | (absent) | x | (0, inf) | 0.5–3 | - | placeholder | the lake's size: multiplies its length, width, bay, meander, depth (short of bedrock) and marsh; not the water level |
 | `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
 | `world.landform.terrarium.yard` | (absent) | fraction of the depth | [0, 1) | 0.2–0.5 | - | placeholder | how deep the yard held clear for the lake is |
 | `world.landform.terrarium.pool_m.*` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | a pool's radius around the ring |
