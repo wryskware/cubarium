@@ -35,6 +35,8 @@ const JUMP_VOXELS := 48.0
 
 var models: VoxelModels
 var material: Material
+var glow_material: Material
+var glowcap := -1        # the glowcap's species code (its lips candle)
 var dims := Vector3i.ZERO
 var voxel_m := 0.125
 var lineages := {}       # species code -> lineage name
@@ -69,15 +71,18 @@ class Body:
 	var fade_out_s := FADE_OUT_S
 
 
-func setup(p_models: VoxelModels, p_material: Material, species: Dictionary) -> void:
+func setup(p_models: VoxelModels, p_material: Material, p_glow: Material, species: Dictionary) -> void:
 	models = p_models
 	material = p_material
+	glow_material = p_glow
 	lineages.clear()
 	for a in species.get("animals", []):
 		lineages[int(a["id"])] = str(a["name"]).replace("_", "-")
 	plant_species.clear()
 	for p in species.get("plants", []):
 		plant_species[int(p["id"])] = str(p["name"]).replace("_", "-")
+		if str(p["name"]) == "glowcap":
+			glowcap = int(p["id"])
 	mobility = species.get("mobility", [])
 	hunker_bit = int(species.get("flags", {}).get("hunkered", 4))
 	_box_mesh = BoxMesh.new()
@@ -155,7 +160,6 @@ func _take_animals(a: Dictionary, instant: bool) -> void:
 		if b == null:
 			b = Body.new()
 			b.node = MeshInstance3D.new()
-			b.node.material_override = material
 			b.node.set_meta("animal_id", id)
 			add_child(b.node)
 			b.from = p
@@ -177,12 +181,13 @@ func _take_animals(a: Dictionary, instant: bool) -> void:
 			b.to = to
 			b.to_h = heading[i]
 			b.leaving = false
+		b.model = lineage
 		var mesh = models.animal_mesh(model, size[i]) if model != "" else null
 		if mesh == null:
 			mesh = _box_mesh
 		if mesh != b.mesh:
 			b.mesh = mesh
-			b.node.mesh = mesh
+			b.node.mesh = _dressed(mesh)
 	for id in animals:
 		var b: Body = animals[id]
 		if not seen.has(id) and not b.leaving:
@@ -207,21 +212,37 @@ func _take_plants(p: Dictionary, instant: bool) -> void:
 		if b == null:
 			b = Body.new()
 			b.node = MeshInstance3D.new()
-			b.node.material_override = material
 			add_child(b.node)
+			if species[i] == glowcap:
+				b.node.set_instance_shader_parameter("candle", 1.0)
+				b.node.set_instance_shader_parameter("candle_phase", fposmod(id * 0.618034, 1.0))
 			b.alpha = 1.0 if instant else 0.0
 			plants[id] = b
 		b.at = at
 		b.leaving = false
-		var mesh = models.plant_mesh(plant_species.get(species[i], ""), growth[i], id)
+		b.model = plant_species.get(species[i], "")
+		var mesh = models.plant_mesh(b.model, growth[i], id)
 		if mesh == null:
 			mesh = _box_mesh
 		if mesh != b.mesh:
 			b.mesh = mesh
-			b.node.mesh = mesh
+			b.node.mesh = _dressed(mesh)
 	for id in plants:
 		if not seen.has(id):
 			plants[id].leaving = true
+
+
+## A model mesh with its surfaces' materials set (once per mesh: the models' cache shares
+## them): `plain` the voxel material, `emissive` the glow material.
+func _dressed(mesh: Mesh) -> Mesh:
+	if mesh == _box_mesh or mesh.has_meta("dressed"):
+		return mesh
+	var am := mesh as ArrayMesh
+	for i in mesh.get_surface_count():
+		var emissive := am != null and am.surface_get_name(i) == "emissive"
+		mesh.surface_set_material(i, glow_material if emissive else material)
+	mesh.set_meta("dressed", true)
+	return mesh
 
 
 ## Ease every body toward its newest frame and fade, at `now`.

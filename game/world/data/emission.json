@@ -1,0 +1,8 @@
+{
+  "about": "Which baked model cells emit light in the Godot view (VoxelModels.set_emissive). Plants: \"tag:material\" (the palette file's keys without the band; tag 0x10|i foliage layer i, 0x30 accent; materials by model-palette index). Animals: \"material\". From the old presenter's emission rules (crates/cubarium/src/voxel/colours.rs, plant_emission): the glowcap's lip (foliage, p2 = 6), the bloomcrown's core (foliage layer 1, p1 = 5) and its bloom accent (accent, warm = 9). The lanternberry's lantern glows only while ripe fruit hangs and the feed carries no ripeness, so it is left out. The lanternjaw's lure (a_lure = 23) is not lit by the old renderer (animal_emission is None for every founder); it is listed here for the predation decision's glow lure.",
+  "cells": {
+    "glowcap": ["16:6", "17:6", "18:6", "19:6"],
+    "bloomcrown": ["17:5", "48:9"],
+    "lanternjaw": ["23"]
+  }
+}

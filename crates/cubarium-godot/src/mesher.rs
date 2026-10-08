@@ -744,6 +744,7 @@ pub struct VoxelMesher {
     generation: i64,
     view_faces_only: bool,
     wrap_x: bool,
+    haze_scale: f32,
     last_ms: f64,
     last_meshed: i64,
 }
@@ -757,6 +758,7 @@ impl IRefCounted for VoxelMesher {
             generation: -1,
             view_faces_only: true,
             wrap_x: true,
+            haze_scale: 1.0,
             last_ms: 0.0,
             last_meshed: 0,
         }
@@ -782,6 +784,15 @@ impl VoxelMesher {
     #[func]
     fn set_view_faces_only(&mut self, on: bool) {
         self.view_faces_only = on;
+        self.mesher = None;
+    }
+
+    /// The baked depth haze, times this (1, the default: the palette's `haze_amount`; 0: none,
+    /// as when the view's own fog stands in for it). Like `set_view_faces_only`, it starts
+    /// the mesher over: call it before the first view.
+    #[func]
+    fn set_haze_scale(&mut self, scale: f64) {
+        self.haze_scale = scale.max(0.0) as f32;
         self.mesher = None;
     }
 
@@ -817,10 +828,11 @@ impl VoxelMesher {
     fn apply_view(&mut self, view: VarDictionary) -> VarArray {
         let started = std::time::Instant::now();
         let mut out = VarArray::new();
-        let Some(look) = self.look.clone() else {
+        let Some(mut look) = self.look.clone() else {
             godot_error!("VoxelMesher: load_palette first");
             return out;
         };
+        look.haze_amount *= self.haze_scale;
         let Some(dims) = view.get("dims").and_then(|v| v.try_to::<Vector3i>().ok()) else {
             return out;
         };
@@ -898,6 +910,13 @@ pub fn array_mesh(m: &MeshData) -> Option<Gd<ArrayMesh>> {
     if m.is_empty() {
         return None;
     }
+    let mut mesh = ArrayMesh::new_gd();
+    mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &surface_arrays(m));
+    Some(mesh)
+}
+
+/// One surface's arrays (vertices, normals, colours, indices) for `add_surface_from_arrays`.
+pub fn surface_arrays(m: &MeshData) -> VarArray {
     let v3 = |p: &[f32; 3]| Vector3::new(p[0], p[1], p[2]);
     let pos: Vec<Vector3> = m.pos.iter().map(v3).collect();
     let normal: Vec<Vector3> = m.normal.iter().map(v3).collect();
@@ -924,9 +943,7 @@ pub fn array_mesh(m: &MeshData) -> Option<Gd<ArrayMesh>> {
         ArrayType::INDEX.ord() as usize,
         &PackedInt32Array::from(m.index.as_slice()).to_variant(),
     );
-    let mut mesh = ArrayMesh::new_gd();
-    mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &arrays);
-    Some(mesh)
+    arrays
 }
 
 #[cfg(test)]

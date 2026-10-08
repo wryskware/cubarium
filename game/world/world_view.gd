@@ -17,6 +17,10 @@ extends Node3D
 ## - `set_highlight(id)` tints one animal (−1 clears); `follow(id)` keeps it in view,
 ##   easing; `stop_follow()`. Panning by hand stops following.
 ## - `capture(size) -> Image`: the current framing, rendered at `size` without the UI.
+## - `set_light(settings)`: how it is lit (`LightSettings`: one switch per Godot built-in
+##   effect, all off by default, and the light's numbers). The environment's part applies at
+##   once; the meshing's part (closed terrain for shadows, no baked haze under the fog)
+##   applies from the next world drawn, so set it before `attach` or `show_view`.
 ##
 ## Panning: mouse drag, arrows/WASD, and a gamepad's left stick. The ring has no ends, so
 ## `x` pans round it without limit (the seam moves); up and down are clamped to the world's
@@ -28,6 +32,28 @@ signal animal_hovered(id: int)
 signal animal_clicked(id: int)
 
 const PALETTE_PATH := "res://world/data/palette.json"
+## Which model cells emit light (`VoxelModels.set_emissive`).
+const EMISSION_PATH := "res://world/data/emission.json"
+const LightSettingsScript := preload("res://world/light_settings.gd")
+const EmitterLightsScript := preload("res://world/emitter_lights.gd")
+## The emitters' material: the cell's colour, emitting it at `energy`; a glowcap's lip
+## (instance `candle` 1) wanders between `candle_min` and full, each its own phase.
+const GLOW_SHADER := """
+shader_type spatial;
+uniform float energy = 0.0;
+uniform float candle_min = 0.25;
+uniform float candle_period = 8.0;
+instance uniform float candle = 0.0;
+instance uniform float candle_phase = 0.0;
+void fragment() {
+	ALBEDO = COLOR.rgb;
+	ROUGHNESS = 1.0;
+	SPECULAR = 0.0;
+	float t = TIME / candle_period + candle_phase;
+	float w = 0.5 + 0.25 * sin(6.2831853 * t) + 0.25 * sin(6.2831853 * (1.618 * t + 0.3));
+	EMISSION = COLOR.rgb * energy * mix(1.0, mix(candle_min, 1.0, w), candle);
+}
+"""
 ## The baked models, relative to the project: `assets/voxel-models/<voxel mm>/`.
 const MODELS_ROOT := "../assets/voxel-models"
 ## The camera's elevation (the presenter's `tilt_degrees`).
@@ -56,6 +82,8 @@ var dims := Vector3i.ZERO
 var voxel_m := 0.125
 var generation := -1
 var hovered := -1
+## How the view is lit (`set_light`).
+var light: LightSettings
 var highlighted := -1
 var following := -1
 
@@ -74,6 +102,12 @@ var _source = null
 var _terrain_mat: StandardMaterial3D
 var _water_mat: StandardMaterial3D
 var _highlight_mat: StandardMaterial3D
+var _glow_mat: ShaderMaterial
+## The meshing half of `light` waits for the next world drawn.
+var _mesh_light_pending := false
+## The emitter lights (`LightSettings.emitter_lights`) and a pending VoxelGI bake.
+var emitters: Node3D
+var _gi_bake_at := -1.0
 var _now := 0.0
 var _mesh_ms := 0.0
 var _mesh_chunks := 0
@@ -97,6 +131,10 @@ func _ready() -> void:
 	var refused := mesher.load_palette(palette_path)
 	if refused != "":
 		push_error("WorldView: " + refused)
+	light = LightSettingsScript.new()
+	emitters = EmitterLightsScript.new()
+	emitters.name = "EmitterLights"
+	add_child(emitters)
 	_terrain_mat = StandardMaterial3D.new()
 	_terrain_mat.vertex_color_use_as_albedo = true
 	_terrain_mat.roughness = 1.0
@@ -111,11 +149,23 @@ func _ready() -> void:
 	_highlight_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_highlight_mat.albedo_color = Color(1, 1, 1, 0.4)
 	_highlight_mat.render_priority = 1
+	_glow_mat = ShaderMaterial.new()
+	var glow_shader := Shader.new()
+	glow_shader.code = GLOW_SHADER
+	_glow_mat.shader = glow_shader
 	models = VoxelModels.new()
+	var emission = JSON.parse_string(FileAccess.get_file_as_string(EMISSION_PATH))
+	if typeof(emission) == TYPE_DICTIONARY:
+		var table := {}
+		for name in emission.get("cells", {}):
+			table[name] = PackedStringArray(emission["cells"][name])
+		models.set_emissive(table)
+	else:
+		push_warning("WorldView: cannot read " + EMISSION_PATH + "; nothing emits")
 	species = CubariumSession.new().query("species", null)
 	var env := Environment.new()
 	camera.environment = env
-	weather.setup(sun, env, palette)
+	weather.setup(sun, env, palette, camera)
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.keep_aspect = Camera3D.KEEP_WIDTH
 	camera.near = 0.05
@@ -123,6 +173,7 @@ func _ready() -> void:
 	camera.rotation_degrees = Vector3(-TILT_DEG, 0.0, 0.0)
 	camera.current = true
 	get_viewport().size_changed.connect(_on_resized)
+	set_light(light)
 
 
 # --- the API ------------------------------------------------------------------------------
@@ -147,6 +198,29 @@ func show_view(view: Dictionary) -> void:
 	_forget()
 	_take(view, [], true)
 	reset_framing()
+
+
+## Light the view by `s` (see the API above).
+func set_light(s: LightSettings) -> void:
+	if s.shadows != light.shadows or s.haze != light.haze or dims.x <= 0:
+		_mesh_light_pending = true
+	light = s
+	weather.apply_settings(s)
+	_water_mat.roughness = s.water_roughness if s.reflections else 1.0
+	_water_mat.metallic_specular = s.water_specular if s.reflections else 0.0
+	_water_mat.metallic = s.water_metallic if s.reflections else 0.0
+	_glow_mat.set_shader_parameter("energy", s.emission_energy if s.glow else 0.0)
+	_glow_mat.set_shader_parameter("candle_min", s.candle_min)
+	_glow_mat.set_shader_parameter("candle_period", maxf(s.candle_period_s, 0.1))
+	var vp := get_viewport()
+	vp.positional_shadow_atlas_size = s.positional_atlas_size
+	for q in 4:
+		vp.set_positional_shadow_atlas_quadrant_subdiv(q, s.positional_atlas_subdiv)
+	emitters.visible = s.emitter_lights
+	if s.emitter_lights and dims.x > 0:
+		emitters.rebuild(organisms, s)
+	if s.gi and s.gi_mode == "voxelgi" and dims.x > 0 and weather.voxel_gi.is_empty():
+		_gi_bake_at = _now + 0.5
 
 
 func reset_framing() -> void:
@@ -230,6 +304,11 @@ func _process(delta: float) -> void:
 	_pan = _pan.lerp(_pan_to, k)
 	_place_camera()
 	organisms.place(camera.global_position.x)
+	if light.emitter_lights:
+		emitters.place(camera.global_position.x, camera.global_position + camera.global_transform.basis.z * -(dims.x + dims.y + dims.z))
+	if _gi_bake_at >= 0.0 and _now >= _gi_bake_at:
+		_gi_bake_at = -1.0
+		weather.bake_voxel_gi([terrain.get_node("Copy0"), terrain.get_node("Copy1")])
 	weather.advance(delta, camera.global_position.x)
 	if _mouse.x >= 0.0 and input_enabled and not _dragging:
 		_hover(_mouse)
@@ -255,6 +334,13 @@ func _take(view: Dictionary, events: Array, instant: bool) -> void:
 		return
 	var g := int(view.get("generation", 0))
 	var renew := g != generation or d != dims or bool(view.get("full", false))
+	if renew and _mesh_light_pending:
+		# The whole world is coming: mesh it as the light wants (both calls start over).
+		mesher.set_view_faces_only(not light.shadows)
+		mesher.set_haze_scale(0.0 if light.haze else 1.0)
+		_mesh_light_pending = false
+	if renew and light.gi and light.gi_mode == "voxelgi":
+		_gi_bake_at = _now + 0.5
 	if renew:
 		for nodes in _chunks.values():
 			for n in nodes:
@@ -273,8 +359,11 @@ func _take(view: Dictionary, events: Array, instant: bool) -> void:
 		_set_chunk(c["at"], c["terrain"], c["water"])
 	organisms.note_events(events)
 	if view.has("tick"):
-		if organisms.take_frame(view, _now, instant) and highlighted >= 0:
-			set_highlight(highlighted)
+		if organisms.take_frame(view, _now, instant):
+			if highlighted >= 0:
+				set_highlight(highlighted)
+			if light.emitter_lights:
+				emitters.rebuild(organisms, light)
 		weather.take_sky(view.get("sky", {}), instant)
 
 
@@ -284,7 +373,7 @@ func _new_world() -> void:
 	var refused := models.load(dir, ProjectSettings.globalize_path(PALETTE_PATH))
 	if refused != "":
 		push_warning("WorldView: no baked models (%s); organisms draw as boxes" % refused)
-	organisms.setup(models, _terrain_mat, species)
+	organisms.setup(models, _terrain_mat, _glow_mat, species)
 	organisms.set_world(dims, voxel_m)
 	weather.set_world(dims)
 	terrain.get_node("Copy1").position = Vector3(dims.x, 0, 0)
@@ -298,6 +387,8 @@ func _set_chunk(at: Vector3i, t: Mesh, w: Mesh) -> void:
 			for copy in 2:
 				var n := MeshInstance3D.new()
 				n.material_override = _terrain_mat if kind == 0 else _water_mat
+				if kind == 1:
+					n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 				n.position = Vector3(at.x * 16, at.y * 16, -at.z * 16)
 				terrain.get_node("Copy%d" % copy).add_child(n)
 				nodes.append(n)
