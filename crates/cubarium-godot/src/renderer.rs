@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use cubarium::sink::gpu::voxel::hosted::{Hosted, HostedOptions};
+use godot::classes::RenderingServer;
 use godot::prelude::*;
 
 use crate::CubariumSession;
@@ -31,6 +32,12 @@ impl WorldRenderer {
     /// second. Returns "" or why not.
     #[func]
     fn start(&mut self, config: GString, root: GString, screen: Vector2i, fps: f64) -> GString {
+        // Draw on the GPU Godot draws on, so a frame never crosses between GPUs on its way
+        // to the screen (`CUBARIUM_GPU` still overrides).
+        let adapter = RenderingServer::singleton().get_video_adapter_name().to_string();
+        if !adapter.is_empty() {
+            cubarium_gpu::vk::prefer_device(&adapter);
+        }
         let options = HostedOptions {
             config: PathBuf::from(config.to_string()),
             root: PathBuf::from(root.to_string()),

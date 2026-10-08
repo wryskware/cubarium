@@ -45,10 +45,29 @@ pub struct Gpu {
     queue_guard: Mutex<()>,
 }
 
+/// The physical device [`Gpu::open`] should prefer, by name: `CUBARIUM_GPU` if set, else
+/// what [`prefer_device`] recorded. A host that already draws on one GPU (the Godot app)
+/// names it here, so frames never cross between GPUs on a multi-GPU desktop.
+static PREFERRED_DEVICE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Prefer the physical device whose name contains `name` (case-insensitive) in every later
+/// [`Gpu::open`]. The `CUBARIUM_GPU` environment variable, when set, wins over this.
+pub fn prefer_device(name: &str) {
+    *PREFERRED_DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = Some(name.to_owned());
+}
+
+fn preferred_device() -> Option<String> {
+    std::env::var("CUBARIUM_GPU")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| PREFERRED_DEVICE.lock().unwrap_or_else(|e| e.into_inner()).clone())
+}
+
 impl Gpu {
-    /// Open the first physical device, with the instance extensions the dma-buf export
-    /// needs and any of `extra_instance_extensions` the loader has (the window target
-    /// adds the surface extensions through that).
+    /// Open a physical device — the preferred one ([`prefer_device`], `CUBARIUM_GPU`) when
+    /// present, else the first — with the instance extensions the dma-buf export needs and
+    /// any of `extra_instance_extensions` the loader has (the window target adds the
+    /// surface extensions through that).
     pub fn open(extra_instance_extensions: &[&CStr]) -> Result<Gpu> {
         let entry = unsafe { ash::Entry::load() }.context("load libvulkan.so.1")?;
         let app = vk::ApplicationInfo::default()
@@ -90,8 +109,19 @@ impl Gpu {
         }
         .context("vkCreateInstance")?;
 
-        let pdev = *unsafe { instance.enumerate_physical_devices() }?
-            .first()
+        let pdevs = unsafe { instance.enumerate_physical_devices() }?;
+        let named = |p: &vk::PhysicalDevice| {
+            let props = unsafe { instance.get_physical_device_properties(*p) };
+            unsafe { CStr::from_ptr(props.device_name.as_ptr()) }
+                .to_string_lossy()
+                .to_lowercase()
+        };
+        let pdev = *preferred_device()
+            .and_then(|want| {
+                let want = want.to_lowercase();
+                pdevs.iter().find(|p| named(p).contains(&want))
+            })
+            .or_else(|| pdevs.first())
             .ok_or_else(|| anyhow!("no Vulkan physical device"))?;
         let props = unsafe { instance.get_physical_device_properties(pdev) };
         let name = unsafe { CStr::from_ptr(props.device_name.as_ptr()) }

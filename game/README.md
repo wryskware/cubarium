@@ -18,6 +18,19 @@ This builds `crates/cubarium-godot` (gdext 0.5.5, Godot API 4.7), copies the lib
 `game/.godot/extension_list.cfg` so a headless run loads it without the editor ever having
 opened the project.
 
+## Run the app
+
+```sh
+scripts/run-game.sh            # Godot on the first-listed GPU (the display's); the renderer follows
+```
+
+Godot on its own picks the most powerful GPU, which on a two-GPU desktop is not the one the
+screen is on, so every frame would cross GPUs. The launcher passes `--gpu-index 0`
+(`CUBARIUM_GODOT_GPU` overrides) and asks for Wayland when it's there. The world's renderer
+opens whatever GPU Godot reports (`cubarium_gpu::vk::prefer_device`; `CUBARIUM_GPU=<name>`
+overrides). Agents' hidden captures on Xvfb need `CUBARIUM_GODOT_GPU=1`: the 5080 cannot
+present there.
+
 ## Run headless (no window)
 
 ```sh
