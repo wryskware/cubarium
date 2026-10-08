@@ -19,7 +19,7 @@
 //! The **presenting thread** submits the recorded frame, waits for it, tells the
 //! recorder it has retired, and then does everything the window needs on its own:
 //! acquires a swapchain image, runs the present pass from the raster onto it — the
-//! integer nearest upscale, letterboxed ([`WindowFit`]) — and presents it. Every WSI call
+//! area-filtered fill, aspect kept ([`WindowFit`]) — and presents it. Every WSI call
 //! is on that thread, because on Wayland with NVIDIA a FIFO present to a window that
 //! is on another workspace can block indefinitely: that stops this thread and the
 //! picture, and not the world.
@@ -843,11 +843,7 @@ impl Panel for WindowPanel {
 
 fn describe(swap: &Swapchain, mode: vk::PresentModeKHR) -> String {
     let fit = &swap.fit;
-    let scale = if fit.factor >= 1 {
-        format!("x{} upscale", fit.factor)
-    } else {
-        format!("1/{:.2} nearest downscale", fit.step)
-    };
+    let scale = format!("x{:.3} area-filtered", 1.0 / fit.step);
     format!(
         "swapchain {}x{} {:?} {:?}, {} images; raster {} to {}x{} at ({}, {}), sRGB by {}",
         swap.extent.0,

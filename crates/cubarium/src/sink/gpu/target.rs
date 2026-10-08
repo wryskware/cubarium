@@ -19,9 +19,10 @@ use super::wayland::WaylandWindow;
 pub enum GpuTargetKind {
     /// The board: dma-bufs handed to `cube-screen-shim` over its frame socket.
     Shim,
-    /// The desktop: a window showing the world raster at the largest whole upscale that
-    /// fits — through a swapchain on its own thread for the voxel strip, read back from
-    /// the GPU each frame for the ring (and wherever a swapchain cannot be made).
+    /// The desktop: a window the world raster fills, aspect kept, at any scale (area
+    /// filtered, `cubarium_gpu::present::WindowFit`) through a swapchain on its own
+    /// thread for the voxel strip; read back from the GPU each frame at the largest whole
+    /// upscale for the ring (and wherever a swapchain cannot be made).
     Window,
     /// Render and drop. For measuring the renderer, and for `--gpu-capture`.
     Headless,
