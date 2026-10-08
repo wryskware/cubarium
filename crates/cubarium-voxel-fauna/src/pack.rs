@@ -391,7 +391,7 @@ pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) 
             (entry, steps)
         }
     };
-    if view.water_depth_m(i64::from(den.x), den.y, den.z) > 0.0 {
+    if flooded(view, &phys, &t, den) {
         return false;
     }
     let (_, field) = fauna.den_path(view, founder, m.pack, to);
@@ -412,6 +412,23 @@ pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) 
     true
 }
 
+/// **DEN-FLOOD**: whether standing water on `site` floods a den of a pack lineage `phys`
+/// with table `t`: deeper than [`Pack::den_flood_wade_fraction`] of its adult's wade depth.
+pub(crate) fn flooded(view: &VoxelView<'_>, phys: &crate::FounderPhysiology, t: &Pack, site: Site) -> bool {
+    let limit = t.den_flood_wade_fraction.max(0.0) * phys.wade_depth_m(&phys.adult_body());
+    view.water_depth_m(i64::from(site.x), site.y, site.z) > limit
+}
+
+/// The node adult `a` is on in `graph`: its own face, else the nearest within its disc's
+/// radius, as the trip home finds it ([`must_walk_home`]). A body lying against a wall stands
+/// on a face the disc rule leaves out of the graph; it is still on its range.
+fn anchor_node(fauna: &Fauna, graph: &crate::encounter::RouteGraph, a: &Animal, v: f64) -> Option<usize> {
+    let phys = fauna.config.founder(a.founder?);
+    let r = phys.body_at(a.body).footprint_radius();
+    let cols = if r.is_finite() && v > 0.0 { (r / v).ceil().max(0.0) as u32 } else { 0 };
+    graph.node_near(a.site, (a.pose.x, a.pose.z), cols)
+}
+
 /// An unusable den is replaced by a dry site on the breeder's current walking range.
 pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cubarium_voxel_flora::SpeciesConfig) {
     let records = fauna.packs().to_vec();
@@ -422,9 +439,10 @@ pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cuba
         let mut adults: Vec<Animal> = fauna.animals.iter()
             .filter(|a| a.pack.is_some_and(|m| m.pack == rec.id && !m.pup)).copied().collect();
         adults.sort_by_key(|a| (Some(a.id) != rec.breeder, a.id));
-        let wet = view.water_depth_m(i64::from(rec.den.x), rec.den.y, rec.den.z) > 0.0;
+        let phys = *fauna.config.founder(rec.lineage);
+        let wet = flooded(view, &phys, &t, rec.den);
         let mut graph = fauna.pack_routes(view, rec.lineage);
-        let Some((mut anchor, mut from)) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+        let Some((mut anchor, mut from)) = adults.iter().find_map(|a| anchor_node(fauna, &graph, a, v).map(|i| (*a, i))) else { continue };
         // With no adult on the graph there is no replacement search to run. Keep the
         // normal route refresh cadence instead of rebuilding the whole world every
         // tick for a persistently wet den. Once anchored, a flood still gets a fresh
@@ -432,13 +450,13 @@ pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cuba
         if wet {
             fauna.pack_routes.remove(&rec.lineage.index());
             graph = fauna.pack_routes(view, rec.lineage);
-            let Some(current) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+            let Some(current) = adults.iter().find_map(|a| anchor_node(fauna, &graph, a, v).map(|i| (*a, i))) else { continue };
             (anchor, from) = current;
         }
         if !wet && graph.face(rec.den).is_some_and(|i| graph.components[i] == graph.components[from]) { continue; }
         let den = graph.faces.iter().enumerate()
             .filter(|(i, s)| graph.components[*i] == graph.components[from]
-                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                && !flooded(view, &phys, &t, **s)
                 && distance(&anchor, centre(**s, v).0, centre(**s, v).1, ring) <= t.den_search_m
                 && !trespass(fauna, rec.id, centre(**s, v).0, centre(**s, v).1, &t, v, ring))
             .min_by(|(_, a), (_, b)| crate::den_quality(view, glowcap, **a, &t).compare(crate::den_quality(view, glowcap, **b, &t))
@@ -658,7 +676,7 @@ fn level_step(
         return None;
     }
     let (gx, gz) = graph.centre(goal);
-    if graph.walk_line(from, (a.pose.x, a.pose.z), (gx, gz)) {
+    if graph.walk_line_to(from, (a.pose.x, a.pose.z), (gx, gz), goal) {
         return Some(go_to(a, gx, gz, ring, 0.0, 1.0));
     }
     let own = a.pack?.pack;
@@ -735,11 +753,11 @@ fn route_step(
     let (own_r, _) = node_radii(geometry, h, v);
     let graph = fauna.pack_routes(view, founder);
     let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r)?;
-    if graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
-        return None;
-    }
     // STRIKE: the node it would strike from, on a face whose jaw band meets the prey.
     let target = strike_node(&graph, o, height_of(fauna, o.id), geometry, h, v)?;
+    if graph.walk_line_to(from, (a.pose.x, a.pose.z), goal, target) {
+        return None;
+    }
     let (graph, field) = fauna.pack_path(view, founder, own, target, reach_steps(t, cruise_m_per_s, v));
     route_point(fauna, founder, &graph, &field, from, a)
 }
@@ -1048,7 +1066,7 @@ fn draw_step(
         return by_scent(fauna);
     };
     set(fauna, Some((id, s)), false);
-    if d == 0 || graph.walk_line(from, (a.pose.x, a.pose.z), xy) {
+    if d == 0 || graph.walk_line_to(from, (a.pose.x, a.pose.z), xy, j) {
         return Some(xy);
     }
     // Back along the field from the prey's node to the leader's next node.
@@ -1074,7 +1092,7 @@ fn follow_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, foun
     ) else {
         return (goal_xy, false);
     };
-    if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal_xy) {
+    if from == to || graph.walk_line_to(from, (a.pose.x, a.pose.z), goal_xy, to) {
         return (goal_xy, true);
     }
     let (graph, field) = fauna.pack_path(view, founder, own, to, u32::MAX);
@@ -1407,7 +1425,7 @@ fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -
 /// [`route_go`]). A pup born metres
 /// from the den and an adult going home to rest walked straight at it, down the stair of a
 /// trench whose far riser held them.
-fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, den: Site) -> ((f64, f64), bool) {
+pub(crate) fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, den: Site) -> ((f64, f64), bool) {
     let v = view.config.voxel_m;
     let goal = centre(den, v);
     let Some(own) = a.pack.map(|m| m.pack) else {
@@ -1424,7 +1442,7 @@ fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a:
             geometry.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(geometry), own_r, reach)
             .map_or((goal, false), |(step, _, _)| (centre(step, v), true));
     };
-    if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
+    if from == to || graph.walk_line_to(from, (a.pose.x, a.pose.z), goal, to) {
         return (goal, true);
     }
     let (graph, field) = fauna.den_path(view, founder, own, to);

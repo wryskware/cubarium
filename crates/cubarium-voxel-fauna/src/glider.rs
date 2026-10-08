@@ -1951,7 +1951,7 @@ fn walk_to_stand(
                 if graph.components[goal] != graph.components[from] {
                     continue;
                 }
-                if goal == from || graph.walk_line(from, (a.pose.x, a.pose.z), stem) {
+                if goal == from || graph.walk_line_to(from, (a.pose.x, a.pose.z), stem, goal) {
                     Some(stem)
                 } else {
                     graph.path(from, goal, max_steps).and_then(|p| graph.waypoint(&p, (a.pose.x, a.pose.z), ROUTE_LOOKAHEAD))

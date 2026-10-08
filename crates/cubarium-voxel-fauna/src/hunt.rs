@@ -590,7 +590,7 @@ pub(crate) fn route_from(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> O
 fn waypoint(fauna: &mut Fauna, i: usize, graph: &Arc<RouteGraph>, from: usize, goal: usize, steps: u32) -> (f64, f64) {
     let a = fauna.animals[i];
     let goal_xy = graph.centre(goal);
-    if from == goal || graph.walk_line(from, (a.pose.x, a.pose.z), goal_xy) {
+    if from == goal || graph.walk_line_to(from, (a.pose.x, a.pose.z), goal_xy, goal) {
         return goal_xy;
     }
     let field = fauna.hunt_path(graph, a.id, goal, steps);
