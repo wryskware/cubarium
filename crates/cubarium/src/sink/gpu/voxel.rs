@@ -50,6 +50,7 @@ use crate::voxel::animal::{AnimalPart, Animals, Specimen};
 use crate::voxel::candle::{self, Candle};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
+use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigurePick, FigureTrack, Spec};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
@@ -112,12 +113,34 @@ impl Default for VoxelGpuSinkOptions {
     }
 }
 
+/// Where a sink's frames go: a [`GpuTarget`] (a window, the panel, a headless image), or
+/// [`Offscreen`]: nowhere, for a host that records the renderer's frames itself (the
+/// hosted renderer, which reads its raster back on its own ring).
+pub trait SinkTarget {
+    fn destroy(&mut self, gpu: &Gpu);
+}
+
+impl SinkTarget for GpuTarget {
+    fn destroy(&mut self, gpu: &Gpu) {
+        GpuTarget::destroy(self, gpu);
+    }
+}
+
+/// No target: the renderer's raster alone. Unlike a [`GpuTarget`] (whose window is tied to
+/// its thread) it is `Send`, so a sink with it can move to a presenter thread.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Offscreen;
+
+impl SinkTarget for Offscreen {
+    fn destroy(&mut self, _gpu: &Gpu) {}
+}
+
 /// `cubarium voxel --sink gpu`.
-pub struct VoxelGpuSink {
+pub struct VoxelGpuSink<T: SinkTarget = GpuTarget> {
     /// Shared with the presenting thread, which submits on the same queue.
     gpu: std::sync::Arc<Gpu>,
     renderer: VoxelRenderer,
-    target: GpuTarget,
+    target: T,
     /// Turns a tick's world into texels.
     packer: Packer,
     capture: Option<PathBuf>,
@@ -171,15 +194,38 @@ pub struct VoxelGpuSink {
     present_ms: f64,
     pack_ms: f64,
     capture_ms: f64,
+    // --- the model pass (H2) ---
+    /// The figures between ticks, when animals are drawn as models (`[figures] animals`).
+    figure_track: Option<FigureTrack>,
+    /// The animal drawn highlighted, and how far toward white.
+    figure_highlight: Option<(u64, f32)>,
+    /// The last frame's figures, for picking.
+    figure_pick: Arc<FigurePick>,
+    /// The tick the flat tier last moved its figures at (it moves them at the tick rate).
+    figure_tick: Option<u64>,
+    /// GPU milliseconds of the model pass over the frames that drew it, and those frames.
+    figure_ms: f64,
+    figure_frames: u64,
 }
 
-impl VoxelGpuSink {
-    /// Open the device and build the renderer for this world and projection.
-    pub fn new(
+impl VoxelGpuSink<Offscreen> {
+    /// A sink with no target, for a host that records and reads back the renderer's frames
+    /// itself ([`hosted`]).
+    pub fn offscreen(cfg: &VoxelConfig, proj: Projection, models: Option<Arc<ModelLibrary>>) -> Result<Self> {
+        let options = VoxelGpuSinkOptions { target: GpuTargetKind::Headless, models, ..Default::default() };
+        Self::build(cfg, proj, options, |_, _| Ok(Offscreen))
+    }
+}
+
+impl<T: SinkTarget> VoxelGpuSink<T> {
+    /// Open the device and build the renderer for this world and projection, its frames
+    /// going to the target `open` makes.
+    fn build(
         cfg: &VoxelConfig,
         proj: Projection,
         options: VoxelGpuSinkOptions,
-    ) -> Result<VoxelGpuSink> {
+        open: impl FnOnce(&std::sync::Arc<Gpu>, &mut VoxelRenderer) -> Result<T>,
+    ) -> Result<Self> {
         let params = params_of(cfg, proj, options.roof_from_texture);
         let gpu = std::sync::Arc::new(
             Gpu::open(options.target.instance_extensions())
@@ -193,16 +239,7 @@ impl VoxelGpuSink {
         let textures = load_textures(cfg, options.textures_under.as_deref(), &params);
         let species = SpeciesFaces::of(&textures);
         let mut renderer = VoxelRenderer::new(&gpu, params, &textures)?;
-        // The panel is presented on its own thread: the queue submit and the fence wait
-        // are 8 ms the run loop has better things to do with. Every other target is
-        // unchanged (`sink/gpu/target.rs`).
-        let target = GpuTarget::open(
-            options.target,
-            &gpu,
-            &mut renderer,
-            "cubarium — voxel strip (GPU)",
-            true,
-        )?;
+        let target = open(&gpu, &mut renderer)?;
         let mut packer = Packer {
             specimens: options.specimens.clone(),
             ..Packer::new(
@@ -215,8 +252,16 @@ impl VoxelGpuSink {
         };
         packer.animals.set_hunker_s(cfg.hunker_s);
         packer.animals.set_meal_flash(cfg.meal_flash);
+        let models_on = cfg.figures.animals == AnimalDraw::Models;
+        packer.figures = models_on;
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
         Ok(VoxelGpuSink {
+            figure_track: models_on.then(|| FigureTrack::new(cfg.figures.clone(), params.width)),
+            figure_highlight: None,
+            figure_pick: Arc::new(FigurePick::default()),
+            figure_tick: None,
+            figure_ms: 0.0,
+            figure_frames: 0,
             gpu,
             renderer,
             target,
@@ -255,7 +300,7 @@ impl VoxelGpuSink {
     }
 
     /// Feed `web` from this renderer's own readback, at most `rate` times a second.
-    pub fn with_web(mut self, web: WebSink, rate: f64) -> VoxelGpuSink {
+    pub fn with_web(mut self, web: WebSink, rate: f64) -> Self {
         if rate.is_finite() && rate > 0.0 {
             self.web = Some((web, 1.0 / rate));
         }
@@ -279,24 +324,7 @@ impl VoxelGpuSink {
         self.renderer.read_raster(&self.gpu)
     }
 
-    /// A measurement/capture target at an exact output size, pixels. Set before the
-    /// first frame; its normal presentation pass is included in the render wall time.
-    pub fn set_headless_size(&mut self, size: (u32, u32)) -> Result<()> {
-        anyhow::ensure!(self.frames == 0 && matches!(self.target, GpuTarget::Headless(_)),
-            "set_headless_size needs a headless sink before its first frame");
-        let sized = cubarium_gpu::target::Headless::with_size(&self.gpu, &self.renderer, size)?;
-        self.target.destroy(&self.gpu);
-        self.target = GpuTarget::Headless(Box::new(sized));
-        Ok(())
-    }
 
-    /// The sized headless attachment, including its letterbox, as sRGB RGBA8.
-    pub fn read_headless_output(&self) -> Result<Vec<u8>> {
-        match &self.target {
-            GpuTarget::Headless(target) => target.read_output(&self.gpu, &self.renderer),
-            _ => anyhow::bail!("read_headless_output needs a headless sink"),
-        }
-    }
 
     /// Pack one tick's world into the renderer's staging buffer. Call it whenever the
     /// world or the plant layer has moved — a tick, or a stdin command that changed a
@@ -352,6 +380,18 @@ impl VoxelGpuSink {
             if let Err(e) = self.restore_sky() {
                 eprintln!("cubarium voxel: restoring the sky after founding: {e:#}");
             }
+        }
+        if let Some(track) = &mut self.figure_track {
+            let (first, cells) = self.packer.figure_models.pending();
+            if !cells.is_empty() {
+                if !self.renderer.put_figure_models(first, cells) {
+                    eprintln!("cubarium voxel: the model pass is full; new animal models are not drawn");
+                }
+                self.packer.figure_models.uploaded();
+            }
+            track.push(view.tick, &self.packer.figure_specs, self.clock_s);
+            // The flat tier moves its figures at the next tick's clock.
+            self.figure_tick = None;
         }
         let packer = &mut self.packer;
         lap!("sunvis");
@@ -425,6 +465,55 @@ impl VoxelGpuSink {
         if let Some(c) = self.packer.candle {
             self.renderer.set_emit_gains(&candle_gains(Some(c), self.clock_s));
         }
+        self.move_figures(tick as f64 + fraction.clamp(0.0, 1.0));
+    }
+
+    /// The figures at clock `t` (ticks) to the renderer, and to picking. The lit tier moves
+    /// them every frame; the flat tier, which redraws at the tick rate, once a tick.
+    fn move_figures(&mut self, t: f64) {
+        let Some(track) = &mut self.figure_track else { return };
+        let p = self.renderer.params();
+        if !p.lit {
+            let tick = t.floor() as u64;
+            if self.figure_tick == Some(tick) {
+                return;
+            }
+            self.figure_tick = Some(tick);
+        }
+        let (frame, figures) = track.frame(t, self.figure_highlight, &self.packer.figure_models);
+        self.renderer.set_figures(frame);
+        self.figure_pick = Arc::new(FigurePick {
+            s: p.s,
+            rise: p.rise,
+            base: p.base,
+            width: p.width,
+            figures,
+            voxels: self.packer.figure_models.voxels(),
+        });
+    }
+
+    /// Whether animals are drawn as models (`[figures] animals = "models"`).
+    pub fn figures_on(&self) -> bool {
+        self.figure_track.is_some()
+    }
+
+    /// Draw animal `id` leaning `mix` toward white (the model pass's highlight), from the
+    /// next clock on.
+    pub fn set_figure_highlight(&mut self, highlight: Option<(u64, f32)>) {
+        if highlight != self.figure_highlight {
+            self.figure_highlight = highlight;
+            self.figure_tick = None;
+        }
+    }
+
+    /// The last frame's figures, for picking.
+    pub fn figure_pick(&self) -> Arc<FigurePick> {
+        self.figure_pick.clone()
+    }
+
+    /// The model pass's mean GPU milliseconds over the frames that drew it, and how many.
+    pub fn figure_gpu(&self) -> (f64, u64) {
+        (self.figure_ms / self.figure_frames.max(1) as f64, self.figure_frames)
     }
 
     /// Capture-only: draw the lit tier's derived water flow field over the water instead
@@ -509,12 +598,6 @@ impl VoxelGpuSink {
         self.packer.cover_override = draws;
     }
 
-    /// What the panel has actually been shown, where the target knows: presented frames
-    /// and frames the loop had nowhere to put. `None` when every frame drawn is
-    /// presented, which is every target but the panel's presenting thread.
-    pub fn presented(&self) -> Option<(u64, u64)> {
-        self.target.presented()
-    }
 
     /// What this sink has spent, cumulatively: packing ticks, and drawing frames. The
     /// run loop prints the difference between two of these.
@@ -528,34 +611,7 @@ impl VoxelGpuSink {
         (self.frames, self.gpu_stages)
     }
 
-    /// Where a present's time went over the last `seconds`, and what never became one.
-    ///
-    /// **This is the line that says what the panel's ceiling is.** Each phase is per
-    /// present, so they sum to the interval the thread had per frame: mostly idle means
-    /// this thread is not the ceiling; mostly fence means the GPU; mostly submit means a
-    /// driver that renders on the calling thread; mostly slots means the daemon's pacing.
-    /// The redraw-versus-re-present split says whether it is the world pass or the
-    /// upscale onto the panel.
-    pub fn presenter_line(&mut self, seconds: f64) -> Option<String> {
-        let mut now = self.target.sample()?;
-        now.refused_packs = self.packs_skipped;
-        let since = now.since(&self.presenter_mark);
-        self.presenter_mark = now;
-        Some(since.line(seconds, &self.gpu.name))
-    }
 
-    /// Draw one frame of whatever was last staged, and present it.
-    /// Draw the founding frame: whatever is staged — an empty world, before the real one
-    /// exists — under a sky at [`crate::voxel::present::founding_pulse`]'s brightness.
-    ///
-    /// The uniform block is the only thing that moves, so this costs one buffer write and
-    /// the same draw every other frame pays.
-    pub fn founding(&mut self, seconds: f64) -> Result<()> {
-        self.founding_since
-            .get_or_insert_with(|| Instant::now() - Duration::from_secs_f64(seconds.max(0.0)));
-        self.pulse(seconds)?;
-        self.render()
-    }
 
     /// Dim the sky to the founding pulse at `seconds`.
     fn pulse(&mut self, seconds: f64) -> Result<()> {
@@ -591,39 +647,6 @@ impl VoxelGpuSink {
         Ok(())
     }
 
-    pub fn render(&mut self) -> Result<()> {
-        if self.awaiting_light
-            && let Some(since) = self.founding_since
-        {
-            self.pulse(since.elapsed().as_secs_f64())?;
-        }
-        if let Some(sv) = &mut self.sunvis {
-            sv.frame(self.clock_s, self.renderer.params().sun, &mut self.renderer);
-        }
-        let started = Instant::now();
-        let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;
-        self.frames += 1;
-        if !self.renderer.redrew_last() {
-            self.reshown += 1;
-        }
-        self.gpu_ms += ms;
-        if let Some(split) = self.renderer.gpu_split(&self.gpu) {
-            for (acc, stage) in self.gpu_stages.iter_mut().zip(split) {
-                *acc += stage;
-            }
-        }
-        self.present_ms += (Instant::now() - started).as_secs_f64() * 1e3;
-        if let Some(dir) = &self.capture {
-            let at = Instant::now();
-            let p = self.renderer.params();
-            let rgba = self.renderer.read_raster(&self.gpu)?;
-            let path = dir.join(format!("voxel-gpu-{:06}.png", self.frames));
-            cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
-            self.capture_ms += (Instant::now() - at).as_secs_f64() * 1e3;
-        }
-        self.feed_web()?;
-        Ok(())
-    }
 
     /// Hand the viewer this frame if enough time has passed since the last one.
     fn feed_web(&mut self) -> Result<()> {
@@ -656,6 +679,118 @@ impl VoxelGpuSink {
         }
         self.web_frames += 1;
         self.web_ms += (Instant::now() - now).as_secs_f64() * 1e3;
+        Ok(())
+    }
+
+
+
+}
+
+impl VoxelGpuSink<GpuTarget> {
+    /// Open the device and build the renderer for this world and projection.
+    pub fn new(cfg: &VoxelConfig, proj: Projection, options: VoxelGpuSinkOptions) -> Result<VoxelGpuSink> {
+        let kind = options.target;
+        // The panel is presented on its own thread: the queue submit and the fence wait
+        // are 8 ms the run loop has better things to do with. Every other target is
+        // unchanged (`sink/gpu/target.rs`).
+        Self::build(cfg, proj, options, |gpu, renderer| {
+            GpuTarget::open(kind, gpu, renderer, "cubarium — voxel strip (GPU)", true)
+        })
+    }
+
+    /// A measurement/capture target at an exact output size, pixels. Set before the
+    /// first frame; its normal presentation pass is included in the render wall time.
+    pub fn set_headless_size(&mut self, size: (u32, u32)) -> Result<()> {
+        anyhow::ensure!(self.frames == 0 && matches!(self.target, GpuTarget::Headless(_)),
+            "set_headless_size needs a headless sink before its first frame");
+        let sized = cubarium_gpu::target::Headless::with_size(&self.gpu, &self.renderer, size)?;
+        self.target.destroy(&self.gpu);
+        self.target = GpuTarget::Headless(Box::new(sized));
+        Ok(())
+    }
+
+    /// The sized headless attachment, including its letterbox, as sRGB RGBA8.
+    pub fn read_headless_output(&self) -> Result<Vec<u8>> {
+        match &self.target {
+            GpuTarget::Headless(target) => target.read_output(&self.gpu, &self.renderer),
+            _ => anyhow::bail!("read_headless_output needs a headless sink"),
+        }
+    }
+
+    /// What the panel has actually been shown, where the target knows: presented frames
+    /// and frames the loop had nowhere to put. `None` when every frame drawn is
+    /// presented, which is every target but the panel's presenting thread.
+    pub fn presented(&self) -> Option<(u64, u64)> {
+        self.target.presented()
+    }
+
+    /// Where a present's time went over the last `seconds`, and what never became one.
+    ///
+    /// **This is the line that says what the panel's ceiling is.** Each phase is per
+    /// present, so they sum to the interval the thread had per frame: mostly idle means
+    /// this thread is not the ceiling; mostly fence means the GPU; mostly submit means a
+    /// driver that renders on the calling thread; mostly slots means the daemon's pacing.
+    /// The redraw-versus-re-present split says whether it is the world pass or the
+    /// upscale onto the panel.
+    pub fn presenter_line(&mut self, seconds: f64) -> Option<String> {
+        let mut now = self.target.sample()?;
+        now.refused_packs = self.packs_skipped;
+        let since = now.since(&self.presenter_mark);
+        self.presenter_mark = now;
+        Some(since.line(seconds, &self.gpu.name))
+    }
+
+    /// Draw one frame of whatever was last staged, and present it.
+    /// Draw the founding frame: whatever is staged — an empty world, before the real one
+    /// exists — under a sky at [`crate::voxel::present::founding_pulse`]'s brightness.
+    ///
+    /// The uniform block is the only thing that moves, so this costs one buffer write and
+    /// the same draw every other frame pays.
+    pub fn founding(&mut self, seconds: f64) -> Result<()> {
+        self.founding_since
+            .get_or_insert_with(|| Instant::now() - Duration::from_secs_f64(seconds.max(0.0)));
+        self.pulse(seconds)?;
+        self.render()
+    }
+
+    pub fn render(&mut self) -> Result<()> {
+        if self.awaiting_light
+            && let Some(since) = self.founding_since
+        {
+            self.pulse(since.elapsed().as_secs_f64())?;
+        }
+        if let Some(sv) = &mut self.sunvis {
+            sv.frame(self.clock_s, self.renderer.params().sun, &mut self.renderer);
+        }
+        let started = Instant::now();
+        let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;
+        self.frames += 1;
+        if !self.renderer.redrew_last() {
+            self.reshown += 1;
+        }
+        self.gpu_ms += ms;
+        if let Some(split) = self.renderer.gpu_split(&self.gpu) {
+            for (acc, stage) in self.gpu_stages.iter_mut().zip(split) {
+                *acc += stage;
+            }
+        }
+        if self.figure_track.is_some()
+            && self.renderer.redrew_last()
+            && let Some(ms) = self.renderer.figure_gpu_ms(&self.gpu)
+        {
+            self.figure_ms += ms;
+            self.figure_frames += 1;
+        }
+        self.present_ms += (Instant::now() - started).as_secs_f64() * 1e3;
+        if let Some(dir) = &self.capture {
+            let at = Instant::now();
+            let p = self.renderer.params();
+            let rgba = self.renderer.read_raster(&self.gpu)?;
+            let path = dir.join(format!("voxel-gpu-{:06}.png", self.frames));
+            cubarium_gpu::target::write_png(&path, p.raster_w, p.raster_h, &rgba)?;
+            self.capture_ms += (Instant::now() - at).as_secs_f64() * 1e3;
+        }
+        self.feed_web()?;
         Ok(())
     }
 
@@ -700,6 +835,14 @@ impl VoxelGpuSink {
                 "a column walk in the shader"
             },
         );
+        if self.figure_track.is_some() {
+            let (ms, n) = self.figure_gpu();
+            eprintln!(
+                "cubarium voxel --sink gpu: model pass {ms:.3} GPU ms/frame over {n} frames; \
+                 {} tiles had no room in the atlas",
+                self.renderer.figures_dropped()
+            );
+        }
         if self.capture.is_some() {
             eprintln!(
                 "cubarium voxel --sink gpu: captures cost {:.2} ms/frame (readback + PNG)",
@@ -742,7 +885,7 @@ impl VoxelGpuSink {
     }
 }
 
-impl Drop for VoxelGpuSink {
+impl<T: SinkTarget> Drop for VoxelGpuSink<T> {
     fn drop(&mut self) {
         self.target.destroy(&self.gpu);
         self.renderer.destroy(&self.gpu);
@@ -778,6 +921,13 @@ struct Packer {
     animals: Animals,
     /// The baked voxel models, or `None` for the dev-mode glyphs.
     models: Option<Arc<ModelLibrary>>,
+    /// Animals drawn as models by the model pass (H2) rather than stamped here: the grid
+    /// then holds carcasses and specimens alone, and the animals become `figure_specs`.
+    figures: bool,
+    figure_models: FigureModels,
+    figure_specs: Vec<Spec>,
+    /// This tick's emitting figure cells, for the glow volume.
+    figure_emitters: Vec<((u32, u32, u32), [f32; 3])>,
     /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
     specimens: Vec<Specimen>,
     /// The GPU style table: one slot per style some texel draws with.
@@ -1006,6 +1156,10 @@ impl Packer {
             incremental: true,
             animals,
             models,
+            figures: false,
+            figure_models: FigureModels::default(),
+            figure_specs: Vec::new(),
+            figure_emitters: Vec::new(),
             specimens: Vec::new(),
             palette: Palette::new(),
             species,
@@ -1172,16 +1326,34 @@ impl Packer {
             Some(lib) => {
                 self.stands.rebuild_with(view, flora, lib);
                 lap!("stands");
-                self.animals.rebuild_with(view, Some(fauna), lib);
+                if self.figures {
+                    self.animals.rebuild_without_living(view, fauna);
+                } else {
+                    self.animals.rebuild_with(view, Some(fauna), lib);
+                }
                 self.animals.stamp_specimens(view, lib, &self.specimens);
             }
             None => {
                 self.stands.rebuild(view, flora);
-                self.animals.rebuild(view, Some(fauna));
+                if self.figures {
+                    self.animals.rebuild_without_living(view, fauna);
+                } else {
+                    self.animals.rebuild(view, Some(fauna));
+                }
             }
         }
         self.animals.stamp_carcasses(view, &flora, fauna.config);
         lap!("animals");
+        if self.figures {
+            figure::specs(&self.animals, view, fauna, self.models.as_deref(), &mut self.figure_models, &mut self.figure_specs);
+            self.figure_emitters.clear();
+            if self.light.as_ref().is_some_and(|l| l.emission.on) {
+                let c = view.config;
+                self.figure_emitters =
+                    figure::emitters(&self.figure_models, &self.figure_specs, c.width, c.height, c.depth);
+            }
+            lap!("figures");
+        }
         self.candle_class.clear();
         if let Some(c) = self.candle {
             self.candle_class.extend(flora.stands.iter().map(|s| {
@@ -1266,6 +1438,7 @@ impl Packer {
                         l,
                         stands,
                         &self.animals,
+                        &self.figure_emitters,
                         &self.vines,
                         &self.candle_class,
                         incremental,
@@ -1291,6 +1464,7 @@ impl Packer {
                         let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
                         Some(((x, y, z), rgb))
                     }));
+                    l.emitters.extend_from_slice(&self.figure_emitters);
                     for c in self.vines.iter().filter(|c| c.kind.tiled()) {
                         if let Some(rgb) = colours::vine_emission(c.accent) {
                             l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
@@ -1319,6 +1493,7 @@ impl Packer {
         l: &mut LightPlanes,
         stands: &Stands,
         animals: &Animals,
+        figures: &[((u32, u32, u32), [f32; 3])],
         vines: &[VineCell],
         class: &[u8],
         incremental: bool,
@@ -1358,6 +1533,7 @@ impl Packer {
                 let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
                 Some(((x, y, z), 0u8, rgb))
             })
+            .chain(figures.iter().map(|&(v, rgb)| (v, 0u8, rgb)))
             .collect();
         // The grids see the emitters again only when some source moved.
         if moved || !incremental || vines_moved || beasts != l.animal_emitters {
@@ -1897,13 +2073,10 @@ fn pore_byte(pore: f64) -> u8 {
     (v * 255.0 + 0.5) as u8
 }
 
-/// A slice of materials as its bytes, for a fast whole-terrain compare.
-#[allow(unsafe_code)] // Audited: reinterprets a `#[repr(u8)]` enum slice as its bytes.
+/// A slice of materials as its bytes, for a fast whole-terrain compare (`Material` is a
+/// one-byte fieldless enum: `bytemuck::NoUninit`).
 fn material_bytes(m: &[Material]) -> &[u8] {
-    const _: () = assert!(std::mem::size_of::<Material>() == 1);
-    // SAFETY: `Material` is a one-byte fieldless enum, so every value is one initialised
-    // byte.
-    unsafe { std::slice::from_raw_parts(m.as_ptr().cast::<u8>(), m.len()) }
+    bytemuck::cast_slice(m)
 }
 
 /// One voxel's texel: its material and water, and whatever part stands in it. `mats` is

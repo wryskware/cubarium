@@ -587,6 +587,7 @@ name = "cubarium"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "chrono",
  "clap",
  "ctrlc",
@@ -743,6 +744,7 @@ name = "cubarium-voxel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "cubarium-rules",
  "png",
  "postcard",

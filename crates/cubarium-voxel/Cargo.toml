@@ -18,6 +18,8 @@ parallel = ["cubarium-rules/par", "dep:rayon"]
 
 [dependencies]
 anyhow = { workspace = true }
+# `Material` as bytes for a whole-terrain compare (`bytemuck::NoUninit`), with no `unsafe`.
+bytemuck = { version = "1", features = ["derive"] }
 cubarium-rules = { workspace = true }
 # The overlapped tick's water copy-back (`World::restore_water_from`), on the water pool.
 rayon = { version = "1", optional = true }

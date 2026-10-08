@@ -49,6 +49,7 @@ pub mod chiplet;
 pub mod hunker;
 pub mod idle;
 pub mod colours;
+pub mod figure;
 pub mod model;
 pub mod patches;
 pub mod placement;
@@ -204,6 +205,10 @@ pub struct VoxelConfig {
     /// `animal::MEAL_FLASH_FADE_S` once the animal starts cropping and back out after; 0
     /// turns it off. Presentation only.
     pub meal_flash: f32,
+    /// **How the GPU renderer draws animals** (`[figures]`, H2): as models in its model
+    /// pass, moving and turning smoothly between ticks (the default), or stamped into the
+    /// world's voxels as before. Presentation only.
+    pub figures: figure::FigureConfig,
     /// **Seconds a plant takes to cross-fade from one foliage state to the next**
     /// (`design/handoffs/foliage-states-implementation-2026-10-08.md`): cells the two
     /// states share stay, the outgoing state's other cells drop and the incoming state's
@@ -244,6 +249,7 @@ impl Default for VoxelConfig {
             light: LightConfig::default(),
             hunker_s: hunker::DEFAULT_S,
             meal_flash: animal::MEAL_FLASH_DEFAULT,
+            figures: figure::FigureConfig::default(),
             foliage_fade_s: stand::FOLIAGE_FADE_S,
             serve: None,
             sim: SimParams::default(),

@@ -628,7 +628,7 @@ impl Renderer {
         unsafe {
             std::ptr::copy_nonoverlapping(
                 bytes.as_ptr(),
-                self.scratch_staging.ptr.add(offset as usize),
+                self.scratch_staging.ptr().add(offset as usize),
                 bytes.len(),
             )
         };
