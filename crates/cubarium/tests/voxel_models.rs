@@ -145,6 +145,7 @@ fn tag_key(t: Tag) -> (u8, u8) {
         Tag::Foliage(i) => (1, i),
         Tag::Drape(i) => (2, i),
         Tag::Accent => (3, 0),
+        Tag::Fallen(i) => (4, i),
     }
 }
 
@@ -268,11 +269,12 @@ fn a_stand_stamps_its_model_on_the_cell_above_its_support_face() {
                 height_m: STEP_M * f64::from(k),
                 radius_m: 0.5,
                 variants: vec![cells],
+                ..Default::default()
             }
         })
         .collect();
     let mut lib = ModelLibrary::default();
-    lib.insert_plant(sp, PlantModel { steps });
+    lib.insert_plant(sp, PlantModel { steps, ..Default::default() });
 
     let view = w.view();
     let mut stands = Stands::empty(32, 16, 4);
@@ -617,7 +619,9 @@ fn a_browsed_layer_empties_on_the_model_while_the_crown_stays_full() {
                 height_m,
                 radius_m: 0.25,
                 variants: vec![cells],
+                ..Default::default()
             }],
+            ..Default::default()
         },
     );
 
@@ -668,8 +672,10 @@ fn stepped() -> PlantModel {
                 variants: (0..3u8)
                     .map(|v| vec![mc([0, 0, 0], 10 * s + v, Tag::Trunk)])
                     .collect(),
+                ..Default::default()
             })
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -699,7 +705,7 @@ fn the_nearest_height_step_is_chosen_and_a_tie_goes_to_the_taller_step() {
         assert_eq!(step_of(h), want, "height {h} m");
     }
     assert!(
-        PlantModel { steps: Vec::new() }.select(0.3, 5).is_none(),
+        PlantModel { steps: Vec::new(), ..Default::default() }.select(0.3, 5).is_none(),
         "no steps, no model: the presenter falls back"
     );
 }
@@ -758,7 +764,9 @@ fn a_species_with_no_model_draws_exactly_what_parts_of_draws() {
                 height_m: 2.0,
                 radius_m: 0.75,
                 variants: vec![vec![mc([0, 0, 0], 1, Tag::Trunk)]],
+                ..Default::default()
             }],
+            ..Default::default()
         },
     );
 

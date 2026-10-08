@@ -423,6 +423,27 @@ pub struct Stands {
     /// The change-only rebuild's state ([`Stands::set_incremental`]), or `None` for the
     /// full rebuild every tick.
     inc: Option<Box<delta::Inc>>,
+    /// **Foliage states**: each stand of a species with states, by id, its drawn state and
+    /// cross-fade ([`model::FoliageTrack`]) and the rebuild that last advanced it. A stand
+    /// not seen for a rebuild is forgotten, and starts settled if it comes back.
+    foliage: rustc_hash::FxHashMap<u64, (model::FoliageTrack, u64)>,
+    /// This rebuild's number, for `foliage`.
+    foliage_gen: u64,
+    /// When the last rebuild advanced the fades (the film's clock), and the seconds since.
+    fade_clock: Option<std::time::Instant>,
+    fade_dt: f64,
+    /// Seconds a fade between two foliage states takes ([`Stands::set_foliage_fade_s`]).
+    fade_s: f64,
+}
+
+/// [`Stands::set_foliage_fade_s`]'s default: `VoxelConfig::foliage_fade_s`'s.
+pub const FOLIAGE_FADE_S: f64 = 2.0;
+
+/// A stand's **total** foliage fraction: its foliage over the capacity its wood carries
+/// (`alpha · wood`), what picks its foliage state; 0 with no capacity.
+pub fn total_foliage_fraction(stand: &Stand, sc: &cubarium_voxel_flora::SpeciesConfig) -> f64 {
+    let cap = sc.alpha * stand.wood.max(0.0);
+    if cap > 0.0 { stand.foliage / cap } else { 0.0 }
 }
 
 #[path = "stand_delta.rs"]
@@ -449,6 +470,17 @@ struct ModelInputs {
     fruit: bool,
     lip: colours::Lip,
     anchor: Cell,
+    /// The foliage state drawn, for a species with states; `None` thins by layer.
+    state: Option<StateDraw>,
+}
+
+/// What a stand of a species with foliage states draws: its model's step and variant (the
+/// ones [`model::PlantModel::pick_sized`] picks) and its state's track.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StateDraw {
+    step: usize,
+    variant: usize,
+    track: model::FoliageTrack,
 }
 
 /// Which existing part a model cell is drawn as, so it takes that part's lighting.
@@ -492,6 +524,8 @@ impl ModelKey {
             Tag::Foliage(_) => 1,
             Tag::Drape(_) => 2,
             Tag::Accent => 3,
+            // Stamped as foliage ([`Stands::stamp_model`]); never a key of its own.
+            Tag::Fallen(_) => 1,
         };
         // A hand-built test model's out-of-palette material paints as the first entry.
         let material = usize::from(self.material).min(Self::MATERIALS - 1);
@@ -604,7 +638,18 @@ impl Stands {
             film_now: None,
             collect: None,
             inc: None,
+            foliage: rustc_hash::FxHashMap::default(),
+            foliage_gen: 0,
+            fade_clock: None,
+            fade_dt: 0.0,
+            fade_s: FOLIAGE_FADE_S,
         }
+    }
+
+    /// Seconds a stand takes to cross-fade between two foliage states (`0`: at once). A
+    /// negative or NaN value is taken as 0.
+    pub fn set_foliage_fade_s(&mut self, seconds: f64) {
+        self.fade_s = if seconds > 0.0 { seconds } else { 0.0 };
     }
 
     /// Rebuild only what changed from the next rebuild on ([`delta`]): each stand, mark
@@ -773,12 +818,15 @@ impl Stands {
         lib: Option<&ModelLibrary>,
     ) {
         let c = view.config;
+        self.advance_fade_clock();
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
             let (vine_cells, cover_override) = (self.vine_cells, self.cover_override.take());
             let owners = !self.owner.is_empty();
             let emission = self.emission;
             let (incremental, film_now) = (self.inc.is_some(), self.film_now);
+            let fade_s = self.fade_s;
             *self = Stands::empty(c.width, c.height, c.depth);
+            self.fade_s = fade_s;
             self.vine_cells = vine_cells;
             self.emission = emission;
             self.cover_override = cover_override;
@@ -808,9 +856,9 @@ impl Stands {
             self.placing = k as u32 + 1;
             let moved = as_drawn(view, flora, stand);
             let stand = moved.as_ref().unwrap_or(stand);
-            if let Some(cells) = lib.and_then(|lib| model_cells(lib, flora, stand)) {
-                let over = lib.and_then(|lib| over_cells(lib, flora, stand));
-                if !self.stamp_model(view, flora, stand, cells, over) {
+            if let Some((lib, cells)) = lib.and_then(|lib| model_cells(lib, flora, stand).map(|c| (lib, c))) {
+                let over = over_cells(lib, flora, stand);
+                if !self.stamp_model(view, lib, flora, stand, cells, over) {
                     break;
                 }
                 continue;
@@ -972,7 +1020,8 @@ impl Stands {
     }
 
     /// What a stand's model stamp reads of the stand, beside its model's cells.
-    fn model_inputs(&self, flora: FloraView<'_>, stand: &Stand) -> ModelInputs {
+    fn model_inputs(&mut self, lib: &ModelLibrary, flora: FloraView<'_>, stand: &Stand) -> ModelInputs {
+        let state = self.foliage_state(lib, flora, stand);
         let sc = flora.config.species(stand.species);
         let foliage = cubarium_session::view_state::foliage_fractions(stand, sc);
         let wilt = model::wilt_level(stand.moisture);
@@ -1011,14 +1060,75 @@ impl Stands {
             fruit,
             lip,
             anchor,
+            state,
         }
+    }
+
+    /// Advance the foliage fades' clock one rebuild: the film's clock
+    /// ([`Stands::set_film_now`]), so a capture fades on its own frames. Also forgets the
+    /// stands the last rebuild did not see.
+    fn advance_fade_clock(&mut self) {
+        let now = self.film_clock_now();
+        self.fade_dt = match self.fade_clock.replace(now) {
+            None => 0.0,
+            Some(then) => now.saturating_duration_since(then).as_secs_f64(),
+        };
+        let last = self.foliage_gen;
+        self.foliage.retain(|_, (_, seen)| *seen == last);
+        self.foliage_gen += 1;
+    }
+
+    /// The foliage state `stand` draws this rebuild, or `None` for a species without
+    /// states: one whose model carries a single state or whose config names no threshold
+    /// (`SpeciesConfig::foliage_state_below`). The state follows the stand's **total**
+    /// foliage fraction ([`total_foliage_fraction`]) with the species' hysteresis
+    /// ([`model::next_state`]) and moves by a cross-fade over [`Stands::set_foliage_fade_s`]
+    /// on the frame clock ([`model::FoliageTrack::advance`]). Advanced once per rebuild, so
+    /// asking twice in one rebuild gives the same answer. A stand seen for the first time
+    /// starts settled in the state its fraction picks.
+    fn foliage_state(&mut self, lib: &ModelLibrary, flora: FloraView<'_>, stand: &Stand) -> Option<StateDraw> {
+        let model = lib.plant(stand.species)?;
+        let sc = flora.config.species(stand.species);
+        let n = model.state_count().min(sc.foliage_state_below.len() + 1);
+        if n < 2 {
+            return None;
+        }
+        let below = &sc.foliage_state_below[..n - 1];
+        let (step, variant) = model.pick_sized(
+            sc.crown_height_m_at(stand.wood),
+            sc.crown_radius_m_at(stand.wood),
+            stand.id,
+        )?;
+        let f = total_foliage_fraction(stand, sc);
+        let this = self.foliage_gen;
+        let (dt, fade_s) = (self.fade_dt, self.fade_s);
+        let fresh = || (model::FoliageTrack::settled(model::state_at(f, below) as u8), this);
+        let entry = self.foliage.entry(stand.id).or_insert_with(fresh);
+        if usize::from(entry.0.from.max(entry.0.to)) >= n {
+            *entry = fresh();
+        }
+        if entry.1 != this {
+            let aim = model::next_state(usize::from(entry.0.state()), f, below, sc.foliage_state_hysteresis);
+            entry.0.advance(aim as u8, dt, fade_s);
+            entry.1 = this;
+        }
+        Some(StateDraw {
+            step,
+            variant,
+            track: entry.0,
+        })
     }
 
     /// Stamp one stand's model cells. False when the styles would alias (the strip's
     /// 65 535-style cap), which stops the stand loop as the glyph path does.
+    ///
+    /// `cells` is the stand's model at its step and variant in the full state. A species
+    /// with foliage states draws the state its track names ([`Stands::foliage_state`]),
+    /// whole: no layer thins it. Mid-fade it draws [`model::fade_cells`] of the two.
     fn stamp_model(
         &mut self,
         view: &VoxelView<'_>,
+        lib: &ModelLibrary,
         flora: FloraView<'_>,
         stand: &Stand,
         cells: &[ModelCell],
@@ -1031,9 +1141,25 @@ impl Stands {
             fruit,
             lip,
             anchor,
-        } = self.model_inputs(flora, stand);
+            state,
+        } = self.model_inputs(lib, flora, stand);
         // The model's highest cell: each cell's colour comes from its height in the model.
+        // Read off the full state, so a cell keeps its colour across the states.
         let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
+        let faded;
+        let (cells, foliage): (&[ModelCell], &[f64]) = match state {
+            None => (cells, &foliage[..]),
+            Some(sd) => {
+                let step = lib.plant(stand.species).map(|m| &m.steps[sd.step]);
+                let at = |k: u8| step.and_then(|st| st.cells(sd.variant, usize::from(k))).unwrap_or(cells);
+                if sd.track.is_fading() {
+                    faded = model::fade_cells(at(sd.track.from), at(sd.track.to), stand.id, sd.track.blend);
+                    (&faded[..], &[][..])
+                } else {
+                    (at(sd.track.to), &[][..])
+                }
+            }
+        };
         // The plant beneath: the top plant's trunk cells (it shares this anchor), and the
         // beneath plant's own cells outside them, so a cell moved in front of the trunk
         // never lands on one the model already draws.
@@ -1075,10 +1201,15 @@ impl Stands {
                 }
                 front
             };
-            let band = colours::band(m.offset[1], top);
-            let (tint, shown, part) = match m.tag {
+            // A fallen foliage cell is that layer's foliage at the top of its ramp: on the
+            // ground it would otherwise take the ramp's dark base.
+            let (tag, band) = match m.tag {
+                Tag::Fallen(i) => (Tag::Foliage(i), colours::BANDS - 1),
+                t => (t, colours::band(m.offset[1], top)),
+            };
+            let (tint, shown, part) = match tag {
                 Tag::Trunk => (0, true, PartKind::Trunk),
-                Tag::Foliage(_) | Tag::Drape(_) => (wilt, true, PartKind::Crown),
+                Tag::Foliage(_) | Tag::Drape(_) | Tag::Fallen(_) => (wilt, true, PartKind::Crown),
                 Tag::Accent => {
                     let shown = m.material != model::WARM
                         || if fruit {
@@ -1091,13 +1222,13 @@ impl Stands {
             };
             let key = ModelKey {
                 species: stand.species,
-                tag: m.tag,
+                tag,
                 material: m.material,
                 band,
                 wilt: tint,
                 heart: part == PartKind::Heart,
                 ripe: shown,
-                lip: if matches!(m.tag, Tag::Foliage(_))
+                lip: if matches!(tag, Tag::Foliage(_))
                     && m.material == model::named_index("p2")
                 {
                     lip
@@ -2453,7 +2584,9 @@ mod tests {
                         .map(|&(offset, tag)| ModelCell { offset, material: 0, tag })
                         .collect(),
                 ],
+                ..Default::default()
             }],
+            ..Default::default()
         }
     }
 
