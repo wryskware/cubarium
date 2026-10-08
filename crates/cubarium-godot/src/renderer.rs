@@ -72,12 +72,18 @@ impl WorldRenderer {
         }
     }
 
-    /// Draw candidate `index` of `session`, once (its clock stands still).
+    /// Draw candidate `index` of `session`, once (its clock stands still), starting now: a
+    /// candidate opened large.
     #[func]
     fn show_candidate(&mut self, session: Gd<CubariumSession>, index: i64) {
-        self.detach();
-        let (Some(h), Ok(i)) = (&self.hosted, usize::try_from(index)) else { return };
-        h.show_static(session.bind().session.candidate_source(), i);
+        self.show_static(session, index, false);
+    }
+
+    /// `show_candidate` for a thumbnail: staged in its turn, one at a time across the app,
+    /// first asked first drawn (each one's sky plane takes every core but one).
+    #[func]
+    fn show_thumbnail(&mut self, session: Gd<CubariumSession>, index: i64) {
+        self.show_static(session, index, true);
     }
 
     /// The newest frame since the last take: `rgba` (the raster, sRGB RGBA8 bytes for
@@ -136,7 +142,8 @@ impl WorldRenderer {
 
     /// What the presenter has spent: `frames`, and cumulative milliseconds `record_ms` (CPU),
     /// `gpu_ms`, `copy_ms` (the read-back copy), `pack_ms` over `packs`; `packs_refused`,
-    /// `displaced` (frames posted over an untaken one).
+    /// `displaced` (frames posted over an untaken one), `unlit` (a still world drawn before its
+    /// sky plane arrived).
     #[func]
     fn stats(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -150,6 +157,7 @@ impl WorldRenderer {
             d.set("packs", &(s.packs as i64).to_variant());
             d.set("packs_refused", &(s.packs_refused as i64).to_variant());
             d.set("displaced", &(s.displaced as i64).to_variant());
+            d.set("unlit", &s.unlit.to_variant());
         }
         d
     }
@@ -166,6 +174,14 @@ impl WorldRenderer {
         if let Some(h) = &self.hosted {
             h.release();
         }
+    }
+}
+
+impl WorldRenderer {
+    fn show_static(&mut self, session: Gd<CubariumSession>, index: i64, queued: bool) {
+        self.detach();
+        let (Some(h), Ok(i)) = (&self.hosted, usize::try_from(index)) else { return };
+        h.show_static(session.bind().session.candidate_source(), i, queued);
     }
 }
 

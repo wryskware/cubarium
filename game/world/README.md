@@ -30,7 +30,8 @@ this one.
 | | |
 |---|---|
 | `attach(session)` / `detach()` | draw a live `CubariumSession`: the renderer hooks into its loop (one view per session). `detach` keeps the last frame |
-| `show_view(view)` | draw a candidate: `candidate_view(i)` names its session and index (`source`, `candidate`), and the candidate's own world is rendered once. With input off (a thumbnail) the renderer is freed after the first frame |
+| `show_view(view)` | draw a candidate: `candidate_ref(i)` (or `candidate_view(i)`) names its session and index (`source`, `candidate`), and the candidate's own world is rendered once. With input off (a thumbnail) it is staged in its turn, one thumbnail at a time across the app, first asked first drawn (each one's sky plane takes every core but one), and its renderer is freed, off Godot's thread, after the first frame. With input on (opened large) it starts at once |
+| `problem() -> String` | why nothing is drawn yet: the renderer refused to start or reported an error before its first frame (the picker shows it on the card) |
 | `input_enabled` | false: no pointer or pan input |
 | `reset_framing()` | the whole strip in view, the ring unturned |
 | `animal_hovered(id)`, `animal_clicked(id)` | `-1` for none. A press and release under 5 px of movement is a click; more is a drag |

@@ -161,7 +161,9 @@ pub struct CandidateInfo {
 
 enum Slot {
     Generating,
-    Ready(Box<Prepared>),
+    /// Shared, so a reader (a renderer staging a thumbnail) holds the candidate's world
+    /// without holding the list's lock ([`CandidateSource::get`]).
+    Ready(Arc<Prepared>),
     Failed(String),
 }
 
@@ -517,7 +519,7 @@ impl Session {
                             cand.info.notes = note.warnings;
                             cand.info.summary = Some(cubarium_observatory::query::summary(&p.world, &p.label));
                             cand.info.populations = Some(cubarium_observatory::query::populations(&p.flora, &p.fauna));
-                            cand.slot = Slot::Ready(Box::new(p));
+                            cand.slot = Slot::Ready(Arc::new(p));
                         }
                         Err(_) if !go_on() => {
                             cand.info.state = "cancelled".into();
@@ -546,12 +548,21 @@ impl Session {
 
     /// A whole view of a ready candidate (every chunk; a bare terrain has no organisms),
     /// for a thumbnail or to pan across before choosing. `None` while it is being drawn.
+    ///
+    /// Built outside the candidate list's lock, from the candidate's shared world: it walks
+    /// every chunk, which on a wide world takes a while. A world view drawn by the renderer
+    /// needs none of it ([`Session::candidate_ready`]).
     pub fn candidate_view(&self, index: usize) -> Option<View> {
-        let c = self.candidates.lock().ok()?;
-        match &c.list.get(index)?.slot {
-            Slot::Ready(p) => Some(View::whole(&p.world, &p.flora, &p.fauna, 0)),
-            _ => None,
-        }
+        let p = self.candidate_source().get(index)?;
+        Some(View::whole(&p.world, &p.flora, &p.fauna, 0))
+    }
+
+    /// Whether candidate `index` is ready (drawn, and its world held): what a world view
+    /// needs before it renders the candidate through [`Session::candidate_source`].
+    pub fn candidate_ready(&self, index: usize) -> bool {
+        self.candidates
+            .lock()
+            .is_ok_and(|c| c.list.get(index).is_some_and(|x| matches!(x.slot, Slot::Ready(_))))
     }
 
     /// **Found candidate `index` on its own terrain and run it** once founded. Returns at
@@ -906,15 +917,24 @@ impl Session {
 pub struct CandidateSource(Arc<Mutex<Candidates>>);
 
 impl CandidateSource {
-    /// Run `f` over ready candidate `index`'s layers, with the candidate list locked: `None`
-    /// while it is being founded, after it failed, or once the list moved on (a new batch, a
-    /// promotion).
-    pub fn with<R>(&self, index: usize, f: impl FnOnce(&World, &Flora, &Fauna) -> R) -> Option<R> {
+    /// Ready candidate `index`'s world, shared: the list's lock is held only to clone the
+    /// handle, so a reader may take as long as it likes over it (open a renderer, pack it)
+    /// while the picker polls [`Session::candidates`] and other draws file their results.
+    /// `None` while it is being drawn, after it failed, or once the list moved on (a new
+    /// batch, a promotion); a world already handed out stays valid for its holder.
+    pub fn get(&self, index: usize) -> Option<Arc<Prepared>> {
         let c = self.0.lock().ok()?;
         match &c.list.get(index)?.slot {
-            Slot::Ready(p) => Some(f(&p.world, &p.flora, &p.fauna)),
+            Slot::Ready(p) => Some(p.clone()),
             _ => None,
         }
+    }
+
+    /// Run `f` over ready candidate `index`'s layers ([`CandidateSource::get`]), without the
+    /// list's lock held.
+    pub fn with<R>(&self, index: usize, f: impl FnOnce(&World, &Flora, &Fauna) -> R) -> Option<R> {
+        let p = self.get(index)?;
+        Some(f(&p.world, &p.flora, &p.fauna))
     }
 }
 

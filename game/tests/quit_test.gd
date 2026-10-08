@@ -1,10 +1,11 @@
 extends SceneTree
 ## Headless test that quitting is clean wherever it happens:
 ##   godot --headless --path game --script res://tests/quit_test.gd -- \
-##       --saves DIR --at draw|founding|running [--size terrarium] [--seed 5] [--run-s 5] [--via menu|tree] [--timeout 240]
-## Runs main.tscn and quits while terrain candidates are being drawn (`draw`), while the
-## picked one is being founded (`founding`), or with its world running for `--run-s` seconds
-## (`running`), through the menu's Quit (`menu`, the default) or the SceneTree's own quit,
+##       --saves DIR --at draw|thumbnail|founding|running [--size terrarium] [--seed 5] [--run-s 5] [--via menu|tree] [--timeout 240]
+## Runs main.tscn and quits while terrain candidates are being drawn (`draw`), while a
+## drawn one's thumbnail is being staged with others waiting their turn (`thumbnail`: three
+## candidates), while the picked one is being founded (`founding`), or with its world
+## running for `--run-s` seconds (`running`), through the menu's Quit (`menu`, the default) or the SceneTree's own quit,
 ## which is what closing the window does (`tree`). The extension must stop and join every
 ## thread it started before Godot unloads it, so **the process must exit 0**: a thread left
 ## running in the unloaded library is a SIGSEGV (139) after the last line below. The
@@ -48,7 +49,7 @@ func run() -> void:
 	await frames(3)
 	main.picker.select(size_id)
 	main.picker._seed.text = seed_text
-	var refused: String = main.picker.generate(1)
+	var refused: String = main.picker.generate(3 if at == "thumbnail" else 1)
 	if refused != "":
 		print("QUIT TEST: generate refused: " + refused)
 		quit(2)
@@ -57,6 +58,14 @@ func run() -> void:
 		await until(func(): return main.session.workers() > 0, 10.0)
 		await frames(5)
 		print("QUIT TEST: quitting mid-draw (%d worker(s), candidates %s)" % [main.session.workers(), main.session.candidates().map(func(c): return c["state"])])
+		_quit()
+		return
+	if at == "thumbnail":
+		if not await until(_thumbnail_staged, timeout_s):
+			print("QUIT TEST: no thumbnail was being staged")
+			quit(2)
+			return
+		print("QUIT TEST: quitting while a thumbnail is staged (candidates %s)" % [main.session.candidates().map(func(c): return c["state"])])
 		_quit()
 		return
 	if not await until(func(): return main.picker.ready_count() == 1, timeout_s):
@@ -84,6 +93,15 @@ func run() -> void:
 	await until(func(): return Time.get_ticks_msec() >= until_ms, run_s + 1.0)
 	print("QUIT TEST: quitting a running world (tick %s)" % main.session.status().get("tick"))
 	_quit()
+
+
+## A ready card's thumbnail has its renderer and no frame yet.
+func _thumbnail_staged() -> bool:
+	for card in main.picker._cards:
+		var wv = card.get("view")
+		if wv != null and wv.renderer != null and wv.frames_shown == 0:
+			return true
+	return false
 
 
 func _quit() -> void:

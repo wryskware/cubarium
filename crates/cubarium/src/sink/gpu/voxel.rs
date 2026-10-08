@@ -551,6 +551,18 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.packer.light_pending() || self.sunvis.as_ref().is_some_and(|s| s.pending())
     }
 
+    /// Wait up to `timeout` for the lit tier's sky plane being computed off this thread,
+    /// without packing: true once it has finished (the next [`Self::stage_world`] takes it
+    /// in), false if it has not by then. True at once when no sky plane is awaited (the flat
+    /// tier, or it is in), so a caller staging until [`Self::light_pending`] clears stages
+    /// again, as it would have. A still world waits here instead of packing to poll.
+    pub fn wait_sky(&mut self, timeout: Duration) -> bool {
+        match self.packer.light.as_mut() {
+            Some(l) if !l.current => l.worker.wait(timeout),
+            _ => true,
+        }
+    }
+
     /// Capture-only: point the lit tier's sun somewhere else (normalised; at or below the
     /// horizon, no sun), as a moving sun would. The light shafts' volume follows it by
     /// rebaking (`[light] volumetric_rebake_s`).

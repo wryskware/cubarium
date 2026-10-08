@@ -372,6 +372,46 @@ fn terrain_candidates_are_drawn_without_founding() {
     no_workers(&session);
 }
 
+/// **A renderer reading a candidate holds its world, not the candidate list**: while a
+/// reader is inside [`crate::CandidateSource::with`] (a thumbnail's renderer opening and
+/// packing it, which takes seconds on a wide world), the picker's `candidates()` and a new
+/// batch both go through, and the world handed out stays whole after the list moves on.
+#[test]
+fn a_candidate_reader_never_holds_the_list() {
+    let scratch = Scratch::new("reader");
+    let session = std::sync::Arc::new(Session::new(options()));
+    session.generate_candidates(&spec(&scratch.0, 21), 1).expect("starts");
+    assert_eq!(settled(&session, 120)[0].state, "ready");
+    assert!(session.candidate_ready(0) && !session.candidate_ready(1));
+    let source = session.candidate_source();
+    let held = source.get(0).expect("a ready candidate's world");
+    let (w, h, d) = (held.world.config().width, held.world.config().height, held.world.config().depth);
+    let other = scratch.0.clone();
+    let answered = source
+        .with(0, |world, _, _| {
+            // From another thread, as the picker polls on Godot's: it must not wait for us.
+            let (tx, rx) = std::sync::mpsc::channel();
+            let s = session.clone();
+            let t = std::thread::spawn(move || {
+                let listed = s.candidates().len();
+                let batch = s.generate_candidates(&spec(&other, 31), 2);
+                let _ = tx.send((listed, batch));
+            });
+            (rx.recv_timeout(Duration::from_secs(30)), t, world.config().width)
+        })
+        .expect("the candidate is ready");
+    let (got, t, width) = answered;
+    t.join().unwrap();
+    let (listed, batch) = got.expect("candidates() and a new batch went through while a reader held a world");
+    assert_eq!((listed, width), (1, w));
+    assert!(batch.is_ok(), "{batch:?}");
+    // The new batch replaced the list; the world handed out before is still the whole one.
+    assert_eq!(session.candidates().len(), 2);
+    assert_eq!(held.world.view().material.len(), (w * h * d) as usize);
+    session.cancel();
+    no_workers(&session);
+}
+
 /// **Founding the picked terrain keeps it**: the founded, running world has the
 /// candidate's terrain (hash and material, chunk for chunk), the founding is told
 /// through its stages to `done`, and the other candidates are dropped once it runs.

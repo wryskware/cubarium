@@ -42,7 +42,7 @@ var _back: Button
 var _status: Label
 var _grid: GridContainer
 var _cards := []
-var _views := {}  # candidate index -> its whole view, kept for opening large
+var _views := {}  # candidate index -> what its WorldView was shown, kept for opening large
 var _started_ms := 0
 var _batch_key := ""
 var _ready_ms := {}
@@ -606,6 +606,8 @@ func _process(_delta: float) -> void:
 				card["bar"].value = 100.0
 				if not card["shown"]:
 					_show_candidate(i, c)
+				elif not card.get("framed", false):
+					_follow_thumbnail(card)
 			"failed":
 				card["state"].text = "No terrain"
 				card["bar"].indeterminate = false
@@ -625,19 +627,39 @@ func _process(_delta: float) -> void:
 			focus_first()
 
 
+## Give a ready card its thumbnail. The renderer's WorldView needs only which candidate
+## (`candidate_ref`, nothing of the world converted on this thread); the stub draws the
+## whole view. Tried again next frame if the candidate isn't there to show yet.
 func _show_candidate(i: int, c: Dictionary) -> void:
 	var card: Dictionary = _cards[i]
-	card["shown"] = true
-	var view: Dictionary = shell.session.candidate_view(i)
+	var view: Dictionary = (shell.session.candidate_ref(i) if WorldViews.is_real()
+		else shell.session.candidate_view(i))
 	if view.is_empty():
 		return
+	card["shown"] = true
 	_views[i] = view
-	WorldViews.make_framed(view, card["holder"])
+	card["view"] = WorldViews.framed_view(WorldViews.make_framed(view, card["holder"]))
 	card["ready"] = true
 	card["feasible"] = c.get("feasible") != false
 	card["terrain"] = c.get("terrain", "")
 	card["summary"].text = _terrain_line(c)
 	_refresh_controls()
+
+
+## A shown thumbnail until its first frame: if its renderer gave up, say why on the card
+## rather than leave it blank.
+func _follow_thumbnail(card: Dictionary) -> void:
+	var wv = card.get("view")
+	if wv == null or not wv.has_method("problem"):
+		card["framed"] = true
+		return
+	if wv.frames_shown > 0:
+		card["framed"] = true
+		return
+	var problem: String = wv.problem()
+	if problem != "":
+		card["framed"] = true
+		card["summary"].text = "No picture: " + problem
 
 
 ## What a terrain card says under its picture: bare until picked, and what the

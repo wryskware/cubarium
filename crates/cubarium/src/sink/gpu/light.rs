@@ -23,10 +23,11 @@
 //! few cells through open terrain and stopped by solid terrain, and added to the ambient
 //! before the shader snaps it to the ladder.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -77,19 +78,20 @@ pub(crate) fn sky_plane_until(
         .filter(|(_, m)| m.is_solid())
         .map(|(i, _)| config.coords(i).1)
         .max();
-    let slab = |z: u32, rows: &mut [u8]| -> bool {
-        for y in 0..h as u32 {
-            for x in 0..w {
+    // Rows `y0..` of slab `z`, into `rows` (whole rows of that slab).
+    let band = |z: u32, y0: usize, rows: &mut [u8]| -> bool {
+        for (r, row) in rows.chunks_mut(w).enumerate() {
+            let y = (y0 + r) as u32;
+            for (x, cell) in row.iter_mut().enumerate() {
                 if cancel.load(Ordering::Relaxed) {
                     return false;
                 }
-                let i = y as usize * w + x;
                 if view.material_at(x as i64, y, z).is_solid() {
-                    rows[i] = 0;
+                    *cell = 0;
                     continue;
                 }
                 let foot = y.saturating_sub(1);
-                rows[i] = if top.is_none_or(|t| foot >= t) {
+                *cell = if top.is_none_or(|t| foot >= t) {
                     255
                 } else {
                     quantise(view.sky_visibility(x as i64, foot, z))
@@ -98,19 +100,30 @@ pub(crate) fn sky_plane_until(
         }
         true
     };
-    // One z slab is one contiguous run of the output. Slabs are dealt round-robin, so
-    // each thread gets front and back slabs alike and the costly ones spread.
-    let threads = threads.clamp(1, d.max(1));
-    let mut groups: Vec<Vec<(u32, &mut [u8])>> = (0..threads).map(|_| Vec::new()).collect();
-    for (z, rows) in out.chunks_mut(w * h).enumerate() {
-        groups[z % threads].push((z as u32, rows));
+    // The work is cut into bands of a few rows of one slab, and each thread takes the next
+    // band left until none are: a slab's rows cost very differently (open sky above the
+    // highest solid costs nothing), and whole slabs dealt out in turn left most threads
+    // idle while the few with one slab more finished. The plane is the same either way.
+    let threads = threads.max(1);
+    let rows_per_band = SKY_BAND_ROWS.min(h.max(1));
+    let mut bands: Vec<(u32, usize, &mut [u8])> = Vec::new();
+    for (z, slab) in out.chunks_mut(w * h).enumerate() {
+        for (b, rows) in slab.chunks_mut(w * rows_per_band).enumerate() {
+            bands.push((z as u32, b * rows_per_band, rows));
+        }
     }
+    // Reversed, so `pop` hands out the front slabs first.
+    bands.reverse();
+    let threads = threads.min(bands.len().max(1));
+    let queue = Mutex::new(bands);
     std::thread::scope(|s| {
-        for group in groups {
-            let slab = &slab;
+        for _ in 0..threads {
+            let (band, queue) = (&band, &queue);
             s.spawn(move || {
-                for (z, rows) in group {
-                    if !slab(z, rows) {
+                loop {
+                    let next = queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
+                    let Some((z, y0, rows)) = next else { return };
+                    if !band(z, y0, rows) {
                         return;
                     }
                 }
@@ -118,6 +131,61 @@ pub(crate) fn sky_plane_until(
         }
     });
     !cancel.load(Ordering::Relaxed)
+}
+
+/// Rows in one band of the sky plane's work ([`sky_plane_until`]).
+const SKY_BAND_ROWS: usize = 8;
+
+/// Sky planes already computed, kept for a terrain that comes back: a candidate's thumbnail,
+/// then the same candidate opened large, then the world founded on it, each open a renderer
+/// of their own over the same terrain. The plane is a function of the world's shape and which
+/// voxels are solid alone ([`sky_plane_until`]), so that is the key, compared exactly. The
+/// newest few are kept ([`PLANE_CACHE_BYTES`]).
+static PLANES: Mutex<VecDeque<KnownPlane>> = Mutex::new(VecDeque::new());
+/// At most this many bytes of planes are kept (a wide world's plane is about 8 MB).
+const PLANE_CACHE_BYTES: usize = 64 << 20;
+
+struct KnownPlane {
+    dims: (u32, u32, u32),
+    solid: Vec<u64>,
+    plane: Arc<Vec<u8>>,
+}
+
+/// What a sky plane depends on: one bit per voxel, solid or not.
+fn solid_bits(material: &[Material]) -> Vec<u64> {
+    let mut bits = vec![0u64; material.len().div_ceil(64)];
+    for (i, m) in material.iter().enumerate() {
+        if m.is_solid() {
+            bits[i / 64] |= 1 << (i % 64);
+        }
+    }
+    bits
+}
+
+fn dims_of(c: &Config) -> (u32, u32, u32) {
+    (c.width, c.height, c.depth)
+}
+
+/// The sky plane of a terrain computed before, if it is still kept.
+fn known_plane(dims: (u32, u32, u32), solid: &[u64]) -> Option<Arc<Vec<u8>>> {
+    let mut known = PLANES.lock().unwrap_or_else(|e| e.into_inner());
+    let at = known.iter().position(|k| k.dims == dims && k.solid == solid)?;
+    // The newest at the back.
+    let k = known.remove(at)?;
+    let plane = k.plane.clone();
+    known.push_back(k);
+    Some(plane)
+}
+
+/// Keep a whole sky plane for its terrain, dropping the oldest past [`PLANE_CACHE_BYTES`].
+fn keep_plane(dims: (u32, u32, u32), solid: Vec<u64>, plane: Arc<Vec<u8>>) {
+    let mut known = PLANES.lock().unwrap_or_else(|e| e.into_inner());
+    known.retain(|k| !(k.dims == dims && k.solid == solid));
+    known.push_back(KnownPlane { dims, solid, plane });
+    let bytes = |k: &KnownPlane| k.plane.len() + 8 * k.solid.len();
+    while known.len() > 1 && known.iter().map(bytes).sum::<usize>() > PLANE_CACHE_BYTES {
+        known.pop_front();
+    }
 }
 
 /// The sky plane, computed off the loop thread.
@@ -133,6 +201,8 @@ pub(crate) struct SkyWorker {
     /// `None` once the worker is dropping: the thread's `recv` then fails and it ends.
     jobs: Option<Sender<(u64, Config, Vec<Material>)>>,
     done: Receiver<(u64, Vec<u8>)>,
+    /// A plane [`SkyWorker::wait`] saw finish, kept for the next poll.
+    landed: Option<(u64, Vec<u8>)>,
     /// Set on drop: the plane being computed is given up.
     cancel: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -162,10 +232,18 @@ impl SkyWorker {
                         job = newer;
                     }
                     let (id, config, material) = job;
-                    let mut plane = vec![0u8; material.len()];
-                    if !sky_plane_until(&config, &material, threads, &mut plane, &stop) {
-                        break;
-                    }
+                    let (dims, solid) = (dims_of(&config), solid_bits(&material));
+                    let plane = match known_plane(dims, &solid) {
+                        Some(known) => known.as_ref().clone(),
+                        None => {
+                            let mut plane = vec![0u8; material.len()];
+                            if !sky_plane_until(&config, &material, threads, &mut plane, &stop) {
+                                break;
+                            }
+                            keep_plane(dims, solid, Arc::new(plane.clone()));
+                            plane
+                        }
+                    };
                     if outbox.send((id, plane)).is_err() {
                         break;
                     }
@@ -175,6 +253,7 @@ impl SkyWorker {
         SkyWorker {
             jobs: Some(jobs),
             done,
+            landed: None,
             cancel,
             thread: Some(thread),
         }
@@ -189,12 +268,34 @@ impl SkyWorker {
     }
 
     /// The newest plane finished since the last poll, with its id.
-    pub(crate) fn poll(&self) -> Option<(u64, Vec<u8>)> {
-        let mut newest = None;
+    pub(crate) fn poll(&mut self) -> Option<(u64, Vec<u8>)> {
+        let mut newest = self.landed.take();
         while let Ok(done) = self.done.try_recv() {
             newest = Some(done);
         }
         newest
+    }
+
+    /// Wait up to `timeout` for a plane to finish, without taking it: whether one has
+    /// since the last poll (the next [`SkyWorker::poll`] returns it). A still world's stager
+    /// waits here instead of packing the world again and again to poll.
+    pub(crate) fn wait(&mut self, timeout: Duration) -> bool {
+        if self.landed.is_some() {
+            return true;
+        }
+        match self.done.recv_timeout(timeout) {
+            Ok(done) => {
+                self.landed = Some(done);
+                true
+            }
+            Err(RecvTimeoutError::Timeout) => false,
+            // The thread has ended (its drop is under way): nothing will come, but a caller
+            // waiting in a loop still waits its `timeout`, never spins.
+            Err(RecvTimeoutError::Disconnected) => {
+                std::thread::park_timeout(timeout);
+                false
+            }
+        }
     }
 }
 
@@ -1161,6 +1262,33 @@ mod tests {
         let whole = sky_plane_until(&c, view.material, 4, &mut out, &AtomicBool::new(true));
         assert!(!whole, "a cancelled plane says it is not whole");
         assert!(out.iter().all(|&b| b == 7), "no cell was computed after the cancel");
+    }
+
+    /// A still world's stager waits for the plane instead of packing again to poll: the
+    /// wait sees it finish, and the next poll still returns it, the plane of that id.
+    #[test]
+    fn waiting_for_a_plane_keeps_it_for_the_next_poll() {
+        let c = Config {
+            width: 24,
+            height: 16,
+            depth: 6,
+            ..Config::default()
+        };
+        let world = roofed(&c);
+        let view = world.view();
+        let mut whole = vec![0u8; view.material.len()];
+        sky_plane(&c, view.material, 1, &mut whole);
+        let mut worker = SkyWorker::with_threads(1);
+        assert!(!worker.wait(Duration::from_millis(1)), "nothing submitted, nothing finishes");
+        worker.submit(7, &c, view.material);
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while !worker.wait(Duration::from_millis(50)) {
+            assert!(Instant::now() < deadline, "the plane never finished");
+        }
+        assert!(worker.wait(Duration::ZERO), "a plane seen is kept until it is polled");
+        assert_eq!(worker.poll(), Some((7, whole)), "the poll returns the plane the wait saw");
+        assert_eq!(worker.poll(), None);
+        assert!(!worker.wait(Duration::from_millis(1)));
     }
 
     /// Dropping the worker while it computes a plane gives the plane up and joins the
