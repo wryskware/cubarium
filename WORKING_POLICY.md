@@ -247,6 +247,42 @@ think about behaviours that fix the problems as well, or whether the ecosystem i
 - **Reports and briefs:** every ecological report names the stocks that are growing or shrinking
   without check, and the role that should answer each. Every ecology brief restates this rule.
 
+## Shape the situation, don't script the behaviour — Wrysk, 2026-10-08
+
+"i keep saying, if animals dont have to move to ever get food, thats an issue with the food
+supply being too abundant. we really need to stop "telling them what to do" and construct
+situations which naturally push towards the desired behaviour. write this down cuz i think its
+something all these sessions / agents keep not understanding."
+
+- **A behaviour we want comes from the world that makes it pay.** Animals travel, search,
+  spread out, flee or switch diet because staying put stops paying: food runs out where they
+  stand, regrows slowly, sits in patches, or gets taken by others. If they never have to move
+  to eat, the food supply is too abundant or too evenly spread. Fix the supply, its regrowth
+  and its layout (roles first, per "Balance through roles"), not the animal.
+- **Never reward or score the behaviour itself.** Fitness terms and brain rewards measure
+  outcomes: survival, condition, energy, breeding, the balance of stocks. A term that pays for
+  moving, a movement share, bonuses for bites, kills or births, or a pace target tells the
+  animal what to do. Keep such numbers as diagnostics that ask "what about the world
+  allows this?".
+- **Fix an absurd world at the world.** When a behaviour fails because the world model makes
+  no sense (2026-10-08: nectar scent laid on the ground, so bellwings circled roots), fix the
+  model, not the animal's rule. A behavioural patch on top can stay only if it's true on its
+  own (giving up food that can't be reached is).
+- **Heuristics are teachers, not targets.** They are scripted by nature, but each rule must be
+  a plausible response to what the animal senses. Tuning a heuristic so a score looks right is
+  telling it what to do.
+- **Before adding a term, a bonus or a rule to get a behaviour**, ask what in the world should
+  make that behaviour the one that pays, and build that instead. Every training or ecology brief
+  restates this rule.
+
+What prompted it (2026-10-08):
+- The movement term V decided every C1-versus-heuristic ranking.
+- The brain pilot's frondgrazers learned to move twice as much and eat a third less, because the
+  score and the curiosity reward paid for motion.
+- Littershredders never move because litter lies everywhere.
+- The bellwing scent bug was first patched with a give-up rule instead of fixing where the scent
+  sits.
+
 ## No unsafe code — Wrysk, 2026-10-08 (hard rule)
 
 "NO unsafe code allowed in the repo without my approval. external library code excluded."
