@@ -413,11 +413,21 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                     values = [number(r, key) for r in exposed]
                     stage_penalties.setdefault(name, {})[stage] = (average([h(v / targets['fullness_p10']) for v in values])
                                                                    if values and all(v is not None for v in values) else None)
-            if name in stage_penalties:
-                exposed_stages = [stage for stage in stage_penalties[name]
-                                  if any(number(r, 'n_' + stage, 0) > 0 for r in living)]
-                measured = [stage_penalties[name][stage] for stage in exposed_stages]
-                condition[name] = average(measured) if measured and all(v is not None for v in measured) else None
+            stage_fullness = {}
+            for stage in ('adult', 'juvenile', 'pup', 'rider'):
+                count_key = f'n_fullness_{stage}'
+                if living and all(count_key in r for r in living):
+                    exposed = [r for r in living if number(r, count_key, 0) > 0]
+                    stage_fullness[stage] = dict(
+                        fullness_p10=weighted(exposed, f'fullness_p10_{stage}', count_key),
+                        fullness_p50=weighted(exposed, f'fullness_p50_{stage}', count_key),
+                        survivors_by_minute=[dict(minute=number(r, 'minute'), n=number(r, count_key),
+                                                 starving_n=number(r, f'starving_n_{stage}')) for r in vl],
+                    )
+            measured_stages = {stage: data['fullness_p10'] for stage, data in stage_fullness.items()
+                               if data['fullness_p10'] is not None}
+            lowest = min(measured_stages.values()) if measured_stages else None
+            drivers = [stage for stage, value in measured_stages.items() if value == lowest]
             deaths = [r for r in lr if within(number(r, 'died_minute'), begin, end)]
             energy = weighted(vr, 'cohort_energy_change', 'energy_body_hours')
             survivor = weighted(vr, 'survivor_stock_change_per_body_hour', 'energy_body_hours')
@@ -439,7 +449,9 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                           stuck_share=count_share(vl, 'stuck_n', 'stuck_observed_n'),
                           stages={stage: number(vr[-1] if vr else {}, 'n_' + stage) for stage in ('adult', 'juvenile', 'pup', 'rider')},
                           stage_fullness_penalty=stage_penalties.get(name),
-                          stage_note='per-stage fullness measured' if name in stage_penalties else 'F pooled: stage counts alone cannot reconstruct per-stage quantiles',
+                          stage_fullness=stage_fullness,
+                          stage_note=('F remains pooled; low-p10 driver (lowest late-stage p10): ' + ', '.join(drivers))
+                                     if drivers else 'F pooled: stage counts alone cannot reconstruct per-stage quantiles',
                           flag=per_j[name]['flag'], **trend)
             result['health'][name] = health
         j_values = [v['penalty'] for v in per_j.values() if v['weight']]
@@ -764,7 +776,7 @@ def health_tables(worlds):
 
     names = sorted({name for world in worlds for name in world['health']})
     lines = ['Animal health: seed median [min,max]. F uses per-minute p10 and shows its survivor count range.', '']
-    counts, activity, trends = [], [], []
+    counts, activity, trends, stage_conditions = [], [], [], []
     for name in names:
         rows = [world['health'][name] for world in worlds if name in world['health']]
         metric = lambda key: spread([row.get(key) for row in rows])
@@ -772,9 +784,23 @@ def health_tables(worlds):
         survivor_counts = [item['n'] for row in rows for item in row['survivors_by_minute']]
         survivor_range = f'{display(min(survivor_counts))}–{display(max(survivor_counts))}' if survivor_counts else 'NA'
         counts.append([name, metric('alive_end'), stage('adult'), stage('juvenile'), stage('pup'), metric('eggs_end'), metric('fullness_p10'), survivor_range])
+        for stage_name in ('adult', 'juvenile', 'pup', 'rider'):
+            data = [row.get('stage_fullness', {}).get(stage_name) for row in rows]
+            data = [item for item in data if item is not None]
+            if data:
+                observations = [item for reading in data for item in reading['survivors_by_minute']]
+                counts_present = [item['n'] for item in observations if item['n'] is not None]
+                starving = [item['starving_n'] for item in observations if item['starving_n'] is not None]
+                count_range = f'{display(min(counts_present))}–{display(max(counts_present))}' if counts_present else 'NA'
+                starving_range = f'{display(min(starving))}–{display(max(starving))}' if starving else 'NA'
+                stage_conditions.append([name, stage_name, spread([item['fullness_p10'] for item in data]),
+                                         spread([item['fullness_p50'] for item in data]), count_range, starving_range])
         activity.append([name, metric('awake_body_s'), metric('moving_share'), metric('delivered_bl_per_s'), metric('intake_organic'), metric('stuck_share'), metric('stuck_observed_n')])
         trends.append([name, metric('count_slope_per_minute_per_N_ref'), metric('drawdown_per_N_ref'), metric('cohort_energy_change'), metric('survivor_stock_change_per_body_hour')])
     lines += table(['Lineage', 'Alive end', 'Adult', 'Juvenile', 'Pup', 'Eggs', 'Fullness p10', 'Survivor n'], counts)
+    if stage_conditions:
+        lines += ['', 'Stage fullness: late-minute means weighted by stage bodies; living and starving count ranges per minute.', '']
+        lines += table(['Lineage', 'Stage', 'Fullness p10', 'Fullness p50', 'Survivor n', 'Starving n'], stage_conditions)
     lines += [''] + table(['Lineage', 'Awake body-s', 'Moving share', 'Delivered BL/s', 'Intake organic', 'Stuck share', 'Stuck observations'], activity)
     lines += [''] + table(['Lineage', 'Last 30m count slope/min/N_ref', 'Peak drawdown/N_ref', 'Cohort energy trend/body-hour', 'Survivor stock change/body-hour'], trends)
     for name in names:
@@ -786,7 +812,7 @@ def health_tables(worlds):
         notes = sorted({row['flag'] for row in rows if row['flag']} | {row['stage_note'] for row in rows})
         lines += ['', f'**{name}** lifecycle: {display(events)}; deaths: {display(deaths)}. ' + '; '.join(notes) + '.']
         if any(row['stage_fullness_penalty'] for row in rows):
-            lines += ['Stage F penalties: ' + display([row['stage_fullness_penalty'] for row in rows])]
+            lines += ['Stage condition penalties (diagnostic only; F remains pooled): ' + display([row['stage_fullness_penalty'] for row in rows])]
     plants = []
     for name in sorted({name for world in worlds for name in world['plants']}):
         rows = [world['plants'][name] for world in worlds if name in world['plants']]

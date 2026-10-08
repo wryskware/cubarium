@@ -93,6 +93,12 @@
 //! row. The census rows (stdout) always start with the run's own start minute: 0 on a
 //! founding, the load minute on `load=` or `resume=`, before any tick.
 //!
+//! Fullness keeps its pooled columns and appends `fullness_p10_STAGE`,
+//! `fullness_p50_STAGE`, `n_fullness_STAGE`, `starving_n_STAGE` for rider, pup,
+//! juvenile and adult, classified by `query::stage_of` at each minute. Stage fields
+//! are empty without living bodies. `starving_fullness=N` (default 0.05) counts
+//! reserve / reserve capacity strictly below N; it is a diagnostic, not a rule.
+//!
 //! **Segments.** Every row of the three CSVs carries `segment`: 0 for a fresh founding,
 //! 1 for a `load=` branch, and the previous segment + 1 for each `resume=`.
 //! - A founding or `load=` starts the files fresh and writes a row at its start minute.
@@ -234,6 +240,7 @@ fn main() {
             (dir.to_string(), VitalsOptions {
                 stuck_window_min: number("stuck_window_min=", 5.0),
                 stuck_body_lengths: number("stuck_body_lengths=", 1.0),
+                starving_fullness: number("starving_fullness=", 0.05),
             })
         }),
         policies: policies.clone(),
@@ -929,6 +936,7 @@ impl VitalsLog {
             "minute_end": end_minute as f64,
             "git_commit": env!("CUBARIUM_GIT_HASH"),
             "segments": segments,
+            "starving_fullness": options.starving_fullness,
         });
         let mut log = Self {
             recorder: VitalsRecorder::new(options, ring_m, segment, sim.fauna(), minute),

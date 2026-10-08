@@ -397,14 +397,38 @@ class StudyKitTests(unittest.TestCase):
         self.mutate('vitals/plants_vitals.csv', lambda rows: [r for r in rows if r['minute'] != '4'])
         self.assertFalse(self.rescore()['rankable'])
 
-    def test_per_stage_F_when_stage_quantiles_present(self):
+    def test_stage_condition_readouts_leave_F_pooled(self):
         fixture(self.root)
-        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, fullness_p10_adult=r['fullness_p10'], fullness_p10_juvenile='', fullness_p10_pup='', fullness_p10_rider='') for r in rows])
+        pooled = self.rescore()['components']['F']
+        def stages(rows):
+            for r in rows:
+                alive = int(r['n']) > 0
+                for stage in ('adult', 'juvenile', 'pup', 'rider'):
+                    present = alive and stage in ('adult', 'juvenile')
+                    r[f'n_fullness_{stage}'] = 2 if present else ''
+                    r[f'fullness_p10_{stage}'] = (1 if stage == 'adult' else 0) if present else ''
+                    r[f'fullness_p50_{stage}'] = r[f'fullness_p10_{stage}']
+                    r[f'starving_n_{stage}'] = (0 if stage == 'adult' else 2) if present else ''
+                    r[f'n_{stage}'] = 2 if present else 0
+            return rows
+        self.mutate('vitals/vitals.csv', stages)
         world = self.rescore()
         self.assertTrue(world['rankable'], world['warnings'])
-        self.assertIn('adult', world['components']['F']['per_stage_penalty']['frondgrazer'])
-        self.assertEqual(world['components']['F']['per_stage_penalty']['frondgrazer']['adult'],
-                         world['components']['F']['per_lineage_penalty']['frondgrazer'])
+        for key in ('penalty', 'contribution', 'per_lineage_penalty'):
+            self.assertEqual(world['components']['F'][key], pooled[key])
+        health = world['health']['frondgrazer']
+        self.assertEqual(health['stage_fullness']['adult']['fullness_p10'], 1)
+        self.assertEqual(health['stage_fullness']['juvenile']['fullness_p50'], 0)
+        self.assertIsNone(health['stage_fullness']['pup']['fullness_p10'])
+        self.assertEqual(health['stage_fullness']['juvenile']['survivors_by_minute'][0]['starving_n'], 2)
+        report = '\n'.join(score.health_tables([world]))
+        self.assertIn('Starving n', report)
+        self.assertIn('low-p10 driver (lowest late-stage p10): juvenile', report)
+        self.assertIn('| frondgrazer | adult | 1 [1,1] | 1 [1,1] | 2–2 | 0–0 |', report)
+        # Stage quantiles use their own survivor counts, not pooled population weights.
+        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, fullness_p10_adult=r['fullness_p10']) for r in rows])
+        stage_mean = self.rescore()['health']['frondgrazer']['stage_fullness']['adult']['fullness_p10']
+        self.assertAlmostEqual(stage_mean, (0.1 + 0.8 + 0.8) / 3)
 
     def test_profile_mask_controls_required_telemetry(self):
         document = copy.deepcopy(self.document)

@@ -51,6 +51,8 @@ pub struct Options {
     pub stuck_window_min: f64,
     /// Net displacement below this many current body lengths counts as stuck.
     pub stuck_body_lengths: f64,
+    /// Reserve / reserve capacity below this fraction is reported as starving.
+    pub starving_fullness: f64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -107,6 +109,9 @@ pub struct AnimalVitals {
     pub n_by_stage: [usize; 4],
     pub native_n: usize,
     pub fullness: Vec<f64>,
+    /// Current living bodies, grouped in query life-stage order.
+    pub fullness_by_stage: [Vec<f64>; 4],
+    pub starving_by_stage: [usize; 4],
     pub stomach_fill: Vec<f64>,
     pub wound_mean: f64,
     pub wounded_n: usize,
@@ -570,6 +575,8 @@ impl Recorder {
                 n_by_stage: [0; 4],
                 native_n: 0,
                 fullness: Vec::new(),
+                fullness_by_stage: std::array::from_fn(|_| Vec::new()),
+                starving_by_stage: [0; 4],
                 stomach_fill: Vec::new(),
                 wound_mean: 0.0,
                 wounded_n: 0,
@@ -609,10 +616,8 @@ impl Recorder {
                     continue;
                 }
                 let row = query::animal_row(fauna, a);
-                r.n += 1;
-                r.n_by_stage[stage_index(row.stage)] += 1;
+                r.record_condition(&row, self.options.starving_fullness);
                 r.native_n += usize::from(a.reproduction.native);
-                r.fullness.push(row.fullness);
                 let capacity = a
                     .founder
                     .map_or(0.0, |f| fauna.config().founder(f).gut.capacity(a.body));
@@ -767,10 +772,19 @@ fn csv(out: &mut impl Write, cells: impl IntoIterator<Item = String>) -> io::Res
     writeln!(out)
 }
 
-pub const VITALS_HEADER: &str = "minute,lineage,n,n_rider,n_pup,n_juvenile,n_adult,native_n,fullness_mean,fullness_p10,fullness_p50,fullness_p90,stomach_fill_mean,stomach_fill_p50,wound_mean,wounded_n,size_mean,energy_per_body_mean,emergency_n,eating_n,asleep_n,gestating_or_clutch_n,breeding_eligible_n,body_s,awake_body_s,moving_share,feeding_share,resting_share,fleeing_share,hunting_share,climbing_share,gliding_share,flying_share,energy_body_hours,survivor_stock_change_per_body_hour,path_m_per_body,displacement_m_per_body,stuck_n,stuck_observed_n,intake_organic,upkeep_organic,motor_organic,delivered_bl_per_s,cohort_energy_change,segment";
+pub const VITALS_HEADER: &str = "minute,lineage,n,n_rider,n_pup,n_juvenile,n_adult,native_n,fullness_mean,fullness_p10,fullness_p50,fullness_p90,stomach_fill_mean,stomach_fill_p50,wound_mean,wounded_n,size_mean,energy_per_body_mean,emergency_n,eating_n,asleep_n,gestating_or_clutch_n,breeding_eligible_n,body_s,awake_body_s,moving_share,feeding_share,resting_share,fleeing_share,hunting_share,climbing_share,gliding_share,flying_share,energy_body_hours,survivor_stock_change_per_body_hour,path_m_per_body,displacement_m_per_body,stuck_n,stuck_observed_n,intake_organic,upkeep_organic,motor_organic,delivered_bl_per_s,cohort_energy_change,segment,fullness_p10_rider,fullness_p50_rider,n_fullness_rider,starving_n_rider,fullness_p10_pup,fullness_p50_pup,n_fullness_pup,starving_n_pup,fullness_p10_juvenile,fullness_p50_juvenile,n_fullness_juvenile,starving_n_juvenile,fullness_p10_adult,fullness_p50_adult,n_fullness_adult,starving_n_adult";
 pub const PLANTS_HEADER: &str = "minute,species,stands,vigour_mean,vigour_p10,vigour_p50,cured_n,drought_n,aeration_n,stressed_n,segment";
 
 impl AnimalVitals {
+    fn record_condition(&mut self, row: &query::AnimalRow, threshold: f64) {
+        let stage = stage_index(row.stage);
+        self.n += 1;
+        self.n_by_stage[stage] += 1;
+        self.fullness.push(row.fullness);
+        self.fullness_by_stage[stage].push(row.fullness);
+        self.starving_by_stage[stage] += usize::from(row.fullness < threshold);
+    }
+
     pub fn write_csv(&self, out: &mut impl Write) -> io::Result<()> {
         let r = self;
         let a = &r.activity;
@@ -828,6 +842,14 @@ impl AnimalVitals {
             val(r.cohort_energy_change),
             r.segment.to_string(),
         ]);
+        for (stage, values) in r.fullness_by_stage.iter().enumerate() {
+            c.extend([
+                val(quantile(values, 0.1)),
+                val(quantile(values, 0.5)),
+                val((!values.is_empty()).then_some(values.len() as f64)),
+                val((!values.is_empty()).then_some(r.starving_by_stage[stage] as f64)),
+            ]);
+        }
         csv(out, c)
     }
 }
@@ -967,6 +989,7 @@ mod tests {
         Options {
             stuck_window_min: window_s / 60.0,
             stuck_body_lengths: 1.0,
+            starving_fullness: 0.25,
         }
     }
     fn at(seconds: f64, x: f64, active: bool, swallowed: f64) -> Sample {
@@ -983,6 +1006,53 @@ mod tests {
             push_sample(&mut h, *s, window_s);
         }
         h
+    }
+
+    #[test]
+    fn stage_condition_separates_full_adults_from_empty_juveniles() {
+        let (_, flora, fauna) = crate::tests::small_world();
+        let options = opts(60.0);
+        let mut recorder = Recorder::new(options, RING_M, 0, &fauna, 0.0);
+        let (mut rows, _) = recorder.minute(&flora, &fauna, 0.0);
+        let r = rows.iter_mut().find(|r| r.lineage == Founder::Browser.name()).unwrap();
+        r.n = 0;
+        r.n_by_stage = [0; 4];
+        r.fullness.clear();
+        r.fullness_by_stage = std::array::from_fn(|_| Vec::new());
+        r.starving_by_stage = [0; 4];
+        let core = fauna.config().founder(Founder::Browser).core;
+        for adult in [true, true, false, false] {
+            let mut body = fauna.view().animals[0].clone();
+            body.attached = None;
+            body.pack = None;
+            body.body = if adult { core.birth_body } else { core.birth_body / 2.0 };
+            body.reserve = if adult { core.reserve_of(body.body) } else { 0.0 };
+            r.record_condition(&query::animal_row(&fauna, &body), options.starving_fullness);
+        }
+        let mut bytes = Vec::new();
+        r.write_csv(&mut bytes).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        let cells: Vec<_> = text.trim().split(',').collect();
+        let header: Vec<_> = VITALS_HEADER.split(',').collect();
+        assert_eq!(cells.len(), header.len());
+        let cell = |name: &str| cells[header.iter().position(|h| *h == name).unwrap()];
+        for (stage, full, starving) in [("adult", "1", "0"), ("juvenile", "0", "2")] {
+            assert_eq!(cell(format!("fullness_p10_{stage}").as_str()), full);
+            assert_eq!(cell(format!("fullness_p50_{stage}").as_str()), full);
+            assert_eq!(cell(format!("n_fullness_{stage}").as_str()), "2");
+            assert_eq!(cell(format!("starving_n_{stage}").as_str()), starving);
+        }
+        for stage in ["pup", "rider"] {
+            for prefix in ["fullness_p10", "fullness_p50", "n_fullness", "starving_n"] {
+                assert_eq!(cell(format!("{prefix}_{stage}").as_str()), "");
+            }
+        }
+        // Threshold is strict, and is supplied by the caller rather than ecological defaults.
+        let mut row = query::animal_row(&fauna, &fauna.view().animals[0]);
+        row.fullness = options.starving_fullness;
+        let before = r.starving_by_stage;
+        r.record_condition(&row, options.starving_fullness);
+        assert_eq!(r.starving_by_stage, before);
     }
 
     #[test]
