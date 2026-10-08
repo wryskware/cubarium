@@ -10,7 +10,7 @@ Z = 2.0 # Free lanternjaw population share; provisional pending Wrysk.
 M = 3.0 # Largest meadow area deficit; provisional pending Wrysk.
 G_b = 1.0 # Largest lanternberry grove deficit; provisional pending Wrysk.
 G_v = 1.0 # New vaulttree recruitment deficit; provisional pending Wrysk.
-H = 1.0 # World-hour hunt frequency outside band; provisional pending Wrysk.
+H = 1.0 # Kill rate (kills per world-hour) outside band; provisional pending Wrysk.
 F = 3.0 # Low-tail fullness deficit; provisional pending Wrysk.
 S = 5.0 # Observed stuck body share; provisional pending Wrysk.
 
@@ -36,7 +36,7 @@ vaulttree_recruits = 1.0 # New recruits over the window target; provisional pend
 hunt_lineages = ["chorister", "lanternjaw"] # Hunters counted by H; provisional pending Wrysk.
 hunts_per_hour_lo = 0.5 # Minimum kills per simulated world-hour; provisional pending Wrysk.
 hunts_per_hour_hi = 2.0 # Maximum kills per simulated world-hour; provisional pending Wrysk.
-fullness_p10 = 0.3 # Per-minute fullness p10 target; provisional pending Wrysk.
+fullness_p10 = 0.3 # F = mean lineage, mean minute h(fullness_p10 / this target); vitals emits p10, not p25; provisional pending Wrysk.
 
 [reproduction]
 eligible_deficit = 0.5 # J without a late birth but breeding possible; provisional pending Wrysk.
