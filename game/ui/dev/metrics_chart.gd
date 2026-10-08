@@ -55,22 +55,41 @@ func bounds() -> Array:
 		return b
 	if b[1] - b[0] < 1e-9:
 		b[1] = b[0] + 1.0
-	if b[3] - b[2] < 1e-12:
-		var pad := maxf(absf(b[3]) * 0.1, 1.0)
-		b[2] -= pad
-		b[3] += pad
+	# A flat or nearly flat series keeps a span of at least 5 % of its size, so a change in
+	# the fifth decimal doesn't fill the plot (and an all-zero one still has an axis).
+	var least := maxf(maxf(absf(b[2]), absf(b[3])) * 0.05, 1e-6)
+	if b[3] - b[2] < least:
+		var mid: float = (b[2] + b[3]) * 0.5
+		if b[2] >= 0.0 and mid - least * 0.5 < 0.0:
+			b[2] = 0.0
+			b[3] = maxf(least, b[3])
+		else:
+			b[2] = mid - least * 0.5
+			b[3] = mid + least * 0.5
 	return b
+
+
+## An axis label with as many decimals as the tick step needs.
+static func tick_label(v: float, step: float) -> String:
+	if step >= 1.0 and is_equal_approx(v, roundf(v)):
+		return str(int(roundf(v)))
+	var d := clampi(ceili(-log(step) / log(10.0)), 0, 6)
+	return ("%." + str(d) + "f") % v
 
 
 static func label_of(v: float) -> String:
 	var a := absf(v)
+	if a < 1e7 and is_equal_approx(v, roundf(v)):
+		return str(int(roundf(v)))
 	if a >= 1000.0:
 		return "%.0f" % v
 	if a >= 10.0:
 		return "%.1f" % v
 	if a >= 0.1 or a == 0.0:
 		return "%.2f" % v
-	return "%.2e" % v
+	# GDScript's % has no %e: write the mantissa and exponent by hand.
+	var e := floori(log(a) / log(10.0))
+	return "%.2fe%d" % [v / pow(10.0, e), e]
 
 
 func _draw() -> void:
@@ -112,7 +131,7 @@ func _draw() -> void:
 		var y: float = lerpf(b[2], b[3], f)
 		var py: float = plot.end.y - f * plot.size.y
 		draw_line(Vector2(plot.position.x, py), Vector2(plot.end.x, py), faint, 1.0)
-		draw_string(font, Vector2(4, py + fs * 0.35), label_of(y), HORIZONTAL_ALIGNMENT_LEFT, PAD.x - 8, fs, ink)
+		draw_string(font, Vector2(4, py + fs * 0.35), tick_label(y, (b[3] - b[2]) / TICKS), HORIZONTAL_ALIGNMENT_LEFT, PAD.x - 8, fs, ink)
 	draw_string(font, Vector2(plot.position.x, plot.end.y + fs + 6), "minute %s" % label_of(b[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, ink)
 	var right := "minute %s" % label_of(b[1])
 	draw_string(font, Vector2(plot.end.x - font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x, plot.end.y + fs + 6),

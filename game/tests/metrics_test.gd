@@ -154,10 +154,10 @@ func run(opened: bool) -> void:
 
 func pictures(panel) -> void:
 	DirAccess.make_dir_recursive_absolute(shots)
-	main.session.console("speed 64")
+	main.session.set_speed(64.0)
 	var ok := await until(func(): return panel.minutes.size() >= want_minutes, TIMEOUT_S - elapsed() - 20)
 	print("     %d minutes held for the pictures" % panel.minutes.size())
-	main.session.console("speed 1")
+	main.session.set_speed(1.0)
 	panel.show_view("animals")
 	await frames(3)
 	await shot("metrics-table")
