@@ -137,20 +137,23 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
 const SENSE: Rgb = 0xFF_2AFC;
 
 /// A founder cell's colours. `band` is the cell's height in the body; `accent` is a sense
-/// patch or eye, which flashes [`CROPPING_FLASH`] while the animal crops.
+/// patch or eye, which leans toward [`CROPPING_FLASH`] by `flash` (`0..=1`, the meal
+/// flash's eased strength) while the animal crops.
 ///
 /// Each founder paints each part slot of its model (`scripts/blender/animal_models.py`) in
 /// its ramp from [`FRONDGRAZER`], [`LITTERSHREDDER`] or [`LANTERNJAW`], sampled from the
 /// artbook picks.
-pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, cropping: bool) -> Swatch {
-    if accent && cropping {
+pub fn animal(founder: Founder, material: u8, band: u8, accent: bool, flash: f32) -> Swatch {
+    let sw = coat_swatch(founder_coat(founder), material, band);
+    if accent && flash > 0.0 {
+        let t = flash.min(1.0);
         return Swatch {
-            shadow: CROPPING_FLASH,
-            body: CROPPING_FLASH,
-            glint: 0xFF_FFFF,
+            shadow: lerp(sw.shadow, CROPPING_FLASH, t),
+            body: lerp(sw.body, CROPPING_FLASH, t),
+            glint: lerp(sw.glint, CROPPING_FLASH, t),
         };
     }
-    coat_swatch(founder_coat(founder), material, band)
+    sw
 }
 
 /// A live founder's coat, by lineage name: a baked founder's own, else its **specimen's**

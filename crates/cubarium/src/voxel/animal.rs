@@ -128,8 +128,22 @@ pub const FRONDGRAZER_BODY_SRGB: u32 = 0x001E_2248;
 pub const FRONDGRAZER_HEAD_SRGB: u32 = 0x0042_4E88;
 pub const FRONDGRAZER_EYE_SRGB: u32 = 0x00D0_F4FF;
 
-/// Interaction accents:
+/// Interaction accents. The cropping flash is the colour an eating animal's accent leans
+/// toward, by at most `VoxelConfig::meal_flash` ([`MEAL_FLASH_DEFAULT`]).
 pub const ANIMAL_CROPPING_FLASH_SRGB: u32 = 0x00FF_9B50;
+
+/// `VoxelConfig::meal_flash` by default: how far an eating animal's accent leans toward
+/// its flash colour at the height of the flash, `0..=1`. Subtle: a warm tint on the eye
+/// or sense patch, not a light.
+pub const MEAL_FLASH_DEFAULT: f32 = 0.2;
+
+/// Seconds the meal flash takes to ease in once an animal starts cropping, and to ease out
+/// once it stops. Presentation only.
+pub const MEAL_FLASH_FADE_S: f64 = 0.6;
+
+/// Steps of the flash's eased weight that model styles are keyed by: fine enough that one
+/// step at full strength moves the accent by `meal_flash / FLASH_LEVELS` of the way.
+const FLASH_LEVELS: u8 = 8;
 pub const ANIMAL_STARVING_BODY_SRGB: u32 = 0x0028_2834;
 
 /// Lanternjaw (ambush carnivore) interim palette — stage-1 looks, no taste call; its body
@@ -223,24 +237,26 @@ struct AnimalKey {
     band: u8,
     accent: bool,
     starving: bool,
-    cropping: bool,
+    /// The meal flash's eased weight in [`FLASH_LEVELS`] steps, 0 for none.
+    flash: u8,
     wounded: bool,
 }
 
 impl AnimalKey {
     const MATERIALS: usize = model::PALETTE.len();
-    const COUNT: usize = Founder::COUNT * Self::MATERIALS * colours::BANDS as usize * 16;
+    const FLASHES: usize = FLASH_LEVELS as usize + 1;
+    const COUNT: usize =
+        Founder::COUNT * Self::MATERIALS * colours::BANDS as usize * 8 * Self::FLASHES;
 
     fn index(self) -> usize {
         let founder = self.founder.index();
         let material = usize::from(self.material).min(Self::MATERIALS - 1);
         let mut i = founder * Self::MATERIALS + material;
         i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
-        i * 16
-            + usize::from(self.wounded) * 8
-            + usize::from(self.accent) * 4
-            + usize::from(self.starving) * 2
-            + usize::from(self.cropping)
+        let flags = usize::from(self.wounded) * 4
+            + usize::from(self.accent) * 2
+            + usize::from(self.starving);
+        (i * 8 + flags) * Self::FLASHES + usize::from(self.flash.min(FLASH_LEVELS))
     }
 }
 
@@ -257,9 +273,10 @@ pub fn is_wounded(animal: &Animal) -> bool {
 
 /// One animal's style this frame: distinct palettes for founders, cropping flash,
 /// starvation desaturation, or interim fallback. A wounded body that is not starving takes
-/// the starving tint at half strength.
-pub fn animal_style(animal: &Animal) -> Style {
-    let style = animal_style_unwounded(animal);
+/// the starving tint at half strength. `flash` is how far the accent leans toward
+/// [`ANIMAL_CROPPING_FLASH_SRGB`] this frame (the meal flash, eased), `0..=1`.
+pub fn animal_style(animal: &Animal, flash: f32) -> Style {
+    let style = animal_style_unwounded(animal, flash);
     if is_wounded(animal) && !is_starving(animal) {
         Style {
             wood: wilted(style.wood, WOUNDED_TINT),
@@ -271,13 +288,18 @@ pub fn animal_style(animal: &Animal) -> Style {
     }
 }
 
-fn animal_style_unwounded(animal: &Animal) -> Style {
+fn animal_style_unwounded(animal: &Animal, flash: f32) -> Style {
     let Some(founder) = animal.founder else {
         return interim_style(animal.species);
     };
 
-    let is_cropping = animal.state == State::Cropping;
     let is_starving = is_starving(animal);
+    // The accent, leaning toward the flash colour by `flash`.
+    let lean = |accent: u32| {
+        let (a, f) = (srgb_linear(accent), srgb_linear(ANIMAL_CROPPING_FLASH_SRGB));
+        let t = flash.clamp(0.0, 1.0);
+        [0, 1, 2].map(|i| a[i] + (f[i] - a[i]) * t)
+    };
 
     match founder {
         Founder::Blind => {
@@ -291,9 +313,7 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
             } else {
                 LITTERSHREDDER_RIM_SRGB
             };
-            let accent = if is_cropping {
-                ANIMAL_CROPPING_FLASH_SRGB
-            } else if is_starving {
+            let accent = if is_starving {
                 0x004E_5868
             } else {
                 LITTERSHREDDER_FEELER_SRGB
@@ -301,7 +321,7 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
             Style {
                 wood: srgb_linear(body),
                 crown: srgb_linear(rim),
-                heart: srgb_linear(accent),
+                heart: lean(accent),
             }
         }
         Founder::Browser => {
@@ -315,9 +335,7 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
             } else {
                 FRONDGRAZER_HEAD_SRGB
             };
-            let accent = if is_cropping {
-                ANIMAL_CROPPING_FLASH_SRGB
-            } else if is_starving {
+            let accent = if is_starving {
                 0x0068_7280
             } else {
                 FRONDGRAZER_EYE_SRGB
@@ -325,7 +343,7 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
             Style {
                 wood: srgb_linear(body),
                 crown: srgb_linear(head),
-                heart: srgb_linear(accent),
+                heart: lean(accent),
             }
         }
         // The lanternjaw's, and the interim glyph colours of a lineage without its own.
@@ -340,15 +358,10 @@ fn animal_style_unwounded(animal: &Animal) -> Style {
             } else {
                 LANTERNJAW_BACK_SRGB
             };
-            let jaw = if is_cropping {
-                ANIMAL_CROPPING_FLASH_SRGB
-            } else {
-                LANTERNJAW_JAW_SRGB
-            };
             Style {
                 wood: srgb_linear(body),
                 crown: srgb_linear(back),
-                heart: srgb_linear(jaw),
+                heart: lean(LANTERNJAW_JAW_SRGB),
             }
         }
     }
@@ -683,6 +696,12 @@ pub struct Animals {
     /// a hunker takes ([`Animals::set_hunker_s`]).
     hunker_blend: FxHashMap<u64, (f32, bool)>,
     hunker_s: f64,
+    /// Each eating (or just-eaten) animal's meal-flash weight by id, 0 to 1, at the last
+    /// rebuild: it rises over [`MEAL_FLASH_FADE_S`] while the animal crops and falls back
+    /// after, so the flash eases in and out. Kept the same way as the sleep blend.
+    flash_blend: FxHashMap<u64, f32>,
+    /// `VoxelConfig::meal_flash`: how far the accent leans toward the flash at its height.
+    meal_flash: f32,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
     last_tick: Option<u64>,
 }
@@ -733,6 +752,8 @@ impl Animals {
             idle_blend: FxHashMap::default(),
             hunker_blend: FxHashMap::default(),
             hunker_s: hunker::DEFAULT_S,
+            flash_blend: FxHashMap::default(),
+            meal_flash: MEAL_FLASH_DEFAULT,
             last_tick: None,
         }
     }
@@ -740,6 +761,29 @@ impl Animals {
     /// The seconds a hunker takes to go down or come up (`VoxelConfig::hunker_s`).
     pub fn set_hunker_s(&mut self, seconds: f64) {
         self.hunker_s = seconds.max(0.0);
+    }
+
+    /// How far an eating animal's accent leans toward the flash colour at the height of
+    /// the flash (`VoxelConfig::meal_flash`), `0..=1`; 0 turns the flash off.
+    pub fn set_meal_flash(&mut self, strength: f32) {
+        self.meal_flash = if strength.is_finite() { strength.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
+    /// One animal's meal flash this rebuild in [`FLASH_LEVELS`] steps: its weight eased by
+    /// a smoothstep, so it starts and stops gently. 0 when it is not flashing or the
+    /// flash is off.
+    fn flash_level(&self, animal: &Animal) -> u8 {
+        if self.meal_flash <= 0.0 {
+            return 0;
+        }
+        let w = self.flash_blend.get(&animal.id).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        let eased = w * w * (3.0 - 2.0 * w);
+        (eased * f32::from(FLASH_LEVELS)).round() as u8
+    }
+
+    /// How far a flash level leans the accent toward the flash colour.
+    fn flash_amount(&self, level: u8) -> f32 {
+        self.meal_flash * f32::from(level) / f32::from(FLASH_LEVELS)
     }
 
     /// Every animal's sleep and idle weights at this rebuild, moved on from the last one by
@@ -755,6 +799,12 @@ impl Animals {
         let mut seen: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut idle: FxHashMap<u64, Idle> = FxHashMap::default();
         let mut hunkers: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
+        let mut flashes: FxHashMap<u64, f32> = FxHashMap::default();
+        let flash_step = if MEAL_FLASH_FADE_S > 0.0 {
+            (dt / MEAL_FLASH_FADE_S) as f32
+        } else {
+            1.0
+        };
         let hold = (idle::HOLD_S / DT).round() as u64;
         for a in animals {
             if a.founder.is_none() {
@@ -775,6 +825,14 @@ impl Animals {
                 None => 0.0,
             };
             hunkers.insert(a.id, (hunkered, down));
+            // The meal flash: up while the body crops, down after; a body first seen
+            // cropping starts from nothing and eases in like any other.
+            let cropping = a.state == State::Cropping;
+            let last = self.flash_blend.get(&a.id).copied().unwrap_or(0.0);
+            let flash = if cropping { last + flash_step } else { last - flash_step };
+            if flash > 0.0 || cropping {
+                flashes.insert(a.id, flash.clamp(0.0, 1.0));
+            }
             // Idle: awake, standing (not walking, feeding or climbing), where it stood at
             // the last rebuild, fully woken, and so for the hold.
             let at = [a.pose.x, a.pose.z, a.pose.heading_rad];
@@ -800,6 +858,7 @@ impl Animals {
         self.sleep_blend = seen;
         self.idle_blend = idle;
         self.hunker_blend = hunkers;
+        self.flash_blend = flashes;
     }
 
     /// One animal's hunker weight at this rebuild and its change per tick from here, or
@@ -1093,7 +1152,8 @@ impl Animals {
                 if usize::from(style) != self.styles.len() {
                     break;
                 }
-                self.styles.push(animal_style(animal));
+                let flash = self.flash_amount(self.flash_level(animal));
+                self.styles.push(animal_style(animal, flash));
                 for (cell, part, _) in cells_of_local(animal, fauna.config, style, c.voxel_m) {
                     let on_back = Cell {
                         y: cell.y + lift,
@@ -1124,7 +1184,8 @@ impl Animals {
                 if usize::from(style) != self.styles.len() {
                     break; // more than 65 535 animals in one strip: refuse to alias styles.
                 }
-                self.styles.push(animal_style(animal));
+                let flash = self.flash_amount(self.flash_level(animal));
+                self.styles.push(animal_style(animal, flash));
                 let cells = cells_of_local(animal, fauna.config, style, c.voxel_m);
                 if animal.founder == Some(Founder::Lanternjaw) {
                     self.stamp_lure(view, animal, fauna.config, c.voxel_m);
@@ -1258,7 +1319,7 @@ impl Animals {
             z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
         };
         let starving = is_starving(animal);
-        let cropping = animal.state == State::Cropping;
+        let flash = self.flash_level(animal);
         let wounded = is_wounded(animal) && !starving;
         let Some(founder) = animal.founder else {
             return true;
@@ -1276,7 +1337,7 @@ impl Animals {
                 band: colours::band(m.offset[1], top),
                 accent: m.tag == Tag::Accent,
                 starving,
-                cropping,
+                flash,
                 wounded,
             };
             let Some(style) = self.model_style(key) else {
@@ -1333,7 +1394,7 @@ impl Animals {
             key.material,
             key.band,
             key.accent,
-            key.cropping,
+            self.flash_amount(key.flash),
         );
         let paint = |rgb| {
             let c = srgb_linear(rgb);
@@ -2000,6 +2061,56 @@ mod tests {
             assert_eq!(e.drop, 2.0);
         }
         assert_eq!(grid.idle_weight(&a), None);
+    }
+
+    /// The meal flash eases: while a browser crops, its accent leans toward the flash
+    /// colour a little more each tick, never further than the configured strength and
+    /// never by a jump; once it stops, it leans back to its own colour within the fade.
+    /// A strength of 0 is no flash at all.
+    #[test]
+    fn the_meal_flash_eases_in_and_out_within_its_strength() {
+        let (w, fauna) = standing_browser();
+        let mut a = fauna.view().animals[0];
+        let eye = srgb_linear(FRONDGRAZER_EYE_SRGB);
+        let flash = srgb_linear(ANIMAL_CROPPING_FLASH_SRGB);
+        // How far the accent leans, along the channel where the two differ most.
+        let ch = (0..3)
+            .max_by(|&i, &j| (flash[i] - eye[i]).abs().total_cmp(&(flash[j] - eye[j]).abs()))
+            .unwrap();
+        let lean = |s: &Style| (s.heart[ch] - eye[ch]) / (flash[ch] - eye[ch]);
+        let fade_ticks = (MEAL_FLASH_FADE_S / DT).ceil() as u64;
+        for strength in [0.0f32, 0.2, 0.7] {
+            let mut grid = Animals::empty(w.config().width, w.config().height, w.config().depth);
+            grid.set_meal_flash(strength);
+            // The most one tick may move it: the smoothstep's steepest slope over one
+            // tick's share of the fade, plus one quantisation step.
+            let step = strength
+                * (1.5 * (DT / MEAL_FLASH_FADE_S) as f32 + 1.0 / f32::from(FLASH_LEVELS))
+                + 1e-4;
+            let mut last = 0.0f32;
+            let mut tick = 1;
+            a.state = State::Cropping;
+            for _ in 0..fade_ticks + 2 {
+                stamp_at(&mut grid, &w, &fauna, &a, tick);
+                let l = lean(&grid.styles[0]);
+                assert!(l >= last - 1e-4, "{strength}: the flash fell while eating");
+                assert!(l - last <= step, "{strength}: tick {tick} jumped {}", l - last);
+                assert!(l <= strength + 1e-3, "{strength}: leaned {l}");
+                last = l;
+                tick += 1;
+            }
+            assert!((last - strength).abs() < 1e-3, "{strength}: peaked at {last}");
+            a.state = State::Resting;
+            for _ in 0..fade_ticks + 2 {
+                stamp_at(&mut grid, &w, &fauna, &a, tick);
+                let l = lean(&grid.styles[0]);
+                assert!(l <= last + 1e-4, "{strength}: the flash rose after eating");
+                assert!(last - l <= step, "{strength}: tick {tick} dropped {}", last - l);
+                last = l;
+                tick += 1;
+            }
+            assert!(last.abs() < 1e-4, "{strength}: still leaning {last} after the fade");
+        }
     }
 
     /// No animal layer is an empty grid and no lookup: the presenter's existing behaviour

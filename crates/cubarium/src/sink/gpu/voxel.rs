@@ -210,6 +210,7 @@ impl VoxelGpuSink {
             )
         };
         packer.animals.set_hunker_s(cfg.hunker_s);
+        packer.animals.set_meal_flash(cfg.meal_flash);
         Ok(VoxelGpuSink {
             gpu,
             renderer,
