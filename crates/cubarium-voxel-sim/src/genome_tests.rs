@@ -406,3 +406,42 @@ range = [0.5, 2.0]
         assert!(names.contains(&format!("upkeep@{}", f.name())), "{names:?}");
     }
 }
+
+/// `voxel_census genome= gene=`: a genome becomes ordinary `set=` assignments over the
+/// base it is given, ties followed, and those assignments resolve to the same configs as
+/// decoding the genome directly. A gene outside its box, or an unknown name, is refused.
+#[test]
+fn a_genome_as_set_assignments_resolves_like_its_decode() {
+    use crate::params::{Layers, genome_sets, parse_gene_arg};
+    let text = r#"
+[[gene]]
+name = "upkeep"
+path = "fauna.founders.*.core.maintenance_per_s"
+tie = "each"
+range = [0.25, 4.0]
+"#;
+    let base = Params::defaults();
+    let genes = vec![parse_gene_arg("upkeep@frondgrazer=2.5").expect("NAME=VALUE")];
+    let (g, sets) = genome_sets(&base, text, &genes).expect("decodes");
+    assert_eq!(g.get("upkeep@frondgrazer"), Some(2.5));
+    let via_sets = Params::resolve_over(base.clone(), &Layers { sets: sets.clone(), ..Layers::default() })
+        .expect("the sets resolve");
+    let mut direct = base.clone();
+    direct.apply_genome(&g).expect("decodes");
+    assert_eq!(via_sets, direct, "{sets:?}");
+    let d = base.fauna.founder(Founder::Browser);
+    let p = via_sets.fauna.founder(Founder::Browser);
+    assert!(close(p.core.maintenance_per_s, 2.5 * d.core.maintenance_per_s));
+    // The tied walking cost travels with its base through the sets.
+    assert!(close(p.motor_respiration_per_s, 2.5 * d.motor_respiration_per_s));
+    assert_eq!(
+        via_sets.fauna.founder(Founder::Blind).core.maintenance_per_s,
+        base.fauna.founder(Founder::Blind).core.maintenance_per_s
+    );
+
+    // At x1 nothing changes.
+    assert!(genome_sets(&base, text, &[]).expect("decodes").1.is_empty());
+    assert!(genome_sets(&base, text, &[("upkeep@frondgrazer".into(), 9.0)]).is_err());
+    assert!(genome_sets(&base, text, &[("nope".into(), 1.0)]).is_err());
+    assert!(parse_gene_arg("upkeep").is_err());
+}

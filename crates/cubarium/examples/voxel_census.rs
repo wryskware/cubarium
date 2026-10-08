@@ -65,6 +65,14 @@
 //! `params.toml` into the `save=` directory, and to `params=<file>` when given — beside
 //! the CSV the run's stdout is redirected to.
 //!
+//! `genome=FILE` (a search file, `config/training/search/*.toml`) with `gene=NAME=VALUE`
+//! (repeatable, an expanded gene name such as `upkeep@frondgrazer`; unnamed genes stay at
+//! their file value, x1 by default) decodes the genome over the arm's own configs — the
+//! `config=` file's tables on a fresh run, the save's configs beside `load=` — and applies
+//! the changed leaves as `set=`s ahead of the explicit ones (`genome_sets`). `expand=OUT`
+//! writes the expanded genome (with those values) to `OUT`, prints its `set=` lines on
+//! stdout and exits without running: what `scripts/studies/eco_search.py` reads.
+//!
 //! `gap=off` turns the climate's dry gap off on a `preset=` or `config=` arm.
 //! `--weather-log FILE` writes one CSV row per rain event that ends during the run (start
 //! and end tick, mode, cause, RH, °C and day phase at the start, seconds since the
@@ -158,7 +166,7 @@ const PATCH_SPECIES: [(Plant, &str); 3] = [(Plant::Springturf, "meadow"), (Plant
 /// carries the world). A bare word matches exactly; `k=` matches a prefix.
 const FOUNDING_ONLY: &[&str] = &[
     "preset=", "config=", "seed=", "generated", "closed", "nofauna", "set=", "eggbank=", "introduce=", "world=",
-    "gap=", "night=", "still", "save=", "save_min=", "params=",
+    "gap=", "night=", "still", "save=", "save_min=", "params=", "genome=", "gene=", "expand=",
 ];
 
 fn main() {
@@ -280,6 +288,8 @@ fn main() {
         .filter_map(|a| a.strip_prefix("set=").map(str::to_string))
         .collect();
     let params_file = args.iter().find_map(|a| a.strip_prefix("params="));
+    let genome = genome_args(&args);
+    let expand = args.iter().find_map(|a| a.strip_prefix("expand=")).map(str::to_string);
     // `config=<path>`'s own `[flora]` / `[fauna]` tables (a preset's founding table, say),
     // under the `set=`s, exactly as `cubarium voxel` reads that file.
     let file_tables: Option<toml::Table> =
@@ -315,7 +325,23 @@ fn main() {
             }
         }
     };
+    // The genome's `set=`s over a fresh arm: decoded over the `config=` file's tables.
+    let fresh_genome_sets = |world: cubarium_voxel::Config| -> Vec<String> {
+        let Some((text, genes)) = &genome else { return Vec::new() };
+        let base = Params::resolve_over(
+            Params { world, ..Params::defaults() },
+            &Layers { file: file_tables.clone(), ..Layers::default() },
+        )
+        .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+        genome_or_expand(&base, text, genes, expand.as_deref())
+    };
+    if expand.is_some() && !args.iter().any(|a| a.starts_with("load=")) {
+        fresh_genome_sets(cubarium_voxel::Config::default());
+        unreachable!("expand= exits");
+    }
     let resolve = |world: cubarium_voxel::Config| -> Params {
+        let mut all = fresh_genome_sets(world.clone());
+        all.extend(sets.iter().cloned());
         let params = Params::resolve_over(
             Params {
                 world,
@@ -323,7 +349,7 @@ fn main() {
             },
             &Layers {
                 file: file_tables.clone(),
-                sets: sets.clone(),
+                sets: all,
                 ..Layers::default()
             },
         )
@@ -332,8 +358,16 @@ fn main() {
         params
     };
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
-        let (mut sim, minute0) =
-            load_run(std::path::Path::new(dir), &args, heuristic, &policies, &sets, &write_params);
+        let (mut sim, minute0) = load_run(
+            std::path::Path::new(dir),
+            &args,
+            heuristic,
+            &policies,
+            &sets,
+            genome.as_ref(),
+            expand.as_deref(),
+            &write_params,
+        );
         run(&mut sim, hours, minute0, save.as_ref(), &timing, stage);
         return;
     }
@@ -1118,6 +1152,38 @@ impl SaveAt {
     }
 }
 
+/// `genome=FILE` and its `gene=NAME=VALUE`s: the file's text and the values.
+fn genome_args(args: &[String]) -> Option<(String, Vec<(String, f64)>)> {
+    let genes: Vec<(String, f64)> = args
+        .iter()
+        .filter_map(|a| a.strip_prefix("gene="))
+        .map(|g| cubarium_voxel_sim::params::parse_gene_arg(g).unwrap_or_else(|e| panic!("{e}")))
+        .collect();
+    let path = args.iter().find_map(|a| a.strip_prefix("genome="));
+    assert!(path.is_some() || genes.is_empty(), "gene= needs genome=FILE");
+    path.map(|p| {
+        let text = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("genome={p}: {e}"));
+        (text, genes)
+    })
+}
+
+/// The genome's `set=`s over `base`; with `expand=OUT`, the expanded genome goes to `OUT`,
+/// the `set=` lines to stdout, and the process exits.
+fn genome_or_expand(base: &Params, text: &str, genes: &[(String, f64)], expand: Option<&str>) -> Vec<String> {
+    let (g, sets) = cubarium_voxel_sim::params::genome_sets(base, text, genes)
+        .unwrap_or_else(|e| panic!("genome: {e}"));
+    if let Some(out) = expand {
+        std::fs::write(out, g.to_toml("expanded by voxel_census expand=; values as given by gene="))
+            .unwrap_or_else(|e| panic!("expand={out}: {e}"));
+        for s in &sets {
+            println!("set={s}");
+        }
+        std::process::exit(0);
+    }
+    eprintln!("genome: {} ({} set=s)", g.describe(), sets.len());
+    sets
+}
+
 /// `load=<dir>`: a saved run, re-assembled the way the founding arms assemble a new one.
 /// The world's shape, water and seed live in the file, so the generation arguments are
 /// refused rather than silently ignored.
@@ -1127,6 +1193,8 @@ fn load_run(
     heuristic: bool,
     policies: &[(Founder, std::path::PathBuf)],
     sets: &[String],
+    genome: Option<&(String, Vec<(String, f64)>)>,
+    expand: Option<&str>,
     write_params: &dyn Fn(&Params),
 ) -> (Sim, u64) {
     let shaping: Vec<&str> = args
@@ -1159,6 +1227,18 @@ fn load_run(
     // values in their authored unit and rescaled to the world's cell size as a fresh run
     // would ([`Params::over_loaded`]).
     let mut flora = flora;
+    // The genome decodes over the save's own configs, then goes in as `set=`s.
+    let mut all: Vec<String> = Vec::new();
+    if let Some((text, genes)) = genome {
+        let base = Params {
+            world: world.config().clone(),
+            flora: flora.config().clone().authored(),
+            fauna: fauna.config().clone(),
+        };
+        all = genome_or_expand(&base, text, genes, expand);
+    }
+    all.extend(sets.iter().cloned());
+    let sets = &all[..];
     let loaded = Params::over_loaded(world.config().clone(), flora.config(), fauna.config().clone(), sets)
         .unwrap_or_else(|e| panic!("the parameter set: {e}"));
     if !sets.is_empty() {
