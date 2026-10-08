@@ -263,6 +263,23 @@ enum Host {
 }
 
 impl Host {
+    fn surface_sizing(&self) -> Option<cubarium_gpu::target::window::SurfaceSizing> {
+        match self {
+            Host::Wayland(w) => Some(w.surface_sizing()),
+            Host::Xlib(_) => None,
+        }
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Host::Wayland(w) => w.describe(),
+            Host::Xlib(_) => {
+                let (w, h) = self.size();
+                format!("logical {w}x{h}, scale 1.000 (Xlib)")
+            }
+        }
+    }
+
     fn size(&self) -> (u32, u32) {
         match self {
             Host::Wayland(w) => w.size(),
@@ -343,7 +360,13 @@ impl SwapchainWindow {
                 Err(e) => return Err((e, Leftover::Minifb(window))),
             }
         };
-        let presenter = match WindowPresenter::open(gpu.clone(), src, native, host.size()) {
+        let presenter = match WindowPresenter::open_with_sizing(
+            gpu.clone(),
+            src,
+            native,
+            host.size(),
+            host.surface_sizing(),
+        ) {
             Ok(presenter) => presenter,
             Err(e) => {
                 return Err((
@@ -356,7 +379,8 @@ impl SwapchainWindow {
             }
         };
         eprintln!(
-            "cubarium: development window presented on its own thread — {}",
+            "cubarium: development window presented on its own thread — {}; {}",
+            host.describe(),
             presenter.describe()
         );
         Ok(SwapchainWindow {
