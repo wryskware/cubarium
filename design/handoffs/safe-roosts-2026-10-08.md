@@ -108,3 +108,15 @@ raided [...] plenty of elevated groves and meadows that are also perfectly fine 
   - This replaces round 1's "stay put".
 - **Keep** round 1's fixes: the vine-foot steering, and the fallback only to real roost sites when
   better ones exist.
+
+## Outcome (2026-10-08): dropped
+
+- **Round 3:** Codex's fixes (settle when good enough, vaulttree preference, commit to a target),
+  branch `worktree-agent-aefeb9d2e7464ac39` at e187cdbc, not merged. Seedporters slept more, but vaulttree
+  sleep fell from 46 % to 0 % and cliff sleep stayed at 0 %. Kills were unchanged. Table:
+  `art/gen/runs/2026-10-08-safe-roosts-r3/table.md`.
+- **Dropped by Wrysk ("drop rework for now i guess").** Main keeps the roosts-rain behaviour (076891b3)
+  plus the vine-foot steering fix.
+- **If this is resumed:**
+  - a reachable vaulttree should outrank settling;
+  - the cliff preference needs the settle rule to allow a nearby rim.
