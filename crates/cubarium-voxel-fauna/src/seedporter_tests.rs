@@ -1008,15 +1008,21 @@ fn a_seedporter_gliding_off_a_vine_face_lands_once_and_does_not_relaunch() {
     }
     let mut fauna = Fauna::new(FaunaConfig::default());
     let id = on_ground(&mut fauna, &world, SP, 3, 2, HUNGRY_ADULT);
-    hold(&mut fauna, id, 1.0, 0.0);
-    let on_face = |f: &Fauna| {
-        let a = animal(f, id);
-        a.mobility.mode == MobilityMode::Perched && matches!(a.mobility.perch.map(|p| p.anchor), Some(PerchAnchor::Vine(_)))
-    };
-    let n = until(&mut fauna, &world, &mut flora, 2000, on_face);
-    assert!(on_face(&fauna), "fixture: it perches at the face's top ({n} ticks)");
+    // ROOSTS (2026-10-08): a climb up to a lip it reaches now pulls itself over onto the top,
+    // so the body is put clinging at the face's top by hand, as the climb used to leave it.
     let k = fauna.animals.iter().position(|a| a.id == id).expect("the body");
+    {
+        let a = &mut fauna.animals[k];
+        a.pose.y_m = 10.0 * V;
+        a.mobility.mode = MobilityMode::Perched;
+        a.mobility.falling = false;
+        a.mobility.perch = Some(crate::Perch {
+            kind: crate::PerchKind::VineFace,
+            anchor: PerchAnchor::Vine(Face::new(6, 10, 2, FaceDir::NegX)),
+        });
+    }
     fauna.animals[k].pose.x = 6.0 * V - 0.02;
+    fauna.animals[k].pose.z = centre(5, 2).1;
     hold(&mut fauna, id, 1.0, 0.0);
     let climbs = fauna.view().ledger.climbs;
     let mut launches = 0;

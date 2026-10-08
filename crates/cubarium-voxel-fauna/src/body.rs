@@ -434,7 +434,8 @@ pub struct FounderPhysiology {
     pub catch_foray_s: f64,
     /// What upkeep costs while it sleeps, **× its basal upkeep**: 0.5 for endotherm-like
     /// lineages, 0.3 for the ectotherm-like shredder, ripple-snail, capgnawer and
-    /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional).
+    /// lanternjaw (`design/ecology-timescales-2026-10-02.md` 1a; provisional). A flyer
+    /// perched while grounded by rain ([`crate::Mobility::rain_grounded`]) pays it too.
     pub sleep_upkeep: f64,
     /// Hunger overrides sleep: a body whose hunger (the reserve's shortfall from its cap,
     /// 0 full to 1 empty) is at or above this stays awake and forages. 0.9 (1a, 2026-10-02;
@@ -1030,10 +1031,42 @@ pub struct Glider {
     /// input. 8.0.
     #[serde(default = "fruit_search_m")]
     pub fruit_search_m: f64,
+    /// **The preferred roost's reach** (backlog §12, Wrysk 2026-10-08: "seedporters should
+    /// prefer to roost in vault trees at night, or up top mesas they can reach by climbing
+    /// latticevine"): at its rest hour a glider driven by its own heuristic goes to a
+    /// vaulttree crown, else to a ledge top it reaches up a latticevine wall, no farther
+    /// than this straight-line distance, metres, before it falls back on the nearest
+    /// climbable stand (`roost_search_m`). A heuristic world query, not a sense. 0 turns
+    /// the preference off. 12.0 (three roost searches).
+    #[serde(default = "roost_budget_m")]
+    pub roost_budget_m: f64,
+    /// **The roost trip's reserve guard** (den rest's `Pack::home_reserve_share`): a
+    /// preferred roost is taken only when the trip — walking there at cruise, then the climb
+    /// at the climbing pace and cost — costs at most this share of the reserve above the
+    /// emergency line (`wake_hunger`). Fraction. 0.5, as den rest.
+    #[serde(default = "roost_reserve_share")]
+    pub roost_reserve_share: f64,
+    /// **A ledge worth roosting on** stands at least this high over the foot of the
+    /// latticevine wall it is climbed by, metres. 1.0 (a glide's start, so it glides off in
+    /// the morning).
+    #[serde(default = "roost_ledge_min_m")]
+    pub roost_ledge_min_m: f64,
 }
 
 fn roost_search_m() -> f64 {
     4.0
+}
+
+fn roost_budget_m() -> f64 {
+    Glider::SEEDPORTER.roost_budget_m
+}
+
+fn roost_reserve_share() -> f64 {
+    Glider::SEEDPORTER.roost_reserve_share
+}
+
+fn roost_ledge_min_m() -> f64 {
+    Glider::SEEDPORTER.roost_ledge_min_m
 }
 
 fn fruit_search_m() -> f64 {
@@ -1051,6 +1084,9 @@ impl Glider {
         glide_min_height_m: 1.0,
         roost_search_m: 4.0,
         fruit_search_m: 8.0,
+        roost_budget_m: 12.0,
+        roost_reserve_share: 0.5,
+        roost_ledge_min_m: 1.0,
     };
 }
 
@@ -1343,6 +1379,26 @@ pub struct Flight {
     /// rebuilt from the terrain at most this often, seconds. A placeholder: 600.
     #[serde(default = "egg_air_refresh")]
     pub egg_air_refresh_s: f64,
+    /// **Rain grounds it** (backlog §12, Wrysk 2026-10-08: "rain should ground bellwings"):
+    /// at or above this rain rate, m/s, a flyer aloft comes down (up under reachable cover
+    /// overhead, else down onto what is below), and a perched one does not take off or sip,
+    /// until the rate falls under this less `rain_ground_hysteresis_m_per_s`. A downpour
+    /// grounds it whatever the rate (§3.8). 20 mm/h: a shower grounds it, a drizzle does
+    /// not.
+    #[serde(default = "rain_ground")]
+    pub rain_ground_m_per_s: f64,
+    /// How far under `rain_ground_m_per_s` the rain must fall before a rain-grounded flyer
+    /// flies again, m/s. 5 mm/h.
+    #[serde(default = "rain_ground_hysteresis")]
+    pub rain_ground_hysteresis_m_per_s: f64,
+}
+
+fn rain_ground() -> f64 {
+    Flight::BELLWING.rain_ground_m_per_s
+}
+
+fn rain_ground_hysteresis() -> f64 {
+    Flight::BELLWING.rain_ground_hysteresis_m_per_s
 }
 
 fn half() -> f64 {
@@ -1376,6 +1432,8 @@ impl Flight {
         lift_speed_fraction: 0.5,
         egg_headroom_m: 1.0,
         egg_air_refresh_s: 600.0,
+        rain_ground_m_per_s: 20.0 / 1000.0 / 3600.0,
+        rain_ground_hysteresis_m_per_s: 5.0 / 1000.0 / 3600.0,
     };
 }
 
@@ -3468,6 +3526,39 @@ pub(crate) fn mouth_columns(
     pose: &crate::Pose,
     body: &Body,
 ) -> Vec<(i64, u32)> {
+    let mut cols: Vec<(i64, u32)> = Vec::new();
+    mouth_columns_each(view, pose, body, |entry| {
+        if !cols.contains(&entry) {
+            cols.push(entry);
+        }
+    });
+    cols
+}
+
+/// `q.floor() as i64`, without the library call: the truncation, one lower for a
+/// negative non-integer. The same value for every `q` a world coordinate can be.
+#[inline]
+fn floor_i64(q: f64) -> i64 {
+    let t = q as i64;
+    if (t as f64) > q { t - 1 } else { t }
+}
+
+/// `x.rem_euclid(width)` for an `x` within a ring's width of it, without the division.
+#[inline]
+pub(crate) fn wrap_x(x: i64, width: i64) -> i64 {
+    if x < 0 {
+        if x >= -width { x + width } else { x.rem_euclid(width) }
+    } else if x >= width {
+        if x < 2 * width { x - width } else { x.rem_euclid(width) }
+    } else {
+        x
+    }
+}
+
+/// [`mouth_columns`] **with repeats**: every probe's column in probe order, for a caller
+/// that deduplicates a union over many poses itself (`encounter::mouth_columns_from_face`).
+/// Its first occurrences are exactly [`mouth_columns`], in the same order.
+pub(crate) fn mouth_columns_each(view: &VoxelView<'_>, pose: &crate::Pose, body: &Body, mut each: impl FnMut((i64, u32))) {
     let c = view.config;
     let v = c.voxel_m;
     let r = body.footprint_radius();
@@ -3480,28 +3571,22 @@ pub(crate) fn mouth_columns(
     let axis = 2.0 * r + reach;
     let axis_steps = ((axis / (0.5 * v)).ceil() as usize).max(1);
     let side_steps = ((2.0 * r / (0.5 * v)).ceil() as usize).max(1);
-    let mut probes: Vec<(f64, f64)> = Vec::with_capacity(axis_steps + side_steps + 2);
+    let (width, depth) = (i64::from(c.width), i64::from(c.depth));
+    let mut probe = |px: f64, pz: f64| {
+        let z = floor_i64(pz / v);
+        if z < 0 || z >= depth {
+            return;
+        }
+        each((wrap_x(floor_i64(px / v), width), z as u32));
+    };
     for k in 0..=axis_steps {
         let d = axis * (k as f64) / (axis_steps as f64);
-        probes.push((pose.x + d * fx, pose.z + d * fz));
+        probe(pose.x + d * fx, pose.z + d * fz);
     }
     for k in 0..=side_steps {
         let d = -r + 2.0 * r * (k as f64) / (side_steps as f64);
-        probes.push((tip.0 + d * rx, tip.1 + d * rz));
+        probe(tip.0 + d * rx, tip.1 + d * rz);
     }
-    let mut cols: Vec<(i64, u32)> = Vec::with_capacity(probes.len());
-    for &(px, pz) in &probes {
-        let z = (pz / v).floor();
-        if z < 0.0 || z >= f64::from(c.depth) {
-            continue;
-        }
-        let x = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
-        let entry = (x, z as u32);
-        if !cols.contains(&entry) {
-            cols.push(entry);
-        }
-    }
-    cols
 }
 
 /// The stock of one ground food class at a site: what a mouth over it could take.
@@ -4342,7 +4427,7 @@ pub(crate) fn observation_read(
 /// face below, over `band_max_m`) and `ceiling` (the clear height over the base to the
 /// first solid or water cell in its column, over `band_max_m`, capped at 1); `Air`
 /// (perched, hanging, the clear height over its whole span, the rain rate over the
-/// flight's `R₀`, a downpour); `Taste(1)`, the nearest
+/// flight's `R₀`, grounded by the weather: a downpour or its rain latch); `Taste(1)`, the nearest
 /// bloom's nectar in the mouth's reach; and the downward fan, sector by sector, with
 /// `bloom` beside foliage and bodies. Without a prepared occupancy (a diagnostic) it
 /// builds its own window.
@@ -4396,8 +4481,10 @@ fn flyer_observation(
         obs[am.offset + 3] =
             clamp01(f64::from(view.weather.rain_m_per_s) / flight.shower_rain_reference_m_per_s);
     }
-    obs[am.offset + 4] =
-        f64::from(view.weather.mode == cubarium_voxel::weather::RainMode::Downpour);
+    // The weather grounds it: a downpour, or its rain latch (backlog §12).
+    obs[am.offset + 4] = f64::from(
+        view.weather.mode == cubarium_voxel::weather::RainMode::Downpour || a.mobility.rain_grounded,
+    );
 
     let tm = module(manifest, "Taste(1)");
     let reach = shape.r + body.mouth_reach_m;

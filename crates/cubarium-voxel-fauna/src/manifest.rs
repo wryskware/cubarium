@@ -586,7 +586,8 @@ const MODULE_FLYER_SELF: Module = Module {
 /// A flyer's state in the air: perched (1) or aloft (0); hanging (perched under an
 /// underside); `overhead`, the clear height over the body's top across its whole span to
 /// the first solid, over the band (capped at 1); the rain rate over the flight's `R₀`
-/// (capped at 1); and whether a downpour is falling.
+/// (capped at 1); and whether the weather grounds it (the `downpour` channel: a downpour,
+/// or rain over its `Flight::rain_ground_m_per_s` latch, backlog §12).
 const AIR_CHANNELS: [&str; 5] = ["perched", "hanging", "overhead", "rain", "downpour"];
 
 const MODULE_AIR: Module = Module {

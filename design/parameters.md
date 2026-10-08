@@ -344,7 +344,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.lake_shelf_depth_m` | (absent) | m under the water | [0, inf) | 0.125–0.5 | - | placeholder | the marsh shelf's depth at its lakeward edge (one voxel at the shore) |
 | `world.landform.terrarium.lake_flat_m` | (absent) | m | [0, inf) | 0–1.5 | - | placeholder | width of the wet flats outside the shore, graded to the water's surface |
 | `world.landform.terrarium.lake_scale` | (absent) | x | (0, inf) | 0.5–3 | - | placeholder | the lake's size: multiplies its length, width, bay, meander, depth (short of bedrock) and marsh; not the water level |
-| `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
+| `world.landform.terrarium.water_level_m` | (absent) | m above the lowest yard ground | [0, inf) | 0.125–1.125 | - | decision (Wrysk 2026-09-22/23) | where the water stands, above the ground the lake is graded into |
 | `world.landform.terrarium.yard` | (absent) | fraction of the depth | [0, 1) | 0.2–0.5 | - | placeholder | how deep the yard held clear for the lake is |
 | `world.landform.terrarium.pool_m.*` | (absent) | m | (0, inf) | 0.25–2 | - | placeholder | a pool's radius around the ring |
 | `world.landform.terrarium.pool_depth_m` | (absent) | m | [0, inf) | 0.125–0.75 | - | placeholder | a pool's depth |
@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2359 rows)
+**`fauna.*`** (2404 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1590,7 +1590,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.littershredder.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.littershredder.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.littershredder.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.littershredder.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -1686,6 +1686,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.littershredder.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.littershredder.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.littershredder.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -1693,6 +1695,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.littershredder.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.littershredder.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.littershredder.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.littershredder.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.littershredder.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -1830,7 +1835,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.frondgrazer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.frondgrazer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.frondgrazer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.frondgrazer.gut.stomach_k` | 0.06 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -1926,6 +1931,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.frondgrazer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.frondgrazer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.frondgrazer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -1933,6 +1940,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.frondgrazer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.frondgrazer.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.frondgrazer.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.frondgrazer.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.frondgrazer.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2070,7 +2080,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.lanternjaw.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.lanternjaw.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.lanternjaw.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.lanternjaw.gut.stomach_k` | 0.15 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -2166,6 +2176,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.lanternjaw.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.lanternjaw.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.lanternjaw.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2173,6 +2185,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.lanternjaw.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.lanternjaw.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.lanternjaw.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.lanternjaw.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.lanternjaw.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2310,7 +2325,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.capgnawer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.capgnawer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.capgnawer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.capgnawer.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -2406,6 +2421,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.capgnawer.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.capgnawer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.capgnawer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2413,6 +2430,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.capgnawer.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.capgnawer.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.capgnawer.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.capgnawer.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.capgnawer.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2550,7 +2570,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.loftstrider.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.loftstrider.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.loftstrider.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.loftstrider.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -2646,6 +2666,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.loftstrider.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.loftstrider.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.loftstrider.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2653,6 +2675,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.loftstrider.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.loftstrider.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.loftstrider.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.loftstrider.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.loftstrider.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2790,7 +2815,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.ripple-snail.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.ripple-snail.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.ripple-snail.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.ripple-snail.gut.stomach_k` | 0.012 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -2886,6 +2911,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.ripple-snail.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.ripple-snail.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.ripple-snail.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2893,6 +2920,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.ripple-snail.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.ripple-snail.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.ripple-snail.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.ripple-snail.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.ripple-snail.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3030,7 +3060,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.bellwing.active_window.before_rise_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.bellwing.active_window.after_set_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.bellwing.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.bellwing.gut.stomach_k` | 0.03 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -3126,6 +3156,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.lift_speed_fraction` | 0.5 | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.bellwing.flight.egg_headroom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.bellwing.flight.rain_ground_m_per_s` | 0.000005555555555555556 | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.bellwing.flight.rain_ground_hysteresis_m_per_s` | 0.000001388888888888889 | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3133,6 +3165,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.bellwing.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.bellwing.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.bellwing.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.bellwing.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.bellwing.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3270,7 +3305,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.seedporter.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.seedporter.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.seedporter.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.seedporter.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -3366,6 +3401,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.seedporter.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.seedporter.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.seedporter.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3373,6 +3410,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.glider.glide_min_height_m` | 1.0 | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.seedporter.glider.roost_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.seedporter.glider.fruit_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.seedporter.glider.roost_budget_m` | 12.0 | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.seedporter.glider.roost_reserve_share` | 0.5 | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.seedporter.glider.roost_ledge_min_m` | 1.0 | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3510,7 +3550,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.chorister.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.chorister.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
-| `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep |
+| `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.chorister.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.chorister.gut.stomach_k` | 0.2 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
@@ -3606,6 +3646,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.lift_speed_fraction` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | vertical speed at full lift, either way |
 | `fauna.founders.chorister.flight.egg_headroom_m` | (absent) | m | [0, inf) |  | - | placeholder | a flyer lays only on a face with this clear over its hatchling's body |
 | `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
+| `fauna.founders.chorister.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
+| `fauna.founders.chorister.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3613,6 +3655,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.glider.glide_min_height_m` | (absent) | m | [0, inf) |  | - | decision | a glide starts only from this height over the landing surface |
 | `fauna.founders.chorister.glider.roost_search_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this |
 | `fauna.founders.chorister.glider.fruit_search_m` | (absent) | m | [0, inf) |  | - | placeholder | a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense) |
+| `fauna.founders.chorister.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
+| `fauna.founders.chorister.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
+| `fauna.founders.chorister.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
 | `fauna.founders.chorister.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.chorister.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |

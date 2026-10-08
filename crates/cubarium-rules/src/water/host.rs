@@ -56,6 +56,17 @@ struct Scratch {
 }
 
 impl Scratch {
+    /// Bytes of buffer held (capacity).
+    fn bytes(&self) -> usize {
+        16 * (self.full.capacity() + self.touched.capacity())
+            + 8 * (self.head.capacity()
+                + self.drive[0].capacity()
+                + self.drive[1].capacity()
+                + self.proposed.capacity()
+                + self.delta.capacity())
+            + self.edges.iter().map(|e| e.capacity() * core::mem::size_of::<(u32, u32, f64)>()).sum::<usize>()
+    }
+
     fn ensure(&mut self, grid: Grid) {
         let (n, plane) = (grid.cells(), grid.plane());
         if self.head.len() != n {
@@ -75,6 +86,13 @@ impl Scratch {
 #[derive(Default)]
 pub struct Serial {
     sc: Scratch,
+}
+
+impl Serial {
+    /// Bytes of working buffer this driver holds (capacity).
+    pub fn scratch_bytes(&self) -> usize {
+        self.sc.bytes()
+    }
 }
 
 impl ExchangeBackend for Serial {
@@ -800,6 +818,11 @@ mod par {
 
         pub fn threads(&self) -> usize {
             self.pool.current_num_threads()
+        }
+
+        /// Bytes of working buffer this driver holds (capacity); the pool is shared.
+        pub fn scratch_bytes(&self) -> usize {
+            self.sc.bytes()
         }
     }
 

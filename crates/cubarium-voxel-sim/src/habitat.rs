@@ -371,14 +371,17 @@ const LAKE_REST_CAP: u32 = 12_000;
 
 /// Step until the lake's volume moves by under [`LAKE_REST_TOLERANCE`] across a
 /// [`LAKE_REST_WINDOW`], or until [`LAKE_REST_CAP`]; the ticks stepped. A world with no
-/// lake is at rest after one window.
-fn rest_the_lake(world: &mut World, mut watch: impl FnMut(&World)) -> u32 {
+/// lake is at rest after one window. `watch` returning `false` stops it at once (a
+/// cancelled founding, whose world is thrown away).
+fn rest_the_lake(world: &mut World, mut watch: impl FnMut(&World, u32) -> bool) -> u32 {
     let mut before = cubarium_voxel::hydrate::lake(world).volume_m3;
     let mut ticks = 0;
     while ticks < LAKE_REST_CAP {
-        for _ in 0..LAKE_REST_WINDOW {
+        for k in 0..LAKE_REST_WINDOW {
             world.step();
-            watch(world);
+            if !watch(world, ticks + k + 1) {
+                return ticks + k + 1;
+            }
         }
         ticks += LAKE_REST_WINDOW;
         let now = cubarium_voxel::hydrate::lake(world).volume_m3;
@@ -420,9 +423,104 @@ pub fn pre_roll(world: &mut World, open_with_a_shower: bool) -> PreRoll {
 pub fn pre_roll_capturing(
     world: &mut World,
     open_with_a_shower: bool,
-    mut mid_shower: Option<&mut Option<World>>,
+    mid_shower: Option<&mut Option<World>>,
 ) -> PreRoll {
-    let settle = world.settle(SETTLE_CAP);
+    pre_roll_watched(world, open_with_a_shower, mid_shower, &()).expect("nobody cancels an unwatched pre-roll")
+}
+
+/// The stages a founding goes through, in order, as a [`FoundingWatch`] hears them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FoundingPhase {
+    /// The startup settle: the generator's lake finding its hollows.
+    Settling,
+    /// The opening shower.
+    Shower,
+    /// The drain after it.
+    Draining,
+    /// The lake coming to rest.
+    LakeRest,
+    /// The stream watched before anything is planted.
+    StreamWatch,
+    /// Plants, logs and founders placed, and the habitat judged.
+    Placing,
+}
+
+impl FoundingPhase {
+    pub const ALL: [FoundingPhase; 6] = [
+        FoundingPhase::Settling,
+        FoundingPhase::Shower,
+        FoundingPhase::Draining,
+        FoundingPhase::LakeRest,
+        FoundingPhase::StreamWatch,
+        FoundingPhase::Placing,
+    ];
+
+    /// A short name for logs and the session's progress.
+    pub fn name(self) -> &'static str {
+        match self {
+            FoundingPhase::Settling => "settling",
+            FoundingPhase::Shower => "shower",
+            FoundingPhase::Draining => "draining",
+            FoundingPhase::LakeRest => "lake_rest",
+            FoundingPhase::StreamWatch => "stream_watch",
+            FoundingPhase::Placing => "placing",
+        }
+    }
+
+    /// The most ticks this stage can step: its cap. A stage usually ends sooner, when
+    /// its water stops moving (the shower when the weather ends it).
+    pub fn cap_ticks(self) -> u32 {
+        match self {
+            FoundingPhase::Settling => SETTLE_CAP,
+            FoundingPhase::Shower => SHOWER_CAP,
+            FoundingPhase::Draining => DRAIN_CAP,
+            FoundingPhase::LakeRest => LAKE_REST_CAP,
+            FoundingPhase::StreamWatch => STREAM_WATCH_TICKS,
+            FoundingPhase::Placing => 0,
+        }
+    }
+}
+
+/// **Someone following a founding**: told each stage and how many ticks into it the world
+/// is, after every tick, and asked after every tick whether to go on. Watching changes
+/// nothing about the founding; a `false` from [`FoundingWatch::go_on`] stops it, and the
+/// half-founded world is the caller's to throw away. `()` watches nothing.
+pub trait FoundingWatch {
+    /// Placement try `k` of `of` begins, on `placement_seed` ([`crate::found::found_terrain`]).
+    fn attempt(&self, _k: usize, _of: usize, _placement_seed: u64) {}
+    /// `phase` has stepped `ticks` ticks so far (0 when it starts).
+    fn progress(&self, _phase: FoundingPhase, _ticks: u32) {}
+    /// Whether to keep founding; asked after every tick.
+    fn go_on(&self) -> bool {
+        true
+    }
+}
+
+impl FoundingWatch for () {}
+
+/// [`pre_roll_capturing`] with someone watching ([`FoundingWatch`]): exactly the same
+/// pre-roll, tick for tick, unless the watcher says stop — then `None`, part way through.
+pub fn pre_roll_watched(
+    world: &mut World,
+    open_with_a_shower: bool,
+    mut mid_shower: Option<&mut Option<World>>,
+    watcher: &dyn FoundingWatch,
+) -> Option<PreRoll> {
+    let tell = |phase: FoundingPhase, ticks: u32| {
+        watcher.progress(phase, ticks);
+        watcher.go_on()
+    };
+    if !tell(FoundingPhase::Settling, 0) {
+        return None;
+    }
+    let mut settle_ticks = 0u32;
+    let settle = world.settle_while(SETTLE_CAP, |_| {
+        settle_ticks += 1;
+        tell(FoundingPhase::Settling, settle_ticks)
+    });
+    if !watcher.go_on() {
+        return None;
+    }
     let sites = support_sites(world);
     let mut wettest = vec![0.0f64; sites.len()];
     let watch = |w: &World, wettest: &mut [f64]| {
@@ -443,6 +541,9 @@ pub fn pre_roll_capturing(
             world.apply(cubarium_voxel::Command::SetOutlet { open: true });
         }
         let before = world.view().ledger.rain_events;
+        if !tell(FoundingPhase::Shower, 0) {
+            return None;
+        }
         // An empty sky cannot open with rain; it rains when it can, in the running world.
         let started = world.open_with_rain();
         let half = (world.config().climate.opening_min_s * 0.5 * f64::from(cubarium_voxel::TICK_HZ))
@@ -453,6 +554,9 @@ pub fn pre_roll_capturing(
             world.step();
             ticks += 1;
             watch(world, &mut wettest);
+            if !tell(FoundingPhase::Shower, ticks) {
+                return None;
+            }
             let raining = world.view().is_raining();
             if (ticks >= half || !raining)
                 && let Some(slot) = mid_shower.as_deref_mut()
@@ -466,11 +570,31 @@ pub fn pre_roll_capturing(
         }
         report.opening_shower = started || world.view().ledger.rain_events > before;
         report.shower_ticks = ticks;
-        report.drain = world.settle_watching(DRAIN_CAP, |w| watch(w, &mut wettest));
+        if !tell(FoundingPhase::Draining, 0) {
+            return None;
+        }
+        let mut drain_ticks = 0u32;
+        report.drain = world.settle_while(DRAIN_CAP, |w| {
+            watch(w, &mut wettest);
+            drain_ticks += 1;
+            tell(FoundingPhase::Draining, drain_ticks)
+        });
+        if !watcher.go_on() {
+            return None;
+        }
         report.ticks += ticks + report.drain.ticks;
         // **Then the lake comes to rest**, however slowly: founders are placed by the
         // lake the world will have, not by one still filling from under its floor.
-        report.lake_rest_ticks = rest_the_lake(world, |w| watch(w, &mut wettest));
+        if !tell(FoundingPhase::LakeRest, 0) {
+            return None;
+        }
+        report.lake_rest_ticks = rest_the_lake(world, |w, k| {
+            watch(w, &mut wettest);
+            tell(FoundingPhase::LakeRest, k)
+        });
+        if !watcher.go_on() {
+            return None;
+        }
         report.ticks += report.lake_rest_ticks;
     }
     // **Watch the stream before planting in its way.** `settle` converges on the world's
@@ -480,17 +604,23 @@ pub fn pre_roll_capturing(
     // to reach drown in the first seconds — measured on `default`, an umbrellafrond under
     // 0.99 m one tick after seeding and a velvetpad under 0.19 m twelve ticks later, both
     // bone dry when they were planted.
-    for _ in 0..STREAM_WATCH_TICKS {
+    if !tell(FoundingPhase::StreamWatch, 0) {
+        return None;
+    }
+    for k in 0..STREAM_WATCH_TICKS {
         world.step();
         watch(world, &mut wettest);
+        if !tell(FoundingPhase::StreamWatch, k + 1) {
+            return None;
+        }
     }
     report.ticks += STREAM_WATCH_TICKS;
-    PreRoll {
+    Some(PreRoll {
         settle,
         report,
         sites,
         wettest,
-    }
+    })
 }
 
 /// Seed the habitat on a world that has had its [`pre_roll`]. Every eligibility gate
@@ -1085,7 +1215,12 @@ pub fn place_bodies(
             // body never drowns (roster R2b).
             if !phys.aquatic {
                 let drown = phys.drown_depth_m(&phys.adult_body());
-                meadow.retain(|f| index_of(sites, *f).is_none_or(|i| wettest[i] <= drown));
+                // Each face's first index among `sites`, looked up rather than scanned for.
+                let mut first: std::collections::HashMap<Site, usize> = std::collections::HashMap::with_capacity(sites.len());
+                for (i, s) in sites.iter().enumerate() {
+                    first.entry(*s).or_insert(i);
+                }
+                meadow.retain(|f| first.get(f).is_none_or(|&i| wettest[i] <= drown));
             }
             meadow.retain(|f| found.contains(f));
             let chosen = place(

@@ -10,12 +10,13 @@
 //!   slow reader holding the lock only delays this thread.
 //! - **readers** (Godot's main thread) lock the hub briefly to swap out what they take.
 //!
-//! Candidates are founded on threads of their own and never touch the loop until one is
-//! promoted.
+//! Candidates are bare terrains drawn on threads of their own; the picked one is founded
+//! on a thread of its own ([`Session::promote`], `crate::founding`) and never touches the
+//! loop until it is installed.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -33,6 +34,7 @@ use serde_json::{Value, json};
 use crate::console::{Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 use crate::create::{self, Populate, Scene, StartLayers, StartSpec};
 use crate::feed::{ChunkData, FeedConfig, Frame, Tracker, View};
+use crate::founding::{Busy, FoundingInfo, Job, Outcome, TERRAIN_TRIES, found_picked, shower_typical, terrain_candidate};
 use crate::hook::{HookClock, LoopHook};
 use crate::founders::founder_recipes;
 use crate::params::{SimParams, WorldSpec};
@@ -54,6 +56,15 @@ pub struct SessionOptions {
     pub speed: f64,
     /// Life events held for [`Session::take_events`] before the oldest are dropped.
     pub max_events: usize,
+    /// Terrain draws a candidate makes before it reports that none could take the
+    /// founders ([`crate::founding::TERRAIN_TRIES`]).
+    pub terrain_tries: usize,
+    /// Placement tries on a picked terrain before its founding is refused
+    /// ([`cubarium_voxel_sim::found::PLACEMENT_TRIES`]).
+    pub placement_tries: usize,
+    /// Test only: the habitat verdict a founding is judged by, in place of its own.
+    #[cfg(test)]
+    pub(crate) accept: Option<fn(&cubarium_voxel_sim::habitat::Seeded) -> bool>,
 }
 
 impl Default for SessionOptions {
@@ -65,6 +76,10 @@ impl Default for SessionOptions {
             cadence: Cadence::default(),
             speed: 1.0,
             max_events: 4096,
+            terrain_tries: TERRAIN_TRIES,
+            placement_tries: cubarium_voxel_sim::found::PLACEMENT_TRIES,
+            #[cfg(test)]
+            accept: None,
         }
     }
 }
@@ -120,18 +135,28 @@ pub struct Status {
     pub feed_updates: u64,
 }
 
-/// What a candidate is doing.
+/// What a candidate is doing. A candidate is a **bare terrain**: nothing on it is founded
+/// until it is picked ([`Session::promote`]).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CandidateInfo {
     pub index: usize,
-    /// `generating`, `ready` or `failed`.
+    /// `generating`, `ready`, `failed` or `cancelled`.
     pub state: String,
-    /// The seed asked for, if one was.
+    /// The seed asked for while generating; the terrain's own once ready.
     pub seed: Option<u64>,
     pub label: Option<String>,
     pub error: Option<String>,
     pub summary: Option<cubarium_observatory::query::WorldSummary>,
     pub populations: Option<cubarium_observatory::query::Populations>,
+    /// The terrain's hash ([`World::terrain_hash`], hex), once ready.
+    pub terrain: Option<String>,
+    /// What the feasibility check said: whether the founders could all be placed on the
+    /// bare terrain. `None` for a bare spec, which founds no one. A drawn terrain is only
+    /// offered when it is `true`; an asked seed is offered either way.
+    pub feasible: Option<bool>,
+    /// What was said of this terrain: an asked seed kept despite its lake or its
+    /// feasibility, the wettest kept when none had the lake asked for.
+    pub notes: Vec<String>,
 }
 
 enum Slot {
@@ -147,10 +172,15 @@ struct Candidate {
 
 #[derive(Default)]
 struct Candidates {
-    /// Bumped on every new batch and every promotion, so a founding that finishes late
-    /// files into nothing.
+    /// Bumped on every new batch and every promotion, so a draw that finishes late files
+    /// into nothing.
     batch: u64,
     list: Vec<Candidate>,
+    /// The batch's stop flag: its draws stop at the next one when it is set.
+    cancel: Arc<AtomicBool>,
+    /// What the batch was made from, for founding the one picked.
+    spec: Option<WorldSpec>,
+    params: Option<SimParams>,
 }
 
 enum ToSim {
@@ -245,23 +275,62 @@ pub struct Session {
     shared: Arc<Shared>,
     threads: Arc<Threads>,
     candidates: Arc<Mutex<Candidates>>,
+    /// The picked candidate's founding, the last one started.
+    job: Arc<Mutex<Option<Arc<Job>>>>,
+    /// Candidate and founding threads still running.
+    workers: Arc<AtomicUsize>,
+    terrain_tries: usize,
+    placement_tries: usize,
+    #[cfg(test)]
+    accept: Option<fn(&cubarium_voxel_sim::habitat::Seeded) -> bool>,
 }
 
-/// The loop and the ingest thread, and how to stop them: [`Threads::stop`] asks the loop to
-/// shut down and joins it (it joins a save's writer on the way out), then the ingest thread,
-/// which ends when the loop's channel closes.
+/// Every thread a session starts, and how to stop them all ([`Threads::stop`]): the
+/// candidate draws and the founding are cancelled and joined (a draw stops between draws,
+/// a founding at its next tick), then the loop is asked to shut down and joined (it joins
+/// a save's writer on the way out), then the ingest thread, which ends when the loop's
+/// channel closes. Nothing a session starts outlives it: the Godot extension's library is
+/// unloaded at exit, and a thread still running its code then faults.
 struct Threads {
     to_sim: Sender<ToSim>,
     /// The loop first, then the ingest thread.
     handles: Mutex<Vec<JoinHandle<()>>>,
+    /// Candidate draws and foundings not yet joined.
+    workers: Mutex<Vec<JoinHandle<()>>>,
+    /// Their stop flags: the batch's and the founding's.
+    candidates: Arc<Mutex<Candidates>>,
+    job: Arc<Mutex<Option<Arc<Job>>>>,
 }
 
 impl Threads {
+    /// Keep a candidate or founding thread to join; the finished ones are joined here.
+    fn track(&self, h: JoinHandle<()>) {
+        let mut w = self.workers.lock().unwrap_or_else(|e| e.into_inner());
+        let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *w).into_iter().partition(|t| t.is_finished());
+        *w = live;
+        w.push(h);
+        drop(w);
+        for t in done {
+            let _ = t.join();
+        }
+    }
+
     /// Stop and join; returns whether anything was still to stop. Idempotent.
     fn stop(&self) -> bool {
+        if let Ok(c) = self.candidates.lock() {
+            c.cancel.store(true, Ordering::SeqCst);
+        }
+        if let Some(j) = self.job.lock().ok().and_then(|j| j.clone()) {
+            j.cancel.store(true, Ordering::SeqCst);
+        }
+        let workers = std::mem::take(&mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()));
+        let busy = workers.iter().any(|w| !w.is_finished());
+        for w in workers {
+            let _ = w.join();
+        }
         let _ = self.to_sim.send(ToSim::Shutdown);
         let handles = std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()));
-        let live = !handles.is_empty();
+        let live = busy || !handles.is_empty();
         for h in handles {
             let _ = h.join();
         }
@@ -269,18 +338,15 @@ impl Threads {
     }
 }
 
-/// A handle that stops a [`Session`]'s loop and ingest thread without owning it: for an
-/// owner whose drop may come too late (the Godot extension stops every session still alive
-/// when its library is being unloaded). Holds the session only weakly.
-///
-/// Candidate founding threads ([`Session::generate_candidates`]) are not stopped by it:
-/// founding has no point to give up at, and its threads run until they finish.
+/// A handle that stops every thread of a [`Session`] without owning it ([`Threads::stop`]):
+/// for an owner whose drop may come too late (the Godot extension stops every session still
+/// alive when its library is being unloaded). Holds the session only weakly.
 #[derive(Clone)]
 pub struct SessionStop(std::sync::Weak<Threads>);
 
 impl SessionStop {
-    /// Stop the loop (and with it the running world) and join its threads, as dropping the
-    /// session would. Returns whether they were still running.
+    /// Cancel what is being made, stop the loop (and with it the running world) and join
+    /// every thread, as dropping the session would. Returns whether any was still running.
     pub fn shutdown(&self) -> bool {
         self.0.upgrade().is_some_and(|t| t.stop())
     }
@@ -294,6 +360,9 @@ impl SessionStop {
 impl Session {
     /// A session with no world yet.
     pub fn new(options: SessionOptions) -> Session {
+        let (terrain_tries, placement_tries) = (options.terrain_tries, options.placement_tries);
+        #[cfg(test)]
+        let accept = options.accept;
         let shared = Arc::new(Shared {
             hub: Mutex::new(Hub::new()),
             text: Mutex::new((String::new(), None)),
@@ -327,14 +396,25 @@ impl Session {
                 .spawn(move || Loop::new(options, to_reader, shared).main(sim_rx))
                 .expect("spawning the session's loop")
         };
+        let candidates = Arc::new(Mutex::new(Candidates::default()));
+        let job = Arc::new(Mutex::new(None));
         Session {
             threads: Arc::new(Threads {
                 to_sim: to_sim.clone(),
                 handles: Mutex::new(vec![sim, ingest]),
+                workers: Mutex::new(Vec::new()),
+                candidates: candidates.clone(),
+                job: job.clone(),
             }),
             to_sim,
             shared,
-            candidates: Arc::new(Mutex::new(Candidates::default())),
+            candidates,
+            job,
+            workers: Arc::new(AtomicUsize::new(0)),
+            terrain_tries,
+            placement_tries,
+            #[cfg(test)]
+            accept,
         }
     }
 
@@ -349,18 +429,35 @@ impl Session {
 
     // --- Lifecycle ------------------------------------------------------------------
 
-    /// Start founding `count` candidate worlds from `spec`, in parallel, without running
-    /// any. Candidate `k` takes `spec.seed + k` when a seed is given, else its own drawn
-    /// one. Replaces any earlier candidates. Refused at once only for a spec that does not
-    /// parse.
+    /// Start drawing `count` **terrain** candidates from `spec`, in parallel: bare worlds,
+    /// each checked for room for the founders ([`crate::founding::terrain_candidate`]),
+    /// nothing founded. Candidate `k` takes `spec.seed + k` when a seed is given, else its
+    /// own drawn one. Replaces any earlier candidates, and stops their draws and any
+    /// founding in flight. Refused at once only for a spec that does not parse.
     pub fn generate_candidates(&self, spec: &WorldSpec, count: usize) -> Result<(), String> {
+        let seeds: Vec<Option<u64>> = (0..count).map(|k| spec.seed.map(|s| s.wrapping_add(k as u64))).collect();
+        self.generate_candidates_seeded(spec, &seeds)
+    }
+
+    /// [`Session::generate_candidates`] with each candidate's seed named: one candidate per
+    /// entry, `Some(seed)` that terrain (kept whatever its lake and feasibility say, as an
+    /// asked seed is), `None` a drawn one. What the picker's water slider does to bring the
+    /// same terrains back at another water level. `spec.seed` is not read.
+    pub fn generate_candidates_seeded(&self, spec: &WorldSpec, seeds: &[Option<u64>]) -> Result<(), String> {
+        let count = seeds.len();
         let params = spec.sim_params().map_err(|e| format!("{e:#}"))?;
+        self.cancel_founding();
         let mut c = self.candidates.lock().map_err(|_| "the candidate list is poisoned")?;
+        c.cancel.store(true, Ordering::SeqCst);
+        let cancel = Arc::new(AtomicBool::new(false));
+        c.cancel = cancel.clone();
         c.batch += 1;
         let batch = c.batch;
+        c.spec = Some(spec.clone());
+        c.params = Some(params.clone());
         c.list = (0..count)
             .map(|index| {
-                let seed = spec.seed.map(|s| s.wrapping_add(index as u64));
+                let seed = seeds[index];
                 Candidate {
                     slot: Slot::Generating,
                     info: CandidateInfo {
@@ -371,6 +468,9 @@ impl Session {
                         error: None,
                         summary: None,
                         populations: None,
+                        terrain: None,
+                        feasible: None,
+                        notes: Vec::new(),
                     },
                 }
             })
@@ -378,34 +478,51 @@ impl Session {
         drop(c);
         for index in 0..count {
             let mut spec = spec.clone();
-            spec.seed = spec.seed.map(|s| s.wrapping_add(index as u64));
+            spec.seed = seeds[index];
             let params = params.clone();
             let list = self.candidates.clone();
-            std::thread::Builder::new()
+            let cancel = cancel.clone();
+            let busy = Busy::start(&self.workers);
+            let tries = self.terrain_tries;
+            let h = std::thread::Builder::new()
                 .name(format!("cubarium-candidate-{index}"))
                 .spawn(move || {
-                    let made = prepare_new(&params, &spec);
+                    let _busy = busy;
+                    let go_on = || !cancel.load(Ordering::Relaxed);
+                    let made = terrain_candidate(&params, &spec, tries, &go_on);
                     let Ok(mut c) = list.lock() else { return };
                     if c.batch != batch {
                         return;
                     }
                     let Some(cand) = c.list.get_mut(index) else { return };
+                    if cand.info.state != "generating" {
+                        return;
+                    }
                     match made {
-                        Ok(p) => {
+                        Ok((p, note)) => {
                             cand.info.state = "ready".into();
+                            cand.info.seed = Some(note.seed);
                             cand.info.label = Some(p.label.clone());
+                            cand.info.terrain = Some(format!("{:016x}", p.world.terrain_hash()));
+                            cand.info.feasible = note.feasibility.as_ref().map(|a| a.accepted);
+                            cand.info.notes = note.warnings;
                             cand.info.summary = Some(cubarium_observatory::query::summary(&p.world, &p.label));
                             cand.info.populations = Some(cubarium_observatory::query::populations(&p.flora, &p.fauna));
                             cand.slot = Slot::Ready(Box::new(p));
                         }
+                        Err(_) if !go_on() => {
+                            cand.info.state = "cancelled".into();
+                            cand.slot = Slot::Failed("cancelled".into());
+                        }
                         Err(e) => {
                             cand.info.state = "failed".into();
-                            cand.info.error = Some(format!("{e:#}"));
-                            cand.slot = Slot::Failed(format!("{e:#}"));
+                            cand.info.error = Some(e.clone());
+                            cand.slot = Slot::Failed(e);
                         }
                     }
                 })
                 .map_err(|e| format!("spawning a candidate: {e}"))?;
+            self.threads.track(h);
         }
         Ok(())
     }
@@ -418,8 +535,8 @@ impl Session {
             .unwrap_or_default()
     }
 
-    /// A whole view of a ready candidate (every chunk and its organisms), for a thumbnail
-    /// or to pan across before choosing. `None` while it is still being founded.
+    /// A whole view of a ready candidate (every chunk; a bare terrain has no organisms),
+    /// for a thumbnail or to pan across before choosing. `None` while it is being drawn.
     pub fn candidate_view(&self, index: usize) -> Option<View> {
         let c = self.candidates.lock().ok()?;
         match &c.list.get(index)?.slot {
@@ -428,29 +545,146 @@ impl Session {
         }
     }
 
-    /// Run candidate `index` in place of whatever was running, and drop every other
-    /// candidate (one still being founded is discarded when it finishes).
+    /// **Found candidate `index` on its own terrain and run it** once founded. Returns at
+    /// once; the founding runs on a thread of its own and is followed through
+    /// [`Session::founding`]. Its terrain is never changed: a refused placement is tried
+    /// again on the same terrain ([`cubarium_voxel_sim::found::found_terrain`]), and when
+    /// every try is refused the founding fails with a plain message and the candidates
+    /// stay. Once founded the world is installed in place of whatever was running and the
+    /// candidates are dropped. Refused at once while another founding runs.
     pub fn promote(&self, index: usize) -> Result<(), String> {
-        let mut c = self.candidates.lock().map_err(|_| "the candidate list is poisoned")?;
+        let mut slot = self.job.lock().map_err(|_| "the founding is poisoned")?;
+        if slot.as_ref().is_some_and(|j| j.info.lock().is_ok_and(|i| i.state == "founding")) {
+            return Err("a world is already being founded".into());
+        }
+        let c = self.candidates.lock().map_err(|_| "the candidate list is poisoned")?;
         let Some(cand) = c.list.get(index) else {
             return Err(format!("no candidate {index}"));
         };
-        match &cand.slot {
-            Slot::Generating => return Err(format!("candidate {index} is still being founded")),
+        let world = match &cand.slot {
+            Slot::Generating => return Err(format!("candidate {index} is still being drawn")),
             Slot::Failed(e) => return Err(format!("candidate {index} failed: {e}")),
-            Slot::Ready(_) => {}
-        }
-        let list = std::mem::take(&mut c.list);
-        c.batch += 1;
+            Slot::Ready(p) => p.world.clone(),
+        };
+        let (Some(spec), Some(params), Some(seed)) = (c.spec.clone(), c.params.clone(), cand.info.seed) else {
+            return Err(format!("candidate {index} has no spec"));
+        };
+        let batch = c.batch;
+        let terrain = cand.info.terrain.clone();
         drop(c);
-        for (i, cand) in list.into_iter().enumerate() {
-            if i == index
-                && let Slot::Ready(p) = cand.slot
-            {
-                self.send(ToSim::Install(p));
+        let tries = self.placement_tries.max(1);
+        let job = Arc::new(Job {
+            info: Mutex::new(FoundingInfo {
+                state: "founding".into(),
+                candidate: Some(index),
+                seed: Some(seed),
+                terrain,
+                attempts: tries,
+                ..FoundingInfo::default()
+            }),
+            cancel: AtomicBool::new(false),
+            started: Instant::now(),
+            shower_typical: shower_typical(&params),
+            #[cfg(test)]
+            accept: self.accept,
+            #[cfg(not(test))]
+            accept: None,
+        });
+        *slot = Some(job.clone());
+        drop(slot);
+        let list = self.candidates.clone();
+        let to_sim = self.to_sim.clone();
+        let busy = Busy::start(&self.workers);
+        let h = std::thread::Builder::new()
+            .name(format!("cubarium-founding-{index}"))
+            .spawn(move || {
+                let _busy = busy;
+                let outcome = found_picked(world, seed, &params, &spec, tries, &job);
+                // The job's lock decides between this ending and a cancel: whichever takes
+                // it first is what happened.
+                let Ok(mut info) = job.info.lock() else { return };
+                info.elapsed_s = job.started.elapsed().as_secs_f64();
+                if info.state != "founding" || job.cancel.load(Ordering::SeqCst) {
+                    info.state = "cancelled".into();
+                    return;
+                }
+                match outcome {
+                    Outcome::Founded(p) => {
+                        let Ok(mut c) = list.lock() else { return };
+                        if c.batch != batch {
+                            info.state = "cancelled".into();
+                            return;
+                        }
+                        c.list.clear();
+                        c.batch += 1;
+                        drop(c);
+                        info.state = "done".into();
+                        info.progress = 1.0;
+                        // The founded world's own terrain: the picked one's, which a reader
+                        // can check against the candidate's `terrain`.
+                        info.terrain = Some(format!("{:016x}", p.world.terrain_hash()));
+                        info.label = Some(p.label.clone());
+                        let _ = to_sim.send(ToSim::Install(p));
+                    }
+                    Outcome::Refused(why) | Outcome::Failed(why) => {
+                        info.state = "failed".into();
+                        info.error = Some(why);
+                    }
+                    Outcome::Cancelled => info.state = "cancelled".into(),
+                }
+            })
+            .map_err(|e| format!("spawning the founding: {e}"))?;
+        self.threads.track(h);
+        Ok(())
+    }
+
+    /// The picked candidate's founding: `state` `idle` before any, else `founding`,
+    /// `done`, `failed` (with `error`) or `cancelled`, and while founding its stage,
+    /// progress and placement try ([`FoundingInfo`]).
+    pub fn founding(&self) -> FoundingInfo {
+        let job = self.job.lock().ok().and_then(|j| j.clone());
+        match job {
+            None => FoundingInfo { state: "idle".into(), ..FoundingInfo::default() },
+            Some(j) => {
+                let mut info = j.info.lock().map(|i| i.clone()).unwrap_or_default();
+                if info.state == "founding" {
+                    info.elapsed_s = j.started.elapsed().as_secs_f64();
+                }
+                info
             }
         }
-        Ok(())
+    }
+
+    /// **Stop what is being made**: the candidates still being drawn (they become
+    /// `cancelled`; ready ones stay) and the founding in flight (`cancelled`, nothing
+    /// installed). Their threads stop at the next draw or the next tick.
+    pub fn cancel(&self) {
+        if let Ok(mut c) = self.candidates.lock() {
+            c.cancel.store(true, Ordering::SeqCst);
+            for cand in c.list.iter_mut().filter(|x| x.info.state == "generating") {
+                cand.info.state = "cancelled".into();
+                cand.slot = Slot::Failed("cancelled".into());
+            }
+        }
+        self.cancel_founding();
+    }
+
+    fn cancel_founding(&self) {
+        let job = self.job.lock().ok().and_then(|j| j.clone());
+        if let Some(j) = job {
+            j.cancel.store(true, Ordering::SeqCst);
+            if let Ok(mut info) = j.info.lock()
+                && info.state == "founding"
+            {
+                info.state = "cancelled".into();
+                info.elapsed_s = j.started.elapsed().as_secs_f64();
+            }
+        }
+    }
+
+    /// Candidate and founding threads still running (a cancelled one until it notices).
+    pub fn workers(&self) -> usize {
+        self.workers.load(Ordering::SeqCst)
     }
 
     /// Install a world made elsewhere (a tool, a test) in place of whatever was running.
@@ -589,7 +823,7 @@ impl Session {
     /// **A query** over the latest published snapshot, as a serde value:
     /// `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`,
     /// `animal` (`{"id": N}`: the body and its life history), `history`
-    /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `saves`
+    /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `founding`, `saves`
     /// (`{"dir": path}`: the save slots under it, read without loading any), `presets`
     /// (the landform and climate presets a [`WorldSpec`] can name).
     pub fn query(&self, name: &str, args: &Value) -> Result<Value, String> {
@@ -598,6 +832,8 @@ impl Session {
             "presets" => return Ok(crate::params::preset_table()),
             "status" => return Ok(to(&self.status())),
             "candidates" => return Ok(to(&self.candidates())),
+            "founding" => return Ok(to(&self.founding())),
+            "spec" => return spec_info(args),
             "saves" => {
                 let dir = args.get("dir").and_then(Value::as_str).ok_or("`saves` wants {\"dir\": path}")?;
                 return Ok(to(&store::list_saves(Path::new(dir))));
@@ -637,7 +873,7 @@ impl Session {
             other => {
                 return Err(format!(
                     "unknown query `{other}`; known: summary clock environment populations run \
-                     snapshot animals animal history species status candidates saves presets"
+                     snapshot animals animal history species status candidates founding spec saves presets"
                 ));
             }
         })
@@ -673,6 +909,30 @@ impl CandidateSource {
     }
 }
 
+/// Query `spec`: what a [`WorldSpec`] (the query's argument) resolves to, for a picker
+/// setting its controls — the landform's generator (`terrarium`, `staged`, `ridge`), its
+/// water table when it has one (`water_level_m`), and the water steps a picker offers
+/// ([`crate::params::WATER_LEVELS`]).
+fn spec_info(args: &Value) -> Result<Value, String> {
+    let spec: WorldSpec = serde_json::from_value(args.clone()).map_err(|e| format!("the world spec: {e}"))?;
+    let params = spec.sim_params().map_err(|e| format!("{e:#}"))?;
+    let (landform, level) = match &params.world.landform {
+        cubarium_voxel::Landform::Terrarium(t) => ("terrarium", Some(t.water_level_m)),
+        cubarium_voxel::Landform::Staged(_) => ("staged", None),
+        cubarium_voxel::Landform::Ridge => ("ridge", None),
+    };
+    let steps: Vec<Value> = crate::params::WATER_LEVELS
+        .iter()
+        .map(|(name, m)| json!({ "name": name, "water_level_m": m }))
+        .collect();
+    Ok(json!({
+        "landform": landform,
+        "water_level_m": level,
+        "water_levels": steps,
+        "size": [params.world.width, params.world.height, params.world.depth],
+    }))
+}
+
 /// A serde value of `v` (`null` for one that does not serialize).
 fn to<T: Serialize + ?Sized>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or(Value::Null)
@@ -680,6 +940,7 @@ fn to<T: Serialize + ?Sized>(v: &T) -> Value {
 
 impl Drop for Session {
     fn drop(&mut self) {
+        self.cancel();
         self.threads.stop();
     }
 }

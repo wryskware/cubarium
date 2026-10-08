@@ -860,6 +860,11 @@ pub struct World {
     /// for the terrain version it was computed on ([`SkyMemo`]).
     #[serde(skip)]
     pub(crate) sky_memo: SkyMemo,
+    /// **A cache, not state:** the water exchange's working buffers, the world's own and
+    /// freed with it ([`crate::water::ExchangeScratch`]). Not serialized; a clone starts
+    /// without any.
+    #[serde(skip)]
+    pub(crate) water_scratch: crate::water::ExchangeScratch,
 }
 
 /// The value of an empty [`SkyMemo`] slot: no visibility (a fraction of weights in
@@ -1166,6 +1171,7 @@ impl World {
             void_runs: VoidRuns::default(),
             solid: SolidColumns::default(),
             sky_memo: SkyMemo::default(),
+            water_scratch: crate::water::ExchangeScratch::default(),
             config,
         };
         let report = crate::generate::landform(&mut world);
@@ -1232,6 +1238,7 @@ impl World {
             void_runs: VoidRuns::default(),
             solid: SolidColumns::default(),
             sky_memo: SkyMemo::default(),
+            water_scratch: crate::water::ExchangeScratch::default(),
             material,
             config,
         };
@@ -1371,6 +1378,17 @@ impl World {
     /// has to see the water on its way to rest (the habitat's startup pre-roll remembers
     /// the deepest water every face saw).
     pub fn settle_watching(&mut self, cap_ticks: u32, mut watch: impl FnMut(&World)) -> Settle {
+        self.settle_while(cap_ticks, |w| {
+            watch(w);
+            true
+        })
+    }
+
+    /// [`World::settle_watching`], where the watcher also says whether to go on: `false`
+    /// stops the settle after that tick, reported as not converged. A watcher that always
+    /// says `true` is exactly [`World::settle_watching`]. What a founding that can be
+    /// cancelled steps through.
+    pub fn settle_while(&mut self, cap_ticks: u32, mut watch: impl FnMut(&World) -> bool) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
         let mut stored: Vec<f64> = Vec::with_capacity(window + 1);
@@ -1386,8 +1404,11 @@ impl World {
                 break;
             }
             self.step();
-            watch(self);
             ticks += 1;
+            if !watch(self) {
+                converged = false;
+                break;
+            }
         }
         let pooled_m3 = history.last().map(|h| h.0).unwrap_or(0.0);
         let drift = if stored.len() > window {
@@ -1404,6 +1425,26 @@ impl World {
             drift_m3_per_100: drift,
             dry_locked: pooled_m3 <= 0.0 && self.atmosphere_m3 > 0.0,
         }
+    }
+
+    /// Bytes of working buffer the water exchange holds for this world (capacity). The
+    /// buffers are the world's own: built on its first exchange, freed when it drops, and
+    /// not copied by a clone.
+    pub fn water_scratch_bytes(&self) -> usize {
+        self.water_scratch.bytes()
+    }
+
+    /// A hash of the terrain alone: every cell's material, in index order, with the
+    /// world's dimensions. Two worlds with the same terrain hash the same whatever their
+    /// water, weather or tick; what a founding that must keep the picked terrain checks.
+    pub fn terrain_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = rustc_hash::FxHasher::default();
+        (self.config.width, self.config.height, self.config.depth).hash(&mut h);
+        for m in &self.material {
+            (*m as u8).hash(&mut h);
+        }
+        h.finish()
     }
 
     /// Step until the water has stopped moving, or until `cap_ticks`: see

@@ -977,6 +977,36 @@ pub(crate) fn fan_first_hit<O: crate::senses::CellOccupancy>(
     Some((t, if bloom { ConeHit::Bloom } else { hit }))
 }
 
+/// **Cover a flyer can hang under** (backlog §12, the rain roost): an underside it reaches
+/// by rising straight up from `pose` — a solid over its disc, or a crown's foliage layer
+/// over its centre's column — whose bottom its top meets no higher than its ceiling
+/// (`band_max_m` over the support face below) lets it. The rule a rise ends on
+/// ([`move_through_air`]).
+pub(crate) fn cover_overhead(view: &VoxelView<'_>, fv: &FloraView<'_>, shape: Shape, band_max_m: f64, pose: &crate::Pose) -> bool {
+    let c = view.config;
+    let v = c.voxel_m;
+    let Some(site) = support_below(view, pose.x, pose.z, pose.y_m) else {
+        return false;
+    };
+    let ceiling = surface_m(site.y, v) + band_max_m;
+    let top0 = pose.y_m + shape.h;
+    let highest = ceiling + shape.h + EPS;
+    if highest <= top0 {
+        return false;
+    }
+    if roof_over(view, shape, pose.x, pose.z, top0, highest - top0).is_some_and(|(bottom, _)| bottom <= highest) {
+        return true;
+    }
+    let cz = (pose.z / v).floor();
+    if !(0.0..f64::from(c.depth)).contains(&cz) {
+        return false;
+    }
+    crown_layers_at(view, fv, (pose.x / v).floor() as i64, cz as u32).iter().any(|(_, l)| {
+        let bottom = l.cell as f64 * v;
+        bottom >= top0 - EPS && bottom <= highest
+    })
+}
+
 /// **Sheltered** (the census's downpour reading, §3.8): something overhead within the
 /// band — a solid or water cell in the centre's column, or a crown's foliage layer over
 /// it.

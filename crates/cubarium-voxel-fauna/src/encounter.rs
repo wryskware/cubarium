@@ -94,16 +94,36 @@ pub fn mouth_columns_at(view: &VoxelView<'_>, pose: &Pose, body: &Body) -> Vec<(
 /// heading swept in [`HEADING_SAMPLES`] equal steps.
 pub fn mouth_columns_from_face(view: &VoxelView<'_>, face: Site, body: &Body) -> Vec<(i64, u32)> {
     let v = view.config.voxel_m;
+    let width = i64::from(view.config.width);
+    // Every mouth column lies within `2r + reach` of the face (the tip's far corner), so
+    // the union is deduplicated on a small window around the face rather than by a scan
+    // of the list so far (which was 70 % of a wide world's founding check). Same columns,
+    // same first-seen order.
+    let half = ((2.0 * body.footprint_radius() + body.mouth_reach_m) / v).ceil() as i64 + 2;
+    let side = (2 * half + 1) as usize;
+    let mut seen = vec![false; side * side];
+    let (cx, cz) = (i64::from(face.x), i64::from(face.z));
     let mut cols: Vec<(i64, u32)> = Vec::new();
     for k in 0..HEADING_SAMPLES {
         let heading = std::f64::consts::TAU * (k as f64) / (HEADING_SAMPLES as f64);
         let mut pose = Pose::at_site(face, v);
         pose.heading_rad = heading;
-        for entry in mouth_columns(view, &pose, body) {
-            if !cols.contains(&entry) {
+        crate::body::mouth_columns_each(view, &pose, body, |entry| {
+            let mut dx = crate::body::wrap_x(entry.0 - cx, width);
+            if dx > width / 2 {
+                dx -= width;
+            }
+            let dz = i64::from(entry.1) - cz;
+            if dx.abs() <= half && dz.abs() <= half {
+                let at = (dz + half) as usize * side + (dx + half) as usize;
+                if !seen[at] {
+                    seen[at] = true;
+                    cols.push(entry);
+                }
+            } else if !cols.contains(&entry) {
                 cols.push(entry);
             }
-        }
+        });
     }
     cols
 }
@@ -1125,17 +1145,27 @@ impl RouteMap {
         let components = route_components(view, &faces, rule, body.headroom_voxels(c.voxel_m));
         let index: FxHashMap<Site, usize> =
             faces.iter().enumerate().map(|(i, f)| (*f, i)).collect();
-        let mut columns: Vec<Vec<(i64, u32)>> = Vec::with_capacity(faces.len());
+        // Every face's mouth columns are its own (the slow part on a wide world: 72
+        // headings per face), so they are found in face ranges side by side on the compute
+        // pool and come back in face order; the column index is then built serially in
+        // that order, exactly as one pass would.
+        let threads = cubarium_voxel::default_threads();
+        let jobs: Vec<crate::par::Job<'_, Vec<Vec<(i64, u32)>>>> = crate::par::ranges(faces.len(), threads, 512)
+            .into_iter()
+            .map(|r| -> crate::par::Job<'_, Vec<Vec<(i64, u32)>>> {
+                let (faces, body) = (&faces, &body);
+                Box::new(move || faces[r].iter().map(|f| mouth_columns_from_face(view, *f, body)).collect())
+            })
+            .collect();
+        let columns: Vec<Vec<(i64, u32)>> = crate::par::run(threads, jobs).into_iter().flatten().collect();
         let mut by_column: FxHashMap<(u32, u32), Vec<usize>> = FxHashMap::default();
-        for (i, face) in faces.iter().enumerate() {
-            let cols = mouth_columns_from_face(view, *face, &body);
-            for &(cx, cz) in &cols {
+        for (i, cols) in columns.iter().enumerate() {
+            for &(cx, cz) in cols {
                 by_column
                     .entry((cx.rem_euclid(i64::from(c.width)) as u32, cz))
                     .or_default()
                     .push(i);
             }
-            columns.push(cols);
         }
         RouteMap {
             faces,
@@ -1180,6 +1210,9 @@ impl RouteMap {
             return out;
         }
         let li = layer.foliage_index.unwrap_or(0);
+        // Faces already judged for this layer (taken or not): each is judged once, in
+        // first-seen order, as the scan of the list so far did.
+        let mut judged: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
         for column in layer_columns(view, stand, layer) {
             for &i in self
                 .by_column
@@ -1187,7 +1220,7 @@ impl RouteMap {
                 .map(Vec::as_slice)
                 .unwrap_or(&[])
             {
-                if out.contains(&i) {
+                if !judged.insert(i) {
                     continue;
                 }
                 let band = mouth_crown_layers_at(self.faces[i].y, &self.body, self.voxel_m);

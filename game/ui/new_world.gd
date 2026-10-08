@@ -1,9 +1,14 @@
 extends Control
 ## The new-world picker: a size, a terrain preset and a climate preset (the catalog in
 ## `res://data/catalog.json`, shown where the session's `presets` query lists the name),
-## an optional seed, then 3–4 candidates founded in parallel. Each candidate shows its
-## progress and, once ready, its thumbnail: a WorldView in its own SubViewport. Open one
-## large to pan across it; pick one, or reroll.
+## how much water (Low / Medium / High: the terrarium's water table at 0.375, 0.75 and
+## 1.125 m), an optional seed, then 3–4 **terrain** candidates drawn in parallel — bare
+## terrains, checked for room for the founders, nothing founded. Each shows its thumbnail
+## (a WorldView in its own SubViewport); open one large to pan across it, reroll, or move
+## the water slider to see the same terrains wetter or drier. Only the picked one is
+## founded, on its own terrain, with a real progress bar; a founding that can't place the
+## founders comes back here with the reason. Drawing and founding can be cancelled, and
+## leaving the picker cancels them.
 
 signal back
 
@@ -24,7 +29,15 @@ var _size_note: Label
 var _terrain_note: Label
 var _climate_note: Label
 var _seed: LineEdit
+var _water: HSlider
+var _water_note: Label
+var _water_box: Control
+## The water steps the session offers (`query("spec")`): name and water_level_m.
+var water_levels := [{"name": "low", "water_level_m": 0.375}, {"name": "medium", "water_level_m": 0.75},
+	{"name": "high", "water_level_m": 1.125}]
+var _water_ok := false  # the chosen landform has a water table
 var _generate: Button
+var _cancel: Button
 var _back: Button
 var _status: Label
 var _grid: GridContainer
@@ -40,6 +53,14 @@ var _large_title: Label
 var _large_pick: Button
 var _large_back: Button
 var _large_index := -1
+var _founding := false
+var _found_index := -1
+var _found_box: PanelContainer
+var _found_title: Label
+var _found_phase: Label
+var _found_bar: ProgressBar
+var _found_detail: Label
+var _found_cancel: Button
 
 
 func _init() -> void:
@@ -79,6 +100,32 @@ func _init() -> void:
 	_seed = LineEdit.new()
 	_seed.placeholder_text = "blank: drawn for each candidate"
 	left.add_child(_seed)
+	_water_box = VBoxContainer.new()
+	left.add_child(_water_box)
+	var water_label := Label.new()
+	water_label.text = "Water"
+	_water_box.add_child(water_label)
+	_water = HSlider.new()
+	_water.min_value = 0
+	_water.max_value = 2
+	_water.step = 1
+	_water.tick_count = 3
+	_water.ticks_on_borders = true
+	_water.value = 1
+	_water.custom_minimum_size = Vector2(0, 32)
+	_water.value_changed.connect(func(_v): _water_changed())
+	_water_box.add_child(_water)
+	var steps := HBoxContainer.new()
+	_water_box.add_child(steps)
+	for i in 3:
+		var l := Label.new()
+		l.text = ["Low", "Medium", "High"][i]
+		l.theme_type_variation = &"Small"
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		l.horizontal_alignment = [HORIZONTAL_ALIGNMENT_LEFT, HORIZONTAL_ALIGNMENT_CENTER,
+			HORIZONTAL_ALIGNMENT_RIGHT][i]
+		steps.add_child(l)
+	_water_note = _note(_water_box)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	left.add_child(spacer)
@@ -91,24 +138,35 @@ func _init() -> void:
 	_generate.custom_minimum_size = Vector2(0, 44)
 	_generate.pressed.connect(func(): generate())
 	left.add_child(_generate)
+	_cancel = Button.new()
+	_cancel.text = "Cancel"
+	_cancel.custom_minimum_size = Vector2(0, 40)
+	_cancel.visible = false
+	_cancel.pressed.connect(func(): cancel())
+	left.add_child(_cancel)
 	_back = Button.new()
 	_back.text = "Back"
 	_back.custom_minimum_size = Vector2(0, 40)
 	_back.pressed.connect(back.emit)
 	left.add_child(_back)
 
+	var column := VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	h.add_child(column)
+	_build_founding(column)
 	var right := ScrollContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	right.follow_focus = true
-	h.add_child(right)
+	column.add_child(right)
 	_grid = GridContainer.new()
 	_grid.columns = 2
 	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_child(_grid)
 
-	_size.item_selected.connect(func(_i): _notes())
-	_terrain.item_selected.connect(func(_i): _notes())
+	_size.item_selected.connect(func(_i): _notes(); _sync_water())
+	_terrain.item_selected.connect(func(_i): _notes(); _sync_water())
 	_climate.item_selected.connect(func(_i): _notes())
 	_build_large()
 
@@ -129,6 +187,36 @@ func _note(parent: Control) -> Label:
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	parent.add_child(l)
 	return l
+
+
+## The founding panel over the candidates: what is being founded, its stage, a progress
+## bar driven by the session's own progress, the try, and Cancel.
+func _build_founding(parent: Control) -> void:
+	_found_box = PanelContainer.new()
+	_found_box.theme_type_variation = &"Row"
+	_found_box.visible = false
+	parent.add_child(_found_box)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	_found_box.add_child(box)
+	_found_title = Label.new()
+	_found_title.theme_type_variation = &"Title"
+	box.add_child(_found_title)
+	_found_phase = Label.new()
+	box.add_child(_found_phase)
+	_found_bar = ProgressBar.new()
+	_found_bar.custom_minimum_size = Vector2(0, 16)
+	_found_bar.show_percentage = false
+	box.add_child(_found_bar)
+	_found_detail = Label.new()
+	_found_detail.theme_type_variation = &"Small"
+	box.add_child(_found_detail)
+	_found_cancel = Button.new()
+	_found_cancel.text = "Cancel founding"
+	_found_cancel.custom_minimum_size = Vector2(200, 40)
+	_found_cancel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_found_cancel.pressed.connect(func(): cancel())
+	box.add_child(_found_cancel)
 
 
 func _build_large() -> void:
@@ -198,6 +286,7 @@ func setup() -> void:
 	for c in climates:
 		_climate.add_item(c["label"])
 	_notes()
+	_sync_water()
 
 
 ## The catalog's entries the session lists, in the catalog's order, then any listed name
@@ -220,6 +309,22 @@ func open() -> void:
 		_generate.grab_focus()
 	else:
 		focus_first()
+
+
+## Leaving the picker: whatever is being drawn or founded is cancelled.
+func leave() -> void:
+	if _generating or _founding:
+		cancel()
+
+
+## Stop the candidates being drawn and the founding in flight (the session says which
+## ended how; ready candidates stay).
+func cancel() -> void:
+	shell.session.cancel()
+	if _generating:
+		_generating = false
+		_status.text = "Cancelled."
+	_refresh_controls()
 
 
 func focus_first() -> void:
@@ -263,13 +368,65 @@ func select(size_id: String, terrain := "", climate := "") -> void:
 		if climates[i]["name"] == climate:
 			_climate.select(i)
 	_notes()
+	_sync_water()
+
+
+# --- Water ------------------------------------------------------------------------------
+
+## Put the slider on the step matching the chosen config's own water table, or Medium if
+## none matches; hide it for a landform without one. Doesn't regenerate anything.
+func _sync_water() -> void:
+	var base := spec(false)
+	base.erase("seed")
+	var info = shell.session.query("spec", base)
+	_water_ok = info is Dictionary and info.get("landform", "") == "terrarium"
+	_water_box.visible = _water_ok
+	if not _water_ok:
+		return
+	var listed = info.get("water_levels", [])
+	if listed is Array and listed.size() == 3:
+		water_levels = listed
+	var own = info.get("water_level_m")
+	var step := 1
+	for i in water_levels.size():
+		if own != null and absf(float(water_levels[i]["water_level_m"]) - float(own)) < 1e-6:
+			step = i
+	_water.set_value_no_signal(step)
+	_water_text()
+
+
+func water_level_m() -> float:
+	return float(water_levels[int(_water.value)]["water_level_m"])
+
+
+func _water_text() -> void:
+	_water_note.text = "The water table %.3f m over the yard's ground." % water_level_m()
+
+
+## The slider moved: the same terrains again at the new level (their seeds kept), or
+## nothing yet when no candidates are shown.
+func _water_changed() -> void:
+	_water_text()
+	if _cards.is_empty() or _founding:
+		return
+	var seeds := []
+	for c in shell.session.candidates():
+		seeds.append(c.get("seed") if c.get("state") == "ready" else null)
+	if seeds.is_empty():
+		return
+	var refused: String = shell.session.regenerate_candidates(spec(), seeds)
+	if refused != "":
+		_status.text = "Can't make these: " + refused
+		return
+	_start_batch(seeds.size(), "Drawing the same %d terrains with %s water…" % [seeds.size(),
+		["low", "medium", "high"][int(_water.value)]])
 
 
 # --- Generating -------------------------------------------------------------------------
 
 ## The spec for the chosen size, terrain, climate and seed. A preset the size's config
 ## already uses is not sent, so the file's own landform and climate tables stand.
-func spec() -> Dictionary:
+func spec(with_water := true) -> Dictionary:
 	var s = _selected(sizes, _size)
 	var root := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 	var dims: Array = s["size"].map(func(v): return int(v))  # JSON numbers are floats
@@ -280,21 +437,26 @@ func spec() -> Dictionary:
 	var c = _selected(climates, _climate)
 	if c and c["name"] != s.get("climate", ""):
 		out["climate"] = c["name"]
+	if with_water and _water_ok:
+		out["water_level_m"] = water_level_m()
 	var seed := _seed.text.strip_edges()
 	if seed != "" and seed_problem(seed) == "":
-		out["seed"] = int(seed)
+		out["seed"] = seed  # a String: seeds are unsigned 64-bit, Godot's ints are signed
 	return out
 
 
-## Why `text` can't be sent as a seed, or "". The binding passes integers as signed 64-bit,
-## so a drawn seed above 2^63 − 1 (shown unsigned) can't be typed back in yet.
+## Why `text` can't be sent as a seed, or "". Seeds cross the binding as decimal Strings,
+## so any unsigned 64-bit value goes, the drawn ones above 2^63 included.
 static func seed_problem(text: String) -> String:
-	const MAX := "9223372036854775807"
-	if not text.is_valid_int() or text.begins_with("-") or text.begins_with("+"):
+	const MAX := "18446744073709551615"
+	for ch in text:
+		if ch < "0" or ch > "9":
+			return "A seed is a whole number, 0 or more."
+	if text == "":
 		return "A seed is a whole number, 0 or more."
 	var digits := text.lstrip("0")
 	if digits.length() > MAX.length() or (digits.length() == MAX.length() and digits > MAX):
-		return "Seeds above %s can't be passed to the session yet." % MAX
+		return "Seeds go up to %s." % MAX
 	return ""
 
 
@@ -309,13 +471,22 @@ func generate(count := 0) -> String:
 	if seed != "" and seed_problem(seed) != "":
 		_status.text = seed_problem(seed)
 		return seed_problem(seed)
+	if _founding:
+		return "a world is being founded"
 	var refused: String = shell.session.generate_candidates(spec(), count)
 	if refused != "":
 		push_warning("new world: " + refused)
 		_status.text = "Can't make these: " + refused
 		return refused
+	_start_batch(count, "Drawing %d terrains…" % count)
+	return ""
+
+
+## Cards for a batch the session has just started.
+func _start_batch(count: int, says: String) -> void:
+	var s = _selected(sizes, _size)
 	_clear_cards()
-	_batch_key = "%s/%s" % [s["id"], count]
+	_batch_key = "terrain/%s/%s" % [s["id"], count]
 	_started_ms = Time.get_ticks_msec()
 	_generating = true
 	var aspect := float(s["size"][0]) / float(s["size"][1])
@@ -323,8 +494,8 @@ func generate(count := 0) -> String:
 	for i in count:
 		_cards.append(_card(i, aspect))
 	_generate.text = "Reroll"
-	_status.text = "Founding %d candidates…" % count
-	return ""
+	_status.text = says
+	_refresh_controls()
 
 
 func _clear_cards() -> void:
@@ -386,7 +557,23 @@ func _card(i: int, aspect: float) -> Dictionary:
 		"open": open_b, "pick": pick_b, "shown": false}
 
 
+## Buttons as the work in hand allows: nothing new while a world is founded, Cancel while
+## anything is in flight.
+func _refresh_controls() -> void:
+	_generate.disabled = _founding
+	_water.editable = not _founding
+	_cancel.visible = _generating and not _founding
+	for card in _cards:
+		var ready: bool = card.get("ready", false)
+		card["pick"].disabled = _founding or not ready or not card.get("feasible", true)
+		card["open"].disabled = not ready
+	_large_pick.disabled = _founding or (_large_index >= 0 and _large_index < _cards.size()
+		and _cards[_large_index]["pick"].disabled)
+
+
 func _process(_delta: float) -> void:
+	if _founding:
+		_follow_founding()
 	if _cards.is_empty():
 		return
 	var list: Array = shell.session.candidates()
@@ -399,14 +586,11 @@ func _process(_delta: float) -> void:
 		if i >= _cards.size():
 			continue
 		var card: Dictionary = _cards[i]
-		var seed_text := "seed %s" % String.num_uint64(c["seed"]) if c.get("seed") != null else ""
-		var summary = c.get("summary")
-		if summary is Dictionary and summary.has("seed"):
-			seed_text = "seed %s" % String.num_uint64(summary["seed"])
+		var seed_text := "seed %s" % str(c["seed"]) if c.get("seed") != null else ""
 		match c["state"]:
 			"generating":
 				waiting += 1
-				card["state"].text = "Founding…  %d s" % int(elapsed)
+				card["state"].text = "Drawing the terrain…  %d s" % int(elapsed)
 				var bar: ProgressBar = card["bar"]
 				if estimate > 0.0:
 					bar.indeterminate = false
@@ -423,15 +607,20 @@ func _process(_delta: float) -> void:
 				if not card["shown"]:
 					_show_candidate(i, c)
 			"failed":
-				card["state"].text = "Failed"
+				card["state"].text = "No terrain"
 				card["bar"].indeterminate = false
 				card["bar"].value = 0.0
 				card["summary"].text = str(c.get("error", ""))
+			"cancelled":
+				card["state"].text = "Cancelled"
+				card["bar"].indeterminate = false
+				card["bar"].value = 0.0
 	if _generating and waiting == 0 and list.size() > 0:
 		_generating = false
 		shell.record_founding_s(_batch_key, elapsed)
 		var ready := list.filter(func(x): return x["state"] == "ready").size()
-		_status.text = "%d of %d ready in %d s." % [ready, list.size(), int(elapsed)]
+		_status.text = "%d of %d terrains in %d s. Pick one to found it." % [ready, list.size(), int(elapsed)]
+		_refresh_controls()
 		if get_viewport().gui_get_focus_owner() == null or get_viewport().gui_get_focus_owner() == _generate:
 			focus_first()
 
@@ -444,24 +633,22 @@ func _show_candidate(i: int, c: Dictionary) -> void:
 		return
 	_views[i] = view
 	WorldViews.make_framed(view, card["holder"])
-	card["open"].disabled = false
-	card["pick"].disabled = false
-	card["summary"].text = _populations_line(c.get("populations"))
+	card["ready"] = true
+	card["feasible"] = c.get("feasible") != false
+	card["terrain"] = c.get("terrain", "")
+	card["summary"].text = _terrain_line(c)
+	_refresh_controls()
 
 
-func _populations_line(pops) -> String:
-	if not (pops is Dictionary):
-		return ""
-	var animals := 0
-	var kinds := 0
-	for a in pops.get("animals", []):
-		animals += int(a.get("alive", 0)) + int(a.get("eggs", 0))
-		if int(a.get("alive", 0)) + int(a.get("eggs", 0)) > 0:
-			kinds += 1
-	var stands := 0
-	for p in pops.get("plants", []):
-		stands += int(p.get("stands", 0))
-	return "%d animals and eggs in %d lineages  ·  %d plant stands" % [animals, kinds, stands]
+## What a terrain card says under its picture: bare until picked, and what the
+## feasibility check found.
+static func _terrain_line(c: Dictionary) -> String:
+	var line := "Bare terrain: the plants and animals are founded when you pick it."
+	if c.get("feasible") == false:
+		line = "The founders can't all be placed on this terrain."
+	for n in c.get("notes", []):
+		line += "\n" + str(n)
+	return line
 
 
 func open_large(i: int) -> void:
@@ -472,6 +659,7 @@ func open_large(i: int) -> void:
 	WorldViews.make_framed(_views[i], _large_holder, true)
 	_large_title.text = "Candidate %d  ·  %s" % [i + 1, _cards[i]["state"].text]
 	_large.visible = true
+	_refresh_controls()
 	_large_pick.grab_focus()
 
 
@@ -501,12 +689,59 @@ func ready_count() -> int:
 	return _views.size()
 
 
+## Found candidate `i` on its own terrain; the panel follows it until it runs, fails or
+## is cancelled.
 func _pick(i: int) -> void:
-	var problem: String = shell.promote_candidate(i)
+	var problem: String = shell.found_candidate(i)
 	if problem != "":
 		_status.text = "Can't pick it: " + problem
 		return
-	_clear_cards()
-	_generate.text = "Generate"
+	close_large()
+	_founding = true
+	_found_index = i
+	_found_title.text = "Founding candidate %d" % (i + 1)
+	_found_phase.text = "Starting…"
+	_found_bar.value = 0.0
+	_found_detail.text = ""
+	_found_box.visible = true
 	_status.text = ""
+	_refresh_controls()
+	_found_cancel.grab_focus()
+
+
+func is_founding() -> bool:
+	return _founding
+
+
+## The session's founding, onto the panel; and what happens when it ends.
+func _follow_founding() -> void:
+	var f: Dictionary = shell.session.founding()
+	match f.get("state", ""):
+		"founding":
+			var label: String = f.get("phase_label", "")
+			_found_phase.text = (label if label != "" else "Starting") + "…"
+			_found_bar.value = clampf(float(f.get("progress", 0.0)), 0.0, 1.0) * 100.0
+			var detail := "seed %s  ·  %d s" % [str(f.get("seed", "")), int(f.get("elapsed_s", 0.0))]
+			if int(f.get("attempt", 0)) > 1:
+				detail += "  ·  placing the founders again, try %d of %d" % [f["attempt"], f["attempts"]]
+			_found_detail.text = detail
+		"done":
+			_end_founding()
+			_clear_cards()
+			_generate.text = "Generate"
+			_status.text = ""
+			shell.on_founded(f)
+		"failed":
+			_end_founding()
+			_status.text = str(f.get("error", "The founding failed."))
+		"cancelled":
+			_end_founding()
+			_status.text = "Founding cancelled."
+
+
+func _end_founding() -> void:
+	_founding = false
+	_found_index = -1
+	_found_box.visible = false
+	_refresh_controls()
 

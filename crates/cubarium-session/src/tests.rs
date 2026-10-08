@@ -297,50 +297,238 @@ fn the_metadata_is_read_without_loading_the_world() {
     assert_eq!(via_query.as_array().map(Vec::len), Some(2));
 }
 
+/// Every candidate settled (ready, failed or cancelled), within `secs`.
+fn settled(session: &Session, secs: u64) -> Vec<crate::CandidateInfo> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        let infos = session.candidates();
+        if !infos.is_empty() && infos.iter().all(|c| c.state != "generating") {
+            return infos;
+        }
+        assert!(Instant::now() < deadline, "the candidates did not settle in time: {infos:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The founding ended (any state but `founding`), within `secs`.
+fn founded(session: &Session, secs: u64) -> crate::FoundingInfo {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        let f = session.founding();
+        if f.state != "founding" {
+            return f;
+        }
+        assert!(Instant::now() < deadline, "the founding did not end in time: {f:?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn no_workers(session: &Session) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while session.workers() > 0 {
+        assert!(Instant::now() < deadline, "{} workers still running", session.workers());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The material planes of a whole view, chunk by chunk (water left out).
+fn materials(view: &View) -> Vec<([u32; 3], Vec<u8>)> {
+    let mut out: Vec<([u32; 3], Vec<u8>)> =
+        view.chunks.iter().map(|c| (c.at, c.bytes[..CHUNK_CELLS].to_vec())).collect();
+    out.sort_by_key(|(at, _)| *at);
+    out
+}
+
+fn options_judged(accept: fn(&cubarium_voxel_sim::habitat::Seeded) -> bool, tries: usize) -> SessionOptions {
+    SessionOptions { accept: Some(accept), placement_tries: tries, ..options() }
+}
+
+/// **Candidates are bare terrains**: drawn side by side, nothing on them founded and
+/// nothing running, each its own world with the seed it was asked for, its terrain hash
+/// and the feasibility check's verdict.
 #[test]
-fn candidates_are_independent_and_promoting_one_drops_the_others() {
+fn terrain_candidates_are_drawn_without_founding() {
     let scratch = Scratch::new("candidates");
     let session = Session::new(options());
     session.generate_candidates(&spec(&scratch.0, 21), 2).expect("starts");
-    let deadline = Instant::now() + Duration::from_secs(120);
-    let infos = loop {
-        let infos = session.candidates();
-        assert_eq!(infos.len(), 2);
-        assert!(infos.iter().all(|c| c.state != "failed"), "{infos:?}");
-        if infos.iter().all(|c| c.state == "ready") {
-            break infos;
-        }
-        assert!(Instant::now() < deadline, "the candidates did not found in time");
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    assert_eq!(session.status().generation, 0, "nothing runs before a promotion");
-    // Each is its own world: the seed it was asked for, its own view.
-    let seeds: Vec<u64> = infos.iter().map(|c| c.summary.as_ref().unwrap().seed).collect();
-    assert_eq!(seeds, vec![21, 22]);
+    let infos = settled(&session, 120);
+    assert!(infos.iter().all(|c| c.state == "ready"), "{infos:?}");
+    assert_eq!(session.status().generation, 0, "nothing runs before a pick");
+    let seeds: Vec<Option<u64>> = infos.iter().map(|c| c.seed).collect();
+    assert_eq!(seeds, vec![Some(21), Some(22)]);
+    for c in &infos {
+        let pops = serde_json::to_value(c.populations.as_ref().expect("populations")).unwrap();
+        let counted = |key: &str, field: &str| -> u64 {
+            pops[key].as_array().map_or(0, |a| a.iter().map(|x| x[field].as_u64().unwrap_or(0)).sum())
+        };
+        assert_eq!(counted("animals", "alive") + counted("animals", "eggs"), 0, "no animal on a terrain: {pops}");
+        assert_eq!(counted("plants", "stands"), 0, "no plant on a terrain: {pops}");
+        assert!(c.terrain.is_some() && c.feasible.is_some(), "{c:?}");
+    }
     let (a, b) = (session.candidate_view(0).unwrap(), session.candidate_view(1).unwrap());
     assert!(a.full && b.full);
-    assert_eq!(a.chunks.len(), b.chunks.len());
-    assert!(a.frame.is_some() && b.frame.is_some());
-
-    session.promote(0).expect("promotes");
-    assert!(session.candidates().is_empty(), "the others are dropped");
-    assert!(session.candidate_view(1).is_none());
-    assert!(session.promote(1).is_err());
-    let st = wait(&session, "the promoted world runs", |st| st.running && st.generation == 1);
-    assert_eq!(Some(st.label), infos[0].label.clone(), "it is candidate 0");
+    assert_ne!(materials(&a), materials(&b), "two seeds, two terrains");
+    assert!(a.frame.as_ref().is_some_and(|f| f.animals.ids.is_empty() && f.plants.ids.is_empty()));
+    no_workers(&session);
 }
 
-/// The new-world picker's load, in one process: candidates founding side by side on the
-/// shared water pool (worlds of 512 columns and more step water on it), each with seeds
-/// drawn rather than asked and more frondgrazer founders than a small world can place,
-/// so the habitat check refuses every draw and the loop drops it and generates another
-/// (the path the app was on when it died on 2026-10-08); and a second batch of a
-/// different size started while the first is still founding. Nothing crashes, and every
-/// candidate of the batch that counts comes out ready.
+/// **Founding the picked terrain keeps it**: the founded, running world has the
+/// candidate's terrain (hash and material, chunk for chunk), the founding is told
+/// through its stages to `done`, and the other candidates are dropped once it runs.
 #[test]
-fn candidates_of_two_sizes_found_side_by_side_with_drawn_seeds() {
-    let scratch = Scratch::new("candidates-drawn");
+fn founding_the_picked_candidate_keeps_its_terrain() {
+    let scratch = Scratch::new("found");
+    let session = Session::new(options_judged(|_| true, 3));
+    session.generate_candidates(&spec(&scratch.0, 21), 2).expect("starts");
+    let infos = settled(&session, 120);
+    let before = materials(&session.candidate_view(1).unwrap());
+    session.promote(1).expect("founding starts");
+    assert!(session.promote(0).is_err(), "one founding at a time");
+    let mut phases: Vec<String> = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let f = loop {
+        let f = session.founding();
+        if !f.phase.is_empty() && phases.last() != Some(&f.phase) {
+            phases.push(f.phase.clone());
+        }
+        assert!((0.0..=1.0).contains(&f.progress), "{f:?}");
+        if f.state != "founding" {
+            break f;
+        }
+        assert!(Instant::now() < deadline, "the founding did not end: {f:?}");
+        std::thread::sleep(Duration::from_millis(1));
+    };
+    assert_eq!(f.state, "done", "{f:?}");
+    assert_eq!(f.terrain, infos[1].terrain, "the founded world's terrain hash is the candidate's");
+    assert_eq!(f.attempt, 1);
+    assert!(phases.len() > 1, "the stages were told: {phases:?}");
+    wait(&session, "the founded world runs", |st| st.running && st.generation == 1);
+    assert!(session.candidates().is_empty(), "the candidates are dropped");
+    let after = materials(&take_current(&session));
+    assert_eq!(before, after, "the running world's terrain is the candidate's, chunk for chunk");
+    no_workers(&session);
+}
+
+/// **A refused placement is retried on the same terrain, then reported**: every try
+/// refused, the founding fails with a plain message after the tries it was given, the
+/// candidates stay to pick from, and nothing is installed.
+#[test]
+fn a_refused_founding_retries_on_the_same_terrain_and_reports() {
+    let scratch = Scratch::new("refused");
+    let session = Session::new(options_judged(|_| false, 2));
+    session.generate_candidates(&spec(&scratch.0, 21), 1).expect("starts");
+    let infos = settled(&session, 120);
+    session.promote(0).expect("founding starts");
+    let f = founded(&session, 120);
+    assert_eq!(f.state, "failed", "{f:?}");
+    assert_eq!((f.attempt, f.attempts), (2, 2), "both tries made: {f:?}");
+    assert!(f.error.as_deref().is_some_and(|e| e.contains("terrain")), "{f:?}");
+    assert_eq!(f.terrain, infos[0].terrain, "on the candidate's terrain");
+    assert_eq!(session.candidates().len(), 1, "the candidate stays");
+    assert_eq!(session.candidates()[0].terrain, infos[0].terrain, "unchanged");
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(session.status().generation, 0, "nothing was installed");
+    no_workers(&session);
+}
+
+/// **Cancel stops both**: candidates still being drawn (a spec no terrain can host, with
+/// draws to spare, so they would go on) become `cancelled` and their threads end; a
+/// founding in flight becomes `cancelled` at once, installs nothing, and its thread ends.
+#[test]
+fn cancel_stops_the_draws_and_the_founding() {
+    let scratch = Scratch::new("cancel");
+    let session = Session::new(SessionOptions { terrain_tries: 100_000, ..options() });
+    let hopeless = WorldSpec {
+        config: Some(tiny_config(&scratch.0)),
+        seed: None,
+        sets: vec!["fauna.founders.frondgrazer.founding_count=100000".into()],
+        ..WorldSpec::default()
+    };
+    session.generate_candidates(&hopeless, 2).expect("starts");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(session.workers(), 2, "both still drawing");
+    session.cancel();
+    assert!(session.candidates().iter().all(|c| c.state == "cancelled"), "{:?}", session.candidates());
+    no_workers(&session);
+
+    // The founding's verdict waits for the test, so the cancel lands mid-founding.
+    static RELEASED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn held(_: &cubarium_voxel_sim::habitat::Seeded) -> bool {
+        while !RELEASED.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        false
+    }
+    let session = Session::new(options_judged(held, 3));
+    session.generate_candidates(&spec(&scratch.0, 21), 1).expect("starts");
+    settled(&session, 120);
+    session.promote(0).expect("founding starts");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while session.founding().phase != "placing" {
+        assert!(Instant::now() < deadline, "the founding never reached its verdict: {:?}", session.founding());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    session.cancel();
+    assert_eq!(session.founding().state, "cancelled", "cancelled at once");
+    RELEASED.store(true, std::sync::atomic::Ordering::SeqCst);
+    no_workers(&session);
+    assert_eq!(session.founding().attempt, 1, "no further try was made");
+    assert_eq!(session.founding().state, "cancelled", "it stays cancelled");
+    assert_eq!(session.status().generation, 0, "nothing was installed");
+    assert_eq!(session.candidates()[0].state, "ready", "a ready candidate stays");
+}
+
+/// **The water slider's mechanism**: a spec's `water_level_m` is the terrarium's water
+/// table in the world it makes, the same seeds bring the same terrains back at another
+/// level, and a landform with no water table refuses it.
+#[test]
+fn a_water_level_is_the_terrariums_and_seeds_bring_terrains_back() {
+    let scratch = Scratch::new("water");
+    let path = scratch.0.join("terrarium.toml");
+    std::fs::write(
+        &path,
+        "threads = 2\n[world]\nwidth = 64\nheight = 32\ndepth = 12\nvoxel_m = 0.125\n\
+         [world.landform]\npreset = \"terrarium\"\nwater_level_m = 0.375\n\
+         [world.landform.water]\nmin_lake_m2 = 0.0\nmin_tier_pools = 0\n",
+    )
+    .unwrap();
+    let at = |level: Option<f64>| WorldSpec { config: Some(path.clone()), water_level_m: level, empty: true, ..WorldSpec::default() };
+    let level_of = |spec: &WorldSpec| match spec.sim_params().unwrap().world.landform {
+        cubarium_voxel::Landform::Terrarium(t) => t.water_level_m,
+        _ => panic!("a terrarium"),
+    };
+    assert_eq!(level_of(&at(None)), 0.375, "the file's own");
+    for (_, m) in crate::params::WATER_LEVELS {
+        assert_eq!(level_of(&at(Some(m))), m);
+    }
+    let info = Session::new(options()).query("spec", &serde_json::to_value(at(None)).unwrap()).unwrap();
+    assert_eq!(info["landform"], "terrarium");
+    assert_eq!(info["water_level_m"], 0.375);
+    let staged = WorldSpec { water_level_m: Some(0.75), ..spec(&scratch.0, 1) };
+    assert!(staged.sim_params().is_err(), "a staged ring has no water table");
+
     let session = Session::new(options());
+    session.generate_candidates(&at(Some(0.375)), 2).expect("starts");
+    let low = settled(&session, 120);
+    let seeds: Vec<Option<u64>> = low.iter().map(|c| c.seed).collect();
+    assert!(seeds.iter().all(Option::is_some), "{low:?}");
+    session.generate_candidates_seeded(&at(Some(1.125)), &seeds).expect("starts");
+    let high = settled(&session, 120);
+    assert_eq!(high.iter().map(|c| c.seed).collect::<Vec<_>>(), seeds, "the same terrains back");
+    no_workers(&session);
+}
+
+/// The new-world picker's load, in one process: candidates drawn side by side on the
+/// shared water pool (worlds of 512 columns and more step water on it), each with seeds
+/// drawn rather than asked and more frondgrazer founders than a small world can place, so
+/// the feasibility check refuses every draw and each candidate fails after its draws (the
+/// path the app was on when it died on 2026-10-08); and a second batch of a different size
+/// started while the first is still drawing. Nothing crashes, and every candidate of the
+/// batch that counts settles with the refusal said plainly.
+#[test]
+fn candidates_of_two_sizes_drawn_side_by_side_through_refusals() {
+    let scratch = Scratch::new("candidates-drawn");
+    let session = Session::new(SessionOptions { terrain_tries: 4, ..options() });
     let drawn = |size: [u32; 3]| WorldSpec {
         config: Some(tiny_config(&scratch.0)),
         size: Some(size),
@@ -350,22 +538,13 @@ fn candidates_of_two_sizes_found_side_by_side_with_drawn_seeds() {
     };
     session.generate_candidates(&drawn([64, 24, 8]), 4).expect("starts");
     session.generate_candidates(&drawn([96, 20, 6]), 4).expect("starts");
-    let deadline = Instant::now() + Duration::from_secs(240);
-    let infos = loop {
-        let infos = session.candidates();
-        assert_eq!(infos.len(), 4);
-        assert!(infos.iter().all(|c| c.state != "failed"), "{infos:?}");
-        if infos.iter().all(|c| c.state == "ready") {
-            break infos;
-        }
-        assert!(Instant::now() < deadline, "the candidates did not found in time");
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    for (k, info) in infos.iter().enumerate() {
-        assert!(info.summary.is_some(), "candidate {k} has no summary");
-        let view = session.candidate_view(k).expect("a ready candidate's view");
-        assert!(view.full && view.frame.is_some(), "candidate {k}'s view");
+    let infos = settled(&session, 240);
+    assert_eq!(infos.len(), 4);
+    for c in &infos {
+        assert_eq!(c.state, "failed", "{c:?}");
+        assert!(c.error.as_deref().is_some_and(|e| e.contains("can't be placed")), "{c:?}");
     }
+    no_workers(&session);
 }
 
 #[test]
