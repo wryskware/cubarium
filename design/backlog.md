@@ -250,3 +250,10 @@ read as a dug-out. Its basin shaping needs rework before it is used; an unmerged
 shaping the basin before erosion is on branch `water-table-basin-wip` (erosion silts such a
 basin level with the yard; the massif's first riser is a long straight cliff any high table
 reaches).
+
+## 11. Seedporters groom loftstriders (Wrysk, 2026-10-08: idea, someday)
+
+"eventually might be cool to have seedporters be able to climb loftstriders and like clean out gunk
+of bugs from between their tusks." This would be a cleaner symbiosis. Seedporters already climb (the
+climb pose, `5e819d74`), so a loftstrider would become something they can climb. They would feed on
+bug gunk that builds up round the mouth ring, between the six tusks. Not designed and not scheduled.
