@@ -266,6 +266,25 @@ impl VoxelGpuSink {
         self.renderer.read_raster(&self.gpu)
     }
 
+    /// A measurement/capture target at an exact output size, pixels. Set before the
+    /// first frame; its normal presentation pass is included in the render wall time.
+    pub fn set_headless_size(&mut self, size: (u32, u32)) -> Result<()> {
+        anyhow::ensure!(self.frames == 0 && matches!(self.target, GpuTarget::Headless(_)),
+            "set_headless_size needs a headless sink before its first frame");
+        let sized = cubarium_gpu::target::Headless::with_size(&self.gpu, &self.renderer, size)?;
+        self.target.destroy(&self.gpu);
+        self.target = GpuTarget::Headless(Box::new(sized));
+        Ok(())
+    }
+
+    /// The sized headless attachment, including its letterbox, as sRGB RGBA8.
+    pub fn read_headless_output(&self) -> Result<Vec<u8>> {
+        match &self.target {
+            GpuTarget::Headless(target) => target.read_output(&self.gpu, &self.renderer),
+            _ => anyhow::bail!("read_headless_output needs a headless sink"),
+        }
+    }
+
     /// Pack one tick's world into the renderer's staging buffer. Call it whenever the
     /// world or the plant layer has moved — a tick, or a stdin command that changed a
     /// cell — and not per frame: a frame is one draw over whatever was last staged.
