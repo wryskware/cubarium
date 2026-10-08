@@ -3800,7 +3800,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_gaze_turn` | 0.8 | effort | [0, 1] | 0.2–1 | - | placeholder | turn effort toward the sector with the most bloom |
 | `fauna.teachers.bellwing_wander_forward` | 0.7 | effort | [0, 1] | 0.2–1 | - | placeholder | forward effort of the bellwing's no-signal wander |
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
-| `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind forager's forward effort while it tastes food (0 stays on food, 1 walks across it) |
+| `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind and browser foragers' forward effort while they taste food (0 stays on food, 1 walks across it) |
 | `fauna.teachers.forage_turn_back_samples` | 2 | samples | [0, inf) | 0–8 | - | placeholder | samples the blind forager turns after leaving an exhausted patch (area-restricted search) |
 | `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a reflex walk asking forward this long without moving gives its target up (EDGE) |
 | `fauna.teachers.press_shun_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | a target given up for pressing stays given up this long |

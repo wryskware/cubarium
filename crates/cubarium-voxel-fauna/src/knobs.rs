@@ -377,7 +377,8 @@ pub struct TeacherConfig {
     /// below; searching it never climbs toward it; taking off under it, it goes out level.
     #[serde(default = "bw_roost_ceiling")]
     pub bellwing_roost_ceiling: f64,
-    /// **Stay on food** (the detritus web, §3.1A): the blind forager's forward effort
+    /// **Stay on food** (the detritus web, §3.1A): the blind forager's and, since
+    /// JUVENILE-FOOD, the browser's (frondgrazer, loftstrider) forward effort
     /// while its mouth tastes food over [`TeacherConfig::feed_gate`]. 0 stops and feeds
     /// until the face under its mouth falls below the gate (an exhausted patch), then
     /// walks on; 1 is the old forager, which crossed a pile at full walk. A refused motor's

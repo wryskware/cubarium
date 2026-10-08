@@ -5,8 +5,9 @@
 //! ripple-snail), the seedporter's fruit forager and the bellwing's hover-sip — stayed while
 //! their mouth tasted anything over `feed_gate`. Taste saturates, so a crown holding a
 //! thousandth of its fruit tasted like food, and a hungry seedporter nibbled it for tens of
-//! minutes (LOAD-CLIMB, 2026-10-08). The grazing browsers walk while they feed and never
-//! stop; the lanternjaw's patrol has its own fruitless-patch memory.
+//! minutes (LOAD-CLIMB, 2026-10-08). The grazing browsers (frondgrazer, loftstrider) stop
+//! to feed too since JUVENILE-FOOD; the lanternjaw's patrol has its own fruitless-patch
+//! memory.
 //!
 //! The rule, over those heuristics only (a trained policy behaves only through the world):
 //!
