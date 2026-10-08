@@ -19,6 +19,7 @@ pub mod console;
 pub mod create;
 pub mod feed;
 pub mod founders;
+pub mod hook;
 pub mod params;
 mod session;
 pub mod store;
@@ -32,7 +33,8 @@ mod tests;
 pub use console::{COMMANDS, Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 pub use feed::{ChunkData, Frame, View};
 pub use params::{SimParams, WorldSpec};
-pub use session::{CandidateInfo, Notice, Prepared, Session, SessionOptions, Status, prepare_loaded, prepare_new};
+pub use hook::{HookClock, LoopHook};
+pub use session::{CandidateInfo, CandidateSource, Notice, Prepared, Session, SessionOptions, Status, prepare_loaded, prepare_new};
 pub use store::{LoadError, SaveMeta, SlotInfo};
 
 use cubarium_voxel_fauna::{Founder, MobilityMode, State};

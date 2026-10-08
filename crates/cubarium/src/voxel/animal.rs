@@ -695,7 +695,16 @@ pub struct Animals {
     meal_flash: f32,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
     last_tick: Option<u64>,
+    /// Every body cell this rebuild wrote and the animal that wrote it, in writing order
+    /// (a later write of the same cell wins): picking and the highlight read it
+    /// ([`Animals::owner_at`], [`Animals::cells_of`]).
+    owners: Vec<(u32, u64)>,
+    /// The animal being stamped, or [`NO_OWNER`].
+    owner: u64,
 }
+
+/// No animal: what carcasses, specimens and marks are stamped under.
+const NO_OWNER: u64 = u64::MAX;
 
 
 /// One animal's idle memory ([`idle`]): its idle weight (0 moving to 1 idling) and whether
@@ -746,6 +755,8 @@ impl Animals {
             flash_blend: FxHashMap::default(),
             meal_flash: MEAL_FLASH_DEFAULT,
             last_tick: None,
+            owners: Vec::new(),
+            owner: NO_OWNER,
         }
     }
 
@@ -1121,6 +1132,8 @@ impl Animals {
         self.entries.clear();
         self.entry_of.clear();
         self.model_styles.fill(u16::MAX);
+        self.owners.clear();
+        self.owner = NO_OWNER;
         let Some(fauna) = fauna else {
             self.sleep_blend.clear();
             self.idle_blend.clear();
@@ -1133,6 +1146,7 @@ impl Animals {
         // animals on one face paint the same cells and the later id wins; which of two
         // identical interim blocks won is not a visible fact.
         for animal in fauna.animals {
+            self.owner = animal.id;
             // A parasite hatchling riding its host (interim, stage 1: plain voxels, no
             // final look): its own small box, lifted onto the host's back.
             if let Some(lift) = animal
@@ -1217,6 +1231,52 @@ impl Animals {
                 }
             }
         }
+        self.owner = NO_OWNER;
+    }
+
+    /// The animal whose body is drawn in voxel `(x, y, z)` (`x` wraps), if any: the last one
+    /// written there.
+    pub fn owner_at(&self, x: i64, y: u32, z: u32) -> Option<u64> {
+        if y >= self.height || z >= self.depth {
+            return None;
+        }
+        let i = self.index(x, y, z) as u32;
+        self.owners.iter().rev().find(|(c, _)| *c == i).map(|&(_, id)| id)
+    }
+
+    /// Every voxel animal `id`'s body is drawn in, `(x, y, z)` with `x` wrapped; a cell a
+    /// later body painted over is left out.
+    pub fn cells_of(&self, id: u64) -> Vec<(u32, u32, u32)> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        self.owners
+            .iter()
+            .filter(|&&(i, who)| who == id && self.owner_at_index(i) == Some(id))
+            .map(|&(i, _)| {
+                let i = i as usize;
+                let (col, y) = (i / h, i % h);
+                ((col % w) as u32, y as u32, (col / w) as u32)
+            })
+            .collect()
+    }
+
+    /// Every drawn body cell and its animal, latest write winning, as
+    /// `((x, y, z), id)` with `x` wrapped.
+    pub fn owned_cells(&self) -> Vec<((u32, u32, u32), u64)> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut seen = rustc_hash::FxHashSet::default();
+        let mut out = Vec::new();
+        for &(i, id) in self.owners.iter().rev() {
+            if seen.insert(i) {
+                let iu = i as usize;
+                let (col, y) = (iu / h, iu % h);
+                out.push((((col % w) as u32, y as u32, (col / w) as u32), id));
+            }
+        }
+        out
+    }
+
+    fn owner_at_index(&self, i: u32) -> Option<u64> {
+        self.owners.iter().rev().find(|(c, _)| *c == i).map(|&(_, id)| id)
     }
 
     /// The empty voxels a settling torso comes down into, `1..=drop` rows under each of its
@@ -1605,6 +1665,9 @@ impl Animals {
         }
         self.grid[i] = part;
         self.pose[i] = pose;
+        if self.owner != NO_OWNER {
+            self.owners.push((i as u32, self.owner));
+        }
         true
     }
 

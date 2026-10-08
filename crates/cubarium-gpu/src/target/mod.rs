@@ -27,6 +27,7 @@ use crate::render::{RASTER_FORMAT, TargetImage, framebuffer};
 use crate::vk::Gpu;
 
 pub mod presenter;
+pub mod readback;
 pub mod window;
 
 #[cfg(feature = "scanout")]
