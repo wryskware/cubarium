@@ -289,6 +289,30 @@ impl WorldSpec {
     }
 }
 
+/// **The presets a new-world picker can name** (query `presets`): every shipped landform
+/// preset a [`WorldSpec::terrain`] takes, with its generator (`terrarium` or `staged`) and,
+/// for a staged landscape, the ring it was written for; and every climate preset a
+/// [`WorldSpec::climate`] takes. Names only: what to call them and which to offer is the
+/// picker's own data.
+pub fn preset_table() -> serde_json::Value {
+    use serde_json::json;
+    let terrariums = cubarium_voxel::Terrarium::PRESETS
+        .iter()
+        .map(|(name, _)| json!({ "name": name, "kind": "terrarium" }));
+    let staged = cubarium_voxel::PRESETS.iter().map(|p| {
+        json!({
+            "name": p.name,
+            "kind": "staged",
+            "written_for": { "size": [p.width, p.height, p.depth], "voxel_m": p.voxel_m },
+        })
+    });
+    let climates: Vec<serde_json::Value> = cubarium_voxel::weather::ClimatePreset::ALL
+        .into_iter()
+        .map(|c| json!({ "name": c.name() }))
+        .collect();
+    json!({ "terrain": terrariums.chain(staged).collect::<Vec<_>>(), "climate": climates })
+}
+
 /// A config file's table with its `base` chain merged under it.
 ///
 /// **`base = "<file>"`** (scenario maps, 2026-10-04): the file is read first, relative to

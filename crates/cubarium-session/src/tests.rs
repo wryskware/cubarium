@@ -438,3 +438,39 @@ fn the_shipped_terrarium_configs_give_a_parameter_set() {
         params.resolve_sets(&[]).unwrap_or_else(|e| panic!("{file}: {e:#}"));
     }
 }
+
+/// Every preset the `presets` query lists is one a spec can name: a world spec built on
+/// each landform name and each climate name parses, and a name it does not list does not.
+#[test]
+fn every_listed_preset_is_one_a_spec_can_name() {
+    let scratch = Scratch::new("presets");
+    let session = Session::new(options());
+    let table = session.query("presets", &Value::Null).expect("the presets query answers");
+    let names = |key: &str| -> Vec<String> {
+        table[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("`{key}` is a list"))
+            .iter()
+            .map(|p| p["name"].as_str().expect("each preset has a name").to_string())
+            .collect()
+    };
+    let (terrain, climate) = (names("terrain"), names("climate"));
+    assert!(!terrain.is_empty() && !climate.is_empty());
+    let base = tiny_config(&scratch.0);
+    let with = |terrain: Option<&str>, climate: Option<&str>| WorldSpec {
+        config: Some(base.clone()),
+        terrain: terrain.map(String::from),
+        climate: climate.map(String::from),
+        ..WorldSpec::default()
+    };
+    for t in &terrain {
+        with(Some(t), None).sim_params().unwrap_or_else(|e| panic!("terrain {t}: {e:#}"));
+    }
+    for c in &climate {
+        with(None, Some(c)).sim_params().unwrap_or_else(|e| panic!("climate {c}: {e:#}"));
+    }
+    let unlisted = "not-a-listed-preset";
+    assert!(!terrain.iter().any(|t| t == unlisted));
+    assert!(with(Some(unlisted), None).sim_params().is_err(), "an unlisted landform is refused");
+    assert!(with(None, Some(unlisted)).sim_params().is_err(), "an unlisted climate is refused");
+}
