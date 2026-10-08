@@ -96,7 +96,40 @@ FROZEN-PREY 0cd0767f):
 3. Seedporters nibbled empty crowns for tens of minutes.
 4. The staged check called hungry frozen bodies "idle".
 
-Baseline v3 reruns this comparison on the fixed heuristics, from a new start library.
+### 1b. Baseline v3 (fixed heuristics)
+
+Setup: main fabfc142, start library v2 `runs/starts2-2026-10-08` (minute 63), seeds 1–8,
+2 h. Report: `runs/bl3-2026-10-08/report.md`, profile `screen-2h`.
+
+**Persistence.** Both arms are again feasible.
+
+**C1 against heuristic.**
+
+| Measure | C1 | Heuristic |
+|---|---|---|
+| Frondgrazers alive at end | 31.5 | 22 |
+| Frondgrazer juvenile p10 fullness | 0.11 | 0.005 |
+| Frondgrazer moving share | 0.27 | 0.56 |
+| Kills per world-hour | 1.5 | 2.5 |
+| Soft P | 11.1 | 10.4 |
+
+- C1 wins 3/8. Movement (V) again decides the ranking.
+- Littershredders are now alike in both arms (intake about 5.3), since the heuristic shredder
+  no longer freezes.
+
+**The bottom decile is juveniles.** Adults are fed: p10 fullness is 0.26 for the frondgrazer
+and the capgnawer, 0.47 for the loftstrider and 0.16 for the littershredder. Heuristic
+juveniles starve:
+- capgnawer juveniles: all of them below 0.05;
+- bellwing juveniles: nearly all; bellwing adults are low too;
+- frondgrazer juveniles: p10 0.005.
+
+C1 frondgrazer juveniles are fed, so food exists for a juvenile that forages well.
+JUVENILE-FOOD is diagnosing.
+
+**The stuck share reads 0.9–1.0 almost everywhere.** That includes Veilhounds resting fed at
+the den and littershredders that are feeding. It looks like misclassification, not reality.
+STUCK-AUDIT is checking it. S should not carry weight until the audit lands.
 
 ## 2. The fitness score
 
