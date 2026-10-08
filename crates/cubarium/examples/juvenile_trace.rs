@@ -115,6 +115,7 @@ fn main() {
         (held, holding, l.eaten_by_food[nectar], l.sips_by_bloom, l.sip_misses_by_founder[Founder::Bellwing.index()])
     };
     let n0 = nectar(&sim);
+    let light0 = sim.fauna().view().ledger.light_budget[Founder::Bellwing.index()];
     // Per body: its body at the last tick (growth), and its motion feedback so far.
     let mut last: HashMap<u64, f64> = HashMap::new();
     let mut moved: HashMap<u64, (f64, f64)> = HashMap::new();
@@ -393,6 +394,14 @@ fn main() {
     }
     let dt = 1.0 / TICK_HZ as f64;
     let n1 = nectar(&sim);
+    // The bellwing's light layer: its samples by mode over the run (share of them).
+    {
+        let l1 = sim.fauna().view().ledger.light_budget[Founder::Bellwing.index()];
+        let names = cubarium_voxel_fauna::light::LightMode::NAMES;
+        let total: u64 = (0..names.len()).map(|k| l1[k] - light0[k]).sum();
+        let parts: Vec<String> = names.iter().enumerate().map(|(k, n)| format!("{n}={} ({:.3})", l1[k] - light0[k], (l1[k] - light0[k]) as f64 / total.max(1) as f64)).collect();
+        eprintln!("bellwing light layer: {total} samples: {}", parts.join(", "));
+    }
     // The stomach's mineral over its organic, per food, against the eater's `n_tissue`:
     // under it the food cannot fund the tissue its yield would build.
     for f in [Founder::Bellwing, Founder::Browser, Founder::Capgnawer, Founder::Loftstrider] {

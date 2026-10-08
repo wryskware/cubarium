@@ -114,8 +114,8 @@ fn a_bellwing_approaches_a_still_lit_lure_only() {
 // ------------------------------------------------------- smell leads, brightness steers
 
 /// A bloomcrown in flower on the plain at noon, beyond the bellwing's light range: with the
-/// nectar channel laid (and settled) it turns up the smell toward the flower; with the flower
-/// laying none ("light alone") it does not — yet light alone finds the same flower once it is
+/// flower giving off its nectar plume it turns up the smell toward the flower; with the flower
+/// giving none ("light alone") it does not — yet light alone finds the same flower once it is
 /// within its light range. So a flower with scent and light is found from farther.
 #[test]
 fn smell_leads_and_brightness_steers() {
@@ -138,18 +138,12 @@ fn smell_leads_and_brightness_steers() {
         let mut c = config();
         c.scent.nectar_per_s = nectar_per_s;
         let mut fauna = Fauna::new(c);
-        let (view, fv) = (world.view(), flora.view());
-        for _ in 0..400 {
-            let mut field = std::mem::take(&mut fauna.scent);
-            field.update(&view, &fv, &fauna.animals, &fauna.config);
-            fauna.scent = field;
-        }
         let bw = bellwing(&mut fauna, &world, x, (f64::from(fz) + 0.5) * VOXEL_M, 0.5, NORTH);
         let got = steer(&mut fauna, &world, &flora, bw, daylight);
         (got, light_of(&fauna, bw), fauna.ledger)
     };
     // Farther than its light reaches (the short way round is +x).
-    let far = flower_x - light_m - 1.0;
+    let far = flower_x - light_m - 0.5;
     let (smelled, l, ledger) = run(2.25, far);
     assert!(!l.beacon, "fixture: the flower is beyond its light: {l:?}");
     let (act, _) = smelled.expect("smell leads it");
@@ -390,8 +384,8 @@ fn lead_config(samples: f64) -> FaunaConfig {
     c
 }
 
-/// A bloomcrown in flower on the plain at noon, its nectar scent laid and settled, and a
-/// hungry bellwing beyond its light range downwind of the scent: `(world, flora, fauna,
+/// A bloomcrown in flower on the plain at noon giving off its nectar plume, and a hungry
+/// bellwing beyond its light range within the plume: `(world, flora, fauna,
 /// bellwing, the flower's (x, z))`.
 fn scent_scene(c: FaunaConfig) -> (World, Flora, Fauna, u64, (f64, f64)) {
     let mut world = plain_at(12.0, 24, 5);
@@ -411,15 +405,7 @@ fn scent_scene(c: FaunaConfig) -> (World, Flora, Fauna, u64, (f64, f64)) {
     let mut c = c;
     c.scent.nectar_per_s = 2.25;
     let mut fauna = Fauna::new(c);
-    {
-        let (view, fv) = (world.view(), flora.view());
-        for _ in 0..400 {
-            let mut field = std::mem::take(&mut fauna.scent);
-            field.update(&view, &fv, &fauna.animals, &fauna.config);
-            fauna.scent = field;
-        }
-    }
-    let bw = bellwing(&mut fauna, &world, flower.0 - light_m - 1.0, flower.1, 0.5, NORTH);
+    let bw = bellwing(&mut fauna, &world, flower.0 - light_m - 0.5, flower.1, 0.5, NORTH);
     (world, flora, fauna, bw, flower)
 }
 

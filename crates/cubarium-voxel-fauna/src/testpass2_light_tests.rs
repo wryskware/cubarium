@@ -8,7 +8,7 @@
 
 use super::predation_fixture::*;
 use crate::light::{self, Beacon, BeaconKind, CYAN, UV};
-use crate::{Actions, Command, Fauna, FaunaConfig, Founder, MobilityMode, Pose, Reproduction, ScentChannel, StartingStores, State};
+use crate::{Actions, Command, Fauna, FaunaConfig, Founder, MobilityMode, Pose, Reproduction, StartingStores, State};
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{Flora, FloraConfig};
 
@@ -96,7 +96,7 @@ fn a_failed_visit_mark_on_a_lure_holds_against_the_lures_scent() {
         let (lx, lz, _) = light::lure_point(&fauna.config, &animal(&fauna, lj), VOXEL_M).expect("a lure");
         let smell_min = fauna.config.founder(BW).senses.smell_min;
         let a = animal(&fauna, bw);
-        let s = fauna.scent.read_below(&view, a.pose.x, a.pose.z, a.pose.y_m)[ScentChannel::Nectar.index()];
+        let s = light::smell_nectar(&mut fauna, &a, &view, &fv, 0.0);
         assert!(s.level >= smell_min && s.gx > 0.0, "fixture: it smells the lure up the gradient toward it: {s:?} (smell_min {smell_min})");
         if marked {
             let until = fauna.tick + cubarium_voxel::ticks_at_least_one(fauna.config.light.mark_s);
@@ -200,7 +200,8 @@ fn lure_smell(lit: f64, asleep: bool, updates: usize) -> f64 {
         fauna.scent.update(&view, &fv, &fauna.animals, &fauna.config);
     }
     let a = animal(&fauna, lj);
-    fauna.scent.read_below(&view, a.pose.x, a.pose.z, a.pose.y_m + 1.0)[ScentChannel::Nectar.index()].level
+    let sources = crate::scent::nectar_sources(&fauna, &view, None);
+    crate::scent::nectar_plume(&view, &fauna.config, &sources, (a.pose.x, a.pose.y_m + 1.0, a.pose.z), 0, 0.0).level
 }
 
 /// **The lure's scent is laid by its lit fraction and not in its sleep**: half lit, a still

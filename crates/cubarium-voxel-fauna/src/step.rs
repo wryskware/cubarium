@@ -5197,6 +5197,9 @@ mod senses_core_tests;
 #[path = "light_tests.rs"]
 mod light_tests;
 #[cfg(test)]
+#[path = "nectar_scent_tests.rs"]
+mod nectar_scent_tests;
+#[cfg(test)]
 #[path = "light_learning_tests.rs"]
 mod light_learning_tests;
 #[cfg(test)]

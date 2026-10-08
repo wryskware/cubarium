@@ -31,6 +31,9 @@ fn config(learn_rate: f64) -> FaunaConfig {
     c.light.forget_s = 1e9;
     c.light.visit_s = 1.0;
     c.light.mark_s = 1.0;
+    // The light alone: since NECTAR-SCENT a hand-placed flower beacon gives off its nectar
+    // plume, which would lead a bellwing these cases pass by.
+    c.scent.nectar_per_s = 0.0;
     c
 }
 
