@@ -3004,7 +3004,10 @@ fn advance_candidate(
     if hits || (ny < standing_y && !pose_clear(view, nx, nz, ny, r, headroom, step_limits)) {
         // EDGE-2, out of a wall: a body whose disc is already caught in solid where it
         // stands (it grew against a wall, or came down a stem or a vine beside one) may take
-        // a step that leaves it less deep in it, and none deeper; a clear body never enters.
+        // a step that leaves it no deeper in it; a clear body never enters. TRAPS: "no
+        // deeper", not "less deep": along a wall it is caught in (a juvenile grown wider than
+        // its ledge, a loftstrider grown against an overhang's side) a step keeps the same
+        // depth, and "less deep" refused every heading but the one straight out.
         let here = pose_penetration(view, px, pz, standing_y, r, headroom, step_limits);
         if !(here > 0.0) {
             return None;
@@ -3013,7 +3016,7 @@ fn advance_candidate(
         if ny < standing_y {
             there = there.max(pose_penetration(view, nx, nz, ny, r, headroom, step_limits));
         }
-        if !(there < here - PENETRATION_EPS_M) {
+        if !(there <= here + PENETRATION_EPS_M) {
             return None;
         }
     }
@@ -3052,8 +3055,8 @@ fn advance_candidate(
     Some((nx, nz, (dx * fx + (nz - pz) * fz).max(0.0), ny))
 }
 
-/// How much less deep in solid a step out of a wall must leave a body ([`advance_candidate`]),
-/// metres: a float tolerance, not a knob.
+/// How much deeper in solid a step along a wall it is caught in may leave a body
+/// ([`advance_candidate`]), metres: a float tolerance, not a knob.
 const PENETRATION_EPS_M: f64 = 1e-9;
 
 /// How deep the disc of radius `r` at `(cx, cz)`, standing on `standing_y`, is in solid over

@@ -644,7 +644,19 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
     let mut m = a.hunt;
     let above_meal = a.mobility.mode == crate::MobilityMode::Perched
         && a.pose.y_m > crate::surface_m(a.site.y, v) + geometry.mouth_ceiling_m;
+    // TRAPS: up a stem or a vine (`Climb`) its feeding takes only fruit, so a carcass at the
+    // foot is no meal from there, however near its mouth (seedporters walked into a stem on
+    // the way to a carcass at its base and held still on it "eating" for an hour, starving).
+    // It climbs down to the carcass first.
+    let on_stem = a.mobility.mode == crate::MobilityMode::Climb;
+    let get_down = |fauna: &mut Fauna| {
+        fauna.animals[i].mobility.falling = true;
+        Actions { forward: 0.0, turn: 0.0, feed: 0.0 }
+    };
     if !above_meal && mouth_on_carcass(fv, view, &a, &geometry) {
+        if on_stem {
+            return Some(get_down(fauna));
+        }
         m.mode = HuntMode::Meal;
         m.samples = 0;
         fauna.animals[i].hunt = m;
@@ -671,6 +683,9 @@ fn meal_step_among(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flora
             ((only.is_some() || d <= scan) && !a.hunt.is_fruitless(&cfg, x, z, tick, ring)).then_some((s, d))
         })
         .collect();
+    if on_stem {
+        return (!near.is_empty()).then(|| get_down(fauna));
+    }
     if above_meal {
         // The catch fell to a support face. Descend to the nearest carcass it knows
         // through the same perception scan; a crown cannot eat through empty air.
