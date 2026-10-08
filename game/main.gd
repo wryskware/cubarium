@@ -7,7 +7,9 @@ extends Node
 ## Start-up opens the last save if there is one, else the new-world picker.
 ## Esc: closes a dialog, then the open screen, then the inspect panel, then toggles the
 ## pause menu. Esc never quits; only the menu's Quit does. Gamepad: Start toggles the
-## menu, B goes back, Select (or P) pauses the world without a menu.
+## menu, B goes back, Select (or P) pauses the world without a menu. F3 opens the dev
+## metrics panel over the running world (the pause menu's Dev metrics opens it too); back,
+## Esc or F3 again closes it.
 ##
 ## Command line (after `--`): `--saves DIR` (the slots' root, default `user://saves`),
 ## `--no-autoload` (don't open the last save), `--new` (open the picker at start-up).
@@ -19,6 +21,7 @@ const SaveSlots := preload("res://ui/save_slots.gd")
 const NewWorld := preload("res://ui/new_world.gd")
 const InspectPanel := preload("res://ui/inspect_panel.gd")
 const SettingsPage := preload("res://ui/settings.gd")
+const MetricsPanel := preload("res://ui/dev/metrics_panel.gd")
 const Dialog := preload("res://ui/dialog.gd")
 const Notices := preload("res://ui/notices.gd")
 const THEME := preload("res://ui/theme.tres")
@@ -46,6 +49,9 @@ var menu
 var slots
 var picker
 var settings_page
+var metrics
+## The metrics panel was opened from the pause menu, which it goes back to.
+var metrics_from_menu := false
 var inspect
 var dialog
 var notices
@@ -120,7 +126,8 @@ func _actions() -> void:
 		return e
 	for a in [["shell_menu", [key.call(KEY_ESCAPE), pad.call(JOY_BUTTON_START)]],
 			["shell_back", [pad.call(JOY_BUTTON_B)]],
-			["shell_pause", [key.call(KEY_P), pad.call(JOY_BUTTON_BACK)]]]:
+			["shell_pause", [key.call(KEY_P), pad.call(JOY_BUTTON_BACK)]],
+			["shell_metrics", [key.call(KEY_F3)]]]:
 		if InputMap.has_action(a[0]):
 			continue
 		InputMap.add_action(a[0])
@@ -180,6 +187,11 @@ func _build_ui() -> void:
 	settings_page.changed.connect(_on_motion_changed)
 	ui.add_child(settings_page)
 
+	metrics = MetricsPanel.new()
+	metrics.shell = self
+	metrics.back.connect(close_metrics)
+	ui.add_child(metrics)
+
 	dialog = Dialog.new()
 	ui.add_child(dialog)
 
@@ -213,7 +225,7 @@ func busy() -> String:
 
 ## Whether anything covers the world: the menu, a screen or a dialog.
 func overlay_open() -> bool:
-	return menu.visible or slots.visible or picker.visible or settings_page.visible or dialog.is_open()
+	return menu.visible or slots.visible or picker.visible or settings_page.visible or metrics.visible or dialog.is_open()
 
 
 func species_label(name: String) -> String:
@@ -257,6 +269,12 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("shell_back"):
 		if back_one():
 			get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("shell_metrics") and not _typing():
+		get_viewport().set_input_as_handled()
+		if metrics.visible:
+			close_metrics()
+		elif has_world() and not dialog.is_open() and not slots.visible and not picker.visible and not settings_page.visible:
+			open_metrics()
 	elif event.is_action_pressed("shell_pause") and not overlay_open() and not _typing():
 		get_viewport().set_input_as_handled()
 		set_player_paused(not player_paused)
@@ -292,6 +310,9 @@ func back_one(start := false) -> bool:
 		return true
 	if settings_page.visible:
 		close_screen(settings_page)
+		return true
+	if metrics.visible:
+		close_metrics()
 		return true
 	if inspect.visible and not menu.visible and not start:
 		inspect.close()
@@ -340,6 +361,8 @@ func _on_menu(item: String) -> void:
 			open_picker()
 		"settings":
 			open_settings()
+		"metrics":
+			open_metrics()
 		"quit":
 			quit_hook.call()
 
@@ -366,6 +389,7 @@ func close_all() -> void:
 	picker.visible = false
 	slots.visible = false
 	settings_page.visible = false
+	metrics.visible = false
 	menu.visible = false
 
 
@@ -382,6 +406,23 @@ func _process(_delta: float) -> void:
 		tooltip.position = at
 	if inspect.visible and inspect.dead:
 		world_view.stop_follow()
+
+
+# --- Dev metrics --------------------------------------------------------------------
+
+## The dev metrics panel over the world. From the pause menu it stands in for the menu
+## (the world stays paused) and goes back to it; from F3 the world keeps running under it.
+func open_metrics() -> void:
+	metrics_from_menu = menu.visible
+	menu.visible = false
+	_hover_off()
+	metrics.open()
+
+
+func close_metrics() -> void:
+	metrics.visible = false
+	if metrics_from_menu:
+		open_menu()
 
 
 # --- Settings -----------------------------------------------------------------------

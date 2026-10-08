@@ -166,6 +166,15 @@ runs one, steps 100 ticks, queries, takes a view, saves and loads; it prints `PA
 exits non-zero on a failure. `--headless` never opens a window; anything that needs one goes
 through `scripts/hidden.sh`.
 
+**Dev metrics** (F3, or the pause menu's Dev metrics; back or Esc closes it): the study
+recorder's per-minute rows, the same numbers `voxel_census vitals=` writes and the
+training harness reads (`query("vitals")`, `crates/cubarium-session/src/vitals.rs`), as an
+animal table by lineage with grouped columns, a plant table, and line charts. Every column
+header's tooltip is the column's meaning and unit. Rows start fresh at each load and keep
+`[vitals] span_s` (default 6 h); `[vitals] enabled = false` turns the recorder off.
+`tests/metrics_test.gd -- --open SAVE` checks it headless (without `--open` it founds a
+terrarium first); with `--shots DIR` under `scripts/hidden.sh` it takes two pictures.
+
 `tests/quit_test.gd -- --saves DIR --at draw|founding|running [--via menu|tree]` quits while
 terrains are drawn, while the pick is founded, or with a world running. **Every test here
 must exit 0, not 139**: the extension stops and joins its own threads before Godot unloads
