@@ -46,8 +46,13 @@ pub struct LiveWorld {
 }
 
 /// One body's result for one window.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct BodyScore {
+    pub world: usize,
+    pub body_id: u64,
+    /// Both energy potentials, regardless of which is ranked.
+    pub delta_body_normalized: f64,
+    pub delta_stomach_aware_normalized: f64,
     pub founder: Founder,
     pub candidate: usize,
     pub score: NetEnergy,
@@ -154,6 +159,8 @@ impl NetEnergy {
 #[derive(Clone, Copy, Debug)]
 pub struct EnergyMeter {
     e_start: f64,
+    d_start: f64,
+    d_last: f64,
     given_start: f64,
     e_last: f64,
     given_last: f64,
@@ -165,11 +172,28 @@ impl EnergyMeter {
         let e = body_energy(a);
         EnergyMeter {
             e_start: e,
+            d_start: 0.0,
+            d_last: 0.0,
             given_start: a.reproduction.given,
             e_last: e,
             given_last: a.reproduction.given,
             died: false,
         }
+    }
+
+    pub fn new_with_stomach(a: &cubarium_voxel_fauna::Animal, p: &cubarium_voxel_fauna::FounderPhysiology) -> EnergyMeter {
+        let d = super::targets::digestible_stomach(a, p);
+        Self { d_start: d, d_last: d, ..Self::new(a) }
+    }
+
+    pub fn observe_with_stomach(&mut self, a: &cubarium_voxel_fauna::Animal, p: &cubarium_voxel_fauna::FounderPhysiology) {
+        self.observe(a);
+        self.d_last = super::targets::digestible_stomach(a, p);
+    }
+
+    pub fn stomach_score(&self, intake: f64, motor: f64, body_reference: f64) -> NetEnergy {
+        NetEnergy::of(self.e_start + self.d_start, self.e_last + self.d_last,
+            self.given_last - self.given_start, self.died, intake, motor, body_reference)
     }
 
     /// Fold in one post-step reading of the living body.
@@ -253,6 +277,7 @@ pub fn newborn_candidate(
 
 /// One body followed through one window.
 struct Tracked {
+    id: u64,
     founder: Founder,
     candidate: Option<usize>,
     newborn: bool,
@@ -274,6 +299,8 @@ struct Tracked {
 /// One window in progress on one world: [`Window::begin`], [`Window::step`] once per
 /// tick, [`Window::finish`]. [`run_window`] is the three in a row.
 pub struct Window {
+    /// Training-side experiment; false retains the current tissue/stores reward.
+    pub stomach_aware_reward: bool,
     tables: Vec<Option<VariantTable>>,
     ticks: u64,
     elapsed: u64,
@@ -291,6 +318,7 @@ pub struct Window {
     assimilated_start: [f64; Founder::COUNT],
     /// The ledger at the window's start: the balance measures' books.
     ledger_start: Box<cubarium_voxel_fauna::FaunaLedger>,
+    recruitment_start: super::accounting::Recruitment,
     tracked: Vec<Tracked>,
     index: FxHashMap<u64, usize>,
     counts: Vec<Vec<u32>>,
@@ -335,6 +363,7 @@ impl Window {
             .map(|t| t.as_ref().map_or(0, |t| t.len() / 2))
             .collect();
         let mut w = Window {
+            stomach_aware_reward: false,
             tables: tables.to_vec(),
             ticks,
             elapsed: 0,
@@ -351,6 +380,7 @@ impl Window {
             deaths_start: sim.fauna().view().ledger.deaths_by_founder_cause,
             assimilated_start: sim.fauna().view().ledger.assimilated_by_founder,
             ledger_start: Box::new(*sim.fauna().view().ledger),
+            recruitment_start: super::accounting::Recruitment::of(sim.fauna()),
             tracked: Vec::new(),
             index: FxHashMap::default(),
             counts: pairs.iter().map(|&p| vec![0u32; 2 * p]).collect(),
@@ -371,7 +401,7 @@ impl Window {
             .iter()
             .filter_map(|a| {
                 a.founder
-                    .map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a), EnergyMeter::new(a)))
+                    .map(|f| (a.id, f, a.pose.x, BodyMeter::new(f, a), EnergyMeter::new_with_stomach(a, sim.fauna().config().founder(f))))
             })
             .collect();
         // Only the living are remembered; a body met for the first time starts empty.
@@ -413,6 +443,7 @@ impl Window {
                 }
                 w.index.insert(b.0, w.tracked.len());
                 w.tracked.push(Tracked {
+                    id: b.0,
                     founder: f,
                     candidate,
                     newborn: false,
@@ -458,7 +489,7 @@ impl Window {
                         f,
                         a.pose.x,
                         BodyMeter::new(f, a),
-                        EnergyMeter::new(a),
+                        EnergyMeter::new_with_stomach(a, &self.phys[f.index()]),
                     ));
                     continue;
                 };
@@ -469,7 +500,7 @@ impl Window {
                 if super::balance::is_adult(a, fv.config) {
                     self.stats[f.index()].adult_ticks += 1;
                 }
-                b.energy.observe(a);
+                b.energy.observe_with_stomach(a, &self.phys[f.index()]);
                 let len = self.phys[f.index()].body_at(a.body).length_m;
                 if len > 0.0 {
                     b.minute_bl += d.forward_m / len;
@@ -516,7 +547,7 @@ impl Window {
         }
         for (id, f, x, meter, energy) in self.newcomers.drain(..) {
             let fi = f.index();
-            self.stats[fi].births += 1;
+
             let candidate = self.tables[fi].as_ref().map(|table| {
                 let c = newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi]);
                 sim.fauna_mut().set_controller(id, table.controller(c));
@@ -533,6 +564,7 @@ impl Window {
             }
             self.index.insert(id, self.tracked.len());
             self.tracked.push(Tracked {
+                id,
                 founder: f,
                 candidate,
                 newborn: true,
@@ -589,9 +621,15 @@ impl Window {
     pub fn finish(mut self, sim: &Sim, world_id: usize) -> WindowResult {
         let mut scores = Vec::new();
         let mut anomalies = 0u64;
+        let events = super::accounting::Recruitment::of(sim.fauna()).since(&self.recruitment_start);
         let deaths_end = sim.fauna().view().ledger.deaths_by_founder_cause;
         for f in Founder::ALL {
             let fi = f.index();
+            self.stats[fi].births = events.births[fi];
+            self.stats[fi].live_births = events.live_births[fi];
+            self.stats[fi].hatchings = events.hatchings[fi];
+            self.stats[fi].eggs_laid = events.eggs_laid[fi];
+            self.stats[fi].maturations = events.maturations[fi];
             for (d, (end, start)) in deaths_end[fi].iter().zip(self.deaths_start[fi]).enumerate() {
                 self.stats[fi].deaths[d] = end - start;
             }
@@ -635,7 +673,7 @@ impl Window {
             if b.meter.intake < -1e-9 {
                 anomalies += 1;
             }
-            let score = b
+            let body_score = b
                 .energy
                 .score(
                     b.meter.intake.max(0.0),
@@ -643,9 +681,16 @@ impl Window {
                     b.founder.manifest().body_reference,
                 )
                 .with_curiosity(novelty, weight);
+            let stomach_score = b.energy.stomach_score(b.meter.intake.max(0.0), b.meter.motor.max(0.0),
+                b.founder.manifest().body_reference).with_curiosity(novelty, weight);
+            let score = if self.stomach_aware_reward { stomach_score } else { body_score };
             s.scored += 1;
             s.mean_score += score.score;
             scores.push(BodyScore {
+                world: world_id,
+                body_id: b.id,
+                delta_body_normalized: body_score.delta_normalized,
+                delta_stomach_aware_normalized: stomach_score.delta_normalized,
                 founder: b.founder,
                 candidate: c,
                 score,
@@ -687,8 +732,16 @@ pub fn run_window(
     ticks: u64,
     curiosity: &Curiosity,
 ) -> WindowResult {
+    run_window_with_reward(world, tables, first_pair, ticks, curiosity, false)
+}
+
+pub fn run_window_with_reward(
+    world: &mut LiveWorld, tables: &[Option<VariantTable>], first_pair: &[usize],
+    ticks: u64, curiosity: &Curiosity, stomach_aware_reward: bool,
+) -> WindowResult {
     let memory = std::mem::take(&mut world.memory);
     let mut w = Window::begin_with(&mut world.sim, tables, first_pair, ticks, curiosity, memory);
+    w.stomach_aware_reward = stomach_aware_reward;
     while !w.done() {
         w.step(&mut world.sim);
     }
@@ -732,4 +785,29 @@ pub fn population(sim: &Sim) -> [usize; Founder::COUNT] {
         }
     }
     n
+}
+
+#[cfg(test)]
+mod energy_accounting_tests {
+    use super::*;
+
+    #[test]
+    fn digestion_transfers_potential_and_death_clears_both_stocks() {
+        let mut meter = EnergyMeter {
+            e_start: 10.0, e_last: 13.0, d_start: 3.0, d_last: 0.0,
+            given_start: 1.0, given_last: 3.0, died: false,
+        };
+        let e = meter.score(3.0, 0.0, 2.0);
+        let star = meter.stomach_score(3.0, 0.0, 2.0);
+        assert_eq!(e.delta_normalized, 1.5);
+        assert_eq!(star.delta_normalized, 0.0, "digestion moves a stock, not new intake");
+        assert_eq!(e.given_normalized, star.given_normalized);
+        meter.e_last = 10.0;
+        meter.d_last = 6.0;
+        assert_eq!(meter.stomach_score(0.0, 0.0, 2.0).delta_normalized, 1.5, "late food is in this window");
+        meter.die();
+        assert_eq!(meter.score(0.0, 0.0, 2.0).delta_normalized, -5.0);
+        assert_eq!(meter.stomach_score(0.0, 0.0, 2.0).delta_normalized, -6.5);
+        assert_eq!(meter.stomach_score(0.0, 0.0, 2.0).given_normalized, 1.0);
+    }
 }

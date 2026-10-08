@@ -16,8 +16,8 @@ use super::targets::{LineageOutcome, StageSpec, judge};
 /// 0.4, motor 0.1 and lost 0.1 to riders, with stores of 0.6 at the end:
 /// - `B = 0.3 / (0.4 + 0.1 + 0.1) = 0.5`;
 /// - the deficit is 0.3 over 2 days, 0.15 a day, so the stores last 4 days;
-/// - surplus per adult-day `(0.3 − 0.4 − 0.1) / 4 adult-days = −0.05`, so `R̂` is
-///   −0.05 x 8 days / 0.3 per young < 0;
+/// - surplus per adult-day `(0.3 − 0.4 − 0.1 − 0.1) / 4 adult-days = −0.075`, so `R̂` is
+///   −0.075 x 8 days / 0.3 per young < 0;
 /// - access: 300 of 400 wanting ticks spent eating, 0.75; sated share 600 of 1,000 awake.
 #[test]
 fn a_hand_built_ledger_gives_the_measures() {
@@ -36,18 +36,18 @@ fn a_hand_built_ledger_gives_the_measures() {
     let m = measures(&b, &c);
     assert!((m.energy_balance - 0.5).abs() < 1e-12, "{m:?}");
     assert!((m.days_to_empty.expect("B < 1") - 4.0).abs() < 1e-12, "{m:?}");
-    assert!((m.surplus_per_adult_day + 0.05).abs() < 1e-12, "{m:?}");
-    assert!((m.r_hat - (-0.05 * 8.0 / 0.3)).abs() < 1e-12, "{m:?}");
+    assert!((m.surplus_per_adult_day + 0.075).abs() < 1e-12, "{m:?}");
+    assert!((m.r_hat - (-0.075 * 8.0 / 0.3)).abs() < 1e-12, "{m:?}");
     assert!((m.access - 0.75).abs() < 1e-12, "{m:?}");
     // 600 of 1,000 awake ticks with the latch off.
     assert!((m.sated_share - 0.6).abs() < 1e-12, "{m:?}");
 
     // A fed lineage: assimilated 0.9 against the same spend. B 1.5, no days to empty;
-    // surplus (0.9 − 0.5) / 4 = 0.1 a day, R̂ = 0.1 x 8 / 0.3 = 2.67.
+    // surplus (0.9 − 0.6) / 4 = 0.075 a day, R̂ = 0.075 x 8 / 0.3 = 2.0.
     l.assimilated_by_founder[i] = 0.9;
     let m = measures(&Books::of(&l, f), &c);
     assert!((m.energy_balance - 1.5).abs() < 1e-12 && m.days_to_empty.is_none(), "{m:?}");
-    assert!((m.r_hat - 0.1 * 8.0 / 0.3).abs() < 1e-12, "{m:?}");
+    assert!((m.r_hat - 0.075 * 8.0 / 0.3).abs() < 1e-12, "{m:?}");
     assert_eq!(shortfall(&m), 0.0);
 }
 

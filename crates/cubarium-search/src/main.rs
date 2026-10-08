@@ -1071,6 +1071,9 @@ enum Command {
         /// `weight × novelty` in the brains' window score. Without it every weight is 0.
         #[arg(long)]
         curiosity: Option<PathBuf>,
+        /// Experimental energy potential includes digestible stomach; both deltas are logged.
+        #[arg(long)]
+        stomach_aware_reward: bool,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -2212,6 +2215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             world,
             ecology,
             curiosity,
+            stomach_aware_reward,
         } => {
             let ecology = match ecology {
                 Some(p) => es::voxel::live::ecology::EcologyParams::load(&p)?,
@@ -2223,6 +2227,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None => None,
                 },
                 ecology,
+                stomach_aware_reward,
                 centres: parse_centres(&centres)?,
                 worlds,
                 threads,

@@ -99,15 +99,17 @@ pub struct Measures {
     /// **Days to empty**, when `B < 1`: the stores over the deficit per world day,
     /// `stores / ((spend − assimilated) / days)`. `None` at `B ≥ 1` (to rounding).
     pub days_to_empty: Option<f64>,
-    /// **Surplus** per adult per world day: `(assimilated − upkeep − motor) / adult_days`.
+    /// **Surplus** per adult per world day: `(assimilated − upkeep − motor − rider losses) / adult_days`.
     pub surplus_per_adult_day: f64,
-    /// **The replacement estimate** `R̂ = surplus per adult per day × median lifespan in
+    /// **Surplus-extrapolated replacement potential** `R̂ = surplus per adult per day × median lifespan in
     /// days / the cost of one offspring`: the offspring a lifetime's surplus could pay for.
     /// **Optimistic**: it assumes every juvenile survives to replace its parent, and that
     /// all surplus goes to young. Under the gut a full reserve digests only what is burnt,
     /// so the surplus is what was actually built and invested (growth, young, reserve
     /// refilled), not what a fed body could have eaten.
     pub r_hat: f64,
+    /// Explicitly labelled alias: a surplus extrapolation, not observed recruitment.
+    pub r_hat_surplus_extrapolated: f64,
     /// **Access**: eating ticks over wanting ticks, at most 1.
     pub access: f64,
     /// **Sated share**: awake ticks with the eating latch off over awake ticks. It reads
@@ -124,6 +126,7 @@ impl Default for Measures {
             days_to_empty: None,
             surplus_per_adult_day: f64::NAN,
             r_hat: f64::NAN,
+            r_hat_surplus_extrapolated: f64::NAN,
             access: f64::NAN,
             sated_share: f64::NAN,
         }
@@ -150,7 +153,7 @@ pub fn measures(b: &Books, c: &Context) -> Measures {
         if deficit_per_day > 0.0 { c.stores.max(0.0) / deficit_per_day } else { f64::INFINITY }
     });
     let surplus_per_adult_day = if c.adult_days > 0.0 {
-        (b.assimilated - b.upkeep - b.motor) / c.adult_days
+        (b.assimilated - spend) / c.adult_days
     } else {
         f64::NAN
     };
@@ -169,7 +172,7 @@ pub fn measures(b: &Books, c: &Context) -> Measures {
     } else {
         f64::NAN
     };
-    Measures { energy_balance, days_to_empty, surplus_per_adult_day, r_hat, access, sated_share }
+    Measures { energy_balance, days_to_empty, surplus_per_adult_day, r_hat, r_hat_surplus_extrapolated: r_hat, access, sated_share }
 }
 
 /// **The soft shortfall** a lineage scored on balance pays: `(1 − min(1, B)) + (1 −

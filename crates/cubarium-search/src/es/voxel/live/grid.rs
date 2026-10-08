@@ -282,6 +282,14 @@ pub struct SpeciesRecord {
 /// One cell × seed: a line of `cells.jsonl`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CellRecord {
+    #[serde(default)]
+    pub lost_required: usize,
+    #[serde(default)]
+    pub lost_required_names: Vec<String>,
+    #[serde(default)]
+    pub required_roster: super::accounting::RequiredRoster,
+    #[serde(default)]
+    pub presence_end: super::accounting::Presence,
     pub cell: String,
     pub levels: Vec<(String, String)>,
     pub world_seed: u64,
@@ -454,6 +462,10 @@ pub fn run_cell(
         })
         .collect();
     CellRecord {
+        lost_required: e.lost_required,
+        lost_required_names: e.lost_required_names,
+        required_roster: e.required_roster,
+        presence_end: e.presence_end,
         cell: cell.label.clone(),
         levels: cell.levels.clone(),
         world_seed: seed,
@@ -872,6 +884,8 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     let horizon = (spec.hours * 3600.0 * f64::from(cubarium_voxel_fauna::TICK_HZ)).round() as u64;
     let mut eval = EvalSpec::new(spec.world.clone(), horizon, WINDOW_MIN * TICKS_PER_MIN);
     eval.founders = founders;
+    eval.driver_sources = spec.centres.iter().map(|(f, p)| (*f, p.display().to_string())).collect();
+    eval.required_roster = Some(super::accounting::RequiredRoster::declared(&founders, &neutral.flora(spec.world.voxel_m)));
     eval.water_every = spec.water_every;
     eval.abort_animals = spec.abort_animals;
     eval.stop_on_loss = false;

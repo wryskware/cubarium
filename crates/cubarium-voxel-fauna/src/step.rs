@@ -4018,6 +4018,9 @@ fn newborn(
     let id = fauna.ledger.births;
     fauna.ledger.births += 1;
     fauna.ledger.born += 1;
+    if let Some(f) = founder {
+        fauna.born_by_founder[f.index()] += 1;
+    }
     Animal {
         id,
         species,
@@ -4064,6 +4067,25 @@ fn newborn(
         emergency: false,
         bout: None,
         hunt: crate::HuntMemory::default(),
+    }
+}
+
+#[cfg(test)]
+mod birth_accounting_tests {
+    use super::*;
+
+    #[test]
+    fn paid_creation_is_counted_even_without_a_surviving_body() {
+        let mut fauna = Fauna::new(crate::FaunaConfig::default());
+        let founder = crate::Founder::Blind;
+        let site = Site { x: 1, y: 1, z: 1 };
+        let a = newborn(&mut fauna, (crate::Species::Frondgrazer, Some(founder)),
+            (site, crate::Pose::at_site(site, 0.25)), 0.01,
+            Taken { organic: 0.02, mineral: 0.001, energy: 0.1 }, 100.0);
+        assert_eq!(a.founder, Some(founder));
+        assert!(fauna.view().animals.is_empty(), "creation counter is independent of survivors");
+        assert_eq!(fauna.born_by_founder()[founder.index()], 1);
+        assert_eq!(fauna.view().ledger.born, 1);
     }
 }
 
