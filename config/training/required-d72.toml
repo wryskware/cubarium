@@ -1,0 +1,16 @@
+# d72 desktop terrarium founding roster (start library seed 1, minute 0, main c7603d50).
+# Required for every d72 soak/screen; N_ref = founding bodies + eggs.
+[required]
+animals = ["bellwing", "capgnawer", "chorister", "frondgrazer", "lanternjaw", "littershredder", "loftstrider", "ripple-snail", "seedporter"]
+plants = ["bloomcrown", "glowcap", "lanternberry", "siphonreed", "springturf", "stonecushion", "umbrellafrond", "vaulttree", "velvetpad"]
+
+[required.N_ref]
+"bellwing" = 6
+"capgnawer" = 6
+"chorister" = 4
+"frondgrazer" = 8
+"lanternjaw" = 9
+"littershredder" = 8
+"loftstrider" = 2
+"ripple-snail" = 8
+"seedporter" = 4
