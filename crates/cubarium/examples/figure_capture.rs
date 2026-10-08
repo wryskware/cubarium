@@ -355,6 +355,7 @@ fn main() -> Result<()> {
         .iter()
         .map(|v| (v.sink.gpu_stage_totals(), v.sink.figure_gpu()))
         .collect();
+    let wp0: Vec<_> = sinks.iter().map(|v| v.sink.walk_plant_gpu()).collect();
     let ticks0 = sim.world().tick();
     let frames = if seconds > 0.0 {
         (seconds * fps).round() as u64
@@ -508,7 +509,7 @@ fn main() -> Result<()> {
     }
     let mut costs = std::fs::File::create(out.join("costs.txt"))?;
     let ticks = (sim.world().tick() - ticks0).max(1) as f64;
-    for ((v, p0), ((n0, stages0), (figure0, figure_n0))) in sinks.iter_mut().zip(p0).zip(gpu0) {
+    for (i, ((v, p0), ((n0, stages0), (figure0, figure_n0)))) in sinks.iter_mut().zip(p0).zip(gpu0).enumerate() {
         let (n, stages) = v.sink.gpu_stage_totals();
         let n = n - n0;
         let stages: [f64; 3] = std::array::from_fn(|i| stages[i] - stages0[i]);
@@ -543,6 +544,16 @@ fn main() -> Result<()> {
             atlas.width, atlas.height, atlas.figures, atlas.tiles, atlas.composites,
             atlas.tile_capacity, atlas.composite_capacity, atlas.supersample,
             atlas.requested_supersample, atlas.dropped, atlas.omitted_extras,
+        );
+        let (w1, p1, n1) = v.sink.walk_plant_gpu();
+        let (w0, p0, n0) = wp0[i];
+        let dn = (n1 - n0).max(1) as f64;
+        let line = format!(
+            "{line}; walk {:.3} GPU ms/frame, plant pass {:.3} GPU ms/frame over {} frames; plants {:?}",
+            (w1 - w0) / dn,
+            (p1 - p0) / dn,
+            n1 - n0,
+            v.sink.plant_stats(),
         );
         println!("{line}");
         writeln!(costs, "{line}")?;

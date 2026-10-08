@@ -669,6 +669,12 @@ impl Stands {
         }
     }
 
+    /// Whether rebuilds are change-only ([`Stands::set_incremental`]): then an empty
+    /// [`Stands::dirty`] means the last rebuild moved nothing.
+    pub fn incremental(&self) -> bool {
+        self.inc.is_some()
+    }
+
     /// The grid cells (`(z · width + x) · height + y`) whose part, owner or style the last
     /// change-only rebuild may have changed; empty for the full rebuild.
     pub fn dirty(&self) -> &[u32] {

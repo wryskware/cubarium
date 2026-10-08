@@ -396,6 +396,17 @@ mod preset_tests {
     }
 
     #[test]
+    fn the_plants_override_names_models_or_stamped_and_nothing_else() {
+        assert_eq!(FigureConfig::default().plants, PlantDraw::Stamped, "stamped until Wrysk picks");
+        let cfg = config();
+        assert_eq!(cfg.with_plants(Some("stamped")).unwrap(), FigureConfig { plants: PlantDraw::Stamped, ..cfg.clone() });
+        assert_eq!(cfg.with_plants(Some("models")).unwrap(), cfg);
+        assert_eq!(cfg.with_plants(None).unwrap(), cfg);
+        let err = cfg.with_plants(Some("sway")).unwrap_err().to_string();
+        assert!(err.contains("CUBARIUM_PLANTS") && err.contains("models, stamped"), "{err}");
+    }
+
+    #[test]
     fn animal_presets_change_only_their_named_fields() {
         let base = config();
         assert_eq!(base.with_overrides(None, None, None, None).unwrap(), base);

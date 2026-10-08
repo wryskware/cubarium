@@ -30,6 +30,7 @@ use cubarium_voxel_flora::FloraView;
 use crate::voxel::plant_motion::{GrowOrder, PlantConfig};
 use crate::voxel::stand::{Part, Stands, drawn_site};
 
+use super::super::pack_timer::lap;
 use super::super::palette::{Palette, StyleKey};
 
 /// A tick further from the last than this is a jump (a load, a seek): nothing grows in.
@@ -91,6 +92,11 @@ pub(super) struct PlantTracker {
     changes: FxHashMap<u32, Change>,
     last_tick: Option<u64>,
     now_s: f64,
+    /// The last list built, while it holds for this tick too (nothing moved, nothing
+    /// changing): copied instead of built.
+    cache: PlantList,
+    cache_valid: bool,
+    scratch: Vec<u32>,
 }
 
 fn bit(bits: &[u64], i: u32) -> bool {
@@ -130,6 +136,9 @@ impl PlantTracker {
             changes: FxHashMap::default(),
             last_tick: None,
             now_s: 0.0,
+            cache: PlantList::default(),
+            cache_valid: false,
+            scratch: Vec::new(),
         }
     }
 
@@ -163,20 +172,36 @@ impl PlantTracker {
         now: f64,
     ) {
         self.now_s = now;
-        // The last tick's cells become `prev`; `now_bits` is cleared for this tick's.
-        for c in &self.prev {
-            set_bit(&mut self.was_bits, c.index, false);
-        }
-        std::mem::swap(&mut self.prev, &mut self.cur);
-        std::mem::swap(&mut self.was_bits, &mut self.now_bits);
-        self.cur.clear();
-        self.gather(view, flora, stands);
-
         let settle = match self.last_tick {
             None => true,
             Some(last) => tick < last || tick > last + SETTLE_GAP,
         };
         self.last_tick = Some(tick);
+        // A change-only rebuild that moved nothing leaves every plant cell, its plant and its
+        // owner as they were: most ticks. Gathering reads the stand grid at every plant
+        // cell, scattered over the volume (2 ms a tick on the wide world).
+        let (w, h) = (self.width, self.height);
+        let now_bits = &self.now_bits;
+        let plant_cell = |g: u32| {
+            let (x, y, z) = stands.xyz(g);
+            matches!(stands.at_index(g), Part::Trunk(_) | Part::Crown { .. })
+                || bit(now_bits, VoxelStaging::index(w, h, x, y, z) as u32)
+        };
+        // Only a dirty cell that is, or was, a plant cell moves a plant (not a mark).
+        let moved = settle || !stands.incremental() || stands.dirty().iter().any(|&g| plant_cell(g));
+        self.cache_valid &= !moved;
+        if moved {
+            // The last tick's cells become `prev`; `now_bits` is cleared for this tick's.
+            for c in &self.prev {
+                set_bit(&mut self.was_bits, c.index, false);
+            }
+            std::mem::swap(&mut self.prev, &mut self.cur);
+            std::mem::swap(&mut self.was_bits, &mut self.now_bits);
+            self.cur.clear();
+            lap!("plants");
+            self.gather(view, flora, stands);
+            lap!("plant gather");
+        }
         if settle {
             for (_, ch) in self.changes.drain() {
                 if let Some(key) = ch.key {
@@ -187,7 +212,7 @@ impl PlantTracker {
             let grow = self.grow_s();
             let as_f32 = |s: f64| s as f32;
             // Arrivals.
-            for k in 0..self.cur.len() {
+            for k in 0..if moved { self.cur.len() } else { 0 } {
                 let c = self.cur[k];
                 if bit(&self.was_bits, c.index) {
                     continue;
@@ -219,7 +244,7 @@ impl PlantTracker {
                 );
             }
             // Departures.
-            for k in 0..self.prev.len() {
+            for k in 0..if moved { self.prev.len() } else { 0 } {
                 let c = self.prev[k];
                 if bit(&self.now_bits, c.index) {
                     continue;
@@ -269,8 +294,10 @@ impl PlantTracker {
                 }
             }
         }
-        self.prev_plants.clear();
-        self.prev_plants.extend(self.plants[1..].iter().map(|p| (p.stand, *p)));
+        if moved {
+            self.prev_plants.clear();
+            self.prev_plants.extend(self.plants[1..].iter().map(|p| (p.stand, *p)));
+        }
     }
 
     /// The stamped plant cells, their plants and their weights and ranks.
@@ -290,10 +317,16 @@ impl PlantTracker {
         });
         let ring = i64::from(w.max(1));
         let wrap = |dx: i64| (dx + ring / 2).rem_euclid(ring) - ring / 2;
-        for (x, y, z) in stands.cells() {
-            if !matches!(stands.at(i64::from(x), i64::from(y), z), Part::Trunk(_) | Part::Crown { .. }) {
+        // In grid order: the grid and its owners are read front to back, not scattered.
+        self.scratch.clear();
+        self.scratch.extend(stands.stamped());
+        self.scratch.sort_unstable();
+        for k in 0..self.scratch.len() {
+            let g = self.scratch[k];
+            if !matches!(stands.at_index(g), Part::Trunk(_) | Part::Crown { .. }) {
                 continue;
             }
+            let (x, y, z) = stands.xyz(g);
             let index = VoxelStaging::index(w, h, x, y, z) as u32;
             let (plant, stand) = match stands.owner(i64::from(x), y, z).filter(|&o| o < flora.stands.len()) {
                 Some(o) => {
@@ -351,10 +384,14 @@ impl PlantTracker {
         }
     }
 
-    /// Write the tick's list: every plant cell with its texel from the filled `master`, and
-    /// every leaving cell. `full`: the fill packed in full, which reset the palette, so the
+    /// Write the tick's list: every plant cell, and every leaving cell with its texel. `full`: the fill packed in full, which reset the palette, so the
     /// leaving cells take their styles' slots again.
-    pub(super) fn build(&mut self, master: &[VoxelTexel], palette: &mut Palette, full: bool, list: &mut PlantList) {
+    pub(super) fn build(&mut self, palette: &mut Palette, full: bool, list: &mut PlantList) {
+        if self.cache_valid && self.changes.is_empty() {
+            list.clone_from(&self.cache);
+            list.epoch = self.now_s;
+            return;
+        }
         let epoch = self.now_s;
         list.cells.clear();
         list.plants.clear();
@@ -370,8 +407,8 @@ impl PlantTracker {
                 }
                 _ => SETTLED,
             };
-            let t = master[c.index as usize];
-            list.cells.push(pack_cell(c.xyz, c.plant, c.weight, false, time, u32::from_le_bytes(t.0)));
+            // A cell in the volume draws the volume's texel; only a leaving one carries its own.
+            list.cells.push(pack_cell(c.xyz, c.plant, c.weight, false, time, 0));
         }
         let mut ghosts: FxHashMap<u64, u32> = FxHashMap::default();
         for ch in self.changes.values_mut().filter(|ch| ch.dying) {
@@ -400,6 +437,12 @@ impl PlantTracker {
             ));
         }
         list.settled_at = settled_at;
+        if self.changes.is_empty() {
+            self.cache.clone_from(list);
+            self.cache_valid = true;
+        } else {
+            self.cache_valid = false;
+        }
     }
 
     /// Cells arriving or leaving now.
@@ -412,5 +455,176 @@ impl PlantTracker {
 fn release_key(palette: &mut Palette, key: &StyleKey) {
     if let Some(slot) = palette.find(key) {
         palette.release(slot);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cubarium_gpu::plants::{SETTLED, cell_scale, unpack_cell};
+    use cubarium_voxel::{Command, Config, Material, World};
+    use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
+
+    const FADE: f64 = 2.0;
+    const GROW: f64 = 0.4;
+
+    struct Rig {
+        world: World,
+        flora: Flora,
+        stands: Stands,
+        tracker: PlantTracker,
+        palette: Palette,
+        master: Vec<VoxelTexel>,
+        list: PlantList,
+    }
+
+    impl Rig {
+        fn new(cfg: PlantConfig) -> Rig {
+            let c = Config { width: 24, height: 32, depth: 8, ..Config::default() };
+            let mut world = World::empty(c.clone());
+            for x in 0..i64::from(c.width) {
+                for z in 0..c.depth {
+                    world.apply(Command::SetMaterial { x, y: 0, z, material: Material::Soil });
+                }
+            }
+            let fc = FloraConfig::default();
+            let mut flora = Flora::new(fc.clone());
+            let wood = fc.species(Species::Vaulttree).wood_max;
+            assert!(flora.apply(&world, FloraCommand::Seed { x: 12, z: 4, species: Species::Vaulttree, wood }));
+            let mut stands = Stands::empty(c.width, c.height, c.depth);
+            stands.track_owners();
+            let n = (c.width * c.height * c.depth) as usize;
+            Rig {
+                tracker: PlantTracker::new(cfg, FADE, c.width, c.height, c.depth),
+                world,
+                flora,
+                stands,
+                palette: Palette::new(),
+                master: vec![VoxelTexel::default(); n],
+                list: PlantList::default(),
+            }
+        }
+
+        /// One tick at `now`, the stand there or not; the list's cells as (height, absolute
+        /// time, dying, weight).
+        fn tick(&mut self, tick: u64, now: f64, present: bool) -> Vec<(u32, f64, bool, f32)> {
+            let view = self.world.view();
+            let fv = self.flora.view();
+            let none = FloraView { stands: &[], ..fv };
+            let fv = if present { fv } else { none };
+            self.stands.rebuild(&view, fv);
+            self.tracker.detect(&view, fv, &self.stands, &self.master, |_| false, &mut self.palette, tick, now);
+            self.tracker.build(&mut self.palette, false, &mut self.list);
+            let epoch = self.list.epoch;
+            self.list
+                .cells
+                .iter()
+                .map(|&c| {
+                    let (xyz, _, w, dying, t) = unpack_cell(c);
+                    let abs = if t == SETTLED { f64::NEG_INFINITY } else { epoch + f64::from(t) };
+                    (xyz[1], abs, dying, w)
+                })
+                .collect()
+        }
+    }
+
+    fn still_order() -> PlantConfig {
+        PlantConfig { jitter: 0.0, grow_s: GROW, ..PlantConfig::default() }
+    }
+
+    fn scale(at: f64, t: f64, dying: bool) -> f32 {
+        cell_scale((at - t) as f32, 0.0, dying, GROW as f32)
+    }
+
+    #[test]
+    fn the_first_tick_shows_every_cell_as_it_stands() {
+        let mut r = Rig::new(still_order());
+        let cells = r.tick(1, 10.0, true);
+        assert!(cells.len() > 4, "a vaulttree of several cells");
+        assert!(cells.iter().all(|c| c.1 == f64::NEG_INFINITY && !c.2), "nothing grows in on a world's first tick");
+    }
+
+    #[test]
+    fn an_arriving_plant_grows_in_from_the_root_up_and_is_whole_at_the_end() {
+        let mut r = Rig::new(still_order());
+        assert!(r.tick(1, 0.0, false).is_empty());
+        let cells = r.tick(2, 0.05, true);
+        assert!(cells.iter().all(|c| c.1 >= 0.05 && !c.2), "every cell arrives, from the tick on");
+        // Root up: a higher cell never starts before a lower one; the lowest first.
+        let mut by_h = cells.clone();
+        by_h.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        for w in by_h.windows(2) {
+            assert!(w[1].1 >= w[0].1 - 1e-6, "h {} starts at {} before h {} at {}", w[1].0, w[1].1, w[0].0, w[0].1);
+        }
+        assert!(by_h.last().unwrap().1 > by_h[0].1, "the top waits for the root");
+        // Mid-change some voxels are whole and some not yet there; at the end all whole.
+        let mid = 0.05 + FADE / 2.0;
+        let shown: Vec<f32> = cells.iter().map(|c| scale(mid, c.1, false)).collect();
+        assert!(shown.iter().any(|&s| s == 1.0) && shown.iter().any(|&s| s < 1.0), "partial mid-change: {shown:?}");
+        assert!(cells.iter().all(|c| scale(0.05 + FADE + 1e-3, c.1, false) == 1.0), "whole after foliage_fade_s");
+        assert!((r.list.settled_at - (0.05 + FADE)).abs() < 1e-3, "moving until {}", r.list.settled_at);
+    }
+
+    #[test]
+    fn a_leaving_plant_shrinks_from_the_top_down_and_is_then_gone() {
+        let mut r = Rig::new(still_order());
+        let whole = r.tick(1, 0.0, true).len();
+        let cells = r.tick(2, 1.0, false);
+        assert_eq!(cells.len(), whole, "every cell still drawn, leaving");
+        assert!(cells.iter().all(|c| c.2), "all leaving");
+        let mut by_h = cells.clone();
+        by_h.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
+        for w in by_h.windows(2) {
+            assert!(w[1].1 <= w[0].1 + 1e-6, "top first: h {} at {} after h {} at {}", w[1].0, w[1].1, w[0].0, w[0].1);
+        }
+        assert!(cells.iter().all(|c| scale(1.0 + FADE + 1e-3, c.1, true) == 0.0), "gone after foliage_fade_s");
+        assert!(r.tick(3, 1.0 + FADE + 0.1, false).is_empty(), "and out of the list");
+    }
+
+    #[test]
+    fn a_change_reversed_half_way_goes_back_from_the_size_it_has() {
+        let mut r = Rig::new(still_order());
+        r.tick(1, 0.0, false);
+        r.tick(2, 0.0, true);
+        let at = 1.0;
+        let key = |c: &[u32; 4]| unpack_cell(*c).0;
+        let arriving: FxHashMap<[u32; 3], f64> = r
+            .list
+            .cells
+            .iter()
+            .map(|c| (key(c), r.list.epoch + f64::from(unpack_cell(*c).4)))
+            .collect();
+        let shown = arriving.values().filter(|&&t| scale(at, t, false) > 0.0).count();
+        r.tick(3, at, false);
+        // Each cell that had begun leaves from the size it had; one not begun is gone.
+        assert_eq!(r.list.cells.len(), shown, "the cells that had begun to show");
+        assert!(shown > 0 && shown < arriving.len(), "reversed mid-change");
+        for c in &r.list.cells {
+            let (xyz, _, _, dying, t) = unpack_cell(*c);
+            assert!(dying);
+            let was = scale(at, arriving[&xyz], false);
+            let now = scale(at, r.list.epoch + f64::from(t), true);
+            assert!((was - now).abs() < 1e-3, "{xyz:?} at {was} jumped to {now}");
+            assert!(scale(at + 0.05, r.list.epoch + f64::from(t), true) < now, "and shrinks from there");
+        }
+    }
+
+    #[test]
+    fn the_root_never_moves_and_a_cell_moves_more_the_higher_it_is() {
+        let mut r = Rig::new(still_order());
+        let cells = r.tick(1, 0.0, true);
+        let root = cells.iter().map(|c| c.0).min().unwrap();
+        for c in &cells {
+            if c.0 == root {
+                assert_eq!(c.3, 0.0, "a root cell's weight");
+            }
+            for d in &cells {
+                if d.0 > c.0 {
+                    assert!(d.3 > c.3, "h {} weight {} vs h {} weight {}", d.0, d.3, c.0, c.3);
+                }
+            }
+        }
+        assert!(r.list.plants.iter().skip(1).any(|p| p.amp > 0.0), "the tree sways");
+        assert_eq!(r.list.plants[0].amp, 0.0, "plant 0 is still");
     }
 }

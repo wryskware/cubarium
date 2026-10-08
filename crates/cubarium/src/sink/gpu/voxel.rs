@@ -212,6 +212,9 @@ pub struct VoxelGpuSink<T: SinkTarget = GpuTarget> {
     /// GPU milliseconds of the model pass over the frames that drew it, and those frames.
     figure_ms: f64,
     figure_frames: u64,
+    /// GPU milliseconds of the walk and of the plant pass over the frames that drew the
+    /// world, and those frames.
+    walk_plant_ms: (f64, f64, u64),
     // --- the pack off the loop (H3) ---
     /// The snapshots' dense water grids ([`snapshot`]).
     mirror: Mirror,
@@ -318,6 +321,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             figure_tick: None,
             figure_ms: 0.0,
             figure_frames: 0,
+            walk_plant_ms: (0.0, 0.0, 0),
             gpu,
             renderer,
             target,
@@ -647,6 +651,17 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         (self.figure_ms / self.figure_frames.max(1) as f64, self.figure_frames)
     }
 
+    /// GPU milliseconds a drawn frame spends in the walk and in the plant pass (its layer
+    /// and its shade; 0 with stamped plants), summed so far, and the frames summed.
+    pub fn walk_plant_gpu(&self) -> (f64, f64, u64) {
+        self.walk_plant_ms
+    }
+
+    /// The plant pass's latest cell list, when plants are models.
+    pub fn plant_stats(&self) -> Option<cubarium_gpu::plants::PlantStats> {
+        self.renderer.plant_stats()
+    }
+
     /// Capture-only: draw the lit tier's derived water flow field over the water instead
     /// of the water (`VoxelParams::debug_flow`). Never set by the live display.
     pub fn set_debug_flow(&mut self, on: bool) -> Result<()> {
@@ -917,6 +932,13 @@ impl VoxelGpuSink<GpuTarget> {
         {
             self.figure_ms += ms;
             self.figure_frames += 1;
+        }
+        if self.renderer.redrew_last()
+            && let Some((walk, plants)) = self.renderer.walk_plant_gpu_ms(&self.gpu)
+        {
+            self.walk_plant_ms.0 += walk;
+            self.walk_plant_ms.1 += plants;
+            self.walk_plant_ms.2 += 1;
         }
         self.present_ms += (Instant::now() - started).as_secs_f64() * 1e3;
         if let Some(dir) = &self.capture {
@@ -1663,7 +1685,7 @@ impl Packer {
         if let Some(t) = &mut self.plants {
             let delta = &self.delta;
             t.detect(view, flora, &self.stands, &delta.master, |i| delta.is_keyed(i), &mut self.palette, view.tick, candle_s);
-            lap!("plants");
+            lap!("plant changes");
         }
         if self.figures {
             figure::specs(&self.animals, view, fauna, self.models.as_deref(), &mut self.figure_models, &mut self.figure_specs);
@@ -2060,8 +2082,8 @@ impl Packer {
         }
         self.delta.full = false;
         if let (Some(t), Some(list)) = (self.plants.as_mut(), out.plants.as_deref_mut()) {
-            t.build(&self.delta.master, &mut self.palette, full, list);
-            lap!("plant cells");
+            t.build(&mut self.palette, full, list);
+            lap!("plant list");
         }
         // The pose table: the staged tick and its breaths, then this pack's poses.
         let entries = self.animals.pose_entries();
