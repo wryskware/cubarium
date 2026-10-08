@@ -1408,6 +1408,38 @@ fn centres_or_brains(
         .collect()
 }
 
+/// A config file's table with its `base = "<file>"` chain merged under it (scenario maps:
+/// the base read first, relative to this file, and this file's keys laid over it, tables
+/// merged key by key) — `cubarium_session::params::config_table`'s rule.
+fn config_with_base(path: &std::path::Path, depth: usize) -> Result<toml::Table, String> {
+    if depth >= 8 {
+        return Err(format!("{}: `base` nests too deep", path.display()));
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let mut table: toml::Table = text.parse().map_err(|e| format!("{} is not TOML: {e}", path.display()))?;
+    let Some(base) = table.remove("base") else {
+        return Ok(table);
+    };
+    let Some(base) = base.as_str() else {
+        // A genome's `[base]` table, not a file chain.
+        table.insert("base".into(), base);
+        return Ok(table);
+    };
+    let mut merged = config_with_base(&path.parent().unwrap_or(std::path::Path::new(".")).join(base), depth + 1)?;
+    fn merge(under: &mut toml::Table, over: toml::Table) {
+        for (k, v) in over {
+            match (under.get_mut(&k), v) {
+                (Some(toml::Value::Table(u)), toml::Value::Table(o)) => merge(u, o),
+                (_, v) => {
+                    under.insert(k, v);
+                }
+            }
+        }
+    }
+    merge(&mut merged, table);
+    Ok(merged)
+}
+
 fn parse_centres(
     centres: &[String],
 ) -> Result<Vec<(cubarium_voxel_fauna::Founder, PathBuf)>, String> {
@@ -2245,13 +2277,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             curiosity,
             stomach_aware_reward,
         } => {
+            // A scenario map (`base = "<file>"`) is resolved through its chain, so its
+            // `[world]` and its founding table reach the training worlds.
             let ecology = match ecology {
-                Some(p) => es::voxel::live::ecology::EcologyParams::load(&p)?,
+                Some(p) => es::voxel::live::ecology::EcologyParams::parse(
+                    &toml::to_string(&config_with_base(&p, 0)?).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| format!("{}: {e}", p.display()))?,
                 None => es::voxel::live::ecology::EcologyParams::defaults(),
             };
             let spec = es::voxel::live::trainer::LiveSpec {
                 world: match &world {
-                    Some(p) => Some(cubarium_voxel::world_config_from_file(p)?),
+                    Some(p) => Some(cubarium_voxel::world_config_from_table(
+                        match config_with_base(p, 0)?.remove("world") {
+                            Some(toml::Value::Table(t)) => t,
+                            Some(_) => return Err(format!("{}: [world] is not a table", p.display()).into()),
+                            None => toml::Table::new(),
+                        },
+                    )?),
                     None => None,
                 },
                 ecology,
