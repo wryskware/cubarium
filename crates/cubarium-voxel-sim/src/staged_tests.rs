@@ -336,3 +336,74 @@ fn the_founding_table_scales_with_land_area() {
     assert_eq!(as_written.wanted, counts);
 }
 
+
+/// **Hungry and held still** (FROZEN-PREY): an awake body with its eating or emergency latch
+/// on, still for a second, not biting and not resting by choice is held; each of those
+/// conditions undone lets it go.
+#[test]
+fn a_hungry_still_awake_body_is_held_and_a_fed_or_moving_one_is_not() {
+    let (_, _, fauna, _) = seeded(64, None, 0.0);
+    let mut a = fauna.view().animals[0];
+    a.state = cubarium_voxel_fauna::State::Walking;
+    a.rest = None;
+    a.hunkered = false;
+    a.attached = None;
+    a.mobility.mode = cubarium_voxel_fauna::MobilityMode::Ground;
+    a.eating = true;
+    a.emergency = false;
+    a.still_ticks = u64::from(cubarium_voxel_fauna::TICK_HZ);
+    assert!(super::hungry_held(&a), "hungry, awake and still: held");
+    let mut b = a;
+    b.eating = false;
+    assert!(!super::hungry_held(&b), "fed: a chosen stillness");
+    b.emergency = true;
+    assert!(super::hungry_held(&b), "the emergency latch is hunger too");
+    let mut c = a;
+    c.still_ticks = 0;
+    assert!(!super::hungry_held(&c), "moving");
+    let mut d = a;
+    d.state = cubarium_voxel_fauna::State::Asleep;
+    assert!(!super::hungry_held(&d), "asleep");
+    let mut e = a;
+    e.state = cubarium_voxel_fauna::State::Cropping;
+    assert!(!super::hungry_held(&e), "biting");
+}
+
+/// **Resting while hungry is not idle by choice** (FROZEN-PREY): a window in which every
+/// driven body rested passes as idle while the resting was fed; with the resting samples
+/// hungry for most of the window, or with one body hungry and held still at every sample,
+/// the lineage is no longer idle and, having neither moved nor fed, is called frozen.
+#[test]
+fn a_hungry_resting_lineage_is_frozen_not_idle() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let dir = scratch("hungry-idle");
+    let (cfg, _) = stage(&dir, &[]);
+    std::fs::remove_dir_all(&dir).ok();
+    let samples = 10u64;
+    let rested = |sim: &Sim| {
+        let mut window = Window::open(sim);
+        window.held.clear();
+        for f in Founder::ALL {
+            let s = &mut window.states[f.index()];
+            s.clear();
+            s.insert("Resting".into(), samples);
+            window.awake[f.index()] = true;
+        }
+        window
+    };
+    let ok = rested(&sim).verdict(&sim, &cfg).expect("fed, resting, driven lineages pass");
+    assert!(ok.contains("idle"), "{ok}");
+    let mut hungry = rested(&sim);
+    hungry.resting_hungry = [samples; Founder::COUNT];
+    let why = hungry.verdict(&sim, &cfg).expect_err("hungry resting lineages fail");
+    assert!(why.contains("frozen"), "{why}");
+    let mut light = rested(&sim);
+    light.resting_hungry = [samples / 2 - 1; Founder::COUNT];
+    assert!(light.verdict(&sim, &cfg).is_ok(), "hungry for under half the resting: still idle");
+    let (id, f) = founder_bodies(sim.fauna())[0];
+    let mut one = rested(&sim);
+    one.held.insert(id, (f, samples, samples));
+    let why = one.verdict(&sim, &cfg).expect_err("a body hungry and held all window");
+    assert!(why.contains(&format!("{} frozen", f.name())), "{why}");
+}

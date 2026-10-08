@@ -36,6 +36,10 @@
 //!   its bodies' summed path > 0 and at least two bodies (one, for a lineage of one)
 //!   ended half a voxel or more from where they started — or, standing still, it fed
 //!   (a body with no controller does neither);
+//!   a lineage asleep or resting nearly all the window passes as idle by choice only while
+//!   every body is driven, its resting bodies were not hungry (eating and emergency latches
+//!   off) for most of their resting samples, and no body was hungry and held still at every
+//!   sample (FROZEN-PREY); such frozen bodies are named on a lineage that passes otherwise;
 //! - the grazers (every lineage whose diet takes stand tissue) bit plants, counting only
 //!   the lineages with a body that wanted food in the window (its eating latch on while
 //!   awake): founders arrive fed (`founding.arrival_stomach`) and a sated body is right not
@@ -257,7 +261,28 @@ pub struct Window {
     /// Each lineage's bodies by state, sampled once a second: what a frozen lineage was
     /// doing instead.
     states: [std::collections::BTreeMap<String, u64>; Founder::COUNT],
+    /// FROZEN-PREY: each lineage's sampled body-seconds standing in `State::Resting` with
+    /// the eating or the emergency latch on: hungry, so not a rest it chose.
+    resting_hungry: [u64; Founder::COUNT],
+    /// FROZEN-PREY: per founder body, its lineage, its samples in the window and those in
+    /// which it was [`hungry_held`]: hungry at every one is a body frozen by a bug.
+    held: HashMap<u64, (Founder, u64, u64)>,
     ticks: u64,
+}
+
+/// **Hungry and held still** at a sample (FROZEN-PREY): awake and not resting by choice
+/// (no den rest, not hunkered, perched or carried), the eating or the emergency latch on,
+/// not biting (`State::Cropping`), and still for at least the last second. A flee layer
+/// that never lets go, or a walk that never goes, holds a body like this.
+pub(crate) fn hungry_held(a: &cubarium_voxel_fauna::Animal) -> bool {
+    a.state != State::Asleep
+        && a.state != State::Cropping
+        && a.rest.is_none()
+        && a.attached.is_none()
+        && !a.hunkered
+        && a.mobility.mode != cubarium_voxel_fauna::MobilityMode::Perched
+        && (a.eating || a.emergency)
+        && a.still_ticks >= u64::from(TICK_HZ)
 }
 
 impl Window {
@@ -282,6 +307,8 @@ impl Window {
             bites: v.ledger.bites_by_founder_food,
             wanting: v.ledger.wanting_ticks_by_founder,
             states: std::array::from_fn(|_| std::collections::BTreeMap::new()),
+            resting_hungry: [0; Founder::COUNT],
+            held: HashMap::new(),
             ticks: 0,
         };
         w.watch(sim);
@@ -299,6 +326,12 @@ impl Window {
             let Some(f) = a.founder else { continue };
             if sample {
                 *self.states[f.index()].entry(format!("{:?}", a.state)).or_default() += 1;
+                if a.state == State::Resting && (a.eating || a.emergency) {
+                    self.resting_hungry[f.index()] += 1;
+                }
+                let h = self.held.entry(a.id).or_insert((f, 0, 0));
+                h.1 += 1;
+                h.2 += u64::from(hungry_held(a));
             }
             if a.state != State::Asleep {
                 self.awake[f.index()] = true;
@@ -333,9 +366,17 @@ impl Window {
         idle as f64 / seen.max(1) as f64
     }
 
+    /// FROZEN-PREY: the lineage's bodies that were [`hungry_held`] at every sample of the
+    /// window (two at least): frozen by a behaviour, whatever their state says.
+    fn frozen_bodies(&self, f: Founder) -> usize {
+        self.held.values().filter(|&&(g, n, h)| g == f && n >= 2 && h == n).count()
+    }
+
     /// Idle by choice: asleep or resting for all but [`AWAKE_SHARE_MIN`] of the window
     /// (a pack lying up at its den by day) with every body of the lineage still driven. A
-    /// body with no controller is never idle: it is the frozen-world failure.
+    /// body with no controller is never idle: it is the frozen-world failure. FROZEN-PREY:
+    /// nor is a lineage whose resting bodies were hungry (eating or emergency latch on) for
+    /// most of their resting samples, or with a body hungry and held still the whole window.
     fn idle_by_choice(&self, f: Founder, fauna: &cubarium_voxel_fauna::Fauna) -> Option<f64> {
         let idle = self.idle_share(f);
         let driven = fauna
@@ -344,7 +385,9 @@ impl Window {
             .iter()
             .filter(|a| a.founder == Some(f))
             .all(|a| fauna.has_controller(a.id));
-        (idle > 1.0 - AWAKE_SHARE_MIN && driven).then_some(idle)
+        let resting = self.states[f.index()].get("Resting").copied().unwrap_or(0);
+        let fed_rest = 2 * self.resting_hungry[f.index()] <= resting;
+        (idle > 1.0 - AWAKE_SHARE_MIN && driven && fed_rest && self.frozen_bodies(f) == 0).then_some(idle)
     }
 
     /// The full check over the window, as one verdict per item; `Err` lists the failures.
@@ -385,6 +428,10 @@ impl Window {
             let need = n.min(2);
             let path = self.path_m[f.index()];
             let ate: u64 = Food::ALL.iter().map(|food| now[f.index()][food.index()] - self.bites[f.index()][food.index()]).sum();
+            let frozen = self.frozen_bodies(f);
+            if frozen > 0 {
+                notes.push(format!("{} {frozen}/{n} bodies frozen (hungry and held still all window)", f.name()));
+            }
             if path > 0.0 && moved[f.index()] >= need {
                 notes.push(format!("{} moved {path:.1} m, {}/{n} bodies off their start", f.name(), moved[f.index()]));
             } else if ate > 0 {
