@@ -971,7 +971,7 @@ fn climb_tick(
     // (the stand still counts as climbing time by its mode).
     a.state = match (fed, a.mobility.mode) {
         (true, _) => State::Cropping,
-        (false, _) if !(went > 0.0) => State::Resting,
+        (false, _) if went <= 0.0 => State::Resting,
         (false, MobilityMode::Climb) => State::Climbing,
         (false, MobilityMode::Ground) => State::Walking,
         _ => State::Resting,
