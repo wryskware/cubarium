@@ -1624,10 +1624,18 @@ fn go_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
         && a.site.y == l.foot.y
         && (dx * dx + dz * dz).sqrt() <= s.r + v
     {
-        // At the foot: into the wall.
+        // At the foot: into the vine's wall column from the foot's own column (a vine climb
+        // starts only from the column in front of the covered face); beside the foot, onto
+        // it first. It steps forward only while its aim lies within half a voxel of its
+        // heading, so turning in place never carries it off the foot along the wall.
         fauna.walking_to(a.id, key, crate::Steer::Roost);
-        let h = into_face(l.face);
-        return Some(walk_toward(&a, h.sin(), h.cos(), 0.0));
+        let (ax, az) = if (a.site.x, a.site.z) == (l.foot.x, l.foot.z) {
+            let (wx, wz) = crate::pack::centre(Site { x: l.face.x, y: l.face.y, z: l.face.z }, v);
+            crate::pose::wrapped_delta(a.pose.x, a.pose.z, wx, wz, ring)
+        } else {
+            (dx, dz)
+        };
+        return Some(aim_toward(&a, ax, az, 0.5 * v));
     }
     let d = (dx * dx + dz * dz).sqrt();
     let budget = phys.glider?.roost_budget_m;
@@ -1648,6 +1656,17 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
         turn: (angle * 2.0).clamp(-1.0, 1.0),
         feed,
     }
+}
+
+/// [`walk_toward`] that steps forward only while the target at `(dx, dz)` lies ahead and
+/// within `lateral` metres of the heading's line; else it turns in place.
+fn aim_toward(a: &Animal, dx: f64, dz: f64, lateral: f64) -> Actions {
+    let (fx, fz) = a.pose.forward();
+    let cross = fz * dx - fx * dz;
+    let dot = fx * dx + fz * dz;
+    let mut go = walk_toward(a, dx, dz, 0.0);
+    go.forward = if dot > 0.0 && cross.abs() <= lateral { 1.0 } else { 0.0 };
+    go
 }
 
 /// **The fruit search** (roster mechanics fix 4; Fable's call, 2026-10-02): a glider
