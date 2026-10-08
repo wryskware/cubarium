@@ -21,7 +21,13 @@ case "$(uname -s)" in
     *) lib=libcubarium_godot.so ;;
 esac
 mkdir -p game/bin game/.godot
-cp -f "$target/$profile/$lib" "game/bin/$lib"
+# Install by rename, never by copying over the old file. A running Godot maps
+# game/bin/$lib; `cp` truncates that same inode and rewrites it, and the next page the
+# process faults in from it is past the file's end for a moment, which is SIGBUS
+# (2026-10-08: the app died founding candidates while an agent rebuilt the extension).
+# A rename leaves the running process on the old inode and the next launch on the new one.
+cp "$target/$profile/$lib" "game/bin/.$lib.new"
+mv -f "game/bin/.$lib.new" "game/bin/$lib"
 grep -qx 'res://cubarium.gdextension' game/.godot/extension_list.cfg 2>/dev/null \
     || echo 'res://cubarium.gdextension' >> game/.godot/extension_list.cfg
 echo "built game/bin/$lib ($profile)"

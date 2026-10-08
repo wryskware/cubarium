@@ -167,6 +167,67 @@ fn the_parallel_exchange_agrees_with_the_serial_one() {
     }
 }
 
+/// Several worlds of different sizes stepping the exchange at once in one process, each
+/// on its own `Parallel` over the one shared pool (the new-world picker founding its
+/// candidates): each lands where it lands stepped alone on one thread, to rounding, and
+/// keeps its water. And one `Parallel` stepping two worlds of different sizes in turn (a
+/// thread's backend in `cubarium-voxel`, which serves whatever world that thread steps)
+/// resizes its scratch and agrees too.
+#[cfg(feature = "par")]
+#[test]
+fn worlds_of_different_sizes_exchange_at_once_on_one_pool() {
+    use cubarium_rules::water::host::Parallel;
+    const STEPS: usize = 80;
+    let sizes = [(24, 6, 20, 11), (40, 3, 30, 12), (9, 11, 12, 13), (70, 5, 64, 14), (33, 7, 128, 15)];
+    let alone: Vec<Pond> = sizes
+        .iter()
+        .map(|&(w, d, h, seed)| {
+            let mut pond = Pond::seeded(w, d, h, seed);
+            let mut serial = Serial::default();
+            for _ in 0..STEPS {
+                pond.step(&mut serial, &P);
+            }
+            pond
+        })
+        .collect();
+    let together: Vec<Pond> = std::thread::scope(|s| {
+        let handles: Vec<_> = sizes
+            .iter()
+            .map(|&(w, d, h, seed)| {
+                s.spawn(move || {
+                    let mut pond = Pond::seeded(w, d, h, seed);
+                    let total = pond.total();
+                    let mut parallel = Parallel::new(4);
+                    for step in 0..STEPS {
+                        pond.step(&mut parallel, &P);
+                        let drift = (pond.total() - total).abs();
+                        assert!(drift <= 1e-12 * total, "{w}x{d}x{h} step {step}: drifted by {drift}");
+                    }
+                    pond
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("a world's thread")).collect()
+    });
+    for (a, b) in alone.iter().zip(&together) {
+        let worst = a.free.iter().zip(&b.free).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max);
+        assert!(worst <= 1e-9, "{:?}: alone and together differ by {worst}", a.grid);
+        assert_eq!(b.wet, b.masks_from_free(), "{:?}: wet masks", b.grid);
+    }
+
+    // One backend, two sizes in turn.
+    let (mut big, mut small) = (Pond::seeded(70, 5, 64, 14), Pond::seeded(9, 11, 12, 13));
+    let mut shared = Parallel::new(4);
+    for _ in 0..STEPS {
+        big.step(&mut shared, &P);
+        small.step(&mut shared, &P);
+    }
+    for (a, b) in [(&alone[3], &big), (&alone[2], &small)] {
+        let worst = a.free.iter().zip(&b.free).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max);
+        assert!(worst <= 1e-9, "{:?}: one backend for two worlds differs by {worst}", a.grid);
+    }
+}
+
 // ------------------------------------------------------------------ the column phases
 
 /// Serial against the pool, so only with the rayon drivers (`par`, on in the workspace
@@ -386,6 +447,56 @@ mod columns {
         assert!(worst(&serial.free, &start.free) > 0.1, "free water never moved");
         assert!(worst(&serial.pore, &start.pore) > 0.1, "pore water never moved");
         assert!((serial.aquifer - start.aquifer).abs() > 1.0, "the aquifer never moved");
+    }
+
+    /// Worlds of different sizes running the column phases at once on the one shared
+    /// pool: each follows itself run alone on one thread, to rounding, keeps its water, and
+    /// keeps its sets true to its arrays.
+    #[test]
+    fn worlds_of_different_sizes_run_the_column_phases_at_once_on_one_pool() {
+        const TICKS: usize = 30;
+        let sizes = [(70, 5, 12, 3), (130, 4, 20, 4), (17, 9, 9, 5), (64, 8, 128, 6)];
+        let alone: Vec<Land> = sizes
+            .iter()
+            .map(|&(w, d, h, seed)| {
+                let mut land = Land::seeded(w, d, h, seed);
+                land.aquifer = 1e4;
+                for _ in 0..TICKS {
+                    land.tick(Exec::serial());
+                }
+                land
+            })
+            .collect();
+        let together: Vec<Land> = std::thread::scope(|s| {
+            let handles: Vec<_> = sizes
+                .iter()
+                .map(|&(w, d, h, seed)| {
+                    s.spawn(move || {
+                        let pool = host::pool(4);
+                        let mut land = Land::seeded(w, d, h, seed);
+                        land.aquifer = 1e4;
+                        let total = land.total();
+                        for tick in 0..TICKS {
+                            land.tick(Exec::on(&pool));
+                            let drift = (land.total() - total).abs();
+                            assert!(drift <= 1e-12 * total, "{w}x{d}x{h} tick {tick}: drifted by {drift}");
+                            assert_eq!(
+                                (land.wet.clone(), land.damp.clone(), land.drainable.clone()),
+                                land.sets_from_arrays(),
+                                "{w}x{d}x{h} tick {tick}: sets"
+                            );
+                        }
+                        land
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().expect("a world's thread")).collect()
+        });
+        for (a, b) in alone.iter().zip(&together) {
+            assert!(worst(&a.free, &b.free) <= 1e-9, "{:?}: free", a.grid);
+            assert!(worst(&a.pore, &b.pore) <= 1e-9, "{:?}: pore", a.grid);
+            assert!((a.aquifer - b.aquifer).abs() <= 1e-9 * a.aquifer.max(1.0), "{:?}: aquifer", a.grid);
+        }
     }
 
     /// When the aquifer cannot pay for every cell the table reaches, it is shared in the

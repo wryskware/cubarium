@@ -6,7 +6,8 @@
 //! (`design/handoffs/voxel-water-parallel-2026-09-24.md`). The trial also compiled this
 //! crate to PTX for CUDA kernels; that driver, its kernel crate and the fauna rules stayed
 //! on `rules-trial`. The crate is kept `no_std`-compatible (on `nvptx64` it is `no_std`)
-//! so the GPU driver can come back.
+//! so the GPU driver can come back; its libdevice calls in [`math`] were removed on
+//! 2026-10-08, since the crate forbids `unsafe`, and would need Wrysk's approval to return.
 //!
 //! **The restricted style**, which is what a rule here has to be written in:
 //! - no allocation and no `std` in a rule: slices, fixed arrays, `Option`, iterators,
@@ -24,6 +25,8 @@
 //!   [`water::host`].
 
 #![cfg_attr(target_arch = "nvptx64", no_std)]
+// No `unsafe` in this crate without Wrysk's approval (2026-10-08).
+#![forbid(unsafe_code)]
 // The rules mirror the code they were moved from, loops and comparisons included.
 #![allow(
     clippy::needless_range_loop,
