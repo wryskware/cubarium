@@ -106,8 +106,12 @@ the band `[lo, hi]`.
 | M | largest meadow patch below its target area | census `meadow_patch_max` | in CSV |
 | G_b, G_v | lanternberry grove size; new established vaulttree sites | census grove/forest columns | partial |
 | H | hunts per world-hour outside the target band | strikes and kills by hunter × prey | reducer needed |
-| **F** | **condition**: mean over lineages of `h(p25 fullness / 0.4)` | VITALS | new (Wrysk's vitals ask) |
-| **S** | **stuck**: mean share of awake bodies with under 1 BL net displacement in 5 min while not feeding or resting | VITALS | new |
+| **F** | **condition**: mean over lineages of `h(p10 fullness / 0.3)` (VITALS emits p10, not p25) | VITALS | new (Wrysk's vitals ask) |
+| **S** | **stuck**: share of exposed bodies (awake, not voluntarily resting, no swallow for a whole 5-min window) with under 1 BL wrapped net displacement; NA without exposure | VITALS-2 | new |
+
+Caveat on F (Astra I2): fullness is reserve over the body's reserve capacity, and capacity is
+a search gene. Shrinking capacity raises F without more food. F stays a warning signal beside
+the cohort energy trend (`cohort_energy_change`); it is not a target to optimise alone.
 
 F and S are the vitals terms Wrysk asked for. They move before anything dies, which gives a
 gradient long before L or J can. The life table adds diagnostics; those are reported and not
@@ -116,9 +120,26 @@ scored at first:
 - share of natives reaching maturity;
 - lifespan of the dead by cause.
 
-**Noise.** Use 8 common seeds and identical saved starts for every arm. The rank score is
-`mean P + 0.5 sd P`. A change wins only if its paired sign holds on at least 6 of 8 seeds.
-Failed runs count; they are never dropped.
+**Noise and feasibility** (revised after Astra's plan review,
+`design/7_Research/astra-plan-review-2026-10-08.md`):
+- Use 8 common seeds and identical saved starts for every arm.
+- **Feasibility comes first.** An arm with a required loss on any seed (beyond the
+  baseline's) is infeasible and ranks after every feasible arm. Averaging must not let one
+  extinction be bought back: with a plain `mean + 0.5 sd`, an arm with P = [0 ×7, 100] beat
+  a steady 35 on 7 of 8 pairs.
+- Among feasible arms, rank by `mean P + 0.5 sd P` without L, and report the paired median Δ
+  and the worst seed.
+- "Wins k/n" is only a consistency count, not a significance test: ≥ 6 of 8 by chance is
+  about 14.5 %.
+- Missing required data makes a world unrankable, never P = 0. Arms pair only on the same
+  objective profile and horizon. Failed runs count; they are never dropped.
+- **The required roster and reference counts are declared up front** (the start library's
+  founding), not read from whoever survived to the start.
+
+**Objective parity.** Today `score.py`'s P is an external gate on census batches. The Rust
+search (`cubarium-search`) still optimises its own older penalty. Until P is wired into the
+search, a search's winner is only a candidate for the P gate; it is not "trained against
+P".
 
 **Slow clocks.** A 2 h screen judges access, energy, condition, stage transitions and breeding
 where breeding was possible. Slow terms are marked "provisional, lifecycle untested": the
