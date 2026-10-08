@@ -28,6 +28,7 @@ use cubarium_voxel_fauna::{Controller, Fauna, Founder};
 
 use super::EpisodeDriver;
 
+pub mod accounting;
 pub mod balance;
 pub mod curiosity;
 pub mod assembly;

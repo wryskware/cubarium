@@ -27,6 +27,10 @@ pub enum Pool {
 #[derive(Clone, Debug, Default)]
 pub struct LineageStats {
     pub births: u64,
+    pub live_births: u64,
+    pub hatchings: u64,
+    pub eggs_laid: u64,
+    pub maturations: u64,
     pub deaths: [u64; Departure::COUNT],
     /// Body-ticks lived inside the window.
     pub body_ticks: u64,
@@ -222,11 +226,16 @@ pub const LINEAGE_FACTORS: &[LineageFactor] = &[
     ("days_to_empty", Pool::Mean, |c, f| c.lineages[f.index()].balance.days_to_empty.unwrap_or(f64::NAN)),
     ("surplus_per_adult_day", Pool::Mean, |c, f| c.lineages[f.index()].balance.surplus_per_adult_day),
     ("r_hat", Pool::Mean, |c, f| c.lineages[f.index()].balance.r_hat),
+    ("r_hat_surplus_extrapolated", Pool::Mean, |c, f| c.lineages[f.index()].balance.r_hat),
     ("access", Pool::Mean, |c, f| c.lineages[f.index()].balance.access),
     ("sated_share", Pool::Mean, |c, f| c.lineages[f.index()].balance.sated_share),
     ("population", Pool::Sum, |c, f| {
         lineage_bodies(c, f).len() as f64
     }),
+    ("live_births", Pool::Sum, |c, f| c.lineages[f.index()].live_births as f64),
+    ("hatchings", Pool::Sum, |c, f| c.lineages[f.index()].hatchings as f64),
+    ("eggs_laid", Pool::Sum, |c, f| c.lineages[f.index()].eggs_laid as f64),
+    ("maturations", Pool::Sum, |c, f| c.lineages[f.index()].maturations as f64),
     ("births_per_h", Pool::Mean, |c, f| {
         c.lineages[f.index()].births as f64 / c.hours
     }),
