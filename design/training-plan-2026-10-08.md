@@ -368,13 +368,13 @@ control and the reward accounting; display targets after seeing results.
        and world-state layout changes still refuse.
    - Recommended (b). It isn't migration: a loaded world already runs new code.
    - At least, a config change should bump the schema, so the loader refuses cleanly.
+10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
+    related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
 11. **Shredders by day?** The heuristic shredder is DarkActive. It sleeps while its face is
     lit, so adults lay about one egg per 2 h. Option: litter cover counts as dark, or a
     shredder on food stays awake. Visible effect: shredders feed by day and eggs roughly
     double. Litter is unchanged, since decay sets it. If you want to see litter eaten, that
     is a new decomposer role (a litter mould), not more shredders.
-10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
-    related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
 
 ## 7. Work log (2026-10-08)
 
