@@ -134,9 +134,9 @@ impl Observer {
 
     /// After every step: record what the animals did, and count the tick and what it
     /// cost (`tick_ns`, the host's own measure of the step).
-    pub fn after_tick(&mut self, fauna: &Fauna, tick_ns: u64) {
+    pub fn after_tick(&mut self, world: &World, fauna: &Fauna, tick_ns: u64) {
         let at = Instant::now();
-        self.recorder.observe(fauna);
+        self.recorder.observe(fauna, world.tick());
         self.observe_ns += at.elapsed().as_nanos() as u64;
         self.ticks += 1;
         self.tick_ns += tick_ns;
@@ -172,7 +172,7 @@ impl Observer {
         let at = Instant::now();
         if !self.recorder.started() {
             // Published before any tick: the bodies standing now are the record's start.
-            self.recorder.observe(fauna);
+            self.recorder.observe(fauna, world.tick());
         }
         let wall = now.duration_since(self.last_wall).as_secs_f64().max(1e-9);
         self.seq += 1;

@@ -228,7 +228,7 @@ function sig(v) {
   if (v === null || v === undefined) return "–";
   const a = Math.abs(v);
   if (a === 0) return "0";
-  if (a >= 100) return fmt(v, 0);
+  if (a >= 100 || Number.isInteger(v)) return fmt(v, 0);
   if (a >= 1) return fmt(v, 2);
   if (a >= 0.01) return v.toFixed(3);
   return v.toExponential(1);
@@ -244,6 +244,7 @@ function hhmm(hour) {
   const m = Math.floor(hour * 60) % 1440;
   return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
 }
+function plural(n, w) { return `${fmt(n)} ${w}${n === 1 ? "" : "s"}`; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // --- Charts: thin lines, hairline grid, one y-axis, crosshair + tooltip. ---------------
@@ -265,8 +266,14 @@ function lineChart(el, xs, series, opt = {}) {
   }
   if (!isFinite(lo)) lo = 0;
   if (!isFinite(hi)) hi = 1;
-  if (opt.zero !== false && lo > 0) lo = 0;
-  if (opt.max === undefined) hi = lo >= 0 ? niceMax(hi) : hi;
+  if (opt.zero === false) {
+    // A level, not an amount: frame the range it moved over, not zero to it.
+    const pad = (hi - lo) * 0.15 || Math.max(Math.abs(hi) * 0.02, 0.5);
+    lo -= pad; hi += pad;
+  } else {
+    if (lo > 0) lo = 0;
+    if (opt.max === undefined) hi = lo >= 0 ? niceMax(hi) : hi;
+  }
   if (hi - lo < 1e-12) hi = lo + 1;
   const x0 = n ? xs[0] : 0, x1 = n > 1 ? xs[n - 1] : x0 + 1;
   const X = (x) => L + (x - x0) / (x1 - x0 || 1) * iw;
@@ -319,13 +326,14 @@ const when = (i) => samples[i] ? `day ${samples[i].day} · ${hhmm(samples[i].hou
 function renderClock(s) {
   const c = s.clock;
   $("time").textContent = c.time_of_day;
-  $("day").textContent = `Day ${c.day}` + (c.year ? ` · year ${c.year.number}` : "") + (c.dry_season ? " · dry season" : "");
+  $("day").textContent = `Day ${c.day}` + (c.year && c.year.number >= 0 ? ` · year ${c.year.number + 1}` : "") + (c.dry_season ? " · dry season" : "");
   $("phase").textContent = (c.night ? "night" : c.daylight < 0.98 ? "twilight" : "day") + ` · ${dur(c.sim_elapsed_s)} simulated · tick ${fmt(c.tick)}`;
   const rise = c.sunrise_phase, set = c.sunset_phase;
   $("lit").style.left = (rise * 100) + "%"; $("lit").style.width = ((set - rise) * 100) + "%";
   $("sun").style.left = `calc(${c.day_phase * 100}% - 2px)`;
   const w = s.summary;
-  $("world").textContent = `${w.landform} · ${w.climate} · ${w.width}×${w.height}×${w.depth} at ${w.voxel_m} m · seed ${w.seed} · ${w.label}`;
+  // The label carries the seed exactly; a JSON number past 2^53 does not survive JavaScript.
+  $("world").textContent = `${w.landform} · ${w.climate} · ${w.width}×${w.height}×${w.depth} at ${w.voxel_m} m · ${w.label}`;
 }
 function renderRun(s) {
   const r = s.run;
@@ -350,7 +358,7 @@ function renderEnv(s) {
   $("tiles").innerHTML =
     tile("Air temperature", fmt(e.temperature_c, 1) + "°", e.front_depth_c ? `cold front −${fmt(e.front_depth_c, 1)}°` : "") +
     tile("Humidity", fmt(e.rh * 100, 0) + "%", `cloud ${fmt(e.cloud_cover * 100, 0)}% · fog ${fmt(e.fog * 100, 0)}%`) +
-    tile("Rain", rain, e.rain_mm_per_h > 0 ? `${fmt(e.rain_mm_per_h, 1)} mm/h` : `${e.rain_counts.showers} showers · ${e.rain_counts.downpours} storms so far`) +
+    tile("Rain", rain, e.rain_mm_per_h > 0 ? `${fmt(e.rain_mm_per_h, 1)} mm/h` : `${plural(e.rain_counts.showers, "shower")} · ${plural(e.rain_counts.downpours, "storm")} so far`) +
     tile("Daylight", fmt(e.daylight * 100, 0) + "%", `sun ${fmt(e.sun_elevation_deg, 0)}°` + (e.dry_season ? ` · <span class="badge"><i style="background:var(--warn)"></i>dry season</span>` : ""));
   const w = e.water;
   $("water").innerHTML =
@@ -486,7 +494,7 @@ async function loadDetail() {
   html += `<dl class="facts">`;
   if (d) {
     html += `<dt>age</dt><dd>${dur(d.age_s)}` + (d.lifespan_s ? ` of ${dur(d.lifespan_s)}` : "") + `</dd>`;
-    html += `<dt>size</dt><dd class="num">${fmt(d.size * 100, 0)}% of adult · body ${sig(d.body)}</dd>`;
+    html += `<dt>size</dt><dd class="num">${fmt(d.size * 100, 0)}% of full size · body ${sig(d.body)}</dd>`;
     html += `<dt>fed</dt><dd class="num">${fmt(d.fullness * 100, 0)}% · reserve ${sig(d.reserve)} · energy ${sig(d.energy)}</dd>`;
     if (d.stomach.length) html += `<dt>stomach</dt><dd>${d.stomach.map((f) => `${esc(f.food.replace("_", " "))} ${sig(f.organic)}`).join(", ")}</dd>`;
     html += `<dt>wound</dt><dd class="num">${fmt(d.wound * 100, 0)}%</dd>`;

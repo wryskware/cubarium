@@ -557,7 +557,7 @@ pub struct AnimalRow {
     pub age_s: f64,
     /// Its drawn lifespan, simulated seconds; 0 is none.
     pub lifespan_s: f64,
-    /// Organic structure, and the same over its lineage's adult (`birth_body`) size.
+    /// Organic structure, and the same over its lineage's full size (`body_max`).
     pub body: f64,
     pub size: f64,
     /// Reserve over the reserve its body can hold, 0..1: how fed it is.
@@ -597,7 +597,7 @@ pub fn animal_row(fauna: &Fauna, a: &Animal) -> AnimalRow {
         age_s: a.age_ticks as f64 * DT,
         lifespan_s: a.lifespan_ticks as f64 * DT,
         body: a.body,
-        size: if core.birth_body > 0.0 { a.body / core.birth_body } else { 1.0 },
+        size: if core.body_max > 0.0 { a.body / core.body_max } else { 1.0 },
         fullness: if cap > 0.0 { (a.reserve / cap).clamp(0.0, 1.0) } else { 0.0 },
         energy: a.energy,
         wound: a.wound,

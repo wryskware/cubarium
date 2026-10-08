@@ -86,7 +86,8 @@ fn populations_count_each_body_in_the_stage_its_config_puts_it() {
         let row = query::animal_row(&fauna, a);
         let birth = fauna.config().founder(Founder::Browser).core.birth_body;
         assert_eq!(row.stage == LifeStage::Adult, a.body >= birth);
-        assert!((row.size - a.body / birth).abs() < 1e-12);
+        let full = fauna.config().founder(Founder::Browser).core.body_max;
+        assert!((row.size - a.body / full).abs() < 1e-12);
         assert!((0.0..=1.0).contains(&row.fullness));
         assert_eq!(row.label, "frondgrazer");
     }
@@ -168,7 +169,14 @@ fn body(id: u64, founder: Founder) -> BodyState {
 }
 
 fn census(tick: u64, bodies: Vec<BodyState>) -> Census {
-    Census { tick, bodies, clutches: vec![], dens: vec![], departed: vec![[0; Departure::COUNT]; Founder::COUNT] }
+    Census { tick, world_tick: None, bodies, clutches: vec![], dens: vec![], departed: vec![[0; Departure::COUNT]; Founder::COUNT] }
+}
+
+/// The world's tick runs this far ahead of the animal layer's (its pre-roll).
+const WORLD_AHEAD: u64 = 1000;
+
+fn stamped(tick: u64, bodies: Vec<BodyState>) -> Census {
+    Census { world_tick: Some(tick + WORLD_AHEAD), ..census(tick, bodies) }
 }
 
 fn kinds(events: &[crate::LifeEvent], animal: u64) -> Vec<&'static str> {
@@ -219,10 +227,10 @@ fn a_meal_is_what_the_stomach_gained_over_one_bout() {
         a.bout = Some((11, BoutKind::Growth));
         a.stomach[litter] += bite - digest;
         eaten += bite;
-        r.observe_census(&mut census(tick, vec![a]));
+        r.observe_census(&mut stamped(tick, vec![a]));
     }
     a.bout = None;
-    r.observe_census(&mut census(15, vec![a]));
+    r.observe_census(&mut stamped(15, vec![a]));
     let ev = r.take_events();
     assert_eq!(ev.len(), 1, "{ev:?}");
     let What::Meal { bout, foods, duration_s } = &ev[0].what else { panic!("{ev:?}") };
@@ -230,7 +238,8 @@ fn a_meal_is_what_the_stomach_gained_over_one_bout() {
     assert_eq!(foods.len(), 1);
     assert_eq!(foods[0].food, "litter");
     assert!((foods[0].organic - eaten).abs() < 1e-12, "{} vs {eaten}", foods[0].organic);
-    assert!((duration_s - 4.0 * DT).abs() < 1e-12);
+    assert!((duration_s - 4.0 * DT).abs() < 1e-12, "timed on the layer's ticks");
+    assert_eq!(ev[0].tick, 15 + WORLD_AHEAD, "stamped on the world's");
 }
 
 #[test]
@@ -402,7 +411,7 @@ fn the_observer_publishes_at_once_then_once_per_sim_interval() {
     let per = (cadence.sim_s / DT).round() as u64;
     for _ in 0..per - 1 {
         world.step();
-        o.after_tick(&fauna, 1);
+        o.after_tick(&world, &fauna, 1);
     }
     assert!(!o.due(world.tick(), t0, false), "one tick short");
     world.step();

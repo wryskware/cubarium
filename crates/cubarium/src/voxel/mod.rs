@@ -1872,7 +1872,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         let ns = at.elapsed().as_nanos() as u64;
                         budget.tick(ns, before);
                         if let Some(o) = observatory.as_mut() {
-                            o.observer.after_tick(sim.fauna(), ns);
+                            o.observer.after_tick(sim.world(), sim.fauna(), ns);
                         }
                         ticks += 1;
                         since_ticks += 1;
@@ -1887,7 +1887,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                         let ns = at.elapsed().as_nanos() as u64;
                         budget.tick(ns, before);
                         if let Some(o) = observatory.as_mut() {
-                            o.observer.after_tick(sim.fauna(), ns);
+                            o.observer.after_tick(sim.world(), sim.fauna(), ns);
                         }
                         ticks += 1;
                         since_ticks += 1;

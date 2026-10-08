@@ -176,7 +176,11 @@ pub struct ClutchState {
 /// Everything the recorder reads on one tick: [`Census::of`] a layer, or built by hand.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Census {
+    /// The animal layer's own tick: what bouts and clutches are timed on.
     pub tick: u64,
+    /// The world's tick, which events are stamped with (the layer's tick counts from the
+    /// layer's making, after the world's pre-roll); `None` stamps them with `tick`.
+    pub world_tick: Option<u64>,
     /// Sorted by id.
     pub bodies: Vec<BodyState>,
     pub clutches: Vec<ClutchState>,
@@ -189,9 +193,10 @@ pub struct Census {
 
 impl Census {
     /// Read `fauna` into this census, reusing its buffers.
-    pub fn read(&mut self, fauna: &Fauna) {
+    pub fn read(&mut self, fauna: &Fauna, world_tick: u64) {
         let view = fauna.view();
         self.tick = view.tick;
+        self.world_tick = Some(world_tick);
         self.bodies.clear();
         self.bodies.extend(view.animals.iter().map(|a| BodyState::of(view.config, a)));
         self.clutches.clear();
@@ -211,9 +216,9 @@ impl Census {
         );
     }
 
-    pub fn of(fauna: &Fauna) -> Census {
+    pub fn of(fauna: &Fauna, world_tick: u64) -> Census {
         let mut c = Census::default();
-        c.read(fauna);
+        c.read(fauna, world_tick);
         c
     }
 }
@@ -235,6 +240,8 @@ pub struct LifeRecorder {
     departed: Vec<[u64; Departure::COUNT]>,
     pending: Vec<LifeEvent>,
     census: Census,
+    /// The world's tick less the layer's, on the last census.
+    stamp_offset: i64,
 }
 
 fn site3(s: Site) -> [u32; 3] {
@@ -265,15 +272,18 @@ impl LifeRecorder {
         self.pending.len()
     }
 
+    /// Record `what` at the layer's `tick`, stamped on the world's clock.
     fn emit(&mut self, tick: u64, animal: u64, what: What) {
+        let tick = (tick as i64 + self.stamp_offset).max(0) as u64;
         self.pending.push(LifeEvent { tick, animal, what });
     }
 
-    /// Compare the layer with the last call and record what changed.
-    pub fn observe(&mut self, fauna: &Fauna) {
+    /// Compare the layer with the last call and record what changed, stamping events with
+    /// the world's tick `world_tick`.
+    pub fn observe(&mut self, fauna: &Fauna, world_tick: u64) {
         let mut census = std::mem::take(&mut self.census);
         census.bodies = std::mem::take(&mut self.next);
-        census.read(fauna);
+        census.read(fauna, world_tick);
         self.observe_census(&mut census);
         self.census = census;
     }
@@ -282,6 +292,7 @@ impl LifeRecorder {
     /// list is taken; the rest is left as it was.
     pub fn observe_census(&mut self, census: &mut Census) {
         let tick = census.tick;
+        self.stamp_offset = census.world_tick.map_or(0, |w| w as i64 - tick as i64);
         let mut next = std::mem::take(&mut census.bodies);
         let clutches_now: Vec<ClutchKey> = census
             .clutches
@@ -296,11 +307,8 @@ impl LifeRecorder {
             self.started = true;
             for s in &next {
                 let species = s.founder.map_or("unknown", |f| f.name()).to_string();
-                self.pending.push(LifeEvent {
-                    tick,
-                    animal: s.id,
-                    what: What::Observed { species, stage: s.stage, age_s: s.age_ticks as f64 * DT },
-                });
+                let what = What::Observed { species, stage: s.stage, age_s: s.age_ticks as f64 * DT };
+                self.emit(tick, s.id, what);
             }
             self.clutches = clutches_now.into_iter().map(|k| (k, None)).collect();
             self.dens = dens_now;
