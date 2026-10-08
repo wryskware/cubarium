@@ -304,8 +304,19 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             raise ValueError('vitals observed horizon differs from profile')
         if plants and max(number(row, 'minute') for row in plants) != end:
             raise ValueError('plant vitals observed horizon differs from profile')
-        if not rows or any(number(row, 'seed') != seed for row in rows):
-            raise ValueError('empty census or census seed differs from batch seed')
+        # A fresh founding must report the batch seed. A saved start reports the seed its
+        # world was founded on, which differs from the start's label when the founding
+        # redrew a refused seed (seed + k): it must be one seed throughout, recorded.
+        if not rows:
+            raise ValueError('empty census')
+        world_seeds = {number(row, 'seed') for row in rows}
+        if len(world_seeds) != 1:
+            raise ValueError('census seed changes within the run')
+        if load_minute == 0 and world_seeds != {seed}:
+            raise ValueError('census seed differs from batch seed')
+        result['world_seed'] = next(iter(world_seeds))
+        if result['world_seed'] != seed:
+            result['warnings'].append(f"start labelled s{seed} holds world seed {result['world_seed']:.0f} (founding redrew a refused seed)")
         minutes = [number(row, 'sim_min') for row in rows]
         # A later invocation may have appended beyond the profile: it is a
         # different observed horizon, never silently clipped to fit this trial.
