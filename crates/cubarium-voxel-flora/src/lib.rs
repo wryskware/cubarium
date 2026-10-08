@@ -5130,6 +5130,9 @@ pub struct DeliveryReceipt {
 /// The plant layer. Owns its stands and ground stocks; borrows the world per call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Flora {
+    /// Saved beside the state as a named-field document (`cubarium_voxel::savedoc`), not in
+    /// its positional bytes: a new knob is not a new state layout.
+    #[serde(skip)]
     config: FloraConfig,
     tick: u64,
     stands: Vec<Stand>,

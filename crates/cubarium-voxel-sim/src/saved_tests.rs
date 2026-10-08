@@ -202,3 +202,45 @@ fn a_wall_climber_saved_on_a_face_comes_off_it_after_a_load() {
         assert!(until(&world, &mut flora, &mut fauna, 600, off), "unsaved {founder:?} still on the face");
     }
 }
+
+/// **The one-version legacy reader on a real save** (SAVE-EXTENSIBLE): a checkpoint of the
+/// 2026-10-08 training starts (world 22, flora 38, fauna 71) loads through the one safe load,
+/// every animal driven, and [`crate::saved::resave`] rewrites it in the current format with
+/// nothing changed. Needs the files:
+/// `CUBARIUM_LEGACY_SAVE=runs/starts3-2026-10-08/heuristic/s4/run/ckpt/m000120 cargo test
+/// --release -p cubarium-voxel-sim -- --ignored a_real_legacy_save`.
+#[test]
+#[ignore = "needs a real schema-71 checkpoint: set CUBARIUM_LEGACY_SAVE"]
+fn a_real_legacy_save_loads_and_resaves() {
+    let dir = std::path::PathBuf::from(
+        std::env::var("CUBARIUM_LEGACY_SAVE").expect("CUBARIUM_LEGACY_SAVE names a checkpoint directory"),
+    );
+    let fauna_bytes = std::fs::read(dir.join("fauna.bin")).expect("fauna.bin");
+    assert_eq!(
+        cubarium_voxel::snapshot::schema_tag(&fauna_bytes),
+        Some(cubarium_voxel_fauna::LEGACY_SCHEMA),
+        "the checkpoint is a legacy one"
+    );
+    let old = crate::saved::load(&dir, &[]).expect("the legacy checkpoint loads");
+    assert!(!old.fauna.view().animals.is_empty(), "a mature start has animals");
+    crate::saved::driven(&old.fauna).expect("every animal is driven");
+
+    let copy = std::env::temp_dir().join(format!("cubarium-resave-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&copy);
+    std::fs::create_dir_all(&copy).unwrap();
+    for f in ["world.bin", "flora.bin", "fauna.bin", "minute"] {
+        std::fs::copy(dir.join(f), copy.join(f)).unwrap();
+    }
+    let done = crate::saved::resave(&copy).expect("resaves");
+    assert_eq!(done.len(), 3, "{done:?}");
+    assert!(crate::saved::resave(&copy).expect("a second pass").is_empty(), "already current");
+    let new = crate::saved::load(&copy, &[]).expect("the resaved checkpoint loads");
+    std::fs::remove_dir_all(&copy).unwrap();
+    assert!(new.world == old.world, "the world comes back whole");
+    assert_eq!(new.flora.config(), old.flora.config());
+    assert_eq!(new.flora.view().stands, old.flora.view().stands);
+    assert_eq!(new.fauna.config(), old.fauna.config());
+    assert_eq!(new.fauna.view().animals, old.fauna.view().animals);
+    assert_eq!(new.fauna.view().ledger, old.fauna.view().ledger);
+    assert_eq!(new.minute, old.minute);
+}
