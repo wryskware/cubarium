@@ -32,7 +32,12 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     let cfg = VoxelConfig::default();
     let mut world = scene::authored(cfg.sim.world.clone());
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // Founders arrive with an empty stomach here, so their eating latch is on and the
+    // mouth is exercised inside 200 ticks (live founders arrive fed:
+    // `founding.arrival_stomach`, 2026-10-08).
+    let mut fauna_cfg = FaunaConfig::default();
+    fauna_cfg.founding.arrival_stomach = 0.0;
+    let mut fauna = Fauna::new(fauna_cfg);
     habitat::seed(&mut world, &mut flora, &mut fauna);
     install_default_founders(&mut fauna).expect("the built-in centres validate");
     let mut senses = Senses::new();
