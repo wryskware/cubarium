@@ -15,13 +15,17 @@ lighting = "lit"        # the desktop's tier; the panel and the cube keep the fl
 serve = "0.0.0.0:7878"   # the observatory: stats, dashboard and speed control at http://<host>:7878/ (the home LAN, opened from the desktop; no auth)
 
 [world]
-width = 256
+# 292 wide fills voidrunner's 1920x1200 (16:10) panel (Wrysk 2026-10-07: "set a width thats
+# the correct aspect for the screen, cuz atm there are pillarboxes"): at 7 px/voxel the strip
+# is 2044 x (128*7 + 96*4) = 2044 x 1280, aspect 1.597, shown at 1917 x 1200.
+width = 292
 height = 128
 depth = 96
 voxel_m = 0.125
 
 [world.landform]
 preset = "terrarium"
+water_level_m = 0.75   # the raised water table (Wrysk 2026-10-07: "can we do .75 water there as well?")
 
 # The climate, in step with config/desktop/terrarium.toml's.
 [world.climate]
