@@ -263,7 +263,7 @@ the band `[lo, hi]`.
 | Q | replenishment shortfall over one day cycle, `h(I/(I − ΔS))` | `targets.rs` cycle books | exists |
 | A | band: late counts within `[N0, 3N0]` per lineage | trace | exists, switched off by `counts_readout` |
 | K | peak above `5 N0` | trace | exists |
-| V | browser movement share below 0.30 | window meter | exists |
+| V | browser movement share below 0.30. **Proposed: drop from P, keep as a diagnostic.** Under WORKING_POLICY "Shape the situation" (Wrysk 2026-10-08), a movement term tells animals what to do; if they don't need to move to eat, the food is too abundant. Your call (Q5) | window meter | exists |
 | Z | lanternjaw share outside 5–15 % of animals (full-world checks only) | trace | exists |
 | M | largest meadow patch below its target area | census `meadow_patch_max` | in CSV |
 | G_b, G_v | lanternberry grove size; new established vaulttree sites | census grove/forest columns | partial |
@@ -415,7 +415,10 @@ control and the reward accounting; display targets after seeing results.
 8. **Founding birth pulse:** founders arrive at full reserve and breed at once. Bellwings went
    from 6 to 70 within 3 h and lose about 5 per seed to starvation. Leave it to the ecology
    search, or have founders earn their surplus first?
-9. **Saved starts and new knobs:** today every new serialised knob made every saved start
+9. **Saved starts and new knobs:** Wrysk 2026-10-08: "we need to do a better job about
+   changing save formats, or making them extensible, or migrations". SAVE-EXTENSIBLE is
+   running (option b below, plus a one-time reader so starts3 survives).
+   Background: today every new serialised knob made every saved start
    unloadable. For example, after DEN-FLOOD, loads failed with "corrupt snapshot", not even a
    clean refusal.
    - With "every number a knob", start libraries die on most merges.
