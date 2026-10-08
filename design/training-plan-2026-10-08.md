@@ -52,8 +52,51 @@ which is 2–4× real time:
 The SIM-SPEED package is on it. At today's speed, an 8-seed × 2-arm × 2 h check takes about
 40 min on eidolon, against the 30-min target.
 
-**Baseline (today's main, before the founding fix).** d72 and d96, shipped brains against
-heuristics, seeds 1–4 × 2 h. The table follows in §1a once the batch ends.
+### 1a. Baseline v2 (before today's heuristic bug fixes)
+
+Setup: main 691d3f8e, d72, saved starts at minute 63 (seeds 1–8), 2 h each. Arms: heuristic
+vs the shipped C1 brains. Scored with `score.py --profile screen-2h-legacy` (report:
+`runs/bl2-2026-10-08/report.md`).
+
+**Persistence.** Both arms are feasible: no required lineage or species was lost on any
+seed. Lanternjaws stay at about 1.7 % of animals (Z penalty 1). Veilhounds made about 2 kills
+per world-hour.
+
+**C1 brains against heuristics.**
+
+| Lineage | Measure | C1 | Heuristic |
+|---|---|---|---|
+| Frondgrazer | alive at end | 32 | 22 |
+| Frondgrazer | p10 fullness | 0.13 | 0.007 |
+| Frondgrazer | intake | 2.3× | 1× |
+| Frondgrazer | moving share | 0.25 | 0.57 |
+| Littershredder | intake | 5.0 | 2.8 |
+
+So the brains feed far better and move half as much. With movement weighted 10, the heuristic
+arm ranks better (soft P 8.8 against 9.9; C1 wins 1/8). How much movement is worth against
+condition is Wrysk's call (§6 Q5).
+
+**Condition is poor at the bottom.** p10 fullness is near zero in every lineage except the
+Veilhound. Populations are about two-thirds juveniles after the founding birth pulse; bellwings
+went from 6 to 70 and lose about 5 a seed to starvation. VITALS-3 adds condition by life stage
+to say whether these are starving juveniles.
+
+**Stocks growing unchecked.**
+- Litter rose by about 6,000 in 2 h. The answering role, the shredders, was frozen by bug 1
+  below.
+- Velvetpad rose by 46 stands/min, while springturf fell by 13/min.
+- Standing foliage rose.
+
+**Heuristic bugs found by the readouts, all fixed since** (FORAGE-LEAVE 54301f40,
+FROZEN-PREY 0cd0767f):
+1. Littershredders froze on any footfall, grazers' included (Flee held them 43 % of the time).
+   Capgnawers ran from the same footfall 66 % of the time.
+2. Browsers facing a wall wobbled their heading forever. Frondgrazers sat like that for
+   20–50 min at zero reserve.
+3. Seedporters nibbled empty crowns for tens of minutes.
+4. The staged check called hungry frozen bodies "idle".
+
+Baseline v3 reruns this comparison on the fixed heuristics, from a new start library.
 
 ## 2. The fitness score
 
@@ -202,7 +245,9 @@ Launch only on Wrysk's go, and always run `down`.
 
 ## 6. Wrysk's calls
 
-Each has a recommendation; the v3 proposal adds its own Q1–Q6.
+Each has a recommendation; the v3 proposal adds its own Q1–Q6. Astra's order of urgency: v3
+Q1 (the brain/reflex boundary) and Q3 (what "places" a brain may sense) first; then the pack
+control and the reward accounting; display targets after seeing results.
 
 1. **Brain contract.** Staged v3 option B: sensed inputs and body actions for all nine
    lineages, reflexes reduced to body constraints, and the Veilhound pack tactic as options
@@ -210,35 +255,67 @@ Each has a recommendation; the v3 proposal adds its own Q1–Q6.
    heuristic behaviours). Astra and the v3 author recommend B. Opus first recommended A as a
    stopgap.
 2. **Until v3 lands, the live world's two brains:** keep C1, or run the two foragers on their
-   heuristics. Decide from the baseline (§1a).
-3. **Count the digestible stomach in the reward?** Recommended yes, after a side-by-side
-   (ACCOUNTING logs both).
+   heuristics.
+   - Baseline v2 (§1a): C1 feeds about 2× better and moves half as much.
+   - Baseline v3 repeats this on the fixed heuristics.
+3. **Count the digestible stomach in the reward?** Recommended yes. The side-by-side is in:
+   it barely changes rankings (within-world rank correlation 0.95–0.96, brain pilot part 1).
 4. **Success across slow clocks:** life-cycle-aware (recommended) rather than "every 2 h run
    breeds".
-5. **What the display should look like, in numbers:**
+5. **The weights, and what the display should look like in numbers:**
+   - movement against condition: V is weighted 10 and decides C1 against heuristic today
+     (§1a);
    - population band per lineage (proposed `[N0, 3N0]`, peak `5 N0`);
-   - meadow patch target area;
+   - meadow patch target area (2 m² now; every baseline world has ~14 m², so it is never
+     binding);
    - groves;
-   - hunt frequency (Astra 0.5–2 per world-hour, Opus 0.1–0.5 per pack-hour).
+   - hunt frequency (proposed 0.5–2 kills per world-hour; baseline v2 has ~2).
 
-   Best decided from captures and the baseline table.
+   Best decided from captures and the baseline tables.
 6. **Fidelity for brain-only training:** `water_every` 8–16, or frozen water, on train-flat?
    Recommended yes for brains only; ecology stays at 4.
-7. **EC2:** one capped spot trial after the pilot.
-8. **Founding birth pulse:** founders arrive at full reserve and breed at once. On seed 1–4
-   checks, bellwings went from 6 to 15–42 in 10 min. Leave it to the ecology search, or have
-   founders earn their surplus first?
+7. **EC2:** one capped spot trial after the pilot. EC2-PREP readies `plan`/`run`/`fetch`/`down`
+   for the new tools without launching anything.
+8. **Founding birth pulse:** founders arrive at full reserve and breed at once. Bellwings went
+   from 6 to 70 within 3 h and lose about 5 per seed to starvation. Leave it to the ecology
+   search, or have founders earn their surplus first?
+9. **Saved starts and new knobs:** today every new serialised knob made every saved start
+   unloadable. For example, after DEN-FLOOD, loads failed with "corrupt snapshot", not even a
+   clean refusal.
+   - With "every number a knob", start libraries die on most merges.
+   - Options:
+     - (a) keep regenerating starts; about an hour of one machine each time;
+     - (b) store configs in saves as self-describing tables, so a new knob takes its default
+       and world-state layout changes still refuse.
+   - Recommended (b). It isn't migration: a loaded world already runs new code.
+   - At least, a config change should bump the schema, so the loader refuses cleanly.
+10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
+    related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
 
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
 |---|---|---|
-| Diagnoses (Opus, Astra), v3 proposal | Opus, Astra (review only) | committed a4e627c0, 3eda1a9e, 0668cdd0 |
-| FOUNDING: founders arrive fed | Opus | merged 110cb418 |
+| Diagnoses (Opus, Astra), v3 proposal, Astra plan review | Opus, Astra (review only) | a4e627c0, 3eda1a9e, 0668cdd0, 1afd7649 |
+| FOUNDING: founders arrive fed | Opus | 110cb418 |
 | Staged check: sated grazers | parent | c7603d50 |
-| VITALS: per-lineage vitals, plant vitals, life table, reducer | Codex | running |
-| SEARCH-DIET: 3 tests, diet coverage, deterministic seed fallback | Codex | running |
-| ACCOUNTING: required roster, burn-in losses, exact births, stomach-aware energy (logged), R-hat, provenance | Codex | running |
-| SIM-SPEED: d96 animal-phase pathology, mature d72 profile | Codex | running |
-| Baseline: d72/d96 × shipped/heuristic × seeds 1–4 | eidolon | running |
-| Start library: d72 seeds 1–16, minutes 30/60/90/120 | eidolon | running |
+| SEARCH-DIET: 3 tests, diet coverage, deterministic seed fallback | Codex | fe99218a |
+| VITALS: per-lineage vitals, plant vitals, life table, reducer | Codex | 1ff594a8 |
+| ACCOUNTING: required roster, burn-in losses, exact births, stomach-aware energy (logged), R-hat, provenance | Codex | a0d78ffd |
+| SIM-SPEED: d96 den-renewal pathology (5.8×), d72 −19 % | Codex | 359efe4b |
+| STUDY-KIT: batch.py, score.py, fitness-v1 | Codex | dcc367c9 |
+| LOAD-SET: set= on loaded starts | Opus | a5e26759 |
+| TRAIN-MAPS: reach readout, train-flat(-nopred) | Opus | 84b9269b |
+| STAGE-TRAIN: staged search/grid/live-train | Codex | fc41541b |
+| VITALS-2: load-boundary row, segments, stuck from swallows, wrap distance, cohort energy | Opus | 1ea9dfce |
+| DEN-FLOOD: walk_line_to (roof-over-den), flood depth knob | Opus | d690557b |
+| SCORER-2: profiles, declared roster, feasibility gate, report | Codex | b1f05e02 |
+| BRAIN-PILOT: base-chain fix, launcher | Opus | 8caf5c60 (pilot running on eidolon) |
+| LOAD-CLIMB: no load bug; still climbers are Resting | Opus | 03fef559 |
+| ECO-SEARCH: eco_search.py, census genome= | Opus | d6408fa2 |
+| FORAGE-LEAVE: giving-up rule | Opus | 54301f40 |
+| FROZEN-PREY: threat-only freeze/flee, browser wall turn, check | Opus | 0cd0767f |
+| Baseline v2 (pre-fix): d72 heuristic vs C1, 8 seeds | desktop | done, §1a |
+| Start library v2 (fixed heuristics): d72 seeds 1–16 | desktop | running |
+| Soak 2: d72 seeds 9–16 × 14 h, fresh founding, fixed heuristics | eidolon | running |
+| EC2-PREP, VITALS-3 | Codex | running |
