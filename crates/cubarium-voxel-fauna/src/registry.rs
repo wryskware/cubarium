@@ -699,6 +699,7 @@ fn knob_rows() -> Vec<Row> {
     rows.extend([
         f("arrival_body", "fraction of adult body", fraction, "a seeded founder arrives at this fraction of its adult body").search(0.3, 1.0).prov("decision"),
         f("arrival_reserve", "fraction of reserve cap", fraction, "a seeded founder arrives with this fraction of its reserve cap").search(0.0, 1.0).prov("decision"),
+        f("arrival_stomach", "fraction of stomach capacity K", fraction, "a seeded founder arrives with this fraction of its stomach capacity, of its first food").search(0.0, 1.0).prov("decision"),
         f("starter_litter_organic", "organic units", nonneg, "leaf litter laid under each seeded littershredder").search(0.05, 1.0),
         f("starter_litter_mineral_fraction", "fraction of organic", fraction, "mineral share of the starter litter").search(0.005, 0.1),
         f("starter_litter_energy_density", "energy per organic unit", nonneg, "retained energy density of the starter litter").search(0.5, 4.0),
