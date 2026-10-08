@@ -46,6 +46,12 @@
 //! library's own variant pick lands there), and no animals. With `--models` pointing at a
 //! scratch library whose adult step holds candidate models as variants, this puts model
 //! candidates (the 2026-10-07 browsed-foliage round) side by side in the presenter.
+//!
+//! `--states SPECIES` draws only that species, at wood 35 %, 65 % and 100 % of its
+//! maximum (left to right, a gap between), each size once per foliage state of its model
+//! (`foliage-states-implementation-2026-10-08.md`): the stand's total foliage set inside
+//! that state's band of the config's `foliage_state_below`, so the presenter's own choice
+//! picks it. No animals.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -112,6 +118,7 @@ fn main() -> Result<()> {
     let mut contest = false;
     let mut models_dir_arg: Option<PathBuf> = None;
     let mut candidates: Option<(Species, Vec<usize>)> = None;
+    let mut states_of: Option<Species> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -143,6 +150,15 @@ fn main() -> Result<()> {
                 let idx = list.split(',').map(|i| i.parse()).collect::<Result<Vec<usize>, _>>()?;
                 candidates = Some((species, idx));
             }
+            "--states" => {
+                let name = args.next().context("--states SPECIES")?;
+                states_of = Some(
+                    Species::ALL
+                        .into_iter()
+                        .find(|s| s.name() == name)
+                        .with_context(|| format!("no species {name}"))?,
+                );
+            }
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
@@ -156,7 +172,24 @@ fn main() -> Result<()> {
     if let Some((species, idx)) = &candidates {
         plan.extend(idx.iter().map(|_| (*species, 1.0, false)));
     }
-    for species in Species::ALL.into_iter().filter(|_| candidates.is_none()) {
+    // `--states`: per size, one stand per state, each with its total foliage fraction.
+    let mut state_fraction: Vec<Option<f64>> = Vec::new();
+    let mut extra_gap: Vec<i64> = Vec::new();
+    if let Some(species) = states_of {
+        let below = &flora_cfg.species(species).foliage_state_below;
+        let n = below.len() + 1;
+        for f in [0.35, 0.65, 1.0] {
+            for k in 0..n {
+                let hi = if k == 0 { 1.0 } else { below[k - 1] };
+                let lo = if k + 1 == n { 0.0 } else { below[k] };
+                plan.push((species, f, false));
+                state_fraction.push(Some(0.5 * (lo + hi)));
+                extra_gap.push(if k + 1 == n { 3 } else { 0 });
+            }
+        }
+    }
+    let solo = candidates.is_some() || states_of.is_some();
+    for species in Species::ALL.into_iter().filter(|_| !solo) {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
         }
@@ -171,9 +204,9 @@ fn main() -> Result<()> {
             (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
         let r = r.max(1);
         columns.push(x + r);
-        x += 2 * r + 1 + GAP;
+        x += 2 * r + 1 + GAP + extra_gap.get(columns.len() - 1).copied().unwrap_or(0);
     }
-    let founders = if candidates.is_some() { 0 } else { FOUNDERS.len() };
+    let founders = if solo { 0 } else { FOUNDERS.len() };
     let animal_x: Vec<i64> = (0..founders as i64).map(|k| x + 4 + k * SLOT).collect();
     let mut width = (x + founders as i64 * SLOT + 6) as u32;
 
@@ -191,7 +224,7 @@ fn main() -> Result<()> {
     // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
     let mut depth = 8u32;
     let mut specimens = Vec::new();
-    if let Some(lib) = models.as_ref().filter(|_| candidates.is_none()) {
+    if let Some(lib) = models.as_ref().filter(|_| !solo) {
         let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
         for (name, heading_rad, lift) in SPECIMENS {
             let Some(cells) = lib.specimen(name).and_then(|m| m.select(f64::INFINITY)) else {
@@ -353,6 +386,16 @@ fn main() -> Result<()> {
         if cured && sc.cure_after_s > 0.0 {
             s.cured = true;
             s.foliage *= 1.0 - sc.cure_shed;
+        }
+        // `--states`: the stand's total foliage at its state's fraction, every layer alike.
+        let k = columns.iter().position(|&x| x == i64::from(s.site.x));
+        if let Some(f) = k.and_then(|k| state_fraction.get(k).copied().flatten()) {
+            let want = f * sc.alpha * s.wood;
+            let scale = if s.foliage > 0.0 { want / s.foliage } else { 0.0 };
+            for v in &mut s.layer_stock {
+                *v *= scale;
+            }
+            s.foliage = want;
         }
     }
     // `--candidates`: give each stand an id whose variant pick is its listed index.
