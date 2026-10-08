@@ -60,8 +60,9 @@ const SMOOTH_SUN: f32 = 1.0 / 3.0;
 /// precision a near-black gradient needs.
 const BACKDROP_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
 
-/// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom.
-const QUERY_SLOTS: u32 = 4;
+/// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom; and
+/// either side of the model pass.
+const QUERY_SLOTS: u32 = 6;
 
 /// How many plant styles one frame may paint with.
 ///
@@ -238,6 +239,12 @@ pub struct PoseAt {
 /// sleep weight (or the hunker weight, whichever is further down); each breath dips at its
 /// own weight; a head move goes out and back at the idle weight.
 pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
+    pose_with(table.sleep, table.idle, entry, ticks)
+}
+
+/// [`pose_at`] with the table's two breaths given alone: what the model pass evaluates a
+/// figure's own entries with (H2).
+pub fn pose_with(sleep: Breath, idle: Breath, entry: &PoseEntry, ticks: f32) -> PoseAt {
     let ticks = ticks.clamp(0.0, 8.0);
     let smooth = |w: f32, r: f32| {
         let w = (w + r * ticks).clamp(0.0, 1.0);
@@ -249,8 +256,7 @@ pub fn pose_at(table: &PoseTable, entry: &PoseEntry, ticks: f32) -> PoseAt {
     let head = entry.head.out(ticks) * wi;
     PoseAt {
         settle: entry.drop * ws.max(wh) + entry.head.dip * head,
-        breath: ws * table.sleep.dip(entry.sleep_phase, ticks)
-            + wi * table.idle.dip(entry.idle_phase, ticks),
+        breath: ws * sleep.dip(entry.sleep_phase, ticks) + wi * idle.dip(entry.idle_phase, ticks),
     }
 }
 
@@ -1916,6 +1922,12 @@ pub struct VoxelRenderer {
     pose_pipeline: vk::Pipeline,
     depth_pose_pipeline: vk::Pipeline,
     present: PresentPass,
+    /// The model pass (H2): animals drawn as models after the walk ([`crate::figures`]).
+    figures: crate::figures::FigurePass,
+    /// The figures the next frame draws ([`VoxelRenderer::set_figures`]).
+    figure_frame: crate::figures::FigureFrame,
+    /// Tiles the atlas had no room for, over the run.
+    figures_dropped: u64,
     pub command_pool: vk::CommandPool,
     queries: vk::QueryPool,
 }
@@ -1962,23 +1974,9 @@ impl VoxelRenderer {
             )
         }?;
 
-        // The lit tier's pass also writes the emission (location 1) for the bloom.
-        let raster_pass = if params.lit {
-            crate::render::colour_pass_n(
-                d,
-                &[RASTER_FORMAT, EMIT_FORMAT],
-                vk::AttachmentLoadOp::DONT_CARE,
-                vk::ImageLayout::UNDEFINED,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            )?
-        } else {
-            crate::render::colour_pass(
-                d,
-                RASTER_FORMAT,
-                vk::AttachmentLoadOp::DONT_CARE,
-                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            )?
-        };
+        // The lit tier's pass also writes the emission (location 1) for the bloom; both
+        // write the walk's end depth (location 2) for the model pass (H2).
+        let raster_pass = crate::figures::walk_pass(d, RASTER_FORMAT, params.lit.then_some(EMIT_FORMAT))?;
         let (raster_image, raster_memory) = gpu.image(
             params.raster_w,
             params.raster_h,
@@ -2232,16 +2230,6 @@ impl VoxelRenderer {
         } else {
             None
         };
-        let raster_framebuffer = match &bloom {
-            Some(b) => framebuffer_n(
-                d,
-                raster_pass,
-                &[raster_view, b.emit_view],
-                params.raster_w,
-                params.raster_h,
-            )?,
-            None => framebuffer(d, raster_pass, raster_view, params.raster_w, params.raster_h)?,
-        };
 
         let linear = unsafe {
             d.create_sampler(
@@ -2409,7 +2397,7 @@ impl VoxelRenderer {
                 fs,
                 false,
                 Some(&spec),
-                if params.lit { 2 } else { 1 },
+                3,
             )
         };
         let pipeline = walk(false, false)?;
@@ -2433,6 +2421,32 @@ impl VoxelRenderer {
             d.destroy_shader_module(vs, None);
             d.destroy_shader_module(fs, None);
         }
+        let figures = crate::figures::FigurePass::new(
+            gpu,
+            (params.raster_w, params.raster_h),
+            RASTER_FORMAT,
+            raster_view,
+            bloom.as_ref().map(|b| (EMIT_FORMAT, b.emit_view)),
+            set_layout,
+            &constants,
+            STAGING_RING,
+        )?;
+        let raster_framebuffer = match &bloom {
+            Some(b) => framebuffer_n(
+                d,
+                raster_pass,
+                &[raster_view, b.emit_view, figures.walk_depth],
+                params.raster_w,
+                params.raster_h,
+            )?,
+            None => framebuffer_n(
+                d,
+                raster_pass,
+                &[raster_view, figures.walk_depth],
+                params.raster_w,
+                params.raster_h,
+            )?,
+        };
 
         Ok(VoxelRenderer {
             params,
@@ -2516,6 +2530,9 @@ impl VoxelRenderer {
             pose_pipeline,
             depth_pose_pipeline,
             present: PresentPass::new(gpu, raster_view, nearest)?,
+            figures,
+            figure_frame: crate::figures::FigureFrame::default(),
+            figures_dropped: 0,
             command_pool,
             queries,
         })
@@ -2739,24 +2756,24 @@ impl VoxelRenderer {
         let (voxels, roof, styles, glyphs, sky, canopy, glow) = unsafe {
             (
                 std::slice::from_raw_parts_mut(
-                    buffer.ptr.add(at(AT_VOXELS)) as *mut VoxelTexel,
+                    buffer.ptr().add(at(AT_VOXELS)) as *mut VoxelTexel,
                     n,
                 ),
-                std::slice::from_raw_parts_mut(buffer.ptr.add(at(AT_ROOF)), n),
+                std::slice::from_raw_parts_mut(buffer.ptr().add(at(AT_ROOF)), n),
                 std::slice::from_raw_parts_mut(
-                    buffer.ptr.add(at(AT_STYLES)) as *mut VoxelStyle,
+                    buffer.ptr().add(at(AT_STYLES)) as *mut VoxelStyle,
                     MAX_STYLES,
                 ),
                 std::slice::from_raw_parts_mut(
-                    buffer.ptr.add(at(AT_GLYPHS)),
+                    buffer.ptr().add(at(AT_GLYPHS)),
                     self.params.glyph_bytes(),
                 ),
-                std::slice::from_raw_parts_mut(buffer.ptr.add(at(AT_SKY)), self.params.sky_bytes()),
+                std::slice::from_raw_parts_mut(buffer.ptr().add(at(AT_SKY)), self.params.sky_bytes()),
                 std::slice::from_raw_parts_mut(
-                    buffer.ptr.add(at(AT_CANOPY)),
+                    buffer.ptr().add(at(AT_CANOPY)),
                     self.params.canopy_bytes(),
                 ),
-                std::slice::from_raw_parts_mut(buffer.ptr.add(at(AT_GLOW)), self.params.glow_bytes()),
+                std::slice::from_raw_parts_mut(buffer.ptr().add(at(AT_GLOW)), self.params.glow_bytes()),
             )
         };
         let poses = &mut self.pose_tables[into];
@@ -3125,6 +3142,20 @@ impl VoxelRenderer {
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);
                 d.cmd_end_render_pass(cb);
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 4);
+                let p = &self.params;
+                self.figures_dropped +=
+                    self.figures.prepare(frame.slot, &self.figure_frame, p.s, p.rise, p.base, self.view_x) as u64;
+                self.figures.record(
+                    d,
+                    cb,
+                    frame.slot,
+                    self.set,
+                    (self.uniform_stride * frame.slot as u64) as u32,
+                    p.s,
+                    p.rise,
+                );
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 5);
                 if let Some(w) = &self.weather_pass
                     && weather
                 {
@@ -3192,6 +3223,37 @@ impl VoxelRenderer {
         ])
     }
 
+    /// The last retired frame's model pass (the tiles and the composite), milliseconds;
+    /// 0 on a frame that drew no figure.
+    pub fn figure_gpu_ms(&self, gpu: &Gpu) -> Option<f64> {
+        let base = self.last_done? as u32 * QUERY_SLOTS;
+        let mut ts = [0u64; 2];
+        let read = unsafe {
+            gpu.device.get_query_pool_results(self.queries, base + 4, &mut ts, vk::QueryResultFlags::TYPE_64)
+        };
+        read.ok()?;
+        Some(ts[1].wrapping_sub(ts[0]) as f64 * f64::from(gpu.timestamp_period) / 1.0e6)
+    }
+
+    /// The figures the next frame draws (H2's model pass). A change redraws.
+    pub fn set_figures(&mut self, frame: crate::figures::FigureFrame) {
+        if frame != self.figure_frame {
+            self.figure_frame = frame;
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    /// Write model cells for the figures at `first` ([`crate::figures::FigurePass::put_models`]).
+    pub fn put_figure_models(&mut self, first: usize, cells: &[crate::figures::FigureVoxel]) -> bool {
+        self.figures.put_models(first, cells)
+    }
+
+    /// Tiles the atlas had no room for, over the run.
+    pub fn figures_dropped(&self) -> u64 {
+        self.figures_dropped
+    }
+
     /// Copy the world raster into a host buffer, `w · 4` bytes per row.
     pub fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>> {
         let (w, h) = (self.params.raster_w, self.params.raster_h);
@@ -3241,6 +3303,7 @@ impl VoxelRenderer {
     /// Release everything. The device must be idle.
     pub fn destroy(&mut self, gpu: &Gpu) {
         self.present.destroy(gpu);
+        self.figures.destroy(gpu);
         if let Some(b) = &mut self.bloom {
             b.destroy(gpu);
         }

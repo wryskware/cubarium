@@ -49,6 +49,7 @@ pub mod chiplet;
 pub mod hunker;
 pub mod idle;
 pub mod colours;
+pub mod figure;
 pub mod model;
 pub mod patches;
 pub mod placement;
@@ -204,6 +205,10 @@ pub struct VoxelConfig {
     /// `animal::MEAL_FLASH_FADE_S` once the animal starts cropping and back out after; 0
     /// turns it off. Presentation only.
     pub meal_flash: f32,
+    /// **How the GPU renderer draws animals** (`[figures]`, H2): as models in its model
+    /// pass, moving and turning smoothly between ticks (the default), or stamped into the
+    /// world's voxels as before. Presentation only.
+    pub figures: figure::FigureConfig,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -238,6 +243,7 @@ impl Default for VoxelConfig {
             light: LightConfig::default(),
             hunker_s: hunker::DEFAULT_S,
             meal_flash: animal::MEAL_FLASH_DEFAULT,
+            figures: figure::FigureConfig::default(),
             serve: None,
             sim: SimParams::default(),
         }

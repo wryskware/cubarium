@@ -19,7 +19,7 @@
 //! the swapchain's WSI on the presenting thread reads the same socket.
 
 use std::ffi::c_void;
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::AsFd;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
@@ -549,7 +549,7 @@ impl WaylandWindow {
     pub fn pump(&mut self) -> Result<()> {
         let _ = self.connection.flush();
         if let Some(guard) = self.queue.prepare_read() {
-            if readable(self.connection.as_fd().as_raw_fd()) {
+            if readable(self.connection.as_fd()) {
                 if let Err(e) = guard.read() {
                     if !matches!(&e, wayland_client::backend::WaylandError::Io(e) if e.kind() == std::io::ErrorKind::WouldBlock)
                     {
@@ -606,16 +606,10 @@ impl Drop for WaylandWindow {
     }
 }
 
-/// Whether `fd` has something to read now.
-#[allow(unsafe_code)] // Audited poll(2) wrapper only, zero timeout.
-fn readable(fd: std::os::fd::RawFd) -> bool {
-    let mut descriptor = libc::pollfd {
-        fd,
-        events: libc::POLLIN,
-        revents: 0,
-    };
-    // SAFETY: one initialised pollfd, exclusively borrowed for the call; the descriptor is
-    // the display connection's, which outlives it. A zero timeout never sleeps.
-    let n = unsafe { libc::poll(&mut descriptor, 1, 0) };
-    n > 0 && descriptor.revents & libc::POLLIN != 0
+/// Whether `fd` has something to read now: poll(2) with a zero timeout, through rustix.
+fn readable(fd: std::os::fd::BorrowedFd<'_>) -> bool {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+    let now = Timespec { tv_sec: 0, tv_nsec: 0 };
+    matches!(poll(&mut fds, Some(&now)), Ok(n) if n > 0) && fds[0].revents().contains(PollFlags::IN)
 }

@@ -44,6 +44,7 @@ pub mod sunvis;
 pub mod synthetic;
 pub mod target;
 pub mod vk;
+pub mod figures;
 pub mod voxel;
 pub mod weather;
 

@@ -555,6 +555,7 @@ name = "cubarium"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "clap",
  "ctrlc",
  "cubarium-core",
@@ -574,6 +575,7 @@ dependencies = [
  "png",
  "raw-window-handle",
  "rustc-hash",
+ "rustix",
  "serde",
  "serde_json",
  "toml",
@@ -706,6 +708,7 @@ name = "cubarium-voxel"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "cubarium-rules",
  "png",
  "postcard",

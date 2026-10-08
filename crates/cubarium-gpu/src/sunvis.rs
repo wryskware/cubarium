@@ -149,7 +149,7 @@ impl SunVisVolume {
         let staging = if on {
             let bytes = extent.0 as u64 * extent.1 as u64 * extent.2 as u64 * TEXEL_BYTES as u64;
             let buffer = gpu.host_buffer(bytes, vk::BufferUsageFlags::TRANSFER_SRC)?;
-            unsafe { std::ptr::write_bytes(buffer.ptr, 0, bytes as usize) };
+            unsafe { std::ptr::write_bytes(buffer.ptr(), 0, bytes as usize) };
             Some(buffer)
         } else {
             None

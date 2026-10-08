@@ -50,7 +50,7 @@ use super::stand::{Cell, Style, wilted};
 /// How many rows a rider is drawn above its own site: its host's drawn height in cells
 /// (a founder host's body height rounded up, the interim block's one row otherwise).
 /// `None` when the host is not in the view.
-fn rider_lift(fauna: &FaunaView<'_>, host: u64, voxel_m: f64) -> Option<u32> {
+pub(super) fn rider_lift(fauna: &FaunaView<'_>, host: u64, voxel_m: f64) -> Option<u32> {
     let host = fauna.animal(host)?;
     let Some(founder) = host.founder else {
         return Some(1);
@@ -356,6 +356,39 @@ fn animal_style_unwounded(animal: &Animal, flash: f32) -> Style {
             }
         }
     }
+}
+
+/// One model cell's colours in linear light (its style: shadow, body, glint) and its
+/// emissive colour in sRGB if its material glows: the founder's coat at the cell's material
+/// and height band, a sense patch's accent leaning toward the meal flash by `flash`, a
+/// starving body wilted (its accent the starved one), a wounded one half as much.
+pub(crate) fn model_colours(
+    founder: Founder,
+    material: u8,
+    band: u8,
+    accent: bool,
+    starving: bool,
+    wounded: bool,
+    flash: f32,
+) -> (Style, Option<u32>) {
+    let sw = colours::animal(founder, material, band, accent, flash);
+    let paint = |rgb| {
+        let c = srgb_linear(rgb);
+        if starving {
+            wilted(c, STARVING_TINT)
+        } else if wounded {
+            wilted(c, WOUNDED_TINT)
+        } else {
+            c
+        }
+    };
+    let (wood, crown, heart) = if starving && accent {
+        let c = srgb_linear(colours::STARVED_ACCENT);
+        (c, c, c)
+    } else {
+        (paint(sw.shadow), paint(sw.body), paint(sw.glint))
+    };
+    (Style { wood, crown, heart }, colours::animal_emission(founder, material, accent))
 }
 
 /// A lineage's body colour in linear light, for a carcass: the three glyph lineages'
@@ -774,7 +807,7 @@ impl Animals {
     /// One animal's meal flash this rebuild in [`FLASH_LEVELS`] steps: its weight eased by
     /// a smoothstep, so it starts and stops gently. 0 when it is not flashing or the
     /// flash is off.
-    fn flash_level(&self, animal: &Animal) -> u8 {
+    pub(crate) fn flash_level(&self, animal: &Animal) -> u8 {
         if self.meal_flash <= 0.0 {
             return 0;
         }
@@ -784,7 +817,7 @@ impl Animals {
     }
 
     /// How far a flash level leans the accent toward the flash colour.
-    fn flash_amount(&self, level: u8) -> f32 {
+    pub(crate) fn flash_amount(&self, level: u8) -> f32 {
         self.meal_flash * f32::from(level) / f32::from(FLASH_LEVELS)
     }
 
@@ -865,7 +898,7 @@ impl Animals {
 
     /// One animal's hunker weight at this rebuild and its change per tick from here, or
     /// `None` for a body standing and staying so (or on a wall, which does not pose).
-    fn hunker_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
+    pub(crate) fn hunker_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
         if animal.mobility.climb.is_some() {
             return None;
         }
@@ -883,7 +916,7 @@ impl Animals {
 
     /// One animal's idle weight at this rebuild and its change per tick from here, or
     /// `None` for a body that is not idling and not fading out of it.
-    fn idle_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
+    pub(crate) fn idle_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
         if animal.mobility.climb.is_some() {
             return None;
         }
@@ -901,7 +934,7 @@ impl Animals {
 
     /// One animal's sleep weight at this rebuild and its change per tick from here, or
     /// `None` for a body that is awake and staying so (or on a wall, which does not pose).
-    fn sleep_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
+    pub(crate) fn sleep_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
         if animal.mobility.climb.is_some() {
             return None;
         }
@@ -1092,7 +1125,15 @@ impl Animals {
     /// when a run has no animal layer. Reuses the allocation: the presenter calls this
     /// every frame.
     pub fn rebuild(&mut self, view: &VoxelView<'_>, fauna: Option<FaunaView<'_>>) {
-        self.rebuild_inner(view, fauna, None);
+        self.rebuild_inner(view, fauna, None, true);
+    }
+
+    /// The model pass's rebuild (H2): the pose and flash memory moved on to this tick for
+    /// every animal, and nothing of a living animal stamped (carcasses and specimens are
+    /// stamped after, as ever). The figures read the memory through
+    /// [`crate::voxel::figure::specs`].
+    pub fn rebuild_without_living(&mut self, view: &VoxelView<'_>, fauna: FaunaView<'_>) {
+        self.rebuild_inner(view, Some(fauna), None, false);
     }
 
     /// Rebuild with the **baked models** ([`crate::voxel::model`]): a founder with a
@@ -1105,7 +1146,7 @@ impl Animals {
         lib: &ModelLibrary,
     ) {
         let lib = lib.serves(view.config.voxel_m).then_some(lib);
-        self.rebuild_inner(view, fauna, lib);
+        self.rebuild_inner(view, fauna, lib, true);
     }
 
     fn rebuild_inner(
@@ -1113,6 +1154,7 @@ impl Animals {
         view: &VoxelView<'_>,
         fauna: Option<FaunaView<'_>>,
         lib: Option<&ModelLibrary>,
+        living: bool,
     ) {
         let c = view.config;
         if (self.width, self.height, self.depth) != (c.width, c.height, c.depth) {
@@ -1141,6 +1183,9 @@ impl Animals {
             return;
         };
         self.advance_poses(view.tick, fauna.animals);
+        if !living {
+            return;
+        }
         // Animals arrive in id order, which is the order the styles are pushed in, so the
         // grid is a pure function of the view and not of any iteration accident. Two
         // animals on one face paint the same cells and the later id wins; which of two
@@ -1440,32 +1485,18 @@ impl Animals {
         let style = u16::try_from(self.styles.len())
             .ok()
             .filter(|&s| s != u16::MAX)?;
-        let sw = colours::animal(
+        let (style_colours, emit) = model_colours(
             key.founder,
             key.material,
             key.band,
             key.accent,
+            key.starving,
+            key.wounded,
             self.flash_amount(key.flash),
         );
-        let paint = |rgb| {
-            let c = srgb_linear(rgb);
-            if key.starving {
-                wilted(c, STARVING_TINT)
-            } else if key.wounded {
-                wilted(c, WOUNDED_TINT)
-            } else {
-                c
-            }
-        };
-        let (wood, crown, heart) = if key.starving && key.accent {
-            let c = srgb_linear(colours::STARVED_ACCENT);
-            (c, c, c)
-        } else {
-            (paint(sw.shadow), paint(sw.body), paint(sw.glint))
-        };
-        self.styles.push(Style { wood, crown, heart });
+        self.styles.push(style_colours);
         if self.emission
-            && let Some(rgb) = colours::animal_emission(key.founder, key.material, key.accent)
+            && let Some(rgb) = emit
         {
             let s = usize::from(style);
             self.emits.resize(s + 1, None);
@@ -1473,6 +1504,11 @@ impl Animals {
         }
         self.model_styles[index] = style;
         Some(style)
+    }
+
+    /// Whether model styles carry emissive colours ([`Animals::set_emission`]).
+    pub fn emission_on(&self) -> bool {
+        self.emission
     }
 
     /// A style of its own for one flat colour, with its emission when the emissive tier is

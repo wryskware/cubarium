@@ -40,8 +40,8 @@ use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
 use rustc_hash::FxHashMap;
 
-use super::{VoxelGpuSink, VoxelGpuSinkOptions};
-use crate::sink::gpu::GpuTargetKind;
+use super::{Offscreen, VoxelGpuSink};
+use crate::voxel::figure::FigurePick;
 use crate::voxel::project::Projection;
 use crate::voxel::{PX_AUTO, VoxelConfig, cover_px_per_voxel, load_config, load_models};
 
@@ -201,6 +201,34 @@ impl PickMap {
         self.nearest(px, py, radius)
     }
 
+    /// Where the walk's ray through world raster pixel `(px, py)` first meets solid terrain,
+    /// z in voxels (a front face at its slab, a cap across its rows), as `voxel.frag`'s
+    /// `depthOut` has it for terrain; `f32::MAX` where it meets none.
+    pub fn terrain_z(&self, px: i32, py: i32) -> f32 {
+        if self.width == 0 || self.s == 0 {
+            return f32::MAX;
+        }
+        let px = px.rem_euclid(self.raster_w());
+        let x = (px / self.s as i32) as u32;
+        let s = self.s as i32;
+        for z in 0..self.depth {
+            let q = self.base - (z * self.rise) as i32 - py - 1;
+            if q < 0 {
+                break;
+            }
+            let level = q / s;
+            let r = q - level * s;
+            if level < self.height as i32 && self.is_solid(x, level as u32, z) {
+                return z as f32;
+            }
+            let below = level - 1;
+            if r < self.rise as i32 && below >= 0 && below < self.height as i32 && self.is_solid(x, below as u32, z) {
+                return z as f32 + (r as f32 + 0.5) / self.rise as f32;
+            }
+        }
+        f32::MAX
+    }
+
     /// The animal with a drawn cell nearest `(px, py)` within `radius` raster pixels.
     fn nearest(&self, px: i32, py: i32, radius: f32) -> Option<u64> {
         if radius <= 0.0 {
@@ -353,7 +381,7 @@ struct Controls {
 /// is dropped first: it waits for its frames, then the sink frees the device.
 struct SinkState {
     ring: ReadbackRing,
-    sink: VoxelGpuSink,
+    sink: VoxelGpuSink<Offscreen>,
     generation: u64,
     /// The lit tier's sky plane has arrived (or the flat tier, which has none): frames may
     /// be shown.
@@ -366,10 +394,9 @@ struct SinkState {
     highlight_drawn: Option<(u64, u64)>,
 }
 
-// The sink's mapped staging pointers are written by whichever thread holds the lock: the
-// loop's pack, or the presenter's record. Never two at once.
-#[allow(unsafe_code)] // Audited: the state lives behind one Mutex and is used by one thread at a time.
-unsafe impl Send for SinkState {}
+// The state is genuinely `Send`: the loop's pack and the presenter's record take it in
+// turn under one `Mutex`, and nothing in it is tied to a thread (the GPU's mapped buffers
+// hold their pointers in `AtomicPtr`s, `cubarium_gpu::vk::HostBuffer`).
 
 struct Shared {
     options: HostedOptions,
@@ -381,6 +408,9 @@ struct Shared {
     clock: Mutex<Clock>,
     controls: Mutex<Controls>,
     pick: Mutex<Option<Arc<PickMap>>>,
+    /// The figures of the newest frame drawn (the model pass, H2): what picking reads when
+    /// animals are drawn as models.
+    figures: Mutex<Option<Arc<FigurePick>>>,
     stats: Mutex<HostedStats>,
     error: Mutex<Option<String>>,
     generation: AtomicU64,
@@ -397,7 +427,7 @@ impl Shared {
     }
 
     /// The renderer for a world of `world`'s shape.
-    fn open(&self, world: &cubarium_voxel::Config) -> Result<(VoxelGpuSink, Projection)> {
+    fn open(&self, world: &cubarium_voxel::Config) -> Result<(VoxelGpuSink<Offscreen>, Projection)> {
         let mut cfg = self.cfg.clone();
         cfg.sim.world = world.clone();
         if cfg.px_per_voxel == PX_AUTO {
@@ -405,16 +435,12 @@ impl Shared {
         }
         let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world)?;
         super::check(proj)?;
-        let sink = VoxelGpuSink::new(
-            &cfg,
-            proj,
-            VoxelGpuSinkOptions { target: GpuTargetKind::Headless, models: load_models(&cfg), ..Default::default() },
-        )?;
+        let sink = VoxelGpuSink::offscreen(&cfg, proj, load_models(&cfg))?;
         Ok((sink, proj))
     }
 
     /// Install a renderer for a world just staged into it.
-    fn install(&self, sink: VoxelGpuSink, ready: bool) -> Result<()> {
+    fn install(&self, sink: VoxelGpuSink<Offscreen>, ready: bool) -> Result<()> {
         let ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), RING)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let state = SinkState {
@@ -433,7 +459,7 @@ impl Shared {
     }
 
     /// Publish the pick map of the pack just staged.
-    fn publish_pick(&self, sink: &VoxelGpuSink, proj: &Projection, solid: Arc<Vec<u64>>) {
+    fn publish_pick(&self, sink: &VoxelGpuSink<Offscreen>, proj: &Projection, solid: Arc<Vec<u64>>) {
         let version = self.pick.lock().ok().and_then(|p| p.as_ref().map(|m| m.version)).unwrap_or(0) + 1;
         let map = PickMap::new(proj, solid, &sink.packer.animals.owned_cells(), version);
         if let Ok(mut p) = self.pick.lock() {
@@ -477,13 +503,20 @@ impl Shared {
         let gpu_ms = (!out.is_empty()).then(|| st.sink.renderer.gpu_split(&gpu)).flatten();
         if due && st.ready && st.ring.can_submit(&st.sink.renderer) {
             let t = self.clock.lock().map(|mut c| c.now()).unwrap_or(0.0);
-            st.sink.set_clock(t.floor() as u64, t.fract());
             let (view_x, highlight) =
                 self.controls.lock().map(|c| (c.view_x, c.highlight)).unwrap_or((0, None));
+            let figures = st.sink.figures_on();
+            if figures {
+                st.sink.set_figure_highlight(highlight.map(|id| (id, self.options.highlight_mix)));
+            }
+            st.sink.set_clock(t.floor() as u64, t.fract());
+            if figures && let Ok(mut f) = self.figures.lock() {
+                *f = Some(st.sink.figure_pick());
+            }
             st.sink.renderer.set_view_x(view_x);
             let pick = self.pick.lock().ok().and_then(|p| p.clone());
             let want = highlight.zip(pick.as_ref().map(|p| p.version));
-            if want != st.highlight_drawn {
+            if !figures && want != st.highlight_drawn {
                 st.highlight_drawn = want;
                 let h = highlight.zip(pick).map(|(id, p)| Highlight {
                     cells: p.cells_of(id).to_vec(),
@@ -581,6 +614,7 @@ impl Hosted {
             clock: Mutex::new(Clock::still(0)),
             controls: Mutex::new(Controls { view_x: 0, highlight: None }),
             pick: Mutex::new(None),
+            figures: Mutex::new(None),
             stats: Mutex::new(HostedStats::default()),
             error: Mutex::new(None),
             generation: AtomicU64::new(0),
@@ -645,14 +679,35 @@ impl Hosted {
         }
     }
 
-    /// The animal under world raster pixel `(px, py)`, or near it ([`PickMap::pick`]).
+    /// The animal under world raster pixel `(px, py)`, or near it: with the model pass, the
+    /// figure whose cell the pixel's ray meets first in front of the terrain's own hit
+    /// ([`FigurePick::hit`], [`PickMap::terrain_z`]), else the one with a cell nearest within
+    /// `radius`; with stamped animals, [`PickMap::pick`].
     pub fn pick(&self, px: i32, py: i32, radius: f32) -> Option<u64> {
-        self.pick_map()?.pick(px, py, radius)
+        let map = self.pick_map();
+        if let Some(f) = self.figure_pick() {
+            let ground = map.as_ref().map_or(f32::MAX, |m| m.terrain_z(px, py));
+            if let Some((z, id)) = f.hit(px, py)
+                && z <= ground + cubarium_gpu::figures::DEPTH_BIAS
+            {
+                return Some(id);
+            }
+            return map.and_then(|m| m.pick(px, py, 0.0)).or_else(|| f.nearest(px, py, radius));
+        }
+        map?.pick(px, py, radius)
     }
 
-    /// Where animal `id` is drawn, world raster pixels ([`PickMap::animal_at`]).
+    /// Where animal `id` is drawn, world raster pixels ([`FigurePick::animal_at`] with the
+    /// model pass, [`PickMap::animal_at`] without).
     pub fn animal_at(&self, id: u64) -> Option<(f32, f32)> {
+        if let Some(f) = self.figure_pick() {
+            return f.animal_at(id);
+        }
         self.pick_map()?.animal_at(id)
+    }
+
+    fn figure_pick(&self) -> Option<Arc<FigurePick>> {
+        self.shared.figures.lock().ok()?.clone()
     }
 
     fn pick_map(&self) -> Option<Arc<PickMap>> {

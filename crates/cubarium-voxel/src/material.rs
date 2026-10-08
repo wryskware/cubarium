@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// What a voxel is made of. Solid materials block bodies and free water; only their
 /// pore space holds water. `Air` is empty space free water can occupy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, bytemuck::NoUninit)]
 #[repr(u8)]
 pub enum Material {
     Air = 0,
