@@ -1,65 +1,37 @@
 class_name WorldView
-extends Node3D
-## **The development presentation of a world** (package B, `design/handoffs/godot-direction-
-## 2026-10-07.md`): terrain and water from the feed's chunks, the organisms as their baked
-## voxel models, daylight and rain, an elevated orthographic camera that pans, and picking.
+extends Control
+## **The world, drawn by the Rust renderer** (H1 of design/handoffs/hybrid-renderer-2026-10-07.md,
+## D-0005): `cubarium-gpu`'s voxel walk, its lighting and sky, at the pixel-scale raster,
+## shown full-size under the UI with the desktop window's fit and nearest upscale. The
+## renderer runs on the session's loop and a presenter thread of its own
+## (`WorldRenderer`); this node takes its newest frame each `_process`.
 ##
-## API (what the shell codes against):
-## - `attach(session)` draws a live `CubariumSession`, taking `take_view()` and
-##   `take_events()` every frame; `detach()` stops (the drawn world stays, and the session
-##   keeps the changes for the next `attach`). While attached, nothing else should take
-##   views or events from that session.
-## - `show_view(view)` draws one whole static view (a candidate's `candidate_view(i)`).
+## API (the shell's contract, design/handoffs/godot-direction-2026-10-07.md):
+## - `attach(session)` draws a live `CubariumSession` (the renderer hooks into its loop);
+##   `detach()` stops (the last frame stays).
+## - `show_view(view)` draws a candidate: `view` is `candidate_view(i)`, which names its
+##   session and index (`source`, `candidate`); the candidate's own world is rendered, once.
 ## - `input_enabled`: false ignores pointer and pan input (a menu is open).
-## - `reset_framing()`: back to the default framing, the world's whole width in view.
+## - `reset_framing()`: the whole strip in view, the ring unturned.
 ## - Signals `animal_hovered(id)` (−1 for none) and `animal_clicked(id)` (−1 for empty
-##   ground). A click is a press and release without dragging; a drag pans.
-## - `set_highlight(id)` tints one animal (−1 clears); `follow(id)` keeps it in view,
-##   easing; `stop_follow()`. Panning by hand stops following.
-## - `capture(size) -> Image`: the current framing, rendered at `size` without the UI.
-## - `set_light(settings)`: how it is lit (`LightSettings`: one switch per Godot built-in
-##   effect, all off by default, and the light's numbers). The environment's part applies at
-##   once; the meshing's part (closed terrain for shadows, no baked haze under the fog)
-##   applies from the next world drawn, so set it before `attach` or `show_view`.
+##   ground). A press and release under 5 px of movement is a click; more is a drag.
+## - `set_highlight(id)`: the renderer draws that animal's cells leaning toward white (−1
+##   clears). `follow(id)` keeps it in view, easing; `stop_follow()`. Panning by hand stops
+##   following.
+## - `capture(size) -> Image`: the latest frame as framed, fitted into `size`.
 ##
-## Panning: mouse drag, arrows/WASD, and a gamepad's left stick. The ring has no ends, so
-## `x` pans round it without limit (the seam moves); up and down are clamped to the world's
-## edges, and only move when the world is taller than the view. Every pan eases.
-##
-## Debug lines: `perf_line()` (fps, ms, mesh cost) for the dev scene.
+## Panning: mouse drag, arrows/WASD, the gamepad's left stick, eased. `x` turns round the
+## ring without end: the renderer turns its raster by whole pixels and the frame is shifted
+## here by the fraction left over, so the camera glides while the world's pixels stay locked
+## to each other. `y` moves only when the strip is taller than the view.
 
 signal animal_hovered(id: int)
 signal animal_clicked(id: int)
 
-const PALETTE_PATH := "res://world/data/palette.json"
-## Which model cells emit light (`VoxelModels.set_emissive`).
-const EMISSION_PATH := "res://world/data/emission.json"
-const LightSettingsScript := preload("res://world/light_settings.gd")
-const EmitterLightsScript := preload("res://world/emitter_lights.gd")
-## The emitters' material: the cell's colour, emitting it at `energy`; a glowcap's lip
-## (instance `candle` 1) wanders between `candle_min` and full, each its own phase.
-const GLOW_SHADER := """
-shader_type spatial;
-uniform float energy = 0.0;
-uniform float candle_min = 0.25;
-uniform float candle_period = 8.0;
-instance uniform float candle = 0.0;
-instance uniform float candle_phase = 0.0;
-void fragment() {
-	ALBEDO = COLOR.rgb;
-	ROUGHNESS = 1.0;
-	SPECULAR = 0.0;
-	float t = TIME / candle_period + candle_phase;
-	float w = 0.5 + 0.25 * sin(6.2831853 * t) + 0.25 * sin(6.2831853 * (1.618 * t + 0.3));
-	EMISSION = COLOR.rgb * energy * mix(1.0, mix(candle_min, 1.0, w), candle);
-}
-"""
-## The baked models, relative to the project: `assets/voxel-models/<voxel mm>/`.
-const MODELS_ROOT := "../assets/voxel-models"
-## The camera's elevation (the presenter's `tilt_degrees`).
-const TILT_DEG := 30.0
-## Seconds the camera takes to ease most of the way to where it is going, by hand and when
-## following.
+## The presentation config (lighting tier, `[light]`, haze, `px_per_voxel`), relative to the
+## repository root.
+const DEFAULT_CONFIG := "config/desktop/terrarium.toml"
+const FPS := 60.0
 const PAN_EASE_S := 0.12
 const DRAG_EASE_S := 0.05
 const FOLLOW_EASE_S := 0.35
@@ -68,29 +40,97 @@ const PAN_SPEED := 0.5
 const STICK_DEADZONE := 0.2
 ## A press that moves less than this many pixels before release is a click.
 const CLICK_SLOP_PX := 5.0
-## The smallest pick box round an animal, pixels.
+## The smallest pick box round an animal, screen pixels.
 const PICK_MIN_PX := 10.0
 
-@export var input_enabled := true
+## The desktop window's present pass (`present.frag`, `WindowFit`), with the ring's turn:
+## each screen pixel the area average of the raster it covers, in linear light (exactly the
+## nearest upscale at a whole scale), the picture centred with black bars, and `x` wrapping
+## round the ring by `shift`.
+const SHADER := """
+shader_type canvas_item;
+render_mode blend_disabled;
+uniform vec2 view_size = vec2(1.0);
+uniform vec2 raster_size = vec2(1.0);
+uniform vec2 shift = vec2(0.0);
+const int MAX_TAPS = 8;
+vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
+vec3 enc(vec3 c) {
+	c = max(c, vec3(0.0));
+	return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+void fragment() {
+	vec2 panel = floor(UV * view_size);
+	float st = max(raster_size.x / view_size.x, raster_size.y / view_size.y);
+	vec2 corner = 0.5 * (view_size - raster_size / st);
+	vec2 centre = st * (panel + 0.5 - corner);
+	vec2 lo = centre - 0.5 * st;
+	vec2 hi = centre + 0.5 * st;
+	if (any(lessThanEqual(hi, vec2(0.0))) || any(greaterThanEqual(lo, raster_size))) {
+		COLOR = vec4(0.0, 0.0, 0.0, 1.0);
+	} else {
+		// The picture's own edges stay where the fit puts them; inside, x turns round the ring.
+		lo.x = max(lo.x, 0.0);
+		hi.x = min(hi.x, raster_size.x);
+		lo += shift;
+		hi += shift;
+		vec2 span = hi - lo;
+		vec2 over = max(span - float(MAX_TAPS - 1), vec2(0.0));
+		lo += 0.5 * over;
+		hi -= 0.5 * over;
+		lo.y = max(lo.y, 0.0);
+		hi.y = min(hi.y, raster_size.y);
+		int rw = int(raster_size.x);
+		int x0 = int(floor(lo.x));
+		int x1 = int(ceil(hi.x)) - 1;
+		int y0 = int(floor(lo.y));
+		int y1 = min(int(ceil(hi.y)) - 1, int(raster_size.y) - 1);
+		vec3 sum = vec3(0.0);
+		float total = 0.0;
+		for (int y = y0; y <= y1 && y < y0 + MAX_TAPS; y++) {
+			float wy = min(hi.y, float(y + 1)) - max(lo.y, float(y));
+			if (wy <= 1e-4) { continue; }
+			for (int x = x0; x <= x1 && x < x0 + MAX_TAPS; x++) {
+				float wx = min(hi.x, float(x + 1)) - max(lo.x, float(x));
+				if (wx <= 1e-4) { continue; }
+				int xr = ((x % rw) + rw) % rw;
+				sum += wx * wy * dec(texelFetch(TEXTURE, ivec2(xr, y), 0).rgb);
+				total += wx * wy;
+			}
+		}
+		COLOR = total <= 1e-4 ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(enc(sum / total), 1.0);
+	}
+}
+"""
+
+## When false, pointer and pan input are ignored (the shell turns it off under a menu).
+var input_enabled := true:
+	set(v):
+		input_enabled = v
+		if not v:
+			_dragging = false
+			_set_hovered(-1)
+
+## A presentation config to use instead of the desktop terrarium's (an absolute path, or
+## relative to the repository root). Set before `attach` or `show_view`.
+var config_path := ""
 
 var session = null
-var mesher: VoxelMesher
-var models: VoxelModels
-var palette := {}
-var species := {}
-var dims := Vector3i.ZERO
-var voxel_m := 0.125
-var generation := -1
-var hovered := -1
-## How the view is lit (`set_light`).
-var light: LightSettings
+var renderer = null
 var highlighted := -1
 var following := -1
+var hovered := -1
+## The latest frame: its raster, its turn round the ring, its world, its tick.
+var raster_size := Vector2i.ZERO
+var frame_view_x := 0
+var frame_generation := -1
+var frame_tick := -1
+var frames_shown := 0
+## Milliseconds spent turning frames into the texture (create + upload), cumulative.
+var upload_ms := 0.0
 
-## Chunk -> [terrain copy 0, terrain copy 1, water copy 0, water copy 1]
-var _chunks := {}
-## The pan: `x` along the ring (voxels, unwrapped), `y` the camera's height on its own up
-## axis (voxels). `_pan` is drawn, `_pan_to` is where it eases to.
+## The pan: `x` raster columns round the ring (unwrapped), `y` raster rows. `_pan` is
+## drawn, `_pan_to` is where it eases to.
 var _pan := Vector2.ZERO
 var _pan_to := Vector2.ZERO
 var _ease_s := PAN_EASE_S
@@ -98,148 +138,65 @@ var _dragging := false
 var _drag_moved := false
 var _press_at := Vector2.ZERO
 var _mouse := Vector2(-1, -1)
-var _source = null
-var _terrain_mat: StandardMaterial3D
-var _water_mat: StandardMaterial3D
-var _highlight_mat: StandardMaterial3D
-var _glow_mat: ShaderMaterial
-## The meshing half of `light` waits for the next world drawn.
-var _mesh_light_pending := false
-## The emitter lights (`LightSettings.emitter_lights`) and a pending VoxelGI bake.
-var emitters: Node3D
-var _gi_bake_at := -1.0
-var _now := 0.0
-var _mesh_ms := 0.0
-var _mesh_chunks := 0
-var _frame_ms := 0.0
-var _shot: SubViewport
-
-@onready var camera: Camera3D = $Camera
-@onready var sun: DirectionalLight3D = $Sun
-@onready var terrain: Node3D = $Terrain
-@onready var organisms: Node3D = $Organisms
-@onready var weather: Node3D = $Weather
+var _image: Image
+var _texture: ImageTexture
+var _material: ShaderMaterial
+## What to draw once the view has a size: ["live", session] or ["candidate", session, i].
+var _pending: Array = []
+var _static := false
+var _process_ms := 0.0
 
 
 func _ready() -> void:
-	var palette_path := ProjectSettings.globalize_path(PALETTE_PATH)
-	palette = JSON.parse_string(FileAccess.get_file_as_string(PALETTE_PATH))
-	if typeof(palette) != TYPE_DICTIONARY:
-		push_error("WorldView: cannot read " + PALETTE_PATH)
-		palette = {}
-	mesher = VoxelMesher.new()
-	var refused := mesher.load_palette(palette_path)
-	if refused != "":
-		push_error("WorldView: " + refused)
-	light = LightSettingsScript.new()
-	emitters = EmitterLightsScript.new()
-	emitters.name = "EmitterLights"
-	add_child(emitters)
-	_terrain_mat = StandardMaterial3D.new()
-	_terrain_mat.vertex_color_use_as_albedo = true
-	_terrain_mat.roughness = 1.0
-	_terrain_mat.metallic_specular = 0.0
-	_water_mat = StandardMaterial3D.new()
-	_water_mat.vertex_color_use_as_albedo = true
-	_water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_water_mat.roughness = 1.0
-	_water_mat.metallic_specular = 0.0
-	_highlight_mat = StandardMaterial3D.new()
-	_highlight_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_highlight_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_highlight_mat.albedo_color = Color(1, 1, 1, 0.4)
-	_highlight_mat.render_priority = 1
-	_glow_mat = ShaderMaterial.new()
-	var glow_shader := Shader.new()
-	glow_shader.code = GLOW_SHADER
-	_glow_mat.shader = glow_shader
-	models = VoxelModels.new()
-	var emission = JSON.parse_string(FileAccess.get_file_as_string(EMISSION_PATH))
-	if typeof(emission) == TYPE_DICTIONARY:
-		var table := {}
-		for name in emission.get("cells", {}):
-			table[name] = PackedStringArray(emission["cells"][name])
-		models.set_emissive(table)
-	else:
-		push_warning("WorldView: cannot read " + EMISSION_PATH + "; nothing emits")
-	species = CubariumSession.new().query("species", null)
-	var env := Environment.new()
-	camera.environment = env
-	weather.setup(sun, env, palette, camera)
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.keep_aspect = Camera3D.KEEP_WIDTH
-	camera.near = 0.05
-	camera.far = 4000.0
-	camera.rotation_degrees = Vector3(-TILT_DEG, 0.0, 0.0)
-	camera.current = true
-	get_viewport().size_changed.connect(_on_resized)
-	set_light(light)
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	_material = ShaderMaterial.new()
+	var shader := Shader.new()
+	shader.code = SHADER
+	_material.shader = shader
+	material = _material
 
 
-# --- the API ------------------------------------------------------------------------------
+func _exit_tree() -> void:
+	if renderer != null:
+		renderer.detach()
 
-## Draw a live session.
+
+# --- the contract --------------------------------------------------------------------------
+
 func attach(p_session) -> void:
-	if p_session != _source:
-		_forget()
 	session = p_session
-	_source = p_session
+	_static = false
+	_pending = ["live", p_session]
 
 
-## Stop taking from the session. What is drawn stays.
 func detach() -> void:
+	if renderer != null:
+		renderer.detach()
 	session = null
+	_pending = []
 
 
-## Draw one whole static view (a candidate's `candidate_view(i)`).
 func show_view(view: Dictionary) -> void:
-	session = null
-	_source = null
-	_forget()
-	_take(view, [], true)
-	reset_framing()
-
-
-## Light the view by `s` (see the API above).
-func set_light(s: LightSettings) -> void:
-	if s.shadows != light.shadows or s.haze != light.haze or dims.x <= 0:
-		_mesh_light_pending = true
-	light = s
-	weather.apply_settings(s)
-	_water_mat.roughness = s.water_roughness if s.reflections else 1.0
-	_water_mat.metallic_specular = s.water_specular if s.reflections else 0.0
-	_water_mat.metallic = s.water_metallic if s.reflections else 0.0
-	_glow_mat.set_shader_parameter("energy", s.emission_energy if s.glow else 0.0)
-	_glow_mat.set_shader_parameter("candle_min", s.candle_min)
-	_glow_mat.set_shader_parameter("candle_period", maxf(s.candle_period_s, 0.1))
-	var vp := get_viewport()
-	vp.positional_shadow_atlas_size = s.positional_atlas_size
-	for q in 4:
-		vp.set_positional_shadow_atlas_quadrant_subdiv(q, s.positional_atlas_subdiv)
-	emitters.visible = s.emitter_lights
-	if s.emitter_lights and dims.x > 0:
-		emitters.rebuild(organisms, s)
-	if s.gi and s.gi_mode == "voxelgi" and dims.x > 0 and weather.voxel_gi.is_empty():
-		_gi_bake_at = _now + 0.5
+	detach()
+	_static = true
+	if view.has("source") and view.has("candidate"):
+		_pending = ["candidate", view["source"], int(view["candidate"])]
+	else:
+		push_warning("WorldView: a view that names no candidate (source, candidate) cannot be rendered")
 
 
 func reset_framing() -> void:
 	stop_follow()
-	var r := _y_range()
-	_pan_to = Vector2(0.0, (r.x + r.y) / 2.0)
-	_pan = _pan_to
-	_place_camera()
+	_pan = Vector2(0.0, _y_range().x)
+	_pan_to = _pan
+	_apply_pan()
 
 
 func set_highlight(id: int) -> void:
-	if highlighted >= 0:
-		var old: MeshInstance3D = organisms.animal_node(highlighted)
-		if old:
-			old.material_overlay = null
 	highlighted = id
-	var node: MeshInstance3D = organisms.animal_node(id) if id >= 0 else null
-	if node:
-		node.material_overlay = _highlight_mat
+	if renderer != null:
+		renderer.set_highlight(id)
 
 
 func follow(id: int) -> void:
@@ -250,201 +207,184 @@ func stop_follow() -> void:
 	following = -1
 
 
-## The current framing rendered at `size`, without anything drawn over the view.
+## The latest frame as framed now (its turn round the ring included), fitted into `size`
+## with black bars, without anything drawn over the view.
 func capture(size: Vector2i) -> Image:
-	if _shot == null:
-		_shot = SubViewport.new()
-		_shot.name = "Capture"
-		_shot.world_3d = get_world_3d()
-		_shot.render_target_update_mode = SubViewport.UPDATE_DISABLED
-		var cam := Camera3D.new()
-		cam.projection = Camera3D.PROJECTION_ORTHOGONAL
-		cam.keep_aspect = Camera3D.KEEP_WIDTH
-		_shot.add_child(cam)
-		add_child(_shot)
-	var cam: Camera3D = _shot.get_child(0)
-	_shot.size = size
-	cam.size = camera.size
-	cam.near = camera.near
-	cam.far = camera.far
-	cam.environment = camera.environment
-	cam.global_transform = camera.global_transform
-	cam.current = true
-	# The server's camera now, not at the end of the frame: the draw below is now.
-	var rid := cam.get_camera_rid()
-	RenderingServer.camera_set_transform(rid, camera.global_transform)
-	RenderingServer.camera_set_orthogonal(rid, camera.size, camera.near, camera.far)
-	RenderingServer.camera_set_use_vertical_aspect(rid, true)  # KEEP_WIDTH
-	_shot.render_target_update_mode = SubViewport.UPDATE_ONCE
-	RenderingServer.force_draw(false)
-	return _shot.get_texture().get_image()
+	var out := Image.create_empty(maxi(size.x, 1), maxi(size.y, 1), false, Image.FORMAT_RGBA8)
+	out.fill(Color.BLACK)
+	if _image == null:
+		return out
+	var w := _image.get_width()
+	var h := _image.get_height()
+	var turned := Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
+	var s := posmod(int(round(_shift().x)), w)
+	turned.blit_rect(_image, Rect2i(s, 0, w - s, h), Vector2i(0, 0))
+	if s > 0:
+		turned.blit_rect(_image, Rect2i(0, 0, s, h), Vector2i(w - s, 0))
+	var k := minf(float(size.x) / w, float(size.y) / h)
+	var fit := Vector2i(maxi(1, int(w * k)), maxi(1, int(h * k)))
+	turned.resize(fit.x, fit.y, Image.INTERPOLATE_LANCZOS)
+	out.blit_rect(turned, Rect2i(Vector2i.ZERO, fit), (size - fit) / 2)
+	return out
 
 
 ## One line of what the view costs, for the dev scene.
 func perf_line() -> String:
-	return "fps %.1f  frame %.2f ms  mesh %.2f ms (%d chunks)  process %.2f ms" % [
+	var s: Dictionary = renderer.stats() if renderer != null else {}
+	var n := maxf(float(s.get("frames", 0)), 1.0)
+	return "fps %.1f  godot frame %.2f ms (process %.2f)  frames %d  GPU %.2f ms  record %.2f ms  copy %.2f ms  upload %.2f ms  pack %.2f ms/tick  view %.2f ms" % [
 		Performance.get_monitor(Performance.TIME_FPS),
 		1000.0 / maxf(Performance.get_monitor(Performance.TIME_FPS), 0.001),
-		_mesh_ms, _mesh_chunks, _frame_ms]
+		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, int(s.get("frames", 0)),
+		float(s.get("gpu_ms", 0.0)) / n, float(s.get("record_ms", 0.0)) / n,
+		float(s.get("copy_ms", 0.0)) / n, upload_ms / maxf(frames_shown, 1.0),
+		float(s.get("pack_ms", 0.0)) / maxf(float(s.get("packs", 0)), 1.0), _process_ms]
 
 
-# --- taking views -------------------------------------------------------------------------
+# --- frames ----------------------------------------------------------------------------------
 
 func _process(delta: float) -> void:
 	var started := Time.get_ticks_usec()
-	_now += delta
-	if session != null:
-		var v: Dictionary = session.take_view()
-		var events: Array = session.take_events()
-		_take(v, events, false)
-	organisms.advance(_now, delta)
+	if not _pending.is_empty() and size.x >= 1.0 and size.y >= 1.0:
+		_begin()
+	if renderer != null:
+		_take_frame()
 	_input_pan(delta)
 	_follow()
 	var k := 1.0 - exp(-delta / _ease_s)
 	_pan = _pan.lerp(_pan_to, k)
-	_place_camera()
-	organisms.place(camera.global_position.x)
-	if light.emitter_lights:
-		emitters.place(camera.global_position.x, camera.global_position + camera.global_transform.basis.z * -(dims.x + dims.y + dims.z))
-	if _gi_bake_at >= 0.0 and _now >= _gi_bake_at:
-		_gi_bake_at = -1.0
-		weather.bake_voxel_gi([terrain.get_node("Copy0"), terrain.get_node("Copy1")])
-	weather.advance(delta, camera.global_position.x)
+	_apply_pan()
 	if _mouse.x >= 0.0 and input_enabled and not _dragging:
 		_hover(_mouse)
-	_frame_ms = (Time.get_ticks_usec() - started) / 1000.0
+	_process_ms = (Time.get_ticks_usec() - started) / 1000.0
 
 
-func _forget() -> void:
-	for nodes in _chunks.values():
-		for n in nodes:
-			n.queue_free()
-	_chunks.clear()
-	mesher.reset()
-	organisms.clear()
-	generation = -1
-	hovered = -1
+## Start the renderer (once, at this view's size) and hand it what to draw.
+func _begin() -> void:
+	var what := _pending
+	_pending = []
+	if renderer == null:
+		renderer = WorldRenderer.new()
+		var root := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+		var cfg := config_path if config_path != "" else DEFAULT_CONFIG
+		if cfg.is_relative_path():
+			cfg = root.path_join(cfg)
+		var refused: String = renderer.start(cfg, root, Vector2i(size), FPS)
+		if refused != "":
+			push_error("WorldView: no renderer (%s)" % refused)
+			renderer = null
+			return
+		if highlighted >= 0:
+			renderer.set_highlight(highlighted)
+	match what[0]:
+		"live":
+			renderer.attach(what[1])
+		"candidate":
+			renderer.show_candidate(what[1], what[2])
 
 
-func _take(view: Dictionary, events: Array, instant: bool) -> void:
-	if view.is_empty() or not view.has("dims"):
+func _take_frame() -> void:
+	var f = renderer.take_frame()
+	if f == null:
 		return
-	var d: Vector3i = view["dims"]
-	if d.x <= 0:
-		return
-	var g := int(view.get("generation", 0))
-	var renew := g != generation or d != dims or bool(view.get("full", false))
-	if renew and _mesh_light_pending:
-		# The whole world is coming: mesh it as the light wants (both calls start over).
-		mesher.set_view_faces_only(not light.shadows)
-		mesher.set_haze_scale(0.0 if light.haze else 1.0)
-		_mesh_light_pending = false
-	if renew and light.gi and light.gi_mode == "voxelgi":
-		_gi_bake_at = _now + 0.5
-	if renew:
-		for nodes in _chunks.values():
-			for n in nodes:
-				n.queue_free()
-		_chunks.clear()
-		organisms.clear()
-		generation = g
-	if d != dims or voxel_m != float(view.get("voxel_m", voxel_m)):
-		dims = d
-		voxel_m = float(view.get("voxel_m", 0.125))
-		_new_world()
-	var changed: Array = mesher.apply_view(view)
-	_mesh_ms = mesher.last_mesh_ms()
-	_mesh_chunks = changed.size()
-	for c in changed:
-		_set_chunk(c["at"], c["terrain"], c["water"])
-	organisms.note_events(events)
-	if view.has("tick"):
-		if organisms.take_frame(view, _now, instant):
-			if highlighted >= 0:
-				set_highlight(highlighted)
-			if light.emitter_lights:
-				emitters.rebuild(organisms, light)
-		weather.take_sky(view.get("sky", {}), instant)
+	var at := Time.get_ticks_usec()
+	var w := int(f["width"])
+	var h := int(f["height"])
+	var img := Image.create_from_data(w, h, false, Image.FORMAT_RGBA8, f["rgba"])
+	if _texture == null or Vector2i(w, h) != raster_size:
+		_texture = ImageTexture.create_from_image(img)
+	else:
+		_texture.update(img)
+	upload_ms += (Time.get_ticks_usec() - at) / 1000.0
+	_image = img
+	var fresh := int(f["generation"]) != frame_generation or Vector2i(w, h) != raster_size
+	raster_size = Vector2i(w, h)
+	frame_view_x = int(f["view_x"])
+	frame_generation = int(f["generation"])
+	frame_tick = int(f["tick"])
+	frames_shown += 1
+	if fresh:
+		reset_framing()
+	_material.set_shader_parameter("raster_size", Vector2(raster_size))
+	queue_redraw()
+	# A still thumbnail is drawn once; its renderer's GPU memory goes.
+	if _static and not input_enabled:
+		renderer.release()
 
 
-func _new_world() -> void:
-	var dir := ProjectSettings.globalize_path("res://").path_join(MODELS_ROOT).simplify_path()
-	dir = dir.path_join(str(roundi(voxel_m * 1000.0)))
-	var refused := models.load(dir, ProjectSettings.globalize_path(PALETTE_PATH))
-	if refused != "":
-		push_warning("WorldView: no baked models (%s); organisms draw as boxes" % refused)
-	organisms.setup(models, _terrain_mat, _glow_mat, species)
-	organisms.set_world(dims, voxel_m)
-	weather.set_world(dims)
-	terrain.get_node("Copy1").position = Vector3(dims.x, 0, 0)
-	reset_framing()
+func _draw() -> void:
+	if _texture != null:
+		draw_texture_rect(_texture, Rect2(Vector2.ZERO, size), false)
+	else:
+		draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK)
 
 
-func _set_chunk(at: Vector3i, t: Mesh, w: Mesh) -> void:
-	var nodes: Array = _chunks.get(at, [])
-	if nodes.is_empty():
-		for kind in 2:
-			for copy in 2:
-				var n := MeshInstance3D.new()
-				n.material_override = _terrain_mat if kind == 0 else _water_mat
-				if kind == 1:
-					n.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-				n.position = Vector3(at.x * 16, at.y * 16, -at.z * 16)
-				terrain.get_node("Copy%d" % copy).add_child(n)
-				nodes.append(n)
-		_chunks[at] = nodes
-	for copy in 2:
-		nodes[copy].mesh = t
-		nodes[copy].visible = t != null
-		nodes[2 + copy].mesh = w
-		nodes[2 + copy].visible = w != null
+# --- framing -------------------------------------------------------------------------------
+
+## Raster pixels per screen pixel (the fit).
+func _step() -> float:
+	if raster_size.x <= 0 or size.x <= 0.0 or size.y <= 0.0:
+		return 1.0
+	return maxf(raster_size.x / size.x, raster_size.y / size.y)
 
 
-# --- the camera ---------------------------------------------------------------------------
-
-## The world's extent on the camera's up axis, and the view's: `E = H·cos t + D·sin t`.
-func _extent() -> float:
-	var t := deg_to_rad(TILT_DEG)
-	return dims.y * cos(t) + dims.z * sin(t)
-
-
-func _view_height() -> float:
-	var vp := get_viewport().get_visible_rect().size
-	return float(dims.x) * vp.y / maxf(vp.x, 1.0)
-
-
-## The range the camera's centre may take on its up axis: the middle when the world fits.
+## The range `_pan.y` may take: 0 when the strip fits the view's height.
 func _y_range() -> Vector2:
-	var e := _extent()
-	var v := _view_height()
-	if e <= v:
-		return Vector2(e / 2.0, e / 2.0)
-	return Vector2(v / 2.0, e - v / 2.0)
+	var visible := size.y * _step()
+	var extra := float(raster_size.y) - visible
+	return Vector2(0.0, maxf(extra, 0.0)) if extra > 0.0 else Vector2.ZERO
 
 
-func _place_camera() -> void:
-	if dims.x <= 0:
-		return
-	var w := float(dims.x)
+## The shift the shown frame needs: the pan, less the whole columns the frame is already
+## turned, the short way round.
+func _shift() -> Vector2:
+	var rw := float(maxi(raster_size.x, 1))
+	var sx := fposmod(_pan.x - frame_view_x + rw / 2.0, rw) - rw / 2.0
+	var r := _y_range()
+	var sy := _pan.y - (r.x + r.y) / 2.0 if r.y > 0.0 else 0.0
+	return Vector2(sx, sy)
+
+
+func _apply_pan() -> void:
 	var r := _y_range()
 	_pan_to.y = clampf(_pan_to.y, r.x, r.y)
 	_pan.y = clampf(_pan.y, r.x, r.y)
-	camera.size = w
-	var t := deg_to_rad(TILT_DEG)
-	var up := Vector3(0.0, cos(t), -sin(t))
-	var forward := Vector3(0.0, -sin(t), -cos(t))
-	# Keep the camera over [W/2, 3W/2): terrain copies at 0 and W cover its span.
-	var x := w / 2.0 + fposmod(_pan.x, w)
-	camera.global_position = Vector3(x, 0.0, 0.0) + up * _pan.y - forward * (w + dims.y + dims.z)
+	if renderer != null and raster_size.x > 0:
+		renderer.set_view_x(posmod(int(floor(_pan.x)), raster_size.x))
+	if _material != null:
+		_material.set_shader_parameter("view_size", size)
+		_material.set_shader_parameter("shift", _shift())
+	queue_redraw()
 
 
-func _on_resized() -> void:
-	_place_camera()
+## Screen point `p` (this node's pixels) as a world raster pixel, or (-1, -1) off the
+## picture.
+func screen_to_raster(p: Vector2) -> Vector2i:
+	if raster_size.x <= 0:
+		return Vector2i(-1, -1)
+	var st := _step()
+	var corner := 0.5 * (size - Vector2(raster_size) / st)
+	var c := st * (p - corner)
+	if c.x < 0.0 or c.y < 0.0 or c.x >= raster_size.x or c.y >= raster_size.y:
+		return Vector2i(-1, -1)
+	c += _shift()
+	return Vector2i(posmod(int(floor(c.x)) + frame_view_x, raster_size.x), int(floor(c.y)))
 
 
-# --- input --------------------------------------------------------------------------------
+## A world raster pixel as a screen point (this node's pixels), the inverse of
+## `screen_to_raster` at the pixel's centre.
+func raster_to_screen(r: Vector2) -> Vector2:
+	var st := _step()
+	var corner := 0.5 * (size - Vector2(raster_size) / st)
+	var rw := float(maxi(raster_size.x, 1))
+	var c := Vector2(fposmod(r.x + 0.5 - frame_view_x, rw), r.y + 0.5) - _shift()
+	c.x = fposmod(c.x, rw)
+	return c / st + corner
 
-func _unhandled_input(event: InputEvent) -> void:
+
+# --- input ---------------------------------------------------------------------------------
+
+func _gui_input(event: InputEvent) -> void:
 	if not input_enabled:
 		_dragging = false
 		return
@@ -458,7 +398,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				_hover(event.position)
 				animal_clicked.emit(hovered)
 			_dragging = false
-		get_viewport().set_input_as_handled()
+		accept_event()
 	elif event is InputEventMouseMotion:
 		_mouse = event.position
 		if _dragging:
@@ -469,16 +409,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				_drag_by(event.relative)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_MOUSE_EXIT:
+		_mouse = Vector2(-1, -1)
+		if not _dragging:
+			_set_hovered(-1)
+	elif what == NOTIFICATION_RESIZED:
+		_apply_pan()
+
+
 func _drag_by(px: Vector2) -> void:
 	stop_follow()
-	var per_px := float(dims.x) / maxf(get_viewport().get_visible_rect().size.x, 1.0)
-	_pan_to.x -= px.x * per_px
-	_pan_to.y += px.y * per_px
+	_pan_to -= px * _step()
 	_ease_s = DRAG_EASE_S
 
 
 func _input_pan(delta: float) -> void:
-	if not input_enabled or dims.x <= 0:
+	if not input_enabled or raster_size.x <= 0 or not is_visible_in_tree():
 		return
 	var dir := Vector2.ZERO
 	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
@@ -486,10 +433,10 @@ func _input_pan(delta: float) -> void:
 	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
 		dir.x += 1.0
 	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
-		dir.y += 1.0
-	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
 		dir.y -= 1.0
-	var stick := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), -Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
+	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
+		dir.y += 1.0
+	var stick := Vector2(Input.get_joy_axis(0, JOY_AXIS_LEFT_X), Input.get_joy_axis(0, JOY_AXIS_LEFT_Y))
 	if stick.length() > STICK_DEADZONE:
 		dir += stick
 	if dir == Vector2.ZERO:
@@ -497,63 +444,58 @@ func _input_pan(delta: float) -> void:
 			_ease_s = PAN_EASE_S
 		return
 	stop_follow()
-	_pan_to += dir.limit_length(1.0) * PAN_SPEED * float(dims.x) * delta
+	_pan_to += dir.limit_length(1.0) * PAN_SPEED * float(raster_size.x) * delta
 	_ease_s = PAN_EASE_S
 
 
-## Pan by a scripted amount (view widths along the ring, view heights up), eased: the dev
-## scene's pan demonstration.
+## Pan by a scripted amount (view widths round the ring, view heights down), eased: the dev
+## scene's pan.
 func pan_by(views: Vector2) -> void:
 	stop_follow()
-	_pan_to += Vector2(views.x * dims.x, views.y * _view_height())
+	_pan_to += Vector2(views.x * raster_size.x, views.y * size.y * _step())
 	_ease_s = FOLLOW_EASE_S
 
 
 func _follow() -> void:
-	if following < 0:
+	if following < 0 or renderer == null or raster_size.x <= 0:
 		return
-	var at = organisms.animal_at(following)
-	if at == null:
+	var at: Vector2 = renderer.animal_at(following)
+	if at.x < 0.0:
 		stop_follow()
 		return
-	var w := float(dims.x)
-	var cam_x := w / 2.0 + fposmod(_pan.x, w)
-	_pan_to.x = _pan.x + wrapf(at.x - cam_x, -w / 2.0, w / 2.0)
-	var t := deg_to_rad(TILT_DEG)
-	_pan_to.y = at.y * cos(t) + at.z * sin(t)
+	var rw := float(raster_size.x)
+	_pan_to.x = _pan.x + wrapf(at.x - (rw / 2.0 + _pan.x), -rw / 2.0, rw / 2.0)
+	var r := _y_range()
+	_pan_to.y = at.y - size.y * _step() / 2.0 if r.y > 0.0 else 0.0
 	_ease_s = FOLLOW_EASE_S
 
 
-# --- picking ------------------------------------------------------------------------------
+# --- picking -------------------------------------------------------------------------------
 
-## The animal under screen point `p`: the nearest to the camera whose projected model box
-## holds it.
-func _pick(p: Vector2) -> int:
-	var best := -1
-	var best_depth := INF
-	var forward := -camera.global_transform.basis.z
-	for entry in organisms.live_animals():
-		var node: MeshInstance3D = entry[1]
-		if node.mesh == null:
-			continue
-		var box := node.global_transform * node.mesh.get_aabb()
-		var lo := Vector2(INF, INF)
-		var hi := Vector2(-INF, -INF)
-		for i in 8:
-			var s := camera.unproject_position(box.get_endpoint(i))
-			lo = lo.min(s)
-			hi = hi.max(s)
-		var grow := (Vector2(PICK_MIN_PX, PICK_MIN_PX) - (hi - lo)).max(Vector2.ZERO) / 2.0
-		if Rect2(lo - grow, hi - lo + 2.0 * grow).has_point(p):
-			var depth := forward.dot(box.get_center() - camera.global_position)
-			if depth < best_depth:
-				best_depth = depth
-				best = entry[0]
-	return best
+## The animal under screen point `p`: the renderer's projection inverted, or the nearest
+## drawn body within half the smallest pick box.
+func pick(p: Vector2) -> int:
+	if renderer == null:
+		return -1
+	var r := screen_to_raster(p)
+	if r.x < 0:
+		return -1
+	return renderer.pick(r.x, r.y, PICK_MIN_PX * 0.5 * _step())
+
+
+## Where animal `id` is on screen, or (-1, -1) when it is not drawn.
+func animal_screen(id: int) -> Vector2:
+	if renderer == null:
+		return Vector2(-1, -1)
+	var at: Vector2 = renderer.animal_at(id)
+	return Vector2(-1, -1) if at.x < 0.0 else raster_to_screen(at)
 
 
 func _hover(p: Vector2) -> void:
-	var id := _pick(p)
+	_set_hovered(pick(p))
+
+
+func _set_hovered(id: int) -> void:
 	if id != hovered:
 		hovered = id
 		animal_hovered.emit(id)

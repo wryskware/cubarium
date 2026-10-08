@@ -83,6 +83,14 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     // Each style slot's emission gain this frame (`VoxelRenderer::set_emit_gains`, the
     // glowcap candle), four slots a row; 1 draws the emissive colour as it is.
     vec4 emitK[64];
+    // The view (the hosted renderer's, H1): raster columns the picture is turned round the
+    // ring (the camera's pan, whole pixels; 0 draws the strip as it always was), and the
+    // highlighted animal's cell count (0 none, -1 its box alone).
+    ivec4 view;
+    ivec4 hiMin;        // the highlighted animal's box: first x (wrapped), lowest y, nearest z
+    ivec4 hiMax;        // its x span in cells, highest y, farthest z
+    vec4 hiK;           // how far its cells lean toward white
+    uvec4 hiCells[64];  // its cells, x | y << 12 | z << 22, four a row
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -2319,9 +2327,9 @@ void over(inout vec3 c, inout float a, vec3 lc, float la) {
 vec4 weatherOver(ivec2 px) {
     float zEnd = floor(texelFetch(depthTex, px, 0).a * 255.0 + 0.5);
     float k = float(RISE) / float(S);
-    float xw = (float(px.x) + 0.5) / float(S);
+    float xw = (float(PX) + 0.5) / float(S);
     float y0 = (float(BASE - px.y - 1) + 0.5) / float(S);
-    int x = px.x / S;
+    int x = PX / S;
     vec3 c = vec3(0.0);
     float a = 0.0;
 
@@ -2409,6 +2417,31 @@ vec3 flatRain(int px, int py, vec3 colour) {
 
 #include "volumetric.glsl"
 
+// The world column a raster column draws: turned round the ring by the view.
+int worldCol(int sx) {
+    int rw = W * S;
+    int v = (sx + u.view.x) % rw;
+    return v < 0 ? v + rw : v;
+}
+
+// Whether cell (x, y, z) is one of the highlighted animal's.
+bool highlighted(int x, int y, int z) {
+    if (u.view.y == 0) { return false; }
+    int dxh = (x - u.hiMin.x) % W;
+    if (dxh < 0) { dxh += W; }
+    if (dxh > u.hiMax.x || y < u.hiMin.y || y > u.hiMax.y || z < u.hiMin.z || z > u.hiMax.z) {
+        return false;
+    }
+    if (u.view.y < 0) { return true; }
+    uint key = uint(wrapX(x)) | (uint(y) << 12) | (uint(z) << 22);
+    for (int i = 0; i < u.view.y; ++i) {
+        if (u.hiCells[i >> 2][i & 3] == key) { return true; }
+    }
+    return false;
+}
+
+vec3 hiTint(vec3 c) { return mix(c, vec3(1.0), u.hiK.x); }
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -2419,7 +2452,7 @@ void main() {
 
     ivec2 px = ivec2(gl_FragCoord.xy);
     if (WEATHER) {
-        PX = px.x;
+        PX = worldCol(px.x);
         PY = px.y;
         outColour = weatherOver(px);
         return;
@@ -2428,13 +2461,14 @@ void main() {
         outColour = litSky(px.x, px.y);
         return;
     }
-    int x = px.x / S;
-    int dx = px.x - x * S;
+    int wcol = worldCol(px.x);
+    int x = wcol / S;
+    int dx = wcol - x * S;
 
     vec3 acc = vec3(0.0);
     vec3 trans = vec3(1.0);
     if (LIT) {
-        PX = px.x;
+        PX = wcol;
         PY = px.y;
         waterLitReset();
     }
@@ -2513,6 +2547,7 @@ void main() {
                 vec3 art;
                 bool lum;
                 if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
+                    if (partOf(v) == ANIMAL_INTERIM && highlighted(x, fy, z)) { art = hiTint(art); }
                     acc += trans * art;
                     trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
                     break;
@@ -2544,6 +2579,7 @@ void main() {
             // A posing cell's cap is where its settle and breath put it (WX4).
             int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
             if (isBlockPart(p) && cl >= 0 && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+                if (p == ANIMAL_INTERIM && highlighted(x, below, z)) { cap = hiTint(cap); }
                 acc += trans * cap;
                 trans = LIT && lum
                     ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))

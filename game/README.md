@@ -2,8 +2,9 @@
 
 The Godot 4.7 app. Rust is the simulation (`crates/cubarium-session`); this project is
 everything you see and touch (D-0004, `design/handoffs/godot-direction-2026-10-07.md`).
-Package A, the state of this directory: the extension, a bare project and a main scene that
-prints. Nothing is drawn yet.
+The shell (package C) runs the world through `world/world_view.tscn`, which shows the Rust
+renderer's frames (D-0005, H1; `world/README.md`); the mesh view of package B is in
+`world/legacy/`.
 
 ## Build
 
@@ -74,7 +75,7 @@ and saving run off Godot's thread and report through `status()`, `candidates()` 
 |---|---|
 | `generate_candidates(spec: Dictionary, count: int) -> String` | found `count` worlds in parallel; `""` or why not. Spec keys: `config`, `size` `[w,h,d]`, `terrain`, `climate`, `seed`, `sets`, `empty`; unknown keys refused |
 | `candidates() -> Array` | `index`, `state` (generating/ready/failed), `seed`, `label`, `error`, `summary`, `populations` |
-| `candidate_view(i: int) -> Dictionary` | a ready candidate's whole view (for thumbnails and panning) |
+| `candidate_view(i: int) -> Dictionary` | a ready candidate's whole view (for thumbnails and panning), naming its `source` (this session) and `candidate` (i) so a world view renders the candidate's own world |
 | `promote(i: int) -> String` | run candidate `i`, drop the rest |
 | `load(dir: String)` / `save(dir: String)` / `close()` | a save is a directory with `meta.json`; a save from another version is refused (`load_failed` notice) |
 | `command(line: String)` | the console (`p`, `s N`, `speed X`, `r`, `i X Y Z`, …) |
@@ -84,6 +85,11 @@ and saving run off Godot's thread and report through `status()`, `candidates()` 
 | `take_view() -> Dictionary` | see below |
 | `take_events() -> Array` | life events since the last take: `tick`, `animal`, `kind` (born, meal, kill, injured, died, …) and the kind's fields |
 | `take_notices() -> Array` | console replies; `saved`/`save_failed`/`loaded`/`load_failed` with `path` and `meta` |
+
+`WorldRenderer` (`crates/cubarium-godot/src/renderer.rs`) is the Rust renderer for a world
+view: `start(config, root, screen, fps)`, `attach(session)` / `detach()` (it hooks into the
+session's loop), `show_candidate(session, i)`, `take_frame()`, `set_view_x`,
+`set_highlight`, `pick`, `animal_at`, `stats`, `release`. `world/world_view.gd` is its one user.
 
 ## The view
 

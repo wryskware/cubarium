@@ -1046,6 +1046,11 @@ impl VoxelParams {
             },
             poses: [[0.0; 4]; POSE_ENTRIES],
             emit_k: [[1.0; 4]; MAX_STYLES / 4],
+            view: [0; 4],
+            hi_min: [0; 4],
+            hi_max: [0; 4],
+            hi_k: [0.0; 4],
+            hi_cells: [[0; 4]; HIGHLIGHT_CELLS / 4],
         }
     }
 }
@@ -1179,6 +1184,83 @@ struct VoxelUniforms {
     /// ([`VoxelStaging::emit_curves`], [`VoxelRenderer::set_emit_gains`]), four slots a
     /// row; `1` draws the style's emissive colour as it is.
     emit_k: [[f32; 4]; MAX_STYLES / 4],
+    /// The view ([`VoxelRenderer::set_view_x`]): raster columns turned round the ring, the
+    /// highlight's cell count (0 none, -1 its box alone), padding.
+    view: [i32; 4],
+    /// The highlighted animal's box: first x, lowest y, nearest z; x span, highest y,
+    /// farthest z ([`VoxelRenderer::set_highlight`]).
+    hi_min: [i32; 4],
+    hi_max: [i32; 4],
+    /// How far its cells lean toward white.
+    hi_k: [f32; 4],
+    /// Its cells, [`Highlight::key`], four a row.
+    hi_cells: [[u32; 4]; HIGHLIGHT_CELLS / 4],
+}
+
+/// The most cells a highlight names one by one; a larger body is highlighted by its box.
+pub const HIGHLIGHT_CELLS: usize = 256;
+
+/// One animal drawn highlighted ([`VoxelRenderer::set_highlight`]): its cells, and how far
+/// they lean toward white over whatever lit colour the walk gives them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Highlight {
+    /// `(x, y, z)` voxels, `x` wrapped into the world.
+    pub cells: Vec<(u32, u32, u32)>,
+    /// 0 none .. 1 white.
+    pub mix: f32,
+}
+
+impl Highlight {
+    /// A cell as the shader's list holds it.
+    pub fn key(x: u32, y: u32, z: u32) -> u32 {
+        (x & 0xFFF) | (y & 0x3FF) << 12 | (z & 0x3FF) << 22
+    }
+
+    /// The uniform block's view of it, for a world `width` voxels round: the box (`x` from
+    /// its first column round the ring, so a body across the seam has a small box), the
+    /// cell count (-1 when there are too many to list), and the list.
+    fn block(&self, width: u32) -> ([i32; 4], [i32; 4], i32, [[u32; 4]; HIGHLIGHT_CELLS / 4]) {
+        let mut cells = [[0u32; 4]; HIGHLIGHT_CELLS / 4];
+        if self.cells.is_empty() || width == 0 {
+            return ([0; 4], [0; 4], 0, cells);
+        }
+        // The box's x: the start of the widest gap between occupied columns, round the ring.
+        let mut cols: Vec<u32> = self.cells.iter().map(|c| c.0 % width).collect();
+        cols.sort_unstable();
+        cols.dedup();
+        let (mut start, mut gap) = (cols[0], 0u32);
+        for (i, &c) in cols.iter().enumerate() {
+            let next = cols[(i + 1) % cols.len()];
+            let g = (next + width - c) % width;
+            let g = if g == 0 { width } else { g };
+            if g > gap {
+                gap = g;
+                start = next;
+            }
+        }
+        let span = width - gap;
+        let (mut y0, mut y1, mut z0, mut z1) = (u32::MAX, 0, u32::MAX, 0);
+        for &(_, y, z) in &self.cells {
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+            z0 = z0.min(z);
+            z1 = z1.max(z);
+        }
+        let count = if self.cells.len() <= HIGHLIGHT_CELLS {
+            for (i, &(x, y, z)) in self.cells.iter().enumerate() {
+                cells[i / 4][i % 4] = Highlight::key(x % width, y, z);
+            }
+            self.cells.len() as i32
+        } else {
+            -1
+        };
+        (
+            [start as i32, y0 as i32, z0 as i32, 0],
+            [span as i32, y1 as i32, z1 as i32, 0],
+            count,
+            cells,
+        )
+    }
 }
 
 /// Where one tick's world is written, straight into mapped memory.
@@ -1813,6 +1895,10 @@ pub struct VoxelRenderer {
     /// Each emission curve's gain this frame ([`VoxelRenderer::set_emit_gains`]); curve 0
     /// and any past the end are 1.
     curve_gain: Vec<f32>,
+    /// The view's turn round the ring, raster columns ([`VoxelRenderer::set_view_x`]).
+    view_x: i32,
+    /// The highlighted animal ([`VoxelRenderer::set_highlight`]).
+    highlight: Option<Highlight>,
     /// The slot of the last frame that retired, i.e. the one whose timestamps are the
     /// newest complete set. `None` before the first frame finishes.
     last_done: Option<usize>,
@@ -2399,6 +2485,8 @@ impl VoxelRenderer {
             drawn_emit_curves: [0; MAX_STYLES],
             curving: false,
             curve_gain: Vec::new(),
+            view_x: 0,
+            highlight: None,
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
             slow: SlowPlanes::new(STAGING_RING),
@@ -2555,6 +2643,34 @@ impl VoxelRenderer {
                 self.raster_current = false;
                 self.version += 1;
             }
+        }
+    }
+
+    /// Turn the picture round the ring by `x` raster columns: what was drawn at column `x`
+    /// is drawn at column 0. The camera's pan, in whole pixels; 0 is the strip as it always
+    /// was. A change redraws.
+    pub fn set_view_x(&mut self, x: i32) {
+        let rw = self.params.raster_w as i32;
+        let x = if rw > 0 { x.rem_euclid(rw) } else { 0 };
+        if x != self.view_x {
+            self.view_x = x;
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    /// The view's turn round the ring ([`VoxelRenderer::set_view_x`]).
+    pub fn view_x(&self) -> i32 {
+        self.view_x
+    }
+
+    /// Draw one animal's cells leaning toward white (`None`: no highlight). A change
+    /// redraws.
+    pub fn set_highlight(&mut self, highlight: Option<Highlight>) {
+        if highlight != self.highlight {
+            self.highlight = highlight;
+            self.raster_current = false;
+            self.version += 1;
         }
     }
 
@@ -2803,6 +2919,15 @@ impl VoxelRenderer {
             block.poses = pose_rows(&self.drawn_poses, self.clock.time, self.params.s);
         }
         block.vol[3] = self.sunvis.fade();
+        block.view[0] = self.view_x;
+        if let Some(h) = &self.highlight {
+            let (lo, hi, count, cells) = h.block(self.params.width);
+            block.hi_min = lo;
+            block.hi_max = hi;
+            block.view[1] = count;
+            block.hi_k = [h.mix, 0.0, 0.0, 0.0];
+            block.hi_cells = cells;
+        }
         block.fog_k[1] = self.fog_floor;
         if self.curving {
             let gain = |c: u8| match c {
@@ -3666,6 +3791,21 @@ pub(crate) mod tests {
     /// The water's clock steps at its own rate over sim time (12 steps a second over 20
     /// ticks a second: a step every 5/3 ticks, fractions included), and wraps its step
     /// and its time where the shader's patterns repeat.
+    #[test]
+    fn a_highlight_boxes_its_cells_the_short_way_round_the_ring() {
+        let h = Highlight { cells: vec![(9, 2, 1), (0, 3, 1), (9, 3, 2)], mix: 0.4 };
+        let (lo, hi, count, cells) = h.block(10);
+        // Columns 9 and 0 are neighbours across the seam: the box starts at 9, spans 1.
+        assert_eq!((lo[0], hi[0]), (9, 1));
+        assert_eq!((lo[1], hi[1], lo[2], hi[2]), (2, 3, 1, 2));
+        assert_eq!(count, 3);
+        assert_eq!(cells[0][1], Highlight::key(0, 3, 1));
+        // Too many cells to list: the box alone.
+        let big = Highlight { cells: vec![(1, 1, 1); HIGHLIGHT_CELLS + 1], mix: 0.4 };
+        assert_eq!(big.block(10).2, -1);
+        assert_eq!(Highlight { cells: vec![], mix: 0.4 }.block(10).2, 0);
+    }
+
     #[test]
     fn the_frame_clock_steps_at_the_water_rate_and_wraps() {
         let at = |tick: u64, f: f64| FrameClock::at(tick, f, 12.0, 20.0, false);

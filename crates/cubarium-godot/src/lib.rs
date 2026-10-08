@@ -15,6 +15,7 @@ use std::path::PathBuf;
 pub mod mesher;
 pub mod models;
 pub mod palette;
+pub mod renderer;
 
 use cubarium_observatory::Command;
 use cubarium_session::{Session, SessionOptions, View, WorldSpec};
@@ -31,13 +32,14 @@ unsafe impl ExtensionLibrary for CubariumExtension {}
 #[derive(GodotClass)]
 #[class(base = RefCounted)]
 pub struct CubariumSession {
+    base: Base<RefCounted>,
     session: Session,
 }
 
 #[godot_api]
 impl IRefCounted for CubariumSession {
-    fn init(_base: Base<RefCounted>) -> Self {
-        CubariumSession { session: Session::new(SessionOptions::default()) }
+    fn init(base: Base<RefCounted>) -> Self {
+        CubariumSession { base, session: Session::new(SessionOptions::default()) }
     }
 }
 
@@ -64,13 +66,20 @@ impl CubariumSession {
     }
 
     /// A ready candidate's whole view (the `take_view` layout, every chunk), or an empty
-    /// Dictionary while it is being founded.
+    /// Dictionary while it is being founded. It also names where it came from, `source` (this
+    /// session) and `candidate` (the index), so a world view can render the candidate's world
+    /// itself (`WorldRenderer.show_candidate`).
     #[func]
     fn candidate_view(&self, index: i64) -> VarDictionary {
-        usize::try_from(index)
+        let mut d = usize::try_from(index)
             .ok()
             .and_then(|i| self.session.candidate_view(i))
-            .map_or_else(VarDictionary::new, |v| view_dict(&v))
+            .map_or_else(VarDictionary::new, |v| view_dict(&v));
+        if !d.is_empty() {
+            put(&mut d, "source", self.to_gd());
+            put(&mut d, "candidate", index);
+        }
+        d
     }
 
     /// Run candidate `index` and drop the others. "" or the reason.

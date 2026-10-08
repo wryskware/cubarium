@@ -33,6 +33,7 @@ use serde_json::{Value, json};
 use crate::console::{Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 use crate::create::{self, Populate, Scene, StartLayers, StartSpec};
 use crate::feed::{ChunkData, FeedConfig, Frame, Tracker, View};
+use crate::hook::{HookClock, LoopHook};
 use crate::founders::founder_recipes;
 use crate::params::{SimParams, WorldSpec};
 use crate::store::{self, SaveMeta};
@@ -159,6 +160,7 @@ enum ToSim {
     Save(PathBuf, Option<Sender<Result<SaveMeta, String>>>),
     Close,
     Shutdown,
+    Hook(Option<Box<dyn LoopHook>>),
 }
 
 enum ToReader {
@@ -442,6 +444,19 @@ impl Session {
         self.send(ToSim::Close);
     }
 
+    /// Follow the running world on the loop's thread ([`LoopHook`]); `None` removes the
+    /// hook (it is dropped on the loop). A hook set while a world runs is told about it at
+    /// once ([`LoopHook::installed`]).
+    pub fn set_hook(&self, hook: Option<Box<dyn LoopHook>>) {
+        self.send(ToSim::Hook(hook));
+    }
+
+    /// A handle on the candidates that outlives this borrow: a renderer reads a candidate
+    /// world through it from a thread of its own ([`CandidateSource::with`]).
+    pub fn candidate_source(&self) -> CandidateSource {
+        CandidateSource(self.candidates.clone())
+    }
+
     // --- Run control ----------------------------------------------------------------
 
     /// A run command, the dashboard's and the console's own.
@@ -591,6 +606,23 @@ impl Session {
     }
 }
 
+/// A handle on a session's candidates ([`Session::candidate_source`]).
+#[derive(Clone)]
+pub struct CandidateSource(Arc<Mutex<Candidates>>);
+
+impl CandidateSource {
+    /// Run `f` over ready candidate `index`'s layers, with the candidate list locked: `None`
+    /// while it is being founded, after it failed, or once the list moved on (a new batch, a
+    /// promotion).
+    pub fn with<R>(&self, index: usize, f: impl FnOnce(&World, &Flora, &Fauna) -> R) -> Option<R> {
+        let c = self.0.lock().ok()?;
+        match &c.list.get(index)?.slot {
+            Slot::Ready(p) => Some(f(&p.world, &p.flora, &p.fauna)),
+            _ => None,
+        }
+    }
+}
+
 /// A serde value of `v` (`null` for one that does not serialize).
 fn to<T: Serialize + ?Sized>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or(Value::Null)
@@ -682,6 +714,10 @@ struct Loop {
     paused: bool,
     writer: Option<JoinHandle<()>>,
     next: Instant,
+    /// What follows the world on this thread ([`Session::set_hook`]), and whether the world
+    /// moved since it was last called.
+    hook: Option<Box<dyn LoopHook>>,
+    hook_moved: bool,
     #[cfg(test)]
     after_tick: Option<Box<dyn FnMut(u64) + Send>>,
 }
@@ -701,6 +737,8 @@ impl Loop {
             paused: false,
             writer: None,
             next: Instant::now(),
+            hook: None,
+            hook_moved: false,
             #[cfg(test)]
             after_tick: None,
         }
@@ -769,6 +807,7 @@ impl Loop {
             return true;
         };
         r.pacer.begin(&mut r.console);
+        let mut stepped = 0u64;
         loop {
             if !self.commands(rx, None) {
                 return false;
@@ -789,15 +828,40 @@ impl Loop {
                 .store(r.sim.world().tick(), Ordering::SeqCst);
             self.shared.stepped.fetch_add(1, Ordering::SeqCst);
             r.moved = true;
+            self.hook_moved = true;
+            stepped += 1;
             #[cfg(test)]
             if let Some(hook) = &mut self.after_tick {
                 hook(r.sim.world().tick());
             }
         }
         self.feed();
+        self.call_hook(stepped);
         self.publish(false);
         self.store_status();
         true
+    }
+
+    /// The hook's period call, with the world borrowed.
+    fn call_hook(&mut self, stepped: u64) {
+        let (Some(hook), Some(r)) = (self.hook.as_mut(), self.run.as_ref()) else { return };
+        let clock = HookClock {
+            tick: r.sim.world().tick(),
+            stepped,
+            speed: r.console.speed,
+            paused: r.console.paused,
+        };
+        let (world, flora, fauna) = r.sim.layers();
+        hook.period(world, flora, fauna, std::mem::take(&mut self.hook_moved), clock);
+    }
+
+    /// Tell the hook about the world now running.
+    fn hook_installed(&mut self) {
+        let (Some(hook), Some(r)) = (self.hook.as_mut(), self.run.as_ref()) else { return };
+        let clock = HookClock { tick: r.sim.world().tick(), stepped: 0, speed: r.console.speed, paused: r.console.paused };
+        let (world, flora, fauna) = r.sim.layers();
+        hook.installed(world, flora, fauna, clock);
+        self.hook_moved = false;
     }
 
     fn feed(&mut self) {
@@ -889,8 +953,15 @@ impl Loop {
                 }
             }
             ToSim::Save(dir, reply) => self.save(dir, reply),
+            ToSim::Hook(hook) => {
+                self.hook = hook;
+                self.hook_installed();
+            }
             ToSim::Close => {
                 self.run = None;
+                if let Some(h) = self.hook.as_mut() {
+                    h.closed();
+                }
                 let _ = self.out.send(ToReader::Closed);
                 self.notice(Notice::say("closed", "closed"));
                 self.store_status();
@@ -907,6 +978,7 @@ impl Loop {
                 }
                 observer.request();
                 r.moved = true;
+                self.hook_moved = true;
                 let said = r.console.take_said();
                 let quit = std::mem::take(&mut r.console.quit);
                 let save = r.console.save_to.take();
@@ -980,6 +1052,7 @@ impl Loop {
             feed_updates: 0,
         });
         self.shared.generation.store(self.generation, Ordering::SeqCst);
+        self.hook_installed();
         // The first publication at once, whatever the speed or pause.
         self.publish(true);
         self.store_status();
