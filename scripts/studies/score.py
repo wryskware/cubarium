@@ -99,7 +99,7 @@ def validate_config(cfg):
 LABELS = {'H': 'kill rate (kills per world-hour)',
           'G_v': 'vaulttree recruitment (not established sites)',
           'F': 'mean lineage h(fullness_p10 / target)',
-          'S': 'stuck share with observed exposure'}
+          'S': 'stuck bodies among awake bodies (prevalence)'}
 TEXT_COLUMNS = {'lineage', 'species', 'origin', 'cause', 'killer_lineage', 'native', 'alive', 'adult', 'mode'}
 
 
@@ -268,6 +268,16 @@ def lifecycle(name, records, opening, closing, begin, end, midpoint):
                 surviving_late_recruits=sum(within(number(row, 'born_minute'), midpoint, end) for row in surviving))
 
 
+def stuck_prevalence(rows):
+    """Stuck body-minutes over awake body-minutes; a minute with no stuck exposure counts
+    zero stuck bodies. None when no body was awake."""
+    stuck = awake = 0.0
+    for row in rows:
+        stuck += number(row, 'stuck_n', 0.0) or 0.0
+        awake += max(0.0, number(row, 'n', 0.0) - number(row, 'asleep_n', 0.0))
+    return stuck / awake if awake else None
+
+
 def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, required=None, load_minute=0):
     spec = cfg['profile']
     begin, end = load_minute + spec['from_minute'], load_minute + spec['to_minute']
@@ -400,7 +410,11 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             vals = [number(r, 'fullness_p10') for r in living]
             fullness[name] = average(vals) if vals and all(v is not None for v in vals) else None
             condition[name] = average([h(v / targets['fullness_p10']) for v in vals]) if vals and all(v is not None for v in vals) else None
-            stuck[name] = count_share(living, 'stuck_n', 'stuck_observed_n') if living else None
+            # S is the prevalence of stuck bodies among awake ones (stuck body-minutes over
+            # awake body-minutes). The conditional share (stuck among exposed: hungry and no
+            # bite for a whole window) sits near 1 whenever anyone is hungry and unfed
+            # (STUCK-AUDIT 2026-10-08), so it stays a diagnostic in the health block.
+            stuck[name] = stuck_prevalence(living) if living else None
             # No living bodies is structural NA, shown beside the egg/loss
             # gate. Living bodies without stuck exposure remain unrankable.
             for r in vr:
@@ -495,7 +509,9 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
         # A lineage observed with no eligible stuck exposure (asleep, fed or voluntarily
         # resting through every trailing window) was not stuck: it counts 0 and is listed.
         # Missing vitals are caught by the required-data check, not here.
-        unexposed = sorted(name for name in body_exposed if stuck[name] is None)
+        unexposed = sorted(name for name in body_exposed
+                           if count_share([r for r in vitals if r.get('lineage') == name and number(r, 'n', 0) > 0],
+                                          'stuck_n', 'stuck_observed_n') is None)
         s_values = [0.0 if stuck[name] is None else stuck[name] for name in sorted(body_exposed)]
         structural_na = sorted(set(active_names) - body_exposed)
         put('F', fullness, average(f_values) if all(v is not None for v in f_values) else None,
