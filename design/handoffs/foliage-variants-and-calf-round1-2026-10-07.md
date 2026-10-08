@@ -102,3 +102,10 @@ Round 2, as read:
   (browsed 3's upper two); stripped = round-1 stripped 3. So the state count is per species.
 - **Loftstrider calf**: body shape from B (neck 0.30, head 0.72, fronds 0.35, tusks 0.55), legs
   **shorter**, chibi. Show a few leg lengths at or below the body's scale.
+
+## Round 2 picks (2026-10-08)
+
+Wrysk: "l38. show me the spread legs for comparison. bloomcrown row 2. umbrafrond working for me now."
+Plants go to implementation: `foliage-states-implementation-2026-10-08.md`. Calf: l38 (calf B body, legs
+0.38, branch `worktree-agent-a22f62e40bfde905b` at 5e3ccd7a); next is a leg-spread comparison, then
+the founder bake once he picks a spread.
