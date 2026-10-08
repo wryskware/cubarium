@@ -257,3 +257,17 @@ reaches).
 of bugs from between their tusks." This would be a cleaner symbiosis. Seedporters already climb (the
 climb pose, `5e819d74`), so a loftstrider would become something they can climb. They would feed on
 bug gunk that builds up round the mouth ring, between the six tusks. Not designed and not scheduled.
+
+## 11. Move the renderer to wgpu (Wrysk, 2026-10-08: "yeah this is why we shouldve been using wgpu... backlog it i guess. no need to switch graphics backends tonight")
+
+The no-unsafe rule (WORKING_POLICY, 2026-10-08) and the renderer collide: `cubarium-gpu` talks
+to Vulkan through `ash`, whose every call is `unsafe` in our code (213 uses). `ash` was chosen
+only because the Tachyon panel needed zero-copy dma-buf scanout, which wgpu couldn't export
+without dropping to `wgpu-hal`; the panel no longer constrains the renderer (D-0005).
+- wgpu gives a safe API, Metal natively on macOS (instead of MoltenVK), and lifts the
+  Vulkan 1.1 limits the panel imposed.
+- Size: about 11,000 lines in `cubarium-gpu` plus the GPU sink's pass setup, and 3,400 lines of
+  GLSL (keep them as SPIR-V through naga or translate to WGSL).
+- The frame bridge into Godot stays a CPU readback (wgpu can't share Godot's device).
+- Order question with H2 (the model pass for smooth rotating animals, which adds new GPU code):
+  write H2 on `ash` now and port it later, or migrate first and write H2 on wgpu.
