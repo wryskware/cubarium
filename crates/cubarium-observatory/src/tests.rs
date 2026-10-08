@@ -41,7 +41,7 @@ fn introduce(fauna: &mut Fauna, world: &World, x: i64, founder: Founder, body: f
 
 /// An adult and a juvenile browser, a stand, and a buried lanternjaw clutch if the
 /// lanternjaw's config lays dormant eggs.
-fn small_world() -> (World, Flora, Fauna) {
+pub(super) fn small_world() -> (World, Flora, Fauna) {
     let world = plain(DayClock::default());
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -229,8 +229,11 @@ fn a_meal_is_what_the_stomach_gained_over_one_bout() {
         eaten += bite;
         r.observe_census(&mut stamped(tick, vec![a]));
     }
+    assert!((r.unfinished_meal(a.id)[litter] - eaten).abs() < 1e-12);
+    assert!(r.unfinished_meals().any(|(id, meal)| id == a.id && meal[litter] > 0.0));
     a.bout = None;
     r.observe_census(&mut stamped(15, vec![a]));
+    assert_eq!(r.unfinished_meal(a.id), [0.0; Food::COUNT]);
     let ev = r.take_events();
     assert_eq!(ev.len(), 1, "{ev:?}");
     let What::Meal { bout, foods, duration_s } = &ev[0].what else { panic!("{ev:?}") };
