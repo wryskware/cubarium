@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 /// `predation.rs` / `lib.rs` or an inline literal in the dodge table, the tremor and the
 /// egg draw.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct PredationConfig {
     /// §2.2: a body is still once it has not moved faster than `still_speed_bl_per_s` for
     /// this long, seconds.
@@ -166,6 +168,8 @@ impl PredationConfig {
 /// A body's day and its life: the daylight lines of the circadian rhythm, the lifespan
 /// draw and the gut.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct LifeConfig {
     /// The daylight (0 night, 1 full day) a diurnal animal wakes above and a nocturnal one
     /// sleeps above.
@@ -239,6 +243,8 @@ impl Default for LifeConfig {
 /// read through (`design/voxel-senses.md` §1, §3). The update cadence
 /// ([`crate::UPDATE_TICKS`]) is a numeric step of the field and stays a `const`.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct CueConfig {
     /// The detritus stock at which a source emits at full strength, organic units; also
     /// the taste reference (`× the body's mass_scale`).
@@ -288,6 +294,8 @@ pub const FUNGAL_HALF_LIFE_S: f64 = 2.0;
 /// animals run on until a policy is installed ([`crate::BlindForager::with_config`] and
 /// its siblings read this).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct TeacherConfig {
     /// `Self.motor_delivery` below this is a refused motor (a wall, a drop, water, the
     /// strip's edge), a fraction.
@@ -626,6 +634,8 @@ impl Default for TeacherConfig {
 /// founder **counts** are each lineage's own
 /// [`crate::FounderPhysiology::founding_count`] ([`crate::FaunaConfig::founder_counts`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct FoundingConfig {
     /// A seeded founder arrives at this fraction of its adult body (`StartingStores`).
     pub arrival_body: f64,
@@ -699,6 +709,8 @@ impl Default for FoundingConfig {
 /// tremor, and attacks the prey it meets often more readily than the prey it meets rarely.
 /// Every number is a plausible starting value, untuned ([`crate::hunt`]).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct HuntConfig {
     /// The patrol on. Off, the lanternjaw's heuristic is the P1 crown-seeking ambush
     /// ([`crate::LanternjawAmbush`]) unchanged: the baseline arm.

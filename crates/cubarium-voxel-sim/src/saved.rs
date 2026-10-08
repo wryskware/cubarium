@@ -116,3 +116,56 @@ pub fn driven(fauna: &Fauna) -> Result<(), String> {
     }
     if why.is_empty() { Ok(()) } else { Err(why.join("; ")) }
 }
+
+/// **Rewrite saved layers in the current format** (SAVE-EXTENSIBLE's one-version legacy
+/// reader): every layer file under `root` (recursively) — `world.bin`, `world.voxel` or
+/// `world-N.voxel`, `flora*.bin`, `fauna*.bin` — that this build reads but does not write is
+/// decoded and written back in the current format, whole or not at all (a `.resave` file
+/// renamed over it). Files already current are left alone. The paths rewritten.
+///
+/// Run it (`voxel_resave`) over a save library while its legacy schemas are still readable,
+/// so the legacy reader can be retired without losing the library.
+pub fn resave(root: &Path) -> Result<Vec<std::path::PathBuf>, String> {
+    let mut done = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        for entry in entries {
+            let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let layer = if name == "world.bin" || (name.starts_with("world") && name.ends_with(".voxel")) {
+                cubarium_voxel::snapshot::SCHEMA
+            } else if name.starts_with("flora") && name.ends_with(".bin") {
+                cubarium_voxel_flora::snapshot::SCHEMA
+            } else if name.starts_with("fauna") && name.ends_with(".bin") {
+                cubarium_voxel_fauna::SCHEMA
+            } else {
+                continue;
+            };
+            let raw = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            if cubarium_voxel::snapshot::schema_tag(&raw) == Some(layer) {
+                continue;
+            }
+            let bytes = if name.starts_with("world") {
+                World::load(&raw).map(|w| w.save())
+            } else if name.starts_with("flora") {
+                cubarium_voxel_flora::snapshot::decode(&raw).map(|f| cubarium_voxel_flora::snapshot::encode(&f))
+            } else {
+                Fauna::load(&raw).map(|f| f.save())
+            }
+            .map_err(|e| format!("{}: {e:#}", path.display()))?;
+            let mut tmp = path.as_os_str().to_owned();
+            tmp.push(".resave");
+            let tmp = std::path::PathBuf::from(tmp);
+            std::fs::write(&tmp, &bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+            std::fs::rename(&tmp, &path).map_err(|e| format!("{} -> {}: {e}", tmp.display(), path.display()))?;
+            done.push(path);
+        }
+    }
+    done.sort();
+    Ok(done)
+}

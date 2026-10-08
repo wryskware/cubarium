@@ -813,7 +813,7 @@ fn the_snapshot_carries_the_escrow_the_counters_and_the_clutches_and_refuses_an_
 
     let mut older = bytes.clone();
     assert_eq!(older[0], SCHEMA as u8, "the tag is the leading varint byte");
-    older[0] = SCHEMA as u8 - 1;
+    older[0] = SCHEMA as u8 - 2; // older than the one-version legacy reader covers
     let err = format!("{:#}", Fauna::load(&older).expect_err("an older world"));
     assert!(err.contains("start a fresh world"), "{err}");
     assert!(err.contains(&format!("is not {SCHEMA}")), "{err}");

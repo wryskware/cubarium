@@ -49,6 +49,7 @@ pub mod recipe;
 pub mod registry;
 mod landform_rows;
 mod world_rows;
+pub mod savedoc;
 pub mod snapshot;
 /// The designed terrarium: a ring of tree and tower, built up from parts.
 pub mod terrarium;

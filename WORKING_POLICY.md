@@ -229,6 +229,13 @@ number as a tunable knob:
   (`cubarium_voxel::registry`, the tables built by R1). The coverage test fails on a field
   with no row. Regenerate `design/parameters.md` with
   `cargo run -p cubarium-voxel-sim --example params -- --write design/parameters.md`.
+- **A new knob is not a new save format** (Wrysk, 2026-10-08: "we need to do a better job
+  about changing save formats, or making them extensible"). Saves carry each layer's config
+  as a named-field document (`cubarium_voxel::savedoc`) beside the positional state: a knob
+  the save lacks takes its default, one the build no longer knows is dropped with a note.
+  Adding, removing or retuning a knob needs **no** `SCHEMA` bump. A change to the state's
+  layout, or to what a field or knob means, still bumps it and refuses older saves
+  ("always fresh, never migrate" holds for those). Each `SCHEMA` comment says which is which.
 
 ## Balance through roles — Wrysk, 2026-10-05
 
