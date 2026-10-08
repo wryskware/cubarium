@@ -1,10 +1,20 @@
 ---
 design_status: proposal
-last_reviewed: 2026-09-23
+last_reviewed: 2026-10-08
+synced_at: e66b92138e8a3aab6c5b15729b7195a0911f18a1
 decision_refs: []
 ---
 
 # D15 · Latticevine (*Reticulum rupis*, "latticevine")
+
+> **Sim sync (2026-10-08):** ecology below is checked against `e66b92138e8a3aab6c5b15729b7195a0911f18a1`.
+> `Sim state` distinguishes shipped code defaults from the named desktop terrarium
+> preset; founder status means configured availability, not an observed population.
+> Other presets, saved worlds and trained brains can differ. Config keys refer to
+> `config/desktop/terrarium.toml` where stated; `design/parameters.md` lists code
+> defaults, not that preset's overrides. Numbers are tunable facts of this revision.
+> The look, body proposals and visual-review notes are retained. Missing ecological
+> intent is labelled *not in the sim yet*; implementation does not confer canon.
 
 > **Colour note (2026-09-24):** the hexes in this document are superseded by
 > `design/art-direction/species-colours-2026-09-24.md`. Parts, counts, shapes and
@@ -101,9 +111,10 @@ parts, colours and phases.
     well-watered sisters slowly take the wall from the dry ones.
   - Simple, local and cheap: one comparison per contested face, only when a face
     weakens.
-- **Spurs and food.** Each covered face has one spur slot. A spur starts a cycle
-  (bud → flower → fruit → spent → bare) when its plant has reserve and a rain pulse has
-  just passed, with a jittered start, so phases scatter across the colony. A face in
+- **Spurs and food.** Each covered face has one spur slot. Its implemented cycle
+  (bud → flower → fruit → spent → bare) has an independent random rest and a reserve
+  gate, so phases scatter across the colony. Rain-pulse-triggered starts are
+  *not in the sim yet* (retained earlier intent). A face in
   **flower holds nectar** (the bellwing's food). A face in **fruit holds beads** (the
   seedporter's food; seeds ride in the gut to the foot of another face, the only long
   dispersal). Nectar and fruit are two separate products that animals deplete.
@@ -131,36 +142,35 @@ parts, colours and phases.
 
 ### Order of work
 
-1. This revision (done).
-2. A simulation package in the flora crate, tests first: the face-cover field, rooting,
-   spread, sister rooting, lateral competition, spurs, and nectar and fruit products. It
-   needs new schemas; fresh worlds only.
-3. The presenter tile layer, after the voxel texture package lands.
-4. The fauna side (climbing, roosting, feeding on nectar and fruit, gut dispersal) with
-   the bellwing and seedporter bodies, later.
+The face-cover simulation, soil rooting, spread, sister rooting, competition,
+dormancy, spurs and two food stocks are implemented. Bellwing nectar feeding,
+seedporter climbing/fruit feeding and vine gut-seed banking are implemented too.
+The tile layer exists. Dedicated bower roosts/nests and visitor-dependent fruit set
+are *not in the sim yet*; their design intent remains below.
 
 ## Field entry
 
-The terrarium's rock faces are the one surface nothing lives on: stonecushion keeps to
-the lips, and the grazers can't reach up the rock. Latticevine takes them over. A
+Latticevine is now the live face-cover colonist of exposed rock and bedrock,
+including vertical sides, stepped slopes and overhang undersides. Stonecushion
+keeps to soil-accessible support lips; grazers crop reachable vine leaves. A
 stand roots in a soil pocket at the foot of a face or on a ledge and sends flat runners
 up the rock, which branch and rejoin into a **diamond lattice** pinned to the stone at
 every node. Older runners thicken and bow away from the rock, leaving hollow
-**bowers** between the lattice and the stone. Bellwings roost and nest in the small
-bowers, and seedporters climb the lattice as a ladder and den in the large ones.
+**bowers** between the lattice and the stone. The proposed bowers as dedicated
+bellwing roosts/nests and seedporter dens are
+*not in the sim yet*. Seedporters do climb the cover and can reach ledge roosts.
 
 It flowers and fruits **in patches, never all at once**. Each node along a runner
 carries a **spur**, and every spur runs its own cycle: *bud → flower → fruit → spent*.
-A spur starts only when the stand has reserve to spend and a rain pulse has just passed,
-and each spur starts at a slightly different time. A grown stand therefore always shows
-a scatter of phases across the face: a few spurs in flower (nectar, for bellwings), a
-few in fruit (beads, for seedporters), most bare leaf. One face feeds both animals
-through the year without a mast.
+Each face now starts independently after a random rest when reserve can pay,
+without a rain trigger. A funded colony scatters phases: some nectar flowers for
+bellwings, some bead fruit for seedporters and mostly bare spurs. Sustained supply
+is contingent on resources, not guaranteed throughout a year.
 
-It's a mutualism on both sides. Bellwings sipping the flowers carry pollen from spur
-to spur, and the fruit set follows the visits. Seedporters eat the beads and pass the
-hard seeds at the foot of the next face they climb, which is how the vine crosses gaps
-between faces.
+Seedporters eat beads and void vine seed lots after gut passage; the bank can
+establish a new root beside an eligible face. Pollen carriage and fruit set that
+follows bellwing visits are *not in the sim yet*. That proposed mutualism remains
+design intent; current fruit set is a paid timed phase even without visitors.
 
 *Latin:* *reticulum* (a net), *rupis* (of the rock).
 
@@ -170,11 +180,26 @@ between faces.
 | --- | --- |
 | **Where** | Rooted in a soil pocket at the **foot of a rock face** or on a **ledge**; its cover spreads up (and from ledges, down) the adjacent vertical faces. In the elevated-oblique view the terrace risers face the camera, so a face covered in latticevine is among the most visible surfaces in the scene. |
 | **Light** | Side light on the face. It tolerates part shade (bowers are dark), but it has to reach open face to flower. |
-| **Water** | Moderate. Roots in the pocket, and the leaf shingles hold a little water, so it gets through short dry spells. It's finished if the foot pocket is under standing water. |
-| **Grazing** | A **refuge**: frondgrazers crop only the lowest band (≤ 0.75 m, their reach); everything above is out of reach. The cropped lower band is the visible grazing line. |
+| **Water** | Roots share soil water with stands; sustained dry/wet thresholds drive dormancy and regreening. Leaf-held water and automatic death of a flooded foot pocket are *not in the sim yet* (earlier intent). |
+| **Grazing** | Crop follows the grazer’s scaled mouth band and vine-face reach, not a fixed 0.75 m cutoff. Unreachable faces remain a refuge. The earlier grazing-line look is retained in the state proposals. |
 | **Competition** | Stonecushion holds the lips and latticevine holds the faces, so the two share a cliff. Where it roots at the foot it sits among springturf and velvetpad. |
 | **Pace** | Slow to cover (like stonecushion, a long-lived rock plant), then steady, with sporadic spur cycles for as long as it has reserve. |
-| **Gives** | Nectar (flower phase) → bellwing. Fruit beads (fruit phase) → seedporter. Roost/nest bowers → bellwing (small), seedporter (large). A climbing substrate → seedporter, and any climber. Leaf-shingle litter at the foot → littershredder. |
+| **Gives** | Implemented nectar → bellwing, fruit → seedporter, climbable cover → seedporter, shed leaf litter → detritivores. Dedicated bower roosts/nests/dens and a ladder usable by any climber (beyond the seedporter) are *not in the sim yet*. |
+
+### Sim state
+
+- synced_against: `e66b92138e8a3aab6c5b15729b7195a0911f18a1` (source: Git HEAD at review, 2026-10-08)
+- status: live separate face-cover system, outside Species::ALL stand list; founders on eligible walls (sources: `crates/cubarium-voxel-flora/src/cover.rs:2251`; `crates/cubarium-session/src/lib.rs:62`)
+- food: per-face photosynthesis, shared root water and mineral store (source: `crates/cubarium-voxel-flora/src/cover.rs:1312`)
+- habitat: exposed rock/bedrock side and downward faces; soil roots at foot/top; stepped adjacency (sources: `crates/cubarium-voxel-flora/src/cover.rs:217`; `crates/cubarium-voxel-flora/src/cover.rs:290`)
+- size: no face-count or reserve cap; extent constrained by resources and eligible faces (source: `crates/cubarium-voxel-flora/src/cover.rs:1312`)
+- life_stages: rooted colony, leafy/dormant faces; per-spur bare → bud → flower → fruit → spent; outer runners lost on starvation (source: `crates/cubarium-voxel-flora/src/cover.rs:1312`)
+- breeding: sister roots split ownership and budgets; gut seed bank can establish roots; no pollen-dependent fruit set (sources: `crates/cubarium-voxel-flora/src/cover.rs:1860`; `crates/cubarium-voxel-flora/src/cover.rs:1929`; `crates/cubarium-voxel-flora/src/cover.rs:1312`)
+- flowering: random per-face rest, spur_share 0.1; preset bud/flower/fruit/spent ≈36.59/73.19/146.38/36.59 s, no rain gate (sources: `config/desktop/terrarium.toml` → `flora.latticevine`; `crates/cubarium-voxel-flora/src/cover.rs:926`; `crates/cubarium-voxel-flora/src/cover.rs:983`)
+- dormancy: water below 0.15 for preset ≈365.94 s dries; above 0.4 for ≈182.97 s wakes; runners persist while upkeep is paid (sources: `config/desktop/terrarium.toml` → `flora.latticevine`; `crates/cubarium-voxel-flora/src/cover.rs:926`; `crates/cubarium-voxel-flora/src/cover.rs:1312`)
+- consumers: bellwing nectar; seedporter fruit/gut seed carrier; vascular grazers within physical reach (sources: `crates/cubarium-voxel-fauna/src/body.rs:2167`; `crates/cubarium-voxel-fauna/src/body.rs:2251`; `crates/cubarium-voxel-flora/src/cover.rs:2134`)
+- defence: contested weak faces compare reserve per face; dormant ownership persists until challenged/lost, rooted faces protected (source: `crates/cubarium-voxel-flora/src/cover.rs:1667`)
+- not_in_sim_yet: rain-triggered cycles, pollen carriage/visit-dependent fruit set, explicit bower nests/dens, leaf water storage, automatic flood death (retained intent; current economy/cycle: `crates/cubarium-voxel-flora/src/cover.rs:1312`)
 
 ## Size
 
@@ -324,7 +349,11 @@ not sway, apart from the bowed arches, which breathe 1 px in strong wind.
   knot at each crossing that's either a flower head or a fruit head. It's more
   graphic and less plant-like, and each knot is a readable food point at 4 px.
 
-## Model requests (nothing here exists yet)
+## Original model requests and their sync status
+
+The numbered requests below are retained as the original proposal. Face cover,
+two products, climbing and gut dispersal are implemented. Rain-triggered cycles
+and dedicated bower roost/nest sites are *not in the sim yet*.
 
 1. **Face cover.** Stands sit on upward support faces only. Latticevine needs a stand
    rooted on a support face whose crown extent lies on the adjacent **vertical faces**
