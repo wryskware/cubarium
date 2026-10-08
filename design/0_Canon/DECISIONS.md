@@ -5,6 +5,7 @@ decision_refs:
   - D-0001
   - D-0002
   - D-0003
+  - D-0004
 ---
 
 # Cubarium decision ledger
@@ -47,3 +48,15 @@ Only decisions already authorized in the owner's request are accepted below.
 - **Consequences:** The approved rules are installed. This approval does not promote the proposed simulation architecture or authorize starting implementation.
 - **Supersedes:** None
 - **Canonical sources:** [Repository working rules](../../AGENTS.md)
+
+## D-0004 — Godot owns presentation and the app; Rust stays the simulation
+
+- **Date:** 2026-10-07
+- **Status:** Accepted
+- **Scope:** The engine and the split between simulation and presentation, for the ambient piece and the future game
+- **Decided by:** Wrysk, on 2026-10-07: "i would rather just do the full port" and, after weighing Unity and Unreal, "yeah godot is the pick for sure"
+- **Decision:** Godot becomes the presentation and application layer: terrain, water and organism rendering, rigging, animation, lighting, camera, picking, menus, save slots, presets, seed picking and input. Rust remains the presentation-agnostic simulation (world, water, flora, fauna, weather, world generation, save format, query layer), reached through a narrow, data-driven GDExtension binding. The custom Vulkan presentation is retired once Godot reaches parity. Unity, Unreal and an egui shell over the Rust renderer were considered and not chosen.
+- **Rationale:** The game needs an engine's UI, input, gamepad and platform export (macOS is a target for the full game). The Rust–Godot binding is needed in any Godot future, so keeping it narrow limits upkeep, and building the look once in Godot avoids porting a look that may change.
+- **Consequences:** No new features go into the Rust GPU presentation; fixes only until parity. The Tachyon panel does not constrain this direction. The visual style (voxel or illustrated pixel art) is not decided by this entry. Packages, checks and names in the canonical source remain proposals.
+- **Supersedes:** None
+- **Canonical sources:** [Godot direction handoff](../handoffs/godot-direction-2026-10-07.md), section "The split"
