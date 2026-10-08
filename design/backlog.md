@@ -272,10 +272,14 @@ without dropping to `wgpu-hal`; the panel no longer constrains the renderer (D-0
 - Order question with H2 (the model pass for smooth rotating animals, which adds new GPU code):
   write H2 on `ash` now and port it later, or migrate first and write H2 on wgpu.
 
-## 12. Seedporter night roosts (Wrysk, 2026-10-08: after the foliage/calf work)
+## 12. Seedporter night roosts and rain-grounded bellwings (Wrysk, 2026-10-08: one behaviour package after the foliage/calf work)
 
 "seedporters should prefer to roost in vault trees at night, or up top mesas they can reach by climbing
 latticevine." Queued to start once the foliage-states and loftstrider-calf work is finished. It is
 behaviour only: at night a seedporter prefers a vaulttree crown, or a mesa top it reaches up a
 latticevine wall, over its current rest spot. Check today's night and rest rules (animal circadian
 rhythm, weather work of 2026-09-24) before designing.
+
+Same package, Wrysk: "rain should ground bellwings." In rain a bellwing stops flying and lands (on a
+ledge, a crown or under cover; check its perch kinds), then flies again when the rain stops. It reads
+the same rain signal the plants and weather already use.
