@@ -1,0 +1,79 @@
+{
+  "_about": "The new-world picker's catalog: what each choice is called and says. Sizes map to a config file (relative to the repository root) and its [width, height, depth]; `terrain` and `climate` name the preset that config already uses, so picking it sends nothing over the file's own tables. Terrain and climate entries are shown only when the session's `presets` query lists that name. Descriptions come from the presets' own doc comments.",
+  "sizes": [
+    {
+      "id": "terrarium",
+      "label": "Terrarium",
+      "size": [256, 128, 48],
+      "config": "config/desktop/terrarium.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 4,
+      "description": "256 × 128 × 48 at 0.125 m: 32 m around, 16 m tall, 6 m deep."
+    },
+    {
+      "id": "deep-1.5",
+      "label": "Deep 1.5×",
+      "size": [256, 128, 72],
+      "config": "config/desktop/terrarium-d72.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 4,
+      "description": "The terrarium 9 m deep (depth 72)."
+    },
+    {
+      "id": "deep-2",
+      "label": "Deep 2×",
+      "size": [256, 128, 96],
+      "config": "config/desktop/terrarium-d96.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 3,
+      "description": "The terrarium 12 m deep (depth 96)."
+    },
+    {
+      "id": "wide",
+      "label": "Wide",
+      "size": [640, 128, 96],
+      "config": "config/desktop/terrarium-wide.toml",
+      "terrain": "terrarium",
+      "climate": "tropical_jungle",
+      "candidates": 3,
+      "description": "640 × 128 × 96: 80 m around and 12 m deep, a 1.5× lake. Founding takes minutes."
+    }
+  ],
+  "terrain": [
+    {
+      "name": "terrarium",
+      "label": "Terrarium",
+      "description": "The desktop terrarium: storeys, halls, arches, spires, a lake and a spring."
+    },
+    {
+      "name": "terrarium-small",
+      "label": "Small terrarium",
+      "description": "The panel's terrarium, written for a 160 × 72 × 24 ring: lower and tighter."
+    },
+    {
+      "name": "small",
+      "label": "Staged ring, small",
+      "description": "An earlier staged landscape: three levels on a 1.4 m stratum, benches and undercuts."
+    },
+    {
+      "name": "default",
+      "label": "Staged ring, terraced",
+      "description": "An earlier staged landscape: a composed shelf ring, written for 0.25 m cells."
+    },
+    {
+      "name": "wide",
+      "label": "Staged ring, wide",
+      "description": "An earlier staged landscape: the terraced ring's sizes on a ring twice as long."
+    }
+  ],
+  "climate": [
+    {
+      "name": "tropical_jungle",
+      "label": "Tropical jungle",
+      "description": "Lowland tropical rainforest: warm, almost seasonless, wet, with afternoon storms."
+    }
+  ]
+}

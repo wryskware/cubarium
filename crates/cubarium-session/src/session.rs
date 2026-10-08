@@ -525,10 +525,12 @@ impl Session {
     /// `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`,
     /// `animal` (`{"id": N}`: the body and its life history), `history`
     /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `saves`
-    /// (`{"dir": path}`: the save slots under it, read without loading any).
+    /// (`{"dir": path}`: the save slots under it, read without loading any), `presets`
+    /// (the landform and climate presets a [`WorldSpec`] can name).
     pub fn query(&self, name: &str, args: &Value) -> Result<Value, String> {
         match name {
             "species" => return Ok(crate::species_table()),
+            "presets" => return Ok(crate::params::preset_table()),
             "status" => return Ok(to(&self.status())),
             "candidates" => return Ok(to(&self.candidates())),
             "saves" => {
@@ -570,7 +572,7 @@ impl Session {
             other => {
                 return Err(format!(
                     "unknown query `{other}`; known: summary clock environment populations run \
-                     snapshot animals animal history species status candidates saves"
+                     snapshot animals animal history species status candidates saves presets"
                 ));
             }
         })

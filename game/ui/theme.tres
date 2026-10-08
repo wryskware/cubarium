@@ -1,0 +1,99 @@
+[gd_resource type="Theme" load_steps=7 format=3]
+
+; The shell's dev theme: Godot's default look with legible sizes, even spacing, dark panels
+; and a focus ring strong enough to follow with a gamepad. No game art: the shell's real
+; look comes from Wrysk's art direction later.
+
+[sub_resource type="StyleBoxFlat" id="panel"]
+content_margin_left = 16.0
+content_margin_top = 14.0
+content_margin_right = 16.0
+content_margin_bottom = 14.0
+bg_color = Color(0.08, 0.085, 0.1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.32, 0.34, 0.38, 1)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="row"]
+content_margin_left = 10.0
+content_margin_top = 8.0
+content_margin_right = 10.0
+content_margin_bottom = 8.0
+bg_color = Color(0.13, 0.135, 0.155, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+
+[sub_resource type="StyleBoxFlat" id="focus"]
+draw_center = false
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.95, 0.95, 0.95, 1)
+corner_radius_top_left = 3
+corner_radius_top_right = 3
+corner_radius_bottom_right = 3
+corner_radius_bottom_left = 3
+expand_margin_left = 2.0
+expand_margin_top = 2.0
+expand_margin_right = 2.0
+expand_margin_bottom = 2.0
+
+[sub_resource type="StyleBoxFlat" id="tooltip"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0.04, 0.045, 0.05, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.45, 0.47, 0.5, 1)
+
+[sub_resource type="StyleBoxEmpty" id="none"]
+
+[sub_resource type="StyleBoxFlat" id="dim"]
+bg_color = Color(0, 0, 0, 0.55)
+
+[resource]
+default_font_size = 18
+Button/constants/h_separation = 8
+Button/styles/focus = SubResource("focus")
+CheckBox/styles/focus = SubResource("focus")
+OptionButton/styles/focus = SubResource("focus")
+LineEdit/styles/focus = SubResource("focus")
+Label/colors/font_color = Color(0.9, 0.9, 0.9, 1)
+HBoxContainer/constants/separation = 10
+VBoxContainer/constants/separation = 10
+GridContainer/constants/h_separation = 12
+GridContainer/constants/v_separation = 12
+MarginContainer/constants/margin_left = 16
+MarginContainer/constants/margin_top = 16
+MarginContainer/constants/margin_right = 16
+MarginContainer/constants/margin_bottom = 16
+PanelContainer/styles/panel = SubResource("panel")
+ProgressBar/font_sizes/font_size = 14
+Dim/base_type = &"Panel"
+Dim/styles/panel = SubResource("dim")
+Row/base_type = &"PanelContainer"
+Row/styles/panel = SubResource("row")
+Tip/base_type = &"PanelContainer"
+Tip/styles/panel = SubResource("tooltip")
+Bare/base_type = &"PanelContainer"
+Bare/styles/panel = SubResource("none")
+Title/base_type = &"Label"
+Title/font_sizes/font_size = 26
+Small/base_type = &"Label"
+Small/font_sizes/font_size = 15
+Small/colors/font_color = Color(0.72, 0.73, 0.76, 1)
+Warn/base_type = &"Label"
+Warn/colors/font_color = Color(1, 0.72, 0.55, 1)
