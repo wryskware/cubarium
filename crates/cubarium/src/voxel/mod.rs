@@ -151,7 +151,8 @@ pub struct VoxelConfig {
     /// Pixels per voxel edge. The chosen camera is 4: below that the sprite atlas stops
     /// reading. `"auto"` (stored as [`PX_AUTO`]) is resolved once at start-up by
     /// [`auto_px_per_voxel`]: the largest that fits the output — the desktop's screen, or
-    /// the panel — with the whole strip in view.
+    /// the panel — with the whole strip in view; for the development window,
+    /// [`cover_px_per_voxel`] of the largest screen, scaled down to fill the window.
     #[serde(with = "px_serde")]
     pub px_per_voxel: u32,
     /// Ring raster height in pixels; `0` derives it so the whole strip fits. The width is
@@ -213,6 +214,11 @@ pub struct VoxelConfig {
     /// (HUNKER, [`hunker`]): the pose moves continuously over this, never in one step.
     /// Presentation only: the simulation's hunker is unchanged by it.
     pub hunker_s: f64,
+    /// The meal flash's strength, `0..=1`: how far an eating animal's eye or sense patch
+    /// leans toward the warm flash colour at the height of the flash. It eases in over
+    /// `animal::MEAL_FLASH_FADE_S` once the animal starts cropping and back out after; 0
+    /// turns it off. Presentation only.
+    pub meal_flash: f32,
     /// The world to build. Extents follow the core; the ambient display uses 0.125 m
     /// cells so organisms retain their physical size with more cells of visual detail.
     #[serde(deserialize_with = "ambient_world_config")]
@@ -249,6 +255,7 @@ impl Default for VoxelConfig {
             water_every: 1,
             fast_forward_water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
             hunker_s: hunker::DEFAULT_S,
+            meal_flash: animal::MEAL_FLASH_DEFAULT,
             // The shipped `default` landscape, ring and all: a `cubarium voxel` with no
             // TOML generates a staged world, not the ridge. `Config::default()` stays
             // `Landform::Ridge` for fixtures and frozen arenas, and `landform = "ridge"`
@@ -649,10 +656,47 @@ pub fn auto_px_per_voxel(
     (1..=256).take_while(|&s| fits(s)).last().unwrap_or(1)
 }
 
+/// The smallest `px_per_voxel` whose strip **covers** `out` on its limiting axis: the
+/// desktop window's, which the present pass then scales down to whatever size the window
+/// is (`cubarium_gpu::present::WindowFit`), so the picture is supersampled rather than
+/// stretched. It is [`auto_px_per_voxel`]'s fit when that already fills `out` on one
+/// axis, else one more.
+pub fn cover_px_per_voxel(
+    tilt_degrees: f64,
+    raster_height: u16,
+    world: &cubarium_voxel::Config,
+    out: (u32, u32),
+) -> u32 {
+    let fit = auto_px_per_voxel(tilt_degrees, raster_height, world, out);
+    let limit = match raster_height {
+        0 => out.1,
+        h => out.1.min(u32::from(h)),
+    };
+    let rise = project::rise_for(tilt_degrees, fit);
+    let tall = u64::from(world.height) * u64::from(fit) + u64::from(world.depth) * u64::from(rise);
+    let fills = u64::from(world.width) * u64::from(fit) == u64::from(out.0)
+        || tall == u64::from(limit);
+    if fills { fit } else { fit + 1 }
+}
+
 /// The desktop's screen in pixels, for `px_per_voxel = "auto"`: `CUBARIUM_SCREEN=WxH`,
 /// else Hyprland's focused monitor, else the first connected output `xrandr` reports.
 /// `None` when none of them answers.
 pub fn desktop_screen() -> Option<(u32, u32)> {
+    desktop_screens(true)
+}
+
+/// The desktop's **largest** screen (by area), for the development window's
+/// `px_per_voxel = "auto"`: the window can be put on any of them, and the raster is drawn
+/// big enough for the largest and scaled down on the others. `CUBARIUM_SCREEN=WxH` still
+/// names the one screen outright.
+pub fn largest_desktop_screen() -> Option<(u32, u32)> {
+    desktop_screens(false)
+}
+
+/// The focused screen (`focused`), or the largest, from `CUBARIUM_SCREEN`, Hyprland or
+/// `xrandr`, in that order.
+fn desktop_screens(focused: bool) -> Option<(u32, u32)> {
     let wxh = |t: &str| -> Option<(u32, u32)> {
         let (w, h) = t.split_once('x')?;
         Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
@@ -660,6 +704,11 @@ pub fn desktop_screen() -> Option<(u32, u32)> {
     if let Ok(v) = std::env::var("CUBARIUM_SCREEN") {
         return wxh(&v);
     }
+    let largest = |sizes: Vec<(u32, u32)>| {
+        sizes
+            .into_iter()
+            .max_by_key(|&(w, h)| u64::from(w) * u64::from(h))
+    };
     let run = |cmd: &str, args: &[&str]| -> Option<String> {
         let out = std::process::Command::new(cmd).args(args).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
@@ -674,15 +723,22 @@ pub fn desktop_screen() -> Option<(u32, u32)> {
                 (m["height"].as_f64()? / scale) as u32,
             ))
         };
-        let focused = monitors.iter().find(|m| m["focused"].as_bool() == Some(true));
-        if let Some(size) = focused.or(monitors.first()).and_then(size) {
+        let found = if focused {
+            let f = monitors.iter().find(|m| m["focused"].as_bool() == Some(true));
+            f.or(monitors.first()).and_then(size)
+        } else {
+            largest(monitors.iter().filter_map(size).collect())
+        };
+        if let Some(size) = found {
             return Some(size);
         }
     }
     let text = run("xrandr", &["--current"])?;
-    text.lines()
+    let mut sizes = text
+        .lines()
         .filter(|l| l.contains(" connected"))
-        .find_map(|l| l.split_whitespace().find_map(|w| wxh(w.split('+').next()?)))
+        .filter_map(|l| l.split_whitespace().find_map(|w| wxh(w.split('+').next()?)));
+    if focused { sizes.next() } else { largest(sizes.collect()) }
 }
 
 /// `organisms` in the config: which drawing of plants and animals.
@@ -1295,20 +1351,34 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     }
     if cfg.px_per_voxel == PX_AUTO {
         // Once, here: the renderer's projection is fixed for the life of the process.
-        let panel = args.sink == VoxelSinkArg::Gpu
-            && args.gpu_target.unwrap_or_else(GpuTargetKind::detect) == GpuTargetKind::Shim;
+        let target = (args.sink == VoxelSinkArg::Gpu)
+            .then(|| args.gpu_target.unwrap_or_else(GpuTargetKind::detect));
+        let panel = target == Some(GpuTargetKind::Shim);
+        // The development window fills itself at any scale (`WindowFit`): its raster
+        // covers the largest screen and is scaled down to the window, so it is never
+        // stretched up. Everything else keeps the largest strip that fits.
+        let window = target == Some(GpuTargetKind::Window);
         let (out, what) = if panel {
             let (w, h) = cubarium_gpu::target::SHIM_PANEL;
-            ((h, w), "the panel")
+            ((h, w), "fits the panel")
+        } else if window {
+            match largest_desktop_screen() {
+                Some(size) => (size, "covers the largest screen"),
+                None => ((1920, 1080), "covers an assumed 1920x1080 screen (none detected)"),
+            }
         } else {
             match desktop_screen() {
-                Some(size) => (size, "the screen"),
-                None => ((1920, 1080), "an assumed 1920x1080 screen (none detected)"),
+                Some(size) => (size, "fits the screen"),
+                None => ((1920, 1080), "fits an assumed 1920x1080 screen (none detected)"),
             }
         };
-        cfg.px_per_voxel = auto_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out);
+        cfg.px_per_voxel = if window {
+            cover_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out)
+        } else {
+            auto_px_per_voxel(cfg.tilt_degrees, cfg.raster_height, &cfg.world, out)
+        };
         eprintln!(
-            "cubarium voxel: px_per_voxel auto -> {} (fits {what}, {}x{})",
+            "cubarium voxel: px_per_voxel auto -> {} ({what}, {}x{})",
             cfg.px_per_voxel, out.0, out.1
         );
     }
@@ -3803,6 +3873,30 @@ mod tests {
         };
         assert_eq!(auto_px_per_voxel(30.0, 540, &panel, (1920, 1080)), 6);
         assert_eq!(auto_px_per_voxel(30.0, 0, &panel, (1920, 1080)), 12);
+    }
+
+    /// The window's cover is the smallest strip at least as big as the screen on one
+    /// axis: at it the strip reaches the screen's width or height, and one less would not.
+    #[test]
+    fn px_per_voxel_cover_is_the_smallest_strip_that_reaches_the_screen() {
+        let w = cubarium_voxel::Preset::find("default").unwrap().config();
+        let strip = |s: u32| {
+            let rise = project::rise_for(30.0, s);
+            (w.width * s, w.height * s + w.depth * rise)
+        };
+        let reaches = |s: u32, out: (u32, u32)| {
+            let (sw, sh) = strip(s);
+            sw >= out.0 || sh >= out.1
+        };
+        for out in [(1920, 1200), (2560, 1600), (3840, 2160), (2560, 1440), (1000, 700)] {
+            let s = cover_px_per_voxel(30.0, 0, &w, out);
+            assert!(reaches(s, out), "{out:?}: {s} does not reach the screen");
+            assert!(s == 1 || !reaches(s - 1, out), "{out:?}: {} already reaches it", s - 1);
+        }
+        // A strip that fills the screen exactly is its own cover.
+        let s = auto_px_per_voxel(30.0, 0, &w, (1920, 1080));
+        let exact = (strip(s).0, 4000);
+        assert_eq!(cover_px_per_voxel(30.0, 0, &w, exact), s);
     }
 
     /// With no TOML the ambient world is the shipped `default` landscape on the ring it
