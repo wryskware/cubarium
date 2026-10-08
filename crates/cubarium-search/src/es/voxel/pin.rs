@@ -167,34 +167,29 @@ pub fn pin_worker(i: usize) {
 
 /// The calling thread's affinity mask.
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: sched_getaffinity on the calling thread only.
 pub fn own_affinity() -> std::io::Result<Vec<usize>> {
-    // SAFETY: a zeroed `cpu_set_t` is a valid empty set, and the size passed is its own.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok((0..libc::CPU_SETSIZE as usize)
-            .filter(|&c| libc::CPU_ISSET(c, &set))
-            .collect())
-    }
+    use nix::sched::{CpuSet, sched_getaffinity};
+    use nix::unistd::Pid;
+    let set = sched_getaffinity(Pid::from_raw(0))?;
+    (0..CpuSet::count())
+        .filter_map(|cpu| match set.is_set(cpu) {
+            Ok(true) => Some(Ok(cpu)),
+            Ok(false) => None,
+            Err(e) => Some(Err(e.into())),
+        })
+        .collect()
 }
 
 /// Restrict the calling thread to `cpus`.
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: sched_setaffinity on the calling thread only.
 pub fn set_affinity(cpus: &[usize]) -> std::io::Result<()> {
-    // SAFETY: as in `own_affinity`; `CPU_SET` is bounded by `CPU_SETSIZE` below.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        for &c in cpus.iter().filter(|&&c| c < libc::CPU_SETSIZE as usize) {
-            libc::CPU_SET(c, &mut set);
-        }
-        if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+    use nix::sched::{CpuSet, sched_setaffinity};
+    use nix::unistd::Pid;
+    let mut set = CpuSet::new();
+    for &cpu in cpus.iter().filter(|&&cpu| cpu < CpuSet::count()) {
+        set.set(cpu)?;
     }
+    sched_setaffinity(Pid::from_raw(0), &set)?;
     Ok(())
 }
 

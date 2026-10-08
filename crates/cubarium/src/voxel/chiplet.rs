@@ -33,7 +33,10 @@ pub fn split_overlap_pools(bio_cores: usize) -> Option<(Vec<usize>, Vec<usize>)>
         .and_then(|s| cubarium_voxel::cpus::parse_cpu_list(&s).ok())
         .unwrap_or_else(|| vec![c.cpu]);
         let first = *siblings.iter().min().unwrap_or(&c.cpu);
-        match cores.iter_mut().find(|v| v.contains(&first) || v.contains(&c.cpu)) {
+        match cores
+            .iter_mut()
+            .find(|v| v.contains(&first) || v.contains(&c.cpu))
+        {
             Some(v) => v.push(c.cpu),
             None => cores.push(vec![c.cpu]),
         }
@@ -72,7 +75,11 @@ pub fn nice_water_pools(n: i32) -> usize {
         if !comm.starts_with("water-") {
             continue;
         }
-        let Some(tid) = task.file_name().to_str().and_then(|t| t.parse::<i32>().ok()) else {
+        let Some(tid) = task
+            .file_name()
+            .to_str()
+            .and_then(|t| t.parse::<i32>().ok())
+        else {
             continue;
         };
         if set_nice(tid, n) {
@@ -84,10 +91,8 @@ pub fn nice_water_pools(n: i32) -> usize {
 }
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: setpriority on one thread of this process.
 fn set_nice(tid: i32, n: i32) -> bool {
-    // SAFETY: plain syscall on a thread id read from /proc/self/task.
-    unsafe { libc::setpriority(libc::PRIO_PROCESS, tid as libc::id_t, n) == 0 }
+    rustix::process::setpriority_process(rustix::process::Pid::from_raw(tid), n).is_ok()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -96,34 +101,23 @@ fn set_nice(_tid: i32, _n: i32) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: sched_getaffinity on the calling thread only.
 fn own_affinity() -> std::io::Result<Vec<usize>> {
-    // SAFETY: a zeroed `cpu_set_t` is a valid empty set, and the size passed is its own.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok((0..libc::CPU_SETSIZE as usize)
-            .filter(|&c| libc::CPU_ISSET(c, &set))
-            .collect())
-    }
+    let set = rustix::thread::sched_getaffinity(None)?;
+    Ok((0..rustix::thread::CpuSet::MAX_CPU)
+        .filter(|&c| set.is_set(c))
+        .collect())
 }
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited: sched_setaffinity on the calling thread only.
 fn set_affinity(cpus: &[usize]) -> std::io::Result<()> {
-    // SAFETY: as in `own_affinity`; `CPU_SET` is bounded by `CPU_SETSIZE` below.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        for &c in cpus.iter().filter(|&&c| c < libc::CPU_SETSIZE as usize) {
-            libc::CPU_SET(c, &mut set);
-        }
-        if libc::sched_setaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+    let mut set = rustix::thread::CpuSet::new();
+    for &c in cpus
+        .iter()
+        .filter(|&&c| c < rustix::thread::CpuSet::MAX_CPU)
+    {
+        set.set(c);
     }
-    Ok(())
+    rustix::thread::sched_setaffinity(None, &set).map_err(Into::into)
 }
 
 #[cfg(not(target_os = "linux"))]

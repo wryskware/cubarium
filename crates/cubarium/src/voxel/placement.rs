@@ -185,10 +185,8 @@ fn list(cpus: &[usize]) -> String {
 }
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited scheduler syscalls on the calling process only.
 fn current_tid() -> i32 {
-    // SAFETY: `gettid` takes no arguments and cannot fail.
-    unsafe { libc::syscall(libc::SYS_gettid) as i32 }
+    rustix::thread::gettid().as_raw_nonzero().get()
 }
 
 /// The process's other threads, from `/proc/self/task`.
@@ -204,100 +202,74 @@ fn other_tids(me: i32) -> Vec<i32> {
 }
 
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited scheduler syscalls on the calling process only.
 fn own_affinity() -> std::io::Result<Vec<usize>> {
-    // SAFETY: a zeroed `cpu_set_t` is a valid empty set, and the size passed is its own.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        if libc::sched_getaffinity(0, std::mem::size_of::<libc::cpu_set_t>(), &mut set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok((0..libc::CPU_SETSIZE as usize)
-            .filter(|&c| libc::CPU_ISSET(c, &set))
-            .collect())
-    }
+    let set = rustix::thread::sched_getaffinity(None)?;
+    Ok((0..rustix::thread::CpuSet::MAX_CPU)
+        .filter(|&c| set.is_set(c))
+        .collect())
 }
 
 /// `sched_setaffinity` for one thread (`0` is the caller).
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited scheduler syscalls on the calling process only.
 fn set_affinity(tid: i32, cpus: &[usize]) -> std::io::Result<()> {
-    // SAFETY: as in `own_affinity`; `CPU_SET` is bounded by `CPU_SETSIZE` below.
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        for &c in cpus.iter().filter(|&&c| c < libc::CPU_SETSIZE as usize) {
-            libc::CPU_SET(c, &mut set);
-        }
-        if libc::sched_setaffinity(tid, std::mem::size_of::<libc::cpu_set_t>(), &set) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+    let mut set = rustix::thread::CpuSet::new();
+    for &c in cpus
+        .iter()
+        .filter(|&&c| c < rustix::thread::CpuSet::MAX_CPU)
+    {
+        set.set(c);
     }
-    Ok(())
-}
-
-/// `struct sched_attr` as of Linux 5.3 (`SCHED_ATTR_SIZE_VER1`, with the clamps).
-#[cfg(target_os = "linux")]
-#[repr(C)]
-#[derive(Default, Debug)]
-struct SchedAttr {
-    size: u32,
-    sched_policy: u32,
-    sched_flags: u64,
-    sched_nice: i32,
-    sched_priority: u32,
-    sched_runtime: u64,
-    sched_deadline: u64,
-    sched_period: u64,
-    sched_util_min: u32,
-    sched_util_max: u32,
-}
-
-#[cfg(target_os = "linux")]
-const SCHED_FLAG_RESET_ON_FORK: u64 = 0x01;
-#[cfg(target_os = "linux")]
-const SCHED_FLAG_KEEP_POLICY: u64 = 0x08;
-#[cfg(target_os = "linux")]
-const SCHED_FLAG_KEEP_PARAMS: u64 = 0x10;
-#[cfg(target_os = "linux")]
-const SCHED_FLAG_UTIL_CLAMP_MIN: u64 = 0x20;
-
-#[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited scheduler syscalls on the calling process only.
-fn get_sched_attr() -> std::io::Result<SchedAttr> {
-    let mut attr = SchedAttr::default();
-    // SAFETY: the buffer is a `SchedAttr` and the size passed is its own.
-    let r = unsafe {
-        libc::syscall(
-            libc::SYS_sched_getattr,
-            0,
-            &mut attr as *mut SchedAttr,
-            std::mem::size_of::<SchedAttr>() as u32,
-            0,
-        )
-    };
-    if r != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(attr)
+    rustix::thread::sched_setaffinity(rustix::process::Pid::from_raw(tid), &set).map_err(Into::into)
 }
 
 /// Raise the calling thread's `uclamp.min`, keeping its policy, nice and `uclamp.max`.
+/// Uses util-linux's safe process interface; `chrt` and `uclampset` must be installed.
 #[cfg(target_os = "linux")]
-#[allow(unsafe_code)] // Audited scheduler syscalls on the calling process only.
 pub fn set_uclamp_min(value: u32) -> std::io::Result<()> {
-    let mut attr = get_sched_attr()?;
-    attr.size = std::mem::size_of::<SchedAttr>() as u32;
-    // The nice value read back is passed back unchanged: 5.4 checks it against the
-    // thread's own even when the params are kept.
-    attr.sched_flags = (attr.sched_flags & SCHED_FLAG_RESET_ON_FORK)
-        | SCHED_FLAG_KEEP_POLICY
-        | SCHED_FLAG_KEEP_PARAMS
-        | SCHED_FLAG_UTIL_CLAMP_MIN;
-    attr.sched_util_min = value;
-    // SAFETY: a fully initialised `SchedAttr` whose `size` is its own.
-    let r = unsafe { libc::syscall(libc::SYS_sched_setattr, 0, &attr as *const SchedAttr, 0) };
-    if r != 0 {
-        return Err(std::io::Error::last_os_error());
+    use std::process::Command;
+
+    if value > 1024 && value != u32::MAX {
+        return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+    }
+    let tid = current_tid().to_string();
+    let policy = Command::new("chrt")
+        .env("LC_ALL", "C")
+        .args(["--pid", &tid])
+        .output()?;
+    if !policy.status.success() {
+        return Err(std::io::Error::other(format!(
+            "chrt failed: {}",
+            String::from_utf8_lossy(&policy.stderr).trim()
+        )));
+    }
+    let policy = String::from_utf8_lossy(&policy.stdout);
+    let policy = policy
+        .lines()
+        .find(|line| line.contains("current scheduling policy:"))
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "chrt did not report the current scheduling policy",
+            )
+        })?;
+    let minimum = if value == u32::MAX {
+        "-1".to_owned()
+    } else {
+        value.to_string()
+    };
+    let mut command = Command::new("uclampset");
+    command
+        .env("LC_ALL", "C")
+        .args(["--pid", &tid, "-m", &minimum]);
+    if policy.contains("|SCHED_RESET_ON_FORK") {
+        command.arg("--reset-on-fork");
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(format!(
+            "uclampset failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
     }
     Ok(())
 }
@@ -485,7 +457,19 @@ mod tests {
     #[test]
     fn the_uclamp_floor_reads_back_on_the_thread_that_set_it() {
         std::thread::spawn(|| match set_uclamp_min(512) {
-            Ok(()) => assert_eq!(get_sched_attr().unwrap().sched_util_min, 512),
+            Ok(()) => {
+                let sched =
+                    std::fs::read_to_string(format!("/proc/self/task/{}/sched", current_tid()))
+                        .unwrap();
+                let minimum = sched
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        (name.trim() == "uclamp.min").then(|| value.trim().parse::<u32>().unwrap())
+                    })
+                    .expect("kernel reports the clamp minimum");
+                assert_eq!(minimum, 512);
+            }
             Err(e) => eprintln!("uclamp not settable here: {e}"),
         })
         .join()

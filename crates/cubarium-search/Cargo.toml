@@ -32,6 +32,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 # The calibration exports its selected configuration as the TOML `cubarium run --config` reads.
 toml = "0.8"
-# Worker pinning (sched_setaffinity) and per-thread hardware counters (perf_event_open)
-# for the cache study: es::voxel::pin, es::voxel::counters.
-libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Safe wrappers for worker pinning and per-thread hardware counters in the cache study.
+nix = { version = "0.31", features = ["sched"] }
+perf-event = { package = "perf-event2", version = "0.7.4" }
+
+[lints]
+workspace = true

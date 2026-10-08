@@ -492,20 +492,17 @@ fn accept_loop(shared: &Arc<Shared>, listener: &TcpListener) {
 /// can still return WouldBlock. A finite idle timeout bounds shutdown even if no
 /// client ever connects, without allocating a wakeup socket or spinning at 1kHz.
 #[cfg(unix)]
-#[allow(unsafe_code)] // Audited poll(2) wrapper only; all HTTP handling stays safe Rust.
 fn wait_for_connection(listener: &TcpListener) {
-    use std::os::fd::AsRawFd;
-    let mut descriptor = libc::pollfd {
-        fd: listener.as_raw_fd(),
-        events: libc::POLLIN,
-        revents: 0,
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let mut descriptors = [PollFd::new(listener, PollFlags::IN)];
+    let timeout = Timespec {
+        tv_sec: 0,
+        tv_nsec: 100_000_000,
     };
-    // SAFETY: one initialized pollfd remains exclusively borrowed for the call;
-    // its descriptor is owned by the listener, which outlives this wait. poll
-    // neither takes ownership nor reads beyond the one-element array. The finite
-    // 100ms timeout keeps the thread responsive to its atomic shutdown flag.
-    let result = unsafe { libc::poll(&mut descriptor, 1, 100) };
-    if result < 0 || (result > 0 && descriptor.revents & libc::POLLIN == 0) {
+    let result = poll(&mut descriptors, Some(&timeout));
+    if result.is_err()
+        || (result.is_ok_and(|n| n > 0) && !descriptors[0].revents().contains(PollFlags::IN))
+    {
         // Avoid a busy loop on an OS error, including POLLNVAL/POLLERR/POLLHUP.
         std::thread::sleep(ACCEPT_POLL);
     }

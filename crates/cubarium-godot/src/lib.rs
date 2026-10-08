@@ -10,6 +10,8 @@
 //!
 //! Paths are filesystem paths: GDScript passes `ProjectSettings.globalize_path("user://…")`.
 
+#![deny(unsafe_code)]
+
 use std::path::PathBuf;
 
 pub mod mesher;
@@ -22,10 +24,17 @@ use cubarium_session::{Session, SessionOptions, View, WorldSpec};
 use godot::prelude::*;
 use serde_json::Value;
 
-struct CubariumExtension;
+// gdextension strips attributes from its impl, including a local lint allow.
+// Keep the exception around only that impl and gdext's generated entry points.
+#[allow(unsafe_code)]
+mod extension {
+    use godot::prelude::*;
 
-#[gdextension]
-unsafe impl ExtensionLibrary for CubariumExtension {}
+    struct CubariumExtension;
+
+    #[gdextension]
+    unsafe impl ExtensionLibrary for CubariumExtension {}
+}
 
 /// A running Cubarium world. `CubariumSession.new()` starts an empty session; make a world
 /// with `generate_candidates` + `promote`, or `load`.

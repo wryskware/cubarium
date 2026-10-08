@@ -17,3 +17,6 @@ serde = ["dep:serde", "cube-proto/serde"]
 [dev-dependencies]
 cubarium-surface-oracle = { workspace = true }
 proptest = { workspace = true }
+
+[lints]
+workspace = true
