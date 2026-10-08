@@ -35,6 +35,13 @@
 //! as the host does at start, and the rows continue from the saved minute. A stale
 //! envelope is refused by the layer's own loader. The generation arguments (`preset=`,
 //! `config=`, `seed=`, `generated`, `closed`, `nofauna`) are refused beside `load=`.
+//! `set=flora.…` / `set=fauna.…` beside `load=` change the saved run's own plant and
+//! animal configs (not the code defaults), the drivers re-installed on the result; a
+//! plant value is in its authored unit and rescaled to the world's cell size exactly as on
+//! a fresh run, and the resolved set goes to `params.toml` as below. `set=world.…` is
+//! refused: the save fixes the world, climate and day clock included. A rate changed on a
+//! branch from a save shows a transient away from the save's state first, not the new
+//! rate's equilibrium — an arm about the equilibrium is founded under its own config.
 //!
 //! ```text
 //! cargo run --release -p cubarium --example voxel_census -- 6 preset=default save=runs/h6
@@ -263,19 +270,7 @@ fn main() {
             }
             file
         });
-    let resolve = |world: cubarium_voxel::Config| -> Params {
-        let params = Params::resolve_over(
-            Params {
-                world,
-                ..Params::defaults()
-            },
-            &Layers {
-                file: file_tables.clone(),
-                sets: sets.clone(),
-                ..Layers::default()
-            },
-        )
-        .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+    let write_params = |params: &Params| {
         let mut written = Vec::new();
         if let Some(s) = &save {
             written.push(params.write_beside(&s.dir).map(|p| p.display().to_string()));
@@ -294,11 +289,26 @@ fn main() {
                 Err(e) => eprintln!("could not write the parameter set: {e}"),
             }
         }
+    };
+    let resolve = |world: cubarium_voxel::Config| -> Params {
+        let params = Params::resolve_over(
+            Params {
+                world,
+                ..Params::defaults()
+            },
+            &Layers {
+                file: file_tables.clone(),
+                sets: sets.clone(),
+                ..Layers::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+        write_params(&params);
         params
     };
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
-        assert!(sets.is_empty(), "set= is refused beside load=: the saved layers carry their own");
-        let (mut sim, minute0) = load_run(std::path::Path::new(dir), &args, heuristic, &policies);
+        let (mut sim, minute0) =
+            load_run(std::path::Path::new(dir), &args, heuristic, &policies, &sets, &write_params);
         run(&mut sim, hours, minute0, save.as_ref(), &timing, stage);
         return;
     }
@@ -945,6 +955,8 @@ fn load_run(
     args: &[String],
     heuristic: bool,
     policies: &[(Founder, std::path::PathBuf)],
+    sets: &[String],
+    write_params: &dyn Fn(&Params),
 ) -> (Sim, u64) {
     let shaping: Vec<&str> = args
         .iter()
@@ -972,6 +984,31 @@ fn load_run(
         flora.view().stands.len(),
         fauna.view().animals.len()
     );
+    // `set=` over the loaded layers: resolved over the save's own configs, the plant
+    // values in their authored unit and rescaled to the world's cell size as a fresh run
+    // would ([`Params::over_loaded`]).
+    let mut flora = flora;
+    let loaded = Params::over_loaded(world.config().clone(), flora.config(), fauna.config().clone(), sets)
+        .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+    if !sets.is_empty() {
+        let plants = cubarium_voxel_flora::registry();
+        let animals = cubarium_voxel_fauna::registry();
+        for s in sets {
+            let path = s.split_once('=').map_or(s.as_str(), |(p, _)| p);
+            let shown = if path.starts_with("flora.") {
+                plants.get(&loaded.flora, path).map(|v| format!("{v} at {} m", world.config().voxel_m))
+            } else {
+                animals.get(fauna.config(), path).map(|v| format!("was {v}"))
+            };
+            eprintln!("set {s} ({})", shown.unwrap_or_else(|e| e));
+        }
+        flora.replace_config(loaded.flora.clone()).unwrap_or_else(|e| panic!("set= flora: {e}"));
+        fauna.replace_config(loaded.params.fauna.clone()).unwrap_or_else(|e| panic!("set= fauna: {e}"));
+        // The drivers read the animal config when installed: put them back on the new one.
+        cubarium_voxel_sim::saved::restore(&mut fauna, &driven_by_policy)
+            .unwrap_or_else(|e| panic!("load: {e}"));
+    }
+    write_params(&loaded.params);
     if heuristic {
         eprintln!("founders: the observation-only heuristic (control)");
     } else {

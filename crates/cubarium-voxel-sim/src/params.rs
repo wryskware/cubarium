@@ -28,6 +28,15 @@ pub struct Params {
     pub fauna: FaunaConfig,
 }
 
+/// [`Params::over_loaded`]'s result.
+#[derive(Clone, Debug)]
+pub struct LoadedParams {
+    /// The resolved set, its plants as authored: what `params.toml` records.
+    pub params: Params,
+    /// The plant config to install on the loaded layer, at the world's cell size.
+    pub flora: FloraConfig,
+}
+
 /// What lies over the code defaults, applied in field order.
 #[derive(Default)]
 pub struct Layers<'a> {
@@ -91,6 +100,66 @@ impl Params {
             .map_err(|e| format!("--set: {e}"))?;
         p.validate()?;
         Ok(p)
+    }
+
+    /// **`set=` over a loaded run**: `sets` resolved over the configs a saved world carries
+    /// — its world config, its plant config **as it runs** (at the world's cell size) and
+    /// its animal config — rather than over the code defaults.
+    ///
+    /// A `flora.*` value means what it means on a fresh run of the same world: the
+    /// authored unit on the reference 0.25 m voxel, rescaled to the world's
+    /// ([`Params::flora_for_world`]). The loaded plant config is taken back to its authored
+    /// form ([`FloraConfig::authored`]) for the resolved set, and the plant config to
+    /// install is the loaded one with only the set paths replaced by their rescaled
+    /// values, so every field nobody set stays exactly as saved.
+    ///
+    /// A `world.*` set is refused: the save fixes the terrain and water, and the world has
+    /// no setter for any of its config at run time, the climate and day clock included.
+    pub fn over_loaded(
+        world: Config,
+        flora: &FloraConfig,
+        fauna: FaunaConfig,
+        sets: &[String],
+    ) -> Result<LoadedParams, String> {
+        let mut flora_paths = Vec::new();
+        for s in sets {
+            let (path, _) = registry::parse_set(s)?;
+            match path.split('.').next().unwrap_or_default() {
+                "world" => {
+                    return Err(format!(
+                        "set={s}: a loaded world keeps its saved world config (terrain, water, \
+                         climate and day clock alike); only flora.* and fauna.* can be set beside load="
+                    ));
+                }
+                "flora" => flora_paths.push(path),
+                _ => {}
+            }
+        }
+        let params = Params::resolve_over(
+            Params {
+                world,
+                flora: flora.clone().authored(),
+                fauna,
+            },
+            &Layers {
+                sets: sets.to_vec(),
+                ..Layers::default()
+            },
+        )?;
+        let rescaled = params.flora_for_world();
+        let reg = cubarium_voxel_flora::registry();
+        let mut edits = Vec::with_capacity(flora_paths.len());
+        for path in flora_paths {
+            let value = reg.get(&rescaled, &path)?;
+            edits.push((path, value));
+        }
+        let mut installed = flora.clone();
+        reg.apply(&mut installed, &edits).map_err(|e| format!("--set: {e}"))?;
+        installed.validate()?;
+        Ok(LoadedParams {
+            params,
+            flora: installed,
+        })
     }
 
     fn apply_file(&mut self, doc: &toml::Table) -> Result<(), String> {

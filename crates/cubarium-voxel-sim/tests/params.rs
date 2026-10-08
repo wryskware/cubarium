@@ -200,3 +200,114 @@ fn the_dump_lists_every_row_and_a_run_writes_its_set() {
     assert_eq!(back, p);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// **`set=` beside `load=`** (`Params::over_loaded`): on a world finer than the reference
+/// voxel, a plant set on a loaded layer holds the value the same set holds on a fresh run
+/// of that world — for a voxel-scaled row (`hop`) and an unscaled one (`assimilation`) —
+/// while every field nobody set keeps the save's value, and the resolved set records the
+/// authored value.
+#[test]
+fn a_set_on_a_loaded_world_means_what_it_means_on_a_fresh_one() {
+    let world = Config {
+        voxel_m: 0.1,
+        ..Config::default()
+    };
+    let resolved = |sets: &[&str]| {
+        Params::resolve_over(
+            Params {
+                world: world.clone(),
+                ..Params::defaults()
+            },
+            &Layers {
+                sets: sets.iter().map(|s| s.to_string()).collect(),
+                ..Layers::default()
+            },
+        )
+        .expect("the sets resolve")
+    };
+    // The save: a run founded under an earlier set of its own, through the plant
+    // snapshot's bytes as a loaded layer comes back.
+    let earlier = resolved(&["flora.velvetpad.rooting_radius=3", "fauna.founding.arrival_body=0.6"]);
+    let founded = cubarium_voxel_flora::Flora::new(earlier.flora_for_world());
+    let saved = cubarium_voxel_flora::snapshot::decode(&cubarium_voxel_flora::snapshot::encode(&founded))
+        .expect("the snapshot reads back");
+
+    let hop = "flora.springturf.hop";
+    let assimilation = "flora.springturf.assimilation";
+    let authored_hop = registry_get(&Params::defaults().flora, hop).as_integer().unwrap() + 2;
+    let authored_assim = registry_get(&Params::defaults().flora, assimilation).as_float().unwrap() * 1.5;
+    let sets = [
+        format!("{hop}={authored_hop}"),
+        format!("{assimilation}={authored_assim}"),
+        "fauna.founding.arrival_stomach=0.5".to_string(),
+    ];
+    let loaded = Params::over_loaded(world.clone(), saved.config(), earlier.fauna.clone(), &sets)
+        .expect("flora and fauna sets resolve over a loaded world");
+
+    let mut all: Vec<&str> = vec!["flora.velvetpad.rooting_radius=3", "fauna.founding.arrival_body=0.6"];
+    all.extend(sets.iter().map(String::as_str));
+    let fresh = resolved(&all).flora_for_world();
+    for path in [hop, assimilation] {
+        assert_eq!(registry_get(&loaded.flora, path), registry_get(&fresh, path), "{path}");
+    }
+    // The scaled row really was rescaled, and the resolved set records it as authored.
+    assert_ne!(registry_get(&loaded.flora, hop).as_integer(), Some(authored_hop));
+    assert_eq!(registry_get(&loaded.params.flora, hop).as_integer(), Some(authored_hop));
+    // What nobody set is the save's, field for field.
+    let untouched = "flora.velvetpad.rooting_radius";
+    assert_eq!(registry_get(&loaded.flora, untouched), registry_get(saved.config(), untouched));
+    assert_eq!(registry_get(&loaded.params.flora, untouched).as_integer(), Some(3));
+    let mut expected = saved.config().clone();
+    cubarium_voxel_flora::registry()
+        .apply(
+            &mut expected,
+            &[hop, assimilation].map(|p| (p.to_string(), registry_get(&fresh, p))),
+        )
+        .unwrap();
+    assert_eq!(loaded.flora, expected, "only the set paths differ from the save");
+    // The animal set lies over the save's animals, not the code defaults.
+    assert_eq!(loaded.params.fauna.founding.arrival_stomach, 0.5);
+    assert_eq!(loaded.params.fauna.founding.arrival_body, earlier.fauna.founding.arrival_body);
+}
+
+/// A `world.*` set beside `load=` is refused by name: the save fixes the world.
+#[test]
+fn a_world_set_on_a_loaded_world_is_refused() {
+    let p = Params::defaults();
+    let e = Params::over_loaded(
+        p.world.clone(),
+        &p.flora_for_world(),
+        p.fauna.clone(),
+        &["world.climate.dry_gap_min_s=0".to_string()],
+    )
+    .expect_err("a world set is refused");
+    assert!(e.contains("world.climate.dry_gap_min_s"), "{e}");
+}
+
+/// A world's plant config taken back to its authored form is the authored one: a rounded
+/// voxel distance exactly, a scaled amount to rounding error.
+#[test]
+fn authored_inverts_rescaled_to() {
+    let reg = cubarium_voxel_flora::registry();
+    let leaves = |cfg: &FloraConfig| {
+        let v = cubarium_voxel::registry::to_value(cfg).unwrap();
+        reg.typed_leaves(&v)
+    };
+    let authored = Params::defaults().flora;
+    for voxel_m in [0.05, 0.1, 0.125, 0.2, 0.25, 0.5] {
+        let back = authored.clone().rescaled_to(voxel_m).authored();
+        let (a, b) = (leaves(&authored), leaves(&back));
+        assert_eq!(a.len(), b.len());
+        for ((path, x, int), (_, y, _)) in a.iter().zip(&b) {
+            if *int || x == y {
+                assert_eq!(x, y, "{path} at {voxel_m}");
+            } else {
+                assert!((x - y).abs() <= 1e-12 * x.abs().max(1e-300), "{path} at {voxel_m}: {x} vs {y}");
+            }
+        }
+    }
+}
+
+fn registry_get(cfg: &FloraConfig, path: &str) -> toml::Value {
+    cubarium_voxel_flora::registry().get(cfg, path).expect(path)
+}
