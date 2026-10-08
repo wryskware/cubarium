@@ -26,6 +26,8 @@ pub struct WaterLend {
     /// hold free water in) and at this one.
     wet_then: Vec<u128>,
     wet_now: Vec<u128>,
+    /// Their union for the restore, kept warm instead of allocated every tick.
+    rows: Vec<u128>,
     /// Per plane (`y`), the porous runs `(start, len)` within it, and the terrain version
     /// they were read at.
     porous: Vec<Vec<(u32, u32)>>,
@@ -113,12 +115,14 @@ impl World {
             lend.porous_version = Some(self.terrain_version);
         }
         // Free water: the cells wet then or now.
-        let rows: Vec<u128> = lend
-            .wet_then
-            .iter()
-            .zip(&lend.wet_now)
-            .map(|(a, b)| a | b)
-            .collect();
+        lend.rows.clear();
+        lend.rows.extend(
+            lend.wet_then
+                .iter()
+                .zip(&lend.wet_now)
+                .map(|(a, b)| a | b),
+        );
+        let rows = &lend.rows;
         let any = rows.iter().fold(0u128, |a, r| a | r);
         let free = |y: usize, d: &mut [f64], s: &[f64]| {
             if (any >> y) & 1 == 0 {

@@ -423,9 +423,18 @@ pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cuba
             .filter(|a| a.pack.is_some_and(|m| m.pack == rec.id && !m.pup)).copied().collect();
         adults.sort_by_key(|a| (Some(a.id) != rec.breeder, a.id));
         let wet = view.water_depth_m(i64::from(rec.den.x), rec.den.y, rec.den.z) > 0.0;
-        if wet { fauna.pack_routes.remove(&rec.lineage.index()); }
-        let graph = fauna.pack_routes(view, rec.lineage);
-        let Some((anchor, from)) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+        let mut graph = fauna.pack_routes(view, rec.lineage);
+        let Some((mut anchor, mut from)) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+        // With no adult on the graph there is no replacement search to run. Keep the
+        // normal route refresh cadence instead of rebuilding the whole world every
+        // tick for a persistently wet den. Once anchored, a flood still gets a fresh
+        // graph immediately, and the anchor must also belong to that fresh graph.
+        if wet {
+            fauna.pack_routes.remove(&rec.lineage.index());
+            graph = fauna.pack_routes(view, rec.lineage);
+            let Some(current) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+            (anchor, from) = current;
+        }
         if !wet && graph.face(rec.den).is_some_and(|i| graph.components[i] == graph.components[from]) { continue; }
         let den = graph.faces.iter().enumerate()
             .filter(|(i, s)| graph.components[*i] == graph.components[from]

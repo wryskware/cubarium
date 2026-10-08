@@ -414,6 +414,46 @@ fn a_flooded_den_moves_to_a_dry_roof_and_a_usable_den_stays_put() {
 }
 
 #[test]
+fn an_off_graph_pack_with_a_wet_den_keeps_the_route_refresh_cadence() {
+    use std::sync::Arc;
+    let mut world = plain();
+    let den = site(6, 6);
+    let (mut fauna, pack) = found(&world, den);
+    // A body in transit above every support face cannot anchor a den search.
+    place(&mut fauna, Site {
+        y: world.config().height - 2,
+        ..site(7, 6)
+    });
+    world.apply(WorldCommand::AddWater {
+        x: i64::from(den.x),
+        y: den.y + 1,
+        z: den.z,
+        volume_m3: world.config().voxel_volume(),
+    });
+    let flora = Flora::new(FloraConfig::default());
+    let glowcap = flora.config().species(Species::Glowcap);
+    let graph = fauna.pack_routes(&world.view(), C);
+    assert!(graph.face(fauna.animals[0].site).is_none());
+    for _ in 0..2 {
+        crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+        assert!(Arc::ptr_eq(&graph, &fauna.pack_routes(&world.view(), C)));
+        assert_eq!(fauna.pack(pack).unwrap().den, den);
+        fauna.tick += 1;
+    }
+    let every = fauna.config.founder(C).pack.unwrap().route_refresh_s;
+    fauna.tick = cubarium_voxel::ticks_at_least_one(every);
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    assert!(!Arc::ptr_eq(&graph, &fauna.pack_routes(&world.view(), C)));
+    // Returning to the graph restores immediate relocation, even within the cache's
+    // refresh interval: the wet den is replaced by a dry reachable face.
+    place(&mut fauna, site(7, 6));
+    crate::pack::renew_dens(&mut fauna, &world.view(), glowcap);
+    let next = fauna.pack(pack).unwrap().den;
+    assert_ne!(next, den);
+    assert_eq!(world.view().water_depth_m(i64::from(next.x), next.y, next.z), 0.0);
+}
+
+#[test]
 fn a_loftstrider_is_not_gravid_at_introduction_and_has_one_calf_before_its_birth_wait() {
     let world = plain();
     let f = Founder::Loftstrider;
