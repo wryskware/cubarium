@@ -3737,6 +3737,10 @@ pub struct Fauna {
     /// FORAGE-LEAVE's readout per lineage ([`ForageTally`]). Session state: not saved.
     #[serde(skip)]
     pub(crate) forage_tally: [ForageTally; Founder::COUNT],
+    /// LEADS-PAY's readout: leads given up per lineage (`step::rove`). Session state: not
+    /// saved.
+    #[serde(skip)]
+    pub(crate) lead_give_ups: [u64; Founder::COUNT],
     /// ROOSTS (backlog §12): the latticevine ledges a glider may roost on ([`Ledge`]) and
     /// the tick they were read, re-read at the teachers' `route_refresh_s`. Derived from the
     /// terrain and the cover: not saved.
@@ -4090,6 +4094,7 @@ impl Fauna {
             forage: FxHashMap::default(),
             rove: FxHashMap::default(),
             forage_tally: [ForageTally::default(); Founder::COUNT],
+            lead_give_ups: [0; Founder::COUNT],
             ledges: (None, Vec::new()),
         })
     }

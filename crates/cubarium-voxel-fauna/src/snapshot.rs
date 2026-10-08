@@ -138,7 +138,9 @@ use crate::Fauna;
 // 70: HUNGRY-SEARCH — `TeacherConfig::{search_patience_s, search_leg_bl, search_cell_bl,
 //     search_memory_half_life_s}`; a hungry heuristic forager with nothing in sense ranges
 //     on legs away from ground it has covered.
-pub const SCHEMA: u32 = 70;
+// 71: LEADS-PAY — `TeacherConfig::lead_give_up_bl`; a heuristic body's lead (food in view, a
+//     scent, a still light) that never brings a taste is given up.
+pub const SCHEMA: u32 = 71;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
