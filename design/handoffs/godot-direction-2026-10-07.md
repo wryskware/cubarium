@@ -76,11 +76,14 @@ the panel is no longer a constraint (a window manager there is acceptable later)
 - **Saves**: `save_whole_world`, `load_world`, `SnapshotWriter` in the same file; the layered
   world/flora/fauna snapshot; schema mismatch refused.
 - **World generation**: the `terrarium` landform preset (`crates/cubarium-voxel/src/terrarium.rs`),
-  live worlds 256 × 128 × 48 at 0.125 m. Depth 72 and 96 are in flight
-  (`design/handoffs/deep-world-2026-10-07.md`).
-- **Observatory** (in flight, `design/handoffs/observatory-api-dashboard-2026-10-07.md`): the
-  transport-free query layer, including `/animals/{id}` with life history. The binding calls
-  those functions directly. The HTTP server and dashboard stay as a dev tool.
+  at 0.125 m. Sizes on main: 256 × 128 × 48 (`config/*/terrarium.toml`), depth 72 and 96
+  (`terrarium-d72.toml`, `-d96.toml`), and the desktop's wide 640 × 128 × 96
+  (`config/desktop/terrarium-wide.toml`, for its 2560×720 screen).
+- **Observatory** (merged d5af164b, `crates/cubarium-observatory`): transport-free `query`
+  functions over `&World`, `&Flora`, `&Fauna` returning serde types; `observer::Observer`
+  publishing snapshots off the loop; `LifeBook` with per-animal life histories; the
+  `Command` enum (speed, pause, resume). The binding calls these directly. The HTTP server and
+  dashboard stay as a dev tool.
 - **Change detection**: the change-only pack in `crates/cubarium/src/sink/gpu/voxel.rs` already
   knows what changed per tick; reuse its logic for the feed.
 - **Organism sources**: baked voxel models (`assets/voxel-models/<mm>/manifest.json`, loaded by
@@ -117,11 +120,16 @@ Dev presentation only. D1 does not port the voxel look or invent a new one.
 
 - Terrain and water meshes from the changed chunks, in plain coloured voxels (the plain path
   is the main draw; textures stay opt-in). The elevated orthographic camera at 30°, as today.
+- **Panning** (Wrysk, 2026-10-07: "panning. or at least at creation, but i dont see the harm
+  in panning a live world"). The camera pans across the live world and across a candidate in
+  the new-world picker: mouse drag, keys, and the gamepad stick, clamped to the world's edges,
+  eased rather than snapped. The default framing fits the world as today. Panning matters most
+  where the world is wider than the screen (the 640-wide world on voidrunner's 1920×1200).
 - Organisms as their baked voxel models, else glyph boxes, placed by position and heading and
   smoothed between ticks. Pose modes may switch models; no rigging yet.
 - Daylight from the day clock; rain as a simple effect. Animated effects fade or move, never
   pop.
-- Measure fps and ms per frame on the live 256 × 128 × 48 world (and depth 96 once it lands)
+- Measure fps and ms per frame on 256 × 128 × 48, depth 96 and the wide 640 × 128 × 96 world
   on the desktop. 60 fps is the bar for the Legion Go.
 
 ### Package C: the shell (Godot; high effort; parallel with B once A lands)
@@ -132,9 +140,9 @@ Dev presentation only. D1 does not port the voxel look or invent a new one.
    Godot's view, the world day and a species summary from the query layer. Save, overwrite,
    rename, delete. A wrong-schema save stays listed as "made by an older version, can't be
    loaded" and can be deleted.
-3. **New world**: size (terrarium, deep 1.5×, 2× when deep-world lands), terrain preset,
-   climate preset. Generate 3–4 candidates in parallel; Godot draws each candidate's thumbnail
-   in its own SubViewport; pick one or reroll.
+3. **New world**: size (terrarium, deep 1.5×, 2×, wide), terrain preset, climate preset.
+   Generate 3–4 candidates in parallel; Godot draws each candidate's thumbnail in its own
+   SubViewport; open one to pan across it; pick one or reroll.
 4. **Inspect**: hover highlights an animal (Godot ray-casts its own scene), click opens its
    stats and life history from the observatory's animal data, and the panel follows the
    animal.
