@@ -1057,6 +1057,8 @@ impl VoxelParams {
             hi_max: [0; 4],
             hi_k: [0.0; 4],
             hi_cells: [[0; 4]; HIGHLIGHT_CELLS / 4],
+            fig_sun: [0.0; 4],
+            fig_map: [0.0; 4],
         }
     }
 }
@@ -1201,6 +1203,9 @@ struct VoxelUniforms {
     hi_k: [f32; 4],
     /// Its cells, [`Highlight::key`], four a row.
     hi_cells: [[u32; 4]; HIGHLIGHT_CELLS / 4],
+    /// The figures' sun map ([`crate::figures::sun_map`]): `figSun`, `figMap`.
+    fig_sun: [f32; 4],
+    fig_map: [f32; 4],
 }
 
 /// The most cells a highlight names one by one; a larger body is highlighted by its box.
@@ -2265,6 +2270,7 @@ impl VoxelRenderer {
             sampled(10),
             sampled(11),
             sampled(12),
+            sampled(13),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -2278,7 +2284,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(12),
+                .descriptor_count(13),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -2430,7 +2436,10 @@ impl VoxelRenderer {
             set_layout,
             &constants,
             STAGING_RING,
+            (params.width, params.height, params.depth),
         )?;
+        let isun = image_info(figures.sun_view);
+        unsafe { d.update_descriptor_sets(&[sampled_write(set, 13, &isun)], &[]) };
         let raster_framebuffer = match &bloom {
             Some(b) => framebuffer_n(
                 d,
@@ -2946,6 +2955,21 @@ impl VoxelRenderer {
             block.hi_cells = cells;
         }
         block.fog_k[1] = self.fog_floor;
+        // The figures go into this slot's buffer now: the sun map is drawn before the walk.
+        let p = &self.params;
+        let sun_map = if redraw {
+            self.figures_dropped +=
+                self.figures.prepare(frame.slot, &self.figure_frame, p.s, p.rise, p.base, self.view_x) as u64;
+            (p.lit && self.figures.has_tiles(frame.slot))
+                .then(|| crate::figures::sun_map(p.width, p.height, p.depth, self.look.sun))
+                .flatten()
+        } else {
+            None
+        };
+        if let Some((fs, fm)) = sun_map {
+            block.fig_sun = fs;
+            block.fig_map = fm;
+        }
         if self.curving {
             let gain = |c: u8| match c {
                 0 => 1.0,
@@ -3112,6 +3136,8 @@ impl VoxelRenderer {
                 );
             }
             if redraw {
+                // The figures' sun map, which the walk's sun march reads (H2).
+                self.figures.record_sun(d, cb, frame.slot, sun_map);
                 // The pass leaves the raster in `SHADER_READ_ONLY_OPTIMAL`, which is
                 // where the present pass wants it — so a frame that skips this one finds
                 // the image in the right layout, holding the right picture, and only one
@@ -3144,8 +3170,6 @@ impl VoxelRenderer {
                 d.cmd_end_render_pass(cb);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 4);
                 let p = &self.params;
-                self.figures_dropped +=
-                    self.figures.prepare(frame.slot, &self.figure_frame, p.s, p.rise, p.base, self.view_x) as u64;
                 self.figures.record(
                     d,
                     cb,

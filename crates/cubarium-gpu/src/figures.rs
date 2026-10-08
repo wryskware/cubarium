@@ -23,12 +23,15 @@
 //!
 //! # Shadows of animals
 //!
-//! Not drawn: an animal is no longer a voxel of the volume the sun march walks, so it
-//! shadows neither the ground nor itself. **The hook**: a sun-space depth map of the
-//! frame's tiles (a third pass over the same voxel instances, orthographic along
-//! `sunK`, the highest point of any figure per texel), read by `world.glsl`'s
-//! `sunReaches` for terrain texels and by `figure.frag` for figure texels: a point whose
-//! sun-space texel holds a figure above it is in shadow.
+//! An animal is no longer a voxel of the volume the sun march walks, so its shadow comes
+//! from a **sun map** (lit tier): before the walk, every figure cell is drawn along the
+//! sun, orthographic, into a depth map that keeps each sun ray's highest figure point
+//! (`figure_sun.vert`), a texel being where the ray meets y = 0 (two texels a voxel across,
+//! [`SUN_MAP_H`] rows over the rays' reach in z). `world.glsl`'s `sunReaches` reads it
+//! first: a point with a figure higher than itself on its sun ray is in shadow. So animals
+//! shade the ground, the plants and each other, and their own lower faces, as the stamped
+//! voxels did. A sun lower than [`SUN_MAP_MIN_Y`] casts none (the rays' reach grows
+//! without bound).
 //!
 //! Every `unsafe` block below holds one `ash` call and nothing else (WORKING_POLICY,
 //! "No unsafe code").
@@ -39,6 +42,8 @@ use ash::vk;
 use crate::vk::{Gpu, HostBuffer};
 
 const FIGURE_VERT: &[u8] = include_bytes!("../shaders/figure.vert.spv");
+const FIGURE_SUN_VERT: &[u8] = include_bytes!("../shaders/figure_sun.vert.spv");
+const FIGURE_SUN_FRAG: &[u8] = include_bytes!("../shaders/figure_sun.frag.spv");
 const FIGURE_FRAG: &[u8] = include_bytes!("../shaders/figure.frag.spv");
 const COMPOSITE_VERT: &[u8] = include_bytes!("../shaders/composite.vert.spv");
 const COMPOSITE_FRAG: &[u8] = include_bytes!("../shaders/composite.frag.spv");
@@ -50,6 +55,26 @@ pub const FAR: f32 = 65504.0;
 /// A tile texel counts when its z is at most this far behind the walk's hit: a body's
 /// feet stand on the cap their texels are level with.
 pub const DEPTH_BIAS: f32 = 0.05;
+
+/// Rows of the figures' sun map.
+pub const SUN_MAP_H: u32 = 512;
+/// A sun lower than this (the y of the unit vector toward it) casts no figure shadow.
+pub const SUN_MAP_MIN_Y: f32 = 0.2;
+
+/// The figures' sun map for a world `w × h × d` under the sun `toward` (unit, toward the
+/// sun), as `world.glsl`'s `figSun` and `figMap` carry it: `None` for a sun too low.
+pub fn sun_map(w: u32, h: u32, d: u32, toward: [f32; 3]) -> Option<([f32; 4], [f32; 4])> {
+    if !(toward[1] >= SUN_MAP_MIN_Y) {
+        return None;
+    }
+    let (a, b) = (toward[0] / toward[1], toward[2] / toward[1]);
+    // Where the rays through the world's box meet y = 0: z − y·b over z in 0..d, y in 0..h.
+    let (h, d) = (h as f32, d as f32);
+    let z0 = (0.0f32).min(-h * b);
+    let z1 = d.max(d - h * b);
+    let kz = SUN_MAP_H as f32 / (z1 - z0).max(1.0);
+    Some(([a, b, z0, 1.0], [2.0, kz, (2 * w) as f32, SUN_MAP_H as f32]))
+}
 
 /// The atlas the frame's tiles are packed into, texels.
 pub const ATLAS_W: u32 = 2048;
@@ -292,6 +317,8 @@ pub struct Packed {
     tiles: Vec<TileGpu>,
     /// Each tile's cell count, beside it.
     counts: Vec<u32>,
+    /// Whether each tile casts a shadow: its figure's shown tile, at least half faded in.
+    casts: Vec<bool>,
     figs: Vec<FigGpu>,
     palette: Vec<[f32; 8]>,
     used_h: u32,
@@ -349,6 +376,7 @@ pub fn pack(frame: &FigureFrame, s: u32, rise: u32, base: i32, raster_w: u32, vi
             depth: [t.pos[2], 1.0 / span, t.pose[3], 0.0],
         });
         out.counts.push(t.count);
+        out.casts.push(false);
         Some(out.tiles.len() as i32 - 1)
     };
     for f in &frame.figures {
@@ -357,6 +385,9 @@ pub fn pack(frame: &FigureFrame, s: u32, rise: u32, base: i32, raster_w: u32, vi
             continue;
         };
         let b = f.b.and_then(|b| tile(&b, &mut out)).unwrap_or(-1);
+        // The shadow is the dominant tile's, while the figure is at least half there.
+        let shown = if b >= 0 && f.weight_b >= 0.5 { b } else { a };
+        out.casts[shown as usize] = f.alpha >= 0.5;
         let mut p = project(s, rise, base, f.a.pos);
         if frame.whole_pixels {
             p = p.map(f32::round);
@@ -489,6 +520,13 @@ pub struct FigurePass {
     composite_pipeline: vk::Pipeline,
     raster: (u32, u32),
     lit: bool,
+    /// The figures' sun map: its depth plane (sampled by the walk), pass and pipeline.
+    pub sun_view: vk::ImageView,
+    sun_plane: Plane,
+    sun_pass: vk::RenderPass,
+    sun_fb: vk::Framebuffer,
+    sun_pipeline: vk::Pipeline,
+    world: (u32, u32, u32),
 }
 
 /// The push block both passes read (`figure.glsl`'s `FigurePush`).
@@ -513,6 +551,7 @@ impl FigurePass {
         walk_layout: vk::DescriptorSetLayout,
         constants: &[u32],
         slots: usize,
+        world: (u32, u32, u32),
     ) -> Result<FigurePass> {
         let d = &gpu.device;
         let colour_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED;
@@ -525,7 +564,8 @@ impl FigurePass {
             .into_iter()
             .find(|&f| {
                 let p = unsafe { gpu.instance.get_physical_device_format_properties(gpu.pdev, f) };
-                p.optimal_tiling_features.contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT)
+                p.optimal_tiling_features
+                    .contains(vk::FormatFeatureFlags::DEPTH_STENCIL_ATTACHMENT | vk::FormatFeatureFlags::SAMPLED_IMAGE)
             })
             .ok_or_else(|| anyhow!("no depth format for the model pass"))?;
         let depth = Plane::new(
@@ -761,8 +801,61 @@ impl FigurePass {
             unsafe { d.destroy_shader_module(fs, None) };
             p?
         };
+        // The sun map: a depth plane alone, cleared to the floor, left for sampling.
+        let sun_plane = Plane::new(
+            gpu,
+            2 * world.0,
+            SUN_MAP_H,
+            depth_format,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+            vk::ImageAspectFlags::DEPTH,
+        )?;
+        let sun_att = [vk::AttachmentDescription::default()
+            .format(depth_format)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .store_op(vk::AttachmentStoreOp::STORE)
+            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let sun_ref = vk::AttachmentReference::default()
+            .attachment(0)
+            .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        let sun_sub = [vk::SubpassDescription::default()
+            .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+            .depth_stencil_attachment(&sun_ref)];
+        let sun_pass = unsafe {
+            d.create_render_pass(&vk::RenderPassCreateInfo::default().attachments(&sun_att).subpasses(&sun_sub), None)
+        }?;
+        let sun_views = [sun_plane.view];
+        let sun_fb = unsafe {
+            d.create_framebuffer(
+                &vk::FramebufferCreateInfo::default()
+                    .render_pass(sun_pass)
+                    .attachments(&sun_views)
+                    .width(2 * world.0)
+                    .height(SUN_MAP_H)
+                    .layers(1),
+                None,
+            )
+        }?;
+        let sun_pipeline = {
+            let vs = gpu.shader(FIGURE_SUN_VERT)?;
+            let fs = gpu.shader(FIGURE_SUN_FRAG)?;
+            let p = pipeline(d, sun_pass, layout, vs, fs, None, vk::PrimitiveTopology::TRIANGLE_LIST, &[], true);
+            unsafe { d.destroy_shader_module(vs, None) };
+            unsafe { d.destroy_shader_module(fs, None) };
+            p?
+        };
         let lit = emit.is_some();
         Ok(FigurePass {
+            sun_view: sun_plane.view,
+            sun_plane,
+            sun_pass,
+            sun_fb,
+            sun_pipeline,
+            world,
             walk_depth: walk_plane.view,
             walk_plane,
             colour,
@@ -818,6 +911,71 @@ impl FigurePass {
         let dropped = packed.dropped;
         self.packed[slot] = packed;
         dropped
+    }
+
+    /// Record the figures' sun map for slot `slot` (packed by [`FigurePass::prepare`]) under
+    /// `sun` (`figSun`, [`sun_map`]): cleared, then every figure cell, before the walk.
+    /// Every frame that draws the world records it, so the walk always samples a defined
+    /// map; with no sun or no figures it stays clear.
+    pub(crate) fn record_sun(&self, d: &ash::Device, cb: vk::CommandBuffer, slot: usize, sun: Option<([f32; 4], [f32; 4])>) {
+        let (w, h, _) = self.world;
+        let clears = [vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: 0 } }];
+        let extent = vk::Extent2D { width: 2 * w, height: SUN_MAP_H };
+        let begin = vk::RenderPassBeginInfo::default()
+            .render_pass(self.sun_pass)
+            .framebuffer(self.sun_fb)
+            .render_area(vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent })
+            .clear_values(&clears);
+        unsafe { d.cmd_begin_render_pass(cb, &begin, vk::SubpassContents::INLINE) };
+        let packed = &self.packed[slot];
+        if let Some((fs, fm)) = sun
+            && !packed.tiles.is_empty()
+        {
+            let viewport = vk::Viewport {
+                x: 0.0,
+                y: 0.0,
+                width: (2 * w) as f32,
+                height: SUN_MAP_H as f32,
+                min_depth: 0.0,
+                max_depth: 1.0,
+            };
+            unsafe { d.cmd_set_viewport(cb, 0, &[viewport]) };
+            unsafe { d.cmd_set_scissor(cb, 0, &[vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent }]) };
+            unsafe { d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.sun_pipeline) };
+            let sets = [self.data_sets[slot]];
+            unsafe { d.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, self.layout, 1, &sets, &[]) };
+            for (i, t) in packed.tiles.iter().enumerate() {
+                if !packed.casts[i] {
+                    continue;
+                }
+                let push = Push {
+                    k: [i as i32, w as i32, h as i32, SUN_MAP_H as i32],
+                    atlas: [fs[0], fs[1], fs[2], fm[1]],
+                };
+                unsafe { d.cmd_push_constants(cb, self.layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytemuck::bytes_of(&push)) };
+                unsafe { d.cmd_draw(cb, 36, packed.counts[i], 0, t.orig[3] as u32) };
+            }
+        }
+        unsafe { d.cmd_end_render_pass(cb) };
+        let m = [vk::MemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ)];
+        unsafe {
+            d.cmd_pipeline_barrier(
+                cb,
+                vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &m,
+                &[],
+                &[],
+            )
+        };
+    }
+
+    /// Whether this slot's frame has any figure (it has a sun map worth reading).
+    pub fn has_tiles(&self, slot: usize) -> bool {
+        !self.packed[slot].tiles.is_empty()
     }
 
     /// Whether slot `slot`'s frame draws anything.
@@ -929,6 +1087,10 @@ impl FigurePass {
         let d = &gpu.device;
         unsafe { d.destroy_pipeline(self.tile_pipeline, None) };
         unsafe { d.destroy_pipeline(self.composite_pipeline, None) };
+        unsafe { d.destroy_pipeline(self.sun_pipeline, None) };
+        unsafe { d.destroy_framebuffer(self.sun_fb, None) };
+        unsafe { d.destroy_render_pass(self.sun_pass, None) };
+        self.sun_plane.destroy(d);
         unsafe { d.destroy_pipeline_layout(self.layout, None) };
         unsafe { d.destroy_descriptor_pool(self.pool, None) };
         for l in self.set_layouts {
@@ -1002,7 +1164,8 @@ fn pipeline(
     let ds = vk::PipelineDepthStencilStateCreateInfo::default()
         .depth_test_enable(depth)
         .depth_write_enable(depth)
-        .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
+        // The sun map keeps each ray's highest point; a tile its nearest face.
+        .depth_compare_op(if blend.is_empty() { vk::CompareOp::GREATER } else { vk::CompareOp::LESS_OR_EQUAL });
     let cb = vk::PipelineColorBlendStateCreateInfo::default().attachments(blend);
     let dynamic = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
     let dy = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&dynamic);
@@ -1106,6 +1269,21 @@ mod tests {
         let xs: Vec<f32> = p.placements().iter().map(|q| q.0[0]).collect();
         assert_eq!(xs.len(), 2, "{xs:?}");
         assert!(xs.contains(&0.4) && xs.contains(&256.4), "{xs:?}");
+    }
+
+    #[test]
+    fn the_sun_map_reaches_every_ray_through_the_world_and_a_low_sun_casts_none() {
+        assert_eq!(sun_map(64, 32, 16, [0.0, 0.1, 0.995]), None);
+        let (fs, fm) = sun_map(64, 32, 16, [0.6, 0.8, 0.0]).unwrap();
+        assert_eq!((fs[0], fs[1]), (0.75, 0.0));
+        // A sun straight across x: the rays' z is the world's own, 0..16.
+        assert_eq!((fs[2], fm[1] * 16.0), (0.0, SUN_MAP_H as f32));
+        // Leaning toward +z, a ray from the floor at the back reaches z 16, one from the
+        // top at the front z −32·b.
+        let (fs, fm) = sun_map(64, 32, 16, [0.0, 0.8, 0.6]).unwrap();
+        assert_eq!(fs[2], -32.0 * 0.75);
+        assert!((fm[1] * (16.0 + 24.0) - SUN_MAP_H as f32).abs() < 1e-3);
+        assert_eq!(fm[2], 128.0, "two texels a voxel across");
     }
 
     #[test]

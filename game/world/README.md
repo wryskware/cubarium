@@ -34,7 +34,7 @@ this one.
 | `input_enabled` | false: no pointer or pan input |
 | `reset_framing()` | the whole strip in view, the ring unturned |
 | `animal_hovered(id)`, `animal_clicked(id)` | `-1` for none. A press and release under 5 px of movement is a click; more is a drag |
-| `set_highlight(id)`, `follow(id)`, `stop_follow()` | the renderer draws the animal's cells leaning 40 % toward white (the mesh view's overlay); follow eases the view onto it; panning by hand stops it |
+| `set_highlight(id)`, `follow(id)`, `stop_follow()` | the renderer draws the animal leaning 40 % toward white (the mesh view's overlay); follow eases the view onto it; panning by hand stops it |
 | `capture(size) -> Image` | the latest frame as framed, fitted into `size` with bars |
 | `config_path` | another presentation config (set before `attach`/`show_view`) |
 | `pick(point)`, `animal_screen(id)`, `screen_to_raster(p)`, `raster_to_screen(r)` | for tools and tests |
@@ -46,10 +46,17 @@ this node shifts the frame by the fraction left over, with `x` wrapping, so the 
 glides while the world's pixels stay locked to each other. `y` never moves: the fit
 always shows the whole strip.
 
-**Picking**: screen point → raster pixel (the fit and the shift inverted) → the
-renderer's slab walk inverted over the last pack's body cells (front face before the cap of
-the voxel below, slab by slab, ending at a solid voxel); failing that, the nearest drawn
-body within 5 screen pixels.
+**Animals** (H2): drawn by the renderer's model pass, not stamped into the voxels —
+each its baked model in a tile at the raster's scale, placed between pixels at its
+interpolated place, turned freely, lit by the walk's light, depth-tested against the walk
+(`crates/cubarium-gpu/src/figures.rs`). `[figures]` in the presentation config picks
+`animals = "models" | "stamped"`, `turn = "free" | "steps"` and the fades.
+
+**Picking**: screen point → raster pixel (the fit and the shift inverted) → the ray through
+it against the frame's figures (`FigurePick`), the nearest cell in front of the terrain's
+own hit (`PickMap::terrain_z`); failing that, the figure with a cell nearest within 5
+screen pixels. With `animals = "stamped"`: the renderer's slab walk inverted over the last
+pack's body cells, as before.
 
 ## Recipes (never a window on the desktop)
 

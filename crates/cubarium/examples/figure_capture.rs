@@ -6,8 +6,11 @@
 //! cargo run --release -p cubarium --example figure_capture -- --save DIR --out DIR \
 //!     [--config config/desktop/terrarium.toml] [--set LINE]... [--px N] \
 //!     [--variant NAME=SETLINE[;SETLINE]]... [--seconds 0] [--fps 60] [--warm 20] \
-//!     [--crop NAME=X0,Y0,X1,Y1]... [--every 1]
+//!     [--crop NAME=X0,Y0,X1,Y1]... [--every 1] [--mp4]
 //! ```
+//!
+//! `--mp4` pipes each variant's frames (and each crop's) to `ffmpeg` instead of PNGs:
+//! `NAME.mp4` and `NAME-CROP.mp4`, x264 yuv444p crf 12 at `--fps`, real time.
 //!
 //! The save (a session save directory, read only) is loaded once and stepped by one sim;
 //! every tick is staged into every variant's sink, and every frame (`--fps` a second of sim
@@ -45,10 +48,51 @@ fn configured(path: &PathBuf, sets: &[String]) -> Result<VoxelConfig> {
     Ok(toml::Value::Table(table).try_into()?)
 }
 
+/// An ffmpeg process taking raw RGBA frames.
+struct Encoder {
+    child: std::process::Child,
+    w: u32,
+    h: u32,
+}
+
+impl Encoder {
+    fn new(path: &std::path::Path, w: u32, h: u32, fps: f64) -> Result<Encoder> {
+        let child = std::process::Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"])
+            .arg(format!("{w}x{h}"))
+            .args(["-r"])
+            .arg(format!("{fps}"))
+            .args(["-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv444p", "-crf", "12", "-preset", "fast"])
+            .arg(path)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .context("ffmpeg")?;
+        Ok(Encoder { child, w, h })
+    }
+
+    fn put(&mut self, rgba: &[u8]) -> Result<()> {
+        debug_assert_eq!(rgba.len(), (self.w * self.h * 4) as usize);
+        self.child.stdin.as_mut().context("ffmpeg's stdin")?.write_all(rgba)?;
+        Ok(())
+    }
+
+    fn finish(mut self) -> Result<()> {
+        drop(self.child.stdin.take());
+        let status = self.child.wait()?;
+        if !status.success() {
+            bail!("ffmpeg failed: {status}");
+        }
+        Ok(())
+    }
+}
+
 struct Variant {
     name: String,
     sink: VoxelGpuSink,
+    video: Option<Encoder>,
+    crops: Vec<Encoder>,
     draw_ms: f64,
+    clock_ms: f64,
     frames: u64,
     gpu: (u64, [f64; 3]),
 }
@@ -60,6 +104,7 @@ fn main() -> Result<()> {
     let mut variants: Vec<(String, Vec<String>)> = Vec::new();
     let mut crops: Vec<(String, [u32; 4])> = Vec::new();
     let (mut seconds, mut fps, mut warm, mut px, mut every) = (0.0f64, 60.0f64, 20u64, None::<u32>, 1u64);
+    let mut mp4 = false;
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         let mut v = || it.next().context("missing value");
@@ -73,6 +118,7 @@ fn main() -> Result<()> {
             "--fps" => fps = v()?.parse()?,
             "--warm" => warm = v()?.parse()?,
             "--every" => every = v()?.parse()?,
+            "--mp4" => mp4 = true,
             "--variant" => {
                 let s = v()?;
                 let (name, lines) = s.split_once('=').context("--variant NAME=SET[;SET]")?;
@@ -126,7 +172,16 @@ fn main() -> Result<()> {
                 ..VoxelGpuSinkOptions::default()
             },
         )?;
-        sinks.push(Variant { name: name.clone(), sink, draw_ms: 0.0, frames: 0, gpu: (0, [0.0; 3]) });
+        sinks.push(Variant {
+            name: name.clone(),
+            sink,
+            video: None,
+            crops: Vec::new(),
+            draw_ms: 0.0,
+            clock_ms: 0.0,
+            frames: 0,
+            gpu: (0, [0.0; 3]),
+        });
     }
     // The lit tier's sky plane first.
     let started = Instant::now();
@@ -164,7 +219,16 @@ fn main() -> Result<()> {
     let frames = if seconds > 0.0 { (seconds * fps).round() as u64 } else { 1 };
     let hz = f64::from(cubarium_voxel::TICK_HZ);
     let mut tick = sim.world().tick();
-    for v in &sinks {
+    for v in &mut sinks {
+        if mp4 && seconds > 0.0 {
+            let p = v.sink.params();
+            v.video = Some(Encoder::new(&out.join(format!("{}.mp4", v.name)), p.raster_w, p.raster_h, fps)?);
+            for (c, b) in &crops {
+                let (w, h) = (b[2].min(p.raster_w) - b[0], b[3].min(p.raster_h) - b[1]);
+                v.crops.push(Encoder::new(&out.join(format!("{}-{c}.mp4", v.name)), w, h, fps)?);
+            }
+            continue;
+        }
         if seconds > 0.0 {
             std::fs::create_dir_all(out.join(&v.name))?;
             for (c, _) in &crops {
@@ -182,6 +246,7 @@ fn main() -> Result<()> {
         for v in sinks.iter_mut() {
             let at = Instant::now();
             v.sink.set_clock(t.floor() as u64, t.fract());
+            v.clock_ms += at.elapsed().as_secs_f64() * 1e3;
             v.sink.render()?;
             v.draw_ms += at.elapsed().as_secs_f64() * 1e3;
             v.frames += 1;
@@ -190,6 +255,19 @@ fn main() -> Result<()> {
             }
             let p = v.sink.params();
             let rgba = v.sink.read_raster()?;
+            if let Some(e) = &mut v.video {
+                e.put(&rgba)?;
+                for ((_, b), e) in crops.iter().zip(&mut v.crops) {
+                    let (x0, y0, x1, y1) = (b[0], b[1], b[2].min(p.raster_w), b[3].min(p.raster_h));
+                    let mut px = Vec::with_capacity(((x1 - x0) * (y1 - y0) * 4) as usize);
+                    for y in y0..y1 {
+                        let row = (y * p.raster_w + x0) as usize * 4;
+                        px.extend_from_slice(&rgba[row..row + (x1 - x0) as usize * 4]);
+                    }
+                    e.put(&px)?;
+                }
+                continue;
+            }
             let path = if seconds > 0.0 {
                 out.join(&v.name).join(format!("f{k:05}.png"))
             } else {
@@ -213,6 +291,14 @@ fn main() -> Result<()> {
             }
         }
     }
+    for v in &mut sinks {
+        if let Some(e) = v.video.take() {
+            e.finish()?;
+        }
+        for e in v.crops.drain(..) {
+            e.finish()?;
+        }
+    }
     let mut costs = std::fs::File::create(out.join("costs.txt"))?;
     let ticks = (sim.world().tick() - ticks0).max(1) as f64;
     for (v, p0) in sinks.iter_mut().zip(p0) {
@@ -222,7 +308,7 @@ fn main() -> Result<()> {
         let p = v.sink.params();
         let line = format!(
             "{}: raster {}x{} ({} px/voxel); GPU {:.3} ms/frame (upload {:.3}, walk+models+weather+bloom {:.3}, present {:.3}) over {} frames; \
-             model pass {:.3} GPU ms/frame over {} frames; draw (CPU, record+submit+wait) {:.3} ms/frame; pack {:.3} ms/tick over {} ticks",
+             model pass {:.3} GPU ms/frame over {} frames; draw (CPU, record+submit+wait) {:.3} ms/frame, of which the clock (the figures' frame) {:.3}; pack {:.3} ms/tick over {} ticks",
             v.name,
             p.raster_w,
             p.raster_h,
@@ -235,6 +321,7 @@ fn main() -> Result<()> {
             fig_ms,
             fig_n,
             v.draw_ms / v.frames.max(1) as f64,
+            v.clock_ms / v.frames.max(1) as f64,
             (v.sink.draw_split().0 - p0) / ticks,
             ticks as u64,
         );

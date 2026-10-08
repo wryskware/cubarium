@@ -78,6 +78,11 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     ivec4 hiMax;        // its x span in cells, highest y, farthest z
     vec4 hiK;           // how far its cells lean toward white
     uvec4 hiCells[64];  // its cells, x | y << 12 | z << 22, four a row
+    // The figures' sun map (H2, `cubarium_gpu::figures`): a figure's highest point along
+    // each sun ray, by where the ray meets y = 0. figSun: Lx/Ly, Lz/Ly, the map's first z,
+    // on (1) or off; figMap: texels a voxel across and along z, the map's size.
+    vec4 figSun;
+    vec4 figMap;
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The
@@ -147,6 +152,8 @@ layout(set = 0, binding = 11) uniform sampler2D backdropTex;
 // walk sets to the slab its ray ended in (over 255; the water surface where there is one),
 // the weather's depth. The flat tier binds its one backdrop texel here.
 layout(set = 0, binding = 12) uniform sampler2D depthTex;
+// Lit tier: the figures' sun map (depth: a figure's height over H), `figSun` above.
+layout(set = 0, binding = 13) uniform sampler2D figSunTex;
 
 // The plant part classes, as `crate::voxel`'s PART_* constants number them.
 const int TRUNK = 1;
@@ -554,8 +561,22 @@ bool crownLets(uvec4 v, ivec3 c) {
 
 // 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
 // (the cell in front of the face it is on); 0 where anything opaque is in the way.
+// Whether a figure stands between world point `p` and the sun: on the sun ray through `p`
+// the map holds a figure higher than `p` (by a quarter voxel, so a top face does not shade
+// itself).
+bool figureShades(vec3 p) {
+    if (u.figSun.w < 0.5) { return false; }
+    float fx = p.x - p.y * u.figSun.x;
+    float fz = p.z - p.y * u.figSun.y - u.figSun.z;
+    vec2 t = vec2((fx - float(W) * floor(fx / float(W))) * u.figMap.x, fz * u.figMap.y);
+    if (t.y < 0.0 || t.y >= u.figMap.w) { return false; }
+    float top = texelFetch(figSunTex, ivec2(min(t, u.figMap.zw - 1.0)), 0).r * float(H);
+    return top > p.y + 0.25;
+}
+
 float sunReaches(vec3 p, ivec3 c) {
     if (!SHADOWS) { return 1.0; }
+    if (figureShades(p)) { return 0.0; }
     vec3 L = u.sunK.xyz;
     ivec3 dir = ivec3(sign(L));
     vec3 inv = vec3(
