@@ -75,7 +75,18 @@ Workers read `design/handoffs/worker-rules-2026-10-07.md` first.
   instanced geometry at the pixel-scale raster: positions and headings **interpolated between
   ticks** on the frame clock, **free rotation** (heading now; pitch on climbs and slopes when the
   feed gives it), fades on birth and death.
-- Depth-tested against the voxel walk's depth, so terrain and animals occlude each other.
+- **Pixel look without pixel stepping** (Wrysk, 2026-10-08: "i would ideally keep the look
+  artificially without this limitation"):
+  - **Rasterizing:** each animal is rasterized at the coarse pixel scale into its own small
+    tile whose pixel grid moves with the animal.
+  - **Placing:** the tile goes at the animal's exact interpolated screen position. The animal
+    glides with no crawling pixels and keeps the same chunky pixels as the world.
+  - **Turning:** a turn re-rasterizes the animal (a few pixels change, like a turning sprite).
+    Fine angle steps blended over a few frames may calm it; the worker shows both.
+  - **Panning:** sub-pixel as well. The world raster is drawn with a one-pixel margin and the
+    upscaled image is shifted by the leftover fraction (asked of H1).
+- Tiles carry depth and are tested against the voxel walk's depth, so terrain and animals
+  occlude each other.
 - Lit by the renderer's own lighting model, evaluated with the model's real normals and sampled
   at the fragment's world position (sun visibility, sky visibility, glow volume, haze). The old
   baked light-imitating tones (lit column, rim) become real lighting; markings and eyes stay.
