@@ -239,10 +239,13 @@ fn main() {
                 args.iter().find_map(|a| a.strip_prefix(name))
                     .map_or(default, |v| v.parse().expect("vitals option needs a number"))
             };
+            // The defaults are `VitalsOptions::default()`, which the Godot session's
+            // recorder runs with too.
+            let d = VitalsOptions::default();
             (dir.to_string(), VitalsOptions {
-                stuck_window_min: number("stuck_window_min=", 5.0),
-                stuck_body_lengths: number("stuck_body_lengths=", 1.0),
-                starving_fullness: number("starving_fullness=", 0.05),
+                stuck_window_min: number("stuck_window_min=", d.stuck_window_min),
+                stuck_body_lengths: number("stuck_body_lengths=", d.stuck_body_lengths),
+                starving_fullness: number("starving_fullness=", d.starving_fullness),
             })
         }),
         policies: policies.clone(),
