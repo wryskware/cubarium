@@ -208,3 +208,19 @@ think about behaviours that fix the problems as well, or whether the ecosystem i
 - **Rate tuning comes last.** Fix the behaviour, or add the role.
 - **Reports and briefs:** every ecological report names the stocks that are growing or shrinking
   without check, and the role that should answer each. Every ecology brief restates this rule.
+
+## No unsafe code — Wrysk, 2026-10-08 (hard rule)
+
+"NO unsafe code allowed in the repo without my approval. external library code excluded."
+
+- No `unsafe` block, `unsafe fn`, `unsafe impl` or raw-pointer trick in this repository's code
+  unless Wrysk approved that specific use. Code inside external crates doesn't count: prefer a
+  safe wrapper crate (rayon chunks, native atomics, `nix`/`core_affinity`-style syscall
+  wrappers) over writing `unsafe` here.
+- Crates with no approved `unsafe` carry `#![forbid(unsafe_code)]` at their root.
+- Existing `unsafe` (2026-10-08): `cubarium-gpu` (raw Vulkan through `ash`), `cubarium-rules`
+  (water host, `math.rs`), `cubarium` (`save.rs`, `placement.rs`, `chiplet.rs`, `state.rs`,
+  the web sink, `render_bench`), `cubarium-search` (CPU pinning, perf counters) and
+  `cubarium-godot` (gdext's required `unsafe impl ExtensionLibrary`). It is either removed or
+  listed here as approved; until then, no new `unsafe` lands anywhere.
+- Every brief that touches these crates restates this rule.
