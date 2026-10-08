@@ -245,9 +245,26 @@ Weights are a proposed default to publish in a training config, not tuned consta
   gate every few generations.
 - Soaks: 8 seeds × one season (about 10–12 h), staged, with vitals.
 
-**Machines.** Eidolon (24 threads) is the workhorse: about 16 one-thread worlds at a time. The
-desktop is shared with other sessions; this morning it showed load around 120, 70 % iowait and
-62 GB of swap in use. It takes only small batches until that clears. EC2 is §5.
+**Machines: one world per physical core.** Measured 2026-10-08 on the desktop: mature d72
+worlds at 1 thread, start library minute 120, binary 1179a42a.
+
+| Worlds at once | Each runs at | Aggregate (sim-h per wall-h) |
+|---|---|---|
+| 8 | 3.0× real time | 24 |
+| 16 | 2.2× | 35 |
+| 24 | 1.1× | 26 |
+| 30 | 1.0× | 31 |
+
+- SMT siblings add contention, not throughput. `batch.py` now defaults to one world per
+  physical core: 16 on the desktop, 12 on eidolon.
+- An 8-seed × 2-arm × 2 h check (32 sim-hours) therefore takes about 55 min on the desktop
+  alone.
+- Split across the desktop and eidolon it takes about 30 min, or trim to 6 seeds or 1.5 h.
+- Ticks also slow as worlds mature: about 2 ms at founding against 12–14 ms at minute 120,
+  1 thread. Velvetpad keeps adding stands.
+- The desktop is shared with other sessions. This morning it showed load around 120, 70 %
+  iowait and 62 GB of swap in use, so check load before launching.
+- EC2 is §5. Graviton has no SMT, so 57 workers on 64 vCPUs is right there.
 
 ## 4. Maps
 
