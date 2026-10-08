@@ -465,6 +465,17 @@ pub struct TeacherConfig {
     /// several legs, so a search does not double back onto ground it just left.
     #[serde(default = "search_memory_half_life_s")]
     pub search_memory_half_life_s: f64,
+    /// **LEADS-PAY** (`step::rove`, [`crate::light`]): a heuristic body wanting food that
+    /// has steered by leads — food in view, a scent's gradient, a still light — for this
+    /// many of its body lengths at cruise (`lead_give_up_bl / cruise_body_lengths_per_s`
+    /// seconds of leading, summed) since its last taste gives the lead up: a still light or
+    /// a scent's source is marked "no reward here" for the light's `mark_s`, and its own
+    /// heuristic's lead becomes one search leg away. A taste, or the latch letting go,
+    /// starts the count over. 150: half again the longest lead a sense reaches (a juvenile
+    /// bellwing smells nectar about 100 of its lengths off), about 19 s for a bellwing
+    /// and 150 s for a 1-length-a-second walker. 0 turns it off.
+    #[serde(default = "lead_give_up_bl")]
+    pub lead_give_up_bl: f64,
 }
 
 fn search_patience_s() -> f64 {
@@ -478,6 +489,9 @@ fn search_cell_bl() -> f64 {
 }
 fn search_memory_half_life_s() -> f64 {
     300.0
+}
+fn lead_give_up_bl() -> f64 {
+    150.0
 }
 
 fn way_on_m() -> f64 {
@@ -602,6 +616,7 @@ impl Default for TeacherConfig {
             search_leg_bl: search_leg_bl(),
             search_cell_bl: search_cell_bl(),
             search_memory_half_life_s: search_memory_half_life_s(),
+            lead_give_up_bl: lead_give_up_bl(),
         }
     }
 }

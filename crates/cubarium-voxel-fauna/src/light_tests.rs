@@ -378,3 +378,140 @@ fn live_off_restores_s1() {
     assert!(n_on > 0 && lit_on != dark_on, "control: live, the lit lure steers it ({n_on} samples)");
     assert_eq!(lit, dark, "the lit lure changes nothing");
 }
+
+// ------------------------------------------------------- LEADS-PAY: a lead that never pays
+
+/// A config whose lead budget runs out on the bellwing's `samples`-th controller sample of
+/// leading (half a sample short of it, so rounding never decides).
+fn lead_config(samples: f64) -> FaunaConfig {
+    let mut c = config();
+    let period_s = c.manifest(BW).cadence_ticks().max(1) as f64 * cubarium_voxel::DT;
+    c.teachers.lead_give_up_bl = (samples - 0.5) * period_s * c.founder(BW).cruise_body_lengths_per_s;
+    c
+}
+
+/// A bloomcrown in flower on the plain at noon, its nectar scent laid and settled, and a
+/// hungry bellwing beyond its light range downwind of the scent: `(world, flora, fauna,
+/// bellwing, the flower's (x, z))`.
+fn scent_scene(c: FaunaConfig) -> (World, Flora, Fauna, u64, (f64, f64)) {
+    let mut world = plain_at(12.0, 24, 5);
+    let mut fc = FloraConfig::default();
+    fc.bloomcrown.nectar_per_s = 1e-3;
+    fc.bloomcrown.nectar_cap = 2e-3;
+    let mut flora = Flora::new(fc);
+    let (fx, fz) = (32i64, 6u32);
+    let wood = flora.config().species(Species::Bloomcrown).wood_max;
+    assert!(flora.apply(&world, FloraCommand::Seed { x: fx, z: fz, species: Species::Bloomcrown, wood }));
+    for _ in 0..60 {
+        flora.step(&mut world);
+    }
+    assert!(flora.view().stands.iter().any(|s| s.nectar > 0.0), "fixture: the flower holds nectar");
+    let flower = ((fx as f64 + 0.5) * VOXEL_M, (f64::from(fz) + 0.5) * VOXEL_M);
+    let light_m = c.founder(BW).senses.light_m;
+    let mut c = c;
+    c.scent.nectar_per_s = 2.25;
+    let mut fauna = Fauna::new(c);
+    {
+        let (view, fv) = (world.view(), flora.view());
+        for _ in 0..400 {
+            let mut field = std::mem::take(&mut fauna.scent);
+            field.update(&view, &fv, &fauna.animals, &fauna.config);
+            fauna.scent = field;
+        }
+    }
+    let bw = bellwing(&mut fauna, &world, flower.0 - light_m - 1.0, flower.1, 0.5, NORTH);
+    (world, flora, fauna, bw, flower)
+}
+
+/// The bellwing's steer this tick with its heuristic asking `asked` (the tick advanced
+/// first).
+fn steer_asked(fauna: &mut Fauna, world: &World, flora: &Flora, id: u64, asked: Actions) -> Option<(Actions, f64)> {
+    fauna.tick += 1;
+    let i = index(fauna, id);
+    let daylight = world.life_daylight();
+    light::steer_flyer(fauna, i, &world.view(), &flora.view(), daylight, asked, 0.0)
+}
+
+/// The hover-sip's answer at a flower: still, feeding.
+const SIP: Actions = Actions { forward: 0.0, turn: 0.0, feed: 1.0 };
+
+/// **A scent lead that never brings a sip is given up**: a hungry bellwing led up the nectar
+/// scent, sample after sample, without a sip, follows it for its `lead_give_up_bl` budget;
+/// then it gives the lead up — the flower the scent comes from is marked "no reward here",
+/// the give-up counted — and the scent from it is passed by while the mark lasts.
+#[test]
+fn a_bellwing_whose_scent_lead_never_brings_a_sip_gives_it_up() {
+    let budget = 3.0;
+    let (world, flora, mut fauna, bw, flower) = scent_scene(lead_config(budget));
+    let ring = f64::from(world.view().config.width) * VOXEL_M;
+    let r = fauna.config.light.mark_radius_m;
+    for k in 0..(budget as usize - 1) {
+        let led = steer_asked(&mut fauna, &world, &flora, bw, WANDER);
+        assert!(led.is_some(), "sample {k}: within its budget the scent leads it");
+    }
+    assert!(!fauna.percept(bw).unwrap().marked(flower.0, flower.1, fauna.tick, r, ring), "not marked yet");
+    let gave_up = steer_asked(&mut fauna, &world, &flora, bw, WANDER);
+    assert!(gave_up.is_none(), "its budget spent: its heuristic's answer stands: {gave_up:?}");
+    assert_eq!(fauna.lead_give_ups()[BW.index()], 1, "the give-up is counted");
+    assert!(fauna.percept(bw).unwrap().marked(flower.0, flower.1, fauna.tick, r, ring), "the scent's source is marked");
+    for _ in 0..3 {
+        assert!(steer_asked(&mut fauna, &world, &flora, bw, WANDER).is_none(), "the scent from the marked flower is passed by");
+    }
+}
+
+/// **One that sips keeps feeding**: the same lead, a sip between its stretches: each sip
+/// starts the count over, so the bellwing is never turned off the flower's scent, and its
+/// sips stand.
+#[test]
+fn a_bellwing_that_sips_keeps_its_lead() {
+    let budget = 3.0;
+    let (world, flora, mut fauna, bw, flower) = scent_scene(lead_config(budget));
+    let ring = f64::from(world.view().config.width) * VOXEL_M;
+    for round in 0..4 {
+        for k in 0..(budget as usize - 1) {
+            assert!(steer_asked(&mut fauna, &world, &flora, bw, WANDER).is_some(), "round {round} sample {k}: led");
+        }
+        assert!(steer_asked(&mut fauna, &world, &flora, bw, SIP).is_none(), "round {round}: the sip stands");
+    }
+    assert_eq!(fauna.lead_give_ups()[BW.index()], 0, "never given up");
+    assert!(!fauna.percept(bw).unwrap().marked(flower.0, flower.1, fauna.tick, fauna.config.light.mark_radius_m, ring), "and nothing marked");
+}
+
+/// **An approach that keeps moving cannot hold a light forever** (the S3b stall needs a body
+/// that stands still): a hungry bellwing steering for a still lit lure short of it, moving
+/// every sample, gives the light up at its budget: the lure is marked, not as a stall.
+#[test]
+fn a_moving_approach_to_a_still_light_is_given_up_at_its_budget() {
+    let world = clock_off(3);
+    let flora = Flora::new(FloraConfig::default());
+    let budget = 3.0;
+    let mut fauna = Fauna::new(lead_config(budget));
+    let bw = bellwing(&mut fauna, &world, 2.0, LANE_Z, 0.3, NORTH);
+    let lj = lanternjaw(&mut fauna, &world, 5.0, LANE_Z, WEST, 1.0, false);
+    let (lx, lz, _) = light::lure_point(&fauna.config, &animal(&fauna, lj), VOXEL_M).expect("a lure");
+    let ring = f64::from(world.view().config.width) * VOXEL_M;
+    let r = fauna.config.light.mark_radius_m;
+    let mut sample = |fauna: &mut Fauna| {
+        animal_mut(fauna, bw).still_ticks = 0;
+        steer(fauna, &world, &flora, bw, 0.0)
+    };
+    for k in 0..(budget as usize - 1) {
+        assert!(sample(&mut fauna).is_some(), "sample {k}: it approaches the still light");
+    }
+    assert!(sample(&mut fauna).is_none(), "its budget spent: the light is given up");
+    assert!(fauna.percept(bw).unwrap().marked(lx, lz, fauna.tick, r, ring), "the lure is marked");
+    assert_eq!(fauna.ledger.stalled_visits[BW.index()], 0, "a give-up, not a stall");
+    assert_eq!(fauna.lead_give_ups()[BW.index()], 1);
+}
+
+/// `lead_give_up_bl` 0: the scent leads it on however long.
+#[test]
+fn a_zero_lead_budget_never_gives_a_lead_up() {
+    let mut c = config();
+    c.teachers.lead_give_up_bl = 0.0;
+    let (world, flora, mut fauna, bw, _) = scent_scene(c);
+    for k in 0..20 {
+        assert!(steer_asked(&mut fauna, &world, &flora, bw, WANDER).is_some(), "sample {k}: led");
+    }
+    assert_eq!(fauna.lead_give_ups()[BW.index()], 0);
+}

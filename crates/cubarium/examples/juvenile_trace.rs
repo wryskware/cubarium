@@ -129,8 +129,63 @@ fn main() {
                 let h = a.founder_state.held;
                 let m = a.mobility;
                 let fbk = a.founder_state.feedback;
+                // The light reading (S3): the still beacon it steers by, `kind@(x,z,y)` and its
+                // horizontal distance, or `-`; the open inspection's age in ticks.
+                let light = fauna.percept(a.id).map_or_else(String::new, |p| {
+                    let l = p.light;
+                    let beacon = if l.beacon {
+                        let ring = f64::from(sim.world().view().config.width) * sim.world().view().config.voxel_m;
+                        let mut dx = (l.beacon_x - a.pose.x).rem_euclid(ring);
+                        if dx > ring / 2.0 {
+                            dx -= ring;
+                        }
+                        format!("{}@({:.2},{:.2},{:.2})d={:.2}", l.beacon_kind, l.beacon_x, l.beacon_z, l.beacon_y, dx.hypot(l.beacon_z - a.pose.z))
+                    } else {
+                        "-".to_string()
+                    };
+                    let visit = if p.visit.active { (fauna.view().tick.saturating_sub(p.visit.since)).to_string() } else { "-".to_string() };
+                    // The class expectations (UV, cyan), the nearest lit lure and the nearest
+                    // nectar-holding stand (horizontal metres, its site's cell height), for the
+                    // light and smell leads.
+                    let now = fauna.view().tick;
+                    let (uv, cyan) = (
+                        cubarium_voxel_fauna::light::expectation_of(&config.light, p, 0, now),
+                        cubarium_voxel_fauna::light::expectation_of(&config.light, p, 1, now),
+                    );
+                    let wv = sim.world().view();
+                    let v = wv.config.voxel_m;
+                    let ring = f64::from(wv.config.width) * v;
+                    let hd = |x: f64, z: f64| {
+                        let mut dx = (x - a.pose.x).rem_euclid(ring);
+                        if dx > ring / 2.0 {
+                            dx -= ring;
+                        }
+                        dx.hypot(z - a.pose.z)
+                    };
+                    let lure = cubarium_voxel_fauna::light::lures(fauna, &wv)
+                        .iter()
+                        .map(|b| (hd(b.x, b.z), b.y_m))
+                        .min_by(|p, q| p.0.total_cmp(&q.0))
+                        .map_or("-".to_string(), |(d, y)| format!("{d:.2}/y{y:.2}"));
+                    let fv = sim.flora().view();
+                    let stand = fv
+                        .stands
+                        .iter()
+                        .filter(|s| s.nectar > 0.0)
+                        .map(|s| {
+                            let head = fv.profile_layers(s).into_iter().filter(|l| l.kind.bears_foliage()).map(|l| l.cell).max().unwrap_or(-1);
+                            (hd((f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v), s.site.y, head, s.nectar)
+                        })
+                        .min_by(|p, q| p.0.total_cmp(&q.0))
+                        .map_or("-".to_string(), |(d, y, h, n)| format!("{d:.2}/c{y}/head{h}/{n:.4}"));
+                    format!(
+                        " amb={:.3} beacon={beacon} visit={visit} marks={} expect={uv:.2}/{cyan:.2} lure={lure} stand={stand}",
+                        l.ambient,
+                        p.marks.iter().filter(|m| m.until_tick > now).count()
+                    )
+                });
                 eprintln!(
-                    "body t={} id={} {} x={:.3} z={:.3} y={} ym={:.3} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} lift={:.1} steer={:?} state={:?} mode={:?} eat={} emerg={} full={:.3} body={:.3} thirsty={} ashore={} dry={:.2} retract={} climb={} perch={} falling={} att={:.4} got={:.4} trapped={:?} stay={:?} hunt={:?}",
+                    "body t={} id={} {} x={:.3} z={:.3} y={} ym={:.3} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} lift={:.1} steer={:?} state={:?} mode={:?} eat={} emerg={} full={:.3} body={:.3} thirsty={} ashore={} dry={:.2} retract={} climb={} perch={} falling={} att={:.4} got={:.4} trapped={:?} stay={:?} hunt={:?}{light}",
                     fauna.view().tick, a.id, f.name(), a.pose.x, a.pose.z, a.site.y, a.pose.y_m, a.pose.heading_rad,
                     h.forward, h.turn, h.feed, a.founder_state.lift, fauna.steer_of(a.id), a.state, m.mode,
                     a.eating, a.emergency, a.reserve / config.founder(f).core.reserve_of(a.body).max(1e-12), a.body,
@@ -371,6 +426,10 @@ fn main() {
         n1.3[0] - n0.3[0], n1.3[1] - n0.3[1], n1.4 - n0.4
     );
     let fauna = sim.fauna();
+    // LEADS-PAY: the leads each lineage gave up over the run.
+    let gave_up = fauna.lead_give_ups();
+    let gave_up: Vec<String> = Founder::ALL.iter().filter(|f| gave_up[f.index()] > 0).map(|f| format!("{} {}", f.name(), gave_up[f.index()])).collect();
+    eprintln!("leads given up: {}", if gave_up.is_empty() { "none".to_string() } else { gave_up.join(", ") });
     println!("lineage,stage,body_mean,awake_s,eat,ask,bite,fwd,fwd_feed,stom,full,in_rate,gut_max,gut_use,grow,idle,delivery,fwd_bins,steer");
     let mut keys: Vec<_> = acc.keys().copied().collect();
     keys.sort_by_key(|(f, s)| (f.index(), *s as u8));

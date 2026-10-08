@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2424 rows)
+**`fauna.*`** (2425 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3817,6 +3817,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.search_leg_bl` | 12.0 | body lengths | [0, inf) | 3–40 log | - | placeholder | one hungry-search leg: the net way it holds a heading for (0 turns the search off) |
 | `fauna.teachers.search_cell_bl` | 2.0 | body lengths | (0, inf) | 0.5–6 | - | placeholder | the hungry search's visited-ground memory cell |
 | `fauna.teachers.search_memory_half_life_s` | 300.0 | s | (0, inf) | 30–1800 log | - | placeholder | half-life of the hungry search's visited-ground memory |
+| `fauna.teachers.lead_give_up_bl` | 150.0 | body lengths | [0, inf) | 30–600 log | - | placeholder | a hungry heuristic body that has followed leads this many of its lengths at cruise since its last taste gives the lead up: the light or scent source is marked, its own lead becomes a search leg (LEADS-PAY; 0 off) |
 | `fauna.hunt.cue_scan_m` | 6.0 | m | [0, inf) | 2–12 | - | placeholder | how far around itself a patroller reads its prey's food to choose the next patch |
 | `fauna.hunt.patch_m` | 1.0 | m | (0, inf) | 0.5–3 | - | placeholder | food cells are pooled into square patches this wide |
 | `fauna.hunt.patch_min_hop_m` | 1.5 | m | [0, inf) | 0.5–4 | - | placeholder | the nearest a next patch may be |

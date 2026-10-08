@@ -607,6 +607,7 @@ fn knob_rows() -> Vec<Row> {
         t("search_leg_bl", "body lengths", nonneg, "one hungry-search leg: the net way it holds a heading for (0 turns the search off)").search(3.0, 40.0).log(),
         t("search_cell_bl", "body lengths", pos, "the hungry search's visited-ground memory cell").search(0.5, 6.0),
         t("search_memory_half_life_s", "s", pos, "half-life of the hungry search's visited-ground memory").search(30.0, 1800.0).log(),
+        t("lead_give_up_bl", "body lengths", nonneg, "a hungry heuristic body that has followed leads this many of its lengths at cruise since its last taste gives the lead up: the light or scent source is marked, its own lead becomes a search leg (LEADS-PAY; 0 off)").search(30.0, 600.0).log(),
     ]);
 
     // `fauna.hunt.*`: the lanternjaw's patrol (the detritus web D2), every one a plausible

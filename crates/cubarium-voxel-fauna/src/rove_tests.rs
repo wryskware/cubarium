@@ -13,6 +13,9 @@
 //! - A body on a leg in a world turns toward the leg's heading (the tick wires it in).
 //! - A body on a stem or a terrain face is left to its climb.
 //! - `search_leg_bl` 0 turns the search off.
+//! - LEADS-PAY: a lead followed for its `lead_give_up_bl` budget without a taste becomes a
+//!   leg turned at least square from it, held over the heuristic's leads until it runs out;
+//!   a taste starts the count over, so a lead that ends in food is never given up.
 
 use super::*;
 use crate::step::predation_fixture::*;
@@ -223,4 +226,56 @@ fn a_zero_leg_turns_the_search_off() {
     let n = 3 * c.samples(cfg.teachers.search_patience_s);
     assert!(c.walk_east(n, 0.1).iter().all(Option::is_none), "off");
     assert!(c.fauna.rove.is_empty(), "and it keeps no memory");
+}
+
+/// A config whose lead budget runs out on the grazer's `samples`-th sample of leading.
+fn lead_config(samples: f64) -> FaunaConfig {
+    let mut c = config();
+    let period_s = GRAZER.manifest().cadence_ticks().max(1) as f64 * DT;
+    c.teachers.lead_give_up_bl = (samples - 0.5) * period_s * c.founder(GRAZER).cruise_body_lengths_per_s;
+    c
+}
+
+#[test]
+fn a_lead_that_never_brings_a_taste_becomes_a_leg_away_from_it() {
+    let budget = 4usize;
+    let cfg = lead_config(budget as f64);
+    let mut c = Case::new(cfg.clone(), true);
+    for k in 0..budget - 1 {
+        assert!(c.sample(Seek::Lead).is_none(), "sample {k}: its heuristic steers by the lead");
+    }
+    let go = c.sample(Seek::Lead).expect("its budget spent: the lead is given up for a leg");
+    assert_eq!(c.fauna.lead_give_ups()[GRAZER.index()], 1, "counted");
+    let (heading, _) = c.fauna.search_leg(c.id).expect("on a leg");
+    let (a, b) = (unit(EAST), unit(heading));
+    assert!(a.0 * b.0 + a.1 * b.1 <= 1e-9, "the leg turns at least square from the way it was led (east): {heading}");
+    assert_eq!(go.feed, WANDER.feed, "at its heuristic's own feed");
+    assert!(c.sample(Seek::Lead).is_some(), "the leg holds over the lead while it runs");
+    assert_eq!(c.fauna.search_leg(c.id).map(|l| l.0), Some(heading), "the same leg");
+}
+
+#[test]
+fn a_taste_starts_the_lead_count_over() {
+    let budget = 4usize;
+    let cfg = lead_config(budget as f64);
+    let mut c = Case::new(cfg.clone(), true);
+    for round in 0..4 {
+        for k in 0..budget - 1 {
+            assert!(c.sample(Seek::Lead).is_none(), "round {round} sample {k}: led");
+        }
+        assert!(c.sample(Seek::Taste).is_none(), "round {round}: it feeds");
+    }
+    assert_eq!(c.fauna.lead_give_ups()[GRAZER.index()], 0, "a lead that ends in food is never given up");
+    assert!(c.fauna.search_leg(c.id).is_none());
+}
+
+#[test]
+fn a_zero_lead_budget_follows_a_lead_on() {
+    let mut cfg = config();
+    cfg.teachers.lead_give_up_bl = 0.0;
+    let mut c = Case::new(cfg.clone(), true);
+    for k in 0..40 {
+        assert!(c.sample(Seek::Lead).is_none(), "sample {k}: led");
+    }
+    assert_eq!(c.fauna.lead_give_ups()[GRAZER.index()], 0);
 }

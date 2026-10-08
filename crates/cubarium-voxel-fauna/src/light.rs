@@ -49,6 +49,13 @@
 //! 6. **smell leads**: up the nectar channel's gradient where it smells it;
 //! 7. otherwise its heuristic (the wander, its flower fan).
 //!
+//! **LEADS-PAY** (`step::rove`): the approach (5) and the scent (6) are leads. A body that
+//! has steered by leads for its `lead_give_up_bl` budget since its last sip gives the lead
+//! up: the still light, or the nearest nectar source up the scent, is marked as a failed
+//! visit marks it (unlearned), and its heuristic's answer stands. A hungry bellwing awake in
+//! the dark sees no flower and smells one: the scent brought it over the plant's rooting
+//! face, a metre or two off the flower, and held it circling there all night.
+//!
 //! # Learning which light pays (S3b, [`expectation`])
 //!
 //! A flyer keeps a reward expectation per beacon **class** — UV (flowers) and cyan
@@ -680,6 +687,8 @@ pub(crate) fn steer_flyer(
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let budget = |fauna: &mut Fauna, m: LightMode| fauna.ledger.light_budget[founder.index()][m as usize] += 1;
+    // Its controller period: one sample of a lead (LEADS-PAY).
+    let period_s = fauna.config.manifest(founder).cadence_ticks().max(1) as f64 * cubarium_voxel::DT;
     // 1. A sip at its mouth stands: an inspection that ends in a sip is rewarded, and (S3b) a
     //    new sip bout teaches its class — the inspected beacon's, else UV (a flower).
     if asked.feed > 0.5 && asked.forward == 0.0 && asked.turn == 0.0 && asked_lift == 0.0 {
@@ -704,6 +713,7 @@ pub(crate) fn steer_flyer(
             learn(fauna, a.id, founder, kind, 1.0);
         }
         rewarded(fauna, a.id);
+        crate::step::rove::tasted(fauna, a.id);
         return None;
     }
     // FINDINGS-FIX: an open inspection it has flown away from (beyond `visit_m` +
@@ -752,15 +762,21 @@ pub(crate) fn steer_flyer(
             act.forward = 0.0;
             return Some((act, lift));
         }
-        // S3b: short of it and not moving for `visit_s` — wedged — it gives the beacon up.
-        if a.still_ticks >= cubarium_voxel::ticks_at_least_one(cfg.visit_s) {
+        // S3b: short of it and not moving for `visit_s` — wedged — it gives the beacon up;
+        // LEADS-PAY: so it does when its leads have run past their budget without a sip.
+        let spent = crate::step::rove::lead_spent(fauna, i, period_s);
+        if spent || a.still_ticks >= cubarium_voxel::ticks_at_least_one(cfg.visit_s) {
             let until = fauna.tick + cubarium_voxel::ticks_at_least_one(cfg.mark_s);
             let rec = fauna.percepts.entry(a.id).or_default();
             rec.mark(p.light.beacon_x, p.light.beacon_z, until);
             rec.visit = Visit::default();
             rec.light.beacon = false;
-            fauna.ledger.stalled_visits[founder.index()] += 1;
-            budget(fauna, LightMode::Stall);
+            if spent {
+                budget(fauna, LightMode::Search);
+            } else {
+                fauna.ledger.stalled_visits[founder.index()] += 1;
+                budget(fauna, LightMode::Stall);
+            }
             return None;
         }
         fauna.ledger.beacon_samples[founder.index()] += 1;
@@ -772,6 +788,16 @@ pub(crate) fn steer_flyer(
     if table.smell_min > 0.0 {
         let s = fauna.scent.read_below(view, a.pose.x, a.pose.z, a.pose.y_m)[ScentChannel::Nectar.index()];
         if s.level >= table.smell_min && (s.gx != 0.0 || s.gz != 0.0) && !scent_from_marked(fauna, &a, view, fv, (s.gx, s.gz)) {
+            // LEADS-PAY: a scent followed past the budget without a sip: its source is
+            // marked, and the scent from it passed by.
+            if crate::step::rove::lead_spent(fauna, i, period_s) {
+                if let Some((x, z)) = scent_source(fauna, &a, view, fv, (s.gx, s.gz)) {
+                    let until = fauna.tick + cubarium_voxel::ticks_at_least_one(cfg.mark_s);
+                    fauna.percepts.entry(a.id).or_default().mark(x, z, until);
+                }
+                budget(fauna, LightMode::Search);
+                return None;
+            }
             fauna.ledger.scent_led_samples[founder.index()] += 1;
             budget(fauna, LightMode::Scent);
             return Some((crate::hunt::head(a.pose.heading_rad, s.gx.atan2(s.gz), 1.0, 0.0), asked_lift));
@@ -792,6 +818,13 @@ fn scent_from_marked(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, fv: &Flora
     if !record.marks.iter().any(|m| m.until_tick > tick) {
         return false;
     }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    scent_source(fauna, a, view, fv, grad).is_some_and(|(x, z)| record.marked(x, z, tick, fauna.config.light.mark_radius_m, ring))
+}
+
+/// The nectar source the scent `grad` leads bellwing `a` to: the nearest flower holding
+/// nectar (its scent face's centre) or lit lure up the gradient, `(x, z)` metres.
+fn scent_source(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, fv: &FloraView<'_>, grad: (f64, f64)) -> Option<(f64, f64)> {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let flowers = crate::scent::flower_faces(view, fv).into_iter().map(|(x, _, z)| ((x as f64 + 0.5) * v, (f64::from(z) + 0.5) * v));
@@ -803,7 +836,7 @@ fn scent_from_marked(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, fv: &Flora
             (dx * grad.0 + dz * grad.1 > 0.0).then_some((dx * dx + dz * dz, x, z))
         })
         .min_by(|p, q| p.0.total_cmp(&q.0));
-    nearest.is_some_and(|(_, x, z)| record.marked(x, z, tick, fauna.config.light.mark_radius_m, ring))
+    nearest.map(|(_, x, z)| (x, z))
 }
 
 /// **The capgnawer's cyan** (D2, module note) over its forager: `asked` is its forager's
