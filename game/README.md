@@ -21,8 +21,14 @@ opened the project.
 ## Run the app
 
 ```sh
-godot --path game              # or scripts/run-game.sh; either lands on the session's GPU
+scripts/run-game.sh            # the session's GPU, and this host's run CPUs
 ```
+
+The launcher keeps the app to the CPUs the host profile names (`RUN_CPUS` in
+`config/hosts/$(hostname).env`: the V-cache chiplet, 0-7,16-23, on the desktop), as
+`scripts/run-voxel.sh` does for `cubarium voxel`; `CUBARIUM_CPUS` overrides it and
+`CUBARIUM_CPUS=` runs unpinned. A plain `godot --path game` lands on the right GPU but
+runs on every core.
 
 The project asks for Godot's Wayland display driver (`display_server/driver.linuxbsd` in
 project.godot) and falls back to X11 where there is no Wayland. Under Godot's default, X11
