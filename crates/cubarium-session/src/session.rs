@@ -285,12 +285,12 @@ pub struct Session {
     accept: Option<fn(&cubarium_voxel_sim::habitat::Seeded) -> bool>,
 }
 
-/// Every thread a session starts, and how to stop them all ([`Threads::stop`]): the
-/// candidate draws and the founding are cancelled and joined (a draw stops between draws,
-/// a founding at its next tick), then the loop is asked to shut down and joined (it joins
-/// a save's writer on the way out), then the ingest thread, which ends when the loop's
-/// channel closes. Nothing a session starts outlives it: the Godot extension's library is
-/// unloaded at exit, and a thread still running its code then faults.
+/// Every thread a session starts, and how to stop them ([`Threads::stop`]): the candidate
+/// draws and the founding are cancelled (a draw stops between draws, a founding at its next
+/// tick), then the loop is asked to shut down and joined (it joins a save's writer on the
+/// way out), then the ingest thread, which ends when the loop's channel closes. The Godot
+/// extension's library is unloaded at exit, and a thread still running its code then
+/// faults; see `stop` for the draws and foundings it does not wait for.
 struct Threads {
     to_sim: Sender<ToSim>,
     /// The loop first, then the ingest thread.
@@ -323,11 +323,19 @@ impl Threads {
         if let Some(j) = self.job.lock().ok().and_then(|j| j.clone()) {
             j.cancel.store(true, Ordering::SeqCst);
         }
+        // Draws and foundings that have ended are joined. Ones still running are cancelled
+        // above and end at their next check, but are not waited for: a draw checks only
+        // between draws (about 10 s on the wide world), and quitting must stay quick. They
+        // are pure computation on state they hold by `Arc` and send nothing anyone waits on,
+        // so ending with the process is harmless; the Godot extension is linked so its code
+        // stays mapped until then (crates/cubarium-godot/build.rs).
         let workers = std::mem::take(&mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()));
-        let busy = workers.iter().any(|w| !w.is_finished());
-        for w in workers {
+        let (done, running): (Vec<_>, Vec<_>) = workers.into_iter().partition(|w| w.is_finished());
+        for w in done {
             let _ = w.join();
         }
+        let busy = !running.is_empty();
+        drop(running);
         let _ = self.to_sim.send(ToSim::Shutdown);
         let handles = std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()));
         let live = busy || !handles.is_empty();
@@ -346,7 +354,8 @@ pub struct SessionStop(std::sync::Weak<Threads>);
 
 impl SessionStop {
     /// Cancel what is being made, stop the loop (and with it the running world) and join
-    /// every thread, as dropping the session would. Returns whether any was still running.
+    /// it and the ingest thread, as dropping the session would. Returns whether any thread
+    /// was still running.
     pub fn shutdown(&self) -> bool {
         self.0.upgrade().is_some_and(|t| t.stop())
     }

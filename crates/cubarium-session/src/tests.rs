@@ -478,6 +478,54 @@ fn cancel_stops_the_draws_and_the_founding() {
     assert_eq!(session.candidates()[0].state, "ready", "a ready candidate stays");
 }
 
+/// **Stopping a session stops every thread it started** ([`crate::SessionStop`], what the
+/// Godot extension does before its library is unloaded, and what a drop does): the loop
+/// is joined, and draws still going and a founding in flight are cancelled and end on
+/// their own without being waited for. A second stop finds nothing running.
+#[test]
+fn stopping_a_session_stops_its_draws_its_founding_and_its_loop() {
+    let scratch = Scratch::new("stop");
+    let session = Session::new(SessionOptions { terrain_tries: 100_000, ..options() });
+    let hopeless = WorldSpec {
+        config: Some(tiny_config(&scratch.0)),
+        seed: None,
+        sets: vec!["fauna.founders.frondgrazer.founding_count=100000".into()],
+        ..WorldSpec::default()
+    };
+    session.generate_candidates(&hopeless, 2).expect("starts");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(session.workers(), 2, "both still drawing");
+    let stop = session.stopper();
+    assert!(stop.shutdown(), "it had threads to stop");
+    no_workers(&session);
+    assert!(!stop.shutdown(), "a second stop finds nothing running");
+    assert!(stop.alive(), "the session itself is still there");
+    drop(session);
+    assert!(!stop.alive(), "and gone once dropped");
+
+    // The founding's verdict waits for the test, so the stop lands mid-founding.
+    static RELEASED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    fn held(_: &cubarium_voxel_sim::habitat::Seeded) -> bool {
+        while !RELEASED.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        false
+    }
+    let session = Session::new(options_judged(held, 3));
+    session.generate_candidates(&spec(&scratch.0, 21), 1).expect("starts");
+    settled(&session, 120);
+    session.promote(0).expect("founding starts");
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while session.founding().phase != "placing" {
+        assert!(Instant::now() < deadline, "the founding never reached its verdict: {:?}", session.founding());
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(session.stopper().shutdown(), "it had threads to stop, and did not wait for the held founding");
+    RELEASED.store(true, std::sync::atomic::Ordering::SeqCst);
+    no_workers(&session);
+    assert_eq!(session.founding().attempt, 1, "the cancelled founding made no further try");
+}
+
 /// **The water slider's mechanism**: a spec's `water_level_m` is the terrarium's water
 /// table in the world it makes, the same seeds bring the same terrains back at another
 /// level, and a landform with no water table refuses it.

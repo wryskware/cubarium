@@ -1022,6 +1022,7 @@ impl GlowSet {
 mod tests {
     use super::*;
     use cubarium_voxel::{Command, World};
+    use std::time::Instant;
     use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
     fn config() -> Config {
@@ -1132,6 +1133,67 @@ mod tests {
             (130..=210).contains(&wall),
             "in front of the wall about two thirds of the sky: {wall}"
         );
+    }
+
+    /// A world whose every open cell is under a roof, so each one casts its whole fan:
+    /// a sky plane that takes a while.
+    fn roofed(c: &Config) -> World {
+        let mut world = World::empty(c.clone());
+        let roof = c.height - 2;
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                set(&mut world, x, 0, z, Material::Bedrock);
+                if x % 7 != 0 {
+                    set(&mut world, x, roof, z, Material::Rock);
+                }
+            }
+        }
+        world
+    }
+
+    /// A cancelled plane writes nothing more: with the flag already set, not one cell.
+    #[test]
+    fn a_cancelled_sky_plane_stops_before_its_next_cell() {
+        let c = config();
+        let world = world(&c);
+        let view = world.view();
+        let mut out = vec![7u8; view.material.len()];
+        let whole = sky_plane_until(&c, view.material, 4, &mut out, &AtomicBool::new(true));
+        assert!(!whole, "a cancelled plane says it is not whole");
+        assert!(out.iter().all(|&b| b == 7), "no cell was computed after the cancel");
+    }
+
+    /// Dropping the worker while it computes a plane gives the plane up and joins the
+    /// thread: the drop returns in a small part of the time the whole plane takes, and no
+    /// thread of the worker is left holding anything of it.
+    #[test]
+    fn dropping_the_sky_worker_mid_plane_returns_promptly_and_ends_its_thread() {
+        let c = Config {
+            width: 96,
+            height: 32,
+            depth: 16,
+            ..Config::default()
+        };
+        let world = roofed(&c);
+        let view = world.view();
+        let mut full = vec![0u8; view.material.len()];
+        let at = Instant::now();
+        sky_plane(&c, view.material, 1, &mut full);
+        let whole = at.elapsed();
+
+        let worker = SkyWorker::with_threads(1);
+        // The thread holds its own clone of the cancel flag for as long as it runs.
+        let thread_alive = Arc::downgrade(&worker.cancel);
+        worker.submit(1, &c, view.material);
+        std::thread::sleep(whole / 8);
+        let at = Instant::now();
+        drop(worker);
+        let dropped = at.elapsed();
+        assert!(
+            dropped < whole / 2,
+            "the drop gave the plane up ({dropped:?}, the whole plane takes {whole:?})"
+        );
+        assert!(thread_alive.upgrade().is_none(), "the worker's thread has ended");
     }
 
     fn flora(world: &World, stands: &[(i64, u32, Species)]) -> Flora {
