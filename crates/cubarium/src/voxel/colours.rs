@@ -68,6 +68,11 @@ pub fn band(dy: i32, top: i32) -> u8 {
 /// gave it, and its height band. `ripe` says whether a warm accent shows ripe (the
 /// caller decides from the parcel); an unripe accent paints the species' closed colour.
 pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> Swatch {
+    // Fallen foliage is its layer's foliage at the tip of the ramp (`Tag::Fallen`).
+    let (tag, band) = match tag {
+        Tag::Fallen(i) => (Tag::Foliage(i), BANDS - 1),
+        t => (t, band),
+    };
     let t = f32::from(band.min(BANDS - 1)) / f32::from(BANDS - 1);
     let r = recipe(species);
     match tag {
@@ -80,7 +85,7 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
                 glint: lerp(bark, GLOW, 0.3),
             }
         }
-        Tag::Foliage(_) => {
+        Tag::Foliage(_) | Tag::Fallen(_) => {
             // The bake's shades of one part: `p0` is a part's dark base, `p2` its lit
             // tip. Folded into the ramp rather than into a separate table.
             let bias = if material == model::named_index("p0") {
@@ -95,7 +100,7 @@ pub fn plant(species: Species, tag: Tag, material: u8, band: u8, ripe: bool) -> 
                 None => lerp(r.leaf.0, r.leaf.1, (t + bias).clamp(0.0, 1.0)),
             };
             let layer = match tag {
-                Tag::Foliage(i) => i,
+                Tag::Foliage(i) | Tag::Fallen(i) => i,
                 _ => 0,
             };
             let body = match r.core {

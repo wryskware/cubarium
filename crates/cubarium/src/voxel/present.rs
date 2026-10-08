@@ -366,12 +366,14 @@ pub struct VoxelPresenter {
 
 impl VoxelPresenter {
     pub fn new(cfg: VoxelConfig, proj: Projection) -> VoxelPresenter {
+        let mut stands = Stands::empty(0, 0, 0);
+        stands.set_foliage_fade_s(cfg.foliage_fade_s);
         VoxelPresenter {
             cfg,
             proj,
             said_cropped: false,
             roof: Vec::new(),
-            stands: Stands::empty(0, 0, 0),
+            stands,
             animals: Animals::empty(0, 0, 0),
             models: None,
             specimens: Vec::new(),

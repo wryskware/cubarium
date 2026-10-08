@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1053 rows)
+**`flora.*`** (1071 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -485,6 +485,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.bloomcrown.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.bloomcrown.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.bloomcrown.foliage_state_below.*` | 0.66, 0.25 | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.bloomcrown.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.bloomcrown.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.bloomcrown.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.bloomcrown.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -593,6 +595,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.umbrellafrond.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.umbrellafrond.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.umbrellafrond.foliage_state_below.*` | 0.75, 0.5, 0.25 | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.umbrellafrond.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.umbrellafrond.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.umbrellafrond.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.umbrellafrond.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -701,6 +705,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.springturf.cure_cover` | 1.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.springturf.cured_srgb` | 12755290 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.springturf.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.springturf.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.springturf.founder_per_m2` | 0.6 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.springturf.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.springturf.founder_cap` | 160 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -809,6 +815,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.stonecushion.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.stonecushion.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.stonecushion.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.stonecushion.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.stonecushion.founder_per_m2` | 0.2 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.stonecushion.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.stonecushion.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -917,6 +925,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.velvetpad.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.velvetpad.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.velvetpad.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.velvetpad.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.velvetpad.founder_per_m2` | 0.4 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.velvetpad.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.velvetpad.founder_cap` | 120 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1025,6 +1035,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.glowcap.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.glowcap.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.glowcap.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.glowcap.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.glowcap.founder_per_m2` | 0.15 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.glowcap.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.glowcap.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1133,6 +1145,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.vaulttree.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.vaulttree.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.vaulttree.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.vaulttree.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.vaulttree.founder_cap` | 12 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1241,6 +1255,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.lanternberry.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.lanternberry.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.lanternberry.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.lanternberry.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.lanternberry.founder_per_m2` | 0.25 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.lanternberry.founder_colony` | 3 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.lanternberry.founder_cap` | 40 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |
@@ -1349,6 +1365,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.siphonreed.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.siphonreed.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
+| `flora.siphonreed.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.siphonreed.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.siphonreed.founder_per_m2` | 4.0 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.siphonreed.founder_colony` | 6 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |
 | `flora.siphonreed.founder_cap` | 64 | stands | [0, inf) | 0–400 | - | placeholder | founding: the cap a world puts on this species' founders |

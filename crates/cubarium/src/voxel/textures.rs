@@ -605,7 +605,7 @@ fn species_stems(root: &Path, s: Option<u32>) -> Vec<SpeciesStem> {
 fn roles_of(tag: Tag) -> Vec<String> {
     match tag {
         Tag::Trunk => vec!["bark".into()],
-        Tag::Foliage(i) => vec![format!("leaf{}", u16::from(i) + 1), "leaf".into()],
+        Tag::Foliage(i) | Tag::Fallen(i) => vec![format!("leaf{}", u16::from(i) + 1), "leaf".into()],
         Tag::Drape(_) => vec!["drape".into()],
         Tag::Accent => vec!["accent".into()],
     }
@@ -627,7 +627,7 @@ fn tag_key(tag: Tag) -> usize {
     match tag {
         Tag::Trunk => 0,
         Tag::Accent => 1,
-        Tag::Foliage(i) => 2 + usize::from(i.min(LEAF_LAYERS - 1)),
+        Tag::Foliage(i) | Tag::Fallen(i) => 2 + usize::from(i.min(LEAF_LAYERS - 1)),
         Tag::Drape(i) => 2 + LEAF_LAYERS as usize + usize::from(i.min(LEAF_LAYERS - 1)),
     }
 }

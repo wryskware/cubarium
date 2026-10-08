@@ -48,12 +48,14 @@ pub struct Model {
     pub growth: Vec<f64>,
 }
 
-/// Read a `.cvm` file. `palette` is the model palette's names in index order: a file names
-/// its materials, and a cell's material becomes that name's index.
+/// Read a `.cvm` file (version 2). `palette` is the model palette's names in index order: a
+/// file names its materials, and a cell's material becomes that name's index. A plant's
+/// foliage states past the first are skipped: this view draws every plant in its full
+/// state (state 0).
 pub fn parse_cvm(bytes: &[u8], palette: &[String]) -> Result<Model, String> {
     let mut r = Reader { bytes, at: 0 };
-    if r.take(4)? != b"CVM1" {
-        return Err("not a CVM1 model file".into());
+    if r.take(4)? != b"CVM2" {
+        return Err("not a CVM2 model file".into());
     }
     let kind = r.take(1)?[0];
     let n_materials = r.take(1)?[0];
@@ -67,6 +69,15 @@ pub fn parse_cvm(bytes: &[u8], palette: &[String]) -> Result<Model, String> {
             .ok_or_else(|| format!("material {name:?} is not in the palette"))?;
         remap.push(i as u8);
     }
+    // The state table: name and start fraction per state, state 0 the full model.
+    let n_states = usize::from(r.take(1)?[0]);
+    if n_states == 0 {
+        return Err("a model with no states".into());
+    }
+    for _ in 0..n_states {
+        let len = usize::from(r.take(1)?[0]);
+        r.take(len + 8)?;
+    }
     let n_steps = u16::from_le_bytes(r.take(2)?.try_into().unwrap());
     let mut steps = Vec::new();
     for _ in 0..n_steps {
@@ -77,6 +88,11 @@ pub fn parse_cvm(bytes: &[u8], palette: &[String]) -> Result<Model, String> {
         for _ in 0..n_variants {
             let n = u32::from_le_bytes(r.take(4)?.try_into().unwrap()) as usize;
             let raw = r.take(n.checked_mul(5).ok_or("cell count")?)?;
+            // The reduced foliage states, which this view does not draw.
+            for _ in 1..n_states {
+                let m = u32::from_le_bytes(r.take(4)?.try_into().unwrap()) as usize;
+                r.take(m.checked_mul(5).ok_or("cell count")?)?;
+            }
             let mut cells = Vec::with_capacity(n);
             for c in raw.chunks_exact(5) {
                 let material = *remap.get(usize::from(c[3])).ok_or("cell material")?;
@@ -491,26 +507,76 @@ mod tests {
     /// A hand-built file: `kind`, the materials it names, and steps of
     /// `(size, [variant cells])`.
     fn cvm(kind: u8, materials: &[&str], steps: &[(f64, Vec<Vec<[u8; 5]>>)]) -> Vec<u8> {
-        let mut b = b"CVM1".to_vec();
+        let steps: Vec<(f64, Vec<Vec<Vec<[u8; 5]>>>)> = steps
+            .iter()
+            .map(|(s, vs)| (*s, vs.iter().map(|v| vec![v.clone()]).collect()))
+            .collect();
+        cvm_states(kind, materials, &["full"], &steps)
+    }
+
+    /// A hand-built version 2 file with `states` (named, state 0 first): each variant
+    /// holds one cell list per state.
+    fn cvm_states(
+        kind: u8,
+        materials: &[&str],
+        states: &[&str],
+        steps: &[(f64, Vec<Vec<Vec<[u8; 5]>>>)],
+    ) -> Vec<u8> {
+        let mut b = b"CVM2".to_vec();
         b.push(kind);
         b.push(materials.len() as u8);
         for m in materials {
             b.push(m.len() as u8);
             b.extend(m.as_bytes());
         }
+        b.push(states.len() as u8);
+        for (k, s) in states.iter().enumerate() {
+            b.push(s.len() as u8);
+            b.extend(s.as_bytes());
+            b.extend((1.0 - 0.25 * k as f64).to_le_bytes());
+        }
         b.extend((steps.len() as u16).to_le_bytes());
         for (size, variants) in steps {
             b.extend(size.to_le_bytes());
             b.extend(0.5f64.to_le_bytes());
             b.push(variants.len() as u8);
-            for cells in variants {
-                b.extend((cells.len() as u32).to_le_bytes());
-                for c in cells {
-                    b.extend(c);
+            for per_state in variants {
+                for cells in per_state {
+                    b.extend((cells.len() as u32).to_le_bytes());
+                    for c in cells {
+                        b.extend(c);
+                    }
                 }
             }
         }
         b
+    }
+
+    /// A plant file with foliage states reads back each variant's full state (state 0) and
+    /// skips the rest whole, so the next variant and step still line up.
+    #[test]
+    fn a_file_with_foliage_states_reads_its_full_state() {
+        let variant = |y: u8| {
+            vec![
+                vec![[0, y, 0, 0, 0x10], [1, y, 0, 0, 0x10]],
+                vec![[0, y, 0, 0, 0x10]],
+                vec![],
+            ]
+        };
+        let bytes = cvm_states(
+            0,
+            &["plum"],
+            &["full", "browsed", "stripped"],
+            &[(0.25, vec![variant(1), variant(2)]), (0.5, vec![variant(3)])],
+        );
+        let m = parse_cvm(&bytes, &palette()).unwrap();
+        assert_eq!(m.steps.len(), 2);
+        assert_eq!(m.steps[0].variants.len(), 2);
+        for (step, v, y) in [(0, 0, 1), (0, 1, 2), (1, 0, 3)] {
+            let cells = &m.steps[step].variants[v];
+            assert_eq!(cells.len(), 2, "the full state's two cells");
+            assert!(cells.iter().all(|c| c.offset[1] == y));
+        }
     }
 
     #[test]
@@ -564,6 +630,33 @@ mod tests {
             (0..=1).all(|_| m.plant_pick(0.9, 99).unwrap().1 == v),
             "the variant follows the id alone"
         );
+    }
+
+    /// The shipped library (`assets/voxel-models/<mm>/`) reads whole with this reader, in
+    /// the palette its manifest names: every file the manifest lists, with at least one
+    /// step and a cell in it.
+    #[test]
+    fn the_shipped_library_reads() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        for mm in ["125", "250"] {
+            let dir = root.join(mm);
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+            let palette: Vec<String> = manifest["palette"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            for key in ["species", "founders", "specimens"] {
+                for (name, file) in manifest[key].as_object().unwrap() {
+                    let bytes = std::fs::read(dir.join(file.as_str().unwrap())).unwrap();
+                    let m = parse_cvm(&bytes, &palette).unwrap_or_else(|e| panic!("{mm}/{name}: {e}"));
+                    assert!(!m.steps.is_empty(), "{mm}/{name}");
+                    assert!(m.steps.iter().all(|s| s.variants.iter().all(|v| !v.is_empty())), "{mm}/{name}");
+                }
+            }
+        }
     }
 
     #[test]

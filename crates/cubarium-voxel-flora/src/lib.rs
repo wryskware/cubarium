@@ -915,6 +915,11 @@ fn default_night_floor() -> f64 {
     0.2
 }
 
+/// [`SpeciesConfig::foliage_state_hysteresis`]'s base (the orchestrator's start value).
+fn default_foliage_state_hysteresis() -> f64 {
+    0.05
+}
+
 /// [`SpeciesConfig::night_min_s`]'s default: ten minutes.
 fn default_night_min_s() -> f64 {
     600.0
@@ -1507,6 +1512,23 @@ pub struct SpeciesConfig {
     /// darkest faces that pass its gates with no substrate laid (no log under them). 0 is
     /// none: every founder is founded as before. A fraction.
     pub dark_founder_share: f64,
+    /// **Foliage states** (presentation only;
+    /// `design/handoffs/foliage-states-implementation-2026-10-08.md`): the stand's **total**
+    /// foliage fraction (its foliage over `alpha · wood`) below which the presenter draws
+    /// each reduced state of the species' baked model, descending: state `k` below entry
+    /// `k − 1`. The baked model carries the states; this picks among them. Empty: no
+    /// states, and the model thins layer by layer as before. Fractions of capacity. Start
+    /// values (the orchestrator's, 2026-10-08): bloomcrown browsed 0.66 and stripped 0.25,
+    /// umbrellafrond browsed A 0.75, browsed B 0.5 and stripped 0.25. The simulation
+    /// never reads it.
+    #[serde(default)]
+    pub foliage_state_below: Vec<f64>,
+    /// The **hysteresis** on [`SpeciesConfig::foliage_state_below`], a fraction of
+    /// capacity: a stand goes to a barer state as soon as its fraction is below that
+    /// state's threshold, and back to a fuller one only once its fraction is at or above
+    /// the threshold plus this. Presentation only. 0.05 at the base.
+    #[serde(default = "default_foliage_state_hysteresis")]
+    pub foliage_state_hysteresis: f64,
     /// **What is in that volume**: the species' anatomy, staged by `wood / wood_max`.
     /// The first entry whose `wood_fraction_max` is at or above the fraction applies;
     /// the last must catch a full-grown stand. Its foliage-bearing layers are the
@@ -1902,6 +1924,9 @@ impl SpeciesConfig {
             dark_establish_min: 0.0,
             dark_spore_bias: 0.0,
             dark_founder_share: 0.0,
+            // No foliage states: only the species whose models carry them name thresholds.
+            foliage_state_below: Vec::new(),
+            foliage_state_hysteresis: default_foliage_state_hysteresis(),
             // The v1 base carries no anatomy of its own: every preset states one.
             profile: SpeciesConfig::one_stage(vec![SpeciesConfig::foliage_layer(
                 [0.0, 1.0],
@@ -2001,6 +2026,9 @@ impl SpeciesConfig {
             nectar_per_s: 1e-4,
             nectar_cap: 0.02,
             nectar_mineral_fraction: 0.01,
+            // Foliage states (Wrysk's picks 2026-10-08; the thresholds are start values):
+            // browsed below 0.66 of capacity, stripped below 0.25.
+            foliage_state_below: vec![0.66, 0.25],
             ..SpeciesConfig::v1_base()
         }
     }
@@ -2086,6 +2114,9 @@ impl SpeciesConfig {
                     ],
                 },
             ],
+            // Foliage states (Wrysk's picks 2026-10-08; the thresholds are start values):
+            // browsed A below 0.75 of capacity, browsed B below 0.5, stripped below 0.25.
+            foliage_state_below: vec![0.75, 0.5, 0.25],
             ..SpeciesConfig::v1_base()
         }
     }
