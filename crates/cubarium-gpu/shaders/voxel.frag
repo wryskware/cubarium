@@ -23,16 +23,29 @@
 
 #include "world.glsl"
 
+#if defined(PLANT_VIS) || defined(PLANT_SHADE)
+// This file again as the plant pass's two fragment stages (`crate::plants`, compiled with
+// `-DPLANT_VIS` and `-DPLANT_SHADE`): the walk's own face functions, so a plant drawn as a
+// model shows the stamped cell's texels, lit as the walk lights them.
+#include "plant.glsl"
+#endif
+
+#ifdef PLANT_VIS
+layout(location = 0) out uint outId;
+#else
 layout(location = 0) out vec4 outColour;
 // Lit tier only (the flat tier's pass has no attachment here, so the writes are dropped):
 // the light this pixel emits, for the bloom (`cubarium_gpu::bloom`). An emitting texel's
 // emissive colour, less the haze in front of it and times the water's transmission in
 // front of it; zero for every pixel that is not an emitter.
 layout(location = 1) out vec4 emitOut;
+#endif
+#if !defined(PLANT_VIS) && !defined(PLANT_SHADE)
 // The walk's end depth for the model pass (H2): the z, in voxels, where the ray met its
 // first opaque face (a front face at its slab, a cap at the row's own depth across it), or
 // FAR where it met none. Animals are drawn after the walk, each texel tested against this.
 layout(location = 2) out float depthOut;
+#endif
 const float FAR = 65504.0;
 
 // --- the faces ------------------------------------------------------------------------
@@ -347,6 +360,10 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
     rgb = hazed(cap, hazeAt(float(z) + float(r) / float(RISE)));
     return true;
 }
+
+// A dry plant cell the plant pass draws instead of the walk (`PLANT_MODELS`). A cell with
+// water in it stays the walk's: the water of its own cell blends over it.
+bool plantHidden(uvec4 v) { return PLANT_MODELS && v.g == 0u && plantBlockPart(partOf(v)); }
 
 // --- the sleep and idle poses (WX4, `cubarium::voxel::sleep`, `cubarium::voxel::idle`) ------
 //
@@ -1803,6 +1820,13 @@ vec3 flatRain(int px, int py, vec3 colour) {
 
 #include "volumetric.glsl"
 
+// In the walk: whether the ray goes through this plant cell for the plant pass to draw it.
+// Only while nothing has been met in front of it: behind water (falling water, a pool's
+// surface) the walk draws the cell itself, still, under the water's colour, as ever.
+bool walkSkipsPlant(uvec4 v, vec3 trans) {
+    return plantHidden(v) && all(equal(trans, vec3(1.0))) && (!LIT || wEntry < 0);
+}
+
 // The world column a raster column draws: turned round the ring by the view.
 int worldCol(int sx) {
     int rw = W * S;
@@ -1827,6 +1851,9 @@ bool highlighted(int x, int y, int z) {
 
 vec3 hiTint(vec3 c) { return mix(c, vec3(1.0), u.hiK.x); }
 
+#if defined(PLANT_VIS) || defined(PLANT_SHADE)
+#include "plant_main.glsl"
+#else
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -1861,6 +1888,9 @@ void main() {
     // The slab the walk ends in outlives the walk: the light shafts stop there.
     int z = 0;
     float zHit = FAR;
+    // The walk ended on a plant cell the plant pass would draw, because water lay in front
+    // of it (`walkSkipsPlant`).
+    bool plantBehind = false;
     for (; z < D; ++z) {
         int q = BASE - z * RISE - px.y - 1;
         // q falls by `rise` a slab: once the pixel is below this slab's y = 0 front face
@@ -1920,7 +1950,7 @@ void main() {
                 }
             }
             int p = partOf(v);
-            if (p != 0) {
+            if (p != 0 && !walkSkipsPlant(v, trans)) {
                 // A posing body (WX4): whichever of its cells (or their caps) the settle
                 // has moved over this pixel, if any, instead of the band's own voxel.
                 int fy = level;
@@ -1933,6 +1963,7 @@ void main() {
                 vec3 art;
                 bool lum;
                 if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
+                    plantBehind = plantHidden(v);
                     if (partOf(v) == ANIMAL_INTERIM && highlighted(x, fy, z)) { art = hiTint(art); }
                     acc += trans * art;
                     trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
@@ -1964,7 +1995,9 @@ void main() {
             bool lum;
             // A posing cell's cap is where its settle and breath put it (WX4).
             int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
-            if (isBlockPart(p) && cl >= 0 && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+            if (isBlockPart(p) && !walkSkipsPlant(v, trans) && cl >= 0
+                && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+                plantBehind = plantHidden(v);
                 if (p == ANIMAL_INTERIM && highlighted(x, below, z)) { cap = hiTint(cap); }
                 acc += trans * cap;
                 trans = LIT && lum
@@ -1994,7 +2027,9 @@ void main() {
     // ray ended in, or the water surface in front of it (the fog and the rain stop there).
     int zEnd = LIT && wEntry >= 0 ? min(z, (wEntry >> 12) & 0xFFF) : z;
     emitOut = vec4(emitted, WEATHER_DEPTH ? float(min(zEnd, 255)) / 255.0 : 1.0);
-    depthOut = zHit;
+    // A plant cell drawn here under the water in front of it: a slab nearer, so the plant
+    // pass's own samples of it count as behind and are not drawn over the water.
+    depthOut = plantBehind ? zHit - 1.0 : zHit;
     // The flat tier has no light to scale: its day and night are a tint over the world (1
     // by day), under the sky's own gradient.
     vec3 colour = (LIT ? acc : acc * u.tint.rgb) + trans * sky;
@@ -2013,3 +2048,4 @@ void main() {
         outColour.rgb = flatRain(px.x, px.y, outColour.rgb);
     }
 }
+#endif

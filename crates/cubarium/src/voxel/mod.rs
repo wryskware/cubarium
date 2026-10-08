@@ -53,6 +53,7 @@ pub mod figure;
 pub mod model;
 pub mod patches;
 pub mod placement;
+pub mod plant_motion;
 pub mod present;
 pub mod project;
 pub mod save;
@@ -209,11 +210,18 @@ pub struct VoxelConfig {
     /// pass, moving and turning smoothly between ticks (the default), or stamped into the
     /// world's voxels as before. Presentation only.
     pub figures: figure::FigureConfig,
+    /// **How plants move when the GPU renderer draws them as models** (`[plants]`, with
+    /// `[figures] plants = "models"`): the breeze, the sway, the grow-in. Presentation only;
+    /// unread with stamped plants.
+    pub plants: plant_motion::PlantConfig,
     /// **Seconds a plant takes to cross-fade from one foliage state to the next**
     /// (`design/handoffs/foliage-states-implementation-2026-10-08.md`): cells the two
     /// states share stay, the outgoing state's other cells drop and the incoming state's
     /// appear one by one over this, on the frame clock. 0 switches at once. Presentation
     /// only; the states and their thresholds are the species' (`foliage_state_below`).
+    /// With plants as models (`[figures] plants = "models"`) the stamp switches at once
+    /// and this is how long the plant pass's grow-in of any change takes instead: each
+    /// voxel's own `[plants] grow_s`, staggered over the rest.
     pub foliage_fade_s: f64,
     /// **How the GPU renderer's pack runs** (`[pack]`, H3): execution and presentation only.
     pub pack: PackConfig,
@@ -252,6 +260,7 @@ impl Default for VoxelConfig {
             hunker_s: hunker::DEFAULT_S,
             meal_flash: animal::MEAL_FLASH_DEFAULT,
             figures: figure::FigureConfig::default(),
+            plants: plant_motion::PlantConfig::default(),
             foliage_fade_s: stand::FOLIAGE_FADE_S,
             pack: PackConfig::default(),
             serve: None,

@@ -50,7 +50,7 @@ use crate::voxel::animal::{AnimalPart, Animals, Specimen};
 use crate::voxel::candle::{self, Candle};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
-use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, Spec};
+use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, PlantDraw, Spec};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
@@ -81,6 +81,7 @@ pub mod hosted;
 /// What the pack reads, copied off the live world (H3).
 #[path = "snapshot.rs"]
 pub mod snapshot;
+mod plants;
 use snapshot::{Hint, Mirror, PackSnapshot};
 
 /// The knobs `cubarium voxel --sink gpu` takes.
@@ -249,6 +250,23 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         open: impl FnOnce(&std::sync::Arc<Gpu>, &mut VoxelRenderer) -> Result<T>,
     ) -> Result<Self> {
         anyhow::ensure!(cfg.figures.supersample > 0, "figures.supersample must be positive");
+        if cfg.figures.plants == PlantDraw::Models {
+            cfg.plants.validate()?;
+            let w = &cfg.sim.world;
+            anyhow::ensure!(
+                proj.s <= cubarium_gpu::plants::MAX_PX_PER_VOXEL,
+                "plants = \"models\" draws at most {} px per voxel, not {}",
+                cubarium_gpu::plants::MAX_PX_PER_VOXEL,
+                proj.s
+            );
+            anyhow::ensure!(
+                w.width <= 4096 && w.height <= 1024 && w.depth <= 1024,
+                "plants = \"models\" packs a cell in 12 + 10 + 10 bits: the world {}x{}x{} is too big",
+                w.width,
+                w.height,
+                w.depth
+            );
+        }
         let params = params_of(cfg, proj, options.roof_from_texture);
         let gpu = std::sync::Arc::new(
             Gpu::open(options.target.instance_extensions())
@@ -278,6 +296,21 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
+        if cfg.figures.plants == PlantDraw::Models {
+            // The stamp switches foliage states at once; the plant pass grows the change in
+            // over `foliage_fade_s` instead of the stamp's cell-by-cell swap.
+            packer.stands.set_foliage_fade_s(0.0);
+            if !params.lit {
+                packer.stands.track_owners();
+            }
+            packer.plants = Some(plants::PlantTracker::new(
+                cfg.plants.clone(),
+                cfg.foliage_fade_s,
+                params.width,
+                params.height,
+                params.depth,
+            ));
+        }
         Ok(VoxelGpuSink {
             figure_track: models_on.then(|| FigureTrack::new(cfg.figures.clone(), params.width)),
             figure_highlight: None,
@@ -1228,6 +1261,8 @@ struct Packer {
     /// Whether a tick packs only what changed (the live pack) or everything (the oracle
     /// the change-only pack is held to).
     incremental: bool,
+    /// The plant pass's cells between ticks, when plants are models (`[figures] plants`).
+    plants: Option<plants::PlantTracker>,
     /// The change-only pack's state.
     delta: Delta,
 }
@@ -1434,6 +1469,7 @@ impl Packer {
             candle: (p.lit && emission.on && emission.candle.on()).then_some(emission.candle),
             candle_class: Vec::new(),
             incremental: true,
+            plants: None,
             animals,
             models,
             figures: false,
@@ -1624,6 +1660,11 @@ impl Packer {
         }
         self.animals.stamp_carcasses(view, &flora, fauna.config);
         lap!("animals");
+        if let Some(t) = &mut self.plants {
+            let delta = &self.delta;
+            t.detect(view, flora, &self.stands, &delta.master, |i| delta.is_keyed(i), &mut self.palette, view.tick, candle_s);
+            lap!("plants");
+        }
         if self.figures {
             figure::specs(&self.animals, view, fauna, self.models.as_deref(), &mut self.figure_models, &mut self.figure_specs);
             self.figure_emitters.clear();
@@ -2002,8 +2043,9 @@ impl Packer {
 
     /// [`Packer::fill`] of a snapshot's views ([`snapshot`]): `hint` names the wet set the
     /// view itself cannot give, and the only pore ranges that can have moved.
-    fn fill_with(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>, hint: Hint<'_>) {
+    fn fill_with(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, mut out: VoxelStaging<'_>, hint: Hint<'_>) {
         self.keys_tick += 1;
+        let full = !(self.incremental && !self.delta.full);
         if self.incremental && !self.delta.full {
             self.fill_delta(view, w, h, d, hint);
             for &(i, _, _) in &self.delta.changed {
@@ -2017,6 +2059,10 @@ impl Packer {
             lap!("full pack");
         }
         self.delta.full = false;
+        if let (Some(t), Some(list)) = (self.plants.as_mut(), out.plants.as_deref_mut()) {
+            t.build(&self.delta.master, &mut self.palette, full, list);
+            lap!("plant cells");
+        }
         // The pose table: the staged tick and its breaths, then this pack's poses.
         let entries = self.animals.pose_entries();
         if entries.len() > 1 {
@@ -2579,6 +2625,7 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         },
         star_bloom: cfg.light.star_bloom.max(0.0),
         day_sky_brightness: cfg.light.day_sky_brightness.clamp(0.0, 2.0),
+        plants: (cfg.figures.plants == PlantDraw::Models).then(|| cfg.plants.motion()),
     }
 }
 
@@ -2906,6 +2953,7 @@ mod tests {
         ) -> VoxelStaging<'a> {
             *carried = Carried::default();
             VoxelStaging {
+                plants: None,
                 voxels: &mut self.voxels,
                 roof: &mut self.roof,
                 styles: &mut self.styles,

@@ -70,6 +70,7 @@ impl Planes {
         self.emit_curves = [0; MAX_STYLES];
         *carried = Carried::default();
         VoxelStaging {
+            plants: None,
             voxels: &mut self.voxels,
             roof: &mut self.roof,
             styles: &mut self.styles,

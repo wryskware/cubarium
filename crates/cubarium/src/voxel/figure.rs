@@ -62,6 +62,35 @@ pub enum AnimalDraw {
     Stamped,
 }
 
+/// How the GPU renderer draws plants (`[figures] plants`, `CUBARIUM_PLANTS`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlantDraw {
+    /// Voxels of the world's texture, still, as ever (the default until Wrysk picks).
+    #[default]
+    Stamped,
+    /// The plant pass (`cubarium_gpu::plants`): every plant cell a model voxel, swaying in
+    /// the breeze and growing in voxel by voxel (`[plants]`).
+    Models,
+}
+
+impl PlantDraw {
+    pub fn name(self) -> &'static str {
+        match self {
+            PlantDraw::Stamped => "stamped",
+            PlantDraw::Models => "models",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<PlantDraw> {
+        match s {
+            "stamped" => Some(PlantDraw::Stamped),
+            "models" => Some(PlantDraw::Models),
+            _ => None,
+        }
+    }
+}
+
 /// How a figure's heading turns.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -175,6 +204,10 @@ pub struct FigureConfig {
     /// Tile samples per raster-pixel axis (positive; 1 disables AA). Startup only.
     #[serde(deserialize_with = "positive_supersample")]
     pub supersample: u32,
+    /// `"stamped"` (the default) or `"models"` ([`PlantDraw`]): plants in the world's
+    /// voxels, still, or drawn by the plant pass, swaying and growing in (`[plants]`).
+    /// Startup only.
+    pub plants: PlantDraw,
 }
 
 fn positive_supersample<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -198,6 +231,7 @@ impl Default for FigureConfig {
             swap_s: 0.3,
             subpixel: true,
             supersample: 2,
+            plants: PlantDraw::Stamped,
         }
     }
 }
@@ -285,6 +319,18 @@ impl FigureConfig {
         Ok(cfg)
     }
 
+    /// `CUBARIUM_PLANTS` applied: `models` or `stamped`, or anything else refused with the
+    /// valid values named. Pure, like [`FigureConfig::with_overrides`].
+    pub fn with_plants(&self, plants: Option<&str>) -> anyhow::Result<Self> {
+        let mut cfg = self.clone();
+        if let Some(value) = plants {
+            cfg.plants = PlantDraw::parse(value).ok_or_else(|| {
+                anyhow::anyhow!("unknown CUBARIUM_PLANTS value {value:?}; valid values: models, stamped")
+            })?;
+        }
+        Ok(cfg)
+    }
+
     /// Read the process overrides once at renderer startup, and report the effective
     /// settings. Low-level sinks do not read them: explicit captures and CPU/GPU parity
     /// checks retain their own presentation config. Returns which live settings the
@@ -304,9 +350,11 @@ impl FigureConfig {
         )?;
         let subpixel = read("CUBARIUM_ANIMAL_SUBPIXEL", "0, 1")?;
         let supersample = read("CUBARIUM_ANIMAL_AA", "a positive integer (1..=4294967295)")?;
+        let plants = read("CUBARIUM_PLANTS", "models, stamped")?;
         *self = self.with_overrides(animals.as_deref(), turn.as_deref(), subpixel.as_deref(), supersample.as_deref())?;
+        *self = self.with_plants(plants.as_deref())?;
         eprintln!(
-            "cubarium animals: animals={} movement={} turn={} turn_steps={} turn_blend_s={} stepped_turn_blend_s={} subpixel={} supersample={}",
+            "cubarium animals: animals={} movement={} turn={} turn_steps={} turn_blend_s={} stepped_turn_blend_s={} subpixel={} supersample={}; plants={}",
             match self.animals {
                 AnimalDraw::Models => "models",
                 AnimalDraw::Stamped => "stamped",
@@ -321,6 +369,7 @@ impl FigureConfig {
             self.stepped_turn_blend_s,
             self.subpixel,
             self.supersample,
+            self.plants.name(),
         );
         Ok(EnvPins::of(animals.as_deref(), subpixel.as_deref()))
     }
@@ -328,7 +377,7 @@ impl FigureConfig {
 
 #[cfg(test)]
 mod preset_tests {
-    use super::{AnimalDraw, EnvPins, FigureConfig, FigureMotion, Movement, Turn};
+    use super::{AnimalDraw, EnvPins, FigureConfig, FigureMotion, Movement, PlantDraw, Turn};
 
     fn config() -> FigureConfig {
         FigureConfig {
@@ -342,6 +391,7 @@ mod preset_tests {
             swap_s: 2.5,
             subpixel: false,
             supersample: 3,
+            plants: PlantDraw::Models,
         }
     }
 

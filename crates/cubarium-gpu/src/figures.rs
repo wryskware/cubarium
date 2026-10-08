@@ -686,14 +686,14 @@ pub(crate) fn walk_pass(d: &ash::Device, raster: vk::Format, emit: Option<vk::Fo
 }
 
 /// An image, its memory and a view.
-struct Plane {
+pub(crate) struct Plane {
     image: vk::Image,
     memory: vk::DeviceMemory,
-    view: vk::ImageView,
+    pub(crate) view: vk::ImageView,
 }
 
 impl Plane {
-    fn new(gpu: &Gpu, w: u32, h: u32, format: vk::Format, usage: vk::ImageUsageFlags, aspect: vk::ImageAspectFlags) -> Result<Plane> {
+    pub(crate) fn new(gpu: &Gpu, w: u32, h: u32, format: vk::Format, usage: vk::ImageUsageFlags, aspect: vk::ImageAspectFlags) -> Result<Plane> {
         let (image, memory) = gpu.image(w, h, format, vk::ImageTiling::OPTIMAL, usage)?;
         let info = vk::ImageViewCreateInfo::default()
             .image(image)
@@ -704,7 +704,7 @@ impl Plane {
         Ok(Plane { image, memory, view })
     }
 
-    fn destroy(&self, d: &ash::Device) {
+    pub(crate) fn destroy(&self, d: &ash::Device) {
         unsafe { d.destroy_image_view(self.view, None) };
         unsafe { d.destroy_image(self.image, None) };
         unsafe { d.free_memory(self.memory, None) };
@@ -1386,6 +1386,22 @@ impl FigurePass {
         unsafe { d.cmd_end_render_pass(cb) };
     }
 
+    /// Test the figures' texels against `view` (an R32 plane of z, [`WALK_DEPTH_FORMAT`],
+    /// left for sampling) instead of the walk's own end depth: the plant pass's occluder,
+    /// the walk's depth with the plants it draws in front ([`crate::plants`]).
+    pub(crate) fn set_occluder(&self, gpu: &Gpu, view: vk::ImageView) {
+        let info = [vk::DescriptorImageInfo::default()
+            .sampler(self.sampler)
+            .image_view(view)
+            .image_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)];
+        let write = [vk::WriteDescriptorSet::default()
+            .dst_set(self.image_set)
+            .dst_binding(3)
+            .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+            .image_info(&info)];
+        unsafe { gpu.device.update_descriptor_sets(&write, &[]) };
+    }
+
     /// Whether the lit tier's emission is composited too.
     pub fn lit(&self) -> bool {
         self.lit
@@ -1424,13 +1440,13 @@ impl FigurePass {
     }
 }
 
-fn plain() -> vk::PipelineColorBlendAttachmentState {
+pub(crate) fn plain() -> vk::PipelineColorBlendAttachmentState {
     vk::PipelineColorBlendAttachmentState::default().color_write_mask(vk::ColorComponentFlags::RGBA)
 }
 
 /// Premultiplied colour over what is there; the destination's alpha kept (the emission's
 /// alpha is the weather's depth).
-fn over() -> vk::PipelineColorBlendAttachmentState {
+pub(crate) fn over() -> vk::PipelineColorBlendAttachmentState {
     vk::PipelineColorBlendAttachmentState::default()
         .color_write_mask(vk::ColorComponentFlags::RGBA)
         .blend_enable(true)
@@ -1443,7 +1459,7 @@ fn over() -> vk::PipelineColorBlendAttachmentState {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pipeline(
+pub(crate) fn pipeline(
     d: &ash::Device,
     pass: vk::RenderPass,
     layout: vk::PipelineLayout,
