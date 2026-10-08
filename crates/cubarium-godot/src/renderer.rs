@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use cubarium::sink::gpu::voxel::hosted::{Hosted, HostedOptions};
+use cubarium::voxel::figure::{FigureMotion, Movement};
 use godot::classes::RenderingServer;
 use godot::prelude::*;
 
@@ -119,6 +120,52 @@ impl WorldRenderer {
         if let Some(h) = &self.hosted {
             h.set_highlight(u64::try_from(id).ok());
         }
+    }
+
+    /// Draw the animals with `movement` ("smooth" or "stepped") and `subpixel` placement
+    /// (smooth only), from the renderer's next frame on, in this world and every one after.
+    /// `startup`: a viewer's stored settings as the renderer starts, under what the
+    /// environment named (`CUBARIUM_ANIMALS`, `CUBARIUM_ANIMAL_SUBPIXEL`), which keeps its
+    /// value; otherwise a viewer's change while it runs, which applies whole. Returns "" or
+    /// why not.
+    #[func]
+    fn set_animal_motion(&self, movement: GString, subpixel: bool, startup: bool) -> GString {
+        let name = movement.to_string();
+        let Some(movement) = Movement::parse(&name) else {
+            return GString::from(format!("unknown movement {name:?}; valid values: smooth, stepped").as_str());
+        };
+        let Some(h) = &self.hosted else { return GString::from("the renderer has not started") };
+        let m = FigureMotion { movement, subpixel };
+        if startup {
+            h.set_stored_figure_motion(m);
+        } else {
+            h.set_figure_motion(m);
+        }
+        GString::new()
+    }
+
+    /// The animals' live settings: `models` (false: stamped animals, which they do not
+    /// apply to), `movement` and `subpixel` asked for, `drawn_movement` and `drawn_subpixel`
+    /// those the newest frame was drawn with (absent before one), and `env_movement`,
+    /// `env_subpixel`: whether the environment named them at startup.
+    #[func]
+    fn animal_motion(&self) -> VarDictionary {
+        let mut d = VarDictionary::new();
+        let Some(h) = &self.hosted else { return d };
+        let (asked, drawn) = h.figure_motion();
+        d.set("models", &asked.is_some().to_variant());
+        if let Some(m) = asked {
+            d.set("movement", &GString::from(m.movement.name()).to_variant());
+            d.set("subpixel", &m.subpixel.to_variant());
+        }
+        if let Some(m) = drawn {
+            d.set("drawn_movement", &GString::from(m.movement.name()).to_variant());
+            d.set("drawn_subpixel", &m.subpixel.to_variant());
+        }
+        let pins = h.figure_env_pins();
+        d.set("env_movement", &pins.movement.to_variant());
+        d.set("env_subpixel", &pins.subpixel.to_variant());
+        d
     }
 
     /// The animal under world raster pixel `(px, py)`, or nearest within `radius` raster

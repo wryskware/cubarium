@@ -46,7 +46,7 @@ use cubarium_voxel_flora::Flora;
 use rustc_hash::FxHashMap;
 
 use super::{Offscreen, VoxelGpuSink};
-use crate::voxel::figure::FigurePick;
+use crate::voxel::figure::{AnimalDraw, EnvPins, FigureMotion, FigurePick};
 use crate::voxel::project::Projection;
 use crate::voxel::{PX_AUTO, VoxelConfig, cover_px_per_voxel, load_config, load_models};
 
@@ -475,6 +475,12 @@ impl Clock {
 struct Controls {
     view_x: i32,
     highlight: Option<u64>,
+    /// The animals' live settings asked for ([`Hosted::set_figure_motion`]); `None`: the
+    /// config's.
+    motion: Option<FigureMotion>,
+    /// The settings the newest frame's animals were drawn with; `None` before one, or with
+    /// stamped animals.
+    drawn: Option<FigureMotion>,
 }
 
 /// The renderer for one world, and its read-back ring. The ring is declared first so it
@@ -501,6 +507,8 @@ struct SinkState {
 struct Shared {
     options: HostedOptions,
     cfg: VoxelConfig,
+    /// The live figure settings the environment named at startup.
+    pins: EnvPins,
     sink: Mutex<Option<SinkState>>,
     mailbox: Mailbox<HostedFrame>,
     /// Spent frame buffers, for the next copy.
@@ -636,13 +644,19 @@ impl Shared {
         let gpu_ms = (!out.is_empty()).then(|| st.sink.renderer.gpu_split(&gpu)).flatten();
         if due && st.ready && st.ring.can_submit(&st.sink.renderer) {
             let t = self.clock.lock().map(|mut c| c.now()).unwrap_or(0.0);
-            let (view_x, highlight) =
-                self.controls.lock().map(|c| (c.view_x, c.highlight)).unwrap_or((0, None));
+            let (view_x, highlight, motion) =
+                self.controls.lock().map(|c| (c.view_x, c.highlight, c.motion)).unwrap_or((0, None, None));
             let figures = st.sink.figures_on();
             if figures {
                 st.sink.set_figure_highlight(highlight.map(|id| (id, self.options.highlight_mix)));
+                if let Some(m) = motion {
+                    st.sink.set_figure_motion(m);
+                }
             }
             st.sink.set_clock(t.floor() as u64, t.fract());
+            if let Ok(mut c) = self.controls.lock() {
+                c.drawn = st.sink.figure_motion();
+            }
             if figures && let Ok(mut f) = self.figures.lock() {
                 *f = Some(st.sink.figure_pick());
             }
@@ -765,18 +779,19 @@ impl Hosted {
     pub fn new(options: HostedOptions) -> Result<Hosted> {
         let mut cfg = load_config(&options.config)
             .with_context(|| format!("the presentation config {}", options.config.display()))?;
-        cfg.figures.apply_env_overrides()?;
+        let pins = cfg.figures.apply_env_overrides()?;
         let rooted = |p: &Path| if p.is_relative() { options.root.join(p) } else { p.to_path_buf() };
         cfg.models_dir = rooted(&cfg.models_dir);
         cfg.textures_dir = rooted(&cfg.textures_dir);
         let shared = Arc::new(Shared {
             options,
             cfg,
+            pins,
             sink: Mutex::new(None),
             mailbox: Mailbox::default(),
             spare: Mutex::new(Vec::new()),
             clock: Mutex::new(Clock::still(0)),
-            controls: Mutex::new(Controls { view_x: 0, highlight: None }),
+            controls: Mutex::new(Controls { view_x: 0, highlight: None, motion: None, drawn: None }),
             pick: Mutex::new(None),
             figures: Mutex::new(None),
             stats: Mutex::new(HostedStats::default()),
@@ -870,6 +885,38 @@ impl Hosted {
         if let Ok(mut c) = self.shared.controls.lock() {
             c.highlight = id;
         }
+    }
+
+    /// Draw the animals with the live settings `m` (movement, subpixel placement), from
+    /// the next frame on, in this world and every one after: a viewer's change while it
+    /// runs, over the config and the environment. Nothing with stamped animals.
+    pub fn set_figure_motion(&self, m: FigureMotion) {
+        if let Ok(mut c) = self.shared.controls.lock() {
+            c.motion = Some(m);
+        }
+    }
+
+    /// A viewer's stored settings as a renderer starts: what the environment named at
+    /// startup keeps its value ([`FigureMotion::at_startup`]), the rest are `stored`.
+    pub fn set_stored_figure_motion(&self, stored: FigureMotion) {
+        let env = self.shared.cfg.figures.motion();
+        self.set_figure_motion(FigureMotion::at_startup(stored, env, self.shared.pins));
+    }
+
+    /// The live settings asked for (or the config's, after the environment), and those
+    /// the newest frame drew with (`None` before one); both `None` with stamped animals.
+    pub fn figure_motion(&self) -> (Option<FigureMotion>, Option<FigureMotion>) {
+        if self.shared.cfg.figures.animals != AnimalDraw::Models {
+            return (None, None);
+        }
+        let c = self.shared.controls.lock().ok();
+        let asked = c.as_ref().and_then(|c| c.motion).unwrap_or(self.shared.cfg.figures.motion());
+        (Some(asked), c.and_then(|c| c.drawn))
+    }
+
+    /// The live settings the environment named at startup.
+    pub fn figure_env_pins(&self) -> EnvPins {
+        self.shared.pins
     }
 
     /// The animal under world raster pixel `(px, py)`, or near it: with the model pass, the

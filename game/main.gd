@@ -1,7 +1,7 @@
 extends Node
 ## **The app shell** (package C of design/handoffs/godot-direction-2026-10-07.md): the live
-## world through a `WorldView`, the pause menu, save slots, the new-world picker and the
-## animal inspect panel. Rust is the simulation (`CubariumSession`); this file owns the
+## world through a `WorldView`, the pause menu, save slots, the new-world picker, the
+## Settings page and the animal inspect panel. Rust is the simulation (`CubariumSession`); this file owns the
 ## flow between screens and the one reader of the session's notices.
 ##
 ## Start-up opens the last save if there is one, else the new-world picker.
@@ -18,6 +18,7 @@ const PauseMenu := preload("res://ui/pause_menu.gd")
 const SaveSlots := preload("res://ui/save_slots.gd")
 const NewWorld := preload("res://ui/new_world.gd")
 const InspectPanel := preload("res://ui/inspect_panel.gd")
+const SettingsPage := preload("res://ui/settings.gd")
 const Dialog := preload("res://ui/dialog.gd")
 const Notices := preload("res://ui/notices.gd")
 const THEME := preload("res://ui/theme.tres")
@@ -28,7 +29,8 @@ const THUMB := Vector2i(320, 160)
 var saves_root := ""
 var autoload := true
 var start_new := false
-## Where the shell keeps its own small settings (last slot, founding times).
+## Where the shell keeps its own small settings (last slot, founding times, the Settings
+## page's choices).
 var settings_path := SETTINGS
 ## What Quit does; tests swap it for a recorder.
 var quit_hook: Callable
@@ -43,6 +45,7 @@ var ui: Control
 var menu
 var slots
 var picker
+var settings_page
 var inspect
 var dialog
 var notices
@@ -81,6 +84,7 @@ func _ready() -> void:
 	world_view.attach(session)
 	world_view.animal_hovered.connect(_on_hovered)
 	world_view.animal_clicked.connect(_on_clicked)
+	_apply_stored_motion()
 	_build_ui()
 
 	var last := _last_slot() if autoload and not start_new else ""
@@ -171,6 +175,11 @@ func _build_ui() -> void:
 	ui.add_child(picker)
 	picker.setup()
 
+	settings_page = SettingsPage.new()
+	settings_page.back.connect(func(): close_screen(settings_page))
+	settings_page.changed.connect(_on_motion_changed)
+	ui.add_child(settings_page)
+
 	dialog = Dialog.new()
 	ui.add_child(dialog)
 
@@ -204,7 +213,7 @@ func busy() -> String:
 
 ## Whether anything covers the world: the menu, a screen or a dialog.
 func overlay_open() -> bool:
-	return menu.visible or slots.visible or picker.visible or dialog.is_open()
+	return menu.visible or slots.visible or picker.visible or settings_page.visible or dialog.is_open()
 
 
 func species_label(name: String) -> String:
@@ -281,6 +290,9 @@ func back_one(start := false) -> bool:
 	if slots.visible:
 		close_screen(slots)
 		return true
+	if settings_page.visible:
+		close_screen(settings_page)
+		return true
 	if inspect.visible and not menu.visible and not start:
 		inspect.close()
 		return true
@@ -326,6 +338,8 @@ func _on_menu(item: String) -> void:
 			slots.open("load")
 		"new":
 			open_picker()
+		"settings":
+			open_settings()
 		"quit":
 			quit_hook.call()
 
@@ -351,6 +365,7 @@ func close_all() -> void:
 	picker.leave()
 	picker.visible = false
 	slots.visible = false
+	settings_page.visible = false
 	menu.visible = false
 
 
@@ -367,6 +382,47 @@ func _process(_delta: float) -> void:
 		tooltip.position = at
 	if inspect.visible and inspect.dead:
 		world_view.stop_follow()
+
+
+# --- Settings -----------------------------------------------------------------------
+
+## The Settings page's choices: in the shell's settings file, per viewer. A viewer who has
+## chosen them has them applied as the renderer starts, after the environment's overrides
+## (what `CUBARIUM_ANIMALS` or `CUBARIUM_ANIMAL_SUBPIXEL` names keeps the environment's
+## value for this run); a change on the page applies to the running world at once, over
+## both. Without a stored choice the config and the environment decide.
+func stored_motion() -> Dictionary:
+	if not settings.has_section_key("animals", "movement"):
+		return {}
+	return {"movement": settings.get_value("animals", "movement", "smooth"),
+		"subpixel": settings.get_value("animals", "subpixel", true)}
+
+
+func _apply_stored_motion() -> void:
+	var m := stored_motion()
+	if not m.is_empty():
+		world_view.set_animal_motion(m["movement"], m["subpixel"], true)
+
+
+## The settings in force: what the renderer draws with once it runs, else the stored ones.
+func current_motion() -> Dictionary:
+	var live: Dictionary = world_view.animal_motion() if world_view.has_method("animal_motion") else {}
+	if live.has("movement"):
+		return {"movement": live["movement"], "subpixel": live["subpixel"]}
+	var m := stored_motion()
+	return m if not m.is_empty() else {"movement": "smooth", "subpixel": true}
+
+
+func open_settings() -> void:
+	var m := current_motion()
+	settings_page.open(m["movement"], m["subpixel"])
+
+
+func _on_motion_changed(movement: String, subpixel: bool) -> void:
+	settings.set_value("animals", "movement", movement)
+	settings.set_value("animals", "subpixel", subpixel)
+	settings.save(settings_path)
+	world_view.set_animal_motion(movement, subpixel)
 
 
 # --- Saves --------------------------------------------------------------------------

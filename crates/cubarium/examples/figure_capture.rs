@@ -16,7 +16,8 @@
 //! `--mp4` pipes each variant's frames (and each crop's) to `ffmpeg` instead of PNGs:
 //! `NAME.mp4` and `NAME-CROP.mp4`, x264 yuv444p crf 12 at `--fps`, real time.
 //!
-//! `--comparison --mp4` writes `comparison.mp4`: classic | crisp | smooth on one row,
+//! `--comparison --mp4` writes `comparison.mp4`: the three variants (by default classic | crisp |
+//! smooth; any three, e.g. `--variant classic= --variant smooth= --variant stepped=`) on one row,
 //! then a 2x nearest crop of the same three. The first `--crop` supplies the close-up;
 //! absent one, it uses the central half of the raster. Labels live in the capture only.
 //! `--costs-only` renders the same frames without writing pictures.
@@ -265,7 +266,7 @@ fn main() -> Result<()> {
         let mut all = sets.clone();
         all.extend(lines.iter().cloned());
         let mut cfg = configured(&config, &all)?;
-        if ["classic", "crisp", "smooth"].contains(&name.as_str()) && lines.is_empty() {
+        if ["classic", "crisp", "smooth", "stepped"].contains(&name.as_str()) && lines.is_empty() {
             cfg.figures = cfg.figures.with_overrides(Some(name), None, None)?;
         }
         cfg.sim.world = world_cfg.clone();

@@ -57,6 +57,8 @@ var _zoom := 1.0
 var _centre := Vector2.ZERO
 var _shown := Vector2.ZERO
 var _dragging := false
+## The animals' live settings asked for, [movement, subpixel, startup] (the real view's API).
+var motion := []
 var _press := Vector2.ZERO
 var _moved := false
 
@@ -93,6 +95,21 @@ func reset_framing() -> void:
 func set_highlight(id: int) -> void:
 	highlighted = id
 	queue_redraw()
+
+
+func set_animal_motion(movement: String, subpixel: bool, startup := false) -> void:
+	if startup and not motion.is_empty() and not motion[2]:
+		return
+	motion = [movement, subpixel, startup]
+
+
+## The stub draws no animals' motion: what was asked, as the real view's renderer would say.
+func animal_motion() -> Dictionary:
+	if motion.is_empty():
+		return {}
+	return {"models": true, "movement": motion[0], "subpixel": motion[1],
+		"drawn_movement": motion[0], "drawn_subpixel": motion[1],
+		"env_movement": false, "env_subpixel": false}
 
 
 func follow(id: int) -> void:

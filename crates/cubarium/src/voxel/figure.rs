@@ -18,7 +18,11 @@
 //!   exist); the poses evaluated at that time; a birth fades in and a death fades out over
 //!   `[figures] fade_s`; a model swap (a pose mode, a size bin) cross-fades over `swap_s`;
 //!   in `turn = "steps"` the heading moves in `turn_steps` steps a turn, each step blended
-//!   over `turn_blend_s`.
+//!   over `turn_blend_s`. In `movement = "stepped"` ([`Movement`]) the place drawn is that
+//!   glide's, snapped to the world's voxel grid ([`on_grid`]: it hops a voxel at a time,
+//!   as the stamp did), and the heading always moves in `turn_steps` steps, blended over
+//!   `stepped_turn_blend_s` (0: a snap). The movement and subpixel placement change live
+//!   ([`FigureTrack::set_motion`], the app's Settings page).
 //! - **Picking** ([`FigurePick`]): the frame's figures, kept with the frame, are ray-cast
 //!   per pick: the ray through a raster pixel into each figure's model frame, against its
 //!   cells; the nearest cell in front of the terrain's own hit wins.
@@ -70,18 +74,96 @@ pub enum Turn {
     Steps,
 }
 
+/// How a figure moves between ticks.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Movement {
+    /// Glides between ticks: its place interpolated, turning freely or in `turn_steps` per
+    /// `turn`, placed between pixels or at whole ones per `subpixel`.
+    #[default]
+    Smooth,
+    /// Hops a voxel at a time, as the stamped animals did: its place snapped to the world's
+    /// voxel grid, its heading to `turn_steps` headings a turn (each change blended over
+    /// `stepped_turn_blend_s`, 0: a snap), at whole pixels. `turn` and `subpixel` do not
+    /// apply.
+    Stepped,
+}
+
+impl Movement {
+    pub fn name(self) -> &'static str {
+        match self {
+            Movement::Smooth => "smooth",
+            Movement::Stepped => "stepped",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Movement> {
+        match s {
+            "smooth" => Some(Movement::Smooth),
+            "stepped" => Some(Movement::Stepped),
+            _ => None,
+        }
+    }
+}
+
+/// The two figure settings a viewer changes live (the app's Settings page): what
+/// [`FigureTrack::set_motion`] takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FigureMotion {
+    pub movement: Movement,
+    pub subpixel: bool,
+}
+
+/// Which of the live settings the process environment named at startup
+/// ([`FigureConfig::apply_env_overrides`]): `CUBARIUM_ANIMALS` names both,
+/// `CUBARIUM_ANIMAL_SUBPIXEL` the placement.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EnvPins {
+    pub movement: bool,
+    pub subpixel: bool,
+}
+
+impl EnvPins {
+    /// The settings named by `CUBARIUM_ANIMALS` = `animals` and `CUBARIUM_ANIMAL_SUBPIXEL`
+    /// = `subpixel` (either unset: `None`): any preset names the movement; `crisp` and
+    /// `smooth` name the placement too, `stepped` and `classic` leave it.
+    pub fn of(animals: Option<&str>, subpixel: Option<&str>) -> EnvPins {
+        EnvPins {
+            movement: animals.is_some(),
+            subpixel: subpixel.is_some() || matches!(animals, Some("crisp" | "smooth")),
+        }
+    }
+}
+
+impl FigureMotion {
+    /// A viewer's stored settings as they apply when a renderer starts: each one the
+    /// environment named keeps the environment's value (`env`), the rest are the viewer's.
+    /// Settings changed while it runs apply whole ([`FigureTrack::set_motion`]).
+    pub fn at_startup(stored: FigureMotion, env: FigureMotion, pins: EnvPins) -> FigureMotion {
+        FigureMotion {
+            movement: if pins.movement { env.movement } else { stored.movement },
+            subpixel: if pins.subpixel { env.subpixel } else { stored.subpixel },
+        }
+    }
+}
+
 /// `[figures]`: the model pass's presentation (H2). Presentation only.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct FigureConfig {
     /// `"models"` (the default) or `"stamped"` (the pre-H2 look, for comparison).
     pub animals: AnimalDraw,
-    /// `"free"` (the default) or `"steps"`.
+    /// `"smooth"` (the default) or `"stepped"` ([`Movement`]).
+    pub movement: Movement,
+    /// `"free"` (the default) or `"steps"`, in smooth movement.
     pub turn: Turn,
-    /// Headings a full turn in `turn = "steps"`.
+    /// Headings a full turn in `turn = "steps"`, and in stepped movement.
     pub turn_steps: u32,
     /// Seconds of sim time one step's blend takes in `turn = "steps"`.
     pub turn_blend_s: f64,
+    /// Seconds of sim time a heading step's blend takes in stepped movement: 0 (the
+    /// default) snaps.
+    pub stepped_turn_blend_s: f64,
     /// Seconds of sim time a born animal fades in over, and a dead one out.
     pub fade_s: f64,
     /// Seconds of sim time a model swap (a pose mode, a size bin) cross-fades over.
@@ -96,9 +178,11 @@ impl Default for FigureConfig {
     fn default() -> FigureConfig {
         FigureConfig {
             animals: AnimalDraw::Models,
+            movement: Movement::Smooth,
             turn: Turn::Free,
-            turn_steps: 32,
+            turn_steps: 16,
             turn_blend_s: 0.1,
+            stepped_turn_blend_s: 0.0,
             fade_s: 0.5,
             swap_s: 0.3,
             subpixel: true,
@@ -106,7 +190,20 @@ impl Default for FigureConfig {
     }
 }
 
+/// The `CUBARIUM_ANIMALS` presets.
+pub const PRESETS: &str = "classic, crisp, smooth, stepped";
+
 impl FigureConfig {
+    /// The live settings ([`FigureMotion`]) this config draws with.
+    pub fn motion(&self) -> FigureMotion {
+        FigureMotion { movement: self.movement, subpixel: self.subpixel }
+    }
+
+    /// This config with the live settings `m`.
+    pub fn with_motion(&self, m: FigureMotion) -> FigureConfig {
+        FigureConfig { movement: m.movement, subpixel: m.subpixel, ..self.clone() }
+    }
+
     /// Apply a per-run preset, then the turn and placement overrides. Missing values
     /// preserve the presentation config; this is pure so tools and tests need not edit
     /// the process environment.
@@ -122,17 +219,23 @@ impl FigureConfig {
             Some("classic") => cfg.animals = AnimalDraw::Stamped,
             Some("crisp") => {
                 cfg.animals = AnimalDraw::Models;
+                cfg.movement = Movement::Smooth;
                 cfg.subpixel = false;
                 cfg.turn = Turn::Steps;
                 cfg.turn_steps = 8;
             }
             Some("smooth") => {
                 cfg.animals = AnimalDraw::Models;
+                cfg.movement = Movement::Smooth;
                 cfg.subpixel = true;
                 cfg.turn = Turn::Free;
             }
+            Some("stepped") => {
+                cfg.animals = AnimalDraw::Models;
+                cfg.movement = Movement::Stepped;
+            }
             Some(value) => anyhow::bail!(
-                "unknown CUBARIUM_ANIMALS value {value:?}; valid values: classic, crisp, smooth"
+                "unknown CUBARIUM_ANIMALS value {value:?}; valid values: {PRESETS}"
             ),
         }
         if let Some(value) = turn {
@@ -163,8 +266,9 @@ impl FigureConfig {
 
     /// Read the process overrides once at renderer startup, and report the effective
     /// settings. Low-level sinks do not read them: explicit captures and CPU/GPU parity
-    /// checks retain their own presentation config.
-    pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
+    /// checks retain their own presentation config. Returns which live settings the
+    /// environment named ([`EnvPins`]).
+    pub fn apply_env_overrides(&mut self) -> anyhow::Result<EnvPins> {
         let read = |name: &str, valid: &str| match std::env::var(name) {
             Ok(value) => Ok(Some(value)),
             Err(std::env::VarError::NotPresent) => Ok(None),
@@ -172,7 +276,7 @@ impl FigureConfig {
                 "invalid {name} value {value:?}; valid values: {valid}"
             )),
         };
-        let animals = read("CUBARIUM_ANIMALS", "classic, crisp, smooth")?;
+        let animals = read("CUBARIUM_ANIMALS", PRESETS)?;
         let turn = read(
             "CUBARIUM_ANIMAL_TURN",
             "free or a positive integer (1..=4294967295)",
@@ -180,33 +284,37 @@ impl FigureConfig {
         let subpixel = read("CUBARIUM_ANIMAL_SUBPIXEL", "0, 1")?;
         *self = self.with_overrides(animals.as_deref(), turn.as_deref(), subpixel.as_deref())?;
         eprintln!(
-            "cubarium animals: animals={} turn={} turn_steps={} turn_blend_s={} subpixel={}",
+            "cubarium animals: animals={} movement={} turn={} turn_steps={} turn_blend_s={} stepped_turn_blend_s={} subpixel={}",
             match self.animals {
                 AnimalDraw::Models => "models",
                 AnimalDraw::Stamped => "stamped",
             },
+            self.movement.name(),
             match self.turn {
                 Turn::Free => "free",
                 Turn::Steps => "steps",
             },
             self.turn_steps,
             self.turn_blend_s,
+            self.stepped_turn_blend_s,
             self.subpixel,
         );
-        Ok(())
+        Ok(EnvPins::of(animals.as_deref(), subpixel.as_deref()))
     }
 }
 
 #[cfg(test)]
 mod preset_tests {
-    use super::{AnimalDraw, FigureConfig, Turn};
+    use super::{AnimalDraw, EnvPins, FigureConfig, FigureMotion, Movement, Turn};
 
     fn config() -> FigureConfig {
         FigureConfig {
             animals: AnimalDraw::Stamped,
+            movement: Movement::Stepped,
             turn: Turn::Steps,
             turn_steps: 17,
             turn_blend_s: 0.75,
+            stepped_turn_blend_s: 0.4,
             fade_s: 1.25,
             swap_s: 2.5,
             subpixel: false,
@@ -229,6 +337,7 @@ mod preset_tests {
             base.with_overrides(Some("crisp"), None, None).unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
+                movement: Movement::Smooth,
                 turn: Turn::Steps,
                 turn_steps: 8,
                 subpixel: false,
@@ -239,11 +348,56 @@ mod preset_tests {
             base.with_overrides(Some("smooth"), None, None).unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
+                movement: Movement::Smooth,
                 turn: Turn::Free,
                 subpixel: true,
-                ..base
+                ..base.clone()
             }
         );
+        let smooth = FigureConfig { movement: Movement::Smooth, ..base.clone() };
+        assert_eq!(
+            smooth.with_overrides(Some("stepped"), None, None).unwrap(),
+            FigureConfig {
+                animals: AnimalDraw::Models,
+                movement: Movement::Stepped,
+                ..base
+            },
+            "stepped names the movement and the model pass, nothing else"
+        );
+    }
+
+    #[test]
+    fn the_live_settings_round_trip_through_a_config() {
+        let base = config();
+        for movement in [Movement::Smooth, Movement::Stepped] {
+            for subpixel in [false, true] {
+                let m = FigureMotion { movement, subpixel };
+                let cfg = base.with_motion(m);
+                assert_eq!(cfg.motion(), m);
+                assert_eq!(FigureConfig { movement: base.movement, subpixel: base.subpixel, ..cfg }, base);
+            }
+        }
+        for name in ["smooth", "stepped"] {
+            assert_eq!(Movement::parse(name).map(Movement::name), Some(name));
+        }
+        assert_eq!(Movement::parse("Stepped"), None);
+    }
+
+    #[test]
+    fn at_startup_the_environment_keeps_what_it_named_and_the_viewer_has_the_rest() {
+        let env = FigureMotion { movement: Movement::Stepped, subpixel: false };
+        let stored = FigureMotion { movement: Movement::Smooth, subpixel: true };
+        let at = |movement, subpixel| FigureMotion::at_startup(stored, env, EnvPins { movement, subpixel });
+        assert_eq!(at(false, false), stored, "nothing named: the viewer's settings");
+        assert_eq!(at(true, true), env, "both named: the environment's");
+        assert_eq!(at(true, false), FigureMotion { movement: env.movement, subpixel: stored.subpixel });
+        assert_eq!(at(false, true), FigureMotion { movement: stored.movement, subpixel: env.subpixel });
+        let pins = |a, s| { let p = EnvPins::of(a, s); (p.movement, p.subpixel) };
+        assert_eq!(pins(None, None), (false, false));
+        assert_eq!(pins(None, Some("0")), (false, true));
+        assert_eq!(pins(Some("stepped"), None), (true, false));
+        assert_eq!(pins(Some("crisp"), None), (true, true));
+        assert_eq!(pins(Some("smooth"), None), (true, true));
     }
 
     #[test]
@@ -254,6 +408,7 @@ mod preset_tests {
                 .unwrap(),
             FigureConfig {
                 animals: AnimalDraw::Models,
+                movement: Movement::Smooth,
                 turn: Turn::Free,
                 turn_steps: 8,
                 subpixel: true,
@@ -261,7 +416,7 @@ mod preset_tests {
             }
         );
         for steps in [1, 7, u32::MAX] {
-            for preset in [None, Some("classic"), Some("crisp"), Some("smooth")] {
+            for preset in [None, Some("classic"), Some("crisp"), Some("smooth"), Some("stepped")] {
                 let selected = base.with_overrides(preset, None, None).unwrap();
                 let cfg = base
                     .with_overrides(preset, Some(&steps.to_string()), Some("0"))
@@ -296,7 +451,7 @@ mod preset_tests {
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("CUBARIUM_ANIMALS"), "{error}");
-            assert!(error.contains("classic, crisp, smooth"), "{error}");
+            assert!(error.contains("classic, crisp, smooth, stepped"), "{error}");
         }
         for value in ["", "steps", "0", "-1", "+1", "1.5", " 8", "4294967296"] {
             let error = base
@@ -934,6 +1089,25 @@ fn step_heading(k: i64, steps: u32) -> f64 {
     k as f64 * std::f64::consts::TAU / f64::from(steps.max(1))
 }
 
+/// Where a figure turned `orient` stands on the world's voxel grid nearest `pos`: its
+/// cells' boxes (each `[o − ½, o + ½]` across and `[o, o + 1]` up, in its own frame) at
+/// whole voxels, as the stamp put them. Standing, the anchor goes to a voxel's middle
+/// across and its floor up, whatever the heading (it turns about that point); on a wall
+/// (a quarter-turned frame) the box of its anchor cell goes to whole voxels.
+pub fn on_grid(pos: [f64; 3], orient: Orient) -> [f64; 3] {
+    let corner = match orient {
+        Orient::Ground(_) => [-0.5, 0.0, -0.5],
+        Orient::Axes(ax) => {
+            let lo = [-0.5, 0.0, -0.5];
+            [0, 1, 2].map(|i| {
+                let c: f64 = (0..3).map(|k| ax[k][i] * lo[k]).sum();
+                (c * 2.0).round() * 0.5
+            })
+        }
+    };
+    [0, 1, 2].map(|i| (pos[i] + corner[i]).round() - corner[i])
+}
+
 #[derive(Clone, Debug)]
 struct Live {
     /// When it was first drawn, sim seconds; `None` for one there from the start.
@@ -978,6 +1152,25 @@ pub struct PickFigure {
 impl FigureTrack {
     pub fn new(cfg: FigureConfig, width: u32) -> FigureTrack {
         FigureTrack { cfg, width: f64::from(width), ..FigureTrack::default() }
+    }
+
+    /// The live settings it draws with.
+    pub fn motion(&self) -> FigureMotion {
+        self.cfg.motion()
+    }
+
+    /// Draw with the live settings `m` from the next frame on. Returns whether they
+    /// changed. Heading steps under way are dropped, so a figure turns at once to where
+    /// the new mode puts it rather than finishing a blend of the old mode's.
+    pub fn set_motion(&mut self, m: FigureMotion) -> bool {
+        if self.cfg.motion() == m {
+            return false;
+        }
+        self.cfg = self.cfg.with_motion(m);
+        for l in self.live.values_mut() {
+            l.step = None;
+        }
+        true
     }
 
     /// A new tick's figures, seen at `now_s` (sim seconds of the frame clock).
@@ -1038,7 +1231,8 @@ impl FigureTrack {
     /// The frame at clock `t` (ticks), `highlight` leaning that animal toward white by
     /// `mix`, from the models in `models`: what the model pass draws, and what a pick reads.
     pub fn frame(&mut self, t: f64, highlight: Option<(u64, f32)>, models: &FigureModels) -> (FigureFrame, Vec<PickFigure>) {
-        let mut frame = FigureFrame { whole_pixels: !self.cfg.subpixel, ..FigureFrame::default() };
+        let stepped = self.cfg.movement == Movement::Stepped;
+        let mut frame = FigureFrame { whole_pixels: stepped || !self.cfg.subpixel, ..FigureFrame::default() };
         let mut picks = Vec::new();
         let Some(cur) = &self.cur else { return (frame, picks) };
         let now_s = t / f64::from(cubarium_voxel::TICK_HZ);
@@ -1077,6 +1271,9 @@ impl FigureTrack {
                     (&l.last, l.last.pos, l.last.orient.axes(), alpha)
                 }
             };
+            // Stepped: the glide's place, on the voxel grid; it hops a voxel each time the
+            // glide crosses into the next.
+            let pos = if stepped { on_grid(pos, spec.orient) } else { pos };
             // The pose: the older tick's entries run on to the drawn time (they end where
             // the newer ones start), else the newer's from its own tick.
             let pose = match (before.and_then(|a| a.pose), spec.pose) {
@@ -1095,15 +1292,16 @@ impl FigureTrack {
             // Turn steps: the step the heading is nearest, blended from the last one.
             let mut step_pair: Option<([[f64; 3]; 3], [[f64; 3]; 3], f32)> = None;
             let mut axes = axes;
-            if cfg.turn == Turn::Steps
+            let blend_s = if stepped { cfg.stepped_turn_blend_s } else { cfg.turn_blend_s };
+            if (stepped || cfg.turn == Turn::Steps)
                 && let Some(h) = heading
             {
                 let k = heading_step(h, cfg.turn_steps);
                 let (shown, from, at) = match l.step {
-                    None => (k, k, now_s - cfg.turn_blend_s),
+                    None => (k, k, now_s - blend_s),
                     Some((shown, from, at)) if shown != k => {
                         // Mid-blend, it leaves whichever of the two shows more.
-                        let w = blend_weight(now_s - at, cfg.turn_blend_s);
+                        let w = blend_weight(now_s - at, blend_s);
                         let left = if w >= 0.5 { shown } else { from };
                         (k, left, now_s)
                     }
@@ -1112,7 +1310,7 @@ impl FigureTrack {
                 l.step = Some((shown, from, at));
                 let on = Orient::Ground(step_heading(shown, cfg.turn_steps)).axes();
                 axes = on;
-                let w = blend_weight(now_s - at, cfg.turn_blend_s);
+                let w = blend_weight(now_s - at, blend_s);
                 if from != shown && w < 1.0 {
                     step_pair = Some((Orient::Ground(step_heading(from, cfg.turn_steps)).axes(), on, w));
                 }
@@ -1383,6 +1581,117 @@ mod tests {
         assert_eq!(f.weight_b, 0.0);
         let f = track.frame(1.8 + 10.0, None, &models).0.figures[0];
         assert!((f.weight_b - 0.5).abs() < 1e-6, "{f:?}");
+    }
+
+    fn stepped(steps: u32) -> FigureConfig {
+        FigureConfig { movement: Movement::Stepped, turn_steps: steps, ..FigureConfig::default() }
+    }
+
+    /// Whether `x` is a whole number of voxels plus `phase`.
+    fn on(x: f32, phase: f32) -> bool {
+        let d = x - phase;
+        (d - d.round()).abs() < 1e-4
+    }
+
+    /// The forward heading of a tile's axes, in steps of `steps` a turn.
+    fn steps_of(axes: [[f32; 3]; 3], steps: u32) -> f64 {
+        let h = f64::from(axes[0][0]).atan2(f64::from(axes[0][2]));
+        h / std::f64::consts::TAU * f64::from(steps)
+    }
+
+    #[test]
+    fn stepped_movement_draws_every_frame_on_the_voxel_grid_and_a_step_heading() {
+        let mut models = FigureModels::default();
+        let m = one_cell(&mut models, 1);
+        for (movement, expect_grid) in [(Movement::Stepped, true), (Movement::Smooth, false)] {
+            let cfg = FigureConfig { movement, turn_steps: 16, ..FigureConfig::default() };
+            let mut track = FigureTrack::new(cfg, 64);
+            // Off the grid at both ends, across voxels, turning by an odd angle; a flyer's
+            // height in between rows.
+            track.push(10, &[spec(1, m, [10.3, 4.2, 5.7], 0.37)], 0.5);
+            track.push(11, &[spec(1, m, [13.1, 4.9, 3.4], 1.91)], 0.55);
+            let (mut all_on, mut xs, mut headings_on) = (true, Vec::new(), true);
+            for i in 0..=40 {
+                let (frame, picks) = track.frame(11.0 + f64::from(i) / 40.0, None, &models);
+                let f = frame.figures[0];
+                for t in std::iter::once(f.a).chain(f.b) {
+                    all_on &= on(t.pos[0], 0.5) && on(t.pos[1], 0.0) && on(t.pos[2], 0.5);
+                    let k = steps_of(t.axes, 16);
+                    headings_on &= (k - k.round()).abs() < 1e-4;
+                }
+                assert_eq!(picks[0].pos, f.b.unwrap_or(f.a).pos, "picking reads the place drawn");
+                if expect_grid {
+                    assert!(frame.whole_pixels, "stepped places at whole pixels whatever subpixel says");
+                    assert!(f.b.is_none(), "a heading step snaps (stepped_turn_blend_s 0)");
+                }
+                xs.push(f.a.pos[0]);
+            }
+            assert_eq!(all_on, expect_grid, "{movement:?}: every frame on the grid");
+            assert_eq!(headings_on, expect_grid, "{movement:?}: every heading on a step");
+            if expect_grid {
+                xs.dedup();
+                assert_eq!(xs, vec![10.5, 11.5, 12.5, 13.5], "it hops a voxel at a time, every voxel on the way");
+            }
+        }
+    }
+
+    #[test]
+    fn on_a_wall_the_anchor_cells_box_lands_on_whole_voxels() {
+        // A climber facing up a wall whose outward normal is −x: the axes `specs` builds.
+        let (ux, uz, fy) = (-1.0f64, 0.0f64, 1.0f64);
+        let orient = Orient::Axes([[0.0, fy, 0.0], [ux, 0.0, uz], [fy * uz, 0.0, -fy * ux]]);
+        let p = on_grid([7.81, 3.37, 2.62], orient);
+        let ax = orient.axes();
+        // The anchor cell's box in the world: corner + each axis × [lo, hi].
+        let (lo, hi) = ([-0.5, 0.0, -0.5], [0.5, 1.0, 0.5]);
+        for i in 0..3 {
+            let a: f64 = p[i] + (0..3).map(|k| ax[k][i] * lo[k]).sum::<f64>();
+            let b: f64 = p[i] + (0..3).map(|k| ax[k][i] * hi[k]).sum::<f64>();
+            for v in [a, b] {
+                assert!((v - v.round()).abs() < 1e-9, "axis {i}: {a}..{b} from {p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn toggling_the_motion_changes_the_next_frames_placement_and_back() {
+        let mut models = FigureModels::default();
+        let m = one_cell(&mut models, 1);
+        let cfg = FigureConfig { turn: Turn::Steps, turn_steps: 16, turn_blend_s: 1.0, ..FigureConfig::default() };
+        let mut track = FigureTrack::new(cfg, 64);
+        track.push(10, &[spec(1, m, [10.3, 4.0, 5.7], 0.0)], 0.5);
+        track.push(11, &[spec(1, m, [11.4, 4.0, 5.9], 1.0)], 0.55);
+        let smooth = FigureMotion { movement: Movement::Smooth, subpixel: true };
+        let step = FigureMotion { movement: Movement::Stepped, subpixel: true };
+        assert_eq!(track.motion(), smooth);
+        let t = 11.6;
+        track.frame(11.0, None, &models);
+        let (before, _) = track.frame(t, None, &models);
+        let f = before.figures[0];
+        assert!(!on(f.a.pos[0], 0.5) && !before.whole_pixels);
+        assert!(f.b.is_some(), "mid heading blend in smooth steps");
+        assert!(track.set_motion(step));
+        assert!(!track.set_motion(step), "the same settings again change nothing");
+        let (now, _) = track.frame(t, None, &models);
+        let g = now.figures[0];
+        assert!(on(g.a.pos[0], 0.5) && on(g.a.pos[2], 0.5) && now.whole_pixels, "{g:?}");
+        assert!(g.b.is_none(), "the smooth blend under way is dropped, not finished");
+        let k = steps_of(g.a.axes, 16);
+        assert!((k - k.round()).abs() < 1e-4, "on a step: {k}");
+        // Stepped turns snap: a step taken just now (from step 0 at the tick to the one at
+        // `t`) leaves nothing for smooth's blend to pick up when it comes back.
+        track.frame(11.0, None, &models);
+        let (snapped, _) = track.frame(t, None, &models);
+        assert!(snapped.figures[0].b.is_none());
+        // Subpixel off in smooth: the same glide, at whole pixels, on the step it is on.
+        assert!(track.set_motion(FigureMotion { subpixel: false, ..smooth }));
+        let (crisp, _) = track.frame(t, None, &models);
+        assert!(crisp.whole_pixels && crisp.figures[0].a.pos == f.a.pos);
+        assert!(crisp.figures[0].b.is_none(), "no blend back from the step stepped left: {:?}", crisp.figures[0]);
+        assert_eq!(crisp.figures[0].a.axes, snapped.figures[0].a.axes, "the step stepped showed");
+        assert!(track.set_motion(smooth));
+        let (back, _) = track.frame(t + 30.0 / 1000.0, None, &models);
+        assert!(!back.whole_pixels && !on(back.figures[0].a.pos[0], 0.5), "back to the glide");
     }
 
     #[test]

@@ -20,6 +20,12 @@ extends Control
 ## - `set_highlight(id)`: the renderer draws that animal's cells leaning toward white (−1
 ##   clears). `follow(id)` keeps it in view, easing; `stop_follow()`. Panning by hand stops
 ##   following.
+## - `set_animal_motion(movement, subpixel, startup := false)`: how the renderer draws
+##   animals, live: `movement` "smooth" or "stepped", `subpixel` (smooth only). `startup`
+##   marks a viewer's stored settings, under what the environment named at startup
+##   (`CUBARIUM_ANIMALS`, `CUBARIUM_ANIMAL_SUBPIXEL`); a change while it runs applies whole.
+##   Kept and applied when the renderer starts if it has not yet. `animal_motion()` is the
+##   renderer's view of them (`WorldRenderer.animal_motion`), {} before it starts.
 ## - `capture(size) -> Image`: the latest frame as framed, fitted into `size`.
 ## - `problem() -> String`: why nothing is drawn yet, when the renderer did not start or
 ##   gave up ("" otherwise), so a thumbnail can say so instead of staying blank.
@@ -121,6 +127,8 @@ var config_path := ""
 
 var session = null
 var renderer = null
+## The animals' live settings asked for, [movement, subpixel, startup]; [] for the config's.
+var motion := []
 var highlighted := -1
 var following := -1
 var hovered := -1
@@ -203,6 +211,27 @@ func set_highlight(id: int) -> void:
 	highlighted = id
 	if renderer != null:
 		renderer.set_highlight(id)
+
+
+func set_animal_motion(movement: String, subpixel: bool, startup := false) -> void:
+	# A startup setting never undoes a viewer's change made before the renderer started.
+	if startup and not motion.is_empty() and not motion[2]:
+		return
+	motion = [movement, subpixel, startup]
+	if renderer != null:
+		_apply_motion()
+
+
+func animal_motion() -> Dictionary:
+	return renderer.animal_motion() if renderer != null else {}
+
+
+func _apply_motion() -> void:
+	if motion.is_empty():
+		return
+	var refused: String = renderer.set_animal_motion(motion[0], motion[1], motion[2])
+	if refused != "":
+		push_warning("WorldView: animal settings refused (%s)" % refused)
 
 
 func follow(id: int) -> void:
@@ -293,6 +322,7 @@ func _begin() -> void:
 			return
 		if highlighted >= 0:
 			renderer.set_highlight(highlighted)
+		_apply_motion()
 	match what[0]:
 		"live":
 			renderer.attach(what[1])

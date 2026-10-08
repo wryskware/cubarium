@@ -1,10 +1,10 @@
 extends Control
-## The pause menu: Resume, Save, Load, New world, Quit. The shell (main.gd) owns what each
+## The pause menu: Resume, Save, Load, New world, Settings, Quit. The shell (main.gd) owns what each
 ## does and when the menu shows; Esc never quits.
 
 signal chosen(item: String)
 
-const ITEMS := [["resume", "Resume"], ["save", "Save"], ["load", "Load"], ["new", "New world"], ["quit", "Quit"]]
+const ITEMS := [["resume", "Resume"], ["save", "Save"], ["load", "Load"], ["new", "New world"], ["settings", "Settings"], ["quit", "Quit"]]
 
 var buttons := {}
 var _title: Label

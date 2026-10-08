@@ -50,7 +50,7 @@ use crate::voxel::animal::{AnimalPart, Animals, Specimen};
 use crate::voxel::candle::{self, Candle};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
-use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigurePick, FigureTrack, Spec};
+use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, Spec};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
@@ -509,6 +509,22 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             self.figure_highlight = highlight;
             self.figure_tick = None;
         }
+    }
+
+    /// Draw animals with the live settings `m` (movement, subpixel placement: the app's
+    /// Settings page) from the next clock on. Nothing with stamped animals.
+    pub fn set_figure_motion(&mut self, m: FigureMotion) {
+        if let Some(track) = &mut self.figure_track
+            && track.set_motion(m)
+        {
+            // The flat tier moves its figures once a tick: this tick's move again.
+            self.figure_tick = None;
+        }
+    }
+
+    /// The live settings the animals are drawn with; `None` with stamped animals.
+    pub fn figure_motion(&self) -> Option<FigureMotion> {
+        self.figure_track.as_ref().map(FigureTrack::motion)
     }
 
     /// The last frame's figures, for picking.

@@ -7,7 +7,10 @@ extends SceneTree
 ## survives the menu; Start opens the menu; the inspect panel opens on a living animal and
 ## Esc closes it before the menu opens; save, list, rename, delete through the slots
 ## screen; a save from another version is listed, refused on load, and can be deleted;
-## a good save loads back. Prints PASS/FAIL lines, exits 0 only if all passed.
+## a good save loads back; the Settings page (from the menu) reloads the viewer's stored
+## animal settings into the renderer at start-up, its two toggles reach the running
+## world's renderer at once (the frames drawn report them) and are stored again, and
+## Subpixel is off under Stepped. Prints PASS/FAIL lines, exits 0 only if all passed.
 
 const TIMEOUT_S := 250.0
 const WorldViews := preload("res://ui/world_views.gd")
@@ -39,6 +42,11 @@ func _initialize() -> void:
 
 
 func run() -> void:
+	# A viewer's stored animal settings, which start-up must load into the renderer.
+	var stored := ConfigFile.new()
+	stored.set_value("animals", "movement", "stepped")
+	stored.set_value("animals", "subpixel", false)
+	stored.save(saves_dir + ".cfg")
 	main = load("res://main.tscn").instantiate()
 	main.saves_root = saves_dir
 	main.settings_path = saves_dir + ".cfg"
@@ -219,6 +227,8 @@ func run() -> void:
 	check(not main.inspect.visible and not main.menu.visible, "Esc closes the panel first, without opening the menu")
 	check(main.world_view.highlighted == -1 and main.world_view.following == -1, "closing it clears the highlight and the follow")
 
+	await settings_checks()
+
 	# Save two slots through the slots screen.
 	esc()
 	await frames(1)
@@ -302,6 +312,70 @@ func run() -> void:
 	main._on_menu("quit")
 	check(quits == 1, "the menu's Quit quits")
 	finish()
+
+
+## The Settings page on the running world: start-up loaded the stored settings, each toggle
+## reaches the renderer's next frames, and both are stored for the next start.
+func settings_checks() -> void:
+	var real: bool = main.world_view.get_script() != WorldViews.STUB
+	var at_start: Dictionary = main.world_view.animal_motion()
+	var env: bool = at_start.get("env_movement", false) or at_start.get("env_subpixel", false)
+	if env:
+		print("     CUBARIUM_ANIMALS or CUBARIUM_ANIMAL_SUBPIXEL is set: start-up keeps the environment's values")
+	else:
+		check(at_start.get("movement") == "stepped" and at_start.get("subpixel") == false,
+			"start-up loads the stored animal settings into the renderer: %s" % [at_start])
+	if real:
+		check(await until(func(): return main.world_view.animal_motion().get("drawn_movement") == at_start.get("movement"), 10.0),
+			"the running world is drawn with them: %s" % [main.world_view.animal_motion()])
+	esc()
+	await frames(1)
+	check(main.menu.visible and main.menu.buttons.has("settings") and not main.menu.buttons["settings"].disabled,
+		"the menu offers Settings")
+	main.menu.buttons["settings"].pressed.emit()
+	await frames(1)
+	var page = main.settings_page
+	check(page.visible, "Settings opens the page")
+	check(page.movement == at_start.get("movement") and page.subpixel == at_start.get("subpixel"),
+		"the page shows the settings in force (%s, subpixel %s)" % [page.movement, page.subpixel])
+	check(not page.subpixel_enabled() if page.movement == "stepped" else page.subpixel_enabled(),
+		"Subpixel is off under Stepped and on under Smooth")
+	# Movement: Smooth. Reaches the renderer at once and is stored.
+	page.choose_movement("smooth")
+	await frames(1)
+	check(page.subpixel_enabled(), "under Smooth, Subpixel can be changed")
+	if real:
+		check(await drawn_is("drawn_movement", "smooth"), "Smooth reaches the running renderer: %s" % [main.world_view.animal_motion()])
+	else:
+		check(main.world_view.animal_motion().get("movement") == "smooth", "Smooth reaches the view")
+	# Subpixel: the other way. Reaches the renderer and is stored.
+	var want: bool = not page.subpixel
+	page.choose_subpixel(want)
+	await frames(1)
+	if real:
+		check(await drawn_is("drawn_subpixel", want), "Subpixel %s reaches the running renderer: %s" % [want, main.world_view.animal_motion()])
+	else:
+		check(main.world_view.animal_motion().get("subpixel") == want, "Subpixel reaches the view")
+	var reread := ConfigFile.new()
+	reread.load(main.settings_path)
+	check(reread.get_value("animals", "movement", "") == "smooth" and reread.get_value("animals", "subpixel", null) == want,
+		"both are stored for the next start: %s, %s" % [reread.get_value("animals", "movement", ""), reread.get_value("animals", "subpixel", null)])
+	# And Stepped again, while it runs: Subpixel greys out, the renderer steps.
+	page.choose_movement("stepped")
+	await frames(1)
+	check(not page.subpixel_enabled(), "under Stepped, Subpixel is off")
+	if real:
+		check(await drawn_is("drawn_movement", "stepped"), "Stepped reaches the running renderer")
+	esc()
+	await frames(1)
+	check(not page.visible and main.menu.visible, "Esc closes Settings back to the menu")
+	esc()
+	await until(func(): return not main.session.status()["paused"], 5.0)
+
+
+## Whether the renderer's frames come to be drawn with `key` = `value` within 10 s.
+func drawn_is(key: String, value) -> bool:
+	return await until(func(): return main.world_view.animal_motion().get(key) == value, 10.0)
 
 
 func finish() -> void:
