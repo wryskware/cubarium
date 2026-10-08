@@ -1,0 +1,329 @@
+//! Juvenile trace: what a lineage's growing bodies do with their time, beside its adults.
+//!
+//! ```text
+//! cargo run --release -p cubarium --example juvenile_trace -- load=DIR minutes=15 [heuristic] [threads=2]
+//! ```
+//!
+//! Loads a saved run (`voxel_census save=` / a staged checkpoint), installs the drivers as
+//! `voxel_census load=` does (the built-in centres, or the observation-only heuristics with
+//! `heuristic`), steps `minutes` simulated minutes and reads every founder body every tick.
+//! Per lineage and stage (juvenile / adult) it prints, on stdout, once at the end:
+//! - `awake_s`: awake body-seconds; `eat`: share of them with the eating latch on;
+//! - `ask`: share of the latch-on controller samples whose held `feed` is on (the mouth
+//!   tasted food); `bite`: share of the latch-on samples that took a bite (`Cropping`);
+//! - `fwd`: mean held forward effort while the latch is on; `fwd_feed`: the same over
+//!   samples that asked to feed (a stay-on-food forager holds it near 0);
+//! - `stom`: mean stomach fill over its capacity; `full`: mean fullness;
+//! - `in_rate`: assimilated organic per body-second, per unit of body, read off the gut
+//!   (each pool's `S · speed / τ` at its mineral-limited yield), and `gut_max`: its ceiling,
+//!   `yield · K/τ` per unit body for the lineage's first diet food — so `gut_use =
+//!   in_rate / gut_max` is how much of its gut it uses;
+//! - `grow`: body built per body-second, over `growth_max_per_s` (equals fullness: growth
+//!   runs at `growth_max_per_s · fullness`);
+//! - `idle`: latch-on samples held still without feeding; `delivery`: motion delivered over
+//!   asked; `fwd_bins`: latch-on non-feeding samples by held forward (0 / ≤0.15 / ≤0.45 /
+//!   more); `steer`: the layer that set the held actions.
+//!
+//! On stderr: the bloom stands' nectar and the sips (start → end), each lineage's stomach
+//! mineral over organic against its `n_tissue`, and with `dump=N` every N-th latch-on
+//! sample of each juvenile (pose, held actions, steer, mobility, fullness); with `probe`,
+//! the walkable surface around each juvenile at the end (`lineage=NAME` narrows all of it).
+//!
+//! Measurement only: it changes nothing in the run.
+
+use cubarium::voxel::install_founders_with;
+use cubarium_observatory::query::{LifeStage, stage_of};
+use cubarium_voxel_fauna::{Founder, State, Steer, TICK_HZ};
+use cubarium_voxel_sim::{Sim, SimConfig};
+use std::collections::HashMap;
+
+#[derive(Default, Clone, Copy)]
+struct Acc {
+    awake_ticks: f64,
+    eat_ticks: f64,
+    samples_eat: f64,
+    asked: f64,
+    bit: f64,
+    fwd_sum: f64,
+    fwd_feed_sum: f64,
+    stom_sum: f64,
+    full_sum: f64,
+    body_sum: f64,
+    intake: f64,
+    grown: f64,
+    ticks: f64,
+    /// Latch-on samples held still (forward under 0.05) without feeding.
+    idle: f64,
+    /// Latch-on samples by the layer that set the held actions ([`Steer::ALL`] order).
+    steer: [f64; 14],
+    /// Latch-on, not-feeding samples by held forward: 0, (0, 0.15], (0.15, 0.45], more.
+    fwd_bins: [f64; 4],
+    /// Motion asked and delivered (equivalent metres), for the delivery ratio.
+    asked_m: f64,
+    got_m: f64,
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let get = |k: &str| args.iter().find_map(|a| a.strip_prefix(k).map(str::to_string));
+    let dir = get("load=").expect("load=DIR");
+    let minutes: f64 = get("minutes=").map_or(10.0, |s| s.parse().expect("minutes="));
+    let threads: usize = get("threads=").map_or(2, |s| s.parse().expect("threads="));
+    let heuristic = args.iter().any(|a| a == "heuristic");
+    let only: Option<String> = get("lineage=");
+    // `dump=N`: also print every N-th latch-on controller sample of each juvenile (stderr).
+    let dump: u64 = get("dump=").map_or(0, |s| s.parse().expect("dump="));
+    let mut dumped: HashMap<u64, u64> = HashMap::new();
+    cubarium_voxel::set_thread_override(threads);
+
+    let driven = if heuristic { Vec::new() } else { cubarium::voxel::policy_founders(&[]) };
+    let saved = cubarium_voxel_sim::saved::load(std::path::Path::new(&dir), &driven)
+        .unwrap_or_else(|e| panic!("load: {e}"));
+    let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
+    if !heuristic {
+        install_founders_with(&mut fauna, &[]).expect("the founder centres validate");
+    }
+    eprintln!(
+        "loaded {dir} at minute {minute}: animals {} ({})",
+        fauna.view().animals.len(),
+        if heuristic { "heuristic" } else { "centres" }
+    );
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
+
+    let ticks = (minutes * 60.0 * TICK_HZ as f64).round() as u64;
+    let dt_tick = 1.0 / TICK_HZ as f64;
+    // The nectar supply: stand nectar held (bloomcrowns), stands holding any, and what the
+    // bellwings ate, at the start and the end.
+    let nectar = |sim: &Sim| {
+        let fv = sim.flora().view();
+        let held: f64 = fv.stands.iter().map(|s| s.nectar).sum();
+        let holding = fv.stands.iter().filter(|s| s.nectar > 0.0).count();
+        let l = sim.fauna().view().ledger;
+        let nectar = cubarium_voxel_fauna::Food::Nectar.index();
+        (held, holding, l.eaten_by_food[nectar], l.sips_by_bloom, l.sip_misses_by_founder[Founder::Bellwing.index()])
+    };
+    let n0 = nectar(&sim);
+    // Per body: its body at the last tick (growth), and its motion feedback so far.
+    let mut last: HashMap<u64, f64> = HashMap::new();
+    let mut moved: HashMap<u64, (f64, f64)> = HashMap::new();
+    let mut acc: HashMap<(Founder, LifeStage), Acc> = HashMap::new();
+    for _ in 0..ticks {
+        sim.step();
+        let fauna = sim.fauna();
+        let config = fauna.config();
+        for a in fauna.view().animals {
+            let Some(f) = a.founder else { continue };
+            if only.as_deref().is_some_and(|l| l != f.name()) {
+                continue;
+            }
+            let stage = stage_of(config, a);
+            if !matches!(stage, LifeStage::Juvenile | LifeStage::Adult) {
+                continue;
+            }
+            let phys = config.founder(f);
+            let e = acc.entry((f, stage)).or_default();
+            let fbk = a.founder_state.feedback;
+            let (pa, pg) = moved.get(&a.id).copied().unwrap_or((fbk.attempted_equivalent, fbk.delivered_equivalent));
+            if fbk.attempted_equivalent + 1e-15 < pa {
+                e.asked_m += fbk.attempted_equivalent;
+                e.got_m += fbk.delivered_equivalent;
+            } else {
+                e.asked_m += fbk.attempted_equivalent - pa;
+                e.got_m += fbk.delivered_equivalent - pg;
+            }
+            moved.insert(a.id, (fbk.attempted_equivalent, fbk.delivered_equivalent));
+            let prev_body = last.get(&a.id).copied().unwrap_or(a.body);
+            last.insert(a.id, a.body);
+            e.ticks += 1.0;
+            // The feedback is zeroed at each sampling, inside the tick, so a lineage
+            // sampled every tick never shows it here: the intake is the gut's own rate
+            // instead — every pool's digestion, `S · speed / τ`, at its mineral-limited
+            // yield (the reserve's room never binds a body this far under its cap).
+            let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
+            for food in cubarium_voxel_fauna::Food::ALL {
+                let p = a.stomach.pools[food.index()];
+                if !(p.organic > 0.0) {
+                    continue;
+                }
+                let funded = if phys.core.n_tissue > 0.0 { p.mineral / (phys.core.n_tissue * p.organic) } else { f64::INFINITY };
+                let y = phys.yield_for(food).min(funded).max(0.0);
+                e.intake += p.organic * speed / phys.gut.digestion_s[food.index()] * y * dt_tick;
+            }
+            if a.body > prev_body {
+                e.grown += a.body - prev_body;
+            }
+            e.body_sum += a.body;
+            let cap = phys.core.reserve_of(a.body);
+            e.full_sum += if cap > 0.0 { (a.reserve / cap).clamp(0.0, 1.0) } else { 0.0 };
+            let k = phys.gut.capacity(a.body);
+            e.stom_sum += if k > 0.0 { a.stomach.organic() / k } else { 0.0 };
+            if a.state == State::Asleep {
+                continue;
+            }
+            e.awake_ticks += 1.0;
+            if !a.eating {
+                continue;
+            }
+            e.eat_ticks += 1.0;
+            let held = a.founder_state.held;
+            e.fwd_sum += held.forward;
+            if a.age_ticks % f.manifest().cadence_ticks() == 0 {
+                e.samples_eat += 1.0;
+                if dump > 0 && stage == LifeStage::Juvenile {
+                    let n = dumped.entry(a.id).or_default();
+                    if *n % dump == 0 {
+                        eprintln!(
+                            "dump t={} id={} x={:.2} z={:.2} y={} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} steer={:?} state={:?} body={:.3} full={:.3} mode={:?} rain={} emerg={} lift={:.1} stom={:.2}",
+                            fauna.view().tick, a.id, a.pose.x, a.pose.z, a.site.y, a.pose.heading_rad,
+                            held.forward, held.turn, held.feed, fauna.steer_of(a.id), a.state, a.body,
+                            a.reserve / phys.core.reserve_of(a.body).max(1e-12),
+                            a.mobility.mode, a.mobility.rain_grounded, a.emergency, a.founder_state.lift,
+                            a.stomach.organic() / phys.gut.capacity(a.body).max(1e-30)
+                        );
+                    }
+                    *n += 1;
+                }
+                if held.forward < 0.05 && held.feed < 0.5 {
+                    e.idle += 1.0;
+                }
+                if let Some(st) = fauna.steer_of(a.id) {
+                    if let Some(k) = Steer::ALL.iter().position(|x| *x == st) {
+                        e.steer[k] += 1.0;
+                    }
+                }
+                if held.feed <= 0.5 {
+                    let b = if held.forward <= 0.0 { 0 } else if held.forward <= 0.15 { 1 } else if held.forward <= 0.45 { 2 } else { 3 };
+                    e.fwd_bins[b] += 1.0;
+                }
+                if held.feed > 0.5 {
+                    e.asked += 1.0;
+                    e.fwd_feed_sum += held.forward;
+                }
+                if a.state == State::Cropping {
+                    e.bit += 1.0;
+                }
+            }
+        }
+    }
+    // `probe`: the ground around each juvenile at the end, a 9 x 9 grid of columns.
+    if args.iter().any(|a| a == "probe") {
+        let w = sim.world().view();
+        let c = w.config;
+        for a in sim.fauna().view().animals {
+            let Some(f) = a.founder else { continue };
+            if only.as_deref().is_some_and(|l| l != f.name()) || stage_of(sim.fauna().config(), a) != LifeStage::Juvenile {
+                continue;
+            }
+            let (cx, cz) = ((a.pose.x / c.voxel_m).floor() as i64, (a.pose.z / c.voxel_m).floor() as i64);
+            eprintln!("probe id={} at col ({cx},{cz}) y={} body={:.3}", a.id, a.site.y, a.body);
+            for dz in -4i64..=4 {
+                let mut line = String::new();
+                for dx in -4i64..=4 {
+                    let (x, z) = (cx + dx, cz + dz);
+                    if z < 0 || z >= i64::from(c.depth) {
+                        line.push('|');
+                        continue;
+                    }
+                    let x = x.rem_euclid(i64::from(c.width));
+                    // The walkable surface nearest the standing face (solid with air above),
+                    // relative to it: `+3` a three-voxel riser, `-5` a five-voxel drop, `##`
+                    // none within nine.
+                    let y = i64::from(a.site.y);
+                    let solid = |yy: i64| yy >= 0 && yy < i64::from(c.height) && w.is_solid(x, yy as u32, z as u32);
+                    let surf = (0..=9i64)
+                        .flat_map(|d| [d, -d])
+                        .find(|d| solid(y + d) && !solid(y + d + 1));
+                    let cell = surf.map_or("##".to_string(), |d| format!("{d:+}"));
+                    line.push_str(&format!("{cell:>3}"));
+                    line.push(' ');
+                    if dx == 0 && dz == 0 {
+                        line.push('*');
+                        continue;
+                    }
+                    line.push(' ');
+                }
+                eprintln!("  {line}");
+            }
+        }
+    }
+    let dt = 1.0 / TICK_HZ as f64;
+    let n1 = nectar(&sim);
+    // The stomach's mineral over its organic, per food, against the eater's `n_tissue`:
+    // under it the food cannot fund the tissue its yield would build.
+    for f in [Founder::Bellwing, Founder::Browser, Founder::Capgnawer, Founder::Loftstrider] {
+        let n_tissue = sim.fauna().config().founder(f).core.n_tissue;
+        let mut by_food = [(0.0f64, 0.0f64); cubarium_voxel_fauna::Food::COUNT];
+        for a in sim.fauna().view().animals.iter().filter(|a| a.founder == Some(f)) {
+            for (k, p) in a.stomach.pools.iter().enumerate() {
+                by_food[k].0 += p.organic;
+                by_food[k].1 += p.mineral;
+            }
+        }
+        for food in cubarium_voxel_fauna::Food::ALL {
+            let (o, m) = by_food[food.index()];
+            if o > 0.0 {
+                eprintln!("stomach: {} {} organic {o:.3e} mineral/organic {:.4} (n_tissue {n_tissue})", f.name(), food.name(), m / o);
+            }
+        }
+    }
+    {
+        let fv = sim.flora().view();
+        let (mut n, mut m) = (0.0, 0.0);
+        for st in fv.stands.iter().filter(|st| st.nectar > 0.0) {
+            n += st.nectar;
+            m += st.mineral;
+        }
+        eprintln!("bloom stands: nectar {n:.3e}, their mineral {m:.3e}");
+    }
+    eprintln!(
+        "nectar: stand stock {:.4e} -> {:.4e} on {} -> {} stands; nectar eaten {:.4e} ({:.3e}/s); sips stand {} vine {}; bellwing misses {}",
+        n0.0, n1.0, n0.1, n1.1, n1.2 - n0.2, (n1.2 - n0.2) / (minutes * 60.0),
+        n1.3[0] - n0.3[0], n1.3[1] - n0.3[1], n1.4 - n0.4
+    );
+    let fauna = sim.fauna();
+    println!("lineage,stage,body_mean,awake_s,eat,ask,bite,fwd,fwd_feed,stom,full,in_rate,gut_max,gut_use,grow,idle,delivery,fwd_bins,steer");
+    let mut keys: Vec<_> = acc.keys().copied().collect();
+    keys.sort_by_key(|(f, s)| (f.index(), *s as u8));
+    for key in keys {
+        let e = acc[&key];
+        let (f, stage) = key;
+        let phys = fauna.config().founder(f);
+        let food = phys.eating_diet().foods().next();
+        let gut_max = food.map_or(0.0, |food| {
+            phys.yield_for(food) * phys.gut.capacity(1.0) / phys.gut.digestion_s[food.index()]
+        });
+        let body_s = e.ticks * dt;
+        let in_rate = e.intake / (e.body_sum * dt).max(1e-12);
+        let steer: Vec<String> = Steer::ALL
+            .iter()
+            .zip(e.steer)
+            .filter(|(_, n)| *n > 0.0)
+            .map(|(s, n)| format!("{}={:.2}", s.name(), n / e.samples_eat.max(1.0)))
+            .collect();
+        println!(
+            "{},{},{:.3},{:.0},{:.3},{:.3},{:.3},{:.3},{:.3},{:.3},{:.4},{:.3e},{:.3e},{:.3},{:.3},{:.3},{:.3},{},{}",
+            f.name(),
+            stage.name(),
+            e.body_sum / e.ticks.max(1.0),
+            e.awake_ticks * dt,
+            e.eat_ticks / e.awake_ticks.max(1.0),
+            e.asked / e.samples_eat.max(1.0),
+            e.bit / e.samples_eat.max(1.0),
+            e.fwd_sum / e.eat_ticks.max(1.0),
+            e.fwd_feed_sum / e.asked.max(1.0),
+            e.stom_sum / e.ticks.max(1.0),
+            e.full_sum / e.ticks.max(1.0),
+            in_rate,
+            gut_max,
+            if gut_max > 0.0 { in_rate / gut_max } else { 0.0 },
+            e.grown / body_s.max(1e-12) / phys.core.growth_max_per_s.max(1e-30),
+            e.idle / e.samples_eat.max(1.0),
+            e.got_m / e.asked_m.max(1e-12),
+            {
+                let n: f64 = e.fwd_bins.iter().sum::<f64>().max(1.0);
+                e.fwd_bins.iter().map(|x| format!("{:.2}", x / n)).collect::<Vec<_>>().join("/")
+            },
+            steer.join(" "),
+        );
+    }
+}
