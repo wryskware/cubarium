@@ -158,6 +158,12 @@ pub struct VoxelView<'a> {
 }
 
 impl<'a> VoxelView<'a> {
+    /// Runtime world identity and terrain revision for caches of material-derived data.
+    /// A clone or decoded world has a fresh identity; a terrain-only view has none.
+    pub fn terrain_cache_key(&self) -> Option<(u64, u64)> {
+        self.sky_memo.map(|memo| (memo.id, self.terrain_version))
+    }
+
     /// The Cubarium year at this view's tick ([`crate::weather::Climate::year`]): what the
     /// fauna and flora read for their seasons.
     pub fn year(&self) -> Option<crate::weather::Year> {
@@ -880,6 +886,8 @@ const SKY_EMPTY: u64 = u64::MAX;
 /// lock-free: a slot is one atomic word, and two readers racing to fill it store the same
 /// value. Allocated on first use; a clone or a decoded world starts empty.
 pub(crate) struct SkyMemo {
+    /// Runtime identity for terrain-derived caches held by readers of this world.
+    id: u64,
     version: std::sync::atomic::AtomicU64,
     slots: std::sync::OnceLock<Box<[std::sync::atomic::AtomicU64]>>,
     reset: std::sync::Mutex<()>,
@@ -887,7 +895,10 @@ pub(crate) struct SkyMemo {
 
 impl Default for SkyMemo {
     fn default() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_ID: AtomicU64 = AtomicU64::new(1);
         SkyMemo {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             version: std::sync::atomic::AtomicU64::new(u64::MAX),
             slots: std::sync::OnceLock::new(),
             reset: std::sync::Mutex::new(()),
