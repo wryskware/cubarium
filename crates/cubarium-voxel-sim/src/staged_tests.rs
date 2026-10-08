@@ -142,6 +142,39 @@ fn a_resting_driven_lineage_is_idle_and_an_undriven_one_is_frozen() {
     assert!(why.contains("frozen"), "{why}");
 }
 
+/// **A sated grazer is not asked to bite; one that wanted food is**: in a window where no
+/// body ate, a grazer lineage whose bodies never had their eating latch on passes as sated,
+/// and the same window counted as wanting fails for want of plant bites. Every lineage is
+/// movement-exempt here, so only the grazing item is under test.
+#[test]
+fn a_sated_grazer_is_not_asked_to_bite_but_a_wanting_one_is() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let dir = scratch("sated");
+    let names: Vec<&str> = Founder::ALL.iter().map(|f| f.name()).collect();
+    let still = format!("still={}", names.join(","));
+    let (cfg, _) = stage(&dir, &[still.as_str()]);
+    std::fs::remove_dir_all(&dir).ok();
+    // A window with no ticks in it: nobody ate, and every lineage was seen awake.
+    let awake = |sim: &Sim| {
+        let mut window = Window::open(sim);
+        for f in Founder::ALL {
+            let s = &mut window.states[f.index()];
+            s.clear();
+            s.insert("Walking".into(), 1);
+            window.awake[f.index()] = true;
+        }
+        window
+    };
+    let ok = awake(&sim).verdict(&sim, &cfg).expect("sated grazers pass");
+    assert!(ok.contains("sated"), "{ok}");
+    // The same window, with each lineage's wanting count moved since its start.
+    let mut wanting = awake(&sim);
+    wanting.wanting = [u64::MAX; Founder::COUNT];
+    let why = wanting.verdict(&sim, &cfg).expect_err("grazers that wanted food and took no bite fail");
+    assert!(why.contains("no grazer bit a plant"), "{why}");
+}
+
 /// **An expected counter that stays zero fails the check**: the arm asks for burrs, and
 /// no species carries any.
 #[test]
