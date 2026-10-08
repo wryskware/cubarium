@@ -204,8 +204,8 @@ pub struct FigureConfig {
     /// Tile samples per raster-pixel axis (positive; 1 disables AA). Startup only.
     #[serde(deserialize_with = "positive_supersample")]
     pub supersample: u32,
-    /// `"stamped"` (the default) or `"models"` ([`PlantDraw`]): plants in the world's
-    /// voxels, still, or drawn by the plant pass, swaying and growing in (`[plants]`).
+    /// `"models"` (the default, Wrysk 2026-10-08) or `"stamped"` ([`PlantDraw`]): plants drawn
+    /// by the plant pass, swaying and growing in (`[plants]`), or in the world's voxels, still.
     /// Startup only.
     pub plants: PlantDraw,
 }
@@ -231,7 +231,7 @@ impl Default for FigureConfig {
             swap_s: 0.3,
             subpixel: true,
             supersample: 2,
-            plants: PlantDraw::Stamped,
+            plants: PlantDraw::Models,
         }
     }
 }
@@ -397,7 +397,6 @@ mod preset_tests {
 
     #[test]
     fn the_plants_override_names_models_or_stamped_and_nothing_else() {
-        assert_eq!(FigureConfig::default().plants, PlantDraw::Stamped, "stamped until Wrysk picks");
         let cfg = config();
         assert_eq!(cfg.with_plants(Some("stamped")).unwrap(), FigureConfig { plants: PlantDraw::Stamped, ..cfg.clone() });
         assert_eq!(cfg.with_plants(Some("models")).unwrap(), cfg);

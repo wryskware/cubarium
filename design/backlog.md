@@ -307,3 +307,14 @@ Shape of the idea (all open, none binding):
 
 **Done looks like:** select an animal in the app, issue move / eat / hunt orders, watch it carry
 them out within its normal physics, with orders listed in the operator controls (§1).
+
+## 14. Plant pass leftovers (Wrysk, 2026-10-08: "backlog the shadows thing, vines, and reflections. for now lets just call it done")
+
+The plant pass (`[figures] plants = "models"`, merged e5f214f5, the default since) sways plants
+and grows them in voxel by voxel. Three gaps were left:
+- **Shadows during a change.** When a plant changes, its shadow and canopy light switch at the
+  start of the change, while its voxels take `foliage_fade_s` to grow in. The stamp used to change
+  them cell by cell. The shadow should follow the grow-in.
+- **Vines don't sway.** Latticevines stay still on their walls.
+- **Plants seen through water** (reflections, a fall, a pool's surface) are drawn by the walk,
+  still and under the water's colour, so they don't sway or grow in.

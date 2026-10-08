@@ -104,8 +104,8 @@ scripts/run-game.sh`. Invalid values stop startup with the valid values named.
 
 `CUBARIUM_PLANTS` overrides `[figures] plants` when the renderer starts:
 
-- `stamped` (the default) draws plants in the world's voxels, still, exactly as before.
-- `models` draws every trunk and crown cell in the plant pass
+- `stamped` draws plants in the world's voxels, still, exactly as before.
+- `models` (the default since Wrysk picked it, 2026-10-08) draws every trunk and crown cell in the plant pass
   (`crates/cubarium-gpu/src/plants.rs`). At rest it is the stamped picture, pixel for pixel.
   - **Sway:** each plant leans in a breeze. The root stays put; the top moves most; a
     short plant barely moves.
