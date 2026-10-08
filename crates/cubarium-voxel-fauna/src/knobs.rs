@@ -443,6 +443,41 @@ pub struct TeacherConfig {
     /// walk straight on without feeding, seconds.
     #[serde(default = "give_up_leave_s")]
     pub give_up_leave_s: f64,
+    /// **HUNGRY-SEARCH** (`step::rove`): this long after its last taste of food, a
+    /// heuristic forager wanting food (its eating or emergency latch on) sets out on
+    /// straight search legs away from ground it has covered whenever its own answer is its
+    /// no-signal search, seconds. Until then its own wander is the area-restricted search
+    /// near where food last was; a lead it steers by (food in view, a scent) is followed
+    /// either way. 30 s: about 30 body lengths of zigzag at cruise.
+    #[serde(default = "search_patience_s")]
+    pub search_patience_s: f64,
+    /// One search leg, in the body's current lengths: it holds the leg's heading until it
+    /// has made this much net way, food comes into sense or something in its way ends it
+    /// (a leg also lapses after twice its time at cruise). 12: a run of ~12 s at the
+    /// walkers' 1 body length per second. 0 turns the search off.
+    #[serde(default = "search_leg_bl")]
+    pub search_leg_bl: f64,
+    /// The visited-ground memory's cell, the body's current lengths across: a sample marks
+    /// the cell it stands in. 2: about what its mouth and near senses cover in passing.
+    #[serde(default = "search_cell_bl")]
+    pub search_cell_bl: f64,
+    /// Half-life of that memory: ground covered this long ago counts half, seconds. 300 s:
+    /// several legs, so a search does not double back onto ground it just left.
+    #[serde(default = "search_memory_half_life_s")]
+    pub search_memory_half_life_s: f64,
+}
+
+fn search_patience_s() -> f64 {
+    30.0
+}
+fn search_leg_bl() -> f64 {
+    12.0
+}
+fn search_cell_bl() -> f64 {
+    2.0
+}
+fn search_memory_half_life_s() -> f64 {
+    300.0
 }
 
 fn way_on_m() -> f64 {
@@ -563,6 +598,10 @@ impl Default for TeacherConfig {
             give_up_shun_s: give_up_shun_s(),
             give_up_zone_bl: give_up_zone_bl(),
             give_up_leave_s: give_up_leave_s(),
+            search_patience_s: search_patience_s(),
+            search_leg_bl: search_leg_bl(),
+            search_cell_bl: search_cell_bl(),
+            search_memory_half_life_s: search_memory_half_life_s(),
         }
     }
 }

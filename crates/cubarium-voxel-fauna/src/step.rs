@@ -106,6 +106,8 @@ pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
 pub(crate) mod jump;
 #[path = "forage.rs"]
 pub(crate) mod forage;
+#[path = "rove.rs"]
+pub(crate) mod rove;
 
 /// The tick's sky, read once (F1): what a flyer's act needs of the weather and the clock.
 #[derive(Clone, Copy, Debug)]
@@ -1325,6 +1327,21 @@ fn controllers(
                 fauna.pressed.remove(&id);
             }
         }
+        // HUNGRY-SEARCH (`rove`): a heuristic forager wanting food, `search_patience_s`
+        // after its last taste of food, ranges on straight legs away from ground it has
+        // covered wherever its own answer is its no-signal search. First, so every layer
+        // below still wins; a layer that overrides a leg's steering ends it (below).
+        let mut searched = None;
+        if driven && (fauna.controllers.flees(id) || fauna.controllers.rests_when_fed(id)) {
+            let seek = fauna.controllers.seek(id);
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let period_s = manifest.cadence_ticks().max(1) as f64 * DT;
+            if let Some(go) = rove::search(fauna, i, actions, seek, period_s, ring) {
+                actions = go;
+                src = crate::Steer::Search;
+                searched = Some(go);
+            }
+        }
         // The prey heuristics' flee rule (predation §2.7): a body driven by its own
         // heuristic — not a saved policy, whose behaviour changes only through the world
         // — turns away from a seen threat within 3 m, or from tremor, and resumes after.
@@ -1569,6 +1586,9 @@ fn controllers(
             if face_sky * sky.daylight >= fauna.config.life.day_line {
                 lure = 0.0;
             }
+        }
+        if searched.is_some_and(|go| (go.forward, go.turn) != (actions.forward, actions.turn)) {
+            rove::overridden(fauna, id);
         }
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
@@ -5091,6 +5111,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.trapped.remove(id);
         fauna.drop_plans.remove(id);
         fauna.forage.remove(id);
+        fauna.rove.remove(id);
     }
     for (a, cause) in &dead {
         if a.pack.is_some_and(|m| m.pup) {

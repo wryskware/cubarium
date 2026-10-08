@@ -26,7 +26,8 @@
 //!
 //! On stderr: the bloom stands' nectar and the sips (start → end), each lineage's stomach
 //! mineral over organic against its `n_tissue`, and with `dump=N` every N-th latch-on
-//! sample of each juvenile (pose, held actions, steer, mobility, fullness); with `probe`,
+//! sample of each juvenile — with `adults`, of every body — (pose, held actions, steer,
+//! mobility, fullness, what its controller said the answer was for: `seek`); with `probe`,
 //! the walkable surface around each juvenile at the end (`lineage=NAME` narrows all of it).
 //! With `ids=A,B,..` (and `every=N` samples): every N-th controller sample of those bodies,
 //! whatever their stage or latch (`body` lines: pose, held actions, steer, state, mobility,
@@ -60,7 +61,7 @@ struct Acc {
     /// Latch-on samples held still (forward under 0.05) without feeding.
     idle: f64,
     /// Latch-on samples by the layer that set the held actions ([`Steer::ALL`] order).
-    steer: [f64; 14],
+    steer: [f64; Steer::ALL.len()],
     /// Latch-on, not-feeding samples by held forward: 0, (0, 0.15], (0.15, 0.45], more.
     fwd_bins: [f64; 4],
     /// Motion asked and delivered (equivalent metres), for the delivery ratio.
@@ -79,6 +80,8 @@ fn main() {
     // `dump=N`: also print every N-th latch-on controller sample of each juvenile (stderr).
     let dump: u64 = get("dump=").map_or(0, |s| s.parse().expect("dump="));
     let mut dumped: HashMap<u64, u64> = HashMap::new();
+    // `adults`: the dump covers the adults too.
+    let adults = args.iter().any(|a| a == "adults");
     // `ids=A,B,...`: every controller sample of these bodies, whatever their stage or latch
     // (stderr `body ...` lines): pose, held actions, steer, state and mobility.
     let ids: Vec<u64> = get("ids=").map_or_else(Vec::new, |s| s.split(',').map(|x| x.parse().expect("ids=")).collect());
@@ -191,16 +194,17 @@ fn main() {
             e.fwd_sum += held.forward;
             if a.age_ticks % f.manifest().cadence_ticks() == 0 {
                 e.samples_eat += 1.0;
-                if dump > 0 && stage == LifeStage::Juvenile {
+                if dump > 0 && (stage == LifeStage::Juvenile || adults) {
                     let n = dumped.entry(a.id).or_default();
                     if *n % dump == 0 {
                         eprintln!(
-                            "dump t={} id={} x={:.2} z={:.2} y={} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} steer={:?} state={:?} body={:.3} full={:.3} mode={:?} rain={} emerg={} lift={:.1} stom={:.2}",
-                            fauna.view().tick, a.id, a.pose.x, a.pose.z, a.site.y, a.pose.heading_rad,
+                            "dump {:?} t={} id={} x={:.2} z={:.2} y={} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} steer={:?} state={:?} body={:.3} full={:.3} mode={:?} rain={} emerg={} lift={:.1} stom={:.2} seek={:?}",
+                            stage, fauna.view().tick, a.id, a.pose.x, a.pose.z, a.site.y, a.pose.heading_rad,
                             held.forward, held.turn, held.feed, fauna.steer_of(a.id), a.state, a.body,
                             a.reserve / phys.core.reserve_of(a.body).max(1e-12),
                             a.mobility.mode, a.mobility.rain_grounded, a.emergency, a.founder_state.lift,
-                            a.stomach.organic() / phys.gut.capacity(a.body).max(1e-30)
+                            a.stomach.organic() / phys.gut.capacity(a.body).max(1e-30),
+                            fauna.seek_of(a.id)
                         );
                     }
                     *n += 1;
