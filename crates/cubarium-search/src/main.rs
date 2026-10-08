@@ -779,15 +779,18 @@ enum Command {
         seeds_per_generation: usize,
         #[arg(long, default_value_t = 100)]
         generations: u32,
-        #[arg(long, default_value_t = 10_800.0)]
+        #[arg(long, alias = "wall", default_value_t = 10_800.0)]
         wall_seconds: f64,
+        /// Calibration deadline for the first generation/cell, including setup.
+        #[arg(long, default_value_t = 900.0)]
+        first_generation_seconds: f64,
         /// Initial step size, natural-log units.
         #[arg(long, default_value_t = 0.5)]
         sigma0: f64,
         #[arg(long, default_value_t = 16)]
         threads: usize,
-        /// Cores the last worlds share once none is left queued (each about cores / running,
-        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// Cores the last worlds share once none is left queued, bounded by --threads;
+        /// `0` uses --threads, `1` keeps
         /// every world on one thread throughout.
         #[arg(long, default_value_t = 0)]
         tail_cores: usize,
@@ -896,8 +899,8 @@ enum Command {
         water_every: u32,
         #[arg(long, default_value_t = 8)]
         threads: usize,
-        /// Cores the last worlds share once none is left queued (each about cores / running,
-        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// Cores the last worlds share once none is left queued, bounded by --threads;
+        /// `0` uses --threads, `1` keeps
         /// every world on one thread throughout.
         #[arg(long, default_value_t = 0)]
         tail_cores: usize,
@@ -954,8 +957,8 @@ enum Command {
         /// Worlds run at once, one simulation thread each while jobs are queued.
         #[arg(long, default_value_t = 8)]
         threads: usize,
-        /// Cores the last worlds share once the queue is empty (each about cores / running,
-        /// re-read every simulated minute); `0` is every core the OS reports, `1` keeps
+        /// Cores the last worlds share once the queue is empty, bounded by --threads;
+        /// `0` uses --threads, `1` keeps
         /// every world on one thread throughout.
         #[arg(long, default_value_t = 0)]
         tail_cores: usize,
@@ -970,6 +973,15 @@ enum Command {
         centres: Vec<String>,
         #[arg(long, default_value = "runs/ecology-grid")]
         out: PathBuf,
+        /// Continue the completed-cell checkpoint in --out; clears STOP once.
+        #[arg(long)]
+        resume: bool,
+        /// Wall budget, including the first cell and setup.
+        #[arg(long, alias = "wall", default_value_t = 10_800.0)]
+        wall_seconds: f64,
+        /// Calibration deadline for the first generation/cell, including setup.
+        #[arg(long, default_value_t = 900.0)]
+        first_generation_seconds: f64,
         /// Where every cell starts: `e0` (today's founding, the default) or `e1` (the
         /// constructed rich start; needs `--starts`).
         #[arg(long)]
@@ -1039,8 +1051,11 @@ enum Command {
         window_min: f64,
         #[arg(long, default_value_t = 1000)]
         generations: u32,
-        #[arg(long, default_value_t = 7000.0)]
+        #[arg(long, alias = "wall", default_value_t = 7000.0)]
         wall_seconds: f64,
+        /// Calibration deadline for the first generation/cell, including setup.
+        #[arg(long, default_value_t = 900.0)]
+        first_generation_seconds: f64,
         #[arg(long, default_value_t = cubarium_search::es::optimizer::SIGMA)]
         sigma: f64,
         #[arg(long, default_value_t = cubarium_search::es::optimizer::LEARNING_RATE)]
@@ -1063,6 +1078,9 @@ enum Command {
         ecology: Option<PathBuf>,
         #[arg(long, default_value = "runs/live-train")]
         out: PathBuf,
+        /// Restore centres, optimizer, persistent worlds and familiarity from DIR.
+        #[arg(long)]
+        resume: Option<PathBuf>,
         /// Found the training worlds from this config file's `[world]` (a host's, e.g.
         /// config/desktop/terrarium.toml) instead of the still-water `small` preset.
         #[arg(long)]
@@ -1812,6 +1830,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             seeds_per_generation,
             generations,
             wall_seconds,
+            first_generation_seconds,
             sigma0,
             threads,
             tail_cores,
@@ -1925,9 +1944,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 seeds_per_generation,
                 generations,
                 wall_seconds,
+                first_generation_seconds,
                 sigma0,
                 threads,
-                tail_cores: machine_cores(tail_cores),
+                tail_cores: if tail_cores == 0 { threads.max(1) } else { tail_cores.min(threads.max(1)) },
                 seed_base,
                 cma_seed,
                 eval,
@@ -2111,6 +2131,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             abort_animals,
             centres,
             out,
+            resume,
+            wall_seconds,
+            first_generation_seconds,
             start,
             starts,
             burn_in_min,
@@ -2147,11 +2170,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 first_seed,
                 hours,
                 threads,
-                tail_cores: machine_cores(tail_cores),
+                tail_cores: if tail_cores == 0 { threads.max(1) } else { tail_cores.min(threads.max(1)) },
                 water_every,
                 abort_animals,
                 centres,
                 out,
+                resume,
+                wall_seconds,
+                first_generation_seconds,
                 start,
                 burn_in,
                 seed_list,
@@ -2204,6 +2230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             window_min,
             generations,
             wall_seconds,
+            first_generation_seconds,
             sigma,
             learning_rate,
             train_seed,
@@ -2212,6 +2239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             population_cap,
             save_every,
             out,
+            resume,
             world,
             ecology,
             curiosity,
@@ -2236,6 +2264,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .round() as u64,
                 generations,
                 wall_seconds,
+                first_generation_seconds,
                 sigma,
                 learning_rate,
                 train_seed,
@@ -2244,6 +2273,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 population_cap,
                 save_every,
                 out,
+                resume,
                 curiosity: es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
             };
             es::voxel::live::trainer::train(&spec)?;

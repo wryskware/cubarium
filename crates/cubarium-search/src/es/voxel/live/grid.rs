@@ -785,6 +785,7 @@ pub fn summary_md(axes: &[Axis], rows: &[SummaryRow], header: &str) -> String {
 }
 
 /// The grid's whole run.
+#[derive(Clone)]
 pub struct GridSpec {
     pub world: cubarium_voxel::Config,
     /// What the world was read from (a config file whose `[flora]`/`[fauna]` the cells
@@ -803,6 +804,11 @@ pub struct GridSpec {
     pub abort_animals: usize,
     pub centres: Vec<(Founder, PathBuf)>,
     pub out: PathBuf,
+    /// Explicit continuation of the completed-cell journal.
+    pub resume: bool,
+    pub wall_seconds: f64,
+    /// Calibration deadline for the first boundary, wall seconds including setup.
+    pub first_generation_seconds: f64,
     /// Where every cell starts ([`super::start`]): E0 (today's founding) or a library.
     pub start: super::start::StartSet,
     pub burn_in: super::start::BurnIn,
@@ -815,6 +821,15 @@ pub struct GridSpec {
 /// thread per world while jobs are queued, `threads` worlds at once; once the queue is
 /// empty the worlds still running share `tail_cores`), then write the summaries.
 pub fn grid(spec: &GridSpec) -> Result<(), String> {
+    super::staging::execute(&spec.out, spec.resume, spec.wall_seconds, spec.first_generation_seconds, |run| grid_inner(spec, run))
+}
+
+fn grid_inner(spec: &GridSpec, run: &std::sync::Arc<super::staging::Run>) -> Result<(), String> {
+    let mut configured = spec.clone();
+    configured.threads = spec.threads.max(1);
+    configured.tail_cores = spec.tail_cores.max(1).min(configured.threads);
+    let spec = &configured;
+    println!("# pool limits: workers={} tail-cores={} world-threads=1 while queued", spec.threads, spec.tail_cores);
     let out = &spec.out;
     std::fs::create_dir_all(out).map_err(|e| format!("cannot create {}: {e}", out.display()))?;
     cubarium_voxel::world::set_thread_override(1);
@@ -870,6 +885,7 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     }
     let cells_path = out.join("cells.jsonl");
     let label = spec.start.label();
+    if !spec.resume && cells_path.exists() { return Err("output has cells.jsonl; use --resume to continue it".into()); }
     let done: Vec<CellRecord> = read_records(&cells_path).into_iter().filter(|r| r.start_label() == label).collect();
     let mut jobs = pending(&all, &list.seeds, spec.hours, &done);
     longest_first(&all, &mut jobs);
@@ -892,20 +908,37 @@ pub fn grid(spec: &GridSpec) -> Result<(), String> {
     eval.asked_seed = true;
     eval.start = spec.start.clone();
     eval.burn_in = spec.burn_in;
+    if spec.resume {
+        super::staging::repair_log(&cells_path, |_| true)?;
+    }
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&cells_path)
         .map_err(|e| format!("cannot open {}: {e}", cells_path.display()))?;
     let file = Mutex::new(file);
+    // The flushed cell journal plus the chosen seeds is the boundary checkpoint.
+    super::staging::atomic_text(&out.join("checkpoint.json"), &serde_json::to_string(&list).map_err(|e| e.to_string())?)?;
+    let measured = Mutex::new(0.0f64);
+    println!("# pools: workers={} tail-cores={} compute-pool={} water-pool={} max-world-threads={}",
+        jobs.len().min(spec.threads), spec.tail_cores, if spec.tail_cores > 1 { spec.tail_cores } else { 0 },
+        if spec.tail_cores > 1 { spec.tail_cores } else { 0 }, spec.tail_cores);
     let budget = ThreadBudget::new(spec.tail_cores);
     let results: Vec<Result<(), String>> = parallel_shared(jobs, spec.threads, &budget, |(c, seed), b| {
+        if run.boundary(c as u32, *measured.lock().expect("cell timing")) { return Ok(()); }
+        run.check()?;
+        let mut eval = eval.clone();
+        eval.staging = Some(super::staging::Segment { run: run.clone(), generation: c as u32, full: true, arm: "cell".into() });
         let r = run_cell(&all[c], &ecologies[c], seed, spec.hours, &drivers, &eval, Some(b));
+        run.check()?;
+        *measured.lock().expect("cell timing") = r.wall_s;
         let line = serde_json::to_string(&r).map_err(|e| e.to_string())?;
         let mut f = file.lock().expect("cells.jsonl");
         writeln!(f, "{line}").map_err(|e| e.to_string())?;
         f.flush().map_err(|e| e.to_string())?;
         println!("grid: {} seed {seed} done in {:.0} s", r.cell, r.wall_s);
+        drop(f);
+        if run.dir.join("STOP").exists() { run.boundary((c + 1) as u32, 0.0); }
         Ok(())
     });
     results.into_iter().collect::<Result<(), String>>()?;

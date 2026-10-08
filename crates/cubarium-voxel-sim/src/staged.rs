@@ -242,7 +242,7 @@ pub enum Ended {
 }
 
 /// What one check window watches: the first segment after a load.
-struct Window {
+pub struct Window {
     start: HashMap<u64, (Founder, Pose)>,
     last: HashMap<u64, Pose>,
     path_m: [f64; Founder::COUNT],
@@ -261,7 +261,7 @@ struct Window {
 }
 
 impl Window {
-    fn open(sim: &Sim) -> Window {
+    pub fn open(sim: &Sim) -> Window {
         let v = sim.fauna().view();
         let mut start = HashMap::new();
         let mut last = HashMap::new();
@@ -290,7 +290,7 @@ impl Window {
 
     /// One tick's movement: each founder body's step along its path, and whether it is
     /// awake.
-    fn watch(&mut self, sim: &Sim) {
+    pub fn watch(&mut self, sim: &Sim) {
         let voxel_m = sim.world().config().voxel_m;
         let ring_m = f64::from(sim.world().config().width) * voxel_m;
         let sample = self.ticks % u64::from(TICK_HZ) == 0;
@@ -348,7 +348,7 @@ impl Window {
     }
 
     /// The full check over the window, as one verdict per item; `Err` lists the failures.
-    fn verdict(&self, sim: &Sim, cfg: &StageConfig) -> Result<String, String> {
+    pub fn verdict(&self, sim: &Sim, cfg: &StageConfig) -> Result<String, String> {
         let mut fail = Vec::new();
         let mut notes = Vec::new();
         let fauna = sim.fauna();
@@ -499,6 +499,19 @@ pub fn counter_delta(
     Err(format!("expect={name}: no ledger counter by that name"))
 }
 
+/// Check that every founder body has its driver and the ledgers conserve within `tol`.
+pub fn instant_check(sim: &Sim, tol: f64) -> Result<(), String> {
+    let mut why = Vec::new();
+    if let Err(e) = crate::saved::driven(sim.fauna()) {
+        why.push(e);
+    }
+    let (w, fl, fa) = sim.layers();
+    if let Some(e) = Residuals::of(w, fl, fa).out_of(tol) {
+        why.push(e);
+    }
+    if why.is_empty() { Ok(()) } else { Err(why.join("; ")) }
+}
+
 /// **The staged run**: told every tick and every sim minute, it checks, checkpoints,
 /// reports and says when to stop.
 pub struct Runner {
@@ -552,7 +565,7 @@ impl Runner {
             water_every: sim.world().water_every(),
             cfg,
         };
-        match runner.instant_check(sim) {
+        match instant_check(sim, runner.cfg.residual_tol) {
             Ok(()) => runner.last_check = format!("load m{minute}: driven, ledgers conserve"),
             Err(why) => {
                 let why = format!("load m{minute}: {why}");
@@ -575,18 +588,6 @@ impl Runner {
         &self.cfg.dir
     }
 
-    fn instant_check(&self, sim: &Sim) -> Result<(), String> {
-        let mut why = Vec::new();
-        if let Err(e) = crate::saved::driven(sim.fauna()) {
-            why.push(e);
-        }
-        let (w, fl, fa) = sim.layers();
-        if let Some(e) = Residuals::of(w, fl, fa).out_of(self.cfg.residual_tol) {
-            why.push(e);
-        }
-        if why.is_empty() { Ok(()) } else { Err(why.join("; ")) }
-    }
-
     /// After every tick.
     pub fn tick(&mut self, sim: &Sim) {
         if let Some(w) = self.window.as_mut() {
@@ -603,28 +604,36 @@ impl Runner {
         let boundary = minute == self.check_end
             || (minute > self.check_end && (minute - self.check_end) % self.cfg.segment_min == 0)
             || minute >= self.end_minute;
+        let mut failure = None;
         if check_due {
             let window = self.window.take().expect("a window is open");
-            let verdict = window.verdict(sim, &self.cfg).and_then(|ok| self.instant_check(sim).map(|()| ok));
+            let verdict = window
+                .verdict(sim, &self.cfg)
+                .and_then(|ok| instant_check(sim, self.cfg.residual_tol).map(|()| ok));
             match verdict {
-                Ok(notes) => self.last_check = format!("check m{}-{minute} ok: {notes}", self.start_minute),
+                Ok(notes) => {
+                    self.last_check = format!("check m{}-{minute} ok: {notes}", self.start_minute)
+                }
                 Err(why) => {
-                    let why = format!("check m{}-{minute}: {why}", self.start_minute);
-                    self.checkpoint(sim, minute);
-                    self.fail(minute, &why);
-                    return Some(Ended::Failed(why));
+                    failure = Some(format!("check m{}-{minute}: {why}", self.start_minute));
                 }
             }
         } else if boundary {
-            if let Err(why) = self.instant_check(sim) {
-                let why = format!("boundary m{minute}: {why}");
-                self.checkpoint(sim, minute);
-                self.fail(minute, &why);
-                return Some(Ended::Failed(why));
+            if let Err(why) = instant_check(sim, self.cfg.residual_tol) {
+                failure = Some(format!("boundary m{minute}: {why}"));
             }
         }
-        if boundary {
-            self.checkpoint(sim, minute);
+        if (boundary || failure.is_some())
+            && let Err(why) = self.checkpoint(sim, minute)
+        {
+            failure = Some(match failure {
+                Some(previous) => format!("{previous}; {why}"),
+                None => why,
+            });
+        }
+        if let Some(why) = failure {
+            self.fail(minute, &why);
+            return Some(Ended::Failed(why));
         }
         if minute >= self.end_minute {
             self.status(minute, "done");
@@ -640,17 +649,16 @@ impl Runner {
         None
     }
 
-    fn checkpoint(&self, sim: &Sim, minute: u64) {
+    fn checkpoint(&self, sim: &Sim, minute: u64) -> Result<(), String> {
         let dir = self.cfg.dir.join("ckpt").join(format!("m{minute:06}"));
         let (w, fl, fa) = sim.layers();
-        if let Err(e) = crate::saved::save(&dir, w, fl, fa, minute) {
-            eprintln!("staged: checkpoint {} failed: {e}", dir.display());
-            return;
-        }
+        crate::saved::save(&dir, w, fl, fa, minute)
+            .map_err(|e| format!("checkpoint {} failed: {e}", dir.display()))?;
         let all = checkpoints(&self.cfg.dir);
         for (_, old) in all.iter().take(all.len().saturating_sub(self.cfg.keep)) {
             let _ = std::fs::remove_dir_all(old);
         }
+        Ok(())
     }
 
     fn fail(&mut self, minute: u64, why: &str) {

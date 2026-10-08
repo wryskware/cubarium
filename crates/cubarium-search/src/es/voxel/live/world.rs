@@ -53,7 +53,7 @@ pub fn is_still(world: &World) -> bool {
 }
 
 /// What the founding loop kept for one training world.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FoundInfo {
     pub seed: u64,
     pub accepted: bool,

@@ -81,6 +81,50 @@ fn stage(dir: &std::path::Path, extra: &[&str]) -> (StageConfig, Vec<String>) {
     (cfg, args)
 }
 
+/// A failed save stops before continuing, pausing or declaring completion. A file
+/// obstructs the checkpoint's temporary directory, including when tests run as root.
+#[test]
+fn a_checkpoint_write_failure_fails_the_run() {
+    for (name, end, stop) in [
+        ("running", 3, false),
+        ("paused", 3, true),
+        ("done", 1, false),
+    ] {
+        let dir = scratch(&format!("write-failure-{name}"));
+        let (world, flora, fauna, _) = seeded(32, Some([0; Founder::COUNT]), 0.0);
+        let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+        let (mut cfg, args) = stage(&dir, &[]);
+        cfg.ticks_per_min = 1;
+        let mut runner = Some(Runner::start(cfg, &args, &mut sim, 0, end).unwrap());
+        std::fs::write(dir.join("ckpt/m000001.partial"), "obstruct the write").unwrap();
+        if stop {
+            std::fs::write(dir.join("STOP"), "").unwrap();
+        }
+        let tick0 = sim.world().tick();
+        let ended = super::drive(&mut sim, &mut runner, 0, end, |_| {}, |_, _| {});
+        let Ended::Failed(why) = ended else {
+            panic!("failed checkpoint must stop: {ended:?}")
+        };
+        assert!(
+            why.contains("checkpoint") && why.contains("m000001"),
+            "{why}"
+        );
+        assert_eq!(sim.world().tick(), tick0 + 1, "no later segment runs");
+        assert!(
+            std::fs::read_to_string(dir.join("FAILED"))
+                .unwrap()
+                .contains(&why)
+        );
+        assert!(
+            std::fs::read_to_string(dir.join("status"))
+                .unwrap()
+                .contains("state=failed")
+        );
+        assert!(!dir.join("PAUSED").exists() && !dir.join("DONE").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 /// **The liveness check fails a frozen world**: bodies with no controller are refused at
 /// the load, and, watched over a window, a lineage that neither moved nor fed is called
 /// frozen.
