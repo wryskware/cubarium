@@ -32,6 +32,30 @@ or several views share one world. The camera carries its own `Environment`, so n
 the scene and keep the variable untyped (as `dev_view.gd` does), or generate the cache
 once with `godot --headless --path game --import` (headless: no window).
 
+## Light (`light_settings.gd`, `LightSettings`)
+
+Godot's own built-in effects, lighting the meshes (the animals' models included, as they
+turn). Nothing of the old renderer's voxel marches is ported. **Every effect is off by
+default** (each waits for Wrysk's pick, and off skips its cost); the dev scene turns them on
+with `--light all`, `--light shadows,ssao`, `--light all,gi`, and numbers as `name=value`
+(`--light emitter_lights,emitter_group_voxels=8`).
+
+| switch | built-in | notes |
+|---|---|---|
+| `shadows` | DirectionalLight3D shadow, one orthogonal split over the world | the terrain is meshed closed (`set_view_faces_only(false)`) so it casts; water casts none |
+| `ssao`, `ssil` | Environment SSAO / SSIL | |
+| `sky` | a gradient quad behind the world, on the camera | an orthographic camera sees one direction of a `Sky`, so a sky background would be one flat colour |
+| `glow` | emissive surface on the emitting model cells (`data/emission.json`) + Environment glow | the glowcap candle wanders per instance in the shader |
+| `haze` | depth fog, none at the world's front edge, `haze_amount` at its back wall | replaces the mesher's baked vertex haze while on |
+| `reflections` | the water smooth and part metallic, lit by a `Sky`'s radiance | SSR skips translucent surfaces, so it cannot reflect the water |
+| `volumetric` | froxel volumetric fog inside a FogVolume over the world | a global density would fog the empty air between the orthographic camera and the world |
+| `emitter_lights` | an OmniLight3D per emitter, shadowed (or grouped, or only the nearest shadowed) | not in `all` |
+| `gi` | SDFGI, or VoxelGI baked when a world is drawn (`gi_mode`) | not in `all` |
+
+The sun is placed as the old lit tier places it (its noon direction, rise and set
+azimuths, elevation floor; the moon opposite at night). Every number is a field of
+`LightSettings` with its old-renderer counterpart named.
+
 ## Files
 
 - `world_view.gd`: the API, chunk nodes, the camera, input and picking.
@@ -40,8 +64,12 @@ once with `godot --headless --path game --import` (headless: no window).
   round the ring); pose models by mobility mode and the hunker flag (`POSE_MODELS`,
   `HUNKER_MODELS`, the presenter's `mode_model`/`hunker_model`); a body that appears or
   leaves fades (slower after a `died` event). No model: a grey box.
-- `weather.gd`: sun energy from `daylight`, its height from `sun_elevation`, its swing
-  along the ring from `day_phase`; ambient light; rain streaks by rain mode. All eased.
+- `weather.gd`: the sun and moon from the feed's `sky` (as the old lit tier places them),
+  ambient light, the environment's effects by `LightSettings`, the sky gradient, the
+  FogVolume, VoxelGI; rain streaks by rain mode. All eased.
+- `light_settings.gd`: `LightSettings`, the switches and numbers.
+- `emitter_lights.gd`: the emitter point lights.
+- `data/emission.json`: which model cells emit (hand-written from the old presenter's rules).
 - `data/palette.json`: generated, do not edit:
   `cargo run --release -p cubarium --example godot_palette -- --write game/world/data/palette.json`.
 - `dev_view.tscn` / `dev_view.gd`: a world through `WorldView` for checks (options in its
@@ -67,6 +95,19 @@ scripts/hidden.sh --hyprland godot --path game --resolution 2560x720 res://world
 # a pan movie: frames at real-time spacing, then x264
 scripts/hidden.sh godot --path game --resolution 2560x720 --fixed-fps 30 res://world/dev_view.tscn -- \
     --load /tmp/…/wide-s1 --pan-demo --record /tmp/…/frames --speed 0.43
+```
+
+```sh
+# a still of one moment, lit (the sim paused once shown)
+scripts/hidden.sh godot --path game --resolution 1920x1080 res://world/dev_view.tscn -- \
+    --load /tmp/…/t256-s7-night --paused --light all,emitter_lights --still /tmp/…/night.png
+# what each effect costs: GPU render ms per frame (vsync stays on under Hyprland's Wayland,
+# so the frame time is capped; the GPU time is the number to read)
+scripts/hidden.sh --hyprland godot --path game --resolution 1920x1080 res://world/dev_view.tscn -- \
+    --load /tmp/…/t256-s7-midday --light shadows --no-vsync --perf 8
+# a save at a time of day: run a save on to ticks and save (hour H of day 1 = (H − 8)·6000)
+godot --headless --path game --script res://world/tools/advance_and_save.gd -- \
+    --load /tmp/…/t256-s7 --speed 12 --stops midday:24000,dusk:66000,night:96000 --out-prefix /tmp/…/t256-s7
 ```
 
 `--write-movie` ignores `--resolution` (it records the project's window size), hence

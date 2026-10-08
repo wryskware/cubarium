@@ -18,9 +18,19 @@ extends Node
 ##   --perf S                   once shown: print perf lines for S seconds, then quit
 ##   --pan-during-perf          keep panning while measuring
 ##   --speed X                  the sim's speed
+##   --light LIST               the light: `all`, `none` (the default) or a comma list of
+##                              LightSettings switches (`shadows,ssao`)
+##   --paused                   pause the sim once shown (stills of one moment)
+##   --still PATH               once shown and settled: save the framing to PATH, then quit
+##   --no-vsync                 frames as fast as they render (for --perf)
+##   --emitter-stress N         with the emitter lights on: N lights, the real emitters
+##                              repeated with jitter (a cost check for thousands)
+##   --speed-at T:X             at T seconds after shown, set the sim's speed to X
+##                              (a time-lapse in a --record movie); repeatable as T:X,T:X
 ## Keys: the view's own pan keys; Esc quits.
 
 const DEFAULT_CONFIG := "../config/desktop/terrarium.toml"
+const LightSettingsScript := preload("res://world/light_settings.gd")
 const SETTLE_S := 2.0
 
 var session
@@ -34,6 +44,7 @@ var _stage := 0
 var _stage_at := 0.0
 var _perf := []
 var _recorded := 0
+var _speed_at := []
 
 
 func _ready() -> void:
@@ -42,12 +53,21 @@ func _ready() -> void:
 	var i := 0
 	while i < args.size():
 		var a: String = args[i]
-		if a in ["--candidate", "--pan-demo", "--pan-during-perf"]:
+		if a in ["--candidate", "--pan-demo", "--pan-during-perf", "--paused", "--no-vsync"]:
 			opts[a.substr(2)] = true
 		elif i + 1 < args.size():
 			opts[a.substr(2)] = args[i + 1]
 			i += 1
 		i += 1
+	view.emitters.stress_total = int(opts.get("emitter-stress", "0"))
+	view.set_light(LightSettingsScript.from_list(str(opts.get("light", "none"))))
+	print("dev_view: light ", view.light.on_list())
+	if opts.has("no-vsync"):
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	RenderingServer.viewport_set_measure_render_time(get_viewport().get_viewport_rid(), true)
+	for pair in str(opts.get("speed-at", "")).split(",", false):
+		var tx := pair.split(":")
+		_speed_at.append([float(tx[0]), float(tx[1])])
 	session = CubariumSession.new()
 	if opts.has("load"):
 		session.load(str(opts["load"]))
@@ -97,11 +117,21 @@ func _shown() -> void:
 	shown_at = clock
 	if opts.has("speed"):
 		session.set_speed(float(opts["speed"]))
+	if opts.has("paused"):
+		session.pause()
 	print("dev_view: shown, dims ", view.dims)
 
 
 func _checks(_delta: float) -> void:
 	var since := clock - shown_at
+	if not _speed_at.is_empty() and since >= _speed_at[0][0]:
+		session.set_speed(_speed_at[0][1])
+		print("dev_view: speed %.2f at %.1f s" % [_speed_at[0][1], since])
+		_speed_at.pop_front()
+	if opts.has("still") and since > SETTLE_S:
+		_save(str(opts["still"]))
+		get_tree().quit(0)
+		return
 	if opts.has("record"):
 		var img := get_viewport().get_texture().get_image()
 		img.save_png(str(opts["record"]).path_join("f%05d.png" % _recorded))
@@ -112,7 +142,10 @@ func _checks(_delta: float) -> void:
 		_pan_demo(since)
 	if opts.has("perf"):
 		if since > SETTLE_S:
-			_perf.append([Performance.get_monitor(Performance.TIME_FPS), view._mesh_ms, view._mesh_chunks, view._frame_ms])
+			var vp := get_viewport().get_viewport_rid()
+			_perf.append([Performance.get_monitor(Performance.TIME_FPS), view._mesh_ms, view._mesh_chunks, view._frame_ms,
+				RenderingServer.viewport_get_measured_render_time_gpu(vp), RenderingServer.viewport_get_measured_render_time_cpu(vp),
+				get_process_delta_time() * 1000.0])
 			if opts.has("pan-during-perf") and fmod(since, 4.0) < get_process_delta_time():
 				view.pan_by(Vector2(0.3, 0.0))
 		if since > SETTLE_S + float(opts["perf"]):
@@ -125,10 +158,15 @@ func _report_perf() -> void:
 	var mesh := []
 	var proc := []
 	var frame_ms := []
+	var gpu := []
 	for p in _perf:
 		fps.append(p[0])
 		mesh.append(p[1])
 		proc.append(p[3])
+		gpu.append(p[4])
+		frame_ms.append(p[6])
+	gpu.sort()
+	frame_ms.sort()
 	fps.sort()
 	mesh.sort()
 	proc.sort()
@@ -143,6 +181,10 @@ func _report_perf() -> void:
 		view.dims, _perf.size(), med.call(fps), fps[0] if fps.size() > 0 else 0.0,
 		1000.0 / maxf(med.call(fps), 0.001), med.call(proc), top.call(proc),
 		mesh_frames.size(), med.call(mesh_cost), top.call(mesh_cost), mesh_cost.max() if mesh_cost.size() > 0 else 0.0])
+	print("dev_view perf: emitter lights %d (%d shadowed), VoxelGI bake %.0f ms" % [
+		view.emitters.lights.size() if view.light.emitter_lights else 0, view.emitters.shadowed, view.weather.gi_bake_ms])
+	print("dev_view perf: light %s  frame ms median %.2f p99 %.2f  GPU render ms median %.2f p99 %.2f" % [
+		view.light.on_list(), med.call(frame_ms), top.call(frame_ms), med.call(gpu), top.call(gpu)])
 	print("dev_view perf: draw calls %d, objects %d, primitives %d, video mem %.0f MB" % [
 		Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 		Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),

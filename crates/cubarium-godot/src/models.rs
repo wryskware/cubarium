@@ -19,7 +19,9 @@ use godot::classes::{ArrayMesh, IRefCounted};
 use godot::prelude::*;
 use serde::Deserialize;
 
-use crate::mesher::{DIRS, Dir, MeshData, array_mesh};
+use godot::classes::mesh::PrimitiveType;
+
+use crate::mesher::{DIRS, Dir, MeshData, surface_arrays};
 use crate::palette::{Linear, PaletteFile, hex_linear};
 
 /// One baked cell: offset from the anchor, a model-palette index and the part tag byte.
@@ -181,10 +183,23 @@ impl Model {
 
 /// A model's cells as a mesh, each cell coloured by `colour(cell, band)`.
 pub fn model_mesh(cells: &[Cell], colour: impl Fn(&Cell, u8) -> Linear) -> MeshData {
+    let [plain, _] = model_meshes(cells, colour, |_| false);
+    plain
+}
+
+/// A model's cells as two meshes: the cells `emits` rejects, and the ones it picks (the
+/// emissive surface the view lights with its glow material). Faces between two cells of
+/// the model are left out whichever mesh either cell is in.
+pub fn model_meshes(
+    cells: &[Cell],
+    colour: impl Fn(&Cell, u8) -> Linear,
+    emits: impl Fn(&Cell) -> bool,
+) -> [MeshData; 2] {
     let top = cells.iter().map(|c| c.offset[1]).max().unwrap_or(0);
     let occupied: std::collections::HashSet<[i32; 3]> = cells.iter().map(|c| c.offset).collect();
-    let mut out = MeshData::default();
+    let mut meshes = [MeshData::default(), MeshData::default()];
     for c in cells {
+        let out = &mut meshes[usize::from(emits(c))];
         let rgb = colour(c, band(c.offset[1], top));
         let rgba = [rgb[0], rgb[1], rgb[2], 1.0];
         let [dx, dy, dz] = c.offset;
@@ -199,7 +214,7 @@ pub fn model_mesh(cells: &[Cell], colour: impl Fn(&Cell, u8) -> Linear) -> MeshD
             out.quad_box_face(c.offset, dir, rgba);
         }
     }
-    out
+    meshes
 }
 
 #[derive(Deserialize)]
@@ -231,6 +246,8 @@ pub struct VoxelModels {
     plant_colours: HashMap<String, HashMap<(u8, u8, u8), Linear>>,
     animal_colours: HashMap<String, HashMap<(u8, u8), Linear>>,
     cache: HashMap<(String, usize, usize), Gd<ArrayMesh>>,
+    /// Model name -> the (tag, material) cells that emit; animals match material only.
+    emissive: HashMap<String, Vec<(Option<u8>, u8)>>,
     voxel_m: f64,
 }
 
@@ -242,6 +259,7 @@ impl IRefCounted for VoxelModels {
             plant_colours: HashMap::new(),
             animal_colours: HashMap::new(),
             cache: HashMap::new(),
+            emissive: HashMap::new(),
             voxel_m: 0.0,
         }
     }
@@ -263,6 +281,35 @@ impl VoxelModels {
     #[func]
     fn voxel_m(&self) -> f64 {
         self.voxel_m
+    }
+
+    /// Which cells emit light: `{model name: ["tag:material", …]}` for a plant (the palette
+    /// file's keys without the band) and `["material", …]` for an animal, materials as
+    /// model-palette indices. Those cells go in a second surface named `emissive` (the first
+    /// is `plain`), so the view can give them its glow material. Clears the mesh cache.
+    #[func]
+    fn set_emissive(&mut self, table: VarDictionary) {
+        self.emissive = table
+            .iter_shared()
+            .filter_map(|(k, v)| {
+                let keys = v.try_to::<PackedStringArray>().ok()?;
+                let cells = keys
+                    .as_slice()
+                    .iter()
+                    .filter_map(|key| {
+                        let parts: Vec<u8> =
+                            key.to_string().split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+                        match parts.as_slice() {
+                            [m] => Some((None, *m)),
+                            [t, m] => Some((Some(*t), *m)),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                Some((same(&k.to_string()), cells))
+            })
+            .collect();
+        self.cache.clear();
     }
 
     /// Whether a model by this name exists.
@@ -391,30 +438,45 @@ impl VoxelModels {
             return Variant::nil();
         };
         const MISSING: Linear = [0.25, 0.25, 0.25];
+        let glow = self.emissive.get(&key.0);
+        let emits = |c: &Cell| {
+            glow.is_some_and(|g| {
+                g.iter()
+                    .any(|&(t, m)| m == c.material && t.is_none_or(|t| t == c.tag))
+            })
+        };
         let data = if model.animal {
             let table = self.animal_colours.get(&key.0);
-            model_mesh(cells, |c, band| {
+            let colour = |c: &Cell, band: u8| {
                 table
                     .and_then(|t| t.get(&(c.material, band)))
                     .copied()
                     .unwrap_or(MISSING)
-            })
+            };
+            model_meshes(cells, colour, emits)
         } else {
             let table = self.plant_colours.get(&key.0);
-            model_mesh(cells, |c, band| {
+            let colour = |c: &Cell, band: u8| {
                 table
                     .and_then(|t| t.get(&(c.tag, c.material, band)))
                     .copied()
                     .unwrap_or(MISSING)
-            })
+            };
+            model_meshes(cells, colour, emits)
         };
-        match array_mesh(&data) {
-            Some(mesh) => {
-                self.cache.insert(key, mesh.clone());
-                mesh.to_variant()
-            }
-            None => Variant::nil(),
+        if data.iter().all(MeshData::is_empty) {
+            return Variant::nil();
         }
+        let mut mesh = ArrayMesh::new_gd();
+        for (part, name) in data.iter().zip(["plain", "emissive"]) {
+            if !part.is_empty() {
+                mesh.add_surface_from_arrays(PrimitiveType::TRIANGLES, &surface_arrays(part));
+                let at = mesh.get_surface_count() - 1;
+                mesh.surface_set_name(at, name);
+            }
+        }
+        self.cache.insert(key, mesh.clone());
+        mesh.to_variant()
     }
 }
 
@@ -542,6 +604,23 @@ mod tests {
         assert_eq!(model_mesh(&cells, |_, _| [0.5; 3]).quads(), 8);
     }
 
+    #[test]
+    fn emitting_cells_go_to_the_second_mesh_and_still_hide_shared_faces() {
+        let cell = |x: i32, material: u8| Cell {
+            offset: [x, 0, 0],
+            material,
+            tag: 0,
+        };
+        let cells = [cell(0, 0), cell(1, 7)];
+        let [plain, glow] = model_meshes(&cells, |_, _| [0.5; 3], |c| c.material == 7);
+        // Each cell keeps its 5 faces less the one between them, in its own mesh.
+        assert_eq!(plain.quads(), 4);
+        assert_eq!(glow.quads(), 4);
+        let [all, none] = model_meshes(&cells, |_, _| [0.5; 3], |_| false);
+        assert_eq!(all.quads(), 8);
+        assert!(none.is_empty());
+    }
+
     /// Every shipped model reads with the exported palette (the bake and the export agree
     /// on the material names).
     #[test]
@@ -554,6 +633,7 @@ mod tests {
             plant_colours: HashMap::new(),
             animal_colours: HashMap::new(),
             cache: HashMap::new(),
+            emissive: HashMap::new(),
             voxel_m: 0.0,
         };
         lib.load_inner(&dir, &format!("{root}/game/world/data/palette.json"))
