@@ -5,8 +5,8 @@ Copy this script into scripts/studies and run-study.py into scripts on a remote
 host; no repository is needed. Inputs and the binary are supplied by path.
 --detach returns immediately; inspect STATE.tsv and wait for DONE externally.
 DONE means every child ended, including failures and pauses, not success.
-The current census refuses set= beside load=: parameter-change arms need fresh
---config worlds until the census supports changing a loaded world's config.
+set= beside load= changes the loaded world's configs (flora values in authored units);
+a rate change branched from a save shows a transient first.
 """
 
 import argparse
@@ -48,7 +48,8 @@ def seed_list(value):
 
 def start_seed(path):
     # A checkpoint's sibling census is authoritative when available. For a
-    # standalone start library accept sN / seedN directory names.
+    # standalone start library accept sN / seedN directory names, with any
+    # map prefix (d72-s4, train-flat_seed3).
     for parent in path.parents:
         census = parent / "census.csv"
         if census.is_file():
@@ -56,7 +57,7 @@ def start_seed(path):
                 row = next(csv.DictReader(stream), None)
             if row and row.get("seed"):
                 return int(row["seed"])
-        match = re.fullmatch(r"(?:s|seed[-_]?)(\d+)", parent.name)
+        match = re.fullmatch(r"(?:.*[-_])?(?:s|seed[-_]?)(\d+)", parent.name)
         if match:
             return int(match[1])
     raise ValueError(f"cannot identify seed for {path}; use sN directories or a sibling census.csv")
@@ -225,8 +226,8 @@ def main(argv=None):
             extra = shlex.split(value)
             if any(arg.startswith(reserved) or re.fullmatch(r"[\d.]+", arg) for arg in extra):
                 raise ValueError("arm overrides a batch-owned argument")
-            if args.starts and any(arg.startswith(("set=", "preset=", "eggbank=", "introduce=", "world=", "gap=", "night=")) or arg in {"generated", "closed", "nofauna", "still"} for arg in extra):
-                raise ValueError("voxel_census refuses founding/parameter overrides beside load=; use --config for these arms")
+            if args.starts and any(arg.startswith(("preset=", "eggbank=", "introduce=", "world=", "gap=", "night=")) or arg in {"generated", "closed", "nofauna", "still"} for arg in extra):
+                raise ValueError("voxel_census refuses founding overrides beside load= (set= is fine); use --config for these arms")
             arms[name] = extra
         stage = shlex.split(args.stage)
         if any(not re.fullmatch(r"(check_min|segment_min|keep)=[1-9]\d*", arg) for arg in stage):
