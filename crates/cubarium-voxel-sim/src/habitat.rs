@@ -1383,6 +1383,112 @@ pub fn lineage_food(
     (map, food)
 }
 
+/// One lineage's **reachability at founding** (training maps, 2026-10-08): how its
+/// walkable land splits under its own route map ([`RouteMap::for_founder`], the same
+/// standable faces, step rule and climbed walls the seeder and the acceptance check
+/// use). A readout only; nothing here gates or moves anything.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Reach {
+    /// A flyer (founded near nectar): walkable components do not bound it, the rest is 0.
+    pub flyer: bool,
+    /// Standable faces of its adult body: its walkable land.
+    pub faces: usize,
+    /// Walkable components over those faces.
+    pub components: usize,
+    /// Faces in the largest component.
+    pub largest_faces: usize,
+    /// `largest_faces / faces` (0 with no land).
+    pub largest_share: f64,
+    /// Components holding food for it: any reached stock of its diet, or for a hunter
+    /// any living body on its prey list.
+    pub food_components: usize,
+    /// Whether the largest component is one of those.
+    pub largest_has_food: bool,
+    /// Its living bodies (founders, at founding), and how many stand in the largest
+    /// component.
+    pub bodies: usize,
+    pub bodies_in_largest: usize,
+}
+
+impl Reach {
+    /// The `reach.tsv` header, matching [`Reach::tsv_row`].
+    pub const TSV_HEADER: &'static str = "lineage\tflyer\tfaces\tcomponents\tlargest_faces\tlargest_share\tfood_components\tlargest_has_food\tbodies\tbodies_in_largest";
+
+    /// One `reach.tsv` row.
+    pub fn tsv_row(&self, founder: Founder) -> String {
+        format!(
+            "{}\t{}\t{}\t{}\t{}\t{:.4}\t{}\t{}\t{}\t{}",
+            founder.name(),
+            u8::from(self.flyer),
+            self.faces,
+            self.components,
+            self.largest_faces,
+            self.largest_share,
+            self.food_components,
+            u8::from(self.largest_has_food),
+            self.bodies,
+            self.bodies_in_largest
+        )
+    }
+}
+
+/// [`Reach`] for every lineage, in [`Founder::ALL`] order.
+pub fn reachability(world: &World, flora: &Flora, fauna: &Fauna) -> [Reach; Founder::COUNT] {
+    let view = world.view();
+    let fv = flora.view();
+    let av = fauna.view();
+    Founder::ALL.map(|founder| {
+        let phys = *fauna.config().founder(founder);
+        let bodies: Vec<Site> = av
+            .animals
+            .iter()
+            .filter(|a| a.founder == Some(founder))
+            .map(|a| a.site)
+            .collect();
+        if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+            return Reach { flyer: true, bodies: bodies.len(), ..Reach::default() };
+        }
+        let (map, food) = lineage_food(&view, &fv, &phys, founder);
+        let mut size: BTreeMap<usize, usize> = BTreeMap::new();
+        for &c in &map.components {
+            *size.entry(c).or_default() += 1;
+        }
+        // The largest component; ties go to the lowest id, so the readout is stable.
+        let largest = size
+            .iter()
+            .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+            .map(|(&c, &n)| (c, n));
+        let fed: std::collections::BTreeSet<usize> = match phys.hunter {
+            Some(h) => av
+                .animals
+                .iter()
+                .filter(|a| a.founder.is_some_and(|f| h.hunts(f)))
+                .filter_map(|a| map.component_of(a.site))
+                .collect(),
+            None => food
+                .iter()
+                .filter(|(_, f)| f.stock > 0.0)
+                .map(|(&c, _)| c)
+                .collect(),
+        };
+        let faces = map.faces.len();
+        let largest_faces = largest.map_or(0, |(_, n)| n);
+        Reach {
+            flyer: false,
+            faces,
+            components: size.len(),
+            largest_faces,
+            largest_share: if faces == 0 { 0.0 } else { largest_faces as f64 / faces as f64 },
+            food_components: fed.len(),
+            largest_has_food: largest.is_some_and(|(c, _)| fed.contains(&c)),
+            bodies: bodies.len(),
+            bodies_in_largest: largest.map_or(0, |(c, _)| {
+                bodies.iter().filter(|&&s| map.component_of(s) == Some(c)).count()
+            }),
+        }
+    })
+}
+
 /// The food each component of `map` holds for a lineage's mouth, read off its
 /// physiology's diet ([`cubarium_voxel_fauna::Diet`]) and founding site.
 ///
@@ -2721,6 +2827,40 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "an in-band layer with no stock admits nothing"
         );
+    }
+
+    /// **The reachability readout splits land at a wall** (training maps): two rock walls
+    /// across the ring leave two walkable areas; the readout reports both, the larger's
+    /// share of the lineage's own standable faces, the one holding food, and which founder
+    /// stands in the larger.
+    #[test]
+    fn reachability_reports_two_areas_split_by_a_wall() {
+        let cfg = Config { width: 24, height: 12, depth: 4, ..Config::default() };
+        let mut world = plain_with(cfg.clone());
+        for x in [0i64, 8] {
+            for z in 0..cfg.depth {
+                for y in 3..cfg.height {
+                    world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: Material::Rock });
+                }
+            }
+        }
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(0.25));
+        plant(&mut flora, &world, 16, 2, Species::Springturf, 0.8);
+        let mut fauna = Fauna::new(cubarium_voxel_fauna::FaunaConfig::placeholder());
+        introduce(&mut fauna, &world, Founder::Browser, Site { x: 4, y: 2, z: 1 });
+        introduce(&mut fauna, &world, Founder::Browser, Site { x: 14, y: 2, z: 1 });
+        let r = reachability(&world, &flora, &fauna)[Founder::Browser.index()];
+        let map = RouteMap::for_founder(&world.view(), fauna.config().founder(Founder::Browser));
+        let wide = map.faces.iter().filter(|f| f.x > 8).count();
+        assert!(wide > 0 && wide < map.faces.len(), "both sides stand: {}", map.faces.len());
+        assert_eq!(r.components, 2, "{r:?}");
+        assert_eq!(r.faces, map.faces.len());
+        assert_eq!(r.largest_faces, wide, "the wide side is the largest");
+        assert!((r.largest_share - wide as f64 / map.faces.len() as f64).abs() < 1e-12);
+        assert_eq!(r.food_components, 1, "only the wide side holds turf: {r:?}");
+        assert!(r.largest_has_food);
+        assert_eq!((r.bodies, r.bodies_in_largest), (2, 1), "{r:?}");
+        assert!(!r.flyer);
     }
 
     /// **Two food patches joined only by bare walkable ground are one component** (item
