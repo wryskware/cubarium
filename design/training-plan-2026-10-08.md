@@ -375,6 +375,16 @@ control and the reward accounting; display targets after seeing results.
     shredder on food stays awake. Visible effect: shredders feed by day and eggs roughly
     double. Litter is unchanged, since decay sets it. If you want to see litter eaten, that
     is a new decomposer role (a litter mould), not more shredders.
+12. **World rules that also bind brains** (TRAPS, merged 34ef1e71):
+    - on a wall face, a turn with no forward backs the body off the face it came from;
+    - a body caught in solid may step along it at no greater depth (before: only out);
+    - a stem climber with a carcass at its foot climbs down to it.
+
+    These are motor fixes for deadlocks. Revert any you disagree with.
+13. **Leads that never pay** (HUNGRY-SEARCH): bellwings orbit a bloom or light they steer at,
+    over 2,000 body lengths of path for no net way, in both arms. A give-up rule for leads
+    that never reach a bite would break the orbit; it is a behaviour choice, so it waits for
+    you.
 
 ## 7. Work log (2026-10-08)
 
@@ -400,6 +410,15 @@ control and the reward accounting; display targets after seeing results.
 | FORAGE-LEAVE: giving-up rule | Opus | 54301f40 |
 | FROZEN-PREY: threat-only freeze/flee, browser wall turn, check | Opus | 0cd0767f |
 | Baseline v2 (pre-fix): d72 heuristic vs C1, 8 seeds | desktop | done, §1a |
-| Start library v2 (fixed heuristics): d72 seeds 1–16 | desktop | running |
-| Soak 2: d72 seeds 9–16 × 14 h, fresh founding, fixed heuristics | eidolon | running |
-| EC2-PREP, VITALS-3 | Codex | running |
+| Start library v2 (fixed heuristics): d72 seeds 1–16 | desktop | done; unloadable from schema 70 |
+| Soak 2: d72 seeds 9–16 × 14 h, fresh founding, fixed heuristics (pre-TRAPS binary) | eidolon | running |
+| EC2-PREP, VITALS-3 | Codex | f4d0d757, fabfc142 |
+| SIM-SPEED-2: root cache, no read copy (d72 −9 %) | Opus | 1179a42a |
+| STUCK-AUDIT: S as prevalence, false positives fixed | Opus | a67b64f8 |
+| JUVENILE-FOOD: browsers stop to crop, push after a full turn, bellwing takeoff from body | Opus | 5a05d327 |
+| Baseline v3 and the minute-120 phase check | desktop | done, §1b |
+| SHREDDER-PLATEAU: stillness is gut-limited feeding; litter is decay-limited | Opus (read-only) | 972306a7 |
+| TRAPS: off a face by turning, step no deeper, stem climber to carcass | Opus | 34ef1e71 |
+| HUNGRY-SEARCH: legs away from covered ground for hungry heuristic foragers (schema 70) | Opus | ea20a13c |
+| Brain pilot end gate: trained vs C1 vs heuristic, flat and d72, 1 h | desktop | running |
+| Start library v3 and baseline v4 (TRAPS + HUNGRY-SEARCH) | desktop | chained after the end gate |
