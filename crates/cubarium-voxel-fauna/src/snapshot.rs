@@ -129,7 +129,10 @@ use crate::Fauna;
 //     catch and bounded, density-led catch foray config.
 // 67: CATCH-SWITCH — `FounderPhysiology::opportunist`: the hunter table exists only while
 //     `catch_bellwings` is on.
-pub const SCHEMA: u32 = 67;
+// 68: ROOSTS-RAIN — `Glider::{roost_budget_m, roost_reserve_share, roost_ledge_min_m}`,
+//     `Flight::{rain_ground_m_per_s, rain_ground_hysteresis_m_per_s}`,
+//     `Mobility::rain_grounded`; a vine climb that tops out perches on the ledge top.
+pub const SCHEMA: u32 = 68;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

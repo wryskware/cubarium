@@ -200,11 +200,11 @@ fn sleep_waits_for_home_but_an_unaffordable_trip_sleeps_in_the_field() {
     let den = site(10, 6);
     let (mut fauna, _) = found(&world, den);
     place(&mut fauna, site(7, 6));
-    circadian(&mut fauna, &world.view(), true, 1.0);
+    circadian(&mut fauna, &world.view(), &Flora::new(FloraConfig::default()).view(), true, 1.0);
     assert_ne!(fauna.animals[0].state, State::Asleep);
     assert_eq!(fauna.animals[0].rest, None);
     place(&mut fauna, den);
-    circadian(&mut fauna, &world.view(), true, 1.0);
+    circadian(&mut fauna, &world.view(), &Flora::new(FloraConfig::default()).view(), true, 1.0);
     assert_eq!(fauna.animals[0].state, State::Asleep);
     assert_eq!(fauna.animals[0].rest, Some(Rest::Sleep));
     place(&mut fauna, site(7, 6));
@@ -213,7 +213,7 @@ fn sleep_waits_for_home_but_an_unaffordable_trip_sleeps_in_the_field() {
         .as_mut()
         .unwrap()
         .home_reserve_share = 0.0;
-    circadian(&mut fauna, &world.view(), true, 1.0);
+    circadian(&mut fauna, &world.view(), &Flora::new(FloraConfig::default()).view(), true, 1.0);
     assert_eq!(fauna.animals[0].state, State::Asleep);
     assert!(
         !fauna.animals[0].emergency,
@@ -351,7 +351,7 @@ fn an_unreachable_den_allows_field_sleep_and_is_reselected_on_the_same_component
     wall(&mut world, 12);
     wall(&mut world, 30);
     assert!(!crate::pack::must_walk_home(&mut fauna, 0, &world.view()));
-    circadian(&mut fauna, &world.view(), true, 1.0);
+    circadian(&mut fauna, &world.view(), &Flora::new(FloraConfig::default()).view(), true, 1.0);
     assert_eq!(fauna.animals[0].state, State::Asleep);
     let flora = Flora::new(FloraConfig::default());
     crate::pack::renew_dens(

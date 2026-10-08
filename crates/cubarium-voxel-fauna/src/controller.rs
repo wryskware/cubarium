@@ -1068,8 +1068,10 @@ impl Controller for FruitForager {
 /// - nothing in sight: a correlated wander at its search height within the band;
 /// - blocked: climb while there is room to rise (under the band's top, open overhead),
 ///   else turn away;
-/// - a downpour: keep moving while the sky is open overhead, stop over cover (the body
-///   is brought down regardless); at night the body roosts by itself.
+/// - grounded by the weather (a downpour, or rain over its threshold; backlog §12): stop
+///   under cover, else head for the most foliage in the fan, else keep moving while the
+///   sky is open overhead (the body is brought down regardless, or up under cover it can
+///   reach); at night the body roosts by itself.
 pub struct HoverSip {
     wander: Wander,
     escape: u32,
@@ -1164,10 +1166,24 @@ impl Controller for HoverSip {
             self.wander.interrupt(&cfg);
             return self.act(0.0, 0.0, 1.0, 0.0);
         }
-        // A downpour: down regardless; keep going while the sky is open overhead.
+        // Grounded by the weather (the `downpour` channel: a downpour, or rain over its
+        // threshold): down regardless (the body rises under cover it can reach); stop under
+        // cover, else keep going toward the most foliage in its fan — a crown to hang under
+        // or land on — or wander on while the sky is open overhead.
         if downpour {
             if perched || ceiling < 1.0 || overhead < 1.0 {
                 return self.act(0.0, 0.0, 0.0, -1.0);
+            }
+            let foliage = [o[f + 4], o[f + 12], o[f + 20]];
+            let best = (0..3).max_by(|&a, &b| foliage[a].total_cmp(&foliage[b])).unwrap_or(1);
+            if foliage[best] > cfg.bellwing_bloom_gate {
+                self.wander.interrupt(&cfg);
+                let turn = match best {
+                    0 => -cfg.bellwing_gaze_turn,
+                    2 => cfg.bellwing_gaze_turn,
+                    _ => 0.0,
+                };
+                return self.act(1.0, turn, 0.0, -1.0);
             }
             let turn = self.wander.turn(o, &cfg);
             return self.act(1.0, turn, 0.0, -1.0);

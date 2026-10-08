@@ -919,6 +919,23 @@ fn climb_tick(
                                 anchor: PerchAnchor::Vine(f),
                             });
                         }
+                        // The cover (or the room) stops at a lip it reaches: it pulls
+                        // itself over and perches on the top (ROOSTS, backlog §12).
+                        _ if let Some((x, z, top, site)) = mount(view, &fv, *a, vine_hold(view, &fv, face, y0, s).unwrap_or(face), s) => {
+                            moved = (top - y0).max(0.0);
+                            a.pose.x = x;
+                            a.pose.z = z;
+                            a.pose.y_m = top;
+                            set_mode(
+                                a,
+                                MobilityMode::Perched,
+                                Some(Perch {
+                                    kind: PerchKind::Face,
+                                    anchor: PerchAnchor::Face(site),
+                                }),
+                                false,
+                            );
+                        }
                         // The cover (or the room) stops: it clings where it is.
                         _ => {
                             let f = vine_hold(view, &fv, face, y0, s).unwrap_or(face);
@@ -1057,6 +1074,8 @@ fn perched_tick(
                     m.falling = perch.kind != PerchKind::Underside;
                 }
             }
+            // On a ledge top (ROOSTS) it stands up and walks.
+            PerchAnchor::Face(_) => set_mode(&mut fauna.animals[i], MobilityMode::Ground, None, false),
             _ => start_glide(fauna, i, true),
         }
         if fauna.animals[i].state != State::Resting || fauna.animals[i].mobility.mode != MobilityMode::Perched {
@@ -1291,6 +1310,27 @@ pub(super) fn roost_reflex(
         turn: 0.0,
         feed: 0.0,
     };
+    // ROOSTS (backlog §12): at its rest hour, a vaulttree crown, else a vine-climbed ledge
+    // top, within its budget, over where it is; on a ledge top it settles there.
+    if sleepy && !sky.downpour && matches!(a.mobility.mode, MobilityMode::Ground | MobilityMode::Perched) {
+        if let Some(roost) = better_roost(fauna, i, view, fv) {
+            if let Some(go) = go_roost(fauna, i, view, fv, roost) {
+                return Some(go);
+            }
+        } else if a.mobility.mode == MobilityMode::Ground && on_ledge_top(fauna, i, view, fv) {
+            let site = a.site;
+            set_mode(
+                &mut fauna.animals[i],
+                MobilityMode::Perched,
+                Some(Perch {
+                    kind: PerchKind::Face,
+                    anchor: PerchAnchor::Face(site),
+                }),
+                false,
+            );
+            return Some(still);
+        }
+    }
     match a.mobility.mode {
         MobilityMode::Perched => Some(still),
         MobilityMode::Climb if !a.mobility.falling => Some(Actions {
@@ -1303,6 +1343,295 @@ pub(super) fn roost_reflex(
         }
         _ => None,
     }
+}
+
+/// **Where a vine climber pulls itself over the lip** (ROOSTS, backlog §12): the wall
+/// column of `face` tops out ([`ledge_lip`]) within the body's height of its highest covered
+/// row there, and its disc stands clear on the top somewhere along its heading into the
+/// face, within two radii and a voxel. `(x, z, the top's height, the top face)`.
+fn mount(view: &VoxelView<'_>, fv: &FloraView<'_>, a: Animal, face: VineFace, s: Shape) -> Option<(f64, f64, f64, Site)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let (y1, high) = ledge_lip(view, fv, face)?;
+    if !mountable(y1, high, s.h, v) {
+        return None;
+    }
+    let site = Site { x: face.x, y: y1 - 1, z: face.z };
+    let top = crate::surface_m(site.y, v);
+    let ring = f64::from(c.width) * v;
+    let h = into_face(face);
+    let (fx, fz) = (h.sin(), h.cos());
+    let n = (((2.0 * s.r + v) / (0.125 * v)).ceil() as usize).max(1);
+    (1..=n).find_map(|k| {
+        let d = k as f64 * 0.125 * v;
+        let (x, z) = ((a.pose.x + fx * d).rem_euclid(ring), a.pose.z + fz * d);
+        if flight::blocked(view, s, x, z, top) {
+            return None;
+        }
+        // Its centre over the top's column.
+        let (floor, under) = floor_at(view, x, z, top)?;
+        ((floor - top).abs() <= EPS && under == site).then_some((x, z, top, site))
+    })
+}
+
+/// The lip of `face`'s wall column: the first open row over it, and the highest covered row
+/// on that side under it. `None` when the column has no open row over the face, or the top
+/// is no support face.
+fn ledge_lip(view: &VoxelView<'_>, fv: &FloraView<'_>, face: VineFace) -> Option<(u32, u32)> {
+    let c = view.config;
+    let x = i64::from(face.x);
+    let mut high = face.y;
+    let mut y = face.y;
+    loop {
+        if fv.cover.face(VineFace::new(face.x, y, face.z, face.dir)).is_some() {
+            high = y;
+        }
+        y += 1;
+        if y >= c.height {
+            return None;
+        }
+        if !view.is_solid(x, y, face.z) {
+            break;
+        }
+    }
+    view.is_support(x, y - 1, face.z).then_some((y, high))
+}
+
+/// Whether a body `h` tall clinging at the top of cover row `high` reaches over the lip row
+/// `y1`: the lip no higher than its top.
+fn mountable(y1: u32, high: u32, h: f64, v: f64) -> bool {
+    f64::from(y1) * v <= f64::from(high + 1) * v + h + EPS
+}
+
+/// **The roost ledges** (ROOSTS): every wall column side whose latticevine cover runs up to
+/// its lip's reach, a support face on top and a foot in front, with no overhang over the
+/// front column below the lip; re-read at the teachers' `route_refresh_s`. The
+/// body-specific test is [`ledge_fits`].
+fn ledges(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<crate::Ledge> {
+    let every = cubarium_voxel::ticks_at_least_one(fauna.config.teachers.route_refresh_s);
+    if let (Some(t), list) = &fauna.ledges
+        && fauna.tick.saturating_sub(*t) < every
+    {
+        return list.clone();
+    }
+    let mut faces: Vec<VineFace> = fv.cover.faces().into_iter().map(|f| f.face).filter(|f| !f.dir.is_underside()).collect();
+    faces.sort_unstable_by_key(|f| (f.x, f.z, f.dir, f.y));
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < faces.len() {
+        let f0 = faces[k];
+        let mut j = k;
+        let mut gap = 0;
+        while j + 1 < faces.len() && (faces[j + 1].x, faces[j + 1].z, faces[j + 1].dir) == (f0.x, f0.z, f0.dir) {
+            gap = gap.max(faces[j + 1].y - faces[j].y - 1);
+            j += 1;
+        }
+        let high = faces[j].y;
+        k = j + 1;
+        let Some((y1, lip_high)) = ledge_lip(view, fv, f0) else { continue };
+        if lip_high != high {
+            continue;
+        }
+        let Some((fx, _, fz)) = f0.front(view) else { continue };
+        // The foot: the first solid down the front column from the lowest cover.
+        let Some(fy) = (0..f0.y).rev().find(|&y| view.is_solid(i64::from(fx), y, fz)) else { continue };
+        if !view.is_support(i64::from(fx), fy, fz) || view.solid_in(i64::from(fx), fz, fy + 1, y1) {
+            continue;
+        }
+        out.push(crate::Ledge {
+            face: f0,
+            foot: Site { x: fx, y: fy, z: fz },
+            top: Site { x: f0.x, y: y1 - 1, z: f0.z },
+            low: f0.y,
+            high,
+            gap,
+        });
+    }
+    fauna.ledges = (Some(fauna.tick), out.clone());
+    out
+}
+
+/// Whether body shape `s` climbs `l` from its foot onto its top: cover in the rows it spans
+/// standing at the foot, no run of uncovered rows it cannot span, the lip within its reach,
+/// and the top at least `min_m` over the foot.
+fn ledge_fits(l: &crate::Ledge, s: Shape, v: f64, min_m: f64) -> bool {
+    let foot = crate::surface_m(l.foot.y, v);
+    let (lo, hi) = body_rows(foot, s, v);
+    let span = (hi - lo + 1).max(1);
+    i64::from(l.low) <= hi
+        && i64::from(l.gap) < span
+        && mountable(l.top.y + 1, l.high, s.h, v)
+        && crate::surface_m(l.top.y, v) - foot >= min_m - EPS
+}
+
+/// The key a walk to ledge `l` is shunned by: apart from every stand id.
+fn ledge_key(l: &crate::Ledge) -> u64 {
+    let d = match l.face.dir {
+        FaceDir::PosX => 0,
+        FaceDir::NegX => 1,
+        FaceDir::PosZ => 2,
+        FaceDir::NegZ => 3,
+        FaceDir::Down => 4,
+    };
+    (1 << 63) | (u64::from(l.face.x) << 24) | (u64::from(l.face.z) << 4) | d
+}
+
+/// A preferred roost ([`better_roost`]).
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Roost {
+    /// A vaulttree: `(id, its site)`, walked to by its stem.
+    Crown(u64, Site),
+    /// A ledge at this distance, `true` walked to on top, `false` climbed from its foot.
+    Ledge(f64, crate::Ledge, bool),
+}
+
+/// Whether body `i` stands on (or by) the lip of a ledge it could have climbed.
+fn on_ledge_top(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> bool {
+    let a = fauna.animals[i];
+    let Some(founder) = a.founder else { return false };
+    let phys = *fauna.config.founder(founder);
+    let Some(glider) = phys.glider else { return false };
+    if glider.roost_budget_m <= 0.0 {
+        return false;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let s = shape(&phys, a.body);
+    ledges(fauna, view, fv).iter().any(|l| {
+        let (cx, cz) = crate::pack::centre(l.top, v);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
+        l.top.y == a.site.y && (dx * dx + dz * dz).sqrt() <= s.r + v && ledge_fits(l, s, v, glider.roost_ledge_min_m)
+    })
+}
+
+/// **ROOSTS: a better roost than where it is** (backlog §12, Wrysk 2026-10-08), for a
+/// glider at its rest hour: perched in a vaulttree crown it has the best; else the nearest
+/// vaulttree it can climb within `roost_budget_m`; else, unless it already perches on a
+/// ledge top, the nearest ledge within it its body climbs ([`ledge_fits`]). Each must be on
+/// its route graph's component (walked to on top, or to the foot), not given up for
+/// pressing, and — den rest's guard — cost the walk at cruise and the climb at the climbing
+/// pace no more than `roost_reserve_share` of the reserve over the emergency line. `None`:
+/// it stays where it is (or takes today's nearest stand).
+pub(super) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Roost> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let glider = phys.glider?;
+    let budget = glider.roost_budget_m;
+    if budget <= 0.0 {
+        return None;
+    }
+    let perched = a.mobility.mode == MobilityMode::Perched;
+    let class = match a.mobility.perch.map(|p| p.anchor) {
+        Some(PerchAnchor::Stand { site, .. })
+            if perched && fv.stands_on(site).iter().any(|st| st.species == cubarium_voxel_flora::Species::Vaulttree) =>
+        {
+            0
+        }
+        Some(PerchAnchor::Face(_)) if perched => 1,
+        _ => 2,
+    };
+    if class == 0 {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let s = shape(&phys, a.body);
+    let g = phys.body_at(a.body);
+    // Den rest's guard: the trip's cost against a share of the reserve over the emergency
+    // line.
+    let cruise = (phys.cruise_body_lengths_per_s * g.length_m).max(f64::EPSILON);
+    let climb = (phys.climb_speed_fraction * cruise).max(f64::EPSILON);
+    let cap = phys.core.reserve_of(a.body);
+    let usable = (a.reserve - (1.0 - phys.wake_hunger) * cap).max(0.0);
+    let allowance = glider.roost_reserve_share.clamp(0.0, 1.0) * usable;
+    let cost = |walk_m: f64, climb_m: f64| {
+        a.body
+            * (walk_m / cruise * (phys.core.maintenance_per_s + phys.motor_respiration_per_s)
+                + climb_m.max(0.0) / climb
+                    * (phys.core.maintenance_per_s + phys.motor_respiration_per_s * phys.wall_climb_cost_factor))
+    };
+    let tc = fauna.config.teachers;
+    let shunned = fauna.walk_shunned(a.id, founder);
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let own = (s.r / v).ceil().max(0.0) as u32;
+    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own)?;
+    let reach = ((s.r + 0.5 * v) / v).floor().max(1.0) as u32;
+    let reachable = |site: Site| {
+        graph
+            .node_near_where(site, crate::pack::centre(site, v), reach, |f| f.y.abs_diff(site.y) <= 1)
+            .is_some_and(|goal| graph.components[goal] == graph.components[from])
+    };
+    let vault = stands_within(view, fv, &a, budget, |st| {
+        st.species == cubarium_voxel_flora::Species::Vaulttree && climbable(fv, st, &glider)
+    });
+    for (d, id, site) in vault {
+        if shunned.contains(&id) {
+            continue;
+        }
+        let Some((_, high)) = crown_span(fv, site) else { continue };
+        let rise = (high.cell + 1) as f64 * v - crate::surface_m(site.y, v);
+        if cost(d, rise) <= allowance && reachable(site) {
+            return Some(Roost::Crown(id, site));
+        }
+    }
+    if class == 1 {
+        return None;
+    }
+    let mut best: Option<Roost> = None;
+    for l in ledges(fauna, view, fv) {
+        if shunned.contains(&ledge_key(&l)) || !ledge_fits(&l, s, v, glider.roost_ledge_min_m) {
+            continue;
+        }
+        let (cx, cz) = crate::pack::centre(l.foot, v);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
+        let d = (dx * dx + dz * dz).sqrt();
+        if d > budget || best.is_some_and(|b| matches!(b, Roost::Ledge(bd, _, _) if bd <= d)) {
+            continue;
+        }
+        let rise = crate::surface_m(l.top.y, v) - crate::surface_m(l.foot.y, v);
+        if reachable(l.top) && cost(d, 0.0) <= allowance {
+            best = Some(Roost::Ledge(d, l, true));
+        } else if reachable(l.foot) && cost(d, rise) <= allowance {
+            best = Some(Roost::Ledge(d, l, false));
+        }
+    }
+    best
+}
+
+/// The actions that take body `i` to `roost`: off a perch, toward it (a glide or a climb
+/// down); on the ground, its route to the vaulttree's stem, the ledge's top, or the
+/// ledge's foot and then into its wall (which climbs it). `None` when it cannot walk there.
+fn go_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, roost: Roost) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (key, target) = match roost {
+        Roost::Crown(id, site) => (id, site),
+        Roost::Ledge(_, l, true) => (ledge_key(&l), l.top),
+        Roost::Ledge(_, l, false) => (ledge_key(&l), l.foot),
+    };
+    let (tx, tz) = crate::pack::centre(target, v);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+    if a.mobility.mode == MobilityMode::Perched {
+        fauna.walking_to(a.id, key, crate::Steer::Roost);
+        return Some(walk_toward(&a, dx, dz, 0.0));
+    }
+    let s = shape(&phys, a.body);
+    if let Roost::Ledge(_, l, false) = roost
+        && a.site.y == l.foot.y
+        && (dx * dx + dz * dz).sqrt() <= s.r + v
+    {
+        // At the foot: into the wall.
+        fauna.walking_to(a.id, key, crate::Steer::Roost);
+        let h = into_face(l.face);
+        return Some(walk_toward(&a, h.sin(), h.cos(), 0.0));
+    }
+    let d = (dx * dx + dz * dz).sqrt();
+    let budget = phys.glider?.roost_budget_m;
+    walk_to_stand(fauna, i, view, fv, &[(d, key, target)], budget, 0.0, crate::Steer::Roost).map(|(go, _)| go)
 }
 
 /// Actions that walk a body at `(dx, dz)` from it: turn toward it and go forward when it
