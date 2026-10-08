@@ -23,7 +23,10 @@
 //! few cells through open terrain and stopped by solid terrain, and added to the ambient
 //! before the shader snaps it to the ladder.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread::JoinHandle;
 
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
@@ -44,7 +47,21 @@ fn quantise(v: f64) -> u8 {
 /// the floor row has no cell under it and takes its own top face's fan. A cell whose foot
 /// is at or above the highest solid anywhere is open sky without asking: every ray in the
 /// fan climbs, so none of them can meet a solid, and the answer is exactly 1.
+#[cfg(test)]
 pub(crate) fn sky_plane(config: &Config, material: &[Material], threads: usize, out: &mut [u8]) {
+    sky_plane_until(config, material, threads, out, &AtomicBool::new(false));
+}
+
+/// The sky plane above, given up as soon as `cancel` is set: every thread looks at it before each
+/// cell, so it stops within one cell's fan of being asked. Returns whether the plane is
+/// whole (`false`: cancelled, and `out` is partly written).
+pub(crate) fn sky_plane_until(
+    config: &Config,
+    material: &[Material],
+    threads: usize,
+    out: &mut [u8],
+    cancel: &AtomicBool,
+) -> bool {
     let (w, h, d) = (
         config.width as usize,
         config.height as usize,
@@ -60,9 +77,12 @@ pub(crate) fn sky_plane(config: &Config, material: &[Material], threads: usize, 
         .filter(|(_, m)| m.is_solid())
         .map(|(i, _)| config.coords(i).1)
         .max();
-    let slab = |z: u32, rows: &mut [u8]| {
+    let slab = |z: u32, rows: &mut [u8]| -> bool {
         for y in 0..h as u32 {
             for x in 0..w {
+                if cancel.load(Ordering::Relaxed) {
+                    return false;
+                }
                 let i = y as usize * w + x;
                 if view.material_at(x as i64, y, z).is_solid() {
                     rows[i] = 0;
@@ -76,6 +96,7 @@ pub(crate) fn sky_plane(config: &Config, material: &[Material], threads: usize, 
                 };
             }
         }
+        true
     };
     // One z slab is one contiguous run of the output. Slabs are dealt round-robin, so
     // each thread gets front and back slabs alike and the costly ones spread.
@@ -89,35 +110,51 @@ pub(crate) fn sky_plane(config: &Config, material: &[Material], threads: usize, 
             let slab = &slab;
             s.spawn(move || {
                 for (z, rows) in group {
-                    slab(z, rows);
+                    if !slab(z, rows) {
+                        return;
+                    }
                 }
             });
         }
     });
+    !cancel.load(Ordering::Relaxed)
 }
 
 /// The sky plane, computed off the loop thread.
 ///
 /// The packer submits the terrain whenever it moves and polls for the plane each pack; a
 /// newer submission supersedes an older one still waiting, and a finished plane for a
-/// terrain that has since moved is thrown away by its id. Dropping the worker ends the
-/// thread once it finishes whatever it is computing.
+/// terrain that has since moved is thrown away by its id.
+///
+/// Dropping the worker cancels the plane it is computing ([`sky_plane_until`]) and joins
+/// its thread, so none of its threads outlives it: the Godot extension's library is
+/// unloaded at exit, and a thread still running its code then faults.
 pub(crate) struct SkyWorker {
-    jobs: Sender<(u64, Config, Vec<Material>)>,
+    /// `None` once the worker is dropping: the thread's `recv` then fails and it ends.
+    jobs: Option<Sender<(u64, Config, Vec<Material>)>>,
     done: Receiver<(u64, Vec<u8>)>,
+    /// Set on drop: the plane being computed is given up.
+    cancel: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
 }
 
 impl SkyWorker {
     pub(crate) fn spawn() -> SkyWorker {
-        let (jobs, inbox) = mpsc::channel::<(u64, Config, Vec<Material>)>();
-        let (outbox, done) = mpsc::channel();
         // Every core the process may use but one, which the loop keeps: this runs once
         // at start-up and again only when the terrain is edited.
         let threads = std::thread::available_parallelism()
             .map_or(1, |n| n.get())
             .saturating_sub(1)
             .max(1);
-        std::thread::Builder::new()
+        SkyWorker::with_threads(threads)
+    }
+
+    fn with_threads(threads: usize) -> SkyWorker {
+        let (jobs, inbox) = mpsc::channel::<(u64, Config, Vec<Material>)>();
+        let (outbox, done) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        let thread = std::thread::Builder::new()
             .name("cubarium-sky".into())
             .spawn(move || {
                 while let Ok(mut job) = inbox.recv() {
@@ -126,20 +163,29 @@ impl SkyWorker {
                     }
                     let (id, config, material) = job;
                     let mut plane = vec![0u8; material.len()];
-                    sky_plane(&config, &material, threads, &mut plane);
+                    if !sky_plane_until(&config, &material, threads, &mut plane, &stop) {
+                        break;
+                    }
                     if outbox.send((id, plane)).is_err() {
                         break;
                     }
                 }
             })
             .expect("spawning the sky plane's thread");
-        SkyWorker { jobs, done }
+        SkyWorker {
+            jobs: Some(jobs),
+            done,
+            cancel,
+            thread: Some(thread),
+        }
     }
 
     /// Compute the sky plane of this terrain, under `id`.
     pub(crate) fn submit(&self, id: u64, config: &Config, material: &[Material]) {
         // A worker that has gone away leaves the plane as it was; nothing else breaks.
-        let _ = self.jobs.send((id, config.clone(), material.to_vec()));
+        if let Some(jobs) = &self.jobs {
+            let _ = jobs.send((id, config.clone(), material.to_vec()));
+        }
     }
 
     /// The newest plane finished since the last poll, with its id.
@@ -149,6 +195,16 @@ impl SkyWorker {
             newest = Some(done);
         }
         newest
+    }
+}
+
+impl Drop for SkyWorker {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.jobs = None;
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
     }
 }
 
@@ -966,6 +1022,7 @@ impl GlowSet {
 mod tests {
     use super::*;
     use cubarium_voxel::{Command, World};
+    use std::time::Instant;
     use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species};
 
     fn config() -> Config {
@@ -1076,6 +1133,67 @@ mod tests {
             (130..=210).contains(&wall),
             "in front of the wall about two thirds of the sky: {wall}"
         );
+    }
+
+    /// A world whose every open cell is under a roof, so each one casts its whole fan:
+    /// a sky plane that takes a while.
+    fn roofed(c: &Config) -> World {
+        let mut world = World::empty(c.clone());
+        let roof = c.height - 2;
+        for z in 0..c.depth {
+            for x in 0..i64::from(c.width) {
+                set(&mut world, x, 0, z, Material::Bedrock);
+                if x % 7 != 0 {
+                    set(&mut world, x, roof, z, Material::Rock);
+                }
+            }
+        }
+        world
+    }
+
+    /// A cancelled plane writes nothing more: with the flag already set, not one cell.
+    #[test]
+    fn a_cancelled_sky_plane_stops_before_its_next_cell() {
+        let c = config();
+        let world = world(&c);
+        let view = world.view();
+        let mut out = vec![7u8; view.material.len()];
+        let whole = sky_plane_until(&c, view.material, 4, &mut out, &AtomicBool::new(true));
+        assert!(!whole, "a cancelled plane says it is not whole");
+        assert!(out.iter().all(|&b| b == 7), "no cell was computed after the cancel");
+    }
+
+    /// Dropping the worker while it computes a plane gives the plane up and joins the
+    /// thread: the drop returns in a small part of the time the whole plane takes, and no
+    /// thread of the worker is left holding anything of it.
+    #[test]
+    fn dropping_the_sky_worker_mid_plane_returns_promptly_and_ends_its_thread() {
+        let c = Config {
+            width: 96,
+            height: 32,
+            depth: 16,
+            ..Config::default()
+        };
+        let world = roofed(&c);
+        let view = world.view();
+        let mut full = vec![0u8; view.material.len()];
+        let at = Instant::now();
+        sky_plane(&c, view.material, 1, &mut full);
+        let whole = at.elapsed();
+
+        let worker = SkyWorker::with_threads(1);
+        // The thread holds its own clone of the cancel flag for as long as it runs.
+        let thread_alive = Arc::downgrade(&worker.cancel);
+        worker.submit(1, &c, view.material);
+        std::thread::sleep(whole / 8);
+        let at = Instant::now();
+        drop(worker);
+        let dropped = at.elapsed();
+        assert!(
+            dropped < whole / 2,
+            "the drop gave the plane up ({dropped:?}, the whole plane takes {whole:?})"
+        );
+        assert!(thread_alive.upgrade().is_none(), "the worker's thread has ended");
     }
 
     fn flora(world: &World, stands: &[(i64, u32, Species)]) -> Flora {

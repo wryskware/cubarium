@@ -273,17 +273,97 @@ struct Shared {
 pub struct Session {
     to_sim: Sender<ToSim>,
     shared: Arc<Shared>,
-    sim: Option<JoinHandle<()>>,
-    ingest: Option<JoinHandle<()>>,
+    threads: Arc<Threads>,
     candidates: Arc<Mutex<Candidates>>,
     /// The picked candidate's founding, the last one started.
-    job: Mutex<Option<Arc<Job>>>,
+    job: Arc<Mutex<Option<Arc<Job>>>>,
     /// Candidate and founding threads still running.
     workers: Arc<AtomicUsize>,
     terrain_tries: usize,
     placement_tries: usize,
     #[cfg(test)]
     accept: Option<fn(&cubarium_voxel_sim::habitat::Seeded) -> bool>,
+}
+
+/// Every thread a session starts, and how to stop them ([`Threads::stop`]): the candidate
+/// draws and the founding are cancelled (a draw stops between draws, a founding at its next
+/// tick), then the loop is asked to shut down and joined (it joins a save's writer on the
+/// way out), then the ingest thread, which ends when the loop's channel closes. The Godot
+/// extension's library is unloaded at exit, and a thread still running its code then
+/// faults; see `stop` for the draws and foundings it does not wait for.
+struct Threads {
+    to_sim: Sender<ToSim>,
+    /// The loop first, then the ingest thread.
+    handles: Mutex<Vec<JoinHandle<()>>>,
+    /// Candidate draws and foundings not yet joined.
+    workers: Mutex<Vec<JoinHandle<()>>>,
+    /// Their stop flags: the batch's and the founding's.
+    candidates: Arc<Mutex<Candidates>>,
+    job: Arc<Mutex<Option<Arc<Job>>>>,
+}
+
+impl Threads {
+    /// Keep a candidate or founding thread to join; the finished ones are joined here.
+    fn track(&self, h: JoinHandle<()>) {
+        let mut w = self.workers.lock().unwrap_or_else(|e| e.into_inner());
+        let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *w).into_iter().partition(|t| t.is_finished());
+        *w = live;
+        w.push(h);
+        drop(w);
+        for t in done {
+            let _ = t.join();
+        }
+    }
+
+    /// Stop and join; returns whether anything was still to stop. Idempotent.
+    fn stop(&self) -> bool {
+        if let Ok(c) = self.candidates.lock() {
+            c.cancel.store(true, Ordering::SeqCst);
+        }
+        if let Some(j) = self.job.lock().ok().and_then(|j| j.clone()) {
+            j.cancel.store(true, Ordering::SeqCst);
+        }
+        // Draws and foundings that have ended are joined. Ones still running are cancelled
+        // above and end at their next check, but are not waited for: a draw checks only
+        // between draws (about 10 s on the wide world), and quitting must stay quick. They
+        // are pure computation on state they hold by `Arc` and send nothing anyone waits on,
+        // so ending with the process is harmless; the Godot extension is linked so its code
+        // stays mapped until then (crates/cubarium-godot/build.rs).
+        let workers = std::mem::take(&mut *self.workers.lock().unwrap_or_else(|e| e.into_inner()));
+        let (done, running): (Vec<_>, Vec<_>) = workers.into_iter().partition(|w| w.is_finished());
+        for w in done {
+            let _ = w.join();
+        }
+        let busy = !running.is_empty();
+        drop(running);
+        let _ = self.to_sim.send(ToSim::Shutdown);
+        let handles = std::mem::take(&mut *self.handles.lock().unwrap_or_else(|e| e.into_inner()));
+        let live = busy || !handles.is_empty();
+        for h in handles {
+            let _ = h.join();
+        }
+        live
+    }
+}
+
+/// A handle that stops every thread of a [`Session`] without owning it ([`Threads::stop`]):
+/// for an owner whose drop may come too late (the Godot extension stops every session still
+/// alive when its library is being unloaded). Holds the session only weakly.
+#[derive(Clone)]
+pub struct SessionStop(std::sync::Weak<Threads>);
+
+impl SessionStop {
+    /// Cancel what is being made, stop the loop (and with it the running world) and join
+    /// it and the ingest thread, as dropping the session would. Returns whether any thread
+    /// was still running.
+    pub fn shutdown(&self) -> bool {
+        self.0.upgrade().is_some_and(|t| t.stop())
+    }
+
+    /// Whether the session has not been dropped yet.
+    pub fn alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
 }
 
 impl Session {
@@ -325,19 +405,31 @@ impl Session {
                 .spawn(move || Loop::new(options, to_reader, shared).main(sim_rx))
                 .expect("spawning the session's loop")
         };
+        let candidates = Arc::new(Mutex::new(Candidates::default()));
+        let job = Arc::new(Mutex::new(None));
         Session {
+            threads: Arc::new(Threads {
+                to_sim: to_sim.clone(),
+                handles: Mutex::new(vec![sim, ingest]),
+                workers: Mutex::new(Vec::new()),
+                candidates: candidates.clone(),
+                job: job.clone(),
+            }),
             to_sim,
             shared,
-            sim: Some(sim),
-            ingest: Some(ingest),
-            candidates: Arc::new(Mutex::new(Candidates::default())),
-            job: Mutex::new(None),
+            candidates,
+            job,
             workers: Arc::new(AtomicUsize::new(0)),
             terrain_tries,
             placement_tries,
             #[cfg(test)]
             accept,
         }
+    }
+
+    /// A handle that stops this session's threads from elsewhere ([`SessionStop`]).
+    pub fn stopper(&self) -> SessionStop {
+        SessionStop(Arc::downgrade(&self.threads))
     }
 
     fn send(&self, m: ToSim) {
@@ -401,7 +493,7 @@ impl Session {
             let cancel = cancel.clone();
             let busy = Busy::start(&self.workers);
             let tries = self.terrain_tries;
-            std::thread::Builder::new()
+            let h = std::thread::Builder::new()
                 .name(format!("cubarium-candidate-{index}"))
                 .spawn(move || {
                     let _busy = busy;
@@ -439,6 +531,7 @@ impl Session {
                     }
                 })
                 .map_err(|e| format!("spawning a candidate: {e}"))?;
+            self.threads.track(h);
         }
         Ok(())
     }
@@ -511,7 +604,7 @@ impl Session {
         let list = self.candidates.clone();
         let to_sim = self.to_sim.clone();
         let busy = Busy::start(&self.workers);
-        std::thread::Builder::new()
+        let h = std::thread::Builder::new()
             .name(format!("cubarium-founding-{index}"))
             .spawn(move || {
                 let _busy = busy;
@@ -550,6 +643,7 @@ impl Session {
                 }
             })
             .map_err(|e| format!("spawning the founding: {e}"))?;
+        self.threads.track(h);
         Ok(())
     }
 
@@ -856,13 +950,7 @@ fn to<T: Serialize + ?Sized>(v: &T) -> Value {
 impl Drop for Session {
     fn drop(&mut self) {
         self.cancel();
-        self.send(ToSim::Shutdown);
-        if let Some(h) = self.sim.take() {
-            let _ = h.join();
-        }
-        if let Some(h) = self.ingest.take() {
-            let _ = h.join();
-        }
+        self.threads.stop();
     }
 }
 

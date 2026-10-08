@@ -45,6 +45,14 @@ runs one, steps 100 ticks, queries, takes a view, saves and loads; it prints `PA
 exits non-zero on a failure. `--headless` never opens a window; anything that needs one goes
 through `scripts/hidden.sh`.
 
+`tests/quit_test.gd -- --saves DIR --at draw|founding|running [--via menu|tree]` quits while
+terrains are drawn, while the pick is founded, or with a world running. **Every test here
+must exit 0, not 139**: the extension stops and joins its own threads before Godot unloads
+it (sessions, renderers, the sky-plane and sun-visibility workers; a backstop stops any
+still alive at the extension's deinit), and it is linked `-z nodelete` so the process-wide
+worker pools it cannot join (water, bevy tasks) and cancelled draws end with the process.
+A SIGSEGV after the last line means a thread was left running in the unloaded library.
+
 ## Making saves without Godot
 
 `cubarium-world` is a headless Rust tool in `cubarium-session`, with no GPU or
