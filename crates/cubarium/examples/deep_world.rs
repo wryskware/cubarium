@@ -1,6 +1,7 @@
 //! Live-water depth cost study, using the host's founding, controllers and GPU sink.
 //! Run through scripts/deep-world-batch.py; all output is headless and disposable.
-//! `deep_world config=... out=... threads=16 seed=1 [minutes=60 frames=3]`
+//! `deep_world config=... out=... threads=16 seed=1 [minutes=60 frames=3 raster=2560x1600]`
+//! A config with a fixed `px_per_voxel` is drawn at that size; `"auto"` fits the raster.
 //! `minutes=0` renders founding only. A short smoke can use `ticks=40`.
 
 use std::path::PathBuf;
@@ -123,9 +124,9 @@ fn settle(sink: &mut VoxelGpuSink, sim: &Sim) -> Result<()> {
     Ok(())
 }
 
-fn capture(sink: &mut VoxelGpuSink, sim: &Sim, path: &std::path::Path) -> Result<()> {
+fn capture(sink: &mut VoxelGpuSink, sim: &Sim, path: &std::path::Path, size: (u32, u32)) -> Result<()> {
     settle(sink, sim)?;
-    cubarium_gpu::target::write_png(path, 2560, 1600, &sink.read_headless_output()?)?;
+    cubarium_gpu::target::write_png(path, size.0, size.1, &sink.read_headless_output()?)?;
     eprintln!("picture: {}", path.display());
     Ok(())
 }
@@ -140,6 +141,11 @@ fn main() -> Result<()> {
     let minutes: u64 = get("minutes").unwrap_or("60").parse()?;
     let frames: u64 = get("frames").unwrap_or("3").parse()?;
     let pictures: bool = get("pictures").unwrap_or("true").parse()?;
+    let raster: (u32, u32) = {
+        let r = get("raster").unwrap_or("2560x1600");
+        let (w, h) = r.split_once('x').context("raster=WxH")?;
+        (w.parse()?, h.parse()?)
+    };
     ensure!(
         threads > 0 && frames > 0,
         "threads and frames must be positive"
@@ -167,6 +173,10 @@ fn main() -> Result<()> {
         false,
     );
     let accepted = founded.accepted;
+    eprintln!(
+        "founding: seed {} land {:.1} m2, land scale {:.3}, founders {:?}",
+        founded.seed, founded.seeded.land_m2, founded.seeded.land_scale, founded.seeded.wanted
+    );
     let warnings = founded.warnings;
     let mut fauna = founded.fauna;
     cubarium::voxel::install_default_founders(&mut fauna)?;
@@ -178,9 +188,11 @@ fn main() -> Result<()> {
         fauna,
         SimConfig::with_threads(threads),
     );
-    cfg.px_per_voxel =
-        cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.world, (2560, 1600));
-    cfg.raster_height = 1600;
+    if cfg.px_per_voxel == cubarium::voxel::PX_AUTO {
+        cfg.px_per_voxel =
+            cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.world, raster);
+    }
+    cfg.raster_height = raster.1 as u16;
     let proj = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
@@ -196,9 +208,9 @@ fn main() -> Result<()> {
             ..VoxelGpuSinkOptions::default()
         },
     )?;
-    sink.set_headless_size((2560, 1600))?;
+    sink.set_headless_size(raster)?;
     if pictures {
-        capture(&mut sink, &sim, &out.join("founding.png"))?;
+        capture(&mut sink, &sim, &out.join("founding.png"), raster)?;
     } else {
         settle(&mut sink, &sim)?;
     }
@@ -217,7 +229,7 @@ fn main() -> Result<()> {
         overlap: sim.config().overlap,
         founding_accepted: accepted,
         founding_warnings: warnings,
-        raster: [2560, 1600],
+        raster: [raster.0, raster.1],
         px_per_voxel: cfg.px_per_voxel,
         sim_minutes: ticks as f64 / ticks_per_minute as f64,
         rows: Vec::new(),
@@ -262,7 +274,7 @@ fn main() -> Result<()> {
             }
         }
         if pictures && tick + 1 == 30 * ticks_per_minute {
-            capture(&mut sink, &sim, &out.join("m30.png"))?;
+            capture(&mut sink, &sim, &out.join("m30.png"), raster)?;
         }
         if measuring
             && (tick + 1 == 5 * ticks_per_minute

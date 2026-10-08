@@ -19,6 +19,7 @@ width = 512
 # and a lake twice as long, so the features keep their density; spires stay one or two.
 [world.landform]
 preset = "terrarium"
+ring_m = 64.0   # the counts and lake length below are written for this 64 m ring
 shelves = [6, 8]
 arches = [2, 4]
 lake_m = [8.0, 12.0]
