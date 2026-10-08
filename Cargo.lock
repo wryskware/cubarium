@@ -599,6 +599,7 @@ name = "cubarium-godot"
 version = "0.1.0"
 dependencies = [
  "cubarium",
+ "cubarium-gpu",
  "cubarium-observatory",
  "cubarium-session",
  "godot",

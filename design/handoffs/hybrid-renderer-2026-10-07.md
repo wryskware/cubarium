@@ -117,6 +117,18 @@ Workers read `design/handoffs/worker-rules-2026-10-07.md` first.
   thread while the next step runs (backlog item 9), so a tick costs about max(step, pack), and
   the presentation samples published snapshots.
 
+## Terrain-first new-world picking (Wrysk 2026-10-08: "yes build it"; after the SIGBUS fix)
+
+Founding 3–4 wide candidates took 3–4 minutes, and the app crashed in the parallel water
+solver while founding them (SIGBUS in `water::column_edges`, fix on branch `fix-sigbus`).
+Terrain alone takes about 5 s for three wide worlds. The picker shows 3–4 terrain-only
+candidates (rerolls nearly free), and only the picked one is founded, with a progress bar.
+- **The picked terrain never changes.** Today a refused habitat draws a new terrain seed.
+  Founding the picked world instead retries the founders' placement on the same terrain.
+- **Infeasible terrains are never offered.** A terrain that can't host the founders is caught
+  by a cheap feasibility check during candidate generation and never shown.
+- Candidate generation can be cancelled; founding reports progress.
+
 ## H4: rigging (later)
 
 - Animals are built in Blender (`scripts/blender/animal_models.py`): bake each part's voxels

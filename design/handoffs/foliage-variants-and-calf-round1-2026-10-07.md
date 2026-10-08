@@ -109,3 +109,11 @@ Wrysk: "l38. show me the spread legs for comparison. bloomcrown row 2. umbrafron
 Plants go to implementation: `foliage-states-implementation-2026-10-08.md`. Calf: l38 (calf B body, legs
 0.38, branch `worktree-agent-a22f62e40bfde905b` at 5e3ccd7a); next is a leg-spread comparison, then
 the founder bake once he picks a spread.
+
+## Calf leg spread (2026-10-08)
+
+Spread sheet at fef46e3d (`art/gen/runs/2026-10-08-loftstrider-calf-r3/`). Wrysk: "not sure it needs it
+tbh. or like id have to see in the world. maybe just keep 1.0 for now". The calf is **l38 at splay 1.0,
+toe 1.0**. Next: bake the loftstrider as a founder, five bins blending linearly from calf-l38 to the
+adult (`ls_blend`). Queued until the foliage-states branch lands, because that branch changes the
+`.cvm` format and rebakes the library. Then look at the calf in the world.

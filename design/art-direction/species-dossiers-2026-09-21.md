@@ -14,7 +14,7 @@ decision_refs: []
 > earlier colour pass and its later concept-pick exceptions.
 
 The [visual artbook](../../art/gen/artbook/index.html) collects the picks and
-retained alternatives. Chorister, ripple-snail, capgnawer and seedporter have
+retained alternatives. Veilhound (formerly Chorister), ripple-snail, capgnawer and seedporter have
 their current selection notes in [the body dossiers](../animal-body-reimagining-2026-09-24.md).
 Painted outer halos are cleanup defects, not organism emission. Terrain images
 remain candidates; their inclusion does not approve a tile set or a new simulation feature.

@@ -130,7 +130,14 @@ far flank, its single #42C5F8 tip beside the mouth across an open channel.
 Matte #3A1A7A ridges articulate the arms. Show the waiting pose with the
 tail channel clearly visible and the capture arms poised around it.
 
-## Chorister
+## Veilhound (formerly Chorister)
+
+**Naming direction (Wrysk, 2026-10-03):** Veilhound is the new common name for
+the established six-limbed pack hunter. The name evokes the selected image's pale
+head veil and the animal's pursuit, pack bonds and den life. Chorister was the
+earlier name, emphasizing calls passed between hunting packmates. That history
+remains in the original proposals and prompts below; CH identifiers, asset
+filenames and simulation identifiers still use the earlier name.
 
 **Selected appearance (reviewed 2026-09-25):** [CH-A2 v3 violet stalker](../art/gen/artbook/chorister.png).
 Retain the accepted v3 six-limbed runner rather than reopening the A/C alternatives
