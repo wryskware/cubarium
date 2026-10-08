@@ -78,14 +78,20 @@ fn every_live_preset_loads_and_resolves() {
     }
 }
 
-/// The baked library a live 0.125 m world loads (`models_dir`'s default).
+/// The baked library a live 0.125 m world loads (`models_dir`'s default): capgnawer uses
+/// its specimen fallback; loftstrider's founder bins take priority over the gallery alias.
 #[test]
-fn a_live_capgnawer_and_a_live_loftstrider_draw_with_their_specimen_models() {
+fn a_live_capgnawer_and_a_live_loftstrider_draw_with_their_baked_models() {
     let lib = ModelLibrary::load(&repo("assets/voxel-models"), 0.125).expect("the baked library");
     for f in NEW {
         let specimen = lib.specimen(f.name()).expect("the baked specimen of its name");
         let drawn = lib.animal(f).expect("a live body has a model");
-        assert!(std::ptr::eq(drawn, specimen), "{f:?} draws with its specimen");
+        if f == Founder::Loftstrider {
+            assert!(!std::ptr::eq(drawn, specimen), "the founder model takes priority");
+            assert_eq!(drawn, specimen, "the gallery aliases the same bake");
+        } else {
+            assert!(std::ptr::eq(drawn, specimen), "{f:?} draws with its specimen");
+        }
         let coat = colours::founder_coat(f);
         let want = colours::specimen_coat(f.name()).expect("the specimen's coat");
         assert!(std::ptr::eq(coat, want), "{f:?} wears its specimen coat");

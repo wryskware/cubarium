@@ -52,6 +52,9 @@
 //! (`foliage-states-implementation-2026-10-08.md`): the stand's total foliage set inside
 //! that state's band of the config's `foliage_state_below`, so the presenter's own choice
 //! picks it. No animals.
+//!
+//! `--loftstrider-bins` draws only the loftstrider's five founder bins, newborn to adult,
+//! using live bodies at the bins' length keys. `--voxel-m M` chooses the baked grid size.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -119,6 +122,8 @@ fn main() -> Result<()> {
     let mut models_dir_arg: Option<PathBuf> = None;
     let mut candidates: Option<(Species, Vec<usize>)> = None;
     let mut states_of: Option<Species> = None;
+    let mut loftstrider_bins = false;
+    let mut voxel_m = 0.125;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -128,6 +133,8 @@ fn main() -> Result<()> {
             "--shared" => shared = true,
             "--contest" => contest = true,
             "--gpu" => gpu = true,
+            "--loftstrider-bins" => loftstrider_bins = true,
+            "--voxel-m" => voxel_m = args.next().context("--voxel-m M")?.parse()?,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
                 textures = Some(PathBuf::from(args.next().context("--textures DIR")?));
@@ -167,7 +174,6 @@ fn main() -> Result<()> {
 
     let flora_cfg = FloraConfig::default();
     // Lay the specimens out first, so the world is exactly as wide as they need.
-    let voxel_m = 0.125;
     let mut plan: Vec<(Species, f64, bool)> = Vec::new();
     if let Some((species, idx)) = &candidates {
         plan.extend(idx.iter().map(|_| (*species, 1.0, false)));
@@ -188,7 +194,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    let solo = candidates.is_some() || states_of.is_some();
+    let solo = candidates.is_some() || states_of.is_some() || loftstrider_bins;
     for species in Species::ALL.into_iter().filter(|_| !solo) {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
@@ -224,6 +230,39 @@ fn main() -> Result<()> {
     // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
     let mut depth = 8u32;
     let mut specimens = Vec::new();
+    let mut loftstriders = Vec::new();
+    if loftstrider_bins {
+        anyhow::ensure!(
+            !glyphs && !rider && candidates.is_none() && states_of.is_none(),
+            "--loftstrider-bins needs models and its own strip"
+        );
+        let lib = models.as_ref().context("the baked models")?;
+        let model = lib
+            .animal(Founder::Loftstrider)
+            .context("the loftstrider founder bake")?;
+        let fauna_cfg = FaunaConfig::default();
+        let phys = fauna_cfg.founder(Founder::Loftstrider);
+        let mut sx = GAP;
+        for bin in &model.bins {
+            let turned: Vec<_> = bin
+                .cells
+                .iter()
+                .map(|m| model::turn(2, m.offset[0], m.offset[2]))
+                .collect();
+            let x0 = turned.iter().map(|t| t.0).min().context("an empty bin")?;
+            let x1 = turned.iter().map(|t| t.0).max().unwrap();
+            let z0 = turned.iter().map(|t| t.1).min().unwrap();
+            let z1 = turned.iter().map(|t| t.1).max().unwrap();
+            depth = depth.max((z1 - z0 + 3) as u32);
+            loftstriders.push((
+                sx - i64::from(x0),
+                u32::try_from(1 - z0).context("a bin's depth anchor")?,
+                (bin.length_m / phys.adult_length_m).powi(3),
+            ));
+            sx += i64::from(x1 - x0) + 1 + GAP;
+        }
+        width = (sx + GAP) as u32;
+    }
     if let Some(lib) = models.as_ref().filter(|_| !solo) {
         let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
         for (name, heading_rad, lift) in SPECIMENS {
@@ -314,6 +353,21 @@ fn main() -> Result<()> {
         }
     }
     let mut fauna = Fauna::new(FaunaConfig::default());
+    for &(x, z, body) in &loftstriders {
+        anyhow::ensure!(
+            fauna.apply(
+                &world,
+                FaunaCommand::IntroduceFounder {
+                    x,
+                    z,
+                    founder: Founder::Loftstrider,
+                    stores: StartingStores { body, reserve: 1.0 },
+                    heading_rad: std::f64::consts::PI,
+                }
+            ),
+            "could not place a loftstrider bin at x={x}"
+        );
+    }
     for (k, &x) in animal_x.iter().enumerate() {
         let founder = FOUNDERS[k];
         let heading_rad = if k % 2 == 0 { 1.5708 } else { -1.5708 };

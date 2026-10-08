@@ -1162,53 +1162,150 @@ LS_FROND = [float(v) for v in os.environ.get("LS_FROND", "1,0.75,0.6,0.75,1,0.6"
 LS_FROND = LS_FROND * 6 if len(LS_FROND) == 1 else LS_FROND
 
 
+# The rig's part sizes, each a linear factor on the adult's (`LS_ADULT`, all 1): the onion
+# body (radius and height), the legs (hip, knee and ankle heights and the splay beyond the
+# hip), the legs' thickness (tubes, bulbs and toes), the neck's length and thickness, the
+# head (with the mouth and the tusk and frond root ring), the fronds (beyond the root ring),
+# the tusks (on top of the head's factor), and the eyes. Every count and angle is the
+# adult's; all factors but `tusk` at s (tusk 1) is the adult scaled by s.
+LS_ADULT = dict(body=1.0, leg=1.0, leg_r=1.0, neck=1.0, neck_r=1.0, head=1.0, frond=1.0,
+                tusk=1.0, eye=1.0)
+
+# Calf candidates (round 1, `design/handoffs/foliage-variants-and-calf-round1-2026-10-07.md`
+# package B; Wrysk 2026-10-07: "long legs, short neck, a big head, small fronds", same
+# six-leg rig and counts, same coat). Not baked: Wrysk picks. Each keeps the body at the
+# newborn's linear size, (body_min / body_max)^(1/3) = 0.1^(1/3) = 0.464 (the loftstrider's
+# table is the frondgrazer's scaled by mass, the ratio kept), so the onion holds a tenth of
+# the adult's volume; they differ in how far legs, head, neck, fronds and tusks depart.
+LS_NEWBORN = 0.1 ** (1.0 / 3.0)
+LS_CALVES = {
+    # A, mild: the nearest to a scaled adult
+    "calf-a": dict(body=LS_NEWBORN, leg=0.62, leg_r=0.60, neck=0.42, neck_r=0.55, head=0.62,
+                   frond=0.45, tusk=0.40, eye=0.55),
+    # B, middle: a foal's legs, a short neck, stub tusks
+    "calf-b": dict(body=LS_NEWBORN, leg=0.72, leg_r=0.55, neck=0.30, neck_r=0.60, head=0.72,
+                   frond=0.35, tusk=0.55, eye=0.60),
+    # C, extreme: stilts, almost no neck, a near-adult head, nubs for tusks, fronds as buds
+    "calf-c": dict(body=LS_NEWBORN, leg=0.85, leg_r=0.50, neck=0.12, neck_r=0.65, head=0.85,
+                   frond=0.25, tusk=0.30, eye=0.70),
+}
+
+
+# Round 2 (Wrysk 2026-10-08: "im not liking the long legs. shorter legs actually work for me.
+# like more chibi. and then i would pick the middle for the rest of the body shape."): B's
+# body, neck, head, fronds, tusks, eyes and thicknesses, with legs at or below the body's
+# scale (0.464). Leg thickness stays B's 0.55, so the shorter the leg the stubbier it reads.
+# Not baked: Wrysk picks.
+LS_CALVES_R2 = {
+    f"calf-l{round(leg * 100)}": dict(LS_CALVES["calf-b"], leg=leg)
+    for leg in (0.46, 0.38, 0.30)
+}
+
+# Round 3 (Wrysk 2026-10-08: "show me the spread legs for comparison"): l38 at its own
+# spread next to two narrower ones, the feet pulled in under the body and the toes shorter
+# so the six stubs stand apart. Not baked: Wrysk picks.
+LS_CALVES_R3 = {
+    "calf-l38": LS_CALVES_R2["calf-l38"],
+    "calf-l38-s60": dict(LS_CALVES_R2["calf-l38"], splay=0.60, toe=0.60),
+    "calf-l38-s30": dict(LS_CALVES_R2["calf-l38"], splay=0.30, toe=0.40),
+}
+
+
+def ls_blend(calf, t, ease=None):
+    """The rig `t` of the way from `calf` (0) to the adult (1), each factor linearly, or for
+    the factors named in `ease` ({factor: exponent}) along t ** exponent."""
+    ease = ease or {}
+    return {k: v + (LS_ADULT[k] - v) * t ** ease.get(k, 1.0) for k, v in calf.items()}
+
+
 def loftstrider():
-    def zone(f, s, p):
-        return 0 if p.z < 1.98 else (1 if p.z < 2.62 else 2)   # body, neck, pink head
-    column = [  # x, y, z, radius: the body, the neck and the head in one loft up the axis
-        (0, 0, 1.15, 0.05), (0, 0, 1.19, 0.30), (0, 0, 1.29, 0.47), (0, 0, 1.43, 0.555),
-        (0, 0, 1.57, 0.56), (0, 0, 1.71, 0.50), (0, 0, 1.84, 0.38), (0, 0, 1.96, 0.26),
-        (0, 0, 2.14, 0.19), (0, 0, 2.40, 0.155), (0, 0, 2.60, 0.16), (0, 0, 2.71, 0.20),
-        (0, 0, 2.78, 0.21), (0, 0, 2.83, 0.13)]
-    loft([(x, y, z, r, r, r) for x, y, z, r in column], [c("a_main"), c("a_pale"), c("a_mark")], zone,
+    loftstrider_rig(LS_ADULT)
+
+
+def loftstrider_rig(p):
+    """The loftstrider at the part sizes `p` (`LS_ADULT`'s keys), in metres, standing on
+    z = 0: the adult at `LS_ADULT`, a calf at its own sizes."""
+    B, Lg, Lr, N, Nr, Hd, F, T, E = (p[k] for k in ("body", "leg", "leg_r", "neck", "neck_r",
+                                                      "head", "frond", "tusk", "eye"))
+    zb = 1.22 * Lg - 0.07 * B          # the body's underside: the hips sit 0.07 above it
+    zt = zb + (1.96 - 1.15) * B        # the body's top, where the neck starts
+    zn = zt + (2.62 - 1.96) * N        # the neck's top, where the pink head starts
+    z_neck = zb + (1.98 - 1.15) * B
+
+    def zone(f, s, q):
+        return 0 if q.z < z_neck else (1 if q.z < zn else 2)   # body, neck, pink head
+
+    def head_z(z):                     # an adult head height (2.62 up) on this head
+        return zn + (z - 2.62) * Hd
+    body = [(1.15, 0.05), (1.19, 0.30), (1.29, 0.47), (1.43, 0.555), (1.57, 0.56), (1.71, 0.50),
+            (1.84, 0.38), (1.96, 0.26)]
+    neck = [(2.14, 0.19), (2.40, 0.155), (2.60, 0.16)]
+    head = [(2.71, 0.20), (2.78, 0.21), (2.83, 0.13)]
+    column = ([(zb + (z - 1.15) * B, r * B) for z, r in body]       # one loft up the axis
+              + [(zt + (z - 1.96) * N, r * Nr) for z, r in neck]
+              + [(head_z(z), r * Hd) for z, r in head])
+    loft([(0, 0, z, r, r, r) for z, r in column], [c("a_main"), c("a_pale"), c("a_mark")], zone,
          nring=90, nseg=36)
     # the mouth hole on top
-    ell((0, 0, 2.835), (0.07, 0.07, 0.025), c("a_dark"))
+    ell((0, 0, head_z(2.835)), (0.07 * Hd, 0.07 * Hd, 0.025 * Hd), c("a_dark"))
+    z_eye = zb + (1.52 - 1.15) * B
     for k in range(6):
         a = math.radians(60 * k)            # eyes and tusks
         b = math.radians(30 + 60 * k)       # legs and fronds
         ca, sa, cb, sb = math.cos(a), math.sin(a), math.cos(b), math.sin(b)
         # eye: a magenta lens on the body's middle facing out, a dark vertical slit pupil
-        ell((0.53 * ca, 0.53 * sa, 1.52), (0.06, 0.1, 0.1), c("a_eye"), rot=rz(60 * k))
-        ell((0.585 * ca, 0.585 * sa, 1.52), (0.012, 0.014, 0.075), c("a_pupil"), rot=rz(60 * k))
+        re, rp = 0.53 * B, 0.53 * B + 0.055 * E
+        ell((re * ca, re * sa, z_eye), (0.06 * E, 0.1 * E, 0.1 * E), c("a_eye"), rot=rz(60 * k))
+        ell((rp * ca, rp * sa, z_eye), (0.012 * E, 0.014 * E, 0.075 * E), c("a_pupil"), rot=rz(60 * k))
         # tusk: from the head's rim, curving up and out
-        tube([(0.19 * ca, 0.19 * sa, 2.73), (0.25 * ca, 0.25 * sa, 2.83), (0.29 * ca, 0.29 * sa, 2.95),
-              (0.28 * ca, 0.28 * sa, 3.06), (0.24 * ca, 0.24 * sa, 3.12)], 0.05, 0.008, c("a_head"), seg=10)
+        tk = [(0.19, 2.73), (0.25, 2.83), (0.29, 2.95), (0.28, 3.06), (0.24, 3.12)]
+        r0, z0 = tk[0]
+        tk = [(Hd * (r0 + (r - r0) * T), head_z(z0 + (z - z0) * T)) for r, z in tk]
+        tube([(r * ca, r * sa, z) for r, z in tk], 0.05 * Hd, 0.008 * Hd, c("a_head"), seg=10)
         # frond: rises from the rim, arcs outward and droops, its edges frilled cyan
         prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
                 (1.2, 2.78), (1.14, 2.6)]
-        fs = LS_FROND[k]
-        prof = [(0.22 + (r - 0.22) * fs, 2.76 + (z - 2.76) * fs) for r, z in prof]
+        fs = LS_FROND[k] * F
+        prof = [(0.22 * Hd + (r - 0.22) * fs, head_z(2.76) + (z - 2.76) * fs) for r, z in prof]
         path = [(r * cb, r * sb, z) for r, z in catmull(prof, 16)]
-        widths = [0.07 + 0.3 * fs * math.sin(math.pi * min(1.0, t / 15 * 1.12)) for t in range(16)]
+        widths = [F * (0.07 + 0.3 * LS_FROND[k] * math.sin(math.pi * min(1.0, t / 15 * 1.12)))
+                  for t in range(16)]
         side = Vector((-sb, cb, 0))
-        ribbon(path, widths, side, c("a_membrane"), th=0.035)
+        ribbon(path, widths, side, c("a_membrane"), th=0.035 * F)
         for sgn in (-1, 1):
-            edge = [tuple(Vector(p) + side * (sgn * w / 2)) for p, w in zip(path, widths)]
-            tube(edge[1:], 0.025, 0.016, c("a_glow"), seg=6)
+            edge = [tuple(Vector(q) + side * (sgn * w / 2)) for q, w in zip(path, widths)]
+            tube(edge[1:], 0.025 * F, 0.016 * F, c("a_glow"), seg=6)
         # leg: a hip bulb under the body, the thigh out and down to a bulbous knee, the shin
         # down to the ankle, three splayed toes
-        hip, knee, ankle = (0.40 * cb, 0.40 * sb, 1.22), (0.72 * cb, 0.72 * sb, 0.80), (0.92 * cb, 0.92 * sb, 0.16)
-        ell(hip, (0.12,) * 3, c("a_limb"))
-        tube([hip, knee], 0.088, 0.072, c("a_limb"), seg=12)
-        ell(knee, (0.1,) * 3, c("a_mark"))
-        tube([knee, ankle], 0.07, 0.06, c("a_limb"), seg=12)
-        ell(ankle, (0.075,) * 3, c("a_mark"))
+        # optional (round 3 comparisons, absent = 1): `splay` scales the knee's and ankle's
+        # reach beyond the hip, `toe` the toes' length from the ankle
+        Sp, Tl = p.get("splay", 1.0), p.get("toe", 1.0)
+        rh = 0.40 * B
+        rk, ra = rh + 0.32 * Lg * Sp, rh + 0.52 * Lg * Sp
+        hip, knee, ankle = (rh * cb, rh * sb, 1.22 * Lg), (rk * cb, rk * sb, 0.80 * Lg), (ra * cb, ra * sb, 0.16 * Lg)
+        ell(hip, (0.12 * Lr,) * 3, c("a_limb"))
+        tube([hip, knee], 0.088 * Lr, 0.072 * Lr, c("a_limb"), seg=12)
+        ell(knee, (0.1 * Lr,) * 3, c("a_mark"))
+        tube([knee, ankle], 0.07 * Lr, 0.06 * Lr, c("a_limb"), seg=12)
+        ell(ankle, (0.075 * Lr,) * 3, c("a_mark"))
         for dt in (-30, 0, 30):
             d = math.radians(30 + 60 * k + dt)
-            toe = (0.92 * cb + 0.17 * math.cos(d), 0.92 * sb + 0.17 * math.sin(d), 0.05)
-            cyl(ankle, toe, 0.06, 0.05, mat=c("a_foot"), seg=8)
-            ell(toe, (0.1, 0.07, 0.05), c("a_foot"), rot=rz(30 + 60 * k + dt))
+            toe = (ra * cb + 0.17 * Lr * Tl * math.cos(d), ra * sb + 0.17 * Lr * Tl * math.sin(d), 0.05 * Lr)
+            cyl(ankle, toe, 0.06 * Lr, 0.05 * Lr, mat=c("a_foot"), seg=8)
+            ell(toe, (0.1 * Lr, 0.07 * Lr, 0.05 * Lr), c("a_foot"), rot=rz(30 + 60 * k + dt))
+
+
+def build_loftstrider(p, x, y):
+    """`loftstrider_rig(p)` at its own metres, its anchor at (x, y) on z = 0 (no `REF`
+    rescale: a calf's part sizes are absolute). Returns the new organism objects."""
+    use("loftstrider")
+    start = len(L.ORG)
+    loftstrider_rig(p)
+    objs = L.ORG[start:]
+    for ob in objs:
+        ob.data.transform(Matrix.Translation((x, y, 0)))
+        ob.data.update()
+    return objs
 
 
 # Models whose parts hang below their z = 0 (the perch under the stand pose's feet): the
