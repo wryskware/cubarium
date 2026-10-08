@@ -222,3 +222,14 @@ max(step, pack) and roughly 3×. Wrysk: "ill pin it for now. with the new render
 should support things like running uncapped by presentation and just sampling the world to
 render it." The Godot renderer should take that shape: the sim runs at its own speed and
 the presentation samples published snapshots.
+
+## 10. One save format (Wrysk, 2026-10-07: "i guess if its an easy package" — it wasn't)
+
+Two formats coexist. The game's whole-world save (directory with `meta.json`, written by
+`cubarium-session`'s store, `cubarium voxel`'s `save`, and `cubarium-world`) is what the Godot
+game loads. The study tools write the older three-file layout (`world.bin`, `flora.bin`,
+`fauna.bin`, `minute`) in about 13 files (`voxel_census`, `phase_profile`, `succession_study`,
+`light_study`, …), read back by `cubarium-voxel-sim/src/saved.rs`. Unifying means moving the
+whole-save format down into the sim crate (the session crate sits above it) and pointing every
+study tool at the one writer and loader. Medium; touches tools other threads use mid-study.
+`cubarium-world found|advance` covers making game-loadable saves headless meanwhile.
