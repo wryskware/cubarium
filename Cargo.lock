@@ -668,6 +668,7 @@ name = "cubarium-session"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
  "cubarium-observatory",
  "cubarium-search",
  "cubarium-voxel",

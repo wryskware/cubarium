@@ -459,18 +459,7 @@ fn marks(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>) {
     let old = std::mem::take(&mut inc(s).ground);
     let mut new: Vec<(Site, [u8; 4])> = Vec::with_capacity(flora.ground.len());
     for g in flora.ground {
-        let seed = g
-            .seed_mark(flora.tick, flora.config)
-            .map_or(0, |sp| sp.index() as u8 + 1);
-        new.push((
-            g.site,
-            [
-                u8::from(g.dead_wood >= 0.05),
-                u8::from(g.litter >= 0.05),
-                u8::from(g.carrion >= 0.05),
-                seed,
-            ],
-        ));
+        new.push((g.site, cubarium_session::view_state::ground_marks(g, flora.tick, flora.config)));
     }
     let mut changes: Vec<(Site, [u8; 4], [u8; 4])> = Vec::new();
     {
