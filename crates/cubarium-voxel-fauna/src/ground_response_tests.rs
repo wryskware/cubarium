@@ -405,6 +405,37 @@ fn a_shredder_freezes_on_a_tremor_and_does_not_flee() {
     }
 }
 
+/// **FROZEN-PREY**: a live blind body with no ground response (the capgnawer) runs from its
+/// hunter's footfall by the S1 rule, and keeps feeding through a grazer's step of the same
+/// strength.
+#[test]
+fn a_live_blind_forager_flees_its_hunters_footfall_not_a_grazers() {
+    let world = world(32);
+    let flora = Flora::new(FloraConfig::default());
+    let me = Founder::Capgnawer;
+    let mut c = config();
+    let hunter = shredder_hunted(&mut c);
+    let mut h = c.founders[hunter.index()].hunter.unwrap();
+    h.prey[me.index()] = true;
+    c.founders[hunter.index()].hunter = Some(h);
+    c.founders[me.index()].senses.live = true;
+    c.founders[me.index()].vigilance = Vigilance::default();
+    assert!(me.manifest().cone_range_m <= 0.0, "the capgnawer is blind");
+    for (walker_of, flees) in [(hunter, true), (GRAZER, false)] {
+        let mut fauna = Fauna::new(c.clone());
+        fauna.set_births_enabled(false);
+        let s = body(&mut fauna, &world, me, 2.0, EAST, 0.0);
+        let sp = 4.0 * cruise(&fauna, walker_of);
+        let w = body(&mut fauna, &world, walker_of, 2.3, EAST, sp);
+        sense(&mut fauna, &world);
+        let felt = crate::tremor_of(&animal(&fauna, w), 0.3, fauna.config.predation.tremor_near_m);
+        assert!(felt >= fauna.config.predation.flee_tremor, "{}: the step reaches the flee line", walker_of.name());
+        let i = fauna.animals.iter().position(|a| a.id == s).unwrap();
+        let act = super::flee(&mut fauna, i, &world.view(), &flora.view(), None, CROP);
+        assert_eq!(act.is_some(), flees, "{}: flees only its hunter", walker_of.name());
+    }
+}
+
 // ------------------------------------------------------------------ the seedporter's eyes
 
 /// The seedporter recognises a still threat farther than the frondgrazer does: a still
