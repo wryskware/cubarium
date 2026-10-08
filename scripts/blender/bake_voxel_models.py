@@ -23,6 +23,15 @@ facing +x, one pose, centred on the anchor cell, from `animal_models.py`'s build
 pass MP-A); the unsimulated specimens (`SPECIMENS`) as one adult model each, under the
 manifest's `specimens` key.
 
+Foliage states (`design/handoffs/foliage-states-implementation-2026-10-08.md`): a species
+with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4) is baked in
+every state at every step and variant, the builder's cuts applied to the smaller steps too
+(an umbrellafrond's two tiers are its lowest and top; a seedling's one tier is its
+lowest). The file's state table carries each state's name and the total foliage fraction
+it starts below (`source.json`'s `foliage_state_below`, the species config's). A stripped
+bloomcrown's fallen crown voxels are added by hand at their ground cells, tagged fallen
+foliage of the crown's layer, so the presenter paints them crown pink.
+
 Voxelization is the lineup's rule — a cell whose centre lies inside a part or within
 half a voxel of its surface — for everything but the accents (bloom, fruit, sense patch).
 Every accent is smaller than a voxel: under the half-voxel rule a 6 cm fruit grew into a
@@ -200,12 +209,18 @@ def lineup_layers(stage):
             for l in stage["layers"]]
 
 
-def build_plant(name, h, r, stage_i, stage, rng, vox):
+def build_plant(name, h, r, stage_i, stage, rng, vox, spec=None):
+    """The plant's parts, built at the cell centre; `spec` a foliage state's cuts (only for
+    a species in `L.FOLIAGE_STATES`). A part marked `fallen` is left out: the bake adds
+    its cell by hand (`fallen_cells`)."""
     reset_scene()
     x = y = 0.5 * vox
     fn = getattr(L, name)
-    fn(x, y, h, r, lineup_layers(stage), stage_i, rng)
-    objs = list(L.ORG)
+    if spec:
+        fn(x, y, h, r, lineup_layers(stage), stage_i, rng, spec=spec)
+    else:
+        fn(x, y, h, r, lineup_layers(stage), stage_i, rng)
+    objs = [ob for ob in L.ORG if "fallen" not in ob]
     if name == "stonecushion":
         # The lineup draws the rock lip it lives on and sits the cushion on its top. In
         # the world the stand's support face *is* that rock: drop the lip and set the
@@ -326,27 +341,71 @@ def cells_of(cells, tag_of):
     return out
 
 
+def fallen_cells(cells, spec, h, stage, vox):
+    """`cells` (as `cells_of` writes them) with the state's fallen crown voxels added at
+    their ground cells (dx, dz) = `spec["fallen"]`: the crown's own material (p2, the
+    vanes') and the **fallen** tag of the crown's foliage layer (0x40 | i), which the
+    presenter paints at the top of the layer's ramp. A cell already held is left as it is.
+    The caller passes no spec for a seedling (stage 0): it has no crown to drop."""
+    if not spec or not spec.get("fallen"):
+        return cells
+    crown = plant_tag("foliage", h, h, stage) & 0x0F
+    taken = {(c[0], c[1], c[2]) for c in cells}
+    out = list(cells)
+    for i, j in spec["fallen"]:
+        if (i, 0, j) in taken:
+            print(f"  fallen cell {(i, j)} is held, left out", flush=True)
+            continue
+        out.append((i, 0, j, PALETTE.index("p2"), 0x40 | crown))
+    return out
+
+
 # --- the file -----------------------------------------------------------------------
 
-def write_cvm(path, kind, steps):
-    """steps: [(height_m, radius_m, [cells, ...])], cells [(dx, dy, dz, material, tag)]."""
-    used = sorted({c[3] for _, _, variants in steps for cells in variants for c in cells})
+def write_cvm(path, kind, steps, states=None):
+    """steps: [(height_m, radius_m, variants)], cells [(dx, dy, dz, material, tag)]. With
+    `states` [(name, start)], state 0 first, each variant is one cell list per state;
+    without, each variant is one cell list and the file has the one state "full"."""
+    if states is None:
+        states = [("full", 1.0)]
+        steps = [(h, r, [[cells] for cells in variants]) for h, r, variants in steps]
+    used = sorted({c[3] for _, _, variants in steps for per in variants for cells in per for c in cells})
     local = {g: n for n, g in enumerate(used)}
-    b = bytearray(b"CVM1")
+    b = bytearray(b"CVM2")
     b += struct.pack("<BB", kind, len(used))
     for g in used:
         name = PALETTE[g].encode()
         b += struct.pack("<B", len(name)) + name
+    assert 1 <= len(states) <= 255
+    b += struct.pack("<B", len(states))
+    for name, start in states:
+        enc = name.encode()
+        b += struct.pack("<B", len(enc)) + enc + struct.pack("<d", start)
     b += struct.pack("<H", len(steps))
     for h, r, variants in steps:
         b += struct.pack("<ddB", h, r, len(variants))
-        for cells in variants:
-            b += struct.pack("<I", len(cells))
-            for dx, dy, dz, m, tag in cells:
-                b += struct.pack("<bbbBB", dx, dy, dz, local[m], tag)
+        for per in variants:
+            assert len(per) == len(states), "one cell list per state"
+            for cells in per:
+                b += struct.pack("<I", len(cells))
+                for dx, dy, dz, m, tag in cells:
+                    b += struct.pack("<bbbBB", dx, dy, dz, local[m], tag)
     with open(path, "wb") as f:
         f.write(b)
     return len(b)
+
+
+def state_table(sp):
+    """[(name, start, spec)]: the species' foliage states, the full model first, each
+    starting below its threshold in `foliage_state_below`; one full state without."""
+    states = L.FOLIAGE_STATES.get(sp["name"])
+    below = list(sp.get("foliage_state_below") or [])
+    if not states:
+        return [("full", 1.0, None)]
+    if len(below) != len(states) - 1:
+        raise ValueError(f"{sp['name']}: {len(states)} baked states but foliage_state_below "
+                         f"{below} names {len(below)} thresholds")
+    return [(name, 1.0 if k == 0 else below[k - 1], spec) for k, (name, spec) in enumerate(states)]
 
 
 def bake_plant(sp, vox, out_dir):
@@ -357,6 +416,7 @@ def bake_plant(sp, vox, out_dir):
     def role_of(mat):
         return roles.get(mat, "foliage")
 
+    table = state_table(sp)
     steps, meta = [], []
     for (kh, kr), t in size_steps(sp, vox):
         prof = sp["profile"]
@@ -366,20 +426,25 @@ def bake_plant(sp, vox, out_dir):
         r = dimension(prof, sp["crown_radius_m"], t)
         variants = []
         for v in range(VARIANTS):
-            objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v}"), vox)
-            cells = voxelize(objs, vox, role_of)
+            per_state = []
+            for _, _, spec in table:
+                objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v}"), vox, spec)
+                cells = voxelize(objs, vox, role_of)
 
-            def tag_of(mat, k, h=h, stage=stage):
-                return plant_tag(role_of(mat), (k + 0.5) * vox, h, stage)
+                def tag_of(mat, k, h=h, stage=stage):
+                    return plant_tag(role_of(mat), (k + 0.5) * vox, h, stage)
 
-            variants.append(cells_of(cells, tag_of))
+                per_state.append(fallen_cells(cells_of(cells, tag_of), spec if si else None, h, stage, vox))
+            variants.append(per_state)
         steps.append((kh * vox, kr * vox / 2, variants))
         meta.append({"height_m": kh * vox, "radius_m": kr * vox / 2, "stage": si,
                      "built_at": {"t": round(t, 4), "height_m": round(h, 4), "radius_m": round(r, 4)},
-                     "cells": [len(c) for c in variants]})
+                     "cells": [len(per[0]) for per in variants]}
+                    | ({"state_cells": [[len(c) for c in per] for per in variants]}
+                       if len(table) > 1 else {}))
     file = f"{name}.cvm"
-    size = write_cvm(os.path.join(out_dir, file), 0, steps)
-    return file, size, meta
+    size = write_cvm(os.path.join(out_dir, file), 0, steps, [(n, s) for n, s, _ in table])
+    return file, size, meta, [{"name": n, "start": s} for n, s, _ in table]
 
 
 def voxelize_animal(objs, vox, floor=0):
@@ -502,20 +567,22 @@ def main():
         out_dir = os.path.join(ROOT, str(round(vox * 1000)))
         os.makedirs(out_dir, exist_ok=True)
         manifest_path = os.path.join(out_dir, "manifest.json")
-        manifest = {"format": "CVM1", "voxel_m": vox, "palette": PALETTE,
+        manifest = {"format": "CVM2", "voxel_m": vox, "palette": PALETTE,
                     "variants": VARIANTS, "bins": BINS, "species": {}, "founders": {},
                     "detail": {}}
         if ONLY and os.path.exists(manifest_path):
             with open(manifest_path) as fh:
                 manifest = json.load(fh)
             manifest["palette"] = PALETTE
+            manifest["format"] = "CVM2"
         manifest.setdefault("specimens", {})
         for sp in src["species"]:
             if (ONLY and sp["name"] not in ONLY) or not hasattr(L, sp["name"]):
                 continue  # no builder yet: no model, and the presenter falls back
-            file, size, meta = bake_plant(sp, vox, out_dir)
+            file, size, meta, states = bake_plant(sp, vox, out_dir)
             manifest["species"][sp["name"]] = file
-            manifest["detail"][sp["name"]] = {"bytes": size, "steps": meta}
+            manifest["detail"][sp["name"]] = {"bytes": size, "steps": meta} | (
+                {"states": states} if len(states) > 1 else {})
             print(f"{vox} m {sp['name']}: {len(meta)} steps, {size} bytes", flush=True)
         for f in src["founders"]:
             if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF:

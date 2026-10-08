@@ -251,6 +251,11 @@ fn species_rows() -> Vec<Row> {
             .search(0.0, 2.0),
         r("cured_srgb", "sRGB 0x00RRGGBB (look, 0 = the species' palette)", nonneg, "the plain-voxel colour of a cured stand's crown")
             .optional().grade("N").prov("decision"),
+        // Optional: empty (no row matched) for a species whose model has no states.
+        r("foliage_state_below.*", "fraction of total foliage capacity (descending)", fraction, "presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn")
+            .optional().grade("N").prov("decision"),
+        r("foliage_state_hysteresis", "fraction of total foliage capacity", fraction, "presentation: how far above a state's threshold a stand must regrow to return to the fuller state")
+            .grade("N").prov("decision"),
         r("founder_per_m2", "founders per m2 of habitat", nonneg, "founding: stands per square metre of ground the species' own gates pass on")
             .search(0.0, 10.0),
         r("founder_colony", "stands", Range::at_least(1.0), "founding: the size of one founder colony").search(1.0, 12.0),
@@ -506,6 +511,13 @@ fn species_rules(at: &str, sc: &SpeciesConfig) -> Result<(), String> {
         return fail(format!(
             "alive_min {} is over wood_max {}: every newborn would die on its first growth tick",
             sc.alive_min, sc.wood_max
+        ));
+    }
+    if sc.foliage_state_below.windows(2).any(|w| w[1] > w[0]) {
+        return fail(format!(
+            "foliage_state_below {:?} is not descending: each reduced state is drawn below \
+             the one before it",
+            sc.foliage_state_below
         ));
     }
     Ok(())
