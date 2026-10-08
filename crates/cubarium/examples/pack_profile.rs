@@ -13,6 +13,12 @@
 //!
 //! `--png` writes the last frame, drawn from the change-only pack's last upload.
 //!
+//! `--mode serial` (the default) steps, then packs the live world: a tick costs both.
+//! `--mode overlap` (H3) packs a snapshot of the last tick on its own thread while the next
+//! tick steps (`VoxelGpuSink::stage_snapshot_beside`), then copies the next snapshot: a
+//! tick costs the copy plus the longer of the two. Both print the step, the pack, the copy
+//! and the whole tick, ms.
+//!
 //! Prints the pack's median, p95 and max ms per tick (over every tick, then the dry and the
 //! raining ones), the bytes the voxel plane uploads per tick, and each phase's.
 
@@ -23,6 +29,7 @@ use anyhow::{Context, Result, bail};
 
 use cubarium::sink::GpuTargetKind;
 use cubarium::sink::gpu::pack_timer;
+use cubarium::sink::gpu::voxel::snapshot::{PackSnapshot, SnapshotCopier};
 use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
 use cubarium::voxel::project::Projection;
 use cubarium::voxel::{LayerConfig, Seeds, VoxelConfig, found as found_habitat, params_of};
@@ -38,6 +45,7 @@ fn main() -> Result<()> {
     let mut save: Option<PathBuf> = None;
     let mut png: Option<PathBuf> = None;
     let mut check = false;
+    let mut overlap = false;
     let (mut seed, mut found_ticks, mut ticks, mut shower_at, mut px) = (1u64, 0u64, 1200u64, None, None);
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -54,6 +62,11 @@ fn main() -> Result<()> {
             "--px" => px = Some(v()?.parse::<u32>()?),
             "--png" => png = Some(v()?.into()),
             "--check-raster" => check = true,
+            "--mode" => overlap = match v()?.as_str() {
+                "serial" => false,
+                "overlap" => true,
+                m => bail!("--mode serial | overlap, not {m}"),
+            },
             _ => bail!("unknown argument {k}"),
         }
     }
@@ -119,24 +132,48 @@ fn main() -> Result<()> {
         ticks
     );
     let mut rows: Vec<(bool, f64, f64, Vec<(&'static str, f64)>)> = Vec::new();
-    let mut sim_ms = Vec::new();
+    let (mut sim_ms, mut copy_ms, mut tick_ms) = (Vec::new(), Vec::new(), Vec::new());
+    let mut copier = SnapshotCopier::new(cfg.pack.pore_sweep);
+    let mut snap = PackSnapshot::default();
+    if overlap {
+        let (world, flora, fauna) = sim.layers();
+        copier.fill(&world.view(), flora.view(), fauna.view(), &mut snap);
+    }
     for k in 0..ticks {
         if Some(k) == shower_at {
             let ok = sim.world_mut().force_rain(cubarium_voxel::weather::RainMode::Shower);
             eprintln!("pack_profile: a shower forced at tick {k}: {ok}");
         }
-        let t = Instant::now();
-        sim.step();
-        sim_ms.push(t.elapsed().as_secs_f64() * 1e3);
-        sink.set_clock(sim.world().tick(), 0.0);
-        let t = Instant::now();
-        if !sink.stage_world(sim.world(), sim.flora(), sim.fauna()) {
-            bail!("the renderer refused a pack with no frame in flight");
-        }
-        let ms = t.elapsed().as_secs_f64() * 1e3;
-        let phases = pack_timer::phases();
+        let whole = Instant::now();
+        let (ms, phases) = if overlap {
+            let (staged, step) = sink.stage_snapshot_beside(&mut snap, || {
+                let t = Instant::now();
+                sim.step();
+                t.elapsed().as_secs_f64() * 1e3
+            });
+            if !staged {
+                bail!("the renderer refused a pack with no frame in flight");
+            }
+            sim_ms.push(step);
+            let (world, flora, fauna) = sim.layers();
+            copier.fill(&world.view(), flora.view(), fauna.view(), &mut snap);
+            copy_ms.push(snap.copy_ms());
+            let (ms, phases) = sink.last_pack();
+            (ms, phases.to_vec())
+        } else {
+            let t = Instant::now();
+            sim.step();
+            sim_ms.push(t.elapsed().as_secs_f64() * 1e3);
+            let t = Instant::now();
+            if !sink.stage_world(sim.world(), sim.flora(), sim.fauna()) {
+                bail!("the renderer refused a pack with no frame in flight");
+            }
+            (t.elapsed().as_secs_f64() * 1e3, pack_timer::phases())
+        };
+        tick_ms.push(whole.elapsed().as_secs_f64() * 1e3);
         let kib = sink.last_upload_kib();
         rows.push((sim.world().view().is_raining(), ms, kib, phases));
+        sink.set_clock(sink.staged_tick().unwrap_or(0), 0.0);
         sink.render()?;
     }
     let q = |mut v: Vec<f64>| -> String {
@@ -172,7 +209,12 @@ fn main() -> Result<()> {
             println!("    {n:16} {}", q(v));
         }
     }
+    println!("mode {}", if overlap { "overlap" } else { "serial" });
     println!("  sim step ms      {}", q(sim_ms));
+    if overlap {
+        println!("  copy ms          {}", q(copy_ms));
+    }
+    println!("  tick ms          {}", q(tick_ms));
     if check {
         // The image the brick uploads built against a whole upload of the same world: the
         // same tick staged once more change-only (nothing moves), then once in full.

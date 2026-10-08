@@ -141,7 +141,8 @@ impl WorldRenderer {
     }
 
     /// What the presenter has spent: `frames`, and cumulative milliseconds `record_ms` (CPU),
-    /// `gpu_ms`, `copy_ms` (the read-back copy), `pack_ms` over `packs`; `packs_refused`,
+    /// `gpu_ms`, `copy_ms` (the read-back copy), `pack_ms` over `packs` (on the pack thread),
+    /// `snapshot_ms` over `snapshots` (the loop's copy for the pack); `packs_refused`,
     /// `displaced` (frames posted over an untaken one), `unlit` (a still world drawn before its
     /// sky plane arrived).
     #[func]
@@ -155,6 +156,8 @@ impl WorldRenderer {
             d.set("copy_ms", &s.copy_ms.to_variant());
             d.set("pack_ms", &s.pack_ms.to_variant());
             d.set("packs", &(s.packs as i64).to_variant());
+            d.set("snapshot_ms", &s.snapshot_ms.to_variant());
+            d.set("snapshots", &(s.snapshots as i64).to_variant());
             d.set("packs_refused", &(s.packs_refused as i64).to_variant());
             d.set("displaced", &(s.displaced as i64).to_variant());
             d.set("unlit", &s.unlit.to_variant());

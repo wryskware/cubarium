@@ -215,6 +215,8 @@ pub struct VoxelConfig {
     /// appear one by one over this, on the frame clock. 0 switches at once. Presentation
     /// only; the states and their thresholds are the species' (`foliage_state_below`).
     pub foliage_fade_s: f64,
+    /// **How the GPU renderer's pack runs** (`[pack]`, H3): execution and presentation only.
+    pub pack: PackConfig,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -251,6 +253,7 @@ impl Default for VoxelConfig {
             meal_flash: animal::MEAL_FLASH_DEFAULT,
             figures: figure::FigureConfig::default(),
             foliage_fade_s: stand::FOLIAGE_FADE_S,
+            pack: PackConfig::default(),
             serve: None,
             sim: SimParams::default(),
         }
@@ -316,6 +319,29 @@ pub enum Lighting {
     Flat,
     /// The lit tier: the desktop's.
     Lit,
+}
+
+/// **How the GPU renderer's pack runs** (`[pack]`, H3 of
+/// `design/handoffs/hybrid-renderer-2026-10-07.md`). The pack runs beside the simulation
+/// from a copy of each tick's world (`crate::sink::gpu::voxel::snapshot`); this says how
+/// much of that copy is taken each tick. Execution and presentation only: no rule and no
+/// number of the simulation.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PackConfig {
+    /// **Pore water is copied and compared a slice of the grid a tick, the whole grid
+    /// once every this many ticks** (like the Godot feed's `pore_sweep`): soil wetness on
+    /// screen catches up with the simulation over this many ticks (16 is 0.8 s at 20
+    /// ticks a second) rather than at once. Free water, plants and animals are copied every
+    /// tick. `1` copies all of it every tick. A new world or a terrain edit copies all of
+    /// it once.
+    pub pore_sweep: u32,
+}
+
+impl Default for PackConfig {
+    fn default() -> PackConfig {
+        PackConfig { pore_sweep: crate::sink::gpu::voxel::snapshot::PORE_SWEEP }
+    }
 }
 
 /// `[light]` in the config: the lit tier's numbers. New numbers with stated defaults,
@@ -1266,6 +1292,18 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
                 since_ticks += stepped;
                 moved |= command_moved || stepped > 0;
                 drop(point);
+                // H3: what moved is copied for the pack, which runs beside the next step;
+                // with no step coming (paused), it is packed now.
+                if out.packs_beside() {
+                    if moved {
+                        let (world, flora, fauna) = sim.layers();
+                        out.snapshot(world, flora, fauna);
+                        moved = false;
+                    }
+                    if stepped == 0 {
+                        out.stage_snapshot_now();
+                    }
+                }
                 out.observe_tick(sim.world().tick());
                 if let Some(o) = observatory.as_mut() {
                     o.maybe_publish(&sim, &ctl);
@@ -1517,12 +1555,48 @@ impl Out {
                 sink.submit(Output::Ring(raster))?;
                 Ok(false)
             }
+            Out::Gpu(gpu) if gpu.packs_beside() && gpu.staged_tick().is_some() => {
+                // The ticks' packs run beside the steps (H3): the frame shows the tick last
+                // packed, and its clock runs on from there. What moved is snapshotted at
+                // the next clock tick, so the flag stays up until then.
+                let tick = gpu.staged_tick().unwrap_or(world.tick());
+                gpu.set_clock(tick, fraction);
+                gpu.render()?;
+                Ok(moved)
+            }
             Out::Gpu(gpu) => {
                 let owed = moved && !gpu.stage_world(world, flora, fauna);
                 gpu.set_clock(world.tick(), fraction);
                 gpu.render()?;
                 Ok(owed)
             }
+        }
+    }
+
+    /// Whether the GPU path packs beside the steps (H3).
+    fn packs_beside(&self) -> bool {
+        matches!(self, Out::Gpu(gpu) if gpu.packs_beside())
+    }
+
+    /// Run `step` beside the pack of the waiting snapshot (the GPU path), or alone.
+    fn step_beside<R>(&mut self, step: impl FnOnce() -> R) -> R {
+        match self {
+            Out::Gpu(gpu) => gpu.step_beside(step),
+            Out::Cpu { .. } => step(),
+        }
+    }
+
+    /// Copy the world for the pack beside the next step.
+    fn snapshot(&mut self, world: &World, flora: &Flora, fauna: &Fauna) {
+        if let Out::Gpu(gpu) = self {
+            gpu.snapshot(world, flora, fauna);
+        }
+    }
+
+    /// Pack the waiting snapshot now (no step is coming to pack it beside).
+    fn stage_snapshot_now(&mut self) {
+        if let Out::Gpu(gpu) = self {
+            gpu.stage_snapshot_now();
         }
     }
 
@@ -1880,6 +1954,8 @@ fn open_out(args: &Voxel, cfg: &VoxelConfig, proj: Projection, speed: f64) -> Re
                 gpu = gpu.with_web(web(args.web_port)?, args.gpu_web_rate);
             }
             gpu.set_weather_preview(args.weather_preview);
+            // H3: each tick's pack runs beside the next tick's step.
+            gpu.pack_beside(cfg.pack.pore_sweep);
             Out::Gpu(Box::new(gpu))
         }
     })
@@ -2041,9 +2117,13 @@ impl CommandPoint<'_> {
             if ctl.quit || !pacer.take_tick() {
                 break;
             }
-            let (at, before) = (Instant::now(), Phases::now());
-            sim.step();
-            let ns = at.elapsed().as_nanos() as u64;
+            let before = Phases::now();
+            // The GPU path packs the last tick's snapshot beside this step (H3).
+            let ns = self.out.step_beside(|| {
+                let at = Instant::now();
+                sim.step();
+                at.elapsed().as_nanos() as u64
+            });
             budget.tick(ns, before);
             if let Some(o) = self.observatory.as_mut() {
                 o.observer.after_tick(sim.world(), sim.fauna(), ns);
