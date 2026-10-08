@@ -11,6 +11,10 @@
 // in front of the walk's own hit at this pixel (`voxel.frag`'s `depthOut`), so terrain and
 // plants hide a figure behind them and a figure hides what is behind it.
 //
+// **Figures over figures.** Each fragment writes the nearest z of its texels as its depth,
+// and the composite keeps the nearest (`figures.rs` draws them back to front as well, so a
+// figure's soft edge blends over the one behind it).
+//
 // **Cross-fades.** A figure may name two tiles, weighted: a pose's model swap, or a turn
 // between two of the fine angle steps. Each texel of either counts by its weight, so the
 // two blend pixel by pixel. Birth and death fade the whole figure; a highlight leans it
@@ -30,7 +34,8 @@ layout(location = 0) out vec4 outColour;
 layout(location = 1) out vec4 outEmit;
 
 // One tile's coverage of this pixel: premultiplied colour and coverage, and emission.
-void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec3 em) {
+// `zNear` keeps the nearest z of the texels that count.
+void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec3 em, inout float zNear) {
     vec2 g = tc - 0.5;
     ivec2 i0 = ivec2(floor(g));
     vec2 f = g - vec2(i0);
@@ -43,7 +48,9 @@ void tileOver(Tile t, vec2 tc, float wz, float weight, inout vec4 col, inout vec
         ivec2 at = t.rect.xy + ti;
         vec4 c = texelFetch(atlasColour, at, 0);
         if (c.a < 0.5) { continue; }
-        if (texelFetch(atlasZ, at, 0).r > wz + pc.atlas.z) { continue; }
+        float tz = texelFetch(atlasZ, at, 0).r;
+        if (tz > wz + pc.atlas.z) { continue; }
+        zNear = min(zNear, tz);
         col += w * vec4(c.rgb, 1.0);
         em += w * texelFetch(atlasEmit, at, 0).rgb;
     }
@@ -57,14 +64,20 @@ void main() {
     vec2 c = gl_FragCoord.xy - f.anchor.xy;
     vec4 col = vec4(0.0);
     vec3 em = vec3(0.0);
+    float zNear = 3.0e38;
     float wb = f.tiles.y >= 0 ? clamp(f.anchor.z, 0.0, 1.0) : 0.0;
     Tile a = tiles[f.tiles.x];
-    tileOver(a, c - vec2(a.orig.xy), wz, 1.0 - wb, col, em);
+    tileOver(a, c - vec2(a.orig.xy), wz, 1.0 - wb, col, em, zNear);
     if (f.tiles.y >= 0) {
         Tile b = tiles[f.tiles.y];
-        tileOver(b, c - vec2(b.orig.xy), wz, wb, col, em);
+        tileOver(b, c - vec2(b.orig.xy), wz, wb, col, em, zNear);
     }
     if (col.a <= 0.0) { discard; }
+    // Figures against each other, per pixel: the composite's depth test keeps the nearest
+    // figure's texels whatever order the figures are drawn in, by the walk's convention (z,
+    // larger is farther; along one pixel's ray z only grows). `pc.atlas.w` is the world's
+    // depth; the range has room either side for a body reaching past the strip.
+    gl_FragDepth = clamp((zNear + 16.0) / (pc.atlas.w + 32.0), 0.0, 1.0);
     float fade = clamp(f.anchor.w, 0.0, 1.0);
     col *= fade;
     em *= fade;

@@ -45,6 +45,8 @@ pub mod synthetic;
 pub mod target;
 pub mod vk;
 pub mod figures;
+#[cfg(test)]
+mod figures_order_tests;
 pub mod voxel;
 pub mod weather;
 

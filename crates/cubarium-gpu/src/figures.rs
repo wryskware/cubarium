@@ -501,6 +501,10 @@ pub fn pack(frame: &FigureFrame, s: u32, rise: u32, base: i32, raster_w: u32, vi
             }
         }
     }
+    // Back to front (larger z first), so a nearer figure's soft edge blends over the one
+    // behind it; the composite's depth test settles every overlap per pixel either way.
+    let tiles = &out.tiles;
+    out.figs.sort_by(|a, b| tiles[b.tiles[0] as usize].pos[2].total_cmp(&tiles[a.tiles[0] as usize].pos[2]));
     out.used_h = shelf.used_height();
     out
 }
@@ -587,6 +591,8 @@ pub struct FigurePass {
     emit: Plane,
     z: Plane,
     depth: Plane,
+    /// The composite's depth: figures against each other, per raster pixel.
+    comp_depth: Plane,
     depth_format: vk::Format,
     tile_pass: vk::RenderPass,
     tile_fb: vk::Framebuffer,
@@ -714,14 +720,23 @@ impl FigurePass {
             )
         }?;
 
-        // The composite: over the raster (and the emission), loaded and left for sampling.
+        // The composite: over the raster (and the emission), loaded and left for sampling,
+        // with a depth of its own (cleared each frame) so figures resolve per pixel.
+        let comp_depth = Plane::new(
+            gpu,
+            raster.0,
+            raster.1,
+            depth_format,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::ImageAspectFlags::DEPTH,
+        )?;
         let mut comp_formats = vec![raster_format];
         let mut comp_views = vec![raster_view];
         if let Some((f, v)) = emit {
             comp_formats.push(f);
             comp_views.push(v);
         }
-        let comp_atts: Vec<_> = comp_formats
+        let mut comp_atts: Vec<_> = comp_formats
             .iter()
             .map(|&f| {
                 vk::AttachmentDescription::default()
@@ -735,10 +750,26 @@ impl FigurePass {
                     .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             })
             .collect();
+        comp_atts.push(
+            vk::AttachmentDescription::default()
+                .format(depth_format)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+        );
+        comp_views.push(comp_depth.view);
         let comp_refs: Vec<_> = (0..comp_formats.len() as u32).map(at).collect();
+        let comp_depth_ref = vk::AttachmentReference::default()
+            .attachment(comp_formats.len() as u32)
+            .layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
         let comp_sub = [vk::SubpassDescription::default()
             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
-            .color_attachments(&comp_refs)];
+            .color_attachments(&comp_refs)
+            .depth_stencil_attachment(&comp_depth_ref)];
         let composite_pass = unsafe {
             d.create_render_pass(&vk::RenderPassCreateInfo::default().attachments(&comp_atts).subpasses(&comp_sub), None)
         }?;
@@ -756,7 +787,7 @@ impl FigurePass {
 
         // Buffers: every model's cells, and one frame buffer a ring slot.
         let storage = vk::BufferUsageFlags::STORAGE_BUFFER;
-        let models = gpu.host_buffer((MAX_VOXELS * 8) as u64, storage)?;
+        let models = gpu.host_buffer((MAX_VOXELS * std::mem::size_of::<FigureVoxel>()) as u64, storage)?;
         let frames = (0..slots).map(|_| gpu.host_buffer(SLOT_BYTES, storage)).collect::<Result<Vec<_>>>()?;
 
         // Set 1: the cells, tiles, figures, palette (one set a slot); set 2: the planes.
@@ -882,7 +913,7 @@ impl FigurePass {
             let vs = gpu.shader(COMPOSITE_VERT)?;
             let fs = gpu.shader(COMPOSITE_FRAG)?;
             let blend = vec![over(); comp_formats.len()];
-            let p = pipeline(d, composite_pass, layout, vs, fs, None, vk::PrimitiveTopology::TRIANGLE_STRIP, &blend, false);
+            let p = pipeline(d, composite_pass, layout, vs, fs, None, vk::PrimitiveTopology::TRIANGLE_STRIP, &blend, true);
             unsafe { d.destroy_shader_module(vs, None) };
             unsafe { d.destroy_shader_module(fs, None) };
             p?
@@ -948,6 +979,7 @@ impl FigurePass {
             emit: emit_plane,
             z,
             depth,
+            comp_depth,
             depth_format,
             tile_pass,
             tile_fb,
@@ -1138,10 +1170,13 @@ impl FigurePass {
         fence_writes(d);
 
         let (rw, rh) = self.raster;
+        // The colour planes load (their clear values go unread); the depth clears to far.
+        let comp_clears = [vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } }; 3];
         let begin = vk::RenderPassBeginInfo::default()
             .render_pass(self.composite_pass)
             .framebuffer(self.composite_fb)
-            .render_area(vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: vk::Extent2D { width: rw, height: rh } });
+            .render_area(vk::Rect2D { offset: vk::Offset2D { x: 0, y: 0 }, extent: vk::Extent2D { width: rw, height: rh } })
+            .clear_values(&comp_clears);
         unsafe { d.cmd_begin_render_pass(cb, &begin, vk::SubpassContents::INLINE) };
         let full = vk::Viewport { x: 0.0, y: 0.0, width: rw as f32, height: rh as f32, min_depth: 0.0, max_depth: 1.0 };
         unsafe { d.cmd_set_viewport(cb, 0, &[full]) };
@@ -1152,7 +1187,7 @@ impl FigurePass {
         unsafe { d.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, self.layout, 0, &sets, &[offset]) };
         let push = Push {
             k: [rw as i32, s as i32, rise as i32, rh as i32],
-            atlas: [ATLAS_W as f32, ATLAS_H as f32, DEPTH_BIAS, 0.0],
+            atlas: [ATLAS_W as f32, ATLAS_H as f32, DEPTH_BIAS, self.world.2 as f32],
         };
         unsafe { d.cmd_push_constants(cb, self.layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytemuck::bytes_of(&push)) };
         unsafe { d.cmd_draw(cb, 4, packed.figs.len() as u32, 0, 0) };
@@ -1191,7 +1226,7 @@ impl FigurePass {
         for f in &self.frames {
             f.destroy(gpu);
         }
-        for p in [&self.walk_plane, &self.colour, &self.emit, &self.z, &self.depth] {
+        for p in [&self.walk_plane, &self.colour, &self.emit, &self.z, &self.depth, &self.comp_depth] {
             p.destroy(d);
         }
     }
