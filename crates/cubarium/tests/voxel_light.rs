@@ -115,7 +115,7 @@ fn voxel_ao_is_a_crease_band_along_occluded_edges() {
     ];
 
     let cfg = VoxelConfig {
-        world: c.clone(),
+        sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
         // 16 px: a 2-px crease, so it reaches inside the edge rows the test leaves out.
         px_per_voxel: 16,
         haze: 0.0,
@@ -264,7 +264,7 @@ fn pillar_shadow(levels: u32, light_of: impl Fn(f32, f32) -> f32) {
     }
     let sun = [-1.0f32, 1.5, -1.0];
     let cfg = VoxelConfig {
-        world: c.clone(),
+        sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
         px_per_voxel: 8,
         haze: 0.0,
         dither: 0.0,
@@ -458,7 +458,7 @@ fn lit_water_marks_exactly_the_flat_tiers_water_pixels() {
     let mut masks = Vec::new();
     for lighting in [Lighting::Flat, Lighting::Lit] {
         let cfg = VoxelConfig {
-            world: c.clone(),
+            sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
             px_per_voxel: 8,
             lighting,
             ..VoxelConfig::default()

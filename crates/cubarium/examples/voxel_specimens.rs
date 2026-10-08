@@ -338,7 +338,7 @@ fn main() -> Result<()> {
     };
 
     let cfg = VoxelConfig {
-        world: world_cfg.clone(),
+        sim: cubarium_session::SimParams { world: world_cfg.clone(), ..Default::default() },
         raster_height: 0,
         organisms: if glyphs {
             OrganismLook::Glyphs

@@ -102,7 +102,7 @@ fn main() -> Result<()> {
 
     let world_cfg = w.config().clone();
     let cfg = VoxelConfig {
-        world: world_cfg.clone(),
+        sim: cubarium_session::SimParams { world: world_cfg.clone(), ..Default::default() },
         raster_height: 0,
         px_per_voxel: px,
         lighting: if lit { Lighting::Lit } else { Lighting::Flat },

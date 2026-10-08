@@ -40,7 +40,7 @@ const WARMUP: u64 = 200;
 
 fn habitat() -> (cubarium_voxel::World, Flora, Fauna) {
     let cfg = cubarium::voxel::VoxelConfig::default();
-    let mut world = cubarium::voxel::scene::authored(cfg.world.clone());
+    let mut world = cubarium::voxel::scene::authored(cfg.sim.world.clone());
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(FaunaConfig::default());
     let seeded = cubarium::voxel::habitat::seed(&mut world, &mut flora, &mut fauna);

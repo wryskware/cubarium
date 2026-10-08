@@ -152,7 +152,7 @@ fn main() -> Result<()> {
     let mut flora = Flora::new(FloraConfig::default());
     let world_cfg = w.config().clone();
     let cfg = VoxelConfig {
-        world: world_cfg.clone(),
+        sim: cubarium_session::SimParams { world: world_cfg.clone(), ..Default::default() },
         raster_height: 0,
         px_per_voxel: px,
         lighting: if lit { Lighting::Lit } else { Lighting::Flat },
@@ -247,7 +247,7 @@ fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
     }
     let flora = Flora::new(FloraConfig::default());
     let vcfg = VoxelConfig {
-        world: cfg.clone(),
+        sim: cubarium_session::SimParams { world: cfg.clone(), ..Default::default() },
         raster_height: 0,
         px_per_voxel: px,
         lighting: if lit { Lighting::Lit } else { Lighting::Flat },

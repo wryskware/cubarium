@@ -2462,7 +2462,7 @@ mod tests {
     impl Rig {
         fn new(c: &Config) -> Rig {
             let cfg = VoxelConfig {
-                world: c.clone(),
+                sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
                 ..VoxelConfig::default()
             };
             let proj =
@@ -2749,7 +2749,7 @@ mod tests {
         write_png(&root.join("masters/vine/vine-full-5.png"), &solid([0, 200, 0, 255])).unwrap();
         let c = Config::default();
         let cfg = VoxelConfig {
-            world: c.clone(),
+            sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
             textures_dir: root.clone(),
             vine_tiles: true,
             ..VoxelConfig::default()
@@ -2785,7 +2785,7 @@ mod tests {
 
     fn oracle_with(c: &Config, lit: bool, models: Option<Arc<ModelLibrary>>) -> PackOracle {
         let mut cfg = VoxelConfig {
-            world: c.clone(),
+            sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
             lighting: if lit { Lighting::Lit } else { Lighting::Flat },
             ..VoxelConfig::default()
         };

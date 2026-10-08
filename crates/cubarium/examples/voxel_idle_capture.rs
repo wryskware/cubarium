@@ -61,7 +61,7 @@ fn ground(cfg: Config) -> World {
 
 fn sink_for(world: &Config, px: u32, lit: bool, glyphs: bool) -> Result<VoxelGpuSink> {
     let cfg = VoxelConfig {
-        world: world.clone(),
+        sim: cubarium_session::SimParams { world: world.clone(), ..Default::default() },
         raster_height: 0,
         px_per_voxel: px,
         lighting: if lit { Lighting::Lit } else { Lighting::Flat },

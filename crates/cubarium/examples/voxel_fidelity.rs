@@ -101,7 +101,7 @@ fn main() -> Result<()> {
     let world_cfg = Config::default();
     let cfg = VoxelConfig {
         px_per_voxel: args.px,
-        world: world_cfg.clone(),
+        sim: cubarium_session::SimParams { world: world_cfg.clone(), ..Default::default() },
         ..VoxelConfig::default()
     };
     let proj = Projection::new(

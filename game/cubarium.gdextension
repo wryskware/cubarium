@@ -1,0 +1,11 @@
+; The Rust extension (crates/cubarium-godot). Built into bin/ by scripts/build-godot-ext.sh.
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.7
+reloadable = false
+
+[libraries]
+linux.debug.x86_64 = "res://bin/libcubarium_godot.so"
+linux.release.x86_64 = "res://bin/libcubarium_godot.so"
+macos.debug = "res://bin/libcubarium_godot.dylib"
+macos.release = "res://bin/libcubarium_godot.dylib"

@@ -60,7 +60,7 @@ fn main() -> Result<()> {
     eprintln!("seed {} founders {:?}", founded.seed, founded.seeded.founders);
     let mut sim = Sim::ambient(founded.world, founded.flora, founded.fauna, SimConfig::default());
     sim.set_overlap(false);
-    cfg.world = world_cfg.clone();
+    cfg.sim.world = world_cfg.clone();
     cfg.raster_height = 0;
     cfg.px_per_voxel = px;
     cfg.organisms = OrganismLook::Models;

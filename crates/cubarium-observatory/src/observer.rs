@@ -142,6 +142,13 @@ impl Observer {
         self.tick_ns += tick_ns;
     }
 
+    /// The life events recorded since the last call (or publication), for a host that
+    /// cues animation by them tick by tick. A host that takes them here hands them to its
+    /// [`crate::LifeBook`] itself: the next [`Observer::publish`] carries only what came after.
+    pub fn take_events(&mut self) -> Vec<LifeEvent> {
+        self.recorder.take_events()
+    }
+
     /// After every frame drawn.
     pub fn after_frame(&mut self) {
         self.frames += 1;

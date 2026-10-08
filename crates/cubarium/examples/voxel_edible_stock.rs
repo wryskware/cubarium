@@ -151,7 +151,7 @@ fn main() {
         }
         None => {
             eprintln!("scene: authored world");
-            let mut world = scene::authored(cfg.world.clone());
+            let mut world = scene::authored(cfg.sim.world.clone());
             let mut flora = Flora::new(layered(FloraConfig::default()));
             let mut fauna = Fauna::new(FaunaConfig::default());
             let seeded = habitat::seed(&mut world, &mut flora, &mut fauna);

@@ -129,7 +129,7 @@ fn main() -> Result<()> {
     let (min_m, drown_m, sat) = (reed.water_depth_min_m, reed.drown_depth_m, reed.saturated_pore);
     if get("gen") == Some("true") {
         // The generated world alone, out of `generate_with_a_lake`: no founding, no flora.
-        let (world, _, _) = cubarium_voxel_sim::found::generate_with_a_lake(&cfg.world, Some(seed), 1, || 0);
+        let (world, _, _) = cubarium_voxel_sim::found::generate_with_a_lake(&cfg.sim.world, Some(seed), 1, || 0);
         let r = measure_world(&world, 0.0, min_m, drown_m, sat);
         if get("hist") == Some("true") {
             // Standing water depth by whole voxels over every open column.
@@ -154,8 +154,8 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let founded = cubarium::voxel::found(
-        &cfg.world,
-        &LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &LayerConfig::new(&params, cfg.sim.world.voxel_m),
         params.fauna.founder_counts(),
         Seeds::Asked(seed),
         false,
@@ -163,14 +163,14 @@ fn main() -> Result<()> {
     let mut fauna = founded.fauna;
     cubarium::voxel::install_default_founders(&mut fauna)?;
     let mut world = founded.world;
-    world.set_water_every(cfg.water_every.max(1));
+    world.set_water_every(cfg.sim.water_every.max(1));
     let mut sim = Sim::ambient(world, founded.flora, fauna, SimConfig::with_threads(threads));
     let mut sink = if pictures {
         if cfg.px_per_voxel == cubarium::voxel::PX_AUTO {
-            cfg.px_per_voxel = cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.world, raster);
+            cfg.px_per_voxel = cubarium::voxel::auto_px_per_voxel(cfg.tilt_degrees, 0, &cfg.sim.world, raster);
         }
         cfg.raster_height = raster.1 as u16;
-        let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.world)?;
+        let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.sim.world)?;
         let mut sink = VoxelGpuSink::new(
             &cfg,
             proj,
@@ -187,7 +187,7 @@ fn main() -> Result<()> {
         None
     };
     // The lake's middle column round the ring (a circular mean of its drain), for crops.
-    let width = cfg.world.width;
+    let width = cfg.sim.world.width;
     let lake_x = {
         let drain = sim.world().lake_drain();
         let tau = std::f64::consts::TAU;

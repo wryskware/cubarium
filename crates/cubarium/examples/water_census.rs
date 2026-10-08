@@ -70,8 +70,8 @@ fn main() {
     let cfg = voxel::load_config(std::path::Path::new(&config)).expect("the voxel config");
     let params = voxel::params_of(&cfg, &[]).expect("the config's parameter set");
     let founded = voxel::found(
-        &cfg.world,
-        &voxel::LayerConfig::new(&params, cfg.world.voxel_m),
+        &cfg.sim.world,
+        &voxel::LayerConfig::new(&params, cfg.sim.world.voxel_m),
         cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
         voxel::Seeds::Asked(seed),
         false,
