@@ -85,7 +85,9 @@
 //! `vitals=DIR` opts into `vitals.csv`, `plants_vitals.csv`, `life.csv` and `meta.json`
 //! in DIR. Activity is sampled each simulated second; life transitions and 3-D path
 //! length are polled each tick. `stuck_window_min=N` defaults to 5 simulated minutes and
-//! `stuck_body_lengths=N` defaults to 1 current body length. The stuck rule, the two
+//! `stuck_body_lengths=N` defaults to 1 current body length; `stuck_dump=FILE` (debug)
+//! writes one row per exposed body per minute with its window's states, steer sources and
+//! latches (`vitals::STUCK_DUMP_HEADER`). The stuck rule, the two
 //! energy readouts (`survivor_stock_change_per_body_hour`, `cohort_energy_change`),
 //! `delivered_bl_per_s` and the ring-wrapped distances are defined in
 //! `cubarium_observatory::vitals`. Activity shares overlap (e.g. moving and fleeing);
@@ -938,8 +940,16 @@ impl VitalsLog {
             "segments": segments,
             "starving_fullness": options.starving_fullness,
         });
+        let mut recorder = VitalsRecorder::new(options, ring_m, segment, sim.fauna(), minute);
+        // `stuck_dump=FILE` (debug): every body the stuck rule exposes, per minute.
+        if let Some(path) = std::env::args().find_map(|a| a.strip_prefix("stuck_dump=").map(str::to_string)) {
+            let file = std::fs::File::create(&path).map_err(|e| format!("{path}: {e}"))?;
+            recorder
+                .set_stuck_dump(Box::new(std::io::LineWriter::new(file)))
+                .map_err(|e| format!("{path}: {e}"))?;
+        }
         let mut log = Self {
-            recorder: VitalsRecorder::new(options, ring_m, segment, sim.fauna(), minute),
+            recorder,
             animals,
             plants,
             lives,

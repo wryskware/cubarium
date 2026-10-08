@@ -24,13 +24,17 @@
 //! (pacing on the spot scores near zero; `moving_share` stays the state-based share).
 //!
 //! **Stuck** (per body, at each minute): the trailing window (`stuck_window_min`) must be
-//! fully observed; at every 1 Hz sample in it and now the body was *active* — awake, not
-//! voluntarily resting (asleep, hunkered, or standing in `State::Resting` with neither
-//! the eating nor the emergency latch on), not perched, not attached — and it
-//! swallowed nothing in the window (no stomach pool rose: an actual bite, not the eating
-//! latch). Such a body is *eligible*; it is stuck if its wrapped net displacement over the
-//! window is under `stuck_body_lengths` current body lengths. A lineage with no eligible
-//! body writes `stuck_n` blank (NA) beside `stuck_observed_n = 0`.
+//! fully observed; at every 1 Hz sample in it and now the body was *exposed* — it wants
+//! food (eating or emergency latch on) and has no chosen reason to stand still
+//! ([`still_reason`]: asleep, riding, hunkered, perched, sated, ambush, roost, threat, pup,
+//! pack-held) — and it ate nothing in the window: no stomach pool rose and it never
+//! cropped (a bite into a stomach digesting as fast as it fills shows no rise). Such a
+//! body is *eligible*; it is stuck if its wrapped net displacement over the window is
+//! under `stuck_body_lengths` current body lengths. A lineage with no eligible body
+//! writes `stuck_n` blank (NA) beside `stuck_observed_n = 0`. The share is conditional:
+//! of the hungry bodies that went a whole window without a bite, how many got nowhere.
+//! `stuck_dump` ([`Recorder::set_stuck_dump`]) lists every eligible body per minute,
+//! beside the rule before STUCK-AUDIT (2026-10-08) for comparison.
 //!
 //! Every row carries `segment`: 0 for a fresh founding, then +1 per load or resume (the
 //! caller decides; see `voxel_census`).
@@ -38,7 +42,9 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, Write};
 
-use cubarium_voxel_fauna::{Animal, DT, Fauna, Food, Founder, MobilityMode, State, Steer};
+use cubarium_voxel_fauna::{
+    Animal, DT, Fauna, Food, Founder, HuntMode, MobilityMode, State, Steer, VigilMode,
+};
 use cubarium_voxel_flora::{Flora, Species as Plant};
 
 use crate::life::{LifeEvent, LifeRecorder, What};
@@ -159,6 +165,16 @@ struct Sample {
     active: bool,
     /// The body's cumulative inferred swallowing at this sample, organic.
     swallowed: f64,
+    /// Ticks it has spent in [`State::Cropping`] (a bite taken) by this sample.
+    bites: u64,
+    /// Diagnostics for `stuck_dump` only: the rule never reads them.
+    active_v2: bool,
+    reason: Option<&'static str>,
+    path_m: f64,
+    state: State,
+    steer: Option<Steer>,
+    eating: bool,
+    emergency: bool,
 }
 
 /// A body's state at the previous minute boundary.
@@ -182,6 +198,9 @@ struct Track {
     /// body was first observed: what it swallowed, never the eating latch.
     stomach: [f64; Food::COUNT],
     swallowed: f64,
+    /// Ticks in [`State::Cropping`] since first observed: a bite taken, which a stomach
+    /// digesting as fast as it fills never shows as a rise.
+    bites: u64,
     history: VecDeque<Sample>,
     boundary: Option<Boundary>,
 }
@@ -201,6 +220,8 @@ pub struct Recorder {
     ledger: [[f64; 3]; Founder::COUNT],
     last_minute: f64,
     last_sample: Option<f64>,
+    /// `stuck_dump=FILE`: one row per body the stuck rule exposes, per minute.
+    stuck_dump: Option<Box<dyn Write + Send>>,
 }
 
 fn position(a: &Animal) -> [f64; 3] {
@@ -227,12 +248,54 @@ fn stomach_pools(a: &Animal) -> [f64; Food::COUNT] {
 fn swallowed_between(before: &[f64; Food::COUNT], now: &[f64; Food::COUNT]) -> f64 {
     before.iter().zip(now).map(|(b, n)| (n - b).max(0.0)).sum()
 }
-/// Eligible for the stuck rule's exposure: awake and not voluntarily resting. Asleep
-/// (`rest`), hunkered, perched and attached bodies are resting by choice or carried.
-/// `State::Resting` is fauna's "nothing in reach or sense, or nowhere closer to stand",
-/// not a chosen rest: it counts as voluntary only for a body with no appetite (eating
-/// and emergency latches off); a hungry body standing there is exposed.
-fn active(a: &Animal) -> bool {
+/// Why an awake, free body standing still is not failing: the first legitimate reason
+/// that holds now, or `None` when it is exposed to the stuck rule. A body is exposed only
+/// while it **wants food** (eating or emergency latch on) and holds still for no chosen
+/// reason. Asleep bodies (`rest`), riders, hunkered and perched bodies are resting by
+/// choice or carried. A sated body (both latches off: digesting, fed rest, den rest, any
+/// state) has nowhere it needs to go. A hungry body is excused while it waits in ambush
+/// (the patrol's `Wait` with its lure lit), roosts (a glider's rest hour), is retracted
+/// or freezes under a threat (its lineage's `Freeze` ground response), is a pack pup
+/// held at the den and provisioned there, or is a pack adult its pack tactic holds (at
+/// the den until the pack's hunt quorum; an emergency starts a hunt, so an emergency
+/// member is not excused).
+pub fn still_reason(fauna: &Fauna, a: &Animal) -> Option<&'static str> {
+    let freezes = a
+        .founder
+        .is_some_and(|f| fauna.config().founder(f).vigilance.mode == VigilMode::Freeze);
+    still_reason_of(a, fauna.steer_of(a.id), freezes)
+}
+/// [`still_reason`] given the body's steer source and whether its lineage freezes.
+fn still_reason_of(a: &Animal, steer: Option<Steer>, freezes: bool) -> Option<&'static str> {
+    if a.rest.is_some() || a.state == State::Asleep {
+        Some("asleep")
+    } else if a.attached.is_some() {
+        Some("riding")
+    } else if a.hunkered {
+        Some("hunkered")
+    } else if a.mobility.mode == MobilityMode::Perched {
+        Some("perched")
+    } else if !(a.eating || a.emergency) {
+        Some("sated")
+    } else if steer == Some(Steer::Patrol) && a.hunt.mode == HuntMode::Wait {
+        Some("ambush")
+    } else if steer == Some(Steer::Roost) {
+        Some("roost")
+    } else if a.mobility.retract_ticks > 0 || (freezes && steer == Some(Steer::Flee)) {
+        Some("threat")
+    } else if a.pack.is_some_and(|p| p.pup) {
+        Some("pup")
+    } else if a.pack.is_some() && steer == Some(Steer::Pack) && !a.emergency {
+        Some("pack")
+    } else {
+        None
+    }
+}
+fn active(fauna: &Fauna, a: &Animal) -> bool {
+    still_reason(fauna, a).is_none()
+}
+/// The rule before STUCK-AUDIT (2026-10-08), kept for the `stuck_dump` comparison only.
+fn active_v2(a: &Animal) -> bool {
     a.rest.is_none()
         && a.state != State::Asleep
         && a.attached.is_none()
@@ -281,22 +344,39 @@ fn push_sample(history: &mut VecDeque<Sample>, sample: Sample, window_s: f64) {
 /// when the body is not eligible (incomplete window, inactive at any sample or now, or
 /// it swallowed in the window), else whether its wrapped net displacement is under the
 /// threshold.
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 fn stuck(
     history: &VecDeque<Sample>,
     now: f64,
     pos: [f64; 3],
     active_now: bool,
-    swallowed_now: f64,
+    ate_now: (f64, u64),
     length: f64,
     options: Options,
     ring_m: f64,
+) -> Option<bool> {
+    stuck_with(history, now, pos, active_now, ate_now, length, options, ring_m, |s| s.active)
+}
+/// [`stuck`] with the sample's activity flag chosen by `pick` (the dump's old rule).
+#[allow(clippy::too_many_arguments)]
+fn stuck_with(
+    history: &VecDeque<Sample>,
+    now: f64,
+    pos: [f64; 3],
+    active_now: bool,
+    (swallowed_now, bites_now): (f64, u64),
+    length: f64,
+    options: Options,
+    ring_m: f64,
+    pick: fn(&Sample) -> bool,
 ) -> Option<bool> {
     let first = history.front()?;
     if now - first.seconds + f64::EPSILON < options.stuck_window_min * 60.0 {
         return None;
     }
-    if !active_now || history.iter().any(|s| !s.active) || swallowed_now > first.swallowed {
+    let ate = swallowed_now > first.swallowed || bites_now > first.bites;
+    if !active_now || history.iter().any(|s| !pick(s)) || ate {
         return None;
     }
     Some(distance(first.pos, pos, ring_m) < options.stuck_body_lengths * length)
@@ -320,6 +400,7 @@ impl Recorder {
             ledger: [[0.0; 3]; Founder::COUNT],
             last_minute: minute,
             last_sample: None,
+            stuck_dump: None,
         };
         r.observe(fauna, (minute * 60.0 / DT).round() as u64);
         r.sample(fauna, minute * 60.0);
@@ -367,6 +448,7 @@ impl Recorder {
                     position: pos,
                     stomach: stomach_pools(a),
                     swallowed: 0.0,
+                    bites: 0,
                     history: VecDeque::new(),
                     boundary: None,
                 }
@@ -375,6 +457,7 @@ impl Recorder {
             track.position = pos;
             let stomach = stomach_pools(a);
             track.swallowed += swallowed_between(&track.stomach, &stomach);
+            track.bites += u64::from(a.state == State::Cropping);
             track.stomach = stomach;
             track.row.last_seen_minute = minute;
             track.row.organic_given = a.reproduction.given;
@@ -468,8 +551,16 @@ impl Recorder {
                 Sample {
                     seconds,
                     pos: position(a),
-                    active: active(a),
+                    active: active(fauna, a),
                     swallowed: t.swallowed,
+                    bites: t.bites,
+                    active_v2: active_v2(a),
+                    reason: still_reason(fauna, a),
+                    path_m: t.row.path_m,
+                    state: a.state,
+                    steer: fauna.steer_of(a.id),
+                    eating: a.eating,
+                    emergency: a.emergency,
                 },
                 self.options.stuck_window_min * 60.0,
             );
@@ -646,20 +737,53 @@ impl Recorder {
                         delivered_awake_s += t.row.activity.awake_body_s - b.awake_s;
                     }
                 }
-                if let Some(length) = length
-                    && let Some(is_stuck) = stuck(
-                        &t.history,
-                        minute * 60.0,
-                        position(a),
-                        active(a),
-                        t.swallowed,
-                        length,
-                        self.options,
-                        self.ring_m,
-                    )
-                {
-                    r.stuck_observed_n += 1;
-                    r.stuck_n += usize::from(is_stuck);
+                if let Some(length) = length {
+                    let now = minute * 60.0;
+                    let rule = |active_now, bites, pick: fn(&Sample) -> bool| {
+                        stuck_with(
+                            &t.history,
+                            now,
+                            position(a),
+                            active_now,
+                            (t.swallowed, bites),
+                            length,
+                            self.options,
+                            self.ring_m,
+                            pick,
+                        )
+                    };
+                    let current = rule(active(fauna, a), t.bites, |s| s.active);
+                    if let Some(is_stuck) = current {
+                        r.stuck_observed_n += 1;
+                        r.stuck_n += usize::from(is_stuck);
+                    }
+                    let before = self
+                        .stuck_dump
+                        .is_some()
+                        .then(|| rule(active_v2(a), 0, |s| s.active_v2))
+                        .flatten();
+                    if let Some(out) = self.stuck_dump.as_mut()
+                        && let Some(is_stuck) = current.or(before)
+                    {
+                        let row = query::animal_row(fauna, a);
+                        let capacity = a
+                            .founder
+                            .map_or(0.0, |f| fauna.config().founder(f).gut.capacity(a.body));
+                        dump_exposed(
+                            out,
+                            minute,
+                            a,
+                            &row,
+                            fauna.steer_of(a.id),
+                            ratio(a.stomach.organic(), capacity),
+                            t,
+                            [before.is_some(), current.is_some()],
+                            is_stuck,
+                            length,
+                            self.ring_m,
+                        )
+                        .expect("write stuck dump");
+                    }
                 }
             }
             r.wound_mean = ratio(r.wound_mean, r.n as f64);
@@ -725,6 +849,14 @@ impl Recorder {
         (animals, plants)
     }
 
+    /// Debug readout: write [`STUCK_DUMP_HEADER`] and then one row per exposed body at
+    /// each minute.
+    pub fn set_stuck_dump(&mut self, mut out: Box<dyn Write + Send>) -> io::Result<()> {
+        writeln!(out, "{STUCK_DUMP_HEADER}")?;
+        self.stuck_dump = Some(out);
+        Ok(())
+    }
+
     pub fn lives(&self) -> impl Iterator<Item = LifeRow> + '_ {
         self.tracks.values().map(|t| {
             let mut row = t.row.clone();
@@ -742,6 +874,89 @@ impl Recorder {
             .map(|id| self.tracks[&id].row.clone())
             .collect()
     }
+}
+
+pub const STUCK_DUMP_HEADER: &str = "minute,id,lineage,stage,exposed_v2,exposed,reasons,stuck,length_m,net_bl,path_bl,cropping,walking,resting,climbing,steer_mix,eating_share,emergency_share,eating_now,emergency_now,stomach_fill,fullness,mode,pack,pup,homing_ticks,yielding,strike,wound,escrow,hunt_mode,activity,x_m,y_m,z_m";
+
+#[allow(clippy::too_many_arguments)]
+fn dump_exposed(
+    out: &mut Box<dyn Write + Send>,
+    minute: f64,
+    a: &Animal,
+    row: &query::AnimalRow,
+    steer_now: Option<Steer>,
+    stomach_fill: f64,
+    t: &Track,
+    exposed: [bool; 2],
+    is_stuck: bool,
+    length: f64,
+    ring_m: f64,
+) -> io::Result<()> {
+    let h = &t.history;
+    let n = h.len().max(1) as f64;
+    let first = h.front().expect("exposed body has history");
+    let share = |f: &dyn Fn(&Sample) -> bool| h.iter().filter(|s| f(s)).count() as f64 / n;
+    let mut steers: BTreeMap<&str, usize> = BTreeMap::new();
+    for s in h {
+        *steers.entry(s.steer.map_or("none", Steer::name)).or_default() += 1;
+    }
+    let mut mix: Vec<(&str, usize)> = steers.into_iter().collect();
+    mix.sort_by_key(|m| std::cmp::Reverse(m.1));
+    let mix = mix
+        .iter()
+        .map(|(k, c)| format!("{k}:{:.2}", *c as f64 / n))
+        .collect::<Vec<_>>()
+        .join(";");
+    let mut reasons: BTreeMap<&str, usize> = BTreeMap::new();
+    for s in h {
+        *reasons.entry(s.reason.unwrap_or("exposed")).or_default() += 1;
+    }
+    let reasons = reasons
+        .iter()
+        .map(|(k, c)| format!("{k}:{:.2}", *c as f64 / n))
+        .collect::<Vec<_>>()
+        .join(";");
+    let l = if length > 0.0 { length } else { f64::NAN };
+    csv(
+        out,
+        [
+            minute.to_string(),
+            a.id.to_string(),
+            row.species.clone(),
+            format!("{:?}", row.stage).to_lowercase(),
+            u8::from(exposed[0]).to_string(),
+            u8::from(exposed[1]).to_string(),
+            reasons,
+            u8::from(is_stuck).to_string(),
+            format!("{length:.3}"),
+            format!("{:.3}", distance(first.pos, position(a), ring_m) / l),
+            format!("{:.3}", (t.row.path_m - first.path_m) / l),
+            format!("{:.2}", share(&|s| s.state == State::Cropping)),
+            format!("{:.2}", share(&|s| s.state == State::Walking)),
+            format!("{:.2}", share(&|s| s.state == State::Resting)),
+            format!("{:.2}", share(&|s| s.state == State::Climbing)),
+            format!("{mix};now={}", steer_now.map_or("none", Steer::name)),
+            format!("{:.2}", share(&|s| s.eating)),
+            format!("{:.2}", share(&|s| s.emergency)),
+            u8::from(a.eating).to_string(),
+            u8::from(a.emergency).to_string(),
+            format!("{stomach_fill:.3}"),
+            format!("{:.3}", row.fullness),
+            format!("{:?}", a.mobility.mode),
+            a.pack.map_or_else(String::new, |p| p.pack.to_string()),
+            a.pack.is_some_and(|p| p.pup).to_string(),
+            a.homing_ticks.to_string(),
+            a.yielding.to_string(),
+            a.strike.is_some().to_string(),
+            format!("{:.3}", a.wound),
+            a.reproduction.escrow.is_some().to_string(),
+            format!("{:?}", a.hunt.mode),
+            row.activity.clone(),
+            format!("{:.2}", a.pose.x),
+            format!("{:.2}", a.pose.y_m),
+            format!("{:.2}", a.pose.z),
+        ],
+    )
 }
 
 fn add_open_intake(row: &mut LifeRow, meal: [f64; Food::COUNT]) {
@@ -981,6 +1196,7 @@ pub fn life_header() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cubarium_voxel_fauna::{HuntMemory, PackMember};
 
     /// The small test world's ring: 12 cells of 0.25 m.
     const RING_M: f64 = 3.0;
@@ -998,6 +1214,14 @@ mod tests {
             pos: [x, 0.0, 0.0],
             active,
             swallowed,
+            bites: 0,
+            active_v2: active,
+            reason: None,
+            path_m: 0.0,
+            state: State::Walking,
+            steer: None,
+            eating: true,
+            emergency: false,
         }
     }
     fn history(samples: &[Sample], window_s: f64) -> VecDeque<Sample> {
@@ -1068,13 +1292,16 @@ mod tests {
         let o = opts(2.0);
         // Pressed against a wall: awake and active the whole window, never moving.
         let h = history(&[at(0.0, 1.0, true, 0.0), at(1.0, 1.0, true, 0.0), at(2.0, 1.0, true, 0.0)], 2.0);
-        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, 0.0, 0.5, o, RING_M), Some(true));
+        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, (0.0, 0), 0.5, o, RING_M), Some(true));
         // The same body taking a bite in the window: feeding, so not exposed.
         let h = history(&[at(0.0, 1.0, true, 0.0), at(1.0, 1.0, true, 0.2), at(2.0, 1.0, true, 0.2)], 2.0);
-        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, 0.2, 0.5, o, RING_M), None);
+        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, (0.2, 0), 0.5, o, RING_M), None);
+        // Cropping while its stomach digests as fast as it fills: no rise, but a bite.
+        let h = history(&[at(0.0, 1.0, true, 0.0), at(2.0, 1.0, true, 0.0)], 2.0);
+        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, (0.0, 1), 0.5, o, RING_M), None);
         // A body that travelled more than its length is eligible and not stuck.
         let h = history(&[at(0.0, 1.0, true, 0.0), at(2.0, 1.6, true, 0.0)], 2.0);
-        assert_eq!(stuck(&h, 2.0, [1.6, 0.0, 0.0], true, 0.0, 0.5, o, RING_M), Some(false));
+        assert_eq!(stuck(&h, 2.0, [1.6, 0.0, 0.0], true, (0.0, 0), 0.5, o, RING_M), Some(false));
     }
 
     #[test]
@@ -1082,14 +1309,14 @@ mod tests {
         let o = opts(2.0);
         let mut h = history(&[at(0.0, 1.0, false, 0.0), at(1.0, 1.0, true, 0.0), at(2.0, 1.0, true, 0.0)], 2.0);
         // The window starts while it was asleep.
-        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, 0.0, 0.5, o, RING_M), None);
+        assert_eq!(stuck(&h, 2.0, [1.0, 0.0, 0.0], true, (0.0, 0), 0.5, o, RING_M), None);
         push_sample(&mut h, at(3.0, 1.0, true, 0.0), 2.0);
-        assert_eq!(stuck(&h, 3.0, [1.0, 0.0, 0.0], true, 0.0, 0.5, o, RING_M), Some(true));
+        assert_eq!(stuck(&h, 3.0, [1.0, 0.0, 0.0], true, (0.0, 0), 0.5, o, RING_M), Some(true));
         // Lying down now ends exposure, whatever the window says.
-        assert_eq!(stuck(&h, 3.0, [1.0, 0.0, 0.0], false, 0.0, 0.5, o, RING_M), None);
+        assert_eq!(stuck(&h, 3.0, [1.0, 0.0, 0.0], false, (0.0, 0), 0.5, o, RING_M), None);
         // An incomplete window never counts.
         let h = history(&[at(0.0, 1.0, true, 0.0), at(1.0, 1.0, true, 0.0)], 2.0);
-        assert_eq!(stuck(&h, 1.0, [1.0, 0.0, 0.0], true, 0.0, 0.5, o, RING_M), None);
+        assert_eq!(stuck(&h, 1.0, [1.0, 0.0, 0.0], true, (0.0, 0), 0.5, o, RING_M), None);
     }
 
     #[test]
@@ -1101,7 +1328,7 @@ mod tests {
         // A body crossing the seam in a short hop is stuck-sized, not ring-sized.
         let o = opts(2.0);
         let h = history(&[at(0.0, a[0], true, 0.0), at(2.0, b[0], true, 0.0)], 2.0);
-        assert_eq!(stuck(&h, 2.0, b, true, 0.0, 0.5, o, RING_M), Some(true));
+        assert_eq!(stuck(&h, 2.0, b, true, (0.0, 0), 0.5, o, RING_M), Some(true));
         // A loop around a square: path is its perimeter, displacement zero.
         let corners = [[1.0, 0.0, 1.0], [2.0, 0.0, 1.0], [2.0, 0.0, 2.0], [1.0, 0.0, 2.0], [1.0, 0.0, 1.0]];
         let path: f64 = corners.windows(2).map(|w| distance(w[0], w[1], RING_M)).sum();
@@ -1120,6 +1347,67 @@ mod tests {
         assert_eq!(swallowed_between(&before, &now), 0.3);
     }
 
+    /// One hand-built body per legitimate reason to stand still: each is excused, and the
+    /// same body hungry, awake and free with nothing excusing it is exposed.
+    #[test]
+    fn only_a_hungry_body_with_no_chosen_reason_to_stand_still_is_exposed() {
+        let (_, _, fauna) = crate::tests::small_world();
+        let mut hungry = fauna.view().animals[0];
+        hungry.state = State::Walking;
+        hungry.rest = None;
+        hungry.eating = true;
+        hungry.emergency = false;
+        hungry.hunkered = false;
+        hungry.attached = None;
+        hungry.mobility.mode = MobilityMode::Ground;
+        hungry.mobility.retract_ticks = 0;
+        hungry.pack = None;
+        hungry.hunt.mode = HuntMode::Idle;
+        let reason = |a: &Animal, steer: Option<Steer>, freezes: bool| still_reason_of(a, steer, freezes);
+        // A hungry blocked body, Walking or Resting, driven by its heuristic or fleeing
+        // (a lineage that runs, not freezes): exposed.
+        for state in [State::Walking, State::Resting, State::Cropping] {
+            let a = Animal { state, ..hungry };
+            assert_eq!(reason(&a, Some(Steer::Heuristic), false), None);
+            assert_eq!(reason(&a, Some(Steer::Flee), false), None);
+        }
+        // The emergency latch alone is wanting food too.
+        let starving = Animal { eating: false, emergency: true, ..hungry };
+        assert_eq!(reason(&starving, Some(Steer::Heuristic), false), None);
+        // Sated (both latches off: digesting a full stomach, fed or den rest), in any state.
+        for state in [State::Walking, State::Resting, State::Cropping, State::Climbing] {
+            let a = Animal { state, eating: false, emergency: false, ..hungry };
+            assert_eq!(reason(&a, Some(Steer::Heuristic), false), Some("sated"));
+        }
+        // Ambush: the patrol waiting on its patch. A wait without the patrol steering is not.
+        let waiting = Animal { hunt: HuntMemory { mode: HuntMode::Wait, ..hungry.hunt }, ..hungry };
+        assert_eq!(reason(&waiting, Some(Steer::Patrol), false), Some("ambush"));
+        assert_eq!(reason(&waiting, Some(Steer::Heuristic), false), None);
+        // A glider's roost.
+        assert_eq!(reason(&hungry, Some(Steer::Roost), false), Some("roost"));
+        // A threat: retracted, or a freezing lineage's flee.
+        let mut retracted = hungry;
+        retracted.mobility.retract_ticks = 1;
+        assert_eq!(reason(&retracted, Some(Steer::Heuristic), false), Some("threat"));
+        assert_eq!(reason(&hungry, Some(Steer::Flee), true), Some("threat"));
+        assert_eq!(reason(&hungry, Some(Steer::Heuristic), true), None);
+        // A pack pup held at its den; an adult pack member is not excused for belonging.
+        let member = |pup| PackMember { pack: 1, pup, calling_ticks: 0 };
+        assert_eq!(reason(&Animal { pack: Some(member(true)), ..hungry }, None, false), Some("pup"));
+        let adult = Animal { pack: Some(member(false)), ..hungry };
+        assert_eq!(reason(&adult, Some(Steer::Heuristic), false), None);
+        // Held by its pack's tactic (waiting at the den for the hunt quorum), unless in an
+        // emergency, which starts the pack's hunt.
+        assert_eq!(reason(&adult, Some(Steer::Pack), false), Some("pack"));
+        assert_eq!(reason(&Animal { emergency: true, ..adult }, Some(Steer::Pack), false), None);
+        // Asleep, hunkered and perched stay excused whatever the latches.
+        assert_eq!(reason(&Animal { state: State::Asleep, ..hungry }, None, false), Some("asleep"));
+        assert_eq!(reason(&Animal { hunkered: true, ..hungry }, None, false), Some("hunkered"));
+        let mut perched = hungry;
+        perched.mobility.mode = MobilityMode::Perched;
+        assert_eq!(reason(&perched, None, false), Some("perched"));
+    }
+
     #[test]
     fn a_real_bite_removes_a_body_from_stuck_exposure() {
         // Driverless founders stand in `State::Resting` with the eating latch on: hungry
@@ -1134,7 +1422,7 @@ mod tests {
                 .view()
                 .animals
                 .iter()
-                .filter(|a| active(a) && cubarium_voxel_fauna::body_of(fauna.config(), a).is_some())
+                .filter(|a| active(fauna, a) && cubarium_voxel_fauna::body_of(fauna.config(), a).is_some())
                 .count()
         };
         let before = eligible(&fauna);
@@ -1144,7 +1432,7 @@ mod tests {
         assert_eq!(browser(&rows).stuck_observed_n, before);
         assert_eq!(browser(&rows).stuck_n, before, "nobody moved");
 
-        let id = fauna.view().animals.iter().find(|a| active(a)).unwrap().id;
+        let id = fauna.view().animals.iter().find(|a| active(&fauna, a)).unwrap().id;
         assert!(fauna.set_arrival_stomach(id, 1.0));
         recorder.observe(&fauna, 1);
         assert!(recorder.tracks[&id].swallowed > 0.0, "the stomach rose");
