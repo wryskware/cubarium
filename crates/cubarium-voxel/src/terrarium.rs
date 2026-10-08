@@ -193,6 +193,10 @@ pub struct Terrarium {
     /// How far from its back end, metres, the lake starts to shoal: the end rounds off
     /// short of the massif's foot.
     pub lake_end_m: f64,
+    /// Keep the lake's whole reach, its graded banks included, clear of the ring's seam
+    /// (column 0), so a flat screen that cuts the ring there shows one lake, not a half at
+    /// each edge. Off by default: the lake goes where the crest picks it, seam or not.
+    pub lake_clear_of_seam: bool,
     /// Where the water stands, above the ground the lake is graded into. It is the water
     /// table: the lake is joined to the aquifer through a drain in its floor and rises and
     /// falls with it, and everything open below this line floods with the lake. Soil below
@@ -350,6 +354,7 @@ impl Terrarium {
         lake_bank_slope: 0.5,
         lake_bank_m: 0.5,
         lake_end_m: 0.25,
+        lake_clear_of_seam: false,
         yard: 0.35,
         pool_m: [0.5, 0.875],
         pool_depth_m: 0.25,
@@ -477,6 +482,7 @@ impl Terrarium {
         lake_bank_slope: 0.5,
         lake_bank_m: 0.75,
         lake_end_m: 0.25,
+        lake_clear_of_seam: false,
         yard: 0.32,
         pool_m: [0.75, 1.25],
         pool_depth_m: 0.375,
@@ -1092,20 +1098,32 @@ fn layout(b: &mut Build) -> Site {
     // The lake's place: where the crest is middling, and a yard is cleared in front.
     let (lo, hi) = (foot_y + v(t.crest_m[0]), foot_y + v(t.crest_m[1]));
     let mid = (lo + hi) / 2.0;
-    let mut order: Vec<usize> = (0..w as usize).collect();
-    order.sort_by(|&a, &c| (b.crest[a] - mid).abs().total_cmp(&(b.crest[c] - mid).abs()));
-    let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
     // One lake whatever the ring, its length scaled with the ring: one spring, one
-    // stream, one water table.
+    // stream, one water table. How far its wandering outline can reach from the centre
+    // column, for a half-length: the yard and the shelves' clearance stay measured from
+    // the drawn half-length, so the massif's plan is the one the rectangular lake had;
+    // the shelves' gap keeps them off the shore.
     let ring = b.ring_scale();
-    let len = b.draw([t.lake_m[0] * ring, t.lake_m[1] * ring]) as i64;
-    let half = ((len / 2) as f64).max(1.0);
-    // How far its wandering outline can reach from the centre column. The yard and the
-    // shelves' clearance stay measured from the drawn half-length, so the massif's plan
-    // is the one the rectangular lake had; the shelves' gap keeps them off the shore.
     let wobble = v(t.lake_meander_m) + v(t.lake_shore_m) + 1.0;
     let bay = if added > 0.0 { 1.0 + t.lake_bay } else { 1.0 };
-    let reach = (half * t.lake_width_share * (1.0 + t.lake_width_waver) * bay + wobble).ceil() as i64;
+    let reach_of = |half: f64| (half * t.lake_width_share * (1.0 + t.lake_width_waver) * bay + wobble).ceil() as i64;
+    let mut order: Vec<usize> = (0..w as usize).collect();
+    if t.lake_clear_of_seam {
+        // The longest lake the range can draw, its banks and the yard's blend: none of it
+        // may cross column 0. Too short a ring for that keeps every column.
+        let longest = ((t.lake_m[1] * ring / b.c.voxel_m).round() as i64 / 2) as f64;
+        let bank = v(t.lake_bank_m).ceil() as i64;
+        let clear = reach_of(longest.max(1.0)) + bank;
+        let off: Vec<usize> = order.iter().copied().filter(|&x| (x as i64) >= clear && (x as i64) < w - clear).collect();
+        if !off.is_empty() {
+            order = off;
+        }
+    }
+    order.sort_by(|&a, &c| (b.crest[a] - mid).abs().total_cmp(&(b.crest[c] - mid).abs()));
+    let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
+    let len = b.draw([t.lake_m[0] * ring, t.lake_m[1] * ring]) as i64;
+    let half = ((len / 2) as f64).max(1.0);
+    let reach = reach_of(half);
     let yard = added + t.yard * massif_d;
     let margin = (len / 2 + i64::from(t.yard_blend_voxels)) as f64;
     for x in 0..w {
@@ -1398,6 +1416,28 @@ mod lowland_tests {
         halls(&mut b);
         let open = |z: i32| (2..26).flat_map(|x| (low + 1..rim).map(move |y| (x, y))).filter(|&(x, y)| !b.g.solid(x, y, z)).count();
         (open(lip), open(lip + 1))
+    }
+
+    #[test]
+    fn a_lake_kept_clear_of_the_seam_never_reaches_column_zero() {
+        // A ring long enough for the clearance, with a lowland so the bay widens it.
+        let t = Terrarium { ring_m: 0.0, lake_clear_of_seam: true, lake_bank_m: 1.0, ..shape() };
+        for seed in 1..=40 {
+            let c = Config { width: 128, seed, ..config(24) };
+            let mut b = Build::new(&c, &t);
+            let site = layout(&mut b);
+            let w = b.g.w;
+            let bank = (t.lake_bank_m / c.voxel_m).ceil() as i64;
+            // The banks reach `site.reach + bank` from the centre (`lay_lake`); the bed
+            // lies within that.
+            assert!(site.centre - site.reach - bank >= 0 && site.centre + site.reach + bank < w, "seed {seed}: centre {} reach {}", site.centre, site.reach);
+            assert!(lake_bed(&b, &site).iter().all(|&(x, _, _)| (0..w).contains(&x)), "seed {seed}");
+        }
+        // A ring too short for any clear column still places its lake.
+        let c = Config { width: 16, ..config(24) };
+        let mut b = Build::new(&c, &t);
+        let site = layout(&mut b);
+        assert!(!lake_bed(&b, &site).is_empty());
     }
 
     #[test]

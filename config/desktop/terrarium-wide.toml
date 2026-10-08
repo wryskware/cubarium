@@ -26,6 +26,19 @@ voxel_m = 0.125
 
 [world.landform]
 preset = "terrarium"
+# More lake on the wide ring (Wrysk 2026-10-07: "raise the water table ... proportionally,
+# i think theres more room for lake. even future aquatic animals";
+# design/handoffs/wide-lake-2026-10-07.md). The table stands 0.625 m over the lowest yard
+# ground (preset 0.375), the bed 0.75 m deep at its middle (0.5), 6-8 m of lake per 32 m
+# of ring (4-6; 15-20 m here) opening 0.75 wider through the lowland (0.5). Deeper than
+# 0.75 m reaches the bedrock floor at this ground height.
+water_level_m = 0.625
+lake_depth_m = 0.75
+lake_m = [6.0, 8.0]
+lake_bay = 0.75
+# The flat 2560 screen cuts the ring at its seam: keep the whole lake, banks included,
+# off it, so it shows as one lake rather than half a pond at each edge.
+lake_clear_of_seam = true
 
 # The day clock (`design/handoffs/voxel-weather-2026-09-24.md`, Wrysk's decision 1).
 [world.day]

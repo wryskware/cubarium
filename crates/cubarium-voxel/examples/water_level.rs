@@ -4,7 +4,7 @@
 //!
 //! ```text
 //! cargo run --release -p cubarium-voxel --example water_level -- \
-//!     <small|default|wide|terrarium|terrarium-small> <seed> [0,30,120] [threads]
+//!     <small|default|wide|terrarium|terrarium-small|config.toml> <seed> [0,30,120] [threads]
 //! ```
 //!
 //! The lake gate is the host's (`crates/cubarium/src/voxel/mod.rs`,
@@ -28,7 +28,15 @@ fn main() {
         .collect();
     let threads: usize = args.next().map_or(1, |s| s.parse().expect("threads"));
 
-    let (config, want) = if let Some(t) = Terrarium::preset(&name) {
+    let (config, want) = if name.ends_with(".toml") {
+        // A config file's `[world]`, landform overrides and climate included.
+        let config = cubarium_voxel::world_config_from_file(std::path::Path::new(&name)).expect("a config file's [world]");
+        let want = match &config.landform {
+            Landform::Terrarium(t) => t.water.min_lake_m2,
+            _ => 0.0,
+        };
+        (Config { seed, ..config }, want)
+    } else if let Some(t) = Terrarium::preset(&name) {
         let small = name != "terrarium";
         let config = Config {
             width: if small { 160 } else { 256 },

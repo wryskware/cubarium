@@ -1,14 +1,23 @@
 //! What a terrarium build made, per seed: `cargo run -p cubarium-voxel --example terrarium
-//! -- <terrarium|terrarium-small> <seed>...` (`DIMS=WxHxD` for another size). Development diagnostics only.
+//! -- <terrarium|terrarium-small|config.toml> <seed>...` (`DIMS=WxHxD` for another size; a
+//! config file's `[world]` table, landform overrides included). Development diagnostics only.
 
 use cubarium_voxel::{Config, Landform, Terrarium, World, terrarium, tidy};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let name = args.next().unwrap_or_else(|| "terrarium-small".into());
-    let t = Terrarium::preset(&name).expect("terrarium or terrarium-small");
+    let file = name.ends_with(".toml").then(|| {
+        cubarium_voxel::world_config_from_file(std::path::Path::new(&name)).expect("a config file's [world]")
+    });
+    let t = match &file {
+        Some(Config { landform: Landform::Terrarium(t), .. }) => *t,
+        Some(_) => panic!("{name} is not a terrarium"),
+        None => Terrarium::preset(&name).expect("terrarium, terrarium-small or a config.toml"),
+    };
     // `DIMS=WxHxD` builds the preset on another world size (the scenario maps' sizing).
     let (width, height, depth) = match std::env::var("DIMS") {
+        Err(_) if file.is_some() => file.as_ref().map(|c| (c.width, c.height, c.depth)).unwrap(),
         Ok(d) => {
             let v: Vec<u32> = d.split('x').map(|n| n.parse().expect("DIMS=WxHxD")).collect();
             (v[0], v[1], v[2])
@@ -37,6 +46,15 @@ fn main() {
                 println!("  {kind} at ({x}, {y}, {z})");
             }
         }
+        // The lake's floor columns around the ring: does it cross the seam?
+        let xs: Vec<u32> = world.lake_drain().iter().map(|&(x, _, _)| x).collect();
+        let seam = xs.contains(&0) || xs.contains(&(width - 1));
+        println!(
+            "  lake columns {}..={} of {width}{}",
+            xs.iter().min().unwrap_or(&0),
+            xs.iter().max().unwrap_or(&0),
+            if seam { " (across the seam)" } else { "" }
+        );
         println!(
             "  floors seen {seen}/{all} ({:.0} %), thin left {thin:?}, outlet {:?}, spring {:?}",
             100.0 * seen as f64 / all.max(1) as f64,
