@@ -23,9 +23,16 @@
 //! - **Arboreal** (the seedporter): a threat within `flee_start_m` sends it to the nearest
 //!   stand it can climb within `refuge_search_m` (walking into the stem climbs it), or
 //!   straight away with none; in the crown it holds still until calm (the same hysteresis).
-//! - **Freeze** (the littershredder): footfall at least `freeze_tremor` freezes it for
-//!   `freeze_s` (no step, no bite); at least `withdraw_tremor` it also turns away in place. It
-//!   never flees: it stays on its litter.
+//! - **Freeze** (the littershredder): a hunter's footfall at least `freeze_tremor` freezes it
+//!   for `freeze_s` (no step, no bite); at least `withdraw_tremor` it also turns away in place.
+//!   It never flees: it stays on its litter. **FROZEN-PREY** (2026-10-08): it froze on every
+//!   footfall, so the grazers browsing over its litter (frondgrazers, loftstriders and
+//!   capgnawers within its 2 m, none of which eats it) held up to half the lineage still for
+//!   good, starving on its food. It now feels only its hunters' footfall: the tremor tracks
+//!   its record holds of a threat (the snail's retraction reads the same), sensed at its latest
+//!   sensing. Wild model: caterpillars and other small arthropods tell a predator's vibrations
+//!   from a harmless source's and freeze only to the first (Castellanos & Barbosa 2006, *Anim.
+//!   Behav.* 72:461; Cocroft & Rodríguez 2005, *BioScience* 55:323).
 //!
 //! **FEAR** (Wrysk, 2026-10-06: "Should seedporters ignore a resting or sleeping Veilhound,
 //! the way gazelles graze near resting lions?" — "sure."). A lineage with `watch_calm` on
@@ -158,7 +165,8 @@ pub struct Vigilance {
     pub alarm_bolt_s: f64,
     /// After a bolt it hears no alarm for this long, seconds.
     pub alarm_refractory_s: f64,
-    /// Footfall (`left + right`, the tremor's units) that freezes it; 0 never freezes.
+    /// A hunter's footfall (its threat tracks' `felt`, summed, the tremor's units) that
+    /// freezes it; 0 never freezes.
     pub freeze_tremor: f64,
     /// Footfall at which it also turns away in place.
     pub withdraw_tremor: f64,
@@ -857,7 +865,7 @@ pub(crate) fn respond(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Fl
         VigilMode::None => None,
         VigilMode::Herd => herd(fauna, i, view, fv, ring, held),
         VigilMode::Arboreal => arboreal(fauna, i, view, fv, ring, held),
-        VigilMode::Freeze => freeze(fauna, i),
+        VigilMode::Freeze => freeze(fauna, i, ring),
     }
 }
 
@@ -1216,14 +1224,40 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     out
 }
 
-fn freeze(fauna: &mut Fauna, i: usize) -> Option<Actions> {
+/// **A hunter's footfall** (FROZEN-PREY): the `felt` of the threat tracks body `a`'s record
+/// `p` holds by tremor from its latest sensing (within the perception's stagger), split
+/// `[left, right]` of its heading. A grazer's or a kin's footfall is not in it: the record
+/// tracks only kin, prey and threats, and only a threat's counts.
+pub(crate) fn threat_tremor(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64) -> [f64; 2] {
+    let window = config.perception.stagger_ticks();
+    let (fx, fz) = a.pose.forward();
+    let (rx, rz) = (fz, -fx);
+    let mut out = [0.0, 0.0];
+    for t in p.tracks().iter().filter(|t| t.class == class::THREAT && t.modes & TREMOR != 0 && now.saturating_sub(t.tick) <= window) {
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+        let side = dx * rx + dz * rz;
+        if side > 0.0 {
+            out[1] += t.felt;
+        } else if side < 0.0 {
+            out[0] += t.felt;
+        } else {
+            out[0] += 0.5 * t.felt;
+            out[1] += 0.5 * t.felt;
+        }
+    }
+    out
+}
+
+/// **The freeze** (module note, FROZEN-PREY): on its hunters' footfall
+/// ([`threat_tremor`]) only.
+fn freeze(fauna: &mut Fauna, i: usize, ring: f64) -> Option<Actions> {
     let a = fauna.animals[i];
     let founder = a.founder?;
     let vg = fauna.config.founder(founder).vigilance;
     let now = fauna.tick;
     let p = fauna.percepts.get(&a.id).copied().unwrap_or_default();
     let mut v = p.vigil;
-    let [left, right] = p.tremor;
+    let [left, right] = threat_tremor(&fauna.config, &a, &p, now, ring);
     let felt = left + right;
     if vg.freeze_tremor > 0.0 && felt >= vg.freeze_tremor {
         if now >= v.freeze_until {

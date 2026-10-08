@@ -4101,6 +4101,13 @@ impl Fauna {
         )
     }
 
+    /// DROP's readout: founder `id`'s trapped clock, `(since, cornered)`: the tick it was
+    /// first found cornered off its route graph and whether its last reading was. `None`
+    /// when it was never read (a flyer, or a body whose jump reach is within its step).
+    pub fn trapped_of(&self, id: u64) -> Option<(u64, bool)> {
+        self.trapped.get(&id).map(|t| (t.since, t.cornered))
+    }
+
     /// EDGE: the key a reflex walk's target goes by: a stand by its id, a face by its
     /// coordinates under the top bit.
     pub(crate) fn walk_key_face(site: Site) -> u64 {

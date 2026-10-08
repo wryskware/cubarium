@@ -1595,7 +1595,8 @@ fn controllers(
 /// away from the nearest threat it sees within `flee_sight_m` ahead of it (by the interim
 /// rule: [`crate::kind_of`], so a still hunter beyond 0.5 m is not one, and not hidden by
 /// terrain or foliage); the blind shredder turns away from tremor above
-/// [`crate::PredationConfig::flee_tremor`]. Full forward, no feeding.
+/// [`crate::PredationConfig::flee_tremor`] (with a live record, its hunters' footfall
+/// only: [`crate::vigil::threat_tremor`]). Full forward, no feeding.
 ///
 /// **S2**: a lineage whose table is live and that has a ground response
 /// ([`crate::Vigilance::mode`]) runs that instead ([`crate::vigil::respond`]), on its record
@@ -1635,14 +1636,20 @@ fn flee(
     let want = crate::perception::Want { threats: !blind, tremor: blind, ..Default::default() };
     crate::perception::refresh(fauna, i, view, fv, occupancy, want);
     let p = crate::perception::percept(fauna, a.id)?;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
     if blind {
-        let [left, right] = p.tremor;
+        // FROZEN-PREY: a live record counts its hunters' footfall only (the capgnawer fled a
+        // grazer's step, 0.6 of its awake time); without one, the S1 reading of every step.
+        let [left, right] = if fauna.config.founder(founder).senses.live {
+            crate::vigil::threat_tremor(&fauna.config, &a, p, fauna.tick, ring)
+        } else {
+            p.tremor
+        };
         if left + right < fauna.config.predation.flee_tremor {
             return None;
         }
         return Some(away(if left > right { 1.0 } else { -1.0 }));
     }
-    let ring = f64::from(view.config.width) * view.config.voxel_m;
     let (fx, fz) = a.pose.forward();
     let (rx, rz) = (fz, -fx);
     let mut nearest: Option<(f64, f64)> = None;

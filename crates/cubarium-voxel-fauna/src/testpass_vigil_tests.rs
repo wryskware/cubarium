@@ -168,12 +168,15 @@ fn a_withdrawing_shredder_turns_away_from_the_side_the_footfall_comes_from() {
     c.founders[Founder::Blind.index()].senses.live = true;
     c.founders[Founder::Blind.index()].vigilance =
         Vigilance { mode: VigilMode::Freeze, freeze_tremor: 1e-9, withdraw_tremor: 2e-9, freeze_s: 1.0, ..Vigilance::default() };
+    // FROZEN-PREY: the walker is a hunter of the shredder (it freezes on no other footfall).
+    let walker = super::ground_response_tests::shredder_hunted(&mut c);
     for side in [1.0, -1.0] {
         let mut fauna = Fauna::new(c.clone());
         fauna.set_births_enabled(false);
         let s = body(&mut fauna, &world, Founder::Blind, 3.0, EAST, 0.0);
-        let w = body(&mut fauna, &world, GRAZER, 3.0, EAST, 0.3);
+        let w = body(&mut fauna, &world, walker, 3.0, EAST, 0.3);
         place(&mut fauna, w, 3.2, LANE_Z + side * 0.3, EAST);
+        sense(&mut fauna, &world);
         let act = respond(&mut fauna, &world, &flora, s, Actions { forward: 1.0, turn: 0.0, feed: 1.0 }).expect("it freezes");
         assert!(act.turn != 0.0, "side {side}: it withdraws");
         let h = animal(&fauna, s).pose.heading_rad;
