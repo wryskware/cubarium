@@ -33,3 +33,6 @@ toml = "0.8"
 [dev-dependencies]
 # The registry spec reads the struct values through an independent serializer.
 serde_json = "1"
+
+[lints]
+workspace = true

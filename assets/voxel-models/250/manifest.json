@@ -1,5 +1,5 @@
 {
- "format": "CVM1",
+ "format": "CVM2",
  "voxel_m": 0.25,
  "palette": [
   "plum",
@@ -43,11 +43,12 @@
  "founders": {
   "littershredder": "littershredder.cvm",
   "frondgrazer": "frondgrazer.cvm",
-  "lanternjaw": "lanternjaw.cvm"
+  "lanternjaw": "lanternjaw.cvm",
+  "loftstrider": "loftstrider.cvm"
  },
  "detail": {
   "bloomcrown": {
-   "bytes": 1213,
+   "bytes": 2449,
    "steps": [
     {
      "height_m": 0.25,
@@ -62,6 +63,23 @@
       3,
       3,
       3
+     ],
+     "state_cells": [
+      [
+       3,
+       2,
+       3
+      ],
+      [
+       3,
+       2,
+       3
+      ],
+      [
+       3,
+       2,
+       3
+      ]
      ]
     },
     {
@@ -77,6 +95,23 @@
       6,
       10,
       10
+     ],
+     "state_cells": [
+      [
+       6,
+       5,
+       4
+      ],
+      [
+       10,
+       5,
+       4
+      ],
+      [
+       10,
+       4,
+       4
+      ]
      ]
     },
     {
@@ -92,6 +127,23 @@
       9,
       7,
       7
+     ],
+     "state_cells": [
+      [
+       9,
+       6,
+       4
+      ],
+      [
+       7,
+       5,
+       4
+      ],
+      [
+       7,
+       5,
+       4
+      ]
      ]
     },
     {
@@ -107,6 +159,23 @@
       11,
       12,
       12
+     ],
+     "state_cells": [
+      [
+       11,
+       6,
+       5
+      ],
+      [
+       12,
+       6,
+       5
+      ],
+      [
+       12,
+       6,
+       5
+      ]
      ]
     },
     {
@@ -122,6 +191,23 @@
       20,
       20,
       20
+     ],
+     "state_cells": [
+      [
+       20,
+       14,
+       6
+      ],
+      [
+       20,
+       13,
+       6
+      ],
+      [
+       20,
+       14,
+       6
+      ]
      ]
     },
     {
@@ -137,12 +223,43 @@
       17,
       16,
       16
+     ],
+     "state_cells": [
+      [
+       17,
+       11,
+       6
+      ],
+      [
+       16,
+       9,
+       6
+      ],
+      [
+       16,
+       10,
+       6
+      ]
      ]
+    }
+   ],
+   "states": [
+    {
+     "name": "full",
+     "start": 1.0
+    },
+    {
+     "name": "browsed",
+     "start": 0.66
+    },
+    {
+     "name": "stripped",
+     "start": 0.25
     }
    ]
   },
   "umbrellafrond": {
-   "bytes": 7118,
+   "bytes": 18903,
    "steps": [
     {
      "height_m": 0.25,
@@ -157,6 +274,26 @@
       1,
       1,
       1
+     ],
+     "state_cells": [
+      [
+       1,
+       1,
+       1,
+       1
+      ],
+      [
+       1,
+       1,
+       1,
+       1
+      ],
+      [
+       1,
+       1,
+       1,
+       1
+      ]
      ]
     },
     {
@@ -172,6 +309,26 @@
       6,
       6,
       6
+     ],
+     "state_cells": [
+      [
+       6,
+       6,
+       2,
+       2
+      ],
+      [
+       6,
+       6,
+       2,
+       2
+      ],
+      [
+       6,
+       6,
+       2,
+       2
+      ]
      ]
     },
     {
@@ -187,6 +344,26 @@
       6,
       6,
       10
+     ],
+     "state_cells": [
+      [
+       6,
+       6,
+       6,
+       2
+      ],
+      [
+       6,
+       6,
+       6,
+       2
+      ],
+      [
+       10,
+       10,
+       6,
+       2
+      ]
      ]
     },
     {
@@ -202,6 +379,26 @@
       15,
       15,
       15
+     ],
+     "state_cells": [
+      [
+       15,
+       11,
+       7,
+       3
+      ],
+      [
+       15,
+       15,
+       7,
+       3
+      ],
+      [
+       15,
+       15,
+       7,
+       3
+      ]
      ]
     },
     {
@@ -217,6 +414,26 @@
       15,
       15,
       15
+     ],
+     "state_cells": [
+      [
+       15,
+       11,
+       7,
+       3
+      ],
+      [
+       15,
+       15,
+       7,
+       3
+      ],
+      [
+       15,
+       15,
+       7,
+       3
+      ]
      ]
     },
     {
@@ -232,6 +449,26 @@
       24,
       24,
       28
+     ],
+     "state_cells": [
+      [
+       24,
+       16,
+       16,
+       4
+      ],
+      [
+       24,
+       20,
+       16,
+       4
+      ],
+      [
+       28,
+       28,
+       16,
+       8
+      ]
      ]
     },
     {
@@ -247,6 +484,26 @@
       21,
       25,
       30
+     ],
+     "state_cells": [
+      [
+       21,
+       21,
+       21,
+       13
+      ],
+      [
+       25,
+       21,
+       21,
+       13
+      ],
+      [
+       30,
+       30,
+       14,
+       13
+      ]
      ]
     },
     {
@@ -262,6 +519,26 @@
       37,
       41,
       37
+     ],
+     "state_cells": [
+      [
+       37,
+       25,
+       25,
+       9
+      ],
+      [
+       41,
+       37,
+       29,
+       9
+      ],
+      [
+       37,
+       37,
+       25,
+       9
+      ]
      ]
     },
     {
@@ -277,6 +554,26 @@
       50,
       50,
       50
+     ],
+     "state_cells": [
+      [
+       50,
+       36,
+       30,
+       14
+      ],
+      [
+       50,
+       38,
+       30,
+       14
+      ],
+      [
+       50,
+       40,
+       24,
+       14
+      ]
      ]
     },
     {
@@ -292,6 +589,26 @@
       54,
       54,
       54
+     ],
+     "state_cells": [
+      [
+       54,
+       42,
+       34,
+       14
+      ],
+      [
+       54,
+       46,
+       30,
+       14
+      ],
+      [
+       54,
+       42,
+       32,
+       14
+      ]
      ]
     },
     {
@@ -307,6 +624,26 @@
       67,
       63,
       71
+     ],
+     "state_cells": [
+      [
+       67,
+       59,
+       35,
+       15
+      ],
+      [
+       63,
+       55,
+       31,
+       15
+      ],
+      [
+       71,
+       59,
+       39,
+       23
+      ]
      ]
     },
     {
@@ -322,6 +659,26 @@
       58,
       69,
       88
+     ],
+     "state_cells": [
+      [
+       58,
+       44,
+       36,
+       16
+      ],
+      [
+       69,
+       52,
+       36,
+       16
+      ],
+      [
+       88,
+       68,
+       48,
+       20
+      ]
      ]
     },
     {
@@ -337,12 +694,50 @@
       68,
       72,
       76
+     ],
+     "state_cells": [
+      [
+       68,
+       60,
+       32,
+       16
+      ],
+      [
+       72,
+       56,
+       36,
+       20
+      ],
+      [
+       76,
+       64,
+       40,
+       24
+      ]
      ]
+    }
+   ],
+   "states": [
+    {
+     "name": "full",
+     "start": 1.0
+    },
+    {
+     "name": "browsed A",
+     "start": 0.75
+    },
+    {
+     "name": "browsed B",
+     "start": 0.5
+    },
+    {
+     "name": "stripped",
+     "start": 0.25
     }
    ]
   },
   "springturf": {
-   "bytes": 221,
+   "bytes": 235,
    "steps": [
     {
      "height_m": 0.25,
@@ -377,7 +772,7 @@
    ]
   },
   "stonecushion": {
-   "bytes": 58,
+   "bytes": 72,
    "steps": [
     {
      "height_m": 0.25,
@@ -397,7 +792,7 @@
    ]
   },
   "velvetpad": {
-   "bytes": 294,
+   "bytes": 308,
    "steps": [
     {
      "height_m": 0.25,
@@ -432,7 +827,7 @@
    ]
   },
   "glowcap": {
-   "bytes": 61,
+   "bytes": 75,
    "steps": [
     {
      "height_m": 0.25,
@@ -452,7 +847,7 @@
    ]
   },
   "vaulttree": {
-   "bytes": 25174,
+   "bytes": 25188,
    "steps": [
     {
      "height_m": 0.25,
@@ -772,7 +1167,7 @@
    ]
   },
   "lanternberry": {
-   "bytes": 1331,
+   "bytes": 1345,
    "steps": [
     {
      "height_m": 0.25,
@@ -882,7 +1277,7 @@
    ]
   },
   "siphonreed": {
-   "bytes": 446,
+   "bytes": 460,
    "steps": [
     {
      "height_m": 0.75,
@@ -947,7 +1342,7 @@
    ]
   },
   "littershredder": {
-   "bytes": 192,
+   "bytes": 206,
    "bins": [
     {
      "length_m": 0.2362,
@@ -972,7 +1367,7 @@
    ]
   },
   "frondgrazer": {
-   "bytes": 405,
+   "bytes": 419,
    "bins": [
     {
      "length_m": 0.3481,
@@ -996,57 +1391,8 @@
     }
    ]
   },
-  "chorister": {
-   "bytes": 293,
-   "bins": [
-    {
-     "length_m": 0.644,
-     "cells": 6
-    },
-    {
-     "length_m": 1.4,
-     "cells": 33
-    }
-   ]
-  },
-  "ripple-snail": {
-   "bytes": 41,
-   "bins": [
-    {
-     "length_m": 0.19,
-     "cells": 1
-    }
-   ]
-  },
-  "capgnawer": {
-   "bytes": 71,
-   "bins": [
-    {
-     "length_m": 0.25,
-     "cells": 4
-    }
-   ]
-  },
-  "seedporter": {
-   "bytes": 112,
-   "bins": [
-    {
-     "length_m": 0.2,
-     "cells": 10
-    }
-   ]
-  },
-  "bellwing": {
-   "bytes": 80,
-   "bins": [
-    {
-     "length_m": 0.05,
-     "cells": 5
-    }
-   ]
-  },
   "lanternjaw": {
-   "bytes": 641,
+   "bytes": 655,
    "bins": [
     {
      "length_m": 0.4597,
@@ -1070,44 +1416,8 @@
     }
    ]
   },
-  "loftstrider": {
-   "bytes": 1212,
-   "bins": [
-    {
-     "length_m": 2.2,
-     "cells": 222
-    }
-   ]
-  },
-  "seedporter-stand": {
-   "bytes": 113,
-   "bins": [
-    {
-     "length_m": 0.31,
-     "cells": 9
-    }
-   ]
-  },
-  "seedporter-ground": {
-   "bytes": 120,
-   "bins": [
-    {
-     "length_m": 1.14,
-     "cells": 12
-    }
-   ]
-  },
-  "seedporter-glide": {
-   "bytes": 125,
-   "bins": [
-    {
-     "length_m": 1.24,
-     "cells": 13
-    }
-   ]
-  },
   "frondgrazer-hunker": {
-   "bytes": 302,
+   "bytes": 316,
    "bins": [
     {
      "length_m": 0.3481,
@@ -1130,9 +1440,141 @@
      "cells": 10
     }
    ]
+  },
+  "chorister": {
+   "bytes": 307,
+   "bins": [
+    {
+     "length_m": 0.644,
+     "cells": 6
+    },
+    {
+     "length_m": 1.4,
+     "cells": 33
+    }
+   ]
+  },
+  "ripple-snail": {
+   "bytes": 55,
+   "bins": [
+    {
+     "length_m": 0.19,
+     "cells": 1
+    }
+   ]
+  },
+  "capgnawer": {
+   "bytes": 85,
+   "bins": [
+    {
+     "length_m": 0.25,
+     "cells": 4
+    }
+   ]
+  },
+  "seedporter": {
+   "bytes": 126,
+   "bins": [
+    {
+     "length_m": 0.2,
+     "cells": 10
+    }
+   ]
+  },
+  "bellwing": {
+   "bytes": 94,
+   "bins": [
+    {
+     "length_m": 0.05,
+     "cells": 5
+    }
+   ]
+  },
+  "loftstrider": {
+   "bytes": 3450,
+   "bins": [
+    {
+     "length_m": 1.0211,
+     "cells": 52,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.3159,
+     "cells": 78,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.6106,
+     "cells": 120,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 1.9053,
+     "cells": 174,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    },
+    {
+     "length_m": 2.2,
+     "cells": 226,
+     "sectors": {
+      "eyes": 6,
+      "tusks": 6,
+      "fronds": 6,
+      "feet": 6
+     }
+    }
+   ]
+  },
+  "seedporter-stand": {
+   "bytes": 127,
+   "bins": [
+    {
+     "length_m": 0.31,
+     "cells": 9
+    }
+   ]
+  },
+  "seedporter-ground": {
+   "bytes": 134,
+   "bins": [
+    {
+     "length_m": 1.14,
+     "cells": 12
+    }
+   ]
+  },
+  "seedporter-glide": {
+   "bytes": 139,
+   "bins": [
+    {
+     "length_m": 1.24,
+     "cells": 13
+    }
+   ]
   }
  },
  "specimens": {
+  "frondgrazer-hunker": "frondgrazer-hunker.cvm",
   "chorister": "chorister.cvm",
   "ripple-snail": "ripple-snail.cvm",
   "capgnawer": "capgnawer.cvm",
@@ -1141,7 +1583,6 @@
   "loftstrider": "loftstrider.cvm",
   "seedporter-stand": "seedporter-stand.cvm",
   "seedporter-ground": "seedporter-ground.cvm",
-  "seedporter-glide": "seedporter-glide.cvm",
-  "frondgrazer-hunker": "frondgrazer-hunker.cvm"
+  "seedporter-glide": "seedporter-glide.cvm"
  }
 }

@@ -12,3 +12,6 @@ serde = { version = "1", features = ["derive"], optional = true }
 default = []
 # Derives Serialize/Deserialize on `Face` so downstream crates can persist layouts.
 serde = ["dep:serde"]
+
+[lints]
+workspace = true

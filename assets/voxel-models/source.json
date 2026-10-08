@@ -103,6 +103,10 @@
             }
           ]
         }
+      ],
+      "foliage_state_below": [
+        0.66,
+        0.25
       ]
     },
     {
@@ -214,6 +218,11 @@
             }
           ]
         }
+      ],
+      "foliage_state_below": [
+        0.75,
+        0.5,
+        0.25
       ]
     },
     {
@@ -243,7 +252,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "stonecushion",
@@ -282,7 +292,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "velvetpad",
@@ -311,7 +322,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "glowcap",
@@ -340,7 +352,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "vaulttree",
@@ -441,7 +454,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "lanternberry",
@@ -506,7 +520,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     },
     {
       "name": "siphonreed",
@@ -535,7 +550,8 @@
             }
           ]
         }
-      ]
+      ],
+      "foliage_state_below": []
     }
   ],
   "founders": [
@@ -562,6 +578,14 @@
       "adult_height_m": 0.45,
       "body_min": 0.102,
       "body_max": 1.05
+    },
+    {
+      "name": "loftstrider",
+      "adult_length_m": 2.2,
+      "adult_width_m": 2.2,
+      "adult_height_m": 3.4,
+      "body_min": 0.528,
+      "body_max": 5.28
     }
   ]
 }

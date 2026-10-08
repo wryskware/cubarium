@@ -28,3 +28,6 @@ bevy_tasks = { workspace = true, optional = true }
 # The registry spec (`tests/registry.rs`).
 serde_json = "1"
 toml = "0.8"
+
+[lints]
+workspace = true

@@ -254,6 +254,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         packer.animals.set_meal_flash(cfg.meal_flash);
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
+        packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
         Ok(VoxelGpuSink {
             figure_track: models_on.then(|| FigureTrack::new(cfg.figures.clone(), params.width)),
             figure_highlight: None,
@@ -312,6 +313,13 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
 
     /// The last rendered world raster as `w · h · 4` sRGB RGBA — the same bytes the
     /// `_SRGB` attachment wrote, directly comparable with `Canvas::encode_raster`'s RGB8.
+    /// Run the presenter's frame clock (the film's easing and the foliage cross-fades) on
+    /// `now` instead of the wall clock; `None` goes back to it. A capture that stages its
+    /// own frames passes each frame's time, so the fades play at real speed in the video.
+    pub fn set_presenter_clock(&mut self, now: Option<Instant>) {
+        self.packer.set_film_now(now);
+    }
+
     pub fn read_raster(&self) -> Result<Vec<u8>> {
         self.renderer.read_raster(&self.gpu)
     }
@@ -2153,7 +2161,7 @@ fn role_of(tag: Option<Tag>) -> u8 {
     match tag {
         None => ROLE_NONE,
         Some(Tag::Trunk) => ROLE_BARK,
-        Some(Tag::Foliage(_)) => ROLE_LEAF,
+        Some(Tag::Foliage(_) | Tag::Fallen(_)) => ROLE_LEAF,
         Some(Tag::Drape(_)) => ROLE_DRAPE,
         Some(Tag::Accent) => ROLE_ACCENT,
     }

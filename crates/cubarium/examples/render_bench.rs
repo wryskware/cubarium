@@ -138,28 +138,24 @@ fn parse_cpus(spec: &str) -> Result<Vec<usize>> {
 
 #[cfg(target_os = "linux")]
 fn set_affinity(cpus: &[usize]) -> bool {
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        libc::CPU_ZERO(&mut set);
-        for &c in cpus {
-            libc::CPU_SET(c, &mut set);
+    let mut set = rustix::thread::CpuSet::new();
+    for &c in cpus {
+        if c >= rustix::thread::CpuSet::MAX_CPU {
+            return false;
         }
-        libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &set) == 0
+        set.set(c);
     }
+    rustix::thread::sched_setaffinity(None, &set).is_ok()
 }
 
 #[cfg(target_os = "linux")]
 fn current_affinity() -> Vec<usize> {
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        libc::CPU_ZERO(&mut set);
-        if libc::sched_getaffinity(0, size_of::<libc::cpu_set_t>(), &mut set) != 0 {
-            return Vec::new();
-        }
-        (0..libc::CPU_SETSIZE as usize)
-            .filter(|&c| libc::CPU_ISSET(c, &set))
-            .collect()
-    }
+    let Ok(set) = rustix::thread::sched_getaffinity(None) else {
+        return Vec::new();
+    };
+    (0..rustix::thread::CpuSet::MAX_CPU)
+        .filter(|&c| set.is_set(c))
+        .collect()
 }
 
 #[cfg(not(target_os = "linux"))]

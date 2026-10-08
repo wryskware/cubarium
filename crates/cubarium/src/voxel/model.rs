@@ -13,10 +13,14 @@
 //!
 //! The tag is what lets the picture show the simulation's state on a fixed model:
 //!
-//! - **Foliage thins by layer.** A foliage or drape cell of layer `i` is drawn iff
-//!   [`keeps`] says so at that layer's `stock / capacity`: a pure hash of stand, cell and
-//!   layer against the fraction, so a browsed rosette visibly empties while the crown
-//!   above it stays full, the same half shows every frame, and regrowth only adds cells.
+//! - **Foliage thins by layer** on a species without foliage states. A foliage or drape
+//!   cell of layer `i` is drawn iff [`keeps`] says so at that layer's `stock / capacity`:
+//!   a pure hash of stand, cell and layer against the fraction, so the same half shows
+//!   every frame and regrowth only adds cells.
+//! - **Foliage states** (`design/handoffs/foliage-states-implementation-2026-10-08.md`): a
+//!   species whose file carries more than one state (bloomcrown, umbrellafrond) is drawn
+//!   whole in the state its **total** foliage fraction picks ([`FoliageTrack`]), with no
+//!   per-layer thinning, and moves between states by a voxel cross-fade ([`fade_shows`]).
 //! - **Wilt** tints foliage cells, quantised to [`WILT_LEVELS`] steps.
 //! - **Accents** follow their state: a warm bloom only when the parcel is ripe (half a
 //!   package), and lanternberry fruit by parcel fullness.
@@ -39,16 +43,25 @@
 //! `assets/voxel-models/<voxel_mm>/<name>.cvm`, one per species or founder, plus a
 //! `manifest.json` naming them. Compact little-endian binary (5 bytes a cell), because
 //! the library is regenerated rather than edited, is read once at start-up, and is a
-//! tenth of the size of the same cells in JSON:
+//! tenth of the size of the same cells in JSON. Version 2 (2026-10-08) adds the **state
+//! axis**: a header table of foliage states, and per step and variant one cell list per
+//! state. A version 1 file is refused: the library is rebaked, never migrated.
 //!
 //! ```text
-//! b"CVM1"  kind u8 (0 plant, 1 animal)
+//! b"CVM2"  kind u8 (0 plant, 1 animal)
 //! n_materials u8, then per material: len u8, name bytes (a PALETTE name)
+//! n_states u8 (>= 1), then per state: len u8, name bytes, start f64
+//!     state 0 is the full model, start 1; state k is meant for a total foliage fraction
+//!     below its start. The starts are the bake's record of the config it was baked
+//!     against (`SpeciesSource::foliage_state_below`); the presenter reads the live
+//!     config's thresholds (`SpeciesConfig::foliage_state_below`).
 //! n_steps u16, then per step:
 //!     height_m f64 (a bin's length for an animal), radius_m f64, n_variants u8,
-//!     per variant: n_cells u32, then per cell: dx i8, dy i8, dz i8, material u8, tag u8
-//! tag: 0x00 trunk, 0x10|i foliage i, 0x20|i drape i, 0x30 accent
+//!     per variant, per state: n_cells u32, then per cell: dx i8, dy i8, dz i8, material u8, tag u8
+//! tag: 0x00 trunk, 0x10|i foliage i, 0x20|i drape i, 0x30 accent, 0x40|i fallen foliage i
 //! ```
+//!
+//! An animal file has one state.
 
 use std::path::Path;
 
@@ -71,6 +84,11 @@ pub enum Tag {
     Foliage(u8),
     Drape(u8),
     Accent,
+    /// Foliage of layer `i` **fallen to the ground** beside the plant (a stripped
+    /// bloomcrown's crown voxels): painted as that layer's foliage at the top of its ramp,
+    /// with no height shading, so it reads in the crown's own colour and not in the dark
+    /// base a ground-level cell would take.
+    Fallen(u8),
 }
 
 impl Tag {
@@ -82,6 +100,7 @@ impl Tag {
             1 => Some(Tag::Foliage(i)),
             2 => Some(Tag::Drape(i)),
             3 if i == 0 => Some(Tag::Accent),
+            4 => Some(Tag::Fallen(i)),
             _ => None,
         }
     }
@@ -92,6 +111,7 @@ impl Tag {
             Tag::Foliage(i) => 0x10 | (i & 0x0f),
             Tag::Drape(i) => 0x20 | (i & 0x0f),
             Tag::Accent => 0x30,
+            Tag::Fallen(i) => 0x40 | (i & 0x0f),
         }
     }
 }
@@ -106,17 +126,43 @@ pub struct ModelCell {
 }
 
 /// One crown-height step of a species, and its 2–3 variants.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlantStep {
     pub height_m: f64,
     pub radius_m: f64,
+    /// The full model (state 0), per variant.
     pub variants: Vec<Vec<ModelCell>>,
+    /// The reduced foliage states `1..`, each per variant: `states[k - 1][v]` is state
+    /// `k` of variant `v`. Empty for a species without states.
+    pub states: Vec<Vec<Vec<ModelCell>>>,
+}
+
+impl PlantStep {
+    /// Variant `v` in state `state` (0 is the full model); `None` past either end.
+    pub fn cells(&self, v: usize, state: usize) -> Option<&[ModelCell]> {
+        match state {
+            0 => self.variants.get(v),
+            k => self.states.get(k - 1).and_then(|s| s.get(v)),
+        }
+        .map(Vec::as_slice)
+    }
+}
+
+/// One foliage state in a model file's header: its name, and the total foliage fraction
+/// below which the bake meant it to be drawn (the full model, state 0, starts at 1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct StateInfo {
+    pub name: String,
+    pub start: f64,
 }
 
 /// A species at every step, ascending by height.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlantModel {
     pub steps: Vec<PlantStep>,
+    /// The file's state table, state 0 first; empty for a model built by hand without
+    /// states.
+    pub states: Vec<StateInfo>,
 }
 
 impl PlantModel {
@@ -140,22 +186,39 @@ impl PlantModel {
         radius_m: f64,
         stand_id: u64,
     ) -> Option<&[ModelCell]> {
+        let (step, v) = self.pick_sized(height_m, radius_m, stand_id)?;
+        self.steps[step].cells(v, 0)
+    }
+
+    /// What [`PlantModel::select_sized`] picks, as `(step index, variant index)`, so a
+    /// caller can take any of its states ([`PlantStep::cells`]).
+    pub fn pick_sized(&self, height_m: f64, radius_m: f64, stand_id: u64) -> Option<(usize, usize)> {
         let h = self.steps[nearest(self.steps.iter().map(|s| s.height_m), height_m)?].height_m;
         // Steps ascend by height, so the ones at `h` are one run.
         let from = self.steps.iter().position(|s| s.height_m == h)?;
         let run = self.steps[from..].iter().take_while(|s| s.height_m == h);
         let i = nearest(run.map(|s| s.radius_m), radius_m)?;
-        variant(&self.steps[from + i], stand_id)
+        let v = variant_index(&self.steps[from + i], stand_id)?;
+        Some((from + i, v))
+    }
+
+    /// How many foliage states every step of the model carries: 1 without states.
+    pub fn state_count(&self) -> usize {
+        self.steps.iter().map(|s| 1 + s.states.len()).min().unwrap_or(1)
     }
 }
 
 /// The variant of `step` that `stand_id` picks, by the id alone.
 fn variant(step: &PlantStep, stand_id: u64) -> Option<&[ModelCell]> {
+    Some(&step.variants[variant_index(step, stand_id)?])
+}
+
+fn variant_index(step: &PlantStep, stand_id: u64) -> Option<usize> {
     let n = step.variants.len() as u64;
     if n == 0 {
         return None;
     }
-    Some(&step.variants[(mix64(stand_id ^ VARIANT_SALT) % n) as usize])
+    Some((mix64(stand_id ^ VARIANT_SALT) % n) as usize)
 }
 
 /// One size bin of a founder, facing +x.
@@ -405,8 +468,8 @@ enum Parsed {
 /// Read one `.cvm` file (the module header has the layout).
 fn parse(bytes: &[u8]) -> Result<Parsed> {
     let mut r = Reader { bytes, at: 0 };
-    if r.take(4)? != b"CVM1" {
-        bail!("not a CVM1 model file");
+    if r.take(4)? != b"CVM2" {
+        bail!("not a CVM2 model file (a CVM1 library is rebaked, never read)");
     }
     let kind = r.u8()?;
     let n_materials = r.u8()?;
@@ -419,6 +482,17 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
         };
         remap.push(i);
     }
+    let n_states = usize::from(r.u8()?);
+    if n_states == 0 {
+        bail!("a model with no states");
+    }
+    let mut states = Vec::with_capacity(n_states);
+    for _ in 0..n_states {
+        let len = usize::from(r.u8()?);
+        let name = std::str::from_utf8(r.take(len)?).context("a state name")?.to_string();
+        let start = r.f64()?;
+        states.push(StateInfo { name, start });
+    }
     let n_steps = r.u16()?;
     let mut steps = Vec::with_capacity(usize::from(n_steps));
     for _ in 0..n_steps {
@@ -426,33 +500,40 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
         let radius_m = r.f64()?;
         let n_variants = r.u8()?;
         let mut variants = Vec::with_capacity(usize::from(n_variants));
+        let mut reduced = vec![Vec::with_capacity(usize::from(n_variants)); n_states - 1];
         for _ in 0..n_variants {
-            let n = r.u32()? as usize;
-            let raw = r.take(n.checked_mul(5).context("cell count")?)?;
-            let mut cells = Vec::with_capacity(n);
-            for c in raw.chunks_exact(5) {
-                let Some(&material) = remap.get(usize::from(c[3])) else {
-                    bail!("cell material {} of {n_materials}", c[3]);
-                };
-                let Some(tag) = Tag::from_byte(c[4]) else {
-                    bail!("cell tag {:#x}", c[4]);
-                };
-                cells.push(ModelCell {
-                    offset: [
-                        i32::from(c[0] as i8),
-                        i32::from(c[1] as i8),
-                        i32::from(c[2] as i8),
-                    ],
-                    material,
-                    tag,
-                });
+            for k in 0..n_states {
+                let n = r.u32()? as usize;
+                let raw = r.take(n.checked_mul(5).context("cell count")?)?;
+                let mut cells = Vec::with_capacity(n);
+                for c in raw.chunks_exact(5) {
+                    let Some(&material) = remap.get(usize::from(c[3])) else {
+                        bail!("cell material {} of {n_materials}", c[3]);
+                    };
+                    let Some(tag) = Tag::from_byte(c[4]) else {
+                        bail!("cell tag {:#x}", c[4]);
+                    };
+                    cells.push(ModelCell {
+                        offset: [
+                            i32::from(c[0] as i8),
+                            i32::from(c[1] as i8),
+                            i32::from(c[2] as i8),
+                        ],
+                        material,
+                        tag,
+                    });
+                }
+                match k {
+                    0 => variants.push(cells),
+                    k => reduced[k - 1].push(cells),
+                }
             }
-            variants.push(cells);
         }
         steps.push(PlantStep {
             height_m,
             radius_m,
             variants,
+            states: reduced,
         });
     }
     if r.at != bytes.len() {
@@ -465,7 +546,7 @@ fn parse(bytes: &[u8]) -> Result<Parsed> {
             if !ascending(&h) {
                 bail!("plant steps are not ascending by height");
             }
-            Parsed::Plant(PlantModel { steps })
+            Parsed::Plant(PlantModel { steps, states })
         }
         1 => {
             let bins: Vec<AnimalBin> = steps
@@ -644,6 +725,125 @@ pub fn keep_threshold(stand_id: u64, offset: [i32; 3], layer: u8) -> f64 {
         | (u64::from(layer) << 48);
     let h = mix64(mix64(stand_id) ^ key);
     ((h >> 40) as f64) * (1.0 / (1u64 << 24) as f64)
+}
+
+// --- foliage states ------------------------------------------------------------------
+
+/// The hash layer a state cross-fade reads ([`fade_shows`]), apart from every foliage
+/// index and [`FRUIT_LAYER`]. One hash per cell offset, so an outgoing and an incoming
+/// cell at the same offset never show together or leave a gap.
+pub const FADE_LAYER: u8 = 0xfe;
+
+/// The state a stand's **total** foliage fraction picks, without hysteresis: how many of
+/// the thresholds `below` (descending, state `k` is drawn below `below[k - 1]`) the
+/// fraction lies below. A NaN fraction counts as bare.
+pub fn state_at(fraction: f64, below: &[f64]) -> usize {
+    let f = if fraction.is_nan() { 0.0 } else { fraction };
+    below.iter().filter(|&&t| f < t).count()
+}
+
+/// The state a stand in state `current` moves to at `fraction`, with `hysteresis`: it
+/// goes down (to a barer state) as soon as the fraction is below a threshold, and back
+/// up only once the fraction is at or above that threshold plus `hysteresis`. So a
+/// fraction hovering on a threshold does not flicker between the two states.
+pub fn next_state(current: usize, fraction: f64, below: &[f64], hysteresis: f64) -> usize {
+    let down = state_at(fraction, below);
+    if down >= current {
+        return down;
+    }
+    let f = if fraction.is_nan() { 0.0 } else { fraction };
+    let up = below.iter().filter(|&&t| f < t + hysteresis.max(0.0)).count();
+    up.clamp(down, current)
+}
+
+/// **A stand's drawn foliage state and its cross-fade**: it shows state `from` blended
+/// toward state `to` by `blend` in `[0, 1]`; settled, `from == to`. The blend moves on the
+/// presenter's frame clock ([`FoliageTrack::advance`]) and never jumps, so a stand never
+/// pops between states.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FoliageTrack {
+    pub from: u8,
+    pub to: u8,
+    pub blend: f64,
+}
+
+impl FoliageTrack {
+    /// Settled in `state`, no fade: what a stand seen for the first time draws.
+    pub fn settled(state: u8) -> FoliageTrack {
+        FoliageTrack {
+            from: state,
+            to: state,
+            blend: 1.0,
+        }
+    }
+
+    pub fn is_fading(&self) -> bool {
+        self.from != self.to
+    }
+
+    /// The state it shows once the fade is done.
+    pub fn state(&self) -> u8 {
+        self.to
+    }
+
+    /// Move `dt` seconds toward state `aim`, a whole fade taking `fade_s` (0: at once).
+    /// Settled elsewhere, it starts fading to `aim` directly, however many states apart.
+    /// Asked back to the state it is fading from, it runs the same fade backward, so the
+    /// cells it already swapped swap back one by one. Asked somewhere else mid-fade, it
+    /// first finishes the fade it is in and then starts the next.
+    pub fn advance(&mut self, aim: u8, dt: f64, fade_s: f64) {
+        let step = if fade_s > 0.0 {
+            (dt.max(0.0) / fade_s).min(1.0)
+        } else {
+            1.0
+        };
+        if self.from == self.to {
+            if aim == self.to {
+                return;
+            }
+            self.from = self.to;
+            self.to = aim;
+            self.blend = 0.0;
+        }
+        if aim == self.from {
+            self.blend -= step;
+            if self.blend <= 0.0 {
+                *self = FoliageTrack::settled(self.from);
+            }
+        } else {
+            self.blend += step;
+            if self.blend >= 1.0 {
+                *self = FoliageTrack::settled(self.to);
+            }
+        }
+    }
+}
+
+/// Whether a cell **only one** of the two states holds shows at `blend` of the fade
+/// between them: an incoming cell once its [`FADE_LAYER`] hash is below the blend, an
+/// outgoing one while its hash is at or above it. A cell both states hold always shows
+/// ([`fade_cells`]). Pure, so a stand fades the same way every time.
+#[inline]
+pub fn fade_shows(stand_id: u64, offset: [i32; 3], incoming: bool, blend: f64) -> bool {
+    let h = keep_threshold(stand_id, offset, FADE_LAYER);
+    if incoming { h < blend } else { h >= blend }
+}
+
+/// The cells drawn at `blend` of the fade from `from` to `to`: every cell both hold, and
+/// of the rest those [`fade_shows`] keeps. At blend 0 it is `from`, at 1 it is `to`.
+pub fn fade_cells(from: &[ModelCell], to: &[ModelCell], stand_id: u64, blend: f64) -> Vec<ModelCell> {
+    let mut out = Vec::with_capacity(from.len().max(to.len()));
+    for m in to {
+        if from.contains(m) || fade_shows(stand_id, m.offset, true, blend) {
+            out.push(*m);
+        }
+    }
+    for m in from {
+        if !to.contains(m) && fade_shows(stand_id, m.offset, false, blend) {
+            out.push(*m);
+        }
+    }
+    out
 }
 
 // --- stamping ------------------------------------------------------------------------
@@ -830,6 +1030,10 @@ pub struct SpeciesSource {
     pub crown_height_m: [f64; 2],
     pub crown_radius_m: [f64; 2],
     pub profile: Vec<Stage>,
+    /// The species' foliage-state thresholds ([`cubarium_voxel_flora::SpeciesConfig::foliage_state_below`]):
+    /// the bake writes them into the model's state table as each reduced state's start.
+    #[serde(default)]
+    pub foliage_state_below: Vec<f64>,
 }
 
 /// A mirror of flora's `Profile` whose threshold survives JSON: the last stage's
@@ -883,6 +1087,7 @@ impl SourceDump {
                                 layers: p.layers.clone(),
                             })
                             .collect(),
+                        foliage_state_below: sc.foliage_state_below.clone(),
                     }
                 })
                 .collect(),
@@ -955,11 +1160,48 @@ mod non_finite {
 mod tests {
     use super::*;
 
+    #[test]
+    fn loftstrider_bins_follow_the_founder_length_rule_at_each_voxel_size() {
+        let fauna = FaunaConfig::default();
+        let phys = fauna.founder(Founder::Loftstrider);
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        for vox in SourceDump::from_model(&FloraConfig::default(), &fauna).voxel_sizes_m {
+            let lib = ModelLibrary::load(&root, vox).unwrap();
+            let model = lib.animals[Founder::Loftstrider.index()]
+                .as_ref()
+                .expect("founder bake");
+            assert_eq!(model.bins.len(), 5);
+            let s0 = (phys.core.body_min / phys.core.body_max).cbrt();
+            for (n, bin) in model.bins.iter().enumerate() {
+                let s = s0 + (1.0 - s0) * n as f64 / (model.bins.len() - 1) as f64;
+                let length = phys.adult_length_m * s;
+                assert!((bin.length_m - length).abs() < 1e-12);
+                assert!(!bin.cells.is_empty());
+                assert!(std::ptr::eq(
+                    model.select(length).unwrap().as_ptr(),
+                    bin.cells.as_ptr()
+                ));
+            }
+            assert_ne!(
+                model.bins.first().unwrap().cells,
+                model.bins.last().unwrap().cells
+            );
+            assert!(std::ptr::eq(
+                model
+                    .select(phys.body_at(phys.core.body_min).length_m)
+                    .unwrap()
+                    .as_ptr(),
+                model.bins[0].cells.as_ptr(),
+            ));
+        }
+    }
+
     /// One animal file, one bin of one cell in `material`, as the bake writes a specimen.
     fn one_bin_animal(material: &str, length_m: f64) -> Vec<u8> {
-        let mut b = b"CVM1".to_vec();
+        let mut b = b"CVM2".to_vec();
         b.extend_from_slice(&[1, 1, material.len() as u8]);
         b.extend_from_slice(material.as_bytes());
+        push_states(&mut b, &[("full", 1.0)]);
         b.extend_from_slice(&1u16.to_le_bytes());
         b.extend_from_slice(&length_m.to_le_bytes());
         b.extend_from_slice(&0.1f64.to_le_bytes());
@@ -1015,6 +1257,16 @@ mod tests {
         assert!(super::super::colours::specimen_coat("ripple_snail").is_some(), "the coat too");
     }
 
+    /// The state table, as the bake writes it.
+    fn push_states(b: &mut Vec<u8>, states: &[(&str, f64)]) {
+        b.push(states.len() as u8);
+        for (name, start) in states {
+            b.push(name.len() as u8);
+            b.extend_from_slice(name.as_bytes());
+            b.extend_from_slice(&start.to_le_bytes());
+        }
+    }
+
     #[test]
     fn a_tag_round_trips_its_byte() {
         for t in [
@@ -1023,22 +1275,77 @@ mod tests {
             Tag::Foliage(3),
             Tag::Drape(1),
             Tag::Accent,
+            Tag::Fallen(1),
         ] {
             assert_eq!(Tag::from_byte(t.to_byte()), Some(t));
         }
-        assert_eq!(Tag::from_byte(0x40), None);
+        assert_eq!(Tag::from_byte(0x41), Some(Tag::Fallen(1)), "the bake's fallen byte");
+        assert_eq!(Tag::from_byte(0x50), None);
+    }
+
+    /// A version 1 file is refused: the library is rebaked, never read across versions.
+    #[test]
+    fn a_version_1_file_is_refused() {
+        let mut b = one_bin_animal("a_main", 0.5);
+        b[..4].copy_from_slice(b"CVM1");
+        assert!(parse(&b).is_err());
+    }
+
+    /// A plant file with three states reads back each variant's cells per state, in the
+    /// file's order, the full model as `variants` and the rest as `states`, and the state
+    /// table's names and starts.
+    #[test]
+    fn a_file_with_foliage_states_parses_each_state() {
+        let mut b = b"CVM2".to_vec();
+        b.extend_from_slice(&[0, 1, 4]);
+        b.extend_from_slice(b"plum");
+        push_states(&mut b, &[("full", 1.0), ("browsed", 0.6), ("stripped", 0.2)]);
+        b.extend_from_slice(&1u16.to_le_bytes());
+        b.extend_from_slice(&0.5f64.to_le_bytes());
+        b.extend_from_slice(&0.25f64.to_le_bytes());
+        b.push(2);
+        // Variant v, state k: k + 1 cells at height 10 v + k; the last one fallen.
+        for v in 0..2u8 {
+            for k in 0..3u8 {
+                b.extend_from_slice(&u32::from(k + 1).to_le_bytes());
+                for c in 0..=k {
+                    let tag = if c == k && k == 2 { 0x41 } else { 0x10 };
+                    b.extend_from_slice(&[c, 10 * v + k, 0, 0, tag]);
+                }
+            }
+        }
+        let Parsed::Plant(m) = parse(&b).unwrap() else {
+            panic!("a plant");
+        };
+        assert_eq!(m.state_count(), 3);
+        assert_eq!(
+            m.states.iter().map(|s| (s.name.as_str(), s.start)).collect::<Vec<_>>(),
+            [("full", 1.0), ("browsed", 0.6), ("stripped", 0.2)]
+        );
+        let step = &m.steps[0];
+        for v in 0..2usize {
+            for k in 0..3usize {
+                let cells = step.cells(v, k).expect("every variant in every state");
+                assert_eq!(cells.len(), k + 1);
+                assert!(cells.iter().all(|c| c.offset[1] == 10 * v as i32 + k as i32));
+            }
+            assert!(step.cells(v, 3).is_none(), "no fourth state");
+        }
+        assert_eq!(step.cells(1, 2).unwrap()[2].tag, Tag::Fallen(1));
+        assert_eq!(step.cells(0, 0), Some(&step.variants[0][..]), "state 0 is the full model");
     }
 
     #[test]
     fn a_written_file_parses_back() {
         // One plant step with two variants, written the way the bake writes it.
-        let mut b = b"CVM1".to_vec();
+        let mut b = b"CVM2".to_vec();
         b.push(0);
         b.push(2);
         for n in ["violet", "warm"] {
             b.push(n.len() as u8);
             b.extend_from_slice(n.as_bytes());
         }
+        push_states(&mut b, &[("full", 1.0)]);
         b.extend_from_slice(&1u16.to_le_bytes());
         b.extend_from_slice(&0.25f64.to_le_bytes());
         b.extend_from_slice(&0.125f64.to_le_bytes());

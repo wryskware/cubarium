@@ -8,12 +8,16 @@
 //! columns it was given, and the columns are split between tasks, so no two threads ever
 //! write one element; the one exception, the exchange's proposals into a neighbour's
 //! cells, is an atomic add. The per-cell arrays are strided by column (a cell is `y ·
-//! plane + col`), so a task cannot be handed a sub-slice: it writes through a raw pointer
-//! (`Ptr`, private to this module) and the drivers here are the only code that makes
-//! one.
+//! plane + col`), so a task cannot be handed a sub-slice: the drivers view each array,
+//! for the length of a phase, as `AtomicU64`s over its own memory (`F64s`, `Words128`,
+//! private to this module) and every task reads and writes its columns through relaxed
+//! loads and stores, which compile to the plain moves a pointer would. No `unsafe`: the
+//! crate forbids it (Wrysk, 2026-10-08).
 
 use core::marker::PhantomData;
 use core::ops::Range;
+use core::sync::atomic::AtomicU64;
+use core::sync::atomic::Ordering::Relaxed;
 
 use super::column::{self, Cells, Ground, Rows, Sets, Store, Table, Words};
 use super::{
@@ -251,39 +255,45 @@ impl<'a> Exec<'a> {
     }
 }
 
-/// A pointer a task reads and writes a strided array through. See the module doc: the
-/// drivers hand every column to exactly one task, and a column phase touches only its own
-/// column's cells, so no element is ever reached from two threads at once.
+/// A per-cell `f64` array as the tasks share it: the array's own memory viewed as
+/// `AtomicU64`s holding the floats' bits, for as long as the view borrows it mutably.
+/// Every access is a relaxed load or store (a plain `mov` on x86-64 and aarch64) and
+/// bounds-checked. The drivers hand every column to exactly one task and a column phase
+/// touches only its own column's cells, so the relaxed accesses never actually race; the
+/// atomics are what lets safe code say so.
 #[derive(Clone, Copy)]
-struct Ptr<T> {
-    at: *mut T,
-    len: usize,
-}
-unsafe impl<T: Send> Send for Ptr<T> {}
-unsafe impl<T: Send> Sync for Ptr<T> {}
+struct F64s<'a>(&'a [AtomicU64]);
 
-impl<T: Copy> Ptr<T> {
-    fn new(v: &mut [T]) -> Ptr<T> {
-        Ptr {
-            at: v.as_mut_ptr(),
-            len: v.len(),
+impl<'a> F64s<'a> {
+    fn new(v: &'a mut [f64]) -> F64s<'a> {
+        F64s(AtomicU64::from_mut_slice(bytemuck::cast_slice_mut(v)))
+    }
+    #[inline(always)]
+    fn load(&self, i: usize) -> f64 {
+        f64::from_bits(self.0[i].load(Relaxed))
+    }
+    #[inline(always)]
+    fn store(&self, i: usize, v: f64) {
+        self.0[i].store(v.to_bits(), Relaxed)
+    }
+    /// `f64` addition on the cell: what a proposal into another column's cell is. Order
+    /// across threads is whatever the adds land in.
+    #[inline(always)]
+    #[cfg(feature = "par")]
+    fn add(&self, i: usize, q: f64) {
+        let cell = &self.0[i];
+        let mut cur = cell.load(Relaxed);
+        loop {
+            let new = (f64::from_bits(cur) + q).to_bits();
+            match cell.compare_exchange_weak(cur, new, Relaxed, Relaxed) {
+                Ok(_) => return,
+                Err(seen) => cur = seen,
+            }
         }
     }
-    #[inline(always)]
-    fn load(&self, i: usize) -> T {
-        debug_assert!(i < self.len);
-        // SAFETY: in bounds (the grid's cells and columns), and owned by the calling task.
-        unsafe { *self.at.add(i) }
-    }
-    #[inline(always)]
-    fn store(&mut self, i: usize, v: T) {
-        debug_assert!(i < self.len);
-        // SAFETY: as `load`.
-        unsafe { *self.at.add(i) = v }
-    }
 }
 
-impl Store for Ptr<f64> {
+impl Store for F64s<'_> {
     #[inline(always)]
     fn get(&self, i: usize) -> f64 {
         self.load(i)
@@ -291,6 +301,28 @@ impl Store for Ptr<f64> {
     #[inline(always)]
     fn set(&mut self, i: usize, v: f64) {
         self.store(i, v)
+    }
+}
+
+/// The exchange's per-column `touched` row masks as the tasks share them: each word as
+/// its two `u64` halves in `AtomicU64`s, the same way as [`F64s`], so a task can mark a
+/// row of another column's word.
+#[cfg(feature = "par")]
+#[derive(Clone, Copy)]
+struct Words128<'a>(&'a [AtomicU64]);
+
+#[cfg(feature = "par")]
+impl<'a> Words128<'a> {
+    fn new(v: &'a mut [u128]) -> Words128<'a> {
+        Words128(AtomicU64::from_mut_slice(bytemuck::cast_slice_mut(v)))
+    }
+    /// Set row `y` of column `col`'s word, from any thread: the `u64` holding bits
+    /// `64·h .. 64·h + 64` of a word is its `h`-th in memory on a little-endian host.
+    #[inline(always)]
+    fn set_row(&self, col: usize, y: usize) {
+        let h = y >> 6;
+        let k = if cfg!(target_endian = "little") { h } else { 1 - h };
+        self.0[2 * col + k].fetch_or(1u64 << (y & 63), Relaxed);
     }
 }
 
@@ -308,71 +340,106 @@ pub struct Water<'a> {
     pub drainable: &'a mut [u128],
 }
 
-/// [`Water`] as the tasks share it.
+/// [`Water`]'s per-cell arrays as the tasks share them.
 #[derive(Clone, Copy)]
-struct Shared {
+struct Shared<'a> {
     plane: usize,
     height: usize,
     voxel: f64,
-    free: Ptr<f64>,
-    pore: Ptr<f64>,
-    wet: Ptr<u128>,
-    damp: Ptr<u128>,
-    drainable: Ptr<u128>,
+    free: F64s<'a>,
+    pore: F64s<'a>,
 }
 
+/// [`Water`]'s three per-column set arrays (wet, damp, drainable), or one task's chunk of
+/// them: columns are contiguous here, so each task is handed its own sub-slices.
+type SetArrays<'s> = [&'s mut [u128]; 3];
+
 impl Water<'_> {
-    fn share(&mut self) -> Shared {
+    /// The per-cell arrays shared, and the set arrays to hand out by chunk.
+    fn split(&mut self) -> (Shared<'_>, SetArrays<'_>) {
         let plane = self.grid.plane();
         assert!(self.free.len() == self.grid.cells() && self.pore.len() == self.grid.cells());
         assert!(self.wet.len() == plane && self.damp.len() == plane && self.drainable.len() == plane);
         assert!(self.grid.height <= super::MASK_ROWS);
-        Shared {
-            plane,
-            height: self.grid.height,
-            voxel: self.voxel,
-            free: Ptr::new(self.free),
-            pore: Ptr::new(self.pore),
-            wet: Ptr::new(self.wet),
-            damp: Ptr::new(self.damp),
-            drainable: Ptr::new(self.drainable),
-        }
+        (
+            Shared {
+                plane,
+                height: self.grid.height,
+                voxel: self.voxel,
+                free: F64s::new(self.free),
+                pore: F64s::new(self.pore),
+            },
+            [&mut *self.wet, &mut *self.damp, &mut *self.drainable],
+        )
     }
 }
 
-impl Shared {
-    /// Run `f` on column `col` with its three set words loaded, store them back, and
-    /// return its result and the sets' count changes. The caller owns the column.
+impl Exec<'_> {
+    /// `f` over every column, in chunks, each handed its own columns' set words
+    /// (`sets[k][j]` is column `cols.start + j`); the chunks' results in column order.
+    fn columns_with_sets<R: Send>(
+        &self,
+        plane: usize,
+        sets: SetArrays<'_>,
+        f: impl Fn(Range<usize>, SetArrays<'_>) -> R + Sync,
+    ) -> Vec<R> {
+        let [wet, damp, drainable] = sets;
+        #[cfg(feature = "par")]
+        if let Some(pool) = self.pool {
+            use rayon::prelude::*;
+            return pool.install(|| {
+                wet.par_chunks_mut(GRAIN)
+                    .zip(damp.par_chunks_mut(GRAIN))
+                    .zip(drainable.par_chunks_mut(GRAIN))
+                    .enumerate()
+                    .map(|(c, ((w, d), dr))| f(c * GRAIN..c * GRAIN + w.len(), [w, d, dr]))
+                    .collect()
+            });
+        }
+        vec![f(0..plane, [wet, damp, drainable])]
+    }
+}
+
+impl<'a> Shared<'a> {
+    /// Run `f` on one column with its three set words (its entries in the task's
+    /// chunk), store them back, and return its result and the sets' count changes.
     #[inline(always)]
     fn column<R>(
         &self,
-        col: usize,
-        f: impl FnOnce(&mut Cells<'_, Ptr<f64>, Ptr<f64>, Words>, Words) -> R,
+        words: [&mut u128; 3],
+        f: impl FnOnce(&mut Cells<'_, F64s<'a>, F64s<'a>, Words>, Words) -> R,
     ) -> (R, [isize; 3]) {
         let (mut free, mut pore) = (self.free, self.pore);
-        let (mut wet, mut damp, mut drainable) = (self.wet, self.damp, self.drainable);
+        let [wet, damp, drainable] = words;
         let before = Words {
-            wet: wet.load(col),
-            damp: damp.load(col),
-            drainable: drainable.load(col),
+            wet: *wet,
+            damp: *damp,
+            drainable: *drainable,
             delta: [0; 3],
         };
-        let mut words = before;
+        let mut sets = before;
         let r = {
             let mut c = Cells {
                 free: &mut free,
                 pore: &mut pore,
-                sets: &mut words,
+                sets: &mut sets,
                 voxel: self.voxel,
                 plane: self.plane,
             };
             f(&mut c, before)
         };
-        wet.store(col, words.wet);
-        damp.store(col, words.damp);
-        drainable.store(col, words.drainable);
-        (r, words.delta)
+        *wet = sets.wet;
+        *damp = sets.damp;
+        *drainable = sets.drainable;
+        (r, sets.delta)
     }
+}
+
+/// The task's column `k` of its chunk, as [`Shared::column`] takes it.
+#[inline(always)]
+fn words_at<'s>(sets: &'s mut SetArrays<'_>, k: usize) -> [&'s mut u128; 3] {
+    let [w, d, dr] = sets;
+    [&mut w[k], &mut d[k], &mut dr[k]]
 }
 
 fn add3(a: &mut [isize; 3], b: [isize; 3]) {
@@ -384,15 +451,17 @@ fn add3(a: &mut [isize; 3], b: [isize; 3]) {
 /// [`column::fall`] over every column: the wet rows at the start of the call, bottom-up.
 /// Returns the change in the three sets' member counts (wet, damp, drainable).
 pub fn fall<G: Fn(usize) -> Ground + Sync>(exec: Exec<'_>, mut w: Water<'_>, ground: &G) -> [isize; 3] {
-    let sh = w.share();
+    let (sh, sets) = w.split();
     let mut total = [0; 3];
-    for d in exec.columns(sh.plane, |cols| {
+    for d in exec.columns_with_sets(sh.plane, sets, |cols, mut sets| {
         let mut delta = [0; 3];
-        for col in cols {
-            if sh.wet.load(col) == 0 {
+        for (k, col) in cols.enumerate() {
+            if sets[0][k] == 0 {
                 continue;
             }
-            let ((), d) = sh.column(col, |c, start| column::fall(c, col, Rows(start.wet), ground));
+            let ((), d) = sh.column(words_at(&mut sets, k), |c, start| {
+                column::fall(c, col, Rows(start.wet), ground)
+            });
             add3(&mut delta, d);
         }
         delta
@@ -405,15 +474,17 @@ pub fn fall<G: Fn(usize) -> Ground + Sync>(exec: Exec<'_>, mut w: Water<'_>, gro
 /// [`column::infiltrate`] over every column, from its wet rows at the start of the call.
 /// `ground`'s flux is over the substep. Returns the sets' count changes.
 pub fn infiltrate<G: Fn(usize) -> Ground + Sync>(exec: Exec<'_>, mut w: Water<'_>, ground: &G) -> [isize; 3] {
-    let sh = w.share();
+    let (sh, sets) = w.split();
     let mut total = [0; 3];
-    for d in exec.columns(sh.plane, |cols| {
+    for d in exec.columns_with_sets(sh.plane, sets, |cols, mut sets| {
         let mut delta = [0; 3];
-        for col in cols {
-            if sh.wet.load(col) == 0 {
+        for (k, col) in cols.enumerate() {
+            if sets[0][k] == 0 {
                 continue;
             }
-            let ((), d) = sh.column(col, |c, start| column::infiltrate(c, col, Rows(start.wet), ground));
+            let ((), d) = sh.column(words_at(&mut sets, k), |c, start| {
+                column::infiltrate(c, col, Rows(start.wet), ground)
+            });
             add3(&mut delta, d);
         }
         delta
@@ -433,15 +504,15 @@ pub fn drain<G: Fn(usize) -> Ground + Sync>(
     voxel_m: f64,
     table: f64,
 ) -> ([isize; 3], f64) {
-    let sh = w.share();
+    let (sh, sets) = w.split();
     let mut total = ([0; 3], 0.0);
-    for (d, gained) in exec.columns(sh.plane, |cols| {
+    for (d, gained) in exec.columns_with_sets(sh.plane, sets, |cols, mut sets| {
         let (mut delta, mut gained) = ([0; 3], 0.0);
-        for col in cols {
-            if sh.drainable.load(col) == 0 {
+        for (k, col) in cols.enumerate() {
+            if sets[2][k] == 0 {
                 continue;
             }
-            let (g, d) = sh.column(col, |c, start| {
+            let (g, d) = sh.column(words_at(&mut sets, k), |c, start| {
                 column::drain(c, col, Rows(start.drainable), ground, voxel_m, table)
             });
             gained += g;
@@ -456,46 +527,44 @@ pub fn drain<G: Fn(usize) -> Ground + Sync>(
 }
 
 /// The whole arrays' set masks, for a pass that walks cells in index order rather than
-/// column by column.
-struct Masks {
+/// column by column (on the calling thread).
+struct Masks<'s> {
     plane: usize,
-    wet: Ptr<u128>,
-    damp: Ptr<u128>,
-    drainable: Ptr<u128>,
+    sets: SetArrays<'s>,
     delta: [isize; 3],
 }
 
-impl Masks {
+impl Masks<'_> {
     #[inline(always)]
-    fn flip(p: &mut Ptr<u128>, count: &mut isize, col: usize, y: usize, member: bool) {
-        let mut word = p.load(col);
+    fn flip(&mut self, k: usize, i: usize, y: usize, member: bool) {
+        let word = &mut self.sets[k][i - y * self.plane];
+        let count = &mut self.delta[k];
         let bit = 1u128 << y;
-        if member == (word & bit != 0) {
+        if member == (*word & bit != 0) {
             return;
         }
         if member {
-            word |= bit;
+            *word |= bit;
             *count += 1;
         } else {
-            word &= !bit;
+            *word &= !bit;
             *count -= 1;
         }
-        p.store(col, word);
     }
 }
 
-impl Sets for Masks {
+impl Sets for Masks<'_> {
     #[inline(always)]
     fn wet(&mut self, i: usize, y: usize, member: bool) {
-        Masks::flip(&mut self.wet, &mut self.delta[0], i - y * self.plane, y, member);
+        self.flip(0, i, y, member);
     }
     #[inline(always)]
     fn damp(&mut self, i: usize, y: usize, member: bool) {
-        Masks::flip(&mut self.damp, &mut self.delta[1], i - y * self.plane, y, member);
+        self.flip(1, i, y, member);
     }
     #[inline(always)]
     fn drainable(&mut self, i: usize, y: usize, member: bool) {
-        Masks::flip(&mut self.drainable, &mut self.delta[2], i - y * self.plane, y, member);
+        self.flip(2, i, y, member);
     }
 }
 
@@ -516,9 +585,9 @@ pub fn water_table<G: Fn(usize) -> Ground + Sync>(
     t: Table,
     charged: f64,
 ) -> ([isize; 3], f64) {
-    let sh = w.share();
+    let (sh, mut sets) = w.split();
     if exec.is_serial() {
-        return table_in_order(&sh, ground, t, charged, 0.0, true);
+        return table_in_order(&sh, sets, ground, t, charged, 0.0, true);
     }
     let sum = |v: Vec<f64>| v.into_iter().sum::<f64>();
 
@@ -546,14 +615,15 @@ pub fn water_table<G: Fn(usize) -> Ground + Sync>(
         d
     }));
     if !(demand <= charged) {
-        return table_in_order(&sh, ground, t, charged, 0.0, true);
+        return table_in_order(&sh, sets, ground, t, charged, 0.0, true);
     }
     let mut total = [0; 3];
     let mut taken = 0.0;
-    for (d, took) in exec.columns(sh.plane, |cols| {
+    let [a, b, c] = &mut sets;
+    for (d, took) in exec.columns_with_sets(sh.plane, [&mut **a, &mut **b, &mut **c], |cols, mut sets| {
         let (mut delta, mut took) = ([0; 3], 0.0);
-        for col in cols {
-            let (t1, d) = sh.column(col, |c, _| {
+        for (k, col) in cols.enumerate() {
+            let (t1, d) = sh.column(words_at(&mut sets, k), |c, _| {
                 let mut took = 0.0;
                 for y in 0..t.band {
                     if t.submerged(y) {
@@ -593,14 +663,14 @@ pub fn water_table<G: Fn(usize) -> Ground + Sync>(
         d
     }));
     if !(demand <= charged - taken) {
-        let (d, taken) = table_in_order(&sh, ground, t, charged, taken, false);
+        let (d, taken) = table_in_order(&sh, sets, ground, t, charged, taken, false);
         add3(&mut total, d);
         return (total, taken);
     }
-    for (d, took) in exec.columns(sh.plane, |cols| {
+    for (d, took) in exec.columns_with_sets(sh.plane, sets, |cols, mut sets| {
         let (mut delta, mut took) = ([0; 3], 0.0);
-        for col in cols {
-            let (t2, d) = sh.column(col, |c, _| {
+        for (k, col) in cols.enumerate() {
+            let (t2, d) = sh.column(words_at(&mut sets, k), |c, _| {
                 let mut took = 0.0;
                 for y in 1..t.seep_top {
                     let (level, top_row) = (t.level(y), y + 1 == sh.height);
@@ -622,7 +692,8 @@ pub fn water_table<G: Fn(usize) -> Ground + Sync>(
 /// The water table in index order on the calling thread, from `taken` already given up:
 /// both halves, or (`saturation` false) seepage only.
 fn table_in_order<G: Fn(usize) -> Ground>(
-    sh: &Shared,
+    sh: &Shared<'_>,
+    sets: SetArrays<'_>,
     ground: &G,
     t: Table,
     charged: f64,
@@ -632,9 +703,7 @@ fn table_in_order<G: Fn(usize) -> Ground>(
     let (mut free, mut pore) = (sh.free, sh.pore);
     let mut sets = Masks {
         plane: sh.plane,
-        wet: sh.wet,
-        damp: sh.damp,
-        drainable: sh.drainable,
+        sets,
         delta: [0; 3],
     };
     let mut c = Cells {
@@ -669,61 +738,15 @@ pub use par::{Parallel, pool};
 
 #[cfg(feature = "par")]
 mod par {
-    use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use core::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
 
     use rayon::prelude::*;
 
     use super::{
-        ExchangeBackend, Field, Grid, HEAD_PASSES, Params, Scratch, column_credits, column_drive_pass, column_edges,
-        column_heads, commit, flip_wet, moved,
+        ExchangeBackend, F64s, Field, Grid, HEAD_PASSES, Params, Scratch, Words128, column_credits, column_drive_pass,
+        column_edges, column_heads, commit, flip_wet, moved,
     };
-
-    /// A pointer the phases write through from many threads. Every phase writes only the
-    /// cells of the column it is given, and the columns are split between threads, so no
-    /// two threads ever write one element, and nothing reads an element a phase writes.
-    #[derive(Clone, Copy)]
-    struct Cells<T>(*mut T);
-    unsafe impl<T> Send for Cells<T> {}
-    unsafe impl<T> Sync for Cells<T> {}
-    impl<T: Copy> Cells<T> {
-        /// # Safety
-        /// `i` is in bounds and belongs to the calling task's column.
-        #[inline(always)]
-        unsafe fn set(self, i: usize, v: T) {
-            unsafe { *self.0.add(i) = v }
-        }
-        #[inline(always)]
-        unsafe fn get(self, i: usize) -> T {
-            unsafe { *self.0.add(i) }
-        }
-    }
-
-    /// `f64` addition on an `AtomicU64` holding its bits: what a proposal into another
-    /// column's cell is. Order across threads is whatever the adds land in.
-    #[inline(always)]
-    fn add_f64(cell: &AtomicU64, q: f64) {
-        let mut cur = cell.load(Ordering::Relaxed);
-        loop {
-            let new = (f64::from_bits(cur) + q).to_bits();
-            match cell.compare_exchange_weak(cur, new, Ordering::Relaxed, Ordering::Relaxed) {
-                Ok(_) => return,
-                Err(seen) => cur = seen,
-            }
-        }
-    }
-
-    fn as_atomic_u64(v: &mut [f64]) -> &[AtomicU64] {
-        // SAFETY: f64 and AtomicU64 have the same size and alignment on the hosts this
-        // builds for (asserted), and the slice is borrowed mutably for the view's life.
-        const { assert!(core::mem::align_of::<AtomicU64>() == core::mem::align_of::<f64>()) };
-        unsafe { core::slice::from_raw_parts(v.as_mut_ptr().cast::<AtomicU64>(), v.len()) }
-    }
-
-    fn as_atomic_u128_halves(v: &mut [u128]) -> &[AtomicU64] {
-        // SAFETY: a u128 is two u64 words (little-endian: low word first), aligned to 16.
-        unsafe { core::slice::from_raw_parts(v.as_mut_ptr().cast::<AtomicU64>(), v.len() * 2) }
-    }
 
     /// The process's water pool of `threads` workers: built on the first call for that
     /// count and shared by every later one, for the life of the process.
@@ -793,6 +816,8 @@ mod par {
             let sc = &mut self.sc;
             sc.ensure(grid);
             let plane = grid.plane();
+            assert!(free.len() == grid.cells() && void.len() == plane && wet.len() == plane);
+            assert!(u32::try_from(grid.cells()).is_ok(), "kept proposals index cells as u32");
             let chunks = plane.div_ceil(grain);
             sc.edges.resize_with(chunks, Vec::new);
             let Scratch { full, touched, head, drive, proposed, delta, edges } = sc;
@@ -801,21 +826,18 @@ mod par {
                 let any_full = AtomicBool::new(false);
                 {
                     let wet: &[u128] = wet;
-                    let (h, d0, d1) = (
-                        Cells(head.as_mut_ptr()),
-                        Cells(drive[0].as_mut_ptr()),
-                        Cells(drive[1].as_mut_ptr()),
-                    );
+                    let [d0, d1] = drive;
+                    let (h, d0, d1) = (F64s::new(head), F64s::new(d0), F64s::new(d1));
                     let free: &[f64] = free;
                     full.par_iter_mut().enumerate().with_min_len(grain).for_each(|(col, fm)| {
                         let w = wet[col];
                         *fm = if w == 0 {
                             0
                         } else {
-                            column_heads(grid, col, w, free, |i, v| unsafe {
-                                h.set(i, v);
-                                d0.set(i, v);
-                                d1.set(i, v);
+                            column_heads(grid, col, w, free, |i, v| {
+                                h.store(i, v);
+                                d0.store(i, v);
+                                d1.store(i, v);
                             })
                         };
                         if *fm != 0 {
@@ -827,16 +849,16 @@ mod par {
                 let mut cur = 0;
                 if any_full.into_inner() {
                     for _ in 0..HEAD_PASSES {
-                        let (a, b) = drive.split_at_mut(1);
-                        let (src, dst) = if cur == 0 { (&a[0], &mut b[0]) } else { (&b[0], &mut a[0]) };
-                        let (src, dst) = (&src[..], Cells(dst.as_mut_ptr()));
+                        let [a, b] = &mut *drive;
+                        let (src, dst) = if cur == 0 { (&*a, b) } else { (&*b, a) };
+                        let (src, dst) = (&src[..], F64s::new(dst));
                         let full: &[u128] = full;
                         let wet: &[u128] = wet;
                         let raised = (0..plane)
                             .into_par_iter()
                             .with_min_len(grain)
                             .filter(|&col| full[col] != 0)
-                            .map(|col| column_drive_pass(grid, col, wet, full, src, |i, v| unsafe { dst.set(i, v) }))
+                            .map(|col| column_drive_pass(grid, col, wet, full, src, |i, v| dst.store(i, v)))
                             .reduce(|| false, |a, b| a | b);
                         cur ^= 1;
                         if !raised {
@@ -849,17 +871,16 @@ mod par {
                 // B: the proposals, added atomically into whichever column they land in,
                 // and kept per chunk of giver columns.
                 {
-                    let prop = as_atomic_u64(proposed);
-                    let tw = as_atomic_u128_halves(touched);
+                    let prop = F64s::new(proposed);
+                    let tw = Words128::new(touched);
                     edges.par_iter_mut().enumerate().for_each(|(c, list)| {
                         list.clear();
                         for col in c * grain..((c + 1) * grain).min(plane) {
                             if field.wet[col] != 0 {
                                 column_edges(&field, p, col, |from, to_col, to_row, q| {
                                     let t = to_row * plane + to_col;
-                                    add_f64(&prop[t], q);
-                                    let word = &tw[2 * to_col + (to_row >> 6)];
-                                    word.fetch_or(1u64 << (to_row & 63), Ordering::Relaxed);
+                                    prop.add(t, q);
+                                    tw.set_row(to_col, to_row);
                                     list.push(((from * plane + col) as u32, t as u32, q));
                                 });
                             }
@@ -869,32 +890,28 @@ mod par {
                 // C: every cell's net change, into its own chunk's cells: the credits of
                 // its columns, the debits of its kept proposals.
                 {
-                    let d = Cells(delta.as_mut_ptr());
+                    let d = F64s::new(delta);
                     let proposed: &[f64] = proposed;
                     let touched: &[u128] = touched;
                     let free: &[f64] = field.free;
                     edges.par_iter().enumerate().for_each(|(c, list)| {
                         for col in c * grain..((c + 1) * grain).min(plane) {
                             if touched[col] != 0 {
-                                column_credits(&field, col, touched[col], proposed, |i, v| unsafe {
-                                    d.set(i, d.get(i) + v);
+                                column_credits(&field, col, touched[col], proposed, |i, v| {
+                                    d.store(i, d.load(i) + v);
                                 });
                             }
                         }
                         for &(from, to, q) in list {
                             let m = moved(q, proposed[to as usize], free[to as usize]);
                             if m > 0.0 {
-                                unsafe { d.set(from as usize, d.get(from as usize) - m) };
+                                d.store(from as usize, d.load(from as usize) - m);
                             }
                         }
                     });
                 }
                 // D: commit, keeping each chunk's wet words and counting its flips.
-                let (fr, d, pr) = (
-                    Cells(free.as_mut_ptr()),
-                    Cells(delta.as_mut_ptr()),
-                    Cells(proposed.as_mut_ptr()),
-                );
+                let (fr, d, pr) = (F64s::new(free), F64s::new(delta), F64s::new(proposed));
                 let counts: Vec<isize> = touched
                     .par_chunks_mut(grain)
                     .zip(wet.par_chunks_mut(grain))
@@ -909,16 +926,14 @@ mod par {
                                 let y = rows.trailing_zeros() as usize;
                                 rows &= rows - 1;
                                 let i = y * plane + col;
-                                unsafe {
-                                    let dv = d.get(i);
-                                    d.set(i, 0.0);
-                                    pr.set(i, 0.0);
-                                    if dv != 0.0 {
-                                        let old = fr.get(i);
-                                        let new = commit(old, dv);
-                                        fr.set(i, new);
-                                        flip_wet(word, &mut count, y, old, new);
-                                    }
+                                let dv = d.load(i);
+                                d.store(i, 0.0);
+                                pr.store(i, 0.0);
+                                if dv != 0.0 {
+                                    let old = fr.load(i);
+                                    let new = commit(old, dv);
+                                    fr.store(i, new);
+                                    flip_wet(word, &mut count, y, old, new);
                                 }
                             }
                         }

@@ -209,6 +209,12 @@ pub struct VoxelConfig {
     /// pass, moving and turning smoothly between ticks (the default), or stamped into the
     /// world's voxels as before. Presentation only.
     pub figures: figure::FigureConfig,
+    /// **Seconds a plant takes to cross-fade from one foliage state to the next**
+    /// (`design/handoffs/foliage-states-implementation-2026-10-08.md`): cells the two
+    /// states share stay, the outgoing state's other cells drop and the incoming state's
+    /// appear one by one over this, on the frame clock. 0 switches at once. Presentation
+    /// only; the states and their thresholds are the species' (`foliage_state_below`).
+    pub foliage_fade_s: f64,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -244,6 +250,7 @@ impl Default for VoxelConfig {
             hunker_s: hunker::DEFAULT_S,
             meal_flash: animal::MEAL_FLASH_DEFAULT,
             figures: figure::FigureConfig::default(),
+            foliage_fade_s: stand::FOLIAGE_FADE_S,
             serve: None,
             sim: SimParams::default(),
         }

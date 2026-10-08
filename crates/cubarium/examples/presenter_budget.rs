@@ -94,14 +94,14 @@ fn parse_cpus(spec: &str) -> Result<Vec<usize>> {
 
 #[cfg(target_os = "linux")]
 fn set_affinity(cpus: &[usize]) -> bool {
-    unsafe {
-        let mut set: libc::cpu_set_t = std::mem::zeroed();
-        libc::CPU_ZERO(&mut set);
-        for &c in cpus {
-            libc::CPU_SET(c, &mut set);
+    let mut set = rustix::thread::CpuSet::new();
+    for &c in cpus {
+        if c >= rustix::thread::CpuSet::MAX_CPU {
+            return false;
         }
-        libc::sched_setaffinity(0, size_of::<libc::cpu_set_t>(), &set) == 0
+        set.set(c);
     }
+    rustix::thread::sched_setaffinity(None, &set).is_ok()
 }
 
 #[cfg(not(target_os = "linux"))]

@@ -474,13 +474,60 @@ def glowcap(x, y, h, r, layers, i, rng, log=None):
         glowcap_cap(x + 0.18, y + 0.03, z, h * 0.7, r * 0.7)
 
 
-def bloomcrown(x, y, h, r, layers, i, rng):
+def _scaled(p0, p1, f):
+    if f == 1.0:
+        return tuple(p1)
+    return tuple(p0[k] + (p1[k] - p0[k]) * f for k in range(3))
+
+
+# Foliage states (design/handoffs/foliage-states-implementation-2026-10-08.md; Wrysk's
+# round-2 picks, scripts/blender/foliage_variants.py round 2). A builder's `spec` cuts the
+# accepted model; None (or {}) is the accepted model itself, with the same random draws in
+# the same order, so a stand keeps its phase across its states.
+#
+# bloomcrown: `basal` per-strap length factors for the 8 basal straps (0 drops one);
+#   `vanes` per-vane length factors by rank of the vane's tip height (rank 0 = the lowest
+#   tip, the one a browser reaches first); `pod` False drops the pod; `seedling` the length
+#   factor of a seedling's rosette straps; `fallen` ground cells (i, j) beside the stem
+#   that hold a fallen crown voxel, drawn here as a vane piece lying flat and marked
+#   `ob["fallen"]` (the bake adds the cell itself, `bake_voxel_models.py`).
+# umbrellafrond: `tiers` {role: (fronds kept: "all" | "alt" | n, rib length factor,
+#   pinnae True | False (bare ribs)) or None (no fronds)}, role "lowest", "middle" or
+#   "top" by the tier's place (two tiers are lowest and top; a seedling's one tier is
+#   lowest); a role not named is full.
+BLOOMCROWN_STATES = [
+    ("full", {}),
+    # round-1 browsed 2's stubbed rosette under a crown whose 4 lowest vanes are cut to 0.4
+    ("browsed", {"basal": [0.3] * 8, "vanes": [0.4] * 4 + [1.0] * 6, "seedling": 0.3}),
+    # stem, pod and bloom, and two fallen pink voxels beside the stem
+    ("stripped", {"basal": [0.0] * 8, "vanes": [0.0] * 10, "seedling": 0.3,
+                  "fallen": [(1, 0), (-1, -1)]}),
+]
+RIBS = ("all", 1.0, False)
+UMBRELLAFROND_STATES = [
+    ("full", {}),
+    ("browsed A", {"tiers": {"lowest": RIBS}}),
+    ("browsed B", {"tiers": {"lowest": ("all", 0.4, False), "middle": RIBS}}),
+    ("stripped", {"tiers": {"lowest": ("all", 0.4, False), "middle": ("all", 0.45, False),
+                            "top": ("all", 0.5, False)}}),
+]
+FOLIAGE_STATES = {"bloomcrown": BLOOMCROWN_STATES, "umbrellafrond": UMBRELLAFROND_STATES}
+
+
+def bloomcrown(x, y, h, r, layers, i, rng, spec=None):
     """Artbook pick (bloomcrown-pink-preferred.png): a violet stem; a basal ring of
     periwinkle straps with cyan tips (p0); a crown of ten hot-pink square vanes (p2)
     flaring up and out round a pale blush pod (p1, the core) capped orange (warm, the
-    bloom). Each part in its profile band."""
+    bloom). Each part in its profile band. `spec`: a foliage state's cuts
+    (`BLOOMCROWN_STATES`)."""
+    spec = spec or {}
     if i == 0:  # seedling: a little ring of basal straps
-        rosette(x, y, 0, h, r, 7, "p0", phase=rng.random())
+        f = spec.get("seedling", 1.0)
+        for dx, dy in ring_dirs(7, rng.random()):
+            p0 = (x + dx * r * 0.12, y + dy * r * 0.12, 0)
+            p1 = (x + dx * r, y + dy * r, h)
+            if f > 0:
+                strap(p0, _scaled(p0, p1, f), 0.03, "p0")
         return
     trunk = next(l for l in layers if l[0] == T)
     basal = next(l for l in layers if l[0] == F and l[1] == 0.0)
@@ -488,23 +535,45 @@ def bloomcrown(x, y, h, r, layers, i, rng):
     za, zb = crown[1] * h, crown[2] * h
     cyl((x, y, 0), (x, y, za + 0.25 * (zb - za)), max(trunk[3] * r * 0.55, 0.018),
         max(trunk[3] * r * 0.45, 0.015), mat="violet", seg=8)
-    for dx, dy in ring_dirs(8, rng.random()):  # basal straps, flaring out of the stem foot
-        strap((x + dx * r * 0.08, y + dy * r * 0.08, 0.0),
-              (x + dx * basal[3] * r, y + dy * basal[3] * r, basal[2] * h), 0.035, "p0")
+    bf = spec.get("basal", [1.0] * 8)
+    for k, (dx, dy) in enumerate(ring_dirs(8, rng.random())):  # basal straps, flaring out of the stem foot
+        p0 = (x + dx * r * 0.08, y + dy * r * 0.08, 0.0)
+        p1 = (x + dx * basal[3] * r, y + dy * basal[3] * r, basal[2] * h)
+        if bf[k] > 0:
+            strap(p0, _scaled(p0, p1, bf[k]), 0.035, "p0")
     # pod and bloom
     pc = (x, y, za + 0.42 * (zb - za))
-    ell(pc, (0.24 * r, 0.24 * r, 0.24 * (zb - za)), "p1")
+    if spec.get("pod", True):
+        ell(pc, (0.24 * r, 0.24 * r, 0.24 * (zb - za)), "p1")
     ell((x, y, za + 0.64 * (zb - za)), (0.15 * r, 0.15 * r, 0.06 * (zb - za)), "warm")
+    vanes = []
     for k, (dx, dy) in enumerate(ring_dirs(10, rng.random())):  # vanes
         reach = crown[3] * r * (0.85 + 0.15 * ((k * 7) % 3) / 2)
         top = zb - (zb - za) * 0.12 * ((k * 3) % 4) / 3
-        strap((x + dx * r * 0.12, y + dy * r * 0.12, za + 0.05 * (zb - za)),
-              (x + dx * reach, y + dy * reach, top), 0.04, "p2")
+        vanes.append(((x + dx * r * 0.12, y + dy * r * 0.12, za + 0.05 * (zb - za)),
+                      (x + dx * reach, y + dy * reach, top)))
+    vf = spec.get("vanes", [1.0] * 10)
+    # by tip height, lowest first (stable: ties keep ring order)
+    for rank, k in enumerate(sorted(range(10), key=lambda k: (vanes[k][1][2], k))):
+        if vf[rank] > 0:
+            p0, p1 = vanes[k]
+            strap(p0, _scaled(p0, p1, vf[rank]), 0.04, "p2")
+    for gi, gj in spec.get("fallen", []):
+        # a vane piece lying flat in ground cell (gi, gj) of a 0.125 m grid around the stem
+        # column; its voxel is added by the bake, not voxelized
+        vox = 0.125
+        cx, cy = x + gi * vox, y + gj * vox
+        with Collect() as piece:
+            strap((cx - 0.05, cy - 0.025, 0.012), (cx + 0.05, cy + 0.025, 0.018), 0.04, "p2")
+        for ob in piece:
+            ob["fallen"] = True
 
 
-def frond(x, y, ang, zb, za, rr, top=False, n=14):
+def frond(x, y, ang, zb, za, rr, top=False, n=14, keep=1.0, pinnae=True):
     """One umbrellafrond frond (artbook pick, 2026-09-24): a pale rib (p2) rising from
-    the node and arching down to its tip, lacy teal pinnae (p1) along both sides."""
+    the node and arching down to its tip, lacy teal pinnae (p1) along both sides. Cut to
+    the first `keep` of its length from the node, with or without its pinnae (a foliage
+    state's bare ribs and stubs); keep 1 with pinnae is the accepted frond."""
     dx, dy = math.cos(ang), math.sin(ang)
     drop = zb - za
     if top:  # the crowning tier rises before it curls over
@@ -512,11 +581,21 @@ def frond(x, y, ang, zb, za, rr, top=False, n=14):
     else:
         ctrl = (x + dx * rr * 0.55, y + dy * rr * 0.55, zb + drop * 0.35)
     path = bezier((x, y, zb), ctrl, (x + dx * rr, y + dy * rr, za), n)
-    tube(path[::2] + ([path[-1]] if (n - 1) % 2 else []), 0.016, 0.006, "p2", seg=6)
+    m = n if keep >= 1.0 else max(2, int(round(n * keep)))
+    if m == n:
+        rib = path[::2] + ([path[-1]] if (n - 1) % 2 else [])
+    else:
+        rib = path[:m:2] + ([path[m - 1]] if (m - 1) % 2 else [])
+        if len(rib) < 2:
+            rib = [path[0], path[m - 1]]
+    tube(rib, 0.016, 0.006 + 0.010 * (1 - min(keep, 1.0)), "p2", seg=6)
+    if not pinnae:
+        return
     with Collect() as blade:
-        ribbon(path, [0.07 * math.sin(math.pi * (0.15 + 0.8 * k / (n - 1))) + 0.02 for k in range(n)], "p1")
+        widths = [0.07 * math.sin(math.pi * (0.15 + 0.8 * k / (n - 1))) + 0.02 for k in range(n)]
+        ribbon(path[:m], widths[:m], "p1")
         side = Vector((-dy, dx, 0))
-        for k in range(2, n - 1):
+        for k in range(2, min(n - 1, m - 1)):
             s = k / (n - 1)
             q = path[k]
             t = (path[k + 1] - path[k - 1]).normalized()
@@ -529,17 +608,37 @@ def frond(x, y, ang, zb, za, rr, top=False, n=14):
     join(blade, "frond")
 
 
-def umbrellafrond(x, y, h, r, layers, i, rng):
+def _kept(which, n=8):
+    if which == "all":
+        return set(range(n))
+    if which == "alt":
+        return set(range(0, n, 2))
+    return {int(round(j * n / which)) % n for j in range(which)}
+
+
+def _tier_rule(spec, k, count):
+    """A tier's (fronds kept, rib length, pinnae) or None under `spec`, by its role."""
+    role = "top" if count > 1 and k == count - 1 else ("lowest" if k == 0 else "middle")
+    return (spec.get("tiers") or {}).get(role, ("all", 1.0, True))
+
+
+def umbrellafrond(x, y, h, r, layers, i, rng, spec=None):
     """Artbook pick (umbrellafrond.png): a straight segmented violet stem with collars and
     a flared foot; three regular tiers of eight straight lacy teal fronds with pale ribs,
     each tier a node with a teal bud, widest at the bottom. Tiers sit in the profile's
-    foliage bands (node at the band top, frond tips at its bottom)."""
+    foliage bands (node at the band top, frond tips at its bottom). `spec`: a foliage
+    state's cuts (`UMBRELLAFROND_STATES`)."""
+    spec = spec or {}
     tiers = [l for l in layers if l[0] in (F, MAT)]
     phase = rng.uniform(0, math.pi / 8)
     if i == 0:  # seedling: one low tier of fronds on a stub
         cyl((x, y, 0), (x, y, h * 0.8), 0.012, mat="violet", seg=6)
-        for k, (dx, dy) in enumerate(ring_dirs(6, phase)):
-            frond(x, y, math.atan2(dy, dx), h * 0.8, 0.0, r, n=8)
+        w = _tier_rule(spec, 0, 1)
+        if w is not None:
+            kept = _kept(w[0], 6)
+            for k, (dx, dy) in enumerate(ring_dirs(6, phase)):
+                if k in kept:
+                    frond(x, y, math.atan2(dy, dx), h * 0.8, 0.0, r, n=8, keep=w[1], pinnae=w[2])
         return
     top_node = (tiers[-1][1] + 0.3 * (tiers[-1][2] - tiers[-1][1])) * h
     rs = max(0.03 * h, 0.02)
@@ -556,8 +655,13 @@ def umbrellafrond(x, y, h, r, layers, i, rng):
         rk = rs * (1 - 0.2 * zb / h)
         cyl((x, y, zb - 0.05 * h), (x, y, zb - 0.01 * h), rk * 1.45, rk * 1.2, mat="plum", seg=6)
         ell((x, y, zb + 0.012), (rk * 0.9, rk * 0.9, 0.025), "p1")
-        for dx, dy in ring_dirs(8, phase + k * math.pi / 8):
-            frond(x, y, math.atan2(dy, dx), zb, a * h, rf * r, top=last)
+        w = _tier_rule(spec, k, len(tiers))
+        if w is None:
+            continue
+        kept = _kept(w[0])
+        for j, (dx, dy) in enumerate(ring_dirs(8, phase + k * math.pi / 8)):
+            if j in kept:
+                frond(x, y, math.atan2(dy, dx), zb, a * h, rf * r, top=last, keep=w[1], pinnae=w[2])
     # collars between the tiers (the pick's segment joints)
     prev = 0.1 * h
     for zb in nodes:
