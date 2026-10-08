@@ -235,6 +235,10 @@ pub struct Voxel {
     /// the weather's ordinary rules (`cubarium_voxel::World::force_rain`).
     #[arg(long, value_name = "MODE")]
     pub weather_force: Option<String>,
+    /// Serve the observatory (the world's stats, the companion dashboard and its speed
+    /// control) at this address, e.g. `127.0.0.1:7878`; overrides the config's `serve`.
+    #[arg(long, value_name = "ADDR")]
+    pub serve: Option<String>,
 }
 
 impl Voxel {

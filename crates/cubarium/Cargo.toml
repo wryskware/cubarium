@@ -30,6 +30,9 @@ cubarium-search = { workspace = true }
 cubarium-voxel = { workspace = true }
 cubarium-voxel-flora = { workspace = true }
 cubarium-voxel-fauna = { workspace = true }
+# `--serve`: the running world's stats, the companion dashboard and its speed control
+# (`voxel/mod.rs`). Its server is `std::net` only.
+cubarium-observatory = { workspace = true }
 # `profile` is on because the host reports where a tick's milliseconds went in its
 # running summary (`voxel/mod.rs`, `Budget`). It is measurement only — one `Instant` per
 # phase per tick, about 40 ns each against a tick of milliseconds — and it adds no rule

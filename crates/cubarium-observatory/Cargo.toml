@@ -1,0 +1,22 @@
+[package]
+name = "cubarium-observatory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Read-only queries over a live voxel world (populations, environment, clock, animals and their life histories), a history ring, and an opt-in HTTP + SSE server with a companion dashboard"
+
+[features]
+default = ["server"]
+# The HTTP + server-sent-events transport and the embedded dashboard. Off, the crate is
+# the transport-free query layer alone: what an in-game UI or a Godot GDExtension links.
+server = ["dep:serde_json"]
+
+[dependencies]
+cubarium-voxel = { workspace = true }
+cubarium-voxel-flora = { workspace = true }
+cubarium-voxel-fauna = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+
+[dev-dependencies]
+serde_json = "1"

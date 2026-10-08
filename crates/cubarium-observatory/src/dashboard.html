@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cubarium Observatory</title>
+<style>
+:root {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #232321;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --ring: rgba(255,255,255,0.10);
+  /* Categorical slots 1-3, dark steps (validated adjacent and all-pairs on the dark surface). */
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  /* Status: reserved for state, always with a label. */
+  --good: #0ca30c;
+  --warn: #fab219;
+  --critical: #d03b3b;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font-size: 16px; line-height: 1.35; }
+main { padding: 16px; max-width: 1900px; margin: 0 auto; display: grid; gap: 16px; }
+h2 { font-size: 15px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px; }
+.card { background: var(--surface); border-radius: 12px; padding: 16px 18px; box-shadow: inset 0 0 0 1px var(--ring); min-width: 0; }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Top bar: clock, world, run controls. */
+.top { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.4fr); gap: 16px; }
+.clock { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.hero { font-size: 56px; font-weight: 600; line-height: 1; }
+.clock-sub { display: grid; gap: 4px; color: var(--ink-2); font-size: 17px; }
+.daybar { position: relative; height: 10px; border-radius: 5px; background: var(--surface-2); margin-top: 14px; overflow: hidden; }
+.daybar .lit { position: absolute; top: 0; bottom: 0; background: #3a3a35; }
+.daybar .now { position: absolute; top: -2px; width: 4px; height: 14px; border-radius: 2px; background: var(--ink); }
+.world { color: var(--muted); font-size: 14px; margin-top: 10px; }
+
+.controls { display: grid; gap: 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+button { font: inherit; color: var(--ink); background: var(--surface-2); border: 0; border-radius: 8px; padding: 8px 12px;
+  box-shadow: inset 0 0 0 1px var(--ring); cursor: pointer; min-width: 44px; }
+button:hover { background: #2e2e2b; }
+button.on { background: var(--ink); color: var(--page); }
+button.pause { min-width: 120px; font-weight: 600; }
+input[type=range] { flex: 1; min-width: 160px; accent-color: var(--ink-2); }
+.speed-now { font-size: 34px; font-weight: 600; min-width: 110px; }
+.stats { display: flex; gap: 22px; flex-wrap: wrap; color: var(--ink-2); font-size: 15px; }
+.stats b { color: var(--ink); font-weight: 600; }
+
+/* Populations: small multiples. */
+.layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 16px; }
+.legend { display: flex; gap: 18px; color: var(--ink-2); font-size: 14px; margin: -4px 0 12px; flex-wrap: wrap; }
+.key { display: inline-flex; align-items: center; gap: 7px; }
+.key i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.mini { background: var(--surface-2); border-radius: 10px; padding: 10px 12px 6px; }
+.mini-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mini-name { font-weight: 600; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-count { font-size: 26px; font-weight: 600; }
+.mini-split { color: var(--muted); font-size: 13px; min-height: 18px; }
+.mini.extinct .mini-count { color: var(--muted); }
+svg.chart { display: block; width: 100%; overflow: visible; }
+
+/* Environment. */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tile { background: var(--surface-2); border-radius: 10px; padding: 10px 12px; }
+.tile .label { color: var(--muted); font-size: 13px; }
+.tile .value { font-size: 28px; font-weight: 600; }
+.tile .note { color: var(--ink-2); font-size: 13px; min-height: 17px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); }
+.badge i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.env-chart { margin-top: 14px; }
+.env-chart .label { color: var(--muted); font-size: 13px; margin-bottom: 2px; }
+
+/* Animals. */
+.animals { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 16px; align-items: start; }
+.filter { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+select { font: inherit; color: var(--ink); background: var(--surface-2); border: 0; border-radius: 8px; padding: 6px 10px; box-shadow: inset 0 0 0 1px var(--ring); }
+.table-wrap { max-height: 560px; overflow: auto; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 15px; }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; color: var(--muted); font-weight: 600; font-size: 13px;
+  padding: 8px 10px; cursor: pointer; white-space: nowrap; user-select: none; border-bottom: 1px solid var(--axis); }
+th.sorted { color: var(--ink); }
+td { padding: 7px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+td.r, th.r { text-align: right; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+tbody tr.sel { background: #2e2e2b; }
+.meter { display: inline-block; width: 64px; height: 6px; border-radius: 3px; background: #24364d; vertical-align: middle; margin-right: 8px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--s1); border-radius: 3px; }
+.detail h3 { margin: 0; font-size: 24px; }
+.detail .sub { color: var(--ink-2); margin: 4px 0 12px; }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 15px; margin-bottom: 14px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+a.link { color: var(--ink); text-decoration: underline; text-decoration-color: var(--muted); cursor: pointer; }
+.events { list-style: none; padding: 0; margin: 0; max-height: 380px; overflow: auto; font-size: 14px; }
+.events li { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--grid); }
+.events .when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.deaths { font-size: 14px; color: var(--ink-2); margin-top: 12px; }
+
+#tip { position: fixed; pointer-events: none; background: #0b0b0b; color: var(--ink); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+  box-shadow: 0 0 0 1px var(--ring), 0 6px 18px rgba(0,0,0,0.5); display: none; z-index: 10; white-space: nowrap; }
+#tip .t { color: var(--muted); margin-bottom: 4px; }
+#tip .k { display: flex; align-items: center; gap: 7px; }
+#tip .k i { width: 10px; height: 3px; border-radius: 2px; display: inline-block; }
+.conn { font-size: 13px; color: var(--muted); }
+
+@media (max-width: 1100px) {
+  .top, .layout, .animals { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  main { padding: 16px 16px; }
+  .hero { font-size: 44px; }
+  .tiles { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<main>
+  <section class="top">
+    <div class="card">
+      <div class="clock">
+        <div class="hero num" id="time">--:--</div>
+        <div class="clock-sub">
+          <div id="day">Day –</div>
+          <div id="phase" class="muted">waiting for the world…</div>
+        </div>
+      </div>
+      <div class="daybar" aria-hidden="true"><div class="lit" id="lit"></div><div class="now" id="sun"></div></div>
+      <div class="world" id="world"></div>
+    </div>
+    <div class="card controls">
+      <div class="row">
+        <button class="pause" id="pause">Pause</button>
+        <div class="speed-now num" id="speedNow">1×</div>
+        <div class="conn" id="conn">connecting…</div>
+      </div>
+      <div class="row" id="presets"></div>
+      <div class="row">
+        <span class="muted">slower</span>
+        <input type="range" id="slider" min="-6" max="6" step="0.25" value="0" aria-label="Speed multiplier (log scale)">
+        <span class="muted">faster</span>
+      </div>
+      <div class="stats" id="runStats"></div>
+    </div>
+  </section>
+
+  <section class="layout">
+    <div class="card">
+      <h2>Animals</h2>
+      <div class="legend">
+        <span class="key"><i style="background:var(--s1)"></i>adults</span>
+        <span class="key"><i style="background:var(--s2)"></i>young (juveniles, pups, riders)</span>
+        <span class="key"><i style="background:var(--s3)"></i>eggs</span>
+        <span class="muted" id="span"></span>
+      </div>
+      <div class="multiples" id="animalCharts"></div>
+      <h2 style="margin-top:20px">Plants <span class="muted" style="text-transform:none;letter-spacing:0">— tissue organic matter; stands counted</span></h2>
+      <div class="multiples" id="plantCharts"></div>
+      <div class="muted" id="ground" style="margin-top:12px;font-size:14px"></div>
+    </div>
+    <div class="card">
+      <h2>Environment</h2>
+      <div class="tiles" id="tiles"></div>
+      <div class="env-chart"><div class="label">Air temperature, °C</div><div id="tempChart"></div></div>
+      <div class="env-chart"><div class="label">Relative humidity</div><div id="rhChart"></div></div>
+      <div class="env-chart"><div class="label">Rain, mm/h</div><div id="rainChart"></div></div>
+      <h2 style="margin-top:20px">Water, m³</h2>
+      <div class="tiles" id="water"></div>
+      <div class="env-chart"><div class="label">Standing water, m³</div><div id="standChart"></div></div>
+    </div>
+  </section>
+
+  <section class="animals">
+    <div class="card">
+      <h2>Living animals <span class="muted" id="animalCount" style="text-transform:none;letter-spacing:0"></span></h2>
+      <div class="filter">
+        <label class="muted" for="speciesFilter">Species</label>
+        <select id="speciesFilter"><option value="">all</option></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr id="thead"></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="deaths" id="deaths"></div>
+    </div>
+    <div class="card detail" id="detail">
+      <h2>Life history</h2>
+      <p class="muted">Click an animal in the table to see its stats and its life so far.</p>
+    </div>
+  </section>
+</main>
+<div id="tip"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const SERIES = ["var(--s1)", "var(--s2)", "var(--s3)"];
+const PRESETS = [0.25, 0.5, 1, 2, 4, 8, 16, 32, 64];
+
+let snap = null;
+let samples = [];
+let animals = [];
+let deaths = [];
+let selected = null;
+let sortKey = "id", sortDir = 1;
+
+function fmt(v, d = 0) {
+  if (v === null || v === undefined || Number.isNaN(v)) return "–";
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(1) + "M";
+  if (a >= 1e4) return (v / 1e3).toFixed(1) + "K";
+  return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function sig(v) {
+  if (v === null || v === undefined) return "–";
+  const a = Math.abs(v);
+  if (a === 0) return "0";
+  if (a >= 100 || Number.isInteger(v)) return fmt(v, 0);
+  if (a >= 1) return fmt(v, 2);
+  if (a >= 0.01) return v.toFixed(3);
+  return v.toExponential(1);
+}
+function speedText(s) { return s >= 1 ? fmt(s, s % 1 ? 2 : 0) + "×" : "1/" + fmt(1 / s, 0) + "×"; }
+function dur(s) {
+  if (s < 90) return Math.round(s) + " s";
+  if (s < 5400) return Math.round(s / 60) + " min";
+  if (s < 172800) return (s / 3600).toFixed(1) + " h";
+  return (s / 86400).toFixed(1) + " d";
+}
+function hhmm(hour) {
+  const m = Math.floor(hour * 60) % 1440;
+  return String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+}
+function plural(n, w) { return `${fmt(n)} ${w}${n === 1 ? "" : "s"}`; }
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// --- Charts: thin lines, hairline grid, one y-axis, crosshair + tooltip. ---------------
+const tip = $("tip");
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  return 10 * p;
+}
+function lineChart(el, xs, series, opt = {}) {
+  const W = el.clientWidth || 300, H = opt.height || 92;
+  const L = opt.left ?? 38, R = 8, T = 6, B = 16;
+  const iw = Math.max(10, W - L - R), ih = H - T - B;
+  const n = xs.length;
+  let lo = opt.min ?? Infinity, hi = opt.max ?? -Infinity;
+  if (opt.min === undefined || opt.max === undefined) {
+    for (const s of series) for (const v of s.values) if (v !== null) { if (opt.min === undefined) lo = Math.min(lo, v); if (opt.max === undefined) hi = Math.max(hi, v); }
+  }
+  if (!isFinite(lo)) lo = 0;
+  if (!isFinite(hi)) hi = 1;
+  if (opt.zero === false) {
+    // A level, not an amount: frame the range it moved over, not zero to it.
+    const pad = (hi - lo) * 0.15 || Math.max(Math.abs(hi) * 0.02, 0.5);
+    lo -= pad; hi += pad;
+  } else {
+    if (lo > 0) lo = 0;
+    if (opt.max === undefined) hi = lo >= 0 ? niceMax(hi) : hi;
+  }
+  if (hi - lo < 1e-12) hi = lo + 1;
+  const x0 = n ? xs[0] : 0, x1 = n > 1 ? xs[n - 1] : x0 + 1;
+  const X = (x) => L + (x - x0) / (x1 - x0 || 1) * iw;
+  const Y = (v) => T + ih - (v - lo) / (hi - lo) * ih;
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(opt.label || "chart")}">`;
+  for (const g of [lo, (lo + hi) / 2, hi]) {
+    if (opt.counts && !Number.isInteger(g)) continue; // no half an animal on a count axis
+    svg += `<line x1="${L}" x2="${W - R}" y1="${Y(g)}" y2="${Y(g)}" stroke="${g === lo ? "var(--axis)" : "var(--grid)"}" stroke-width="1"/>`;
+    svg += `<text x="${L - 6}" y="${Y(g) + 4}" text-anchor="end" fill="var(--muted)" font-size="11" class="num">${sig(g)}</text>`;
+  }
+  if (n > 1) {
+    const span = x1 - x0;
+    svg += `<text x="${L}" y="${H - 3}" fill="var(--muted)" font-size="11">−${dur(span)}</text>`;
+    svg += `<text x="${W - R}" y="${H - 3}" fill="var(--muted)" font-size="11" text-anchor="end">now</text>`;
+  }
+  series.forEach((s) => {
+    let d = "", pen = false;
+    s.values.forEach((v, i) => {
+      if (v === null || v === undefined) { pen = false; return; }
+      d += (pen ? "L" : "M") + X(xs[i]).toFixed(1) + " " + Y(v).toFixed(1);
+      pen = true;
+    });
+    if (s.area && n > 1) svg += `<path d="${d}L${X(x1)} ${Y(lo)}L${X(x0)} ${Y(lo)}Z" fill="${s.color}" fill-opacity="0.10"/>`;
+    svg += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const last = s.values[n - 1];
+    if (n && last !== null && last !== undefined)
+      svg += `<circle cx="${X(xs[n - 1])}" cy="${Y(last)}" r="4" fill="${s.color}" stroke="var(--surface-2)" stroke-width="2"/>`;
+  });
+  svg += `<line class="xh" x1="0" x2="0" y1="${T}" y2="${T + ih}" stroke="var(--ink-2)" stroke-width="1" visibility="hidden"/>`;
+  svg += `<rect x="${L}" y="0" width="${iw}" height="${H}" fill="transparent"/></svg>`;
+  el.innerHTML = svg;
+  const node = el.firstChild, xh = node.querySelector(".xh");
+  node.onmousemove = (ev) => {
+    if (n < 1) return;
+    const r = node.getBoundingClientRect();
+    const px = (ev.clientX - r.left) * (W / r.width);
+    let i = Math.round((px - L) / iw * (n - 1));
+    i = Math.max(0, Math.min(n - 1, i));
+    xh.setAttribute("x1", X(xs[i])); xh.setAttribute("x2", X(xs[i])); xh.setAttribute("visibility", "visible");
+    let h = `<div class="t">${esc(opt.when ? opt.when(i) : "")}</div>`;
+    for (const s of series) h += `<div class="k"><i style="background:${s.color}"></i>${esc(s.name)} <b class="num">${sig(s.values[i])}</b></div>`;
+    tip.innerHTML = h; tip.style.display = "block";
+    const tx = Math.min(ev.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    tip.style.left = tx + "px"; tip.style.top = (ev.clientY + 14) + "px";
+  };
+  node.onmouseleave = () => { xh.setAttribute("visibility", "hidden"); tip.style.display = "none"; };
+}
+const when = (i) => samples[i] ? `day ${samples[i].day} · ${hhmm(samples[i].hour)}` : "";
+
+// --- Rendering ------------------------------------------------------------------------
+function renderClock(s) {
+  const c = s.clock;
+  $("time").textContent = c.time_of_day;
+  $("day").textContent = `Day ${c.day}` + (c.year && c.year.number >= 0 ? ` · year ${c.year.number + 1}` : "") + (c.dry_season ? " · dry season" : "");
+  $("phase").textContent = (c.night ? "night" : c.daylight < 0.98 ? "twilight" : "day") + ` · ${dur(c.sim_elapsed_s)} simulated · tick ${fmt(c.tick)}`;
+  const rise = c.sunrise_phase, set = c.sunset_phase;
+  $("lit").style.left = (rise * 100) + "%"; $("lit").style.width = ((set - rise) * 100) + "%";
+  $("sun").style.left = `calc(${c.day_phase * 100}% - 2px)`;
+  const w = s.summary;
+  // The label carries the seed exactly; a JSON number past 2^53 does not survive JavaScript.
+  $("world").textContent = `${w.landform} · ${w.climate} · ${w.width}×${w.height}×${w.depth} at ${w.voxel_m} m · ${w.label}`;
+}
+function renderRun(s) {
+  const r = s.run;
+  $("pause").textContent = r.paused ? "Resume" : "Pause";
+  $("pause").classList.toggle("on", r.paused);
+  $("speedNow").textContent = r.paused ? "paused" : speedText(r.speed);
+  if (document.activeElement !== $("slider")) $("slider").value = Math.log2(r.speed);
+  $("slider").min = Math.log2(r.min_speed); $("slider").max = Math.log2(r.max_speed);
+  for (const b of $("presets").children) b.classList.toggle("on", !r.paused && Math.abs(+b.dataset.v - r.speed) < 1e-9);
+  $("runStats").innerHTML =
+    `<span>keeping <b class="num">${fmt(r.sim_s_per_s, 2)}×</b></span>` +
+    `<span><b class="num">${fmt(r.ms_per_tick, 2)}</b> ms/tick</span>` +
+    `<span><b class="num">${fmt(r.fps, 0)}</b> fps</span>` +
+    `<span>observer <b class="num">${fmt(r.overhead_share * 100, 2)}%</b> of the tick</span>`;
+}
+function tile(label, value, note = "") {
+  return `<div class="tile"><div class="label">${esc(label)}</div><div class="value num">${value}</div><div class="note">${note}</div></div>`;
+}
+function renderEnv(s) {
+  const e = s.environment;
+  const rain = e.rain === "clear" ? "clear" : e.rain;
+  $("tiles").innerHTML =
+    tile("Air temperature", fmt(e.temperature_c, 1) + "°", e.front_depth_c ? `cold front −${fmt(e.front_depth_c, 1)}°` : "") +
+    tile("Humidity", fmt(e.rh * 100, 0) + "%", `cloud ${fmt(e.cloud_cover * 100, 0)}% · fog ${fmt(e.fog * 100, 0)}%`) +
+    tile("Rain", rain, e.rain_mm_per_h > 0 ? `${fmt(e.rain_mm_per_h, 1)} mm/h` : `${plural(e.rain_counts.showers, "shower")} · ${plural(e.rain_counts.downpours, "storm")} so far`) +
+    tile("Daylight", fmt(e.daylight * 100, 0) + "%", `sun ${fmt(e.sun_elevation_deg, 0)}°` + (e.dry_season ? ` · <span class="badge"><i style="background:var(--warn)"></i>dry season</span>` : ""));
+  const w = e.water;
+  $("water").innerHTML =
+    tile("Standing", sig(w.standing_m3), "lake, pools, streams") +
+    tile("Soil", sig(w.soil_m3), "pore water") +
+    tile("Aquifer", sig(w.aquifer_m3), `table ${fmt(w.aquifer_head_m, 2)} m`) +
+    tile("Atmosphere", sig(w.atmosphere_m3), `stream ${sig(w.stream_m3_s * 1000)} L/s`);
+  const g = s.populations.ground, v = s.populations.vines;
+  $("ground").textContent = `Latticevine: ${v.vines} vines over ${v.faces} faces · litter ${sig(g.litter)} · dead wood ${sig(g.dead_wood)} · carrion ${sig(g.carrion)} · glassfilm ${sig(g.film)}`;
+}
+function ensureMinis(el, names) {
+  if (el.children.length === names.length) return;
+  el.innerHTML = names.map((n, i) => `<div class="mini" data-i="${i}"><div class="mini-head"><span class="mini-name">${esc(n)}</span><span class="mini-count num"></span></div><div class="mini-split"></div><div class="mc"></div></div>`).join("");
+}
+function renderPopulations() {
+  if (!snap) return;
+  const A = snap.populations.animals, P = snap.populations.plants;
+  ensureMinis($("animalCharts"), A.map((a) => a.label));
+  ensureMinis($("plantCharts"), P.map((p) => p.species));
+  const xs = samples.map((s) => s.sim_s);
+  const kids = $("animalCharts").children;
+  A.forEach((a, k) => {
+    const card = kids[k];
+    const young = a.juveniles + a.pups + a.riders;
+    card.querySelector(".mini-count").textContent = fmt(a.alive);
+    card.classList.toggle("extinct", a.alive === 0 && a.eggs === 0);
+    const parts = [`${a.adults} adult`, `${young} young`];
+    if (a.eggs) parts.push(`${fmt(a.eggs)} eggs`);
+    if (a.deaths) parts.push(`${fmt(a.deaths)} died`);
+    card.querySelector(".mini-split").textContent = parts.join(" · ");
+    lineChart(card.querySelector(".mc"), xs, [
+      { name: "adults", color: SERIES[0], values: samples.map((s) => s.adults[k]) },
+      { name: "young", color: SERIES[1], values: samples.map((s) => s.juveniles[k]) },
+      { name: "eggs", color: SERIES[2], values: samples.map((s) => s.eggs[k]) },
+    ], { height: 86, label: a.label + " population", when, counts: true });
+  });
+  const pk = $("plantCharts").children;
+  P.forEach((p, k) => {
+    const card = pk[k];
+    card.querySelector(".mini-count").textContent = sig(p.organic);
+    card.classList.toggle("extinct", p.stands === 0);
+    card.querySelector(".mini-split").textContent = `${fmt(p.stands)} stands · seed bank ${sig(p.seed_bank)}`;
+    lineChart(card.querySelector(".mc"), xs, [
+      { name: "organic", color: SERIES[2], area: true, values: samples.map((s) => s.plant_organic[k]) },
+    ], { height: 70, label: p.species + " biomass", when });
+  });
+  const h = snap.history;
+  $("span").textContent = samples.length > 1 ? `last ${dur(xs[xs.length - 1] - xs[0])}, a sample every ${h.sample_s} s` : "";
+  lineChart($("tempChart"), xs, [{ name: "°C", color: SERIES[1], values: samples.map((s) => s.temperature_c) }], { zero: false, when });
+  lineChart($("rhChart"), xs, [{ name: "RH", color: SERIES[0], values: samples.map((s) => s.rh) }], { when });
+  lineChart($("rainChart"), xs, [{ name: "mm/h", color: SERIES[0], area: true, values: samples.map((s) => s.rain_mm_per_h) }], { when });
+  lineChart($("standChart"), xs, [{ name: "standing", color: SERIES[0], values: samples.map((s) => s.standing_m3) }], { zero: false, when });
+}
+
+// --- Animals --------------------------------------------------------------------------
+const COLS = [
+  ["id", "#", "r", (a) => a.id],
+  ["label", "species", "", (a) => a.label],
+  ["stage", "stage", "", (a) => a.stage],
+  ["age_s", "age", "r", (a) => dur(a.age_s)],
+  ["size", "size", "r", (a) => fmt(a.size * 100, 0) + "%"],
+  ["fullness", "fed", "", (a) => `<span class="meter"><i style="width:${(a.fullness * 100).toFixed(0)}%"></i></span><span class="num">${fmt(a.fullness * 100, 0)}%</span>`],
+  ["wound", "wound", "r", (a) => a.wound > 0 ? fmt(a.wound * 100, 0) + "%" : "–"],
+  ["activity", "doing", "", (a) => esc(a.activity)],
+  ["offspring", "young", "r", (a) => a.offspring || "–"],
+];
+function renderHead() {
+  $("thead").innerHTML = COLS.map(([k, t, c]) => `<th class="${c} ${k === sortKey ? "sorted" : ""}" data-k="${k}">${t}${k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("");
+  for (const th of $("thead").children) th.onclick = () => { const k = th.dataset.k; sortDir = k === sortKey ? -sortDir : 1; sortKey = k; renderHead(); renderTable(); };
+}
+function renderTable() {
+  const f = $("speciesFilter").value;
+  const rows = animals.filter((a) => !f || a.species === f).slice();
+  rows.sort((a, b) => { const x = a[sortKey], y = b[sortKey]; return (x < y ? -1 : x > y ? 1 : 0) * sortDir || a.id - b.id; });
+  $("animalCount").textContent = `— ${rows.length} shown of ${animals.length}`;
+  $("tbody").innerHTML = rows.map((a) => `<tr data-id="${a.id}" class="${a.id === selected ? "sel" : ""}">` + COLS.map(([k, , c, f]) => `<td class="${c}">${f(a)}</td>`).join("") + "</tr>").join("");
+  for (const tr of $("tbody").children) tr.onclick = () => select(+tr.dataset.id);
+  $("deaths").innerHTML = deaths.length ? "Recent deaths: " + deaths.slice(0, 8).map((d) => `<a class="link" data-id="${d.id}">${esc(d.label)} #${d.id}</a> ${esc(d.cause.replace(/_/g, " "))}`).join(" · ") : "";
+  for (const a of $("deaths").querySelectorAll("a")) a.onclick = () => select(+a.dataset.id);
+}
+function ensureFilter() {
+  const sel = $("speciesFilter");
+  if (!snap || sel.options.length > 1) return;
+  for (const a of snap.populations.animals) sel.add(new Option(a.label, a.species));
+  sel.onchange = renderTable;
+}
+async function loadAnimals() {
+  try {
+    const r = await fetch("animals", { cache: "no-store" });
+    const j = await r.json();
+    animals = j.animals; deaths = j.recent_deaths;
+    renderTable();
+  } catch (e) { /* the next poll tries again */ }
+}
+function eventText(e) {
+  const id = (n) => `<a class="link" data-id="${n}">#${n}</a>`;
+  switch (e.kind) {
+    case "observed": return `already alive when the record began (${esc(e.stage)}, ${dur(e.age_s)} old)`;
+    case "born": return e.how === "introduced" ? "introduced into the world" : `${e.how === "hatched" ? "hatched" : "born"}` + (e.parent != null ? ` to ${id(e.parent)}` : "");
+    case "matured": return "reached adult size";
+    case "independent": return "came of age and left the den's hold";
+    case "let_go": return `let go of its host ${id(e.host)}`;
+    case "meal": return `ate (${esc(e.bout)} bout, ${dur(e.duration_s)}): ` + (e.foods.length ? e.foods.map((f) => `${esc(f.food.replace("_", " "))} ${sig(f.organic)}`).join(", ") : "nothing");
+    case "hunt": return `struck at ${id(e.prey)}`;
+    case "kill": return `killed ${esc(e.prey_species)} ${id(e.prey)}`;
+    case "injured": return `wounded to ${fmt(e.wound * 100, 0)}%` + (e.by != null ? ` by ${id(e.by)}` : "");
+    case "gave_birth": return `gave birth to ${e.young.map(id).join(", ")}`;
+    case "laid_eggs": return `laid ${e.eggs} egg${e.eggs === 1 ? "" : "s"}`;
+    case "den_moved": return `the pack's den moved`;
+    case "died": return `died: ${esc(e.cause.replace(/_/g, " "))}` + (e.by != null ? ` (${id(e.by)})` : "");
+    default: return esc(e.kind);
+  }
+}
+function evWhen(tick) {
+  if (!snap) return "";
+  return "−" + dur(Math.max(0, (snap.clock.tick - tick) / 20));
+}
+async function select(id) {
+  selected = id;
+  renderTable();
+  await loadDetail();
+}
+async function loadDetail() {
+  if (selected === null) return;
+  let j;
+  try { const r = await fetch("animals/" + selected, { cache: "no-store" }); j = await r.json(); } catch (e) { return; }
+  const el = $("detail");
+  if (j.error) { el.innerHTML = `<h2>Life history</h2><p class="muted">#${selected}: no longer recorded.</p>`; return; }
+  const d = j.detail, h = j.history;
+  const label = d ? d.label : h ? h.label : "animal";
+  let html = `<h2>Life history</h2><h3>${esc(label)} #${j.id}</h3>`;
+  html += `<div class="sub">${j.alive ? esc(d.stage) + " · " + esc(d.activity) : "dead"}</div>`;
+  html += `<dl class="facts">`;
+  if (d) {
+    html += `<dt>age</dt><dd>${dur(d.age_s)}` + (d.lifespan_s ? ` of ${dur(d.lifespan_s)}` : "") + `</dd>`;
+    html += `<dt>size</dt><dd class="num">${fmt(d.size * 100, 0)}% of full size · body ${sig(d.body)}</dd>`;
+    html += `<dt>fed</dt><dd class="num">${fmt(d.fullness * 100, 0)}% · reserve ${sig(d.reserve)} · energy ${sig(d.energy)}</dd>`;
+    if (d.stomach.length) html += `<dt>stomach</dt><dd>${d.stomach.map((f) => `${esc(f.food.replace("_", " "))} ${sig(f.organic)}`).join(", ")}</dd>`;
+    html += `<dt>wound</dt><dd class="num">${fmt(d.wound * 100, 0)}%</dd>`;
+    if (d.dryness > 0) html += `<dt>drying</dt><dd class="num">${fmt(d.dryness * 100, 0)}%</dd>`;
+    html += `<dt>doing</dt><dd>${esc(d.state)}` + (d.steer ? ` · steered by ${esc(d.steer)}` : "") + (d.bout ? ` · ${esc(d.bout[0])} bout ${dur(d.bout[1])}` : "") + (d.emergency ? " · emergency" : "") + `</dd>`;
+    html += `<dt>where</dt><dd class="num">x ${fmt(d.x_m, 1)} m · z ${fmt(d.z_m, 1)} m · ${fmt(d.y_m, 1)} m up</dd>`;
+    if (d.gestating) html += `<dt>breeding</dt><dd>gestating</dd>`;
+  }
+  if (h) {
+    html += `<dt>parent</dt><dd>${h.parent != null ? `<a class="link" data-id="${h.parent}">#${h.parent}</a>` : "–"}</dd>`;
+    html += `<dt>young</dt><dd>${h.offspring.length ? h.offspring.map((o) => `<a class="link" data-id="${o}">#${o}</a>`).join(" ") : "–"}</dd>`;
+  }
+  html += `</dl>`;
+  if (h) {
+    const evs = [h.origin, ...h.events, ...(h.death ? [h.death] : [])].reverse();
+    html += `<ul class="events">` + evs.map((e) => `<li><span class="when">${evWhen(e.tick)}</span><span>${eventText(e)}</span></li>`).join("") + `</ul>`;
+    if (h.dropped) html += `<div class="muted" style="font-size:13px;margin-top:6px">${h.dropped} older events not kept</div>`;
+  } else {
+    html += `<p class="muted">No history recorded for it.</p>`;
+  }
+  el.innerHTML = html;
+  for (const a of el.querySelectorAll("a[data-id]")) a.onclick = () => select(+a.dataset.id);
+}
+
+// --- Controls -------------------------------------------------------------------------
+async function control(body) {
+  try {
+    await fetch("control", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch (e) { /* shown by the next snapshot */ }
+}
+$("presets").innerHTML = PRESETS.map((v) => `<button data-v="${v}">${speedText(v)}</button>`).join("");
+for (const b of $("presets").children) b.onclick = () => control({ speed: +b.dataset.v, paused: false });
+$("pause").onclick = () => control({ paused: !(snap && snap.run.paused) });
+$("slider").oninput = () => { $("speedNow").textContent = speedText(Math.pow(2, +$("slider").value)); };
+$("slider").onchange = () => control({ speed: Math.pow(2, +$("slider").value) });
+
+// --- Data -----------------------------------------------------------------------------
+let drawPending = false;
+function redraw() {
+  if (drawPending) return;
+  drawPending = true;
+  requestAnimationFrame(() => { drawPending = false; renderPopulations(); });
+}
+function onSnapshot(s) {
+  if (!s) return;
+  const restarted = snap && s.clock.tick < snap.clock.tick;
+  snap = s;
+  if (restarted) samples = [];
+  renderClock(s); renderRun(s); renderEnv(s); ensureFilter();
+  if (s.sample) {
+    if (!samples.length || s.sample.tick > samples[samples.length - 1].tick) samples.push(s.sample);
+    const cap = Math.ceil(s.history.span_s / s.history.sample_s);
+    if (samples.length > cap) samples.splice(0, samples.length - cap);
+    redraw();
+  } else if (!$("animalCharts").children.length) redraw();
+}
+async function start() {
+  try {
+    const [h, s] = await Promise.all([fetch("history").then((r) => r.json()), fetch("snapshot").then((r) => r.json())]);
+    samples = h.samples || [];
+    onSnapshot(s);
+    redraw();
+  } catch (e) { /* the stream fills in */ }
+  const es = new EventSource("stream");
+  es.addEventListener("snapshot", (ev) => { $("conn").textContent = "live"; onSnapshot(JSON.parse(ev.data)); });
+  es.onerror = () => { $("conn").textContent = "reconnecting…"; };
+  loadAnimals();
+  // `#animal=ID` opens that animal's history (a link to one animal).
+  const m = location.hash.match(/animal=(\d+)/);
+  if (m) select(+m[1]);
+  setInterval(loadAnimals, 2000);
+  setInterval(loadDetail, 2000);
+}
+renderHead();
+window.addEventListener("resize", redraw);
+start();
+</script>
+</body>
+</html>
