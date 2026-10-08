@@ -165,7 +165,6 @@
 //!   quantization term: the ledger residual `stored - initial_stored - net_in` is the
 //!   raw conservation error and nothing corrects it.
 
-use std::cell::RefCell;
 
 use cubarium_rules::water::column::{self, Cells, Ground, Sets, Table};
 use cubarium_rules::water::host::{self, Exec, Water};
@@ -1141,6 +1140,30 @@ impl Scratch {
         }
     }
 
+    /// Bytes of buffer held (capacity), for [`ExchangeScratch::bytes`].
+    fn bytes(&self) -> usize {
+        use std::mem::size_of;
+        8 * (self.head.capacity()
+            + self.drive.capacity()
+            + self.drive_next.capacity()
+            + self.proposed_in.capacity()
+            + self.accept.capacity()
+            + self.delta.capacity())
+            + 4 * (self.room_target.capacity()
+                + self.run_top.capacity()
+                + self.stack_of.capacity()
+                + self.touch_stamp.capacity()
+                + self.col_stamp.capacity()
+                + self.full.capacity()
+                + self.rows.capacity())
+            + 8 * (self.active.capacity() + self.columns.capacity() + self.touched.capacity() + self.bits.capacity())
+            + size_of::<(u32, u32, f64)>() * self.edges.capacity()
+            + size_of::<(u32, f64, u8)>() * self.offer_list.capacity()
+            + size_of::<Giver>() * self.givers.capacity()
+            + size_of::<StackFaces>() * self.stacks.capacity()
+            + size_of::<[u32; 4]>() * self.nbr.capacity()
+    }
+
     /// A fresh stamp for this substep's dedup arrays, clearing them on the wrap.
     fn next_stamp(&mut self) {
         self.stamp = self.stamp.wrapping_add(1);
@@ -1177,8 +1200,57 @@ struct StackFaces {
     down: bool,
 }
 
-thread_local! {
-    static SCRATCH: RefCell<Scratch> = RefCell::new(Scratch::default());
+/// **The exchange's working memory, owned by the world it serves** (terrain-first package,
+/// 2026-10-08). It used to be per stepping thread (`thread_local!`) and was never freed: a
+/// wide world's per-column scratch is several hundred megabytes of address space, and four
+/// founding threads kept four of them for the life of the process. Now a world carries its
+/// own, built on its first exchange and freed when it drops; a clone starts without one (a
+/// probe settled on a clone builds its own and frees it with the probe).
+///
+/// Only the driver in use is kept: switching between the serial and the pooled driver drops
+/// the other's buffers. **A cache, not state:** never serialized, and two worlds compare
+/// equal whatever their scratch holds.
+#[derive(Default)]
+pub(crate) struct ExchangeScratch {
+    /// The dense fallback's buffers (worlds taller than [`MASK_ROWS`]).
+    dense: Option<Box<Scratch>>,
+    /// The per-column rule on the calling thread.
+    serial: Option<Serial>,
+    /// The per-column rule on the process's shared pool of the thread count it was last
+    /// asked for; the pool itself is the process's, only the buffers are the world's.
+    #[cfg(feature = "parallel")]
+    parallel: Option<Parallel>,
+}
+
+impl ExchangeScratch {
+    /// Bytes of buffer this scratch holds (capacity, not use).
+    pub(crate) fn bytes(&self) -> usize {
+        let dense = self.dense.as_ref().map_or(0, |d| d.bytes());
+        let serial = self.serial.as_ref().map_or(0, Serial::scratch_bytes);
+        #[cfg(feature = "parallel")]
+        let parallel = self.parallel.as_ref().map_or(0, Parallel::scratch_bytes);
+        #[cfg(not(feature = "parallel"))]
+        let parallel = 0;
+        dense + serial + parallel
+    }
+}
+
+impl Clone for ExchangeScratch {
+    fn clone(&self) -> Self {
+        ExchangeScratch::default()
+    }
+}
+
+impl PartialEq for ExchangeScratch {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for ExchangeScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ExchangeScratch({} bytes)", self.bytes())
+    }
 }
 
 /// Every column's four horizontal neighbour columns, in the exchange's face order: `x`
@@ -1272,19 +1344,26 @@ fn exchange_inner(w: &mut World, threads: usize) {
         exchange_dense(w);
         return;
     }
+    // The world's own scratch, taken out for the call so it and the world are borrowed
+    // apart, and put back after (a few pointer moves).
+    let mut held = std::mem::take(&mut w.water_scratch);
     #[cfg(feature = "parallel")]
     if pooled(w.config.width as usize * w.config.depth as usize, threads) {
-        PARALLEL.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            if slot.as_ref().is_none_or(|p| p.threads() != threads) {
-                *slot = Some(Parallel::new(threads));
-            }
-            exchange_with(w, slot.as_mut().expect("just made"));
-        });
+        held.serial = None;
+        if held.parallel.as_ref().is_none_or(|p| p.threads() != threads) {
+            held.parallel = Some(Parallel::new(threads));
+        }
+        exchange_with(w, held.parallel.as_mut().expect("just made"));
+        w.water_scratch = held;
         return;
     }
     let _ = threads;
-    SERIAL.with(|b| exchange_with(w, &mut *b.borrow_mut()));
+    #[cfg(feature = "parallel")]
+    {
+        held.parallel = None;
+    }
+    exchange_with(w, held.serial.get_or_insert_with(Serial::default));
+    w.water_scratch = held;
 }
 
 pub use cubarium_rules::water::host::{ExchangeBackend, Serial};
@@ -1302,16 +1381,6 @@ pub fn prepare_pool(threads: usize) {
         let _ = cubarium_rules::water::host::pool(threads);
     }
     let _ = threads;
-}
-
-thread_local! {
-    /// The live exchange on one thread: the per-column rule, driven on the calling thread.
-    /// Its scratch is per calling thread, like [`SCRATCH`].
-    static SERIAL: RefCell<Serial> = RefCell::new(Serial::default());
-    /// The live exchange on the process's pool: the calling thread's scratch, and a handle
-    /// on the shared pool of the thread count it was last asked for.
-    #[cfg(feature = "parallel")]
-    static PARALLEL: RefCell<Option<Parallel>> = const { RefCell::new(None) };
 }
 
 /// **The exchange through `cubarium_rules::water`** (from the single-source trial,
@@ -1439,8 +1508,11 @@ fn exchange_dense(w: &mut World) {
     // The void-run geometry the scan needs is terrain-only, so it is built once per
     // terrain version and not per substep.
     w.ensure_void_runs();
-    SCRATCH.with(|slot| {
-        let sc = &mut *slot.borrow_mut();
+    // The world's own scratch, taken out for the substep so it and the world are borrowed
+    // apart, and put back after.
+    let mut dense = w.water_scratch.dense.take().unwrap_or_default();
+    (|| {
+        let sc = &mut *dense;
         #[cfg(feature = "profile")]
         let mut lap = crate::profile::start(crate::profile::Phase::ExchangeSet);
         sc.ensure(n, plane, width, depth);
@@ -1847,7 +1919,8 @@ fn exchange_dense(w: &mut World) {
                 });
             }
         }
-    });
+    })();
+    w.water_scratch.dense = Some(dense);
 }
 
 /// Place `q` into the cells with room at or above world cell `j`, inside that cell's own
@@ -4932,5 +5005,66 @@ mod pool_tests {
         // The rain soaked in, drained, and reached the aquifer.
         assert!(tall.drainable.len() > 0, "nothing is draining");
         assert!(tall.pore.iter().any(|&p| p > 0.5), "the soil never wetted");
+    }
+}
+
+#[cfg(test)]
+mod scratch_tests {
+    use super::{exchange, pooled};
+    use crate::{Command, Config, World};
+
+    /// A flat floor with a mound of water on it, `width × depth` columns.
+    fn puddle(width: u32, depth: u32) -> World {
+        let mut w = World::empty(Config {
+            width,
+            height: 8,
+            depth,
+            voxel_m: 0.25,
+            seed: 3,
+            ..Config::default()
+        });
+        w.apply(Command::AddWater { x: 1, y: 1, z: 1, volume_m3: 0.05 });
+        w
+    }
+
+    /// **The exchange's buffers belong to the world** (terrain-first package): a world
+    /// stepped on a thread that has since ended still holds its own; a second world on the
+    /// same thread starts with none and builds its own; a clone starts with none; and
+    /// they are the world's fields, so they go when it drops. Both drivers: the serial
+    /// one and the pooled one (`pooled`: enough columns and more than one thread).
+    #[test]
+    fn the_water_scratch_belongs_to_the_world_and_goes_with_it() {
+        for (width, depth, threads) in [(8u32, 4u32, 1usize), (32, 16, 2)] {
+            assert_eq!(pooled((width * depth) as usize, threads), threads > 1, "the fixture picks its driver");
+            let stepped_elsewhere = std::thread::spawn(move || {
+                let mut a = puddle(width, depth);
+                assert_eq!(a.water_scratch_bytes(), 0, "a fresh world has no scratch");
+                exchange(&mut a, threads);
+                a
+            })
+            .join()
+            .expect("the stepping thread");
+            assert!(stepped_elsewhere.water_scratch_bytes() > 0, "its scratch outlived the thread that built it");
+            assert_eq!(stepped_elsewhere.clone().water_scratch_bytes(), 0, "a clone copies none");
+
+            let mut b = puddle(width, depth);
+            assert_eq!(b.water_scratch_bytes(), 0, "no thread's scratch is handed to another world");
+            exchange(&mut b, threads);
+            assert!(b.water_scratch_bytes() > 0);
+            drop(stepped_elsewhere);
+            assert!(b.water_scratch_bytes() > 0, "dropping one world leaves another's alone");
+        }
+    }
+
+    /// Switching drivers keeps only the one in use.
+    #[test]
+    fn a_world_keeps_only_the_driver_it_steps_with() {
+        let mut w = puddle(32, 16);
+        exchange(&mut w, 2);
+        assert!(w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none());
+        exchange(&mut w, 1);
+        assert!(w.water_scratch.parallel.is_none() && w.water_scratch.serial.is_some(), "the pooled driver's buffers went");
+        exchange(&mut w, 2);
+        assert!(w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none(), "and the serial one's");
     }
 }

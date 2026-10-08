@@ -19,6 +19,7 @@ pub mod console;
 pub mod create;
 pub mod feed;
 pub mod founders;
+pub mod founding;
 pub mod hook;
 pub mod params;
 mod session;
@@ -34,6 +35,7 @@ pub use console::{COMMANDS, Console, MAX_SPEED, MIN_SPEED, Pacer, console_line};
 pub use feed::{ChunkData, Frame, View};
 pub use params::{SimParams, WorldSpec};
 pub use hook::{HookClock, LoopHook};
+pub use founding::FoundingInfo;
 pub use session::{CandidateInfo, CandidateSource, Notice, Prepared, Session, SessionOptions, Status, prepare_loaded, prepare_new};
 pub use store::{LoadError, SaveMeta, SlotInfo};
 

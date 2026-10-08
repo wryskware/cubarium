@@ -40,8 +40,8 @@ godot --headless --path game --script res://tests/smoke.gd -- --out /tmp/smoke-s
 
 `main.tscn` founds a world from `config/desktop/terrarium.toml` (a drawn seed without
 `--seed`, redrawn while its habitat is refused, which can take a few tries), runs it and
-prints the summary and populations. The smoke test founds two candidates, promotes one,
-steps 100 ticks, queries, takes a view, saves and loads; it prints `PASS`/`FAIL` lines and
+prints the summary and populations. The smoke test draws two terrain candidates, founds and
+runs one, steps 100 ticks, queries, takes a view, saves and loads; it prints `PASS`/`FAIL` lines and
 exits non-zero on a failure. `--headless` never opens a window; anything that needs one goes
 through `scripts/hidden.sh`.
 
@@ -80,21 +80,38 @@ all workers inherit the launcher's CPU affinity without widening it. See
 
 ## `CubariumSession`
 
-`CubariumSession.new()` is an empty session. Every call returns at once; founding, loading
-and saving run off Godot's thread and report through `status()`, `candidates()` and
-`take_notices()`. Paths are filesystem paths (`ProjectSettings.globalize_path(...)`).
+`CubariumSession.new()` is an empty session. Every call returns at once; drawing candidates,
+founding, loading and saving run off Godot's thread and report through `status()`,
+`candidates()`, `founding()` and `take_notices()`. Paths are filesystem paths
+(`ProjectSettings.globalize_path(...)`).
+
+**Terrain first** (2026-10-08): a candidate is a bare terrain — generated, lake-gated and
+checked for room for the founders, nothing founded — so a batch takes seconds and a reroll
+is cheap. Only the picked one is founded (`promote`), on its own terrain: the founding never
+changes it. A refused placement is tried again on the same terrain with the weather and the
+keyed draws re-keyed (up to 3 tries, fewer when two tries running are refused for the same
+reasons); when every try is refused the founding fails with a plain message and the
+candidates stay to pick from.
+
+**Seeds are Strings** across the binding: Godot's ints are signed 64-bit and seeds are
+unsigned. Every `seed`/`placement_seed` returned is a decimal String; a spec's `seed` may be
+a String (up to 18446744073709551615) or a non-negative int.
 
 | call | what |
 |---|---|
-| `generate_candidates(spec: Dictionary, count: int) -> String` | found `count` worlds in parallel; `""` or why not. Spec keys: `config`, `size` `[w,h,d]`, `terrain`, `climate`, `seed`, `sets`, `empty`; unknown keys refused |
-| `candidates() -> Array` | `index`, `state` (generating/ready/failed), `seed`, `label`, `error`, `summary`, `populations` |
+| `generate_candidates(spec: Dictionary, count: int) -> String` | draw `count` terrains in parallel (candidate `k` takes `seed + k` when a seed is given); `""` or why not. Spec keys: `config`, `size` `[w,h,d]`, `terrain`, `climate`, `seed`, `sets`, `empty`, `water_level_m` (a terrarium's water table; the picker's Low/Medium/High are 0.375/0.75/1.125 m); unknown keys refused |
+| `regenerate_candidates(spec: Dictionary, seeds: Array) -> String` | one candidate per seed (`null` draws one): the same terrains again, e.g. at another water level |
+| `candidates() -> Array` | `index`, `state` (generating/ready/failed/cancelled), `seed`, `label`, `error`, `summary`, `populations` (empty until founded), `terrain` (hash of the terrain), `feasible` (whether the founders could all be placed on the bare terrain; a drawn terrain is offered only when true), `notes` |
 | `candidate_view(i: int) -> Dictionary` | a ready candidate's whole view (for thumbnails and panning), naming its `source` (this session) and `candidate` (i) so a world view renders the candidate's own world |
-| `promote(i: int) -> String` | run candidate `i`, drop the rest |
+| `promote(i: int) -> String` | found candidate `i` on its own terrain and run it once founded (the rest are dropped then); `""` once started or why not |
+| `founding() -> Dictionary` | `state` (idle/founding/done/failed/cancelled), `candidate`, `seed`, `terrain`, `phase` (settling, shower, draining, lake_rest, stream_watch, placing, starting), `phase_label`, `progress` (0–1 through the current try), `attempt`/`attempts`, `placement_seed`, `elapsed_s`, `error`, `label` |
+| `cancel()` | stop the terrains being drawn and the founding in flight; ready candidates stay |
+| `workers() -> int` | candidate and founding threads still running |
 | `load(dir: String)` / `save(dir: String)` / `close()` | a save is a directory with `meta.json`; a save from another version is refused (`load_failed` notice) |
 | `command(line: String)` | the console (`p`, `s N`, `speed X`, `r`, `i X Y Z`, …) |
 | `pause()` `resume()` `set_speed(x: float)` `step(n: int)` | run control |
 | `status() -> Dictionary` | `running`, `paused`, `speed`, `tick`, `generation`, `loading`, `saving`, `label`, `last_error`, `step_ms`, `feed_ms` |
-| `query(name: String, args) -> Variant` | `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`, `animal` `{id}`, `history` `{since}`, `species`, `status`, `candidates`, `saves` `{dir}`; `{"error": …}` on a refusal |
+| `query(name: String, args) -> Variant` | `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`, `animal` `{id}`, `history` `{since}`, `species`, `status`, `candidates`, `founding`, `spec` `{spec}` (its landform kind, `water_level_m` and the water steps), `saves` `{dir}`; `{"error": …}` on a refusal |
 | `take_view() -> Dictionary` | see below |
 | `take_events() -> Array` | life events since the last take: `tick`, `animal`, `kind` (born, meal, kill, injured, died, …) and the kind's fields |
 | `take_notices() -> Array` | console replies; `saved`/`save_failed`/`loaded`/`load_failed` with `path` and `meta` |

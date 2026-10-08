@@ -9,6 +9,12 @@
 //! report through `status()`, `candidates()` and `take_notices()`.
 //!
 //! Paths are filesystem paths: GDScript passes `ProjectSettings.globalize_path("user://…")`.
+//!
+//! **Seeds are unsigned 64-bit and Godot's integers are signed**, so a seed crosses as a
+//! decimal String both ways: every `seed` (and `placement_seed`) this class returns is a
+//! String, and a spec's `seed` may be a String (any value up to 2^64 − 1) or an int (0 or
+//! more; a negative int is read as the unsigned value with the same bits, which is what
+//! `String.num_uint64` shows for it).
 
 #![deny(unsafe_code)]
 
@@ -61,14 +67,50 @@ impl CubariumSession {
     /// `empty`; unknown keys are refused. Returns "" or the reason it was refused.
     #[func]
     fn generate_candidates(&self, spec: Variant, count: i64) -> GString {
-        let spec: Result<WorldSpec, String> =
-            serde_json::from_value(to_json(&spec)).map_err(|e| format!("the world spec: {e}"));
-        let result = spec.and_then(|s| self.session.generate_candidates(&s, count.max(0) as usize));
+        let result = world_spec(&spec).and_then(|s| self.session.generate_candidates(&s, count.max(0) as usize));
         error_string(result)
     }
 
-    /// Every candidate: `index`, `state` (generating, ready, failed), `seed`, `label`,
-    /// `error`, `summary`, `populations`.
+    /// Draw one terrain candidate per entry of `seeds`, from `spec`: a seed (String or int)
+    /// brings that terrain back — what the picker's water slider does to show the same
+    /// landforms at another level — and `null` draws one. "" or the reason it was refused.
+    #[func]
+    fn regenerate_candidates(&self, spec: Variant, seeds: VarArray) -> GString {
+        let seeds: Result<Vec<Option<u64>>, String> = seeds
+            .iter_shared()
+            .map(|v| if v.is_nil() { Ok(None) } else { seed_of(&to_json(&v)).map(Some) })
+            .collect();
+        let result = seeds.and_then(|seeds| {
+            world_spec(&spec).and_then(|s| self.session.generate_candidates_seeded(&s, &seeds))
+        });
+        error_string(result)
+    }
+
+    /// The picked candidate's founding: `state` (idle, founding, done, failed, cancelled),
+    /// `candidate`, `seed`, `terrain`, `phase`, `phase_label`, `progress` (0–1 through the
+    /// current try), `attempt` of `attempts`, `placement_seed`, `elapsed_s`, `error`,
+    /// `label`.
+    #[func]
+    fn founding(&self) -> Variant {
+        to_variant(&serde_json::to_value(self.session.founding()).unwrap_or(Value::Null))
+    }
+
+    /// Stop the candidates still being drawn and the founding in flight.
+    #[func]
+    fn cancel(&self) {
+        self.session.cancel();
+    }
+
+    /// Candidate and founding threads still running.
+    #[func]
+    fn workers(&self) -> i64 {
+        self.session.workers() as i64
+    }
+
+    /// Every candidate — a bare terrain until it is picked: `index`, `state` (generating,
+    /// ready, failed, cancelled), `seed`, `label`, `error`, `summary`, `populations`,
+    /// `terrain` (its hash), `feasible` (whether the founders fit on the bare terrain),
+    /// `notes`.
     #[func]
     fn candidates(&self) -> Variant {
         to_variant(&serde_json::to_value(self.session.candidates()).unwrap_or(Value::Null))
@@ -91,7 +133,8 @@ impl CubariumSession {
         d
     }
 
-    /// Run candidate `index` and drop the others. "" or the reason.
+    /// Found candidate `index` on its own terrain, and run it once founded (the others are
+    /// dropped then); follow it through `founding()`. "" or the reason it can't start.
     #[func]
     fn promote(&self, index: i64) -> GString {
         let result = usize::try_from(index)
@@ -165,7 +208,13 @@ impl CubariumSession {
     /// `status`, `candidates`, `saves` {dir}). On a refusal: `{"error": reason}`.
     #[func]
     fn query(&self, name: GString, args: Variant) -> Variant {
-        match self.session.query(&name.to_string(), &to_json(&args)) {
+        let mut args = to_json(&args);
+        if let Some(seed) = args.get("seed").cloned()
+            && let Ok(n) = seed_of(&seed)
+        {
+            args["seed"] = Value::from(n);
+        }
+        match self.session.query(&name.to_string(), &args) {
             Ok(v) => to_variant(&v),
             Err(e) => to_variant(&serde_json::json!({ "error": e })),
         }
@@ -323,7 +372,38 @@ fn view_dict(v: &View) -> VarDictionary {
     d
 }
 
-/// A serde value as a Variant: objects become Dictionaries, arrays Arrays.
+/// A spec Dictionary as a [`WorldSpec`], its `seed` read by [`seed_of`].
+fn world_spec(spec: &Variant) -> Result<WorldSpec, String> {
+    let mut json = to_json(spec);
+    if let Some(seed) = json.get("seed").cloned()
+        && !seed.is_null()
+    {
+        json["seed"] = Value::from(seed_of(&seed)?);
+    }
+    serde_json::from_value(json).map_err(|e| format!("the world spec: {e}"))
+}
+
+/// A seed from Godot: a decimal String (up to 2^64 − 1), or an int — 0 or more, and a
+/// negative int as the unsigned value with the same bits (`String.num_uint64` of it).
+fn seed_of(v: &Value) -> Result<u64, String> {
+    match v {
+        Value::String(s) => s
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| format!("a seed is a whole number from 0 to {}, not \"{s}\"", u64::MAX)),
+        Value::Number(n) => n
+            .as_u64()
+            .or_else(|| n.as_i64().map(|i| i as u64))
+            .ok_or_else(|| format!("a seed is a whole number, not {n}")),
+        other => Err(format!("a seed is a whole number, not {other}")),
+    }
+}
+
+/// Keys whose values are seeds, sent to Godot as decimal Strings (see the module notes).
+const SEED_KEYS: [&str; 2] = ["seed", "placement_seed"];
+
+/// A serde value as a Variant: objects become Dictionaries, arrays Arrays. A seed
+/// ([`SEED_KEYS`]) becomes a decimal String.
 fn to_variant(v: &Value) -> Variant {
     match v {
         Value::Null => Variant::nil(),
@@ -344,7 +424,14 @@ fn to_variant(v: &Value) -> Variant {
         Value::Object(map) => {
             let mut d = VarDictionary::new();
             for (k, x) in map {
-                d.set(&GString::from(k.as_str()).to_variant(), &to_variant(x));
+                let value = match x {
+                    Value::Number(n) if SEED_KEYS.contains(&k.as_str()) => match n.as_u64() {
+                        Some(u) => GString::from(u.to_string().as_str()).to_variant(),
+                        None => to_variant(x),
+                    },
+                    _ => to_variant(x),
+                };
+                d.set(&GString::from(k.as_str()).to_variant(), &value);
             }
             d.to_variant()
         }

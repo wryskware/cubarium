@@ -9,8 +9,9 @@ extends SceneTree
 ## screen; a save from another version is listed, refused on load, and can be deleted;
 ## a good save loads back. Prints PASS/FAIL lines, exits 0 only if all passed.
 
-const TIMEOUT_S := 240.0
+const TIMEOUT_S := 250.0
 const WorldViews := preload("res://ui/world_views.gd")
+const NewWorld := preload("res://ui/new_world.gd")
 
 var main
 var failures := 0
@@ -59,19 +60,35 @@ func run() -> void:
 	check(quits == 0, "Esc never quits (5 presses, no quit)")
 	check(main.menu.visible, "with no world, Esc leaves the menu up (nothing to resume)")
 
-	# Two candidates of the smallest size, then promote one.
+	# Terrain candidates of the smallest size: bare terrains, nothing founded on them.
 	main._on_menu("new")
 	await frames(1)
 	check(main.picker.visible, "New world opens the picker")
 	main.picker.select("terrarium")
-	main.picker._seed.text = "7"  # a drawn seed may be refused and redrawn for minutes
+	var info = main.session.query("spec", main.picker.spec(false))
+	var start_step := 1
+	for k in main.picker.water_levels.size():
+		if info is Dictionary and info.get("water_level_m") != null \
+				and absf(float(main.picker.water_levels[k]["water_level_m"]) - float(info["water_level_m"])) < 1e-6:
+			start_step = k
+	check(main.picker._water_box.visible and int(main.picker._water.value) == start_step,
+		"the water slider starts on the config's own table (%s m: step %d)" % [str(info.get("water_level_m")), start_step])
+	check(NewWorld.seed_problem("18446744073709551615") == "" and NewWorld.seed_problem("18446744073709551616") != "",
+		"a seed may be any unsigned 64-bit number")
+	main.picker._seed.text = "5"  # a seed whose terrain founds on its first try
 	var refused: String = main.picker.generate(2)
-	check(refused == "", "two terrarium candidates asked for %s" % refused)
-	var ready := await until(func(): return main.picker.ready_count() == 2, 200.0)
-	check(ready, "both candidates founded and shown (%d s)" % elapsed())
+	check(refused == "", "two terrarium terrains asked for %s" % refused)
+	var ready := await until(func(): return main.picker.ready_count() == 2, 90.0)
+	check(ready, "both terrains drawn and shown (%d s)" % elapsed())
 	if not ready:
 		await finish()
 		return
+	var cands: Array = main.session.candidates()
+	check(cands.all(func(c): return c["state"] == "ready" and str(c.get("terrain", "")) != "" and c.get("feasible") != null),
+		"each candidate carries its terrain hash and the feasibility check's verdict")
+	check(_living(cands) == 0, "nothing is founded on a terrain candidate")
+	check(cands[0]["seed"] is String and cands[0]["seed"] == "5" and cands[1]["seed"] == "6", "seeds cross the binding as strings: %s" % [cands.map(func(c): return c["seed"])])
+	check(not main.has_world(), "nothing runs while picking")
 	var card: Dictionary = main.picker._cards[1]
 	check(card["holder"].get_child_count() > 1, "a ready candidate shows its own WorldView")
 	main.picker.open_large(1)
@@ -81,7 +98,70 @@ func run() -> void:
 	esc()
 	await frames(1)
 	check(not main.picker.is_large_open() and main.picker.visible, "Esc closes the large candidate, the picker stays")
+
+	# The water slider brings the same terrains back at another level.
+	var seeds: Array = cands.map(func(c): return c["seed"])
+	var other := 2 if start_step != 2 else 0
+	main.picker._water.value = other
+	await frames(1)
+	check(is_equal_approx(float(main.picker.spec().get("water_level_m", -1.0)), float(main.picker.water_levels[other]["water_level_m"])),
+		"the slider sets the spec's water_level_m (%s)" % str(main.picker.spec().get("water_level_m")))
+	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
+	check(ready and main.session.candidates().map(func(c): return c["seed"]) == seeds,
+		"moving the slider draws the same terrains again: %s" % [main.session.candidates().map(func(c): return c["seed"])])
+	main.picker._water.value = start_step
+	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
+	check(ready, "and back at the config's own level")
+
+	# Drawing can be cancelled.
+	main.picker._seed.text = ""
+	main.picker.generate(3)
+	await frames(1)
+	check(main.picker._cancel.visible, "Cancel shows while terrains are drawn")
+	main.picker._cancel.pressed.emit()
+	await frames(1)
+	check(main.session.candidates().all(func(c): return c["state"] != "generating"), "Cancel stops the draws: %s" % [main.session.candidates().map(func(c): return c["state"])])
+	var stopped := await until(func(): return main.session.workers() == 0, 60.0)
+	check(stopped, "and their threads end")
+
+	# Back to the two terrains, then a founding that is cancelled.
+	main.picker._seed.text = "5"
+	main.picker.generate(2)
+	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
+	check(ready, "the two terrains again")
+	var terrain0: String = str(main.session.candidates()[0]["terrain"])
+	main.picker._cards[1]["pick"].pressed.emit()
+	await frames(2)
+	check(main.picker.is_founding() and main.picker._found_box.visible and main.picker._generate.disabled,
+		"picking one shows the founding panel and holds the rest")
+	await until(func(): return str(main.session.founding().get("phase", "")) != "", 30.0)
+	main.picker._found_cancel.pressed.emit()
+	await until(func(): return not main.picker.is_founding(), 10.0)
+	check(main.session.founding()["state"] == "cancelled" and not main.has_world() and main.session.candidates().size() == 2,
+		"cancelling the founding installs nothing and keeps the terrains")
+	stopped = await until(func(): return main.session.workers() == 0, 60.0)
+	check(stopped, "the founding thread ends")
+
+	# The picked terrain founded, with a real progress bar, and run.
 	main.picker._cards[0]["pick"].pressed.emit()
+	var progress := []
+	var phases := []
+	var bar := []
+	var founded := await until(func():
+		var now: Dictionary = main.session.founding()
+		if now["state"] == "founding":
+			var p := float(now.get("progress", 0.0))
+			if progress.is_empty() or p != progress[-1]:
+				progress.append(p)
+			if not str(now.get("phase", "")) in phases:
+				phases.append(str(now.get("phase", "")))
+			bar.append(main.picker._found_bar.value)
+		return now["state"] != "founding", 200.0)
+	var fd: Dictionary = main.session.founding()
+	check(founded and fd["state"] == "done", "candidate 0 founded (%d s): %s" % [int(fd.get("elapsed_s", 0)), str(fd.get("error", ""))])
+	check(progress.size() > 3 and progress.any(func(p): return p > 0.0 and p < 1.0), "the bar moved with the founding: %d readings, %s" % [progress.size(), phases])
+	check(bar.any(func(v): return v > 0.0 and v < 100.0), "the picker's bar showed it")
+	check(str(fd.get("terrain", "")) == terrain0, "the founded world kept the picked terrain")
 	await until(func(): return main.has_world(), 20.0)
 	check(main.has_world(), "picking candidate 0 runs it")
 	check(not main.picker.visible and not main.menu.visible, "picking closes the picker and the menu")
@@ -98,6 +178,7 @@ func run() -> void:
 	esc()
 	await until(func(): return not main.session.status()["paused"], 5.0)
 	check(not main.menu.visible and not main.session.status()["paused"], "Esc again closes the menu and resumes")
+	await frames(1)  # the shell sets the view's input on its next frame
 	check(main.world_view.input_enabled, "the world takes input again")
 	# A pause of the player's own survives the menu.
 	key(KEY_P)
@@ -273,6 +354,20 @@ func pad(b: JoyButton) -> void:
 		e.button_index = b
 		e.pressed = down
 		root.push_input(e)
+
+
+## Animals, eggs and plant stands over every candidate's populations.
+func _living(cands: Array) -> int:
+	var n := 0
+	for c in cands:
+		var pops = c.get("populations")
+		if not (pops is Dictionary):
+			continue
+		for a in pops.get("animals", []):
+			n += int(a.get("alive", 0)) + int(a.get("eggs", 0))
+		for p in pops.get("plants", []):
+			n += int(p.get("stands", 0))
+	return n
 
 
 func _first_animal() -> int:

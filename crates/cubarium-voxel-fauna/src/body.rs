@@ -3526,6 +3526,39 @@ pub(crate) fn mouth_columns(
     pose: &crate::Pose,
     body: &Body,
 ) -> Vec<(i64, u32)> {
+    let mut cols: Vec<(i64, u32)> = Vec::new();
+    mouth_columns_each(view, pose, body, |entry| {
+        if !cols.contains(&entry) {
+            cols.push(entry);
+        }
+    });
+    cols
+}
+
+/// `q.floor() as i64`, without the library call: the truncation, one lower for a
+/// negative non-integer. The same value for every `q` a world coordinate can be.
+#[inline]
+fn floor_i64(q: f64) -> i64 {
+    let t = q as i64;
+    if (t as f64) > q { t - 1 } else { t }
+}
+
+/// `x.rem_euclid(width)` for an `x` within a ring's width of it, without the division.
+#[inline]
+pub(crate) fn wrap_x(x: i64, width: i64) -> i64 {
+    if x < 0 {
+        if x >= -width { x + width } else { x.rem_euclid(width) }
+    } else if x >= width {
+        if x < 2 * width { x - width } else { x.rem_euclid(width) }
+    } else {
+        x
+    }
+}
+
+/// [`mouth_columns`] **with repeats**: every probe's column in probe order, for a caller
+/// that deduplicates a union over many poses itself (`encounter::mouth_columns_from_face`).
+/// Its first occurrences are exactly [`mouth_columns`], in the same order.
+pub(crate) fn mouth_columns_each(view: &VoxelView<'_>, pose: &crate::Pose, body: &Body, mut each: impl FnMut((i64, u32))) {
     let c = view.config;
     let v = c.voxel_m;
     let r = body.footprint_radius();
@@ -3538,28 +3571,22 @@ pub(crate) fn mouth_columns(
     let axis = 2.0 * r + reach;
     let axis_steps = ((axis / (0.5 * v)).ceil() as usize).max(1);
     let side_steps = ((2.0 * r / (0.5 * v)).ceil() as usize).max(1);
-    let mut probes: Vec<(f64, f64)> = Vec::with_capacity(axis_steps + side_steps + 2);
+    let (width, depth) = (i64::from(c.width), i64::from(c.depth));
+    let mut probe = |px: f64, pz: f64| {
+        let z = floor_i64(pz / v);
+        if z < 0 || z >= depth {
+            return;
+        }
+        each((wrap_x(floor_i64(px / v), width), z as u32));
+    };
     for k in 0..=axis_steps {
         let d = axis * (k as f64) / (axis_steps as f64);
-        probes.push((pose.x + d * fx, pose.z + d * fz));
+        probe(pose.x + d * fx, pose.z + d * fz);
     }
     for k in 0..=side_steps {
         let d = -r + 2.0 * r * (k as f64) / (side_steps as f64);
-        probes.push((tip.0 + d * rx, tip.1 + d * rz));
+        probe(tip.0 + d * rx, tip.1 + d * rz);
     }
-    let mut cols: Vec<(i64, u32)> = Vec::with_capacity(probes.len());
-    for &(px, pz) in &probes {
-        let z = (pz / v).floor();
-        if z < 0.0 || z >= f64::from(c.depth) {
-            continue;
-        }
-        let x = ((px / v).floor() as i64).rem_euclid(i64::from(c.width));
-        let entry = (x, z as u32);
-        if !cols.contains(&entry) {
-            cols.push(entry);
-        }
-    }
-    cols
 }
 
 /// The stock of one ground food class at a site: what a mouth over it could take.

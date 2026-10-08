@@ -356,7 +356,7 @@ pub(crate) fn rows() -> Vec<Row> {
         .f("lake_shelf_depth_m", "m under the water", n, (0.125, 0.5), "the marsh shelf's depth at its lakeward edge (one voxel at the shore)")
         .f("lake_flat_m", "m", n, (0.0, 1.5), "width of the wet flats outside the shore, graded to the water's surface")
         .f("lake_scale", "x", p, (0.5, 3.0), "the lake's size: multiplies its length, width, bay, meander, depth (short of bedrock) and marsh; not the water level")
-        .f("water_level_m", "m above the lowest yard ground", n, (0.125, 1.0), "where the water stands, above the ground the lake is graded into")
+        .f("water_level_m", "m above the lowest yard ground", n, (0.125, 1.125), "where the water stands, above the ground the lake is graded into")
         .f("yard", "fraction of the depth", Range::closed(0.0, 1.0).open_hi(), (0.2, 0.5), "how deep the yard held clear for the lake is")
         .f("pool_m.*", "m", p, (0.25, 2.0), "a pool's radius around the ring")
         .f("pool_depth_m", "m", n, (0.125, 0.75), "a pool's depth")
