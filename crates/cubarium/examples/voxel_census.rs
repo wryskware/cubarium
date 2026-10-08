@@ -74,17 +74,35 @@
 //! own columns (`temp_c` … `day_phase`, `stream_m3_s`, `moist`;
 //! `design/handoffs/voxel-weather-2026-09-24.md`).
 //!
-//! `vitals=DIR` opts into `vitals.csv`, `plants_vitals.csv` and `life.csv` in DIR.
-//! Activity is sampled each simulated second; life transitions and 3-D path length
-//! are polled each tick. `stuck_window_min=N` defaults to 5 simulated minutes and
-//! `stuck_body_lengths=N` defaults to 1 current body length. Stuck requires a complete
-//! trailing window, net displacement below that threshold, and a currently awake
-//! body that is not feeding, resting, perched or attached. Activity shares overlap
-//! (e.g. moving and fleeing); denominators are awake individual-seconds. Energy uses
-//! only bodies alive at both minute boundaries; path and displacement use that cohort.
-//! A load starts fresh Observed life histories and rewrites these three readout files;
-//! use a new vitals directory to retain previous segments. Checkpoints within the
-//! process retain the accumulator. Fractional final minutes get an endpoint row.
+//! `vitals=DIR` opts into `vitals.csv`, `plants_vitals.csv`, `life.csv` and `meta.json`
+//! in DIR. Activity is sampled each simulated second; life transitions and 3-D path
+//! length are polled each tick. `stuck_window_min=N` defaults to 5 simulated minutes and
+//! `stuck_body_lengths=N` defaults to 1 current body length. The stuck rule, the two
+//! energy readouts (`survivor_stock_change_per_body_hour`, `cohort_energy_change`),
+//! `delivered_bl_per_s` and the ring-wrapped distances are defined in
+//! `cubarium_observatory::vitals`. Activity shares overlap (e.g. moving and fleeing);
+//! denominators are awake individual-seconds. Fractional final minutes get an endpoint
+//! row. The census rows (stdout) always start with the run's own start minute: 0 on a
+//! founding, the load minute on `load=` or `resume=`, before any tick.
+//!
+//! **Segments.** Every row of the three CSVs carries `segment`: 0 for a fresh founding,
+//! 1 for a `load=` branch, and the previous segment + 1 for each `resume=`.
+//! - A founding or `load=` starts the files fresh and writes a row at its start minute.
+//! - `resume=` continues the same files: it first drops every row the checkpoint at the
+//!   resume minute `m` does not hold (minute rows after `m`; `life.csv` deaths after `m`
+//!   and living rows last seen after `m` — a crash may have written past the
+//!   checkpoint), then appends without a second header. The previous segment's row at
+//!   `m` (it carries the minute before) is kept and the resumed segment does not repeat
+//!   it, so every minute appears once.
+//! - Histories do not cross a boundary: bodies alive at a load or resume start new
+//!   `origin=observed` life rows with their own `id`, so a reducer joins the segments by
+//!   `id`. A segment that ended cleanly wrote its living rows (`alive=true`) at its end
+//!   minute; one that crashed did not, and its living bodies' earlier meals, path and
+//!   activity are lost. Stuck windows restart at a boundary.
+//! - `meta.json` (rewritten at each start and end): the world's `voxel_m`, `width`,
+//!   `depth`, `height`, `ring_m` (x circumference), `seed`, the current `segment`, its
+//!   `minute_start`/`minute_end` (planned, then actual), the binary's `git_commit`, and
+//!   `segments`, one entry per segment kept (kind found/load/resume).
 //!
 //! `overlap=0` runs the chained tick instead of the overlapped one (`SimConfig::overlap`),
 //! and `ab=MIN` flips between the two every simulated minute from minute `MIN` on, so the
@@ -246,6 +264,13 @@ fn main() {
                         .collect()
                 },
             ),
+        segment_kind: if staged::resumed(&args) {
+            SegmentKind::Resume
+        } else if args.iter().any(|a| a.starts_with("load=")) {
+            SegmentKind::Load
+        } else {
+            SegmentKind::Found
+        },
     };
     let save = SaveAt::from_args(&args);
     // `set=PATH=VALUE`: the parameter layers over each arm's world and the default plant
@@ -550,6 +575,16 @@ struct Timing {
     /// `meadow_patch_min_faces=N` (default [`MEADOW_PATCH_MIN_FACES`]): the size a patch
     /// must reach to count in the rows' `*_patches` columns.
     patch_min: usize,
+    /// How this process's run began: the vitals readouts' segment rule.
+    segment_kind: SegmentKind,
+}
+
+/// How a process's run began, for the vitals readouts (doc comment, `vitals=`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SegmentKind {
+    Found,
+    Load,
+    Resume,
 }
 
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
@@ -631,9 +666,9 @@ fn run(
         }
     }
     print_header();
-    if minute0 == 0 {
-        print_row(0, sim, 0.0, timing.patch_min);
-    }
+    // Every run's first row is its start: a founding's minute 0, or the load minute of a
+    // loaded or resumed one, before any tick.
+    print_row(minute0, sim, 0.0, timing.patch_min);
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
     let mut window = SeedWindow::default();
@@ -644,7 +679,8 @@ fn run(
     let mut spells = SpellLog::new(sim);
     let mut lj = LjChain::new(sim);
     let mut vitals = timing.vitals.as_ref().map(|(dir, options)| {
-        VitalsLog::new(dir, *options, sim, minute0 as f64).expect("create vitals readouts")
+        VitalsLog::new(dir, *options, sim, minute0, total_ticks / TICKS_PER_MIN, timing.segment_kind)
+            .unwrap_or_else(|e| panic!("vitals readouts in {dir}: {e}"))
     });
     let mut vitals_time = std::time::Duration::ZERO;
     let first_tick = tick;
@@ -713,7 +749,7 @@ fn run(
         if tick % TICKS_PER_MIN != 0 {
             v.minute(sim, tick as f64 / TICKS_PER_MIN as f64).expect("write final vitals");
         }
-        v.finish().expect("finish life table");
+        v.finish(tick as f64 / TICKS_PER_MIN as f64).expect("finish life table");
         vitals_time += start.elapsed();
         eprintln!("vitals: readout_ms_per_tick={:.6} ticks={}",
             vitals_time.as_secs_f64() * 1e3 / (tick - first_tick).max(1) as f64,
@@ -725,25 +761,123 @@ fn run(
 }
 
 /// Streaming deaths and minute snapshots; living life-table rows appear at run end.
+/// The segment rule is in the doc comment (`vitals=`).
 struct VitalsLog {
     recorder: VitalsRecorder,
     animals: std::io::BufWriter<std::fs::File>,
     plants: std::io::BufWriter<std::fs::File>,
     lives: std::io::BufWriter<std::fs::File>,
+    meta_path: std::path::PathBuf,
+    meta: serde_json::Value,
 }
 
 impl VitalsLog {
-    fn new(dir: &str, options: VitalsOptions, sim: &Sim, minute: f64) -> std::io::Result<Self> {
+    fn new(
+        dir: &str,
+        options: VitalsOptions,
+        sim: &Sim,
+        minute0: u64,
+        end_minute: u64,
+        kind: SegmentKind,
+    ) -> Result<Self, String> {
         let dir = std::path::Path::new(dir);
-        std::fs::create_dir_all(dir)?;
-        let file = |name| std::fs::File::create(dir.join(name)).map(std::io::BufWriter::new);
-        let mut log = Self { recorder: VitalsRecorder::new(options, sim.fauna(), minute),
-            animals: file("vitals.csv")?, plants: file("plants_vitals.csv")?, lives: file("life.csv")? };
-        writeln!(log.animals, "{}", vitals::VITALS_HEADER)?;
-        writeln!(log.plants, "{}", vitals::PLANTS_HEADER)?;
-        vitals::LifeRow::write_header(&mut log.lives)?;
-        log.minute(sim, minute)?;
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        let meta_path = dir.join("meta.json");
+        let minute = minute0 as f64;
+        // A resume continues the files; a founding or a load starts them fresh.
+        let previous: Option<serde_json::Value> = (kind == SegmentKind::Resume)
+            .then(|| std::fs::read_to_string(&meta_path).ok())
+            .flatten()
+            .and_then(|t| serde_json::from_str(&t).ok());
+        let segment = match kind {
+            SegmentKind::Found => 0,
+            SegmentKind::Load => 1,
+            SegmentKind::Resume => previous
+                .as_ref()
+                .and_then(|m| m["segment"].as_u64())
+                .map_or(1, |s| s as u32 + 1),
+        };
+        let mut boundary_written = false;
+        let open = |name: &str, header: &str, readout: vitals::Readout, boundary: &mut bool| {
+            let path = dir.join(name);
+            let existing = match kind {
+                SegmentKind::Resume => std::fs::read_to_string(&path).ok(),
+                _ => None,
+            };
+            let text = match existing {
+                Some(text) => {
+                    let (kept, at) = vitals::keep_through(&text, header, readout, minute)
+                        .map_err(|e| format!("{}: {e}", path.display()))?;
+                    *boundary |= at;
+                    kept
+                }
+                None => format!("{header}\n"),
+            };
+            std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .map(std::io::BufWriter::new)
+                .map_err(|e| format!("{}: {e}", path.display()))
+        };
+        let mut at_animals = false;
+        let animals = open("vitals.csv", vitals::VITALS_HEADER, vitals::Readout::Minutes, &mut at_animals)?;
+        let mut at_plants = false;
+        let plants = open("plants_vitals.csv", vitals::PLANTS_HEADER, vitals::Readout::Minutes, &mut at_plants)?;
+        let mut unused = false;
+        let lives = open("life.csv", &vitals::life_header(), vitals::Readout::Life, &mut unused)?;
+        let _ = at_plants;
+        boundary_written |= at_animals;
+        let config = sim.world().config();
+        let ring_m = f64::from(config.width) * config.voxel_m;
+        let mut segments: Vec<serde_json::Value> = previous
+            .as_ref()
+            .and_then(|m| m["segments"].as_array().cloned())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|s| s["minute_start"].as_f64().is_some_and(|m| m < minute))
+            .collect();
+        segments.push(serde_json::json!({
+            "segment": segment,
+            "kind": format!("{kind:?}").to_lowercase(),
+            "minute_start": minute,
+            "minute_end": end_minute as f64,
+            "git_commit": env!("CUBARIUM_GIT_HASH"),
+        }));
+        let meta = serde_json::json!({
+            "voxel_m": config.voxel_m,
+            "width": config.width,
+            "depth": config.depth,
+            "height": config.height,
+            "ring_m": ring_m,
+            "seed": config.seed,
+            "segment": segment,
+            "minute_start": minute,
+            "minute_end": end_minute as f64,
+            "git_commit": env!("CUBARIUM_GIT_HASH"),
+            "segments": segments,
+        });
+        let mut log = Self {
+            recorder: VitalsRecorder::new(options, ring_m, segment, sim.fauna(), minute),
+            animals,
+            plants,
+            lives,
+            meta_path,
+            meta,
+        };
+        log.write_meta().map_err(|e| e.to_string())?;
+        // The load boundary's row, unless the resumed files already end with it.
+        if boundary_written {
+            let _ = log.recorder.minute(sim.flora(), sim.fauna(), minute);
+        } else {
+            log.minute(sim, minute).map_err(|e| e.to_string())?;
+        }
         Ok(log)
+    }
+
+    fn write_meta(&self) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(&self.meta).map_err(std::io::Error::other)?;
+        std::fs::write(&self.meta_path, text + "\n")
     }
 
     fn minute(&mut self, sim: &Sim, minute: f64) -> std::io::Result<()> {
@@ -754,10 +888,16 @@ impl VitalsLog {
         self.animals.flush()?; self.plants.flush()?; self.lives.flush()
     }
 
-    fn finish(&mut self) -> std::io::Result<()> {
+    /// Living rows at the actual end minute, and the segment's end in `meta.json`.
+    fn finish(&mut self, end_minute: f64) -> std::io::Result<()> {
         for r in self.recorder.take_dead() { r.write_csv(&mut self.lives)?; }
         for r in self.recorder.lives().filter(|r| r.died_minute.is_none()) { r.write_csv(&mut self.lives)?; }
-        self.lives.flush()
+        self.lives.flush()?;
+        self.meta["minute_end"] = end_minute.into();
+        if let Some(last) = self.meta["segments"].as_array_mut().and_then(|s| s.last_mut()) {
+            last["minute_end"] = end_minute.into();
+        }
+        self.write_meta()
     }
 }
 
