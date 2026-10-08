@@ -500,16 +500,18 @@ pub(crate) fn plume_kernel(config: &FaunaConfig, voxel_m: f64) -> Option<(f64, f
 
 /// The point sources of nectar scent and their rates, scent units a second: every flower
 /// holding nectar at its bloom — a bloomcrown's flower head (the top of its top foliage
-/// layer, over its site), a latticevine face in flower (the voxel in front of it) — and every
-/// lit lure but `except`'s (a lanternjaw does not smell its own) at its lure point, by `lure_scent` × its lit fraction (the light
-/// layer's beacons and lures: the same flowers the eye sees).
+/// layer, over its site), a latticevine face in flower (the voxel in front of it) — by the
+/// nectar it holds (`nectar_per_s` × its nectar over a full bloomcrown head's), and every
+/// lit lure but `except`'s (a lanternjaw does not smell its own) at its lure point, by
+/// `lure_scent` × its lit fraction × a full flower's (the mimic holds none). The light
+/// layer's beacons and lures: the same flowers the eye sees.
 pub(crate) fn nectar_sources(fauna: &crate::Fauna, view: &VoxelView<'_>, except: Option<u64>) -> Vec<((f64, f64, f64), f64)> {
     let s = fauna.config.scent;
     if !(s.nectar_per_s > 0.0) {
         return Vec::new();
     }
     let ls = fauna.config.light.lure_scent;
-    let flowers = fauna.beacons.list().iter().filter(|b| b.kind == crate::light::BeaconKind::Flower).map(|b| ((b.x, b.y_m, b.z), s.nectar_per_s));
+    let flowers = fauna.beacons.flowers_by_scent().map(|(b, share)| ((b.x, b.y_m, b.z), s.nectar_per_s * share));
     let lures = crate::light::lures(fauna, view)
         .into_iter()
         .filter(|b| Some(b.body) != except && ls > 0.0 && b.power > 0.0)

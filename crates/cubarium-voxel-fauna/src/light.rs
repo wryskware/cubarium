@@ -319,6 +319,10 @@ pub struct Beacons {
     /// The plant layer's tick and the terrain version it was built at.
     stamp: Option<(u64, u64)>,
     list: Vec<Beacon>,
+    /// NECTAR-SCENT: per entry of `list`, the nectar a flower holds over a full bloomcrown
+    /// head's (`flora.bloomcrown.nectar_cap`): the share of a full flower's scent it gives
+    /// off. 0 for a glowcap; 1 for a hand-placed (test) beacon.
+    scent: Vec<f64>,
 }
 
 /// The top foliage-bearing layer of a stand (its flower head, a cap's top).
@@ -334,14 +338,24 @@ impl Beacons {
             return;
         }
         self.stamp = Some(stamp);
-        self.list = Beacons::build(view, fv);
+        (self.list, self.scent) = Beacons::build(view, fv);
+    }
+
+    /// The flowers as smell sources: each with its scent share ([`Beacons::scent_shares`]).
+    pub(crate) fn flowers_by_scent(&self) -> impl Iterator<Item = (&Beacon, f64)> + '_ {
+        self.list.iter().zip(self.scent.iter().copied().chain(std::iter::repeat(1.0))).filter(|(b, _)| b.kind == BeaconKind::Flower)
     }
 
     /// Every flower holding nectar and every glowcap with a cap (module note).
-    pub(crate) fn build(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<Beacon> {
+    /// With each its scent share (NECTAR-SCENT): a flower's nectar over a full bloomcrown
+    /// head's (`flora.bloomcrown.nectar_cap`; 1 when that is not positive), 0 for a glowcap.
+    pub(crate) fn build(view: &VoxelView<'_>, fv: &FloraView<'_>) -> (Vec<Beacon>, Vec<f64>) {
         let c = view.config;
         let v = c.voxel_m;
         let mut out = Vec::new();
+        let mut scent = Vec::new();
+        let full = fv.config.species(Species::Bloomcrown).nectar_cap;
+        let share = |n: f64| if full > 0.0 { (n / full).max(0.0) } else { 1.0 };
         for st in fv.stands {
             let kind = if st.nectar > 0.0 {
                 BeaconKind::Flower
@@ -355,6 +369,7 @@ impl Beacons {
                 None => (st.site.y, crate::surface_m(st.site.y, v)),
             };
             let sky = view.sky_visibility(i64::from(st.site.x), row.min(c.height.saturating_sub(1)), st.site.z);
+            scent.push(if kind == BeaconKind::Flower { share(st.nectar) } else { 0.0 });
             out.push(Beacon {
                 kind,
                 x: (f64::from(st.site.x) + 0.5) * v,
@@ -368,6 +383,7 @@ impl Beacons {
         }
         for f in fv.cover.flowers() {
             let Some((x, y, z)) = f.face.front(view) else { continue };
+            scent.push(share(f.nectar));
             out.push(Beacon {
                 kind: BeaconKind::Flower,
                 x: (f64::from(x) + 0.5) * v,
@@ -379,7 +395,7 @@ impl Beacons {
                 body: 0,
             });
         }
-        out
+        (out, scent)
     }
 
     /// The static beacons as last built.
@@ -391,7 +407,15 @@ impl Beacons {
     #[cfg(test)]
     pub(crate) fn fixed(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, list: Vec<Beacon>) {
         self.stamp = Some((fv.tick, view.terrain_version));
+        self.scent = vec![1.0; list.len()];
         self.list = list;
+    }
+
+    /// [`Beacons::fixed`] with each beacon's scent share given.
+    #[cfg(test)]
+    pub(crate) fn fixed_with_scent(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, list: Vec<(Beacon, f64)>) {
+        self.stamp = Some((fv.tick, view.terrain_version));
+        (self.list, self.scent) = list.into_iter().unzip();
     }
 }
 

@@ -123,3 +123,25 @@ fn a_hungry_flyer_at_the_scent_peak_finds_the_bloom_in_the_dark() {
     assert!(sipped.is_some(), "no sip in 30 s ({led} scent-led samples, light {l:?}, at {:?})", animal(&fauna, bw).pose);
     assert!(led > 0, "fixture: the scent led it");
 }
+
+/// **A flower smells by the nectar it holds**: two flowers the same distance either side of
+/// the smeller, one holding a full bloomcrown head's nectar and one a tenth of it: the plume
+/// leads to the full one, and each alone gives off in proportion to what it holds.
+#[test]
+fn a_flower_smells_by_the_nectar_it_holds() {
+    let world = clock_off(804);
+    let flora = Flora::new(FloraConfig::default());
+    let (view, fv) = (world.view(), flora.view());
+    let flower = |x: f64| crate::light::Beacon { kind: BeaconKind::Flower, x, z: LANE_Z, y_m: SURFACE_M + 0.5, sky: 1.0, power: 1.0, moving: false, body: 0 };
+    let p = (6.0, SURFACE_M + 0.5, LANE_Z);
+    let smell = |list: Vec<(crate::light::Beacon, f64)>| {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        fauna.beacons.fixed_with_scent(&view, &fv, list);
+        let sources = nectar_sources(&fauna, &view, None);
+        nectar_plume(&view, &fauna.config, &sources, p, 0, 0.0)
+    };
+    let both = smell(vec![(flower(4.5), 1.0), (flower(7.5), 0.1)]);
+    assert!(both.gx < 0.0 && both.source == Some((4.5, SURFACE_M + 0.5, LANE_Z)), "led to the full flower: {both:?}");
+    let (full, tenth) = (smell(vec![(flower(4.5), 1.0)]).level, smell(vec![(flower(4.5), 0.1)]).level);
+    assert!(full > 0.0 && (tenth / full - 0.1).abs() < 1e-9, "in proportion to its nectar: {tenth} of {full}");
+}

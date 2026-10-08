@@ -941,11 +941,12 @@ pub struct ScentConfig {
     /// metres, with open air over the lower face up to the higher (a ledge connects, a
     /// wall does not). 0.5 m.
     pub step_m: f64,
-    /// **The nectar plume** (S3, NECTAR-SCENT): a flower holding nectar (a bloomcrown's head,
-    /// a latticevine face in flower) gives off this much a second at its bloom, whatever its
-    /// stock: a flower smells while it holds nectar, in the air around it
-    /// ([`crate::scent::nectar_plume`]). 2.25 (an adult frondgrazer's organic matter at
-    /// `deposit_per_s`, so the smell floors' calibration reads in metres).
+    /// **The nectar plume** (S3, NECTAR-SCENT): a flower holding a full bloomcrown head's
+    /// nectar (`flora.bloomcrown.nectar_cap`) gives off this much a second at its bloom, and
+    /// any flower (a bloomcrown's head, a latticevine face in flower) in proportion to the
+    /// nectar it holds, in the air around it ([`crate::scent::nectar_plume`]). 2.25 (an adult
+    /// frondgrazer's organic matter at `deposit_per_s`, so the smell floors' calibration
+    /// reads in metres).
     pub nectar_per_s: f64,
 }
 
