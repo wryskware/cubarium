@@ -1657,9 +1657,10 @@ fn go_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
 }
 
 /// Actions that walk a body at `(dx, dz)` from it: turn toward it and go forward when it
-/// is ahead (the roost reflex's steering).
+/// is ahead (the roost reflex's steering). On a wall face "ahead" is the way the climb
+/// goes ([`travel_forward`]).
 pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
-    let (fx, fz) = a.pose.forward();
+    let (fx, fz) = travel_forward(a);
     // Signed angle from the heading to the target: `forward` is (sin h, cos h), so a
     // positive turn (heading up) swings toward +x from +z.
     let cross = fz * dx - fx * dz;
@@ -1675,12 +1676,23 @@ pub(super) fn walk_toward(a: &Animal, dx: f64, dz: f64, feed: f64) -> Actions {
 /// [`walk_toward`] that steps forward only while the target at `(dx, dz)` lies ahead and
 /// within `lateral` metres of the heading's line; else it turns in place.
 fn aim_toward(a: &Animal, dx: f64, dz: f64, lateral: f64) -> Actions {
-    let (fx, fz) = a.pose.forward();
+    let (fx, fz) = travel_forward(a);
     let cross = fz * dx - fx * dz;
     let dot = fx * dx + fz * dz;
     let mut go = walk_toward(a, dx, dz, 0.0);
     go.forward = if dot > 0.0 && cross.abs() <= lateral { 1.0 } else { 0.0 };
     go
+}
+
+/// The way a body's forward effort takes it, as a unit `(x, z)`: its heading's on its feet;
+/// on a wall face ([`crate::WallClimb`]) the climb's own direction, up or down (TRAPS: a
+/// body climbing down a cliff hangs facing the face, so its heading points back where it
+/// came from, and a reflex walk to a target below read it as behind and held still).
+fn travel_forward(a: &Animal) -> (f64, f64) {
+    match a.mobility.climb {
+        Some(c) => (f64::from(c.dir.0), f64::from(c.dir.1)),
+        None => a.pose.forward(),
+    }
 }
 
 /// **The fruit search** (roster mechanics fix 4; Fable's call, 2026-10-02): a glider

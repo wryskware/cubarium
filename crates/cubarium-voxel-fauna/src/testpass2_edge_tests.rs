@@ -359,9 +359,9 @@ fn a_pressed_flight_goes_by_its_graph_from_press_replan_s() {
 // ------------------------------------------------------------------ EDGE-2: the motor out of solid
 
 /// **The motor's step out of solid, at its edges**: a seedporter whose disc is a third of its
-/// radius into a rock wall east of it may step west (out), not east (deeper), and not north
-/// along the wall at the same depth (no less deep); a clear body a centimetre off the same wall
-/// may step north along it and not east into it.
+/// radius into a rock wall east of it may step west (out) and north along the wall at the same
+/// depth (TRAPS: no deeper, where EDGE-2 had "less deep"), not east (deeper); a clear body a
+/// centimetre off the same wall may step north along it and not east into it.
 #[test]
 fn the_motors_step_out_of_solid_at_its_edges() {
     let mut world = plain(32, 16, 12);
@@ -378,7 +378,7 @@ fn the_motors_step_out_of_solid_at_its_edges() {
     assert!(!clear, "fixture: caught in the wall");
     assert!(out, "a step out of the wall");
     assert!(!probe(caught, (1.0, 0.0)).0, "a step deeper");
-    assert!(!probe(caught, (0.0, 1.0)).0, "a step along the wall at the same depth");
+    assert!(probe(caught, (0.0, 1.0)).0, "a step along the wall at the same depth");
     let free = 16.0 * V - r - 0.01;
     let (along, clear) = probe(free, (0.0, 1.0));
     assert!(clear, "fixture: clear of the wall");

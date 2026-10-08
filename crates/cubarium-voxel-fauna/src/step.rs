@@ -3287,8 +3287,9 @@ fn attach(
 /// **One tick on a face**. The feet move along it at half
 /// the walking pace the held forward effort asks for, `0.5 · forward · cruise`, and the
 /// motor cost is the walking cost at that effort × [`crate::FounderPhysiology::
-/// wall_climb_cost_factor`]. Turn effort is not read on a face: the heading stays into
-/// it. The interval's motion feedback books the climbing gait's own request (half pace at
+/// wall_climb_cost_factor`]. Turn effort does not turn a body on a face (the heading stays
+/// into it); a turn with no forward backs it off the face ([`back_off_face`]). The
+/// interval's motion feedback books the climbing gait's own request (half pace at
 /// the held effort) as attempted and what the feet covered as delivered, so an open face
 /// reads as an open road on the motor-delivery channel. At the end of the face it stands
 /// on the far face, beside the plane, heading on in the direction it came: a wall's top
@@ -3304,6 +3305,14 @@ fn climb_tick(
 ) {
     let founder = fauna.animals[i].founder.expect("a founder body");
     let climb_speed_fraction = phys.climb_speed_fraction;
+    // TRAPS: a turn asked with no forward is a wish to turn round, which a face does not
+    // allow: the body goes back the way it came, at the climbing pace of the turn's effort,
+    // and stands on the face it started from, facing away. (Every reflex walk turns in place
+    // toward a target behind it; on a face that held it there for good.)
+    if !(held.forward > 0.0) && held.turn != 0.0 && held.turn.is_finite() {
+        back_off_face(fauna, i, view, manifest, phys, held.turn.abs().min(1.0));
+        return;
+    }
     let effort = held.forward.clamp(0.0, 1.0);
     let cost = phys.motor_respiration_per_s
         * fauna.animals[i].body
@@ -3379,6 +3388,58 @@ fn climb_tick(
         }
         a.pose.heading_rad = (travel + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
     }
+}
+
+/// **Back off a face** (TRAPS, [`climb_tick`]): the climber at `i` goes back along its face
+/// toward where it started, at the climbing pace of `effort` and the climbing cost; at the
+/// start it stands on the face it came from (its `site` all along), beside the plane on that
+/// side, facing away from the face. The interval's feedback books the move as delivered
+/// (it is not forward progress).
+fn back_off_face(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    effort: f64,
+) {
+    let cost = phys.motor_respiration_per_s * fauna.animals[i].body * effort * phys.wall_climb_cost_factor * DT;
+    let (motor_paid, motor_body) = respire(fauna, i, cost, Respiration::Motor);
+    let rate = phys.climb_speed_fraction * effort * manifest.cruise_m_per_s;
+    let a = &mut fauna.animals[i];
+    let mut climb = a.mobility.climb.expect("a body on a face");
+    let before = climb.progress_m;
+    climb.progress_m = (climb.progress_m - rate * DT).max(0.0);
+    let moved = before - climb.progress_m;
+    {
+        let fb = &mut a.founder_state.feedback;
+        fb.attempted_equivalent += rate * DT;
+        fb.delivered_equivalent += moved;
+        fb.structural_loss += motor_body;
+        fb.motor_respiration += motor_paid;
+    }
+    a.state = if moved > 0.0 { State::Climbing } else { State::Resting };
+    if climb.progress_m > 1e-12 {
+        a.mobility.climb = Some(climb);
+        return;
+    }
+    // Back at the start: off the face, on its own side of the plane, facing away.
+    let c = view.config;
+    let v = c.voxel_m;
+    let r = phys.body_at(a.body).footprint_radius();
+    let dir = (i64::from(climb.dir.0), i64::from(climb.dir.1));
+    let s = if dir.0 != 0 { dir.0 } else { dir.1 };
+    let col = if dir.0 != 0 { i64::from(climb.from.x) } else { i64::from(climb.from.z) };
+    let back = beside_plane(col, s, v, r, -1.0);
+    if dir.0 != 0 {
+        a.pose.x = back.rem_euclid(f64::from(c.width) * v);
+    } else {
+        a.pose.z = back;
+    }
+    a.pose.heading_rad = (heading_of(dir) + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU);
+    a.site = climb.from;
+    a.mobility.climb = None;
+    a.state = State::Walking;
 }
 
 /// The founder's supported local bite: the blind founder takes **detritus** — litter or
@@ -5188,6 +5249,10 @@ mod testpass4_glowcap_tests;
 #[cfg(test)]
 #[path = "mimic_tests.rs"]
 mod mimic_tests;
+
+#[cfg(test)]
+#[path = "traps_tests.rs"]
+mod traps_tests;
 
 /// Begin the common windup, used by walking and perched catchers.
 fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
