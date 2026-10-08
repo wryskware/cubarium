@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (359 rows)
+**`world.*`** (365 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -283,6 +283,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.ground_rise_m` | (absent) | m | [0, inf) | 0.1–1 | - | placeholder | how far the ground climbs from the glass to the back wall |
 | `world.landform.terrarium.ground_relief_m` | (absent) | m | [0, inf) | 0–0.25 | - | placeholder | gentle relief on the ground, either way |
 | `world.landform.terrarium.ground_fall` | (absent) | m per m | [0, inf) | 0.02–0.15 | - | placeholder | how steeply the ground climbs away from the lake around the ring |
+| `world.landform.terrarium.massif_depth_m` | (absent) | m | [0, inf) | 0–12 | - | placeholder | original rear massif depth; extra depth is foreground lowland (0: whole depth) |
+| `world.landform.terrarium.lowland_rise_m` | (absent) | m | [0, inf) | 0–1 | - | placeholder | fall from the original ground to the added front plain |
+| `world.landform.terrarium.lowland_relief_m` | (absent) | m | [0, inf) | 0–1 | - | placeholder | height of rolling hills above the added lowland |
+| `world.landform.terrarium.lowland_wavelength_m` | (absent) | m | (0, inf) | 2–12 | - | placeholder | wavelength of the added lowland hills |
+| `world.landform.terrarium.lowland_plain_share` | (absent) | share | [0, 1) | 0–0.6 | - | placeholder | front share of the added depth kept as plain |
+| `world.landform.terrarium.lowland_blend_m` | (absent) | m | (0, inf) | 0.5–3 | - | placeholder | reach of the transition from lowland into the massif foot |
 | `world.landform.terrarium.soil_m` | (absent) | m | [0, inf) | 0.125–1 | - | decision (Wrysk 2026-09-22/23) | soil on every open floor |
 | `world.landform.terrarium.mantle_m` | (absent) | m | [0, inf) | 0.1–0.75 | - | placeholder | loose material laid over the massif before erosion |
 | `world.landform.terrarium.crest_m.*` | (absent) | m | (0, inf) | 1–15 | - | placeholder | the crest's height above the foot at the back wall: lowest and tallest stretches |

@@ -19,10 +19,11 @@
 //!   out of this crate only so that `winit`'s 110-package tail stays out of the
 //!   workspace's shared lockfile and off the board.
 
-use anyhow::Result;
+use anyhow::{Context, Result, ensure};
 use ash::vk;
 
-use crate::present::FrameSource;
+use crate::present::{FrameSource, PresentPass, WindowFit};
+use crate::render::{RASTER_FORMAT, TargetImage, framebuffer};
 use crate::vk::Gpu;
 
 pub mod presenter;
@@ -45,6 +46,18 @@ pub use shim::{PANEL as SHIM_PANEL, SOCKET as SHIM_SOCKET, ShimPresenter, ShimSc
 pub struct Headless {
     command_buffer: vk::CommandBuffer,
     fence: vk::Fence,
+    output: Option<HeadlessOutput>,
+}
+
+struct HeadlessOutput {
+    image: TargetImage,
+    memory: vk::DeviceMemory,
+    sampler: vk::Sampler,
+    pass: PresentPass,
+    entry: (vk::RenderPass, vk::Pipeline),
+    command_buffer: vk::CommandBuffer,
+    size: (u32, u32),
+    fit: WindowFit,
 }
 
 impl Headless {
@@ -61,10 +74,73 @@ impl Headless {
         Ok(Headless {
             command_buffer,
             fence,
+            output: None,
         })
     }
 
-    /// Draw one frame and wait for it. Returns the GPU milliseconds the timestamps saw.
+    /// Draw the native raster and the normal letterboxed presentation pass into an
+    /// offscreen target of `size`, pixels. No window or display transport is opened.
+    pub fn with_size<S: FrameSource>(gpu: &Gpu, src: &S, size: (u32, u32)) -> Result<Headless> {
+        ensure!(
+            size.0 > 0 && size.1 > 0,
+            "headless target must have positive dimensions"
+        );
+        let raster = src
+            .raster_view()
+            .context("renderer does not lend its raster")?;
+        let mut target = Self::new(gpu, src)?;
+        let d = &gpu.device;
+        let sampler = unsafe {
+            d.create_sampler(
+                &vk::SamplerCreateInfo::default()
+                    .mag_filter(vk::Filter::NEAREST)
+                    .min_filter(vk::Filter::NEAREST),
+                None,
+            )
+        }?;
+        let mut pass = PresentPass::new(gpu, raster, sampler)?;
+        let entry = pass.entry(
+            gpu,
+            RASTER_FORMAT,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        )?;
+        let (image, memory) = gpu.image(
+            size.0,
+            size.1,
+            RASTER_FORMAT,
+            vk::ImageTiling::OPTIMAL,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT
+                | vk::ImageUsageFlags::TRANSFER_SRC
+                | vk::ImageUsageFlags::SAMPLED,
+        )?;
+        let view = gpu.view(image, RASTER_FORMAT)?;
+        let framebuffer = framebuffer(d, entry.0, view, size.0, size.1)?;
+        let command_buffer = unsafe {
+            d.allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(src.command_pool())
+                    .command_buffer_count(1),
+            )
+        }?[0];
+        target.output = Some(HeadlessOutput {
+            image: TargetImage {
+                image,
+                view,
+                framebuffer,
+            },
+            memory,
+            sampler,
+            pass,
+            entry,
+            command_buffer,
+            size,
+            fit: WindowFit::fit(src.raster_size(), size, false),
+        });
+        Ok(target)
+    }
+
+    /// Draw one frame and wait for it, including any sized presentation attachment.
+    /// Returns the renderer's timestamp milliseconds (its native passes only).
     pub fn draw<S: FrameSource>(
         &mut self,
         gpu: &Gpu,
@@ -76,12 +152,36 @@ impl Headless {
             d.reset_command_buffer(self.command_buffer, vk::CommandBufferResetFlags::empty())
         }?;
         src.record_frame(gpu, self.command_buffer, frame, None)?;
-        let one = [self.command_buffer];
+        let mut commands = [self.command_buffer; 2];
+        if let Some(output) = &self.output {
+            unsafe {
+                d.reset_command_buffer(
+                    output.command_buffer,
+                    vk::CommandBufferResetFlags::empty(),
+                )?;
+                d.begin_command_buffer(
+                    output.command_buffer,
+                    &vk::CommandBufferBeginInfo::default(),
+                )?;
+                output.pass.record_push(
+                    d,
+                    output.command_buffer,
+                    &output.image,
+                    output.size,
+                    output.fit.push(),
+                    output.entry.0,
+                    output.entry.1,
+                );
+                d.end_command_buffer(output.command_buffer)?;
+            }
+            commands[1] = output.command_buffer;
+        }
+        let commands = &commands[..if self.output.is_some() { 2 } else { 1 }];
         unsafe {
             d.reset_fences(&[self.fence])?;
         }
         gpu.submit(
-            &[vk::SubmitInfo::default().command_buffers(&one)],
+            &[vk::SubmitInfo::default().command_buffers(commands)],
             self.fence,
         )?;
         unsafe {
@@ -98,7 +198,66 @@ impl Headless {
         src.read_raster(gpu)
     }
 
+    /// Read the optional sized presentation attachment; otherwise read the native raster.
+    pub fn read_output<S: FrameSource>(&self, gpu: &Gpu, src: &S) -> Result<Vec<u8>> {
+        let Some(output) = &self.output else {
+            return self.read(gpu, src);
+        };
+        let (w, h) = output.size;
+        let size = u64::from(w) * u64::from(h) * 4;
+        let host = gpu.readback_buffer(size)?;
+        gpu.one_shot(src.command_pool(), |cb| unsafe {
+            crate::vk::barrier(
+                &gpu.device,
+                cb,
+                output.image.image,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            );
+            gpu.device.cmd_copy_image_to_buffer(
+                cb,
+                output.image.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                host.buffer,
+                &[vk::BufferImageCopy::default()
+                    .buffer_row_length(w)
+                    .buffer_image_height(h)
+                    .image_subresource(
+                        vk::ImageSubresourceLayers::default()
+                            .aspect_mask(vk::ImageAspectFlags::COLOR)
+                            .layer_count(1),
+                    )
+                    .image_extent(vk::Extent3D {
+                        width: w,
+                        height: h,
+                        depth: 1,
+                    })],
+            );
+            crate::vk::barrier(
+                &gpu.device,
+                cb,
+                output.image.image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            );
+        })?;
+        let bytes = unsafe { host.bytes() }[..size as usize].to_vec();
+        host.destroy(gpu);
+        Ok(bytes)
+    }
+
     pub fn destroy(&self, gpu: &Gpu) {
+        if let Some(output) = &self.output {
+            output.pass.destroy(gpu);
+            unsafe {
+                gpu.device
+                    .destroy_framebuffer(output.image.framebuffer, None);
+                gpu.device.destroy_image_view(output.image.view, None);
+                gpu.device.destroy_image(output.image.image, None);
+                gpu.device.free_memory(output.memory, None);
+                gpu.device.destroy_sampler(output.sampler, None);
+            }
+        }
         unsafe { gpu.device.destroy_fence(self.fence, None) };
     }
 }

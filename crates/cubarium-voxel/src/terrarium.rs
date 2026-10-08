@@ -64,6 +64,19 @@ pub struct Terrarium {
     /// How steeply the ground climbs away from the lake around the ring, metres per
     /// metre, so everything that lands on it drains to the lake.
     pub ground_fall: f64,
+    /// Depth occupied by the original rear massif, metres. Extra depth becomes
+    /// foreground lowland; zero uses the whole depth (the small terrarium).
+    pub massif_depth_m: f64,
+    /// Fall from the massif's ground to the new front plain, metres.
+    pub lowland_rise_m: f64,
+    /// Height of rolling hills above the new lowland, metres.
+    pub lowland_relief_m: f64,
+    /// Wavelength of the lowland hills around the ring, metres.
+    pub lowland_wavelength_m: f64,
+    /// Front share of the added depth kept as plain, dimensionless `0..1`.
+    pub lowland_plain_share: f64,
+    /// Reach of the transition from lowland into the massif's foot, metres.
+    pub lowland_blend_m: f64,
     /// Soil on every open floor.
     pub soil_m: f64,
     /// Loose material laid over the massif before erosion, which moves it.
@@ -248,6 +261,12 @@ impl Terrarium {
         ground_rise_m: 0.25,
         ground_relief_m: 0.0625,
         ground_fall: 0.08,
+        massif_depth_m: 0.0,
+        lowland_rise_m: 0.25,
+        lowland_relief_m: 0.25,
+        lowland_wavelength_m: 4.0,
+        lowland_plain_share: 0.3,
+        lowland_blend_m: 1.25,
         soil_m: 0.25,
         mantle_m: 0.25,
         crest_m: [1.5, 6.5],
@@ -358,6 +377,12 @@ impl Terrarium {
         ground_rise_m: 0.5,
         ground_relief_m: 0.0625,
         ground_fall: 0.06,
+        massif_depth_m: 6.0,
+        lowland_rise_m: 0.5,
+        lowland_relief_m: 0.375,
+        lowland_wavelength_m: 5.0,
+        lowland_plain_share: 0.3,
+        lowland_blend_m: 1.25,
         soil_m: 0.25,
         mantle_m: 0.375,
         crest_m: [2.5, 12.5],
@@ -517,9 +542,25 @@ impl Terrarium {
             ("warp_wavelength_m", self.warp_wavelength_m),
             ("stream_width_m", self.stream_width_m),
             ("stream_depth_m", self.stream_depth_m),
+            ("lowland_wavelength_m", self.lowland_wavelength_m),
+            ("lowland_blend_m", self.lowland_blend_m),
         ] {
             anyhow::ensure!(v > 0.0 && v.is_finite(), "terrarium.{name} must be positive");
         }
+        for (name, v) in [
+            ("massif_depth_m", self.massif_depth_m),
+            ("lowland_rise_m", self.lowland_rise_m),
+            ("lowland_relief_m", self.lowland_relief_m),
+        ] {
+            anyhow::ensure!(
+                v >= 0.0 && v.is_finite(),
+                "terrarium.{name} must be nonnegative"
+            );
+        }
+        anyhow::ensure!(
+            (0.0..1.0).contains(&self.lowland_plain_share),
+            "terrarium.lowland_plain_share must be in 0..1"
+        );
         for (name, [lo, hi]) in [("spires", self.spires), ("shelves", self.shelves), ("arches", self.arches)] {
             anyhow::ensure!(lo <= hi, "terrarium.{name} is [least, most]");
         }
@@ -730,7 +771,44 @@ struct Build<'a> {
     report: Report,
 }
 
-impl Build<'_> {
+impl<'a> Build<'a> {
+    fn new(c: &'a Config, t: &'a Terrarium) -> Self {
+        let (w, cells) = (c.width as usize, c.width as usize * c.depth as usize);
+        Build {
+            c,
+            t,
+            g: Grid::new(c),
+            rng: Rng::new(c.seed ^ STREAM),
+            foot_y: 0.0,
+            crest: vec![0.0; w],
+            foot: vec![0.0; w],
+            phase: vec![0.0; w],
+            storey: vec![0.0; w],
+            tread: vec![0.0; w],
+            riser: vec![0.0; w],
+            spires: Vec::new(),
+            shelves: Vec::new(),
+            lake_x: 0,
+            base: vec![0.0; cells],
+            ground: vec![0; cells],
+            loose: vec![0; cells],
+            lake: vec![false; cells],
+            water_y: 0,
+            arch: vec![false; cells],
+            course: Vec::new(),
+            stream: vec![false; cells],
+            report: Report::default(),
+        }
+    }
+
+    /// Translate the original plan to the back without stretching its terraces.
+    fn foreground_depth(&self) -> f64 {
+        if self.t.massif_depth_m == 0.0 {
+            0.0
+        } else {
+            (self.g.d as f64 - (self.t.massif_depth_m / self.c.voxel_m).round().max(1.0)).max(0.0)
+        }
+    }
     fn v(&self, m: f64) -> i32 {
         (m / self.c.voxel_m).round() as i32
     }
@@ -788,50 +866,52 @@ impl Build<'_> {
     /// to the back and away from the lake.
     fn base_at(&self, x: i64, z: i32) -> f64 {
         let (w, d) = (self.g.w, self.g.d);
+        let added = self.foreground_depth();
+        let rear_z = z as f64 - added;
         let vm = self.c.voxel_m;
         let circ = w as f64 * vm;
-        let (xm, zm) = ((x.rem_euclid(w) as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
-        let around = (x - self.lake_x).rem_euclid(w).min((self.lake_x - x).rem_euclid(w));
-        let relief = ring_noise(xm, zm, circ, ring_cells(circ, self.t.ground_relief_wavelength_m), self.c.seed ^ STREAM ^ 0x47);
-        self.t.ground_m / vm
+        let (xm, zm) = ((x.rem_euclid(w) as f64 + 0.5) * vm, (rear_z + 0.5) * vm);
+        let around = (x - self.lake_x)
+            .rem_euclid(w)
+            .min((self.lake_x - x).rem_euclid(w));
+        let relief = ring_noise(
+            xm,
+            zm,
+            circ,
+            ring_cells(circ, self.t.ground_relief_wavelength_m),
+            self.c.seed ^ STREAM ^ 0x47,
+        );
+        let ground = self.t.ground_m / vm
             + self.t.ground_fall * around as f64
-            + self.t.ground_rise_m / vm * z as f64 / (d - 1).max(1) as f64
-            + self.t.ground_relief_m / vm * relief.clamp(-1.0, 1.0)
+            + self.t.ground_rise_m / vm * rear_z.max(0.0) / (d as f64 - added - 1.0).max(1.0)
+            + self.t.ground_relief_m / vm * relief.clamp(-1.0, 1.0);
+        if rear_z >= 0.0 || added == 0.0 {
+            return ground;
+        }
+        let u = (z as f64 / added).clamp(0.0, 1.0);
+        let rise = smoothstep(self.t.lowland_plain_share, 1.0, u);
+        // A flat front plain, gentle hills behind it, and no hill at the join. The
+        // existing fall around the ring still drains this ground toward the lake.
+        let hills = ring_noise(
+            xm,
+            zm,
+            circ,
+            ring_cells(circ, self.t.lowland_wavelength_m),
+            self.c.seed ^ STREAM ^ 0x4c,
+        );
+        ground - self.t.lowland_rise_m / vm * (1.0 - rise)
+            + self.t.lowland_relief_m / vm * (hills.clamp(-1.0, 1.0) + 1.0) / 2.0
+                * (std::f64::consts::PI * rise).sin()
     }
 }
 
 /// Build the terrarium into `world`: its material, its outlet and its spring.
 pub fn build(world: &mut World, t: &Terrarium) -> Report {
     let c = world.config.clone();
-    let (w, cells) = (c.width as usize, c.width as usize * c.depth as usize);
-    let mut b = Build {
-        c: &c,
-        t,
-        g: Grid::new(&c),
-        rng: Rng::new(c.seed ^ STREAM),
-        foot_y: 0.0,
-        crest: vec![0.0; w],
-        foot: vec![0.0; w],
-        phase: vec![0.0; w],
-        storey: vec![0.0; w],
-        tread: vec![0.0; w],
-        riser: vec![0.0; w],
-        spires: Vec::new(),
-        shelves: Vec::new(),
-        lake_x: 0,
-        base: vec![0.0; cells],
-        ground: vec![0; cells],
-        loose: vec![0; cells],
-        lake: vec![false; cells],
-        water_y: 0,
-        arch: vec![false; cells],
-        course: Vec::new(),
-        stream: vec![false; cells],
-        report: Report::default(),
-    };
+    let mut b = Build::new(&c, t);
     let site = layout(&mut b);
     for (x, z, _) in lake_bed(&b, &site) {
-        b.lake[(z as i64 * w as i64 + x.rem_euclid(w as i64)) as usize] = true;
+        b.lake[(z as i64 * b.g.w + x.rem_euclid(b.g.w)) as usize] = true;
     }
     heightfield(&mut b);
     lay_lake(&mut b, &site);
@@ -905,12 +985,14 @@ fn ring_field(b: &Build, lo: f64, hi: f64, wavelength_m: f64, contrast: f64, str
 /// yard at its foot.
 fn layout(b: &mut Build) -> Site {
     let (w, h, d) = (b.g.w, b.g.h as f64, b.g.d as f64);
+    let added = b.foreground_depth();
+    let massif_d = d - added;
     let t = b.t;
     b.foot_y = b.v(t.ground_m) as f64;
     let foot_y = b.foot_y;
     let v = |m: f64| m / b.c.voxel_m;
     b.crest = ring_field(b, foot_y + v(t.crest_m[0]), foot_y + v(t.crest_m[1]), t.crest_wavelength_m, t.crest_contrast, 0x43);
-    b.foot = ring_field(b, t.foot[0] * d, t.foot[1] * d, t.foot_wavelength_m, 1.0, 0x46);
+    b.foot = ring_field(b, added + t.foot[0] * massif_d, added + t.foot[1] * massif_d, t.foot_wavelength_m, 1.0, 0x46);
     b.storey = ring_field(b, v(t.storey_m[0]), v(t.storey_m[1]), t.storey_wavelength_m, 1.0, 0x53);
     // The offset drifts through more than a storey: a terrace followed round the ring
     // climbs to the next one or falls to the last, which is how the levels connect.
@@ -927,7 +1009,7 @@ fn layout(b: &mut Build) -> Site {
     let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
     let len = b.draw(t.lake_m) as i64;
     let span = (centre - len / 2, centre + len / 2);
-    let yard = t.yard * d;
+    let yard = added + t.yard * massif_d;
     let margin = (len / 2 + i64::from(t.yard_blend_voxels)) as f64;
     for x in 0..w {
         let off = (x - centre).rem_euclid(w).min((centre - x).rem_euclid(w)) as f64;
@@ -989,7 +1071,7 @@ fn layout(b: &mut Build) -> Site {
         };
         // The first hall is a grove floor: headroom for the tallest trees.
         let hall = if k == 0 { b.v(t.hall_m[1].max(t.grove_headroom_m + t.first_hall_extra_m)) } else { b.draw(t.hall_m) };
-        let front = b.rng.range(t.shelf_front[0], t.shelf_front[1]) * d;
+        let front = added + b.rng.range(t.shelf_front[0], t.shelf_front[1]) * massif_d;
         let zf = (front - 1.0).max(0.0);
         let before = (x0..x0 + slen)
             .map(|x| b.terraced(x as f64 + 0.5, zf + 0.5).max(b.base_at(x, zf as i32)))
@@ -1021,6 +1103,83 @@ fn layout(b: &mut Build) -> Site {
     Site { centre, span }
 }
 
+#[cfg(test)]
+mod lowland_tests {
+    use super::*;
+
+    fn shape() -> Terrarium {
+        Terrarium {
+            massif_depth_m: 4.0,
+            lowland_rise_m: 0.5,
+            lowland_relief_m: 0.25,
+            lowland_wavelength_m: 3.0,
+            lowland_plain_share: 0.25,
+            lowland_blend_m: 1.0,
+            ground_relief_m: 0.0,
+            shelves: [0, 0],
+            spires: [0, 0],
+            ..Terrarium::SMALL
+        }
+    }
+
+    fn config(depth: u32) -> Config {
+        Config {
+            width: 32,
+            height: 48,
+            depth,
+            voxel_m: 0.5,
+            seed: 3,
+            ..Config::default()
+        }
+    }
+
+    #[test]
+    fn added_depth_translates_the_rear_plan_and_extends_the_lake() {
+        let (short, deep, t) = (config(8), config(16), shape());
+        let (mut a, mut b) = (Build::new(&short, &t), Build::new(&deep, &t));
+        let (sa, sb) = (layout(&mut a), layout(&mut b));
+        let shift = b.foreground_depth();
+        assert_eq!(
+            shift * deep.voxel_m,
+            deep.depth as f64 * deep.voxel_m - t.massif_depth_m
+        );
+        for x in 0..a.g.w {
+            for z in 0..a.g.d {
+                let (x, zf) = (x as f64 + 0.5, z as f64 + 0.5);
+                assert!((a.terraced(x, zf) - b.terraced(x, zf + shift)).abs() < 1e-10);
+            }
+            assert!((a.base_at(x, 0) - b.base_at(x, shift as i32)).abs() < 1e-10);
+        }
+        let bed = lake_bed(&b, &sb);
+        assert!(bed.iter().any(|&(_, z, _)| z == 0));
+        for (x, z, dep) in lake_bed(&a, &sa) {
+            assert!(bed.contains(&(x, z + shift as i32, dep)));
+        }
+    }
+
+    #[test]
+    fn the_plain_falls_by_the_configured_height_and_hills_follow_the_relief_knob() {
+        let c = config(24);
+        let t = shape();
+        let flat = Terrarium {
+            lowland_relief_m: 0.0,
+            ..t
+        };
+        let (a, b) = (Build::new(&c, &t), Build::new(&c, &flat));
+        let shift = a.foreground_depth() as i32;
+        for x in 0..a.g.w {
+            assert!(
+                (a.base_at(x, shift) - a.base_at(x, 0) - t.lowland_rise_m / c.voxel_m).abs()
+                    < 1e-10
+            );
+            assert_eq!(a.base_at(x, 0), b.base_at(x, 0));
+            let relief = a.base_at(x, shift / 2) - b.base_at(x, shift / 2);
+            assert!((0.0..=t.lowland_relief_m / c.voxel_m).contains(&relief));
+        }
+        assert!((0..a.g.w).any(|x| a.base_at(x, shift / 2) > b.base_at(x, shift / 2)));
+    }
+}
+
 // --- the heightfield -----------------------------------------------------------------------------
 
 /// Sample the designed terrain through a gentle warp of the plan, lay loose material on
@@ -1028,6 +1187,7 @@ fn layout(b: &mut Build) -> Site {
 /// channels cut the ramps, and the treads collect soil.
 fn heightfield(b: &mut Build) {
     let (w, d) = (b.g.w, b.g.d);
+    let added = b.foreground_depth();
     let vm = b.c.voxel_m;
     let circ = w as f64 * vm;
     let warp = b.t.warp_m / vm;
@@ -1040,7 +1200,7 @@ fn heightfield(b: &mut Build) {
     let mut loose = vec![0.0f64; n];
     for z in 0..d {
         for x in 0..w {
-            let (xm, zm) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5) * vm);
+            let (xm, zm) = ((x as f64 + 0.5) * vm, (z as f64 + 0.5 - added) * vm);
             // The ground in front of and under the massif: low, climbing gently to the
             // back and away from the lake.
             let ground = b.base_at(x, z);
@@ -1048,8 +1208,14 @@ fn heightfield(b: &mut Build) {
             let px = x as f64 + 0.5 + warp * ring_noise(xm, zm, circ, warp_cells, seed ^ 1);
             let pz = z as f64 + 0.5 + warp * ring_noise(xm, zm + 50.0, circ, warp_cells, seed ^ 3);
             let mut top = b.terraced(px, pz);
+            let blend = if added == 0.0 {
+                1.0
+            } else {
+                smoothstep(added - b.t.lowland_blend_m / vm, added, z as f64 + 0.5)
+            };
+            top = ground + (top - ground).max(0.0) * blend;
             if top > ground + 1.0 {
-                top += roll * ring_noise(xm, zm, circ, roll_cells, seed ^ 0x52);
+                top += blend * roll * ring_noise(xm, zm, circ, roll_cells, seed ^ 0x52);
             }
             let i = (z as i64 * w + x) as usize;
             let surface = top.max(ground) * vm;
@@ -1103,7 +1269,7 @@ fn lay_lake(b: &mut Build, site: &Site) {
     let (span, _) = (site.span, site.centre);
     let reach = b.v(b.t.warp_m) + 2;
     let back = |b: &Build, x: i64| -> i32 {
-        (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp(2, b.g.d - 4)
+        (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp((2 + b.foreground_depth() as i32).min(b.g.d - 4), b.g.d - 4)
     };
     // Graded from one flat reference, the lowest ground it is cut into, so the ground's
     // own relief leaves no bumps in its bed. Not the stream's trough: that runs under it.
@@ -1133,7 +1299,7 @@ fn lake_bed(b: &Build, site: &Site) -> Vec<(i64, i32, i32)> {
     let half = ((span.1 - span.0) as f64 / 2.0).max(1.0);
     let depth = b.v(b.t.lake_depth_m).max(2) as f64;
     let reach = b.v(b.t.warp_m) + 2;
-    let back = |x: i64| -> i32 { (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp(2, b.g.d - 4) };
+    let back = |x: i64| -> i32 { (Build::at(&b.foot, x as f64 + 0.5).floor() as i32 - reach).clamp((2 + b.foreground_depth() as i32).min(b.g.d - 4), b.g.d - 4) };
     let mut bed = Vec::new();
     for x in span.0..=span.1 {
         let u = (x - centre) as f64 / half;
