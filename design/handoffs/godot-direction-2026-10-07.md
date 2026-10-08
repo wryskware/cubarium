@@ -148,6 +148,47 @@ Dev presentation only. D1 does not port the voxel look or invent a new one.
    animal.
 5. Every menu works with a gamepad through Godot's focus navigation.
 
+### B and C in parallel: who owns what, and the interface between them
+
+Package A landed on main as e3102c3b: `crates/cubarium-session`, `crates/cubarium-godot`
+(`CubariumSession`) and `game/`. `game/README.md` documents the API and the view layout.
+
+**Files.**
+- B owns `game/world/**` and may add Godot-side classes to `crates/cubarium-godot` (a
+  mesher, a `.cvm` model reader), in new source files where possible.
+- C owns `game/main.tscn`, `game/main.gd`, `game/ui/**` and the preset catalog under
+  `game/data/**`. C may make small additive changes to `crates/cubarium-session` that the
+  shell needs, such as a query listing the landform and climate presets.
+- Neither edits the other's files. The orchestrator resolves `lib.rs` registration conflicts
+  at merge.
+
+**`WorldView`** (B builds it at `res://world/world_view.tscn`, root script
+`class_name WorldView`; C codes against it):
+- `attach(session: CubariumSession)`: draw the live session, taking `take_view()` and
+  `take_events()` every frame. `detach()`.
+- `show_view(view: Dictionary)`: draw one whole static view (a candidate's
+  `candidate_view(i)`) with no session.
+- `input_enabled: bool`: when false, B ignores pointer and pan input (C turns it off while a
+  menu is open).
+- `reset_framing()`: back to the default framing that fits the world.
+- Signals `animal_hovered(id: int)` (`-1` when none) and `animal_clicked(id: int)`. B owns
+  pointer input on the world, including telling a click from a pan-drag.
+- `set_highlight(id: int)`, `follow(id: int)`, `stop_follow()`.
+- `capture(size: Vector2i) -> Image`: a thumbnail of the current framing, for save slots.
+  For candidates, C instances a `WorldView` in a `SubViewport` and calls `show_view`.
+
+Until B lands, C works against a stub with the same API (`game/ui/dev/world_view_stub.gd`,
+a flat colour per column is enough). `main.gd` uses the real scene when
+`ResourceLoader.exists("res://world/world_view.tscn")`.
+
+**Pictures without a window** (verified 2026-10-07): run Godot under `scripts/hidden.sh`.
+It runs on a private Xvfb display, and Godot still gets Vulkan Forward+ on the RTX 5090.
+`--write-movie OUT.png --fixed-fps 30 --quit-after N` writes every frame as a PNG; it renders
+at a fixed rate, so frames are not timing evidence. For fps numbers, use
+`scripts/hidden.sh --hyprland` (real presentation, hidden workspace) and print Godot's
+`Performance` monitors. Motion evidence is MP4 (x264, yuv444p, crf 12, real time). `godot
+--headless` renders nothing.
+
 ### Checks for D1
 
 - Rust: session tests on tiny hand-built worlds, checking mechanisms only. Pause stops ticks,
