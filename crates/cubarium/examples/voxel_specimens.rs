@@ -39,6 +39,13 @@
 //!
 //! `--rider` puts a parasite lanternjaw hatchling on the first grazer's back (its interim
 //! plain-voxel look, `design/handoffs/voxel-predation-parasite-2026-10-01.md`).
+//!
+//! `--models DIR` reads the baked models from `DIR` instead of `assets/voxel-models`.
+//! `--candidates SPECIES:I,J,…` draws only that species, full-grown, one stand per listed
+//! index, the stand drawing variant `I` of the adult step (its id is chosen so the
+//! library's own variant pick lands there), and no animals. With `--models` pointing at a
+//! scratch library whose adult step holds candidate models as variants, this puts model
+//! candidates (the 2026-10-07 browsed-foliage round) side by side in the presenter.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -103,6 +110,8 @@ fn main() -> Result<()> {
     let mut rider = false;
     let mut shared = false;
     let mut contest = false;
+    let mut models_dir_arg: Option<PathBuf> = None;
+    let mut candidates: Option<(Species, Vec<usize>)> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -123,6 +132,17 @@ fn main() -> Result<()> {
             }
             "--wilt" => wilt = args.next().context("--wilt W")?.parse()?,
             "--cured" => cured = true,
+            "--models" => models_dir_arg = Some(PathBuf::from(args.next().context("--models DIR")?)),
+            "--candidates" => {
+                let v = args.next().context("--candidates SPECIES:I,J,...")?;
+                let (name, list) = v.split_once(':').context("--candidates SPECIES:I,J,...")?;
+                let species = Species::ALL
+                    .into_iter()
+                    .find(|s| s.name() == name)
+                    .with_context(|| format!("no species {name}"))?;
+                let idx = list.split(',').map(|i| i.parse()).collect::<Result<Vec<usize>, _>>()?;
+                candidates = Some((species, idx));
+            }
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
@@ -133,7 +153,10 @@ fn main() -> Result<()> {
     // Lay the specimens out first, so the world is exactly as wide as they need.
     let voxel_m = 0.125;
     let mut plan: Vec<(Species, f64, bool)> = Vec::new();
-    for species in Species::ALL {
+    if let Some((species, idx)) = &candidates {
+        plan.extend(idx.iter().map(|_| (*species, 1.0, false)));
+    }
+    for species in Species::ALL.into_iter().filter(|_| candidates.is_none()) {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
         }
@@ -150,13 +173,14 @@ fn main() -> Result<()> {
         columns.push(x + r);
         x += 2 * r + 1 + GAP;
     }
-    let animal_x: Vec<i64> = (0..FOUNDERS.len() as i64).map(|k| x + 4 + k * SLOT).collect();
-    let mut width = (x + FOUNDERS.len() as i64 * SLOT + 6) as u32;
+    let founders = if candidates.is_some() { 0 } else { FOUNDERS.len() };
+    let animal_x: Vec<i64> = (0..founders as i64).map(|k| x + 4 + k * SLOT).collect();
+    let mut width = (x + founders as i64 * SLOT + 6) as u32;
 
     // The unsimulated animals (the models' `specimens`) after the founders, each in its
     // own footprint: side-on as the chorister and ripple-snail picks are, the others facing
     // the viewer as theirs do, the bellwing hovering.
-    let models_dir = VoxelConfig::default().models_dir;
+    let models_dir = models_dir_arg.unwrap_or(VoxelConfig::default().models_dir);
     let models: Option<Arc<ModelLibrary>> = if glyphs {
         None
     } else {
@@ -167,7 +191,7 @@ fn main() -> Result<()> {
     // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
     let mut depth = 8u32;
     let mut specimens = Vec::new();
-    if let Some(lib) = &models {
+    if let Some(lib) = models.as_ref().filter(|_| candidates.is_none()) {
         let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
         for (name, heading_rad, lift) in SPECIMENS {
             let Some(cells) = lib.specimen(name).and_then(|m| m.select(f64::INFINITY)) else {
@@ -329,6 +353,26 @@ fn main() -> Result<()> {
         if cured && sc.cure_after_s > 0.0 {
             s.cured = true;
             s.foliage *= 1.0 - sc.cure_shed;
+        }
+    }
+    // `--candidates`: give each stand an id whose variant pick is its listed index.
+    if let (Some((species, idx)), Some(lib)) = (&candidates, &models) {
+        let model = lib.plant(*species).context("no model for the candidate species")?;
+        let adult = model.steps.last().context("an empty model")?;
+        let sc = flora_cfg.species(*species);
+        let mut next = 1_000_000u64;
+        for (s, &want) in stands.iter_mut().zip(idx) {
+            let target = adult.variants.get(want).with_context(|| format!("no variant {want}"))?;
+            loop {
+                next += 1;
+                let got = model
+                    .select_sized(sc.crown_height_m_at(s.wood), sc.crown_radius_m_at(s.wood), next)
+                    .context("no model step")?;
+                if std::ptr::eq(got.as_ptr(), target.as_ptr()) {
+                    break;
+                }
+            }
+            s.id = next;
         }
     }
     let view = FloraView {
