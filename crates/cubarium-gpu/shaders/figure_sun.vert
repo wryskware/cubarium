@@ -8,16 +8,13 @@
 
 #include "figure.glsl"
 
-const vec3 FACE_O[6] = vec3[](vec3(0, 0, 1), vec3(1, 0, 0), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 0, 0), vec3(1, 0, 1));
-const vec3 FACE_U[6] = vec3[](vec3(0, 0, -1), vec3(0, 0, 1), vec3(1, 0, 0), vec3(1, 0, 0), vec3(1, 0, 0), vec3(-1, 0, 0));
-const vec3 FACE_V[6] = vec3[](vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 0, -1), vec3(0, 0, 1), vec3(0, 1, 0), vec3(0, 1, 0));
 const vec2 CORNER[6] = vec2[](vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 0), vec2(1, 1), vec2(0, 1));
 
 int sbyte(uint v, int at) { return int(bitfieldExtract(int(v), at, 8)); }
 
 void main() {
     Tile t = tiles[pc.k.x];
-    uvec2 cell = vox[gl_InstanceIndex];
+    uvec4 cell = vox[gl_InstanceIndex];
     int face = gl_VertexIndex / 6;
     vec2 ab = CORNER[gl_VertexIndex % 6];
     int cls = int(cell.y & 7u);

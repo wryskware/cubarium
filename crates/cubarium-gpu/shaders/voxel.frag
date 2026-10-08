@@ -215,8 +215,7 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // still calls each glyph function from one place.
 bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out bool lum) {
     lum = false;
-    int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + row;
-    uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
+    uint q = glyphTexel(partOf(v), glyphOf(v), dx, row);
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
     int tone = int(q >> 2);

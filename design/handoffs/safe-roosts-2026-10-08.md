@@ -78,3 +78,33 @@ The heuristic should be coarse; Wrysk said so explicitly.
 - the heuristic and its knobs, with each one's visible effect;
 - the table, or the detached run's paths and what's left;
 - any deviation from Wrysk's words.
+
+## Round 2: back to Wrysk's heuristic (2026-10-08)
+
+Round 1 (branch `worktree-agent-aefeb9d2e7464ac39`, 5a500dec, 29e94f4f, 863277d0) defined "safe" as
+"no Veilhound can walk there or reach it". With the seedporter's 0.25 m step against the Veilhound's
+0.6 m, every place a seedporter can walk to is Veilhound ground. The rule therefore left only
+vaulttrees (2 per world) and vine ledges, and changed nothing in 3 of 4 seeds. That strictness was
+the worker's choice, not Wrysk's: "idk youd have to do it heuristically. like pick a spot thats fairly
+high elevation and maybe has some ledges, and hope thats good enough. go further if the nest is ever
+raided [...] plenty of elevated groves and meadows that are also perfectly fine and safe places".
+
+- **Safety:** a heuristic score:
+  - height above the surrounding ground (relief within a radius);
+  - a bonus for cliff edges nearby, where an adjacent drop exceeds the Veilhound's step plus jaw band
+    from its config.
+
+  Walkability by Veilhounds is not required. Raids catch the mistakes.
+- **Candidates:**
+  - elevated ground (groves, meadows, mesa tops) the seedporter can walk, climb or glide to;
+  - vaulttree crowns, scored on the same height basis;
+  - vine ledges, as a way up.
+
+  Ordinary crowns stay as the old fallback, not first-class candidates.
+- **Raids:** never come back, and search further.
+  - A raided seedporter must leave. It goes to the best non-raided candidate in its widened reach,
+    even if that site scores lower than the raided one.
+  - With no candidate at all, it falls back to today's rest and still avoids the raided spot.
+  - This replaces round 1's "stay put".
+- **Keep** round 1's fixes: the vine-foot steering, and the fallback only to real roost sites when
+  better ones exist.

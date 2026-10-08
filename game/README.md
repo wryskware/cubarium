@@ -21,15 +21,58 @@ opened the project.
 ## Run the app
 
 ```sh
-scripts/run-game.sh            # Godot on the first-listed GPU (the display's); the renderer follows
+scripts/run-game.sh            # the session's GPU, and this host's run CPUs
 ```
 
-Godot on its own picks the most powerful GPU, which on a two-GPU desktop is not the one the
-screen is on, so every frame would cross GPUs. The launcher passes `--gpu-index 0`
-(`CUBARIUM_GODOT_GPU` overrides) and asks for Wayland when it's there. The world's renderer
+The launcher keeps the app to the CPUs the host profile names (`RUN_CPUS` in
+`config/hosts/$(hostname).env`: the V-cache chiplet, 0-7,16-23, on the desktop), as
+`scripts/run-voxel.sh` does for `cubarium voxel`; `CUBARIUM_CPUS` overrides it and
+`CUBARIUM_CPUS=` runs unpinned. A plain `godot --path game` lands on the right GPU but
+runs on every core.
+
+The project asks for Godot's Wayland display driver (`display_server/driver.linuxbsd` in
+project.godot) and falls back to X11 where there is no Wayland. Under Godot's default, X11
+through XWayland, Godot picked the 5090 on the two-GPU desktop while the compositor runs on
+the 5080, so every frame crossed GPUs (2026-10-08); on Wayland it takes the compositor's GPU.
+The launcher also passes `--gpu-index 0` (`CUBARIUM_GODOT_GPU` overrides). The world's renderer
 opens whatever GPU Godot reports (`cubarium_gpu::vk::prefer_device`; `CUBARIUM_GPU=<name>`
 overrides). Agents' hidden captures on Xvfb need `CUBARIUM_GODOT_GPU=1`: the 5080 cannot
 present there.
+
+## Animal rendering per run
+
+`CUBARIUM_ANIMALS` overrides `[figures]` when the renderer starts: `classic` uses the
+original stamped voxels; `crisp` uses edged models placed at whole pixels, with eight
+headings blended over the config's `turn_blend_s`; `smooth` uses edged models with free
+turning and box-filtered subpixel placement. With no environment override, the config
+applies. The renderer logs the effective settings once at startup.
+
+From the repository root, compare the same saved world (a slot directory with `meta.json`):
+
+```sh
+SAVES=/path/to/saves
+SAVE="$SAVES/t256-s7-midday"
+CUBARIUM_ANIMALS=classic scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=crisp scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=smooth scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+```
+
+After each app launch choose **Load** and the same slot (`t256-s7-midday` above). Quit
+between runs; loading leaves the save unchanged unless you explicitly save over it.
+For `cubarium voxel`, build with `cargo build --release -p cubarium`, then run:
+
+```sh
+CUBARIUM_ANIMALS=classic target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+CUBARIUM_ANIMALS=crisp target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+CUBARIUM_ANIMALS=smooth target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+```
+
+For the wide world choose `wide-s1-midday` in both and use
+`config/desktop/terrarium-wide.toml` for `cubarium voxel`.
+`CUBARIUM_ANIMAL_TURN=free` or a positive integer (headings per turn, e.g. `16`) and
+`CUBARIUM_ANIMAL_SUBPIXEL=0|1` apply on top of any preset, or the config if no preset is
+given: e.g. `CUBARIUM_ANIMALS=crisp CUBARIUM_ANIMAL_TURN=free CUBARIUM_ANIMAL_SUBPIXEL=1
+scripts/run-game.sh`. Invalid values stop startup with the valid values named.
 
 ## Run headless (no window)
 
