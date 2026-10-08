@@ -426,7 +426,7 @@ fn a_breeder_conceiving_away_from_its_den_gives_birth_at_its_den() {
         let p = c.founders[C.index()].pack.as_mut().unwrap();
         p.whelp_at_den = true;
         p.den_radius_m = 1.0;
-        p.home_give_up_s = 1e6;
+        p.home_reserve_share = 1.0;
     }
     let mut fauna = Fauna::new(c);
     let den = Site { x: 8, y: SURFACE_Y, z: 6 };

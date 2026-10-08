@@ -94,7 +94,7 @@ fn config(pit_search_m: f64) -> FaunaConfig {
     let pk = c.founders[CH.index()].pack.as_mut().expect("the chorister's pack table");
     pk.pack_size = 1;
     pk.den_radius_m = 0.5;
-    pk.home_give_up_s = 1e6;
+    pk.home_reserve_share = 1.0;
     pk.pit_search_m = pit_search_m;
     c
 }

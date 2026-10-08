@@ -1426,7 +1426,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2350 rows)
+**`fauna.*`** (2359 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1659,7 +1659,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.littershredder.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.littershredder.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.littershredder.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.littershredder.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.littershredder.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.littershredder.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.littershredder.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -1681,9 +1681,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.littershredder.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.littershredder.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.littershredder.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.littershredder.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.littershredder.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.littershredder.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.littershredder.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.littershredder.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.littershredder.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.littershredder.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -1898,7 +1899,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.frondgrazer.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.frondgrazer.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.frondgrazer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.frondgrazer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.frondgrazer.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.frondgrazer.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.frondgrazer.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -1920,9 +1921,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.frondgrazer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.frondgrazer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.frondgrazer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.frondgrazer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.frondgrazer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.frondgrazer.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.frondgrazer.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.frondgrazer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.frondgrazer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.frondgrazer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -2137,7 +2139,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.lanternjaw.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.lanternjaw.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.lanternjaw.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.lanternjaw.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.lanternjaw.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.lanternjaw.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.lanternjaw.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -2159,9 +2161,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.lanternjaw.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.lanternjaw.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.lanternjaw.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.lanternjaw.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.lanternjaw.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.lanternjaw.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.lanternjaw.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.lanternjaw.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.lanternjaw.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.lanternjaw.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -2376,7 +2379,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.capgnawer.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.capgnawer.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.capgnawer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.capgnawer.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.capgnawer.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.capgnawer.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.capgnawer.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -2398,9 +2401,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.capgnawer.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.capgnawer.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.capgnawer.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.capgnawer.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.capgnawer.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.capgnawer.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.capgnawer.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.capgnawer.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.capgnawer.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.capgnawer.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -2432,11 +2436,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.loftstrider.core.lifespan_median_s` | 115200.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
 | `fauna.founders.loftstrider.core.reproduction.surplus_floor` | 0.528 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
-| `fauna.founders.loftstrider.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
+| `fauna.founders.loftstrider.core.reproduction.surplus_hold_s` | 1800.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.loftstrider.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.loftstrider.core.reproduction.gestation_s` | 540.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.loftstrider.core.reproduction.gestation_s` | 3600.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.loftstrider.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
-| `fauna.founders.loftstrider.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.loftstrider.core.reproduction.birth_interval_s` | 21600.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.loftstrider.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.founders.loftstrider.core.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.loftstrider.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
@@ -2615,7 +2619,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.loftstrider.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.loftstrider.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.loftstrider.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.loftstrider.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.loftstrider.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.loftstrider.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.loftstrider.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -2637,9 +2641,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.loftstrider.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.loftstrider.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.loftstrider.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.loftstrider.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.loftstrider.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.loftstrider.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.loftstrider.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.loftstrider.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.loftstrider.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.loftstrider.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -2854,7 +2859,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.ripple-snail.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.ripple-snail.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.ripple-snail.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.ripple-snail.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.ripple-snail.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.ripple-snail.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.ripple-snail.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -2876,9 +2881,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.ripple-snail.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.ripple-snail.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.ripple-snail.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.ripple-snail.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.ripple-snail.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.ripple-snail.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.ripple-snail.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.ripple-snail.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.ripple-snail.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.ripple-snail.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -3093,7 +3099,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.bellwing.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.bellwing.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.bellwing.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.bellwing.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.bellwing.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.bellwing.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.bellwing.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -3115,9 +3121,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.bellwing.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.bellwing.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.bellwing.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.bellwing.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.bellwing.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.bellwing.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.bellwing.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.bellwing.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.bellwing.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.bellwing.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -3332,7 +3339,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.seedporter.pack.pack_size` | (absent) | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.seedporter.pack.den_cover_m` | (absent) | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.seedporter.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.seedporter.pack.den_radius_m` | (absent) | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.seedporter.pack.litter_size_max` | (absent) | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.seedporter.pack.litter_interval_s` | (absent) | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.seedporter.pack.independence_age_s` | (absent) | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -3354,9 +3361,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.route_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.seedporter.pack.chase_reserve_floor` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.seedporter.pack.call_s` | (absent) | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.seedporter.pack.den_search_m` | (absent) | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.seedporter.pack.follow_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.seedporter.pack.home_give_up_s` | (absent) | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.seedporter.pack.rest_radius_m` | (absent) | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.seedporter.pack.home_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.seedporter.pack.stalk_margin` | (absent) | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.seedporter.pack.breed_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.seedporter.pack.regurgitate_reserve_fraction` | (absent) | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |
@@ -3571,7 +3579,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
 | `fauna.founders.chorister.pack.pack_size` | 4 | adults | [0, inf) |  | - | decision | adults per pack at founding (the first is the breeder) |
 | `fauna.founders.chorister.pack.den_cover_m` | 3.0 | m | [0, inf) |  | - | decision | a den has solid within this over its face |
-| `fauna.founders.chorister.pack.den_radius_m` | 4.0 | m | [0, inf) |  | - | decision | adults rest and pups stay within this of the den |
+| `fauna.founders.chorister.pack.den_radius_m` | 4.0 | m | [0, inf) |  | - | decision | nursery/provisioning radius; pups stay here, resting adults use rest_radius_m |
 | `fauna.founders.chorister.pack.litter_size_max` | 4 | young | [0, inf) |  | - | decision | a litter is 2 up to this |
 | `fauna.founders.chorister.pack.litter_interval_s` | 21600.0 | s | [0, inf) |  | - | decision | the breeder's litters are at least this far apart |
 | `fauna.founders.chorister.pack.independence_age_s` | 21600.0 | s | [0, inf) |  | - | decision | a pup cannot strike and stays at the den until this age |
@@ -3593,9 +3601,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.route_refresh_s` | 60.0 | s | [0, inf) |  | - | placeholder | a pack's walking route components (only prey in its own is taken) are rebuilt at most this often |
 | `fauna.founders.chorister.pack.chase_reserve_floor` | 0.3 | fraction of reserve cap | [0, 1] |  | - | placeholder | a chase is dropped when a member's reserve falls under this |
 | `fauna.founders.chorister.pack.call_s` | 1.0 | s | [0, inf) |  | - | decision | a member calls this long after the target changes or it strikes |
-| `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | the breeder looks for a covered den within this of the founding point |
+| `fauna.founders.chorister.pack.den_search_m` | 8.0 | m | [0, inf) |  | - | decision | den search radius around founding/current range; dry reachable roofs, darkest first |
 | `fauna.founders.chorister.pack.follow_radius_m` | 3.0 | m | [0, inf) |  | - | placeholder | an idle adult walks back to within this of the breeder |
-| `fauna.founders.chorister.pack.home_give_up_s` | 600.0 | s | [0, inf) |  | - | placeholder | an adult wanting rest walks home this long, then rests where it is |
+| `fauna.founders.chorister.pack.rest_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | an adult rests or sleeps this close to the den centre, on its level (capped by den_radius_m) |
+| `fauna.founders.chorister.pack.home_reserve_share` | 0.5 | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | the route home may spend this share on awake upkeep and motor cost |
 | `fauna.founders.chorister.pack.stalk_margin` | 0.7 | fraction of the prey's hearing floor | [0, inf) |  | - | placeholder | S2: beyond commit_m a member closes no louder than this share of its prey's hearing floor (0: no stalk) |
 | `fauna.founders.chorister.pack.breed_reserve_fraction` | 0.6 | fraction of reserve cap | [0, 1] |  | - | placeholder | the breeder conceives only with its reserve at this fraction of its cap or more (0: the surplus rule alone) |
 | `fauna.founders.chorister.pack.regurgitate_reserve_fraction` | 0.5 | fraction of reserve cap | [0, 1] |  | - | placeholder | PUP: an adult at the den regurgitates its meal to a pup only with its own reserve at this fraction of its cap or more; below it it keeps the meal (0: its condition never matters) |

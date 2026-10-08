@@ -8,7 +8,7 @@
 //!   place goes to the oldest adult, empty packs are dropped, and adults at the den
 //!   provision a pup there (the hungriest, or with PUP's scramble the strongest beggar).
 //! - [`must_walk_home`] (the circadian stage): a pack adult under its heuristic rests and
-//!   sleeps only within `den_radius_m` of its den, or once `home_give_up_s` has passed.
+//!   sleeps at its den when a reachable route fits its current reserve budget.
 //! - [`steer`] (the controller stage, for a body whose controller opts in): the tactic —
 //!   a pup stays at the den; an adult walks home to rest, drives or flanks a pack target,
 //!   gives a chase up, eats the kill, keeps near the breeder, and otherwise hunts alone
@@ -355,31 +355,92 @@ fn pack_wants(adults: &[Animal]) -> bool {
     !adults.is_empty() && (2 * wanting >= adults.len() || adults.iter().any(|b| b.emergency))
 }
 
-/// The circadian stage's den rule (Brief R3: "adults rest and sleep within
-/// `den_radius_m`"): whether a pack adult under its pack heuristic that wants a rest must
-/// first walk home — it is further than `den_radius_m` from its den and has been walking
-/// home for less than `home_give_up_s`. Counts the walk.
-pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, voxel_m: f64, ring: f64) -> bool {
+/// Both the circadian gate and the post-meal tactic use this route/reserve decision.
+pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> bool {
     let a = fauna.animals[i];
     let (Some(m), Some(t)) = (a.pack, table(fauna, &a)) else {
         return false;
     };
-    if m.pup || a.state == crate::State::Asleep || !fauna.controllers.pack_tactic(a.id) {
+    if m.pup || !fauna.controllers.pack_tactic(a.id) {
         return false;
     }
     let Some(den) = fauna.pack(m.pack).map(|p| p.den) else {
         return false;
     };
-    let (cx, cz) = centre(den, voxel_m);
-    if distance(&a, cx, cz, ring) <= t.den_radius_m {
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (cx, cz) = centre(den, v);
+    if a.site.y == den.y && distance(&a, cx, cz, ring) <= t.rest_radius_m.min(t.den_radius_m) {
+        fauna.animals[i].homing_ticks = 0;
         return false;
     }
-    let give_up = cubarium_voxel::ticks_at_least_one(t.home_give_up_s);
-    if u64::from(a.homing_ticks) >= give_up {
+    let founder = a.founder.expect("a pack lineage");
+    let phys = *fauna.config.founder(founder);
+    let geometry = phys.body_at(a.body);
+    let h = phys.active_hunter().expect("a pack hunter");
+    let (radius, _) = node_radii(&geometry, &h, v);
+    let graph = fauna.pack_routes(view, founder);
+    let Some(to) = graph.face(den) else { return false };
+    let (from, recovery_steps) = match graph.node_near(a.site, (a.pose.x, a.pose.z), radius) {
+        Some(from) => (from, 0),
+        None => {
+            let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
+            let Some((_, entry, steps)) = graph.way_on_path(view, a.site,
+                geometry.footprint_radius(), geometry.headroom_voxels(v), phys.step_limits(v),
+                phys.wade_depth_m(&geometry), radius, reach) else { return false };
+            (entry, steps)
+        }
+    };
+    if view.water_depth_m(i64::from(den.x), den.y, den.z) > 0.0 {
+        return false;
+    }
+    let (_, field) = fauna.den_path(view, founder, m.pack, to);
+    let Some(&steps) = field.get(&from) else { return false };
+    // Include travel inside both end cells, so sharing a route node is not free.
+    let offset = if recovery_steps == 0 { distance(&a, graph.centre(from).0, graph.centre(from).1, ring) } else { 0.0 };
+    let metres = f64::from(steps.saturating_add(recovery_steps)) * v + offset;
+    let cruise = phys.cruise_body_lengths_per_s * geometry.length_m;
+    let pregnancy = if a.reproduction.escrow.is_some() { phys.core.reproduction.gestation_upkeep_factor } else { 1.0 };
+    let cost = metres / cruise.max(f64::EPSILON) * a.body
+        * (phys.core.maintenance_per_s * pregnancy + phys.motor_respiration_per_s);
+    let cap = phys.core.reserve_of(a.body);
+    let usable = (a.reserve - (1.0 - phys.wake_hunger) * cap).max(0.0);
+    if cost > t.home_reserve_share.clamp(0.0, 1.0) * usable || usable <= 0.0 {
         return false;
     }
     fauna.animals[i].homing_ticks = a.homing_ticks.saturating_add(1);
     true
+}
+
+/// An unusable den is replaced by a dry site on the breeder's current walking range.
+pub(crate) fn renew_dens(fauna: &mut Fauna, view: &VoxelView<'_>, glowcap: &cubarium_voxel_flora::SpeciesConfig) {
+    let records = fauna.packs().to_vec();
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    for rec in records {
+        let Some(t) = fauna.config.founder(rec.lineage).pack else { continue };
+        let mut adults: Vec<Animal> = fauna.animals.iter()
+            .filter(|a| a.pack.is_some_and(|m| m.pack == rec.id && !m.pup)).copied().collect();
+        adults.sort_by_key(|a| (Some(a.id) != rec.breeder, a.id));
+        let wet = view.water_depth_m(i64::from(rec.den.x), rec.den.y, rec.den.z) > 0.0;
+        if wet { fauna.pack_routes.remove(&rec.lineage.index()); }
+        let graph = fauna.pack_routes(view, rec.lineage);
+        let Some((anchor, from)) = adults.iter().find_map(|a| graph.face(a.site).map(|i| (*a, i))) else { continue };
+        if !wet && graph.face(rec.den).is_some_and(|i| graph.components[i] == graph.components[from]) { continue; }
+        let den = graph.faces.iter().enumerate()
+            .filter(|(i, s)| graph.components[*i] == graph.components[from]
+                && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                && distance(&anchor, centre(**s, v).0, centre(**s, v).1, ring) <= t.den_search_m
+                && !trespass(fauna, rec.id, centre(**s, v).0, centre(**s, v).1, &t, v, ring))
+            .min_by(|(_, a), (_, b)| crate::den_quality(view, glowcap, **a, &t).compare(crate::den_quality(view, glowcap, **b, &t))
+                .then(distance(&anchor, centre(**a, v).0, centre(**a, v).1, ring)
+                    .total_cmp(&distance(&anchor, centre(**b, v).0, centre(**b, v).1, ring)))
+                .then(a.cmp(b)))
+            .map(|(_, s)| *s);
+        if let Some(den) = den {
+            fauna.set_den(rec.id, den, crate::den_quality(view, glowcap, den, &t).choice);
+        }
+    }
 }
 
 /// The signed angle from `heading` to `want`, in `(-π, π]`.
@@ -1345,14 +1406,23 @@ fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a:
     };
     let (own_r, _) = node_radii(geometry, h, v);
     let graph = fauna.pack_routes(view, founder);
-    let (Some(from), Some(to)) = (graph.node_near(a.site, (a.pose.x, a.pose.z), own_r), graph.node_near(den, goal, own_r)) else {
-        return (goal, false);
+    let Some(to) = graph.face(den) else { return (goal, false) };
+    let Some(from) = graph.node_near(a.site, (a.pose.x, a.pose.z), own_r) else {
+        let Some(t) = fauna.config.founder(founder).pack else { return (goal, false) };
+        let phys = fauna.config.founder(founder);
+        let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
+        return graph.way_on_path(view, a.site, geometry.footprint_radius(),
+            geometry.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(geometry), own_r, reach)
+            .map_or((goal, false), |(step, _, _)| (centre(step, v), true));
     };
     if from == to || graph.walk_line(from, (a.pose.x, a.pose.z), goal) {
         return (goal, true);
     }
     let (graph, field) = fauna.den_path(view, founder, own, to);
-    (route_point(fauna, founder, &graph, &field, from, a).unwrap_or(goal), true)
+    match route_point(fauna, founder, &graph, &field, from, a) {
+        Some(point) => (point, true),
+        None => (goal, false),
+    }
 }
 
 /// The pack tactic of [`steer`], before [`out_of_pit`].
@@ -1433,6 +1503,16 @@ fn tactic(
     let own = m.pack;
     let clamp = |fauna: &Fauna, act: Actions| keep_out(fauna, i, own, act, &t, guard, v, ring);
 
+    // Out of phase or finished its meal: travel home before resting. An unaffordable
+    // or unreachable trip rests in place; emergencies still feed and hunt normally.
+    if !a.emergency && (wants_rest(fauna, i, clock_on, daylight) || !a.eating) {
+        if must_walk_home(fauna, i, view) {
+            let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
+            if routed { return Some(clamp(fauna, route_go(fauna, view, &a, founder, to, ring, 0.0))); }
+        }
+        return Some(Actions::REST);
+    }
+
     // PIT-2, the litter at the den: the breeder carrying a litter (an open gestation) goes
     // home and stays within half the den radius — where its pups stay — until it gives birth,
     // so they are born where they live; not in an emergency. The probe's breeders gave birth
@@ -1487,21 +1567,7 @@ fn tactic(
             let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
             return Some(clamp(fauna, go));
         }
-        return Some(Actions {
-            forward: 0.0,
-            turn: held.turn,
-            feed: held.feed,
-        });
-    }
-
-    // Home to sleep: out of its phase.
-    if wants_rest(fauna, i, clock_on, daylight)
-        && d_den > t.den_radius_m
-        && u64::from(a.homing_ticks) < cubarium_voxel::ticks_at_least_one(t.home_give_up_s)
-    {
-        let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
-        let go = if routed { route_go(fauna, view, &a, founder, to, ring, 0.0) } else { go_to(&a, to.0, to.1, ring, 0.0, 0.0) };
-        return Some(clamp(fauna, go));
+        return Some(Actions::REST);
     }
 
     let now = fauna.tick;

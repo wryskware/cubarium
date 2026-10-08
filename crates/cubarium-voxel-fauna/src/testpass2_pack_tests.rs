@@ -538,7 +538,7 @@ fn den_scene(world: &World, den: Site, whelp: bool) -> (Fauna, u64) {
         let pk = c.founders[CH.index()].pack.as_mut().unwrap();
         pk.pack_size = 1;
         pk.den_radius_m = 2.0;
-        pk.home_give_up_s = 1e6;
+        pk.home_reserve_share = 1.0;
         pk.whelp_at_den = whelp;
     }
     let mut fauna = Fauna::new(c);

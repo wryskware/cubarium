@@ -580,7 +580,8 @@ pub struct Pack {
     pub pack_size: usize,
     /// A den is covered: solid within this over its face, metres. 3.
     pub den_cover_m: f64,
-    /// Adults rest and sleep, and pups stay, within this of the den, metres. 4.
+    /// Nursery and provisioning radius around the den, metres; pups stay here. Adults
+    /// resting or sleeping use the smaller `rest_radius_m`.
     pub den_radius_m: f64,
     /// Young in one litter: 2 up to this. 4.
     pub litter_size_max: u32,
@@ -679,16 +680,20 @@ pub struct Pack {
     /// A member's `calling` flag stays set this long after the pack target changes or it
     /// strikes, seconds. 1.
     pub call_s: f64,
-    /// The breeder looks for its covered den within this of the founding point, metres
-    /// (Fable: 8). With none covered there, the face with the most solid over it; with
-    /// none of those, the founding point.
+    /// Search radius around the founding point or current range, metres. Dry, reachable
+    /// roofed sites beat open ground; glowcap darkness then sky visibility break ties.
     pub den_search_m: f64,
     /// An idle adult that is not the breeder walks back to within this of the breeder,
     /// metres: the pack keeps together between hunts. A placeholder.
     pub follow_radius_m: f64,
-    /// An adult that wants a rest walks home to its den first, for at most this long;
-    /// after it, it rests where it is, seconds. A placeholder.
-    pub home_give_up_s: f64,
+    /// Metres from the den centre within which an adult rests or sleeps, on the den
+    /// level; capped by `den_radius_m` so a small nursery stays small.
+    #[serde(default = "pack_rest_radius_m")]
+    pub rest_radius_m: f64,
+    /// Fraction of reserve above the emergency-wake floor available for the trip home.
+    /// The route estimate includes awake basal upkeep and motor cost; 0 permits no trip.
+    #[serde(default = "pack_home_reserve_share")]
+    pub home_reserve_share: f64,
     /// **The stalk** (S2, [`crate::vigil::stalk`]): closing on its prey beyond `commit_m`, a
     /// member walks no faster than keeps its emission under this fraction of the prey's
     /// hearing floor; 0 does not stalk. 0.7.
@@ -831,6 +836,14 @@ fn pack_pit_search_m() -> f64 {
 fn pack_route_swing_voxels() -> f64 {
     Pack::CHORISTER.route_swing_voxels
 }
+fn pack_rest_radius_m() -> f64 {
+    Pack::CHORISTER.rest_radius_m
+}
+
+fn pack_home_reserve_share() -> f64 {
+    Pack::CHORISTER.home_reserve_share
+}
+
 fn pack_whelp_at_den() -> bool {
     Pack::CHORISTER.whelp_at_den
 }
@@ -908,7 +921,8 @@ impl Pack {
         call_s: 1.0,
         den_search_m: 8.0,
         follow_radius_m: 3.0,
-        home_give_up_s: 600.0,
+        rest_radius_m: 0.5,
+        home_reserve_share: 0.5,
         stalk_margin: 0.7,
         commit_m: 2.5,
         stalk_freeze: true,
@@ -2016,7 +2030,11 @@ impl FounderPhysiology {
                 let grazer = FounderPhysiology::placeholder(Founder::Browser);
                 let mut core = grazer.core;
                 core.scale_mass(LOFTSTRIDER_VOLUME_RATIO);
-                core.reproduction.gestation_s *= 3.0;
+                // A slow, single-calf browser: half a reference world day carrying,
+                // a quarter-day surplus hold, then three days before another conception.
+                core.reproduction.gestation_s = 3600.0;
+                core.reproduction.surplus_hold_s = 1800.0;
+                core.reproduction.birth_interval_s = 21600.0;
                 core.lifespan_median_s = LIFE_LOFTSTRIDER_DAYS * DAY_S;
                 core.maintenance_per_s = DAILY_LOFTSTRIDER / DAY_S;
                 FounderPhysiology {
