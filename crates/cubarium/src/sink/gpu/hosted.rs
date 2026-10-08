@@ -4,10 +4,13 @@
 //!
 //! # How a frame flows
 //!
-//! - **The session's loop** steps the world and, through a [`LoopHook`], packs and stages
-//!   it into the sink exactly as `run_voxel` does: once a loop period when the world moved
-//!   (H3 moves the pack off this thread later). After a pack it publishes a [`PickMap`]:
-//!   which animal each drawn body cell belongs to, and which voxels are solid.
+//! - **The session's loop** steps the world and, through a [`LoopHook`], copies what the
+//!   pack reads into a [`PackSnapshot`] once a loop period when the world moved, and hands
+//!   it to the pack thread ([`PackLane`]). That copy is all the pack costs the loop (H3).
+//! - **The pack thread** packs and stages each snapshot into the sink while the loop steps
+//!   the next tick. After a pack it publishes a [`PickMap`] (which animal each drawn body
+//!   cell belongs to, and which voxels are solid) and moves the frame clock to the tick it
+//!   packed, so the frames between ticks run on from the world they show.
 //! - **The presenter thread** draws frames at the display rate: the frame clock (the tick
 //!   plus the fraction elapsed toward the next), the view's turn round the ring and the
 //!   highlight, then the renderer's passes and a copy of the raster into a
@@ -17,8 +20,9 @@
 //! - **The app** takes the newest frame when it likes ([`Hosted::take_frame`]) and shows it
 //!   with the same fit and nearest upscale as the desktop window.
 //!
-//! One lock, the sink's, is shared by the loop (for the pack) and the presenter (to record
-//! and to retire). The bytes are copied out under it.
+//! One lock, the sink's, is shared by the pack thread and the presenter (to record and to
+//! retire). The bytes are copied out under it. The loop never takes it after a world is
+//! installed.
 //!
 //! A static world (a candidate in the new-world picker) is staged once from a
 //! [`CandidateSource`] on a thread of its own and drawn the same way; its clock stands
@@ -45,6 +49,7 @@ use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
 use rustc_hash::FxHashMap;
 
+use super::snapshot::{PackSnapshot, SnapshotCopier};
 use super::{Offscreen, VoxelGpuSink};
 use crate::voxel::figure::{AnimalDraw, EnvPins, FigureMotion, FigurePick};
 use crate::voxel::project::Projection;
@@ -60,8 +65,11 @@ const STATIC_STAGERS: usize = 1;
 /// thread).
 const STAGE_SLICE: Duration = Duration::from_millis(10);
 /// How often a still world waiting only for the light shafts' first bake packs again (the
-/// bake lands only through a pack).
+/// bake lands only through a pack); the pack thread's wait for the lit tier's sky plane too.
 const RESTAGE_EVERY: Duration = Duration::from_millis(50);
+/// How soon the pack thread tries a snapshot again that the renderer refused (every staging
+/// buffer was still being read).
+const REFUSED_RETRY: Duration = Duration::from_millis(2);
 
 /// The process's still-world stagers take turns ([`StageTurns`]).
 static STAGE_TURNS: StageTurns = StageTurns::new(STATIC_STAGERS);
@@ -187,6 +195,105 @@ impl<T> Mailbox<T> {
     }
 }
 
+// --- the pack lane ---------------------------------------------------------------------
+
+/// **One snapshot waits; one is packed.** The loop fills a snapshot only when the slot is
+/// free ([`PackLane::claim`]), so a snapshot is never displaced unpacked (its pore-water
+/// window is never lost) and the copy is paid only for a snapshot that will be packed. The
+/// pack thread takes the posted snapshot, packs it, and gives its buffer back to be filled
+/// again. A snapshot is owned by one side at a time: the pack never reads one being filled.
+pub struct PackLane<S> {
+    state: Mutex<Lane<S>>,
+    moved: Condvar,
+}
+
+struct Lane<S> {
+    posted: Option<S>,
+    spare: Option<S>,
+    quit: bool,
+}
+
+impl<S> Default for PackLane<S> {
+    fn default() -> Self {
+        PackLane { state: Mutex::new(Lane { posted: None, spare: None, quit: false }), moved: Condvar::new() }
+    }
+}
+
+impl<S> PackLane<S> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Lane<S>> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The copier's turn: while the slot is free, `Some` of a spent buffer to fill again
+    /// (or `None` inside: make one); `None` while a posted snapshot still waits, or after
+    /// [`PackLane::quit`].
+    pub fn claim(&self) -> Option<Option<S>> {
+        let mut l = self.lock();
+        (!l.quit && l.posted.is_none()).then(|| l.spare.take())
+    }
+
+    /// Hand a filled snapshot to the pack thread. False after [`PackLane::quit`].
+    pub fn post(&self, s: S) -> bool {
+        let mut l = self.lock();
+        if l.quit {
+            return false;
+        }
+        l.posted = Some(s);
+        drop(l);
+        self.moved.notify_all();
+        true
+    }
+
+    /// The pack thread's wait: until a snapshot is posted (it replaces `held`, whose buffer
+    /// goes back to the copier), until `retry` has passed with one `held`, or until the
+    /// lane quits (false). Looks at its quit flag every [`STAGE_SLICE`] at least.
+    pub fn wait(&self, held: &mut Option<S>, retry: Option<Duration>) -> bool {
+        let deadline = retry.filter(|_| held.is_some()).map(|d| Instant::now() + d);
+        let mut l = self.lock();
+        loop {
+            if l.quit {
+                return false;
+            }
+            if let Some(s) = l.posted.take() {
+                if let Some(old) = held.replace(s) {
+                    l.spare = Some(old);
+                }
+                return true;
+            }
+            let now = Instant::now();
+            if deadline.is_some_and(|d| now >= d) {
+                return true;
+            }
+            let slice = deadline.map_or(STAGE_SLICE, |d| (d - now).min(STAGE_SLICE));
+            l = self.moved.wait_timeout(l, slice).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+
+    /// A snapshot packed (or of a world no longer shown): its buffer back for the copier.
+    pub fn done(&self, s: S) {
+        self.lock().spare = Some(s);
+    }
+
+    /// Stop: the pack thread's wait returns false, and nothing more is posted.
+    pub fn quit(&self) {
+        self.lock().quit = true;
+        self.moved.notify_all();
+    }
+}
+
+/// What became of a snapshot the pack thread tried.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Packed {
+    /// Staged, and the renderer is ready to show it.
+    Done,
+    /// The renderer refused it (every staging buffer still being read): try again soon.
+    Refused,
+    /// Staged, but the lit tier's sky plane has not arrived: pack again until it has.
+    AwaitingLight,
+    /// Of a world no longer installed (or none is): drop it.
+    Stale,
+}
+
 // --- picking ------------------------------------------------------------------------------
 
 /// What picking reads, published after each pack: the projection, every drawn body cell
@@ -234,7 +341,11 @@ impl PickMap {
 
     /// The solid bits of a world, in its own order.
     pub fn solid_bits(world: &World) -> Vec<u64> {
-        let m = world.view().material;
+        Self::solid_bits_of(world.view().material)
+    }
+
+    /// The solid bits of a world's material, in its own order.
+    pub fn solid_bits_of(m: &[cubarium_voxel::Material]) -> Vec<u64> {
         let mut bits = vec![0u64; m.len().div_ceil(64)];
         for (i, v) in m.iter().enumerate() {
             if v.is_solid() {
@@ -436,6 +547,10 @@ pub struct HostedStats {
     pub copy_ms: f64,
     pub pack_ms: f64,
     pub packs: u64,
+    /// Milliseconds the loop spent copying what the pack reads (H3: the pack's whole cost
+    /// to the loop), over this many snapshots.
+    pub snapshot_ms: f64,
+    pub snapshots: u64,
     /// Ticks whose pack was refused because the GPU held every staging buffer.
     pub packs_refused: u64,
     /// Frames posted over an untaken one.
@@ -498,6 +613,8 @@ struct SinkState {
     flight: VecDeque<(u64, i32, u64)>,
     /// The highlight drawn: the animal and the pick map's version it was taken from.
     highlight_drawn: Option<(u64, u64)>,
+    /// The projection it draws with, for the pick map.
+    proj: Projection,
 }
 
 // The state is genuinely `Send`: the loop's pack and the presenter's record take it in
@@ -525,9 +642,13 @@ struct Shared {
     quit: AtomicBool,
     /// [`HostedStats::unlit`].
     unlit: AtomicBool,
-    /// The presenter, the still-world stagers and renderers being released: joined by
-    /// [`Shared::shutdown`].
+    /// The presenter, the pack thread, the still-world stagers and renderers being
+    /// released: joined by [`Shared::shutdown`].
     threads: Mutex<Vec<JoinHandle<()>>>,
+    /// The live world's snapshots, from the loop to the pack thread (H3).
+    lane: PackLane<Box<PackSnapshot>>,
+    /// The pack thread has been started.
+    packing: AtomicBool,
 }
 
 impl Shared {
@@ -552,8 +673,8 @@ impl Shared {
         Ok((sink, proj))
     }
 
-    /// Install a renderer for a world just staged into it.
-    fn install(&self, sink: VoxelGpuSink<Offscreen>, ready: bool) -> Result<()> {
+    /// Install a renderer for a world just staged into it. Returns its generation.
+    fn install(&self, sink: VoxelGpuSink<Offscreen>, proj: Projection, ready: bool) -> Result<u64> {
         let ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), RING)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         let state = SinkState {
@@ -564,6 +685,7 @@ impl Shared {
             drawn_version: None,
             flight: VecDeque::new(),
             highlight_drawn: None,
+            proj,
         };
         // The old renderer goes outside the lock: dropping it waits for its GPU. A renderer
         // shut down ([`Shared::shutdown`]) takes no new one: checked under the lock its
@@ -576,7 +698,7 @@ impl Shared {
             }
         });
         drop(old);
-        Ok(())
+        Ok(generation)
     }
 
     /// Stop every thread of this renderer and free it: the presenter and any still-world
@@ -586,8 +708,10 @@ impl Shared {
     /// those threads.
     fn shutdown(&self) {
         self.quit.store(true, Ordering::SeqCst);
-        // A stager waiting for its turn looks at its quit flag now, not at its next slice.
+        // A stager waiting for its turn looks at its quit flag now, not at its next slice;
+        // so does the pack thread waiting for a snapshot (one mid-pack finishes it first).
         STAGE_TURNS.wake();
+        self.lane.quit();
         let threads = std::mem::take(&mut *self.threads.lock().unwrap_or_else(|e| e.into_inner()));
         for t in &threads {
             t.thread().unpark();
@@ -606,6 +730,54 @@ impl Shared {
         if let Ok(mut p) = self.pick.lock() {
             *p = Some(Arc::new(map));
         }
+    }
+
+    /// Pack one snapshot of the live world into the installed renderer (the pack thread),
+    /// publish its pick map, and move the frame clock to its tick. `solid` caches the solid
+    /// bits by world generation and terrain version.
+    fn pack_snapshot(&self, snap: &mut PackSnapshot, solid: &mut Option<(u64, u64, Arc<Vec<u64>>)>) -> Packed {
+        let at = Instant::now();
+        let Ok(mut guard) = self.sink.lock() else { return Packed::Stale };
+        let Some(st) = guard.as_mut() else { return Packed::Stale };
+        if st.generation != snap.generation {
+            return Packed::Stale;
+        }
+        let staged = st.sink.stage_snapshot(snap);
+        let mut packed = Packed::Refused;
+        if staged {
+            if !st.ready && !st.sink.light_pending() {
+                st.ready = true;
+            }
+            let key = (snap.generation, snap.terrain_version());
+            let bits = match solid {
+                Some((g, v, bits)) if (*g, *v) == key => bits.clone(),
+                _ => {
+                    let bits = Arc::new(PickMap::solid_bits_of(snap.material()));
+                    *solid = Some((key.0, key.1, bits.clone()));
+                    bits
+                }
+            };
+            self.publish_pick(&st.sink, &st.proj, bits);
+            packed = if st.ready { Packed::Done } else { Packed::AwaitingLight };
+        }
+        drop(guard);
+        if staged && let Ok(mut k) = self.clock.lock() {
+            // The frames run on from the tick just packed, as far as the ticks it moved.
+            let tick = snap.tick();
+            if tick != k.tick {
+                k.ahead = tick.saturating_sub(k.tick).max(1) as f64;
+                k.tick = tick;
+                k.at = Instant::now();
+                if k.drawn < tick as f64 {
+                    k.drawn = tick as f64;
+                }
+            }
+        }
+        if let Ok(mut s) = self.stats.lock() {
+            s.pack_ms += at.elapsed().as_secs_f64() * 1e3;
+            s.packs += u64::from(staged);
+        }
+        packed
     }
 
     /// One pass of the presenter: hand back finished frames, and draw a new one if one is
@@ -735,6 +907,27 @@ fn presenter_main(shared: Arc<Shared>) {
     }
 }
 
+/// The pack thread: packs each snapshot the loop posts, trying a refused one again soon and
+/// one still waiting for its sky plane every [`RESTAGE_EVERY`], until the lane quits.
+fn pack_main(shared: &Arc<Shared>) {
+    let mut held: Option<Box<PackSnapshot>> = None;
+    let mut retry = None;
+    let mut solid = None;
+    while shared.lane.wait(&mut held, retry) {
+        let Some(snap) = held.as_mut() else { continue };
+        retry = match shared.pack_snapshot(snap, &mut solid) {
+            Packed::Done | Packed::Stale => {
+                if let Some(s) = held.take() {
+                    shared.lane.done(s);
+                }
+                None
+            }
+            Packed::Refused => Some(REFUSED_RETRY),
+            Packed::AwaitingLight => Some(RESTAGE_EVERY),
+        };
+    }
+}
+
 // --- the host -------------------------------------------------------------------------------
 
 /// **The world's renderer for an app**: a presenter thread and the frames it draws. Draw a
@@ -800,6 +993,8 @@ impl Hosted {
             quit: AtomicBool::new(false),
             unlit: AtomicBool::new(false),
             threads: Mutex::new(Vec::new()),
+            lane: PackLane::default(),
+            packing: AtomicBool::new(false),
         });
         let presenter = {
             let shared = shared.clone();
@@ -818,8 +1013,18 @@ impl Hosted {
     }
 
     /// The hook a session's loop runs this renderer from ([`cubarium_session::Session::set_hook`]).
+    /// Starts the pack thread the hook's snapshots go to (once).
     pub fn hook(&self) -> Box<dyn LoopHook> {
-        Box::new(LiveHook { shared: self.shared.clone(), proj: None, terrain: None, owed: false })
+        if !self.shared.packing.swap(true, Ordering::SeqCst) {
+            self.spawn("cubarium-hosted-pack", pack_main);
+        }
+        Box::new(LiveHook {
+            shared: self.shared.clone(),
+            proj: None,
+            owed: false,
+            copier: SnapshotCopier::new(self.shared.cfg.pack.pore_sweep),
+            generation: 0,
+        })
     }
 
     /// Draw one still world: candidate `index` of `source`, staged on a thread of its own
@@ -1026,71 +1231,47 @@ fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, qu
     if let Ok(mut c) = shared.clock.lock() {
         *c = Clock::still(tick);
     }
-    shared.install(sink, true)
+    shared.install(sink, proj, true).map(|_| ())
 }
 
-/// The live hook: packs on the session's loop.
+/// The live hook: on the session's loop, it copies what the pack reads and hands it to the
+/// pack thread. Only a new world is packed here (its renderer is opened with it).
 struct LiveHook {
     shared: Arc<Shared>,
     proj: Option<Projection>,
-    /// The terrain version the solid bits are of.
-    terrain: Option<(u64, Arc<Vec<u64>>)>,
-    /// A pack the renderer refused (or the sky plane is still coming): pack again.
+    /// The world moved while a snapshot still waited: copy one at the next period.
     owed: bool,
+    copier: SnapshotCopier,
+    /// The installed renderer's generation, carried by every snapshot.
+    generation: u64,
 }
 
 impl LiveHook {
-    fn solid(&mut self, world: &World) -> Arc<Vec<u64>> {
-        let v = world.view().terrain_version;
-        match &self.terrain {
-            Some((at, bits)) if *at == v => bits.clone(),
-            _ => {
-                let bits = Arc::new(PickMap::solid_bits(world));
-                self.terrain = Some((v, bits.clone()));
-                bits
-            }
-        }
-    }
-
     fn clock(&self, c: HookClock) {
+        // The tick the frames run from moves when a pack lands (`Shared::pack_snapshot`).
         if let Ok(mut k) = self.shared.clock.lock() {
-            let tps = f64::from(cubarium_voxel::TICK_HZ) * c.speed;
-            if c.tick != k.tick {
-                k.tick = c.tick;
-                k.at = Instant::now();
-                k.ahead = c.stepped.max(1) as f64;
-                if k.drawn < c.tick as f64 {
-                    k.drawn = c.tick as f64;
-                }
-            }
-            k.tps = tps;
+            k.tps = f64::from(cubarium_voxel::TICK_HZ) * c.speed;
             k.paused = c.paused;
         }
     }
 
-    /// Pack the world into the renderer; publish the pick map. Returns whether it packed.
-    fn pack(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
-        let Some(proj) = self.proj else { return false };
-        let solid = self.solid(world);
-        let mut guard = match self.shared.sink.lock() {
-            Ok(g) => g,
-            Err(_) => return false,
-        };
-        let Some(st) = guard.as_mut() else { return false };
-        let at = Instant::now();
-        let staged = st.sink.stage_world(world, flora, fauna);
-        if staged {
-            if !st.ready && !st.sink.light_pending() {
-                st.ready = true;
-            }
-            self.shared.publish_pick(&st.sink, &proj, solid);
+    /// Copy the world into a snapshot for the pack thread. False when the last one is still
+    /// waiting to be packed (the world stays owed).
+    fn post(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> bool {
+        if self.proj.is_none() {
+            return true;
         }
-        drop(guard);
+        let Some(spare) = self.shared.lane.claim() else { return false };
+        let mut snap = spare.unwrap_or_default();
+        self.copier.fill(&world.view(), flora.view(), fauna.view(), &mut snap);
+        snap.generation = self.generation;
+        let ms = snap.copy_ms();
+        self.shared.lane.post(snap);
         if let Ok(mut s) = self.shared.stats.lock() {
-            s.pack_ms += at.elapsed().as_secs_f64() * 1e3;
-            s.packs += u64::from(staged);
+            s.snapshot_ms += ms;
+            s.snapshots += 1;
         }
-        staged
+        true
     }
 }
 
@@ -1099,7 +1280,7 @@ impl LoopHook for LiveHook {
         if self.shared.quit.load(Ordering::SeqCst) {
             return;
         }
-        self.terrain = None;
+        self.copier.reset();
         if let Ok(mut c) = self.shared.clock.lock() {
             *c = Clock::still(clock.tick);
         }
@@ -1110,11 +1291,14 @@ impl LoopHook for LiveHook {
                 let staged = sink.stage_world(world, flora, fauna);
                 let ready = staged && !sink.light_pending();
                 self.proj = Some(proj);
-                let solid = self.solid(world);
+                let solid = Arc::new(PickMap::solid_bits(world));
                 self.shared.publish_pick(&sink, &proj, solid);
-                if let Err(e) = self.shared.install(sink, ready) {
-                    self.shared.fail(e);
+                match self.shared.install(sink, proj, ready) {
+                    Ok(g) => self.generation = g,
+                    Err(e) => self.shared.fail(e),
                 }
+                // Not ready yet (the sky plane is coming): the pack thread packs the next
+                // snapshot until it is.
                 self.owed = !ready;
             }
             Err(e) => {
@@ -1127,9 +1311,7 @@ impl LoopHook for LiveHook {
     fn period(&mut self, world: &World, flora: &Flora, fauna: &Fauna, moved: bool, clock: HookClock) {
         self.clock(clock);
         if moved || self.owed {
-            let packed = self.pack(world, flora, fauna);
-            let ready = self.shared.sink.lock().ok().is_some_and(|g| g.as_ref().is_some_and(|s| s.ready));
-            self.owed = !packed || !ready;
+            self.owed = !self.post(world, flora, fauna);
         }
     }
 
@@ -1183,6 +1365,109 @@ mod tests {
     }
 
     /// Wait until `turns` has `n` stagers queued.
+    // ---- the pack lane (H3) ----
+
+    /// The copier fills only a free slot, and gets the packed buffer back to fill again.
+    #[test]
+    fn the_copier_fills_only_a_free_slot_and_reuses_the_packed_buffer() {
+        let lane: PackLane<Vec<u64>> = PackLane::default();
+        assert_eq!(lane.claim(), Some(None), "free, no buffer yet");
+        assert!(lane.post(vec![1]));
+        assert_eq!(lane.claim(), None, "a posted snapshot still waits");
+        let mut held = None;
+        assert!(lane.wait(&mut held, None));
+        assert_eq!(held, Some(vec![1]));
+        assert_eq!(lane.claim(), Some(None), "taken: the slot is free again");
+        lane.done(held.take().unwrap());
+        assert_eq!(lane.claim(), Some(Some(vec![1])), "the packed buffer comes back");
+        // A refused snapshot held for a retry is replaced by a newer one, its buffer spare.
+        assert!(lane.post(vec![2]));
+        assert!(lane.wait(&mut held, None));
+        assert!(lane.wait(&mut held, Some(Duration::from_millis(1))), "the retry comes due");
+        assert_eq!(held, Some(vec![2]));
+        assert!(lane.post(vec![3]));
+        assert!(lane.wait(&mut held, Some(Duration::from_secs(60))));
+        assert_eq!(held, Some(vec![3]));
+        assert_eq!(lane.claim(), Some(Some(vec![2])));
+        lane.quit();
+        assert_eq!(lane.claim(), None);
+        assert!(!lane.post(vec![4]));
+        assert!(!lane.wait(&mut held, None));
+    }
+
+    /// A quit while the pack thread is in the middle of a pack: the pack finishes, the
+    /// thread sees the quit and ends, and the join returns.
+    #[test]
+    fn a_quit_while_the_pack_thread_is_busy_joins_it() {
+        let lane = Arc::new(PackLane::<u64>::default());
+        let (busy, finished) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+        let t = {
+            let (lane, busy, finished) = (lane.clone(), busy.clone(), finished.clone());
+            std::thread::spawn(move || {
+                let mut held = None;
+                while lane.wait(&mut held, None) {
+                    busy.store(true, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(150));
+                    finished.store(true, Ordering::SeqCst);
+                    lane.done(held.take().unwrap());
+                }
+            })
+        };
+        assert!(lane.post(7));
+        let at = Instant::now();
+        while !busy.load(Ordering::SeqCst) {
+            assert!(at.elapsed() < Duration::from_secs(5), "the pack never started");
+            std::thread::yield_now();
+        }
+        lane.quit();
+        t.join().expect("the pack thread ends");
+        assert!(finished.load(Ordering::SeqCst), "the pack in hand was finished, not torn off");
+    }
+
+    /// The pack never reads a snapshot while it is being filled: every snapshot the pack
+    /// thread takes is whole (all of one tick) and newer than the last.
+    #[test]
+    fn the_pack_never_sees_a_torn_snapshot() {
+        let lane = Arc::new(PackLane::<Vec<u64>>::default());
+        let packer = {
+            let lane = lane.clone();
+            std::thread::spawn(move || {
+                let (mut held, mut last, mut seen) = (None, 0u64, 0u64);
+                while lane.wait(&mut held, None) {
+                    let s: Vec<u64> = held.take().unwrap();
+                    assert!(s.iter().all(|&v| v == s[0]), "a torn snapshot");
+                    assert!(s[0] > last, "an old snapshot after a newer one");
+                    last = s[0];
+                    seen += 1;
+                    lane.done(s);
+                }
+                seen
+            })
+        };
+        let mut tick = 0u64;
+        let at = Instant::now();
+        while tick < 2000 && at.elapsed() < Duration::from_secs(20) {
+            if let Some(spare) = lane.claim() {
+                tick += 1;
+                let mut s = spare.unwrap_or_else(|| vec![0; 4096]);
+                // Filled element by element, as a copy is.
+                for v in s.iter_mut() {
+                    *v = tick;
+                }
+                lane.post(s);
+            } else {
+                std::thread::yield_now();
+            }
+        }
+        // Let the last posted one be taken, then stop.
+        while lane.claim().is_none() {
+            std::thread::yield_now();
+        }
+        lane.quit();
+        let seen = packer.join().expect("no torn or stale snapshot");
+        assert!(seen > 0);
+    }
+
     fn queued(turns: &StageTurns, n: usize) {
         let deadline = Instant::now() + Duration::from_secs(30);
         while turns.waiting() != n {

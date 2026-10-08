@@ -277,13 +277,14 @@ func problem() -> String:
 func perf_line() -> String:
 	var s: Dictionary = renderer.stats() if renderer != null else {}
 	var n := maxf(float(s.get("frames", 0)), 1.0)
-	return "fps %.1f  godot frame %.2f ms (process %.2f)  frames %d  GPU %.2f ms  record %.2f ms  copy %.2f ms  upload %.2f ms  pack %.2f ms/tick  view %.2f ms" % [
+	return "fps %.1f  godot frame %.2f ms (process %.2f)  frames %d  GPU %.2f ms  record %.2f ms  copy %.2f ms  upload %.2f ms  pack %.2f ms/tick (pack thread)  copy %.2f ms/tick (loop)  view %.2f ms" % [
 		Performance.get_monitor(Performance.TIME_FPS),
 		1000.0 / maxf(Performance.get_monitor(Performance.TIME_FPS), 0.001),
 		Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0, int(s.get("frames", 0)),
 		float(s.get("gpu_ms", 0.0)) / n, float(s.get("record_ms", 0.0)) / n,
 		float(s.get("copy_ms", 0.0)) / n, upload_ms / maxf(frames_shown, 1.0),
-		float(s.get("pack_ms", 0.0)) / maxf(float(s.get("packs", 0)), 1.0), _process_ms]
+		float(s.get("pack_ms", 0.0)) / maxf(float(s.get("packs", 0)), 1.0),
+		float(s.get("snapshot_ms", 0.0)) / maxf(float(s.get("snapshots", 0)), 1.0), _process_ms]
 
 
 # --- frames ----------------------------------------------------------------------------------

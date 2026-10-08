@@ -78,6 +78,11 @@ pub mod oracle;
 #[path = "hosted.rs"]
 pub mod hosted;
 
+/// What the pack reads, copied off the live world (H3).
+#[path = "snapshot.rs"]
+pub mod snapshot;
+use snapshot::{Hint, Mirror, PackSnapshot};
+
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
 pub struct VoxelGpuSinkOptions {
@@ -206,6 +211,23 @@ pub struct VoxelGpuSink<T: SinkTarget = GpuTarget> {
     /// GPU milliseconds of the model pass over the frames that drew it, and those frames.
     figure_ms: f64,
     figure_frames: u64,
+    // --- the pack off the loop (H3) ---
+    /// The snapshots' dense water grids ([`snapshot`]).
+    mirror: Mirror,
+    /// The tick of the world last staged.
+    staged_tick: Option<u64>,
+    last_pack_ms: f64,
+    last_phases: Vec<(&'static str, f64)>,
+    /// The run loop's snapshot packed beside its next step ([`Self::pack_beside`]).
+    behind: Option<Box<Behind>>,
+}
+
+/// The run loop's pack beside the step ([`VoxelGpuSink::pack_beside`]): the copier, the
+/// one snapshot buffer, and whether it holds a tick not yet packed.
+struct Behind {
+    copier: snapshot::SnapshotCopier,
+    snap: PackSnapshot,
+    pending: bool,
 }
 
 impl VoxelGpuSink<Offscreen> {
@@ -296,6 +318,11 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             present_ms: 0.0,
             pack_ms: 0.0,
             capture_ms: 0.0,
+            mirror: Mirror::default(),
+            staged_tick: None,
+            last_pack_ms: 0.0,
+            last_phases: Vec::new(),
+            behind: None,
         })
     }
 
@@ -354,89 +381,133 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         flora: FloraView<'_>,
         fauna: FaunaView<'_>,
     ) -> bool {
-        if !self.renderer.can_stage() {
-            self.packs_skipped += 1;
-            return false;
-        }
-        let started = Instant::now();
-        super::pack_timer::start();
-        let p = self.renderer.params();
-        // The candles' light at the frame clock's time (the tick's, before a clock is set).
-        let candle_s = if self.clock_s > 0.0 {
-            self.clock_s
-        } else {
-            view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
-        };
-        let slow = self.packer.prepare(view, flora, fauna, candle_s);
-        if let Some(sv) = &mut self.sunvis {
-            let packer = &self.packer;
-            let snapshot = || {
-                let canopy = packer.light.as_ref().map(|l| &l.canopy);
-                Snapshot::of(view, &packer.stands, &packer.animals, canopy)
-            };
-            sv.after_pack(self.clock_s, p.sun, snapshot, &mut self.renderer);
-        }
-        if self.awaiting_light {
-            if self.light_pending() {
-                self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
-                return false;
+        let (stager, _) = self.stager();
+        stager.stage(view, flora, fauna, Hint::default())
+    }
+
+    /// [`VoxelGpuSink::stage_world`] from a [`PackSnapshot`] of the world (H3): the same
+    /// pack, of the tick the snapshot was taken at, with the snapshot's pore-water window
+    /// ([`snapshot`]). Taking the same snapshot again after a refusal is safe.
+    pub fn stage_snapshot(&mut self, snap: &mut PackSnapshot) -> bool {
+        let (stager, mirror) = self.stager();
+        stage_snapshot_with(stager, mirror, snap)
+    }
+
+    /// [`VoxelGpuSink::stage_snapshot`] on a thread of its own while `beside` runs on this
+    /// one, returning both results: the run loop steps the next tick beside the pack of
+    /// the last, so a tick costs the longer of the two rather than their sum. The target
+    /// (a window, tied to this thread) is never touched by the pack.
+    pub fn stage_snapshot_beside<R>(&mut self, snap: &mut PackSnapshot, beside: impl FnOnce() -> R) -> (bool, R) {
+        let (stager, mirror) = self.stager();
+        let (staged, phases, r) = std::thread::scope(|scope| {
+            let pack = std::thread::Builder::new()
+                .name("cubarium-pack".into())
+                .spawn_scoped(scope, move || {
+                    let staged = stage_snapshot_with(stager, mirror, snap);
+                    (staged, super::pack_timer::phases())
+                })
+                .expect("spawning the pack's thread");
+            let r = beside();
+            match pack.join() {
+                Ok((staged, phases)) => (staged, phases, r),
+                Err(e) => std::panic::resume_unwind(e),
             }
-            self.awaiting_light = false;
-            if let Err(e) = self.restore_sky() {
-                eprintln!("cubarium voxel: restoring the sky after founding: {e:#}");
-            }
-        }
-        if let Some(track) = &mut self.figure_track {
-            let (first, cells) = self.packer.figure_models.pending();
-            if !cells.is_empty() {
-                if !self.renderer.put_figure_models(first, cells) {
-                    eprintln!("cubarium voxel: the model pass is full; new animal models are not drawn");
-                }
-                self.packer.figure_models.uploaded();
-            }
-            track.push(view.tick, &self.packer.figure_specs, self.clock_s);
-            // The flat tier moves its figures at the next tick's clock.
-            self.figure_tick = None;
-        }
-        let packer = &mut self.packer;
-        lap!("sunvis");
-        self.renderer.stage(slow, |out| {
-            packer.fill(view, p.width, p.height, p.depth, out)
         });
-        lap!("stage");
-        let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
-            (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
-        } else {
-            0.0
-        };
-        // A weather preview draws its own weather, not the world's shower.
-        let raining = view.is_raining() && self.weather_preview.is_none();
-        let rain_tick = if p.sky_gradient && (raining || self.force_rain) {
-            view.tick as f32
-        } else {
-            0.0
-        };
-        self.renderer.update_weather(atmosphere, rain_tick);
-        if self.tops.0 != Some(view.terrain_version) {
-            let (tops, floor) = super::weather::column_tops(view);
-            self.tops = (Some(view.terrain_version), tops);
-            self.renderer.set_fog_floor(floor);
+        self.last_phases = phases;
+        (staged, r)
+    }
+
+    /// The parts of this sink a pack writes, and the snapshot mirror: everything but the
+    /// target, so a pack can run on another thread.
+    fn stager(&mut self) -> (Stager<'_>, &mut Mirror) {
+        (
+            Stager {
+                renderer: &mut self.renderer,
+                packer: &mut self.packer,
+                sunvis: &mut self.sunvis,
+                figure_track: &mut self.figure_track,
+                tops: &mut self.tops,
+                founding_sky: &mut self.founding_sky,
+                awaiting_light: &mut self.awaiting_light,
+                figure_tick: &mut self.figure_tick,
+                packs_skipped: &mut self.packs_skipped,
+                ticks_staged: &mut self.ticks_staged,
+                pack_ms: &mut self.pack_ms,
+                last_pack_ms: &mut self.last_pack_ms,
+                staged_tick: &mut self.staged_tick,
+                clock_s: self.clock_s,
+                weather_preview: self.weather_preview.is_some(),
+                force_rain: self.force_rain,
+            },
+            &mut self.mirror,
+        )
+    }
+
+    /// **Pack beside the step** (H3, `cubarium voxel --sink gpu`): from now on the run loop
+    /// takes a snapshot after its ticks ([`Self::snapshot`]) and the snapshot is packed on
+    /// its own thread while the next tick steps ([`Self::step_beside`]). The picture then
+    /// trails the simulation by one tick, and the frame clock runs from the tick it shows
+    /// ([`Self::staged_tick`]). `pore_sweep`: [`crate::voxel::PackConfig::pore_sweep`].
+    pub fn pack_beside(&mut self, pore_sweep: u32) {
+        self.behind = Some(Box::new(Behind {
+            copier: snapshot::SnapshotCopier::new(pore_sweep),
+            snap: PackSnapshot::default(),
+            pending: false,
+        }));
+    }
+
+    /// Whether [`Self::pack_beside`] is on.
+    pub fn packs_beside(&self) -> bool {
+        self.behind.is_some()
+    }
+
+    /// Copy what the pack reads of the world now (a tick not packed yet is replaced, its
+    /// pore windows kept). Returns the copy's milliseconds, or `None` when
+    /// [`Self::pack_beside`] is off.
+    pub fn snapshot(&mut self, world: &World, flora: &Flora, fauna: &Fauna) -> Option<f64> {
+        let b = self.behind.as_mut()?;
+        b.copier.fill(&world.view(), flora.view(), fauna.view(), &mut b.snap);
+        b.pending = true;
+        Some(b.snap.copy_ms())
+    }
+
+    /// Whether a snapshot waits to be packed.
+    pub fn snapshot_pending(&self) -> bool {
+        self.behind.as_ref().is_some_and(|b| b.pending)
+    }
+
+    /// Run `step` (the next tick) on this thread while the waiting snapshot, if any, is packed
+    /// on another. A refused pack leaves the snapshot waiting.
+    pub fn step_beside<R>(&mut self, step: impl FnOnce() -> R) -> R {
+        let Some(mut b) = self.behind.take().filter(|b| b.pending) else { return step() };
+        let (staged, r) = self.stage_snapshot_beside(&mut b.snap, step);
+        b.pending = !staged;
+        self.behind = Some(b);
+        r
+    }
+
+    /// Pack the waiting snapshot here and now (no tick is coming to pack it beside: the run
+    /// is paused). False when it was refused, or none waits.
+    pub fn stage_snapshot_now(&mut self) -> bool {
+        let Some(mut b) = self.behind.take() else { return false };
+        let staged = b.pending && self.stage_snapshot(&mut b.snap);
+        if staged {
+            b.pending = false;
         }
-        if self.weather_preview.is_none() {
-            let mut w = view.weather;
-            if self.force_rain && w.mode == cubarium_voxel::weather::RainMode::Clear {
-                w.mode = cubarium_voxel::weather::RainMode::Shower;
-                w.rain_m_per_s = cubarium_gpu::weather::R0;
-            }
-            let tops = &self.tops.1;
-            self.renderer.set_weather(super::weather::weather_of(&w, |x, z| {
-                super::weather::top_of(tops, p.width, x, z)
-            }));
-        }
-        self.renderer.set_water_visible(self.packer.wet);
-        self.ticks_staged += 1;
-        self.pack_ms += (Instant::now() - started).as_secs_f64() * 1e3;
-        true
+        self.behind = Some(b);
+        staged
+    }
+
+    /// The tick of the world last staged, if any: what the frame clock should run from
+    /// when the pack trails the simulation ([`VoxelGpuSink::stage_snapshot_beside`]).
+    pub fn staged_tick(&self) -> Option<u64> {
+        self.staged_tick
+    }
+
+    /// Milliseconds the last pack took (refused or not), and its phases on the thread it
+    /// ran on (`pack-profile`; a pack run beside the step, [`Self::stage_snapshot_beside`]).
+    pub fn last_pack(&self) -> (f64, &[(&'static str, f64)]) {
+        (self.last_pack_ms, &self.last_phases)
     }
 
     /// The frame's time: the sim's `tick` plus the `fraction` of the next tick elapsed.
@@ -671,13 +742,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
     }
 
     fn restore_sky(&mut self) -> Result<()> {
-        if let Some((sky, horizon)) = self.founding_sky.take() {
-            let mut params = self.renderer.params();
-            params.sky = sky;
-            params.sky_horizon = horizon;
-            self.renderer.set_params(params)?;
-        }
-        Ok(())
+        restore_sky(&mut self.founding_sky, &mut self.renderer)
     }
 
 
@@ -925,6 +990,148 @@ impl<T: SinkTarget> Drop for VoxelGpuSink<T> {
     }
 }
 
+/// Take `snap` into `mirror` and pack it.
+fn stage_snapshot_with(stager: Stager<'_>, mirror: &mut Mirror, snap: &mut PackSnapshot) -> bool {
+    mirror.apply(snap);
+    let staged = {
+        let (view, flora, fauna) = mirror.views(snap);
+        stager.stage(&view, flora, fauna, mirror.hint(snap))
+    };
+    if staged {
+        mirror.packed();
+    }
+    staged
+}
+
+/// Put the sky back where the palette had it, after the founding pulse.
+fn restore_sky(founding_sky: &mut Option<([f32; 3], [f32; 3])>, renderer: &mut VoxelRenderer) -> Result<()> {
+    if let Some((sky, horizon)) = founding_sky.take() {
+        let mut params = renderer.params();
+        params.sky = sky;
+        params.sky_horizon = horizon;
+        renderer.set_params(params)?;
+    }
+    Ok(())
+}
+
+/// What a pack writes of a [`VoxelGpuSink`]: every part but the target, borrowed, so the
+/// pack can run on another thread ([`VoxelGpuSink::stage_snapshot_beside`]).
+struct Stager<'a> {
+    renderer: &'a mut VoxelRenderer,
+    packer: &'a mut Packer,
+    sunvis: &'a mut Option<SunVisDriver>,
+    figure_track: &'a mut Option<FigureTrack>,
+    tops: &'a mut (Option<u64>, Vec<u16>),
+    founding_sky: &'a mut Option<([f32; 3], [f32; 3])>,
+    awaiting_light: &'a mut bool,
+    figure_tick: &'a mut Option<u64>,
+    packs_skipped: &'a mut u64,
+    ticks_staged: &'a mut u64,
+    pack_ms: &'a mut f64,
+    last_pack_ms: &'a mut f64,
+    staged_tick: &'a mut Option<u64>,
+    clock_s: f64,
+    weather_preview: bool,
+    force_rain: bool,
+}
+
+impl Stager<'_> {
+    /// [`VoxelGpuSink::stage_world`]'s pack: see there.
+    fn stage(self, view: &VoxelView<'_>, flora: FloraView<'_>, fauna: FaunaView<'_>, hint: Hint<'_>) -> bool {
+        let started = Instant::now();
+        let done = |pack_ms: &mut f64, last: &mut f64| {
+            let ms = (Instant::now() - started).as_secs_f64() * 1e3;
+            *pack_ms += ms;
+            *last = ms;
+        };
+        if !self.renderer.can_stage() {
+            *self.packs_skipped += 1;
+            *self.last_pack_ms = 0.0;
+            return false;
+        }
+        super::pack_timer::start();
+        let p = self.renderer.params();
+        // The candles' light at the frame clock's time (the tick's, before a clock is set).
+        let candle_s = if self.clock_s > 0.0 {
+            self.clock_s
+        } else {
+            view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
+        };
+        let slow = self.packer.prepare(view, flora, fauna, candle_s);
+        if let Some(sv) = self.sunvis.as_mut() {
+            let packer = &*self.packer;
+            let snapshot = || {
+                let canopy = packer.light.as_ref().map(|l| &l.canopy);
+                Snapshot::of(view, &packer.stands, &packer.animals, canopy)
+            };
+            sv.after_pack(self.clock_s, p.sun, snapshot, self.renderer);
+        }
+        if *self.awaiting_light {
+            let pending = self.packer.light_pending() || self.sunvis.as_ref().is_some_and(|s| s.pending());
+            if pending {
+                done(self.pack_ms, self.last_pack_ms);
+                return false;
+            }
+            *self.awaiting_light = false;
+            if let Err(e) = restore_sky(self.founding_sky, self.renderer) {
+                eprintln!("cubarium voxel: restoring the sky after founding: {e:#}");
+            }
+        }
+        if let Some(track) = self.figure_track.as_mut() {
+            let (first, cells) = self.packer.figure_models.pending();
+            if !cells.is_empty() {
+                if !self.renderer.put_figure_models(first, cells) {
+                    eprintln!("cubarium voxel: the model pass is full; new animal models are not drawn");
+                }
+                self.packer.figure_models.uploaded();
+            }
+            track.push(view.tick, &self.packer.figure_specs, self.clock_s);
+            // The flat tier moves its figures at the next tick's clock.
+            *self.figure_tick = None;
+        }
+        let packer = &mut *self.packer;
+        lap!("sunvis");
+        self.renderer.stage(slow, |out| {
+            packer.fill_with(view, p.width, p.height, p.depth, out, hint)
+        });
+        lap!("stage");
+        let atmosphere = if p.sky_gradient && view.atmosphere_m3 > 0.0 {
+            (view.atmosphere_m3 as f32 / 1.5).clamp(0.1, 1.0)
+        } else {
+            0.0
+        };
+        // A weather preview draws its own weather, not the world's shower.
+        let raining = view.is_raining() && !self.weather_preview;
+        let rain_tick = if p.sky_gradient && (raining || self.force_rain) {
+            view.tick as f32
+        } else {
+            0.0
+        };
+        self.renderer.update_weather(atmosphere, rain_tick);
+        if self.tops.0 != Some(view.terrain_version) {
+            let (tops, floor) = super::weather::column_tops(view);
+            *self.tops = (Some(view.terrain_version), tops);
+            self.renderer.set_fog_floor(floor);
+        }
+        if !self.weather_preview {
+            let mut w = view.weather;
+            if self.force_rain && w.mode == cubarium_voxel::weather::RainMode::Clear {
+                w.mode = cubarium_voxel::weather::RainMode::Shower;
+                w.rain_m_per_s = cubarium_gpu::weather::R0;
+            }
+            let tops = &self.tops.1;
+            self.renderer.set_weather(super::weather::weather_of(&w, |x, z| {
+                super::weather::top_of(tops, p.width, x, z)
+            }));
+        }
+        self.renderer.set_water_visible(self.packer.wet);
+        *self.ticks_staged += 1;
+        *self.staged_tick = Some(view.tick);
+        done(self.pack_ms, self.last_pack_ms);
+        true
+    }
+}
+
 /// One tick's world as texels: the stage loop, and what it keeps between ticks.
 ///
 /// **The full pack.** Every voxel once, in the world's own order, for material and water;
@@ -1034,6 +1241,8 @@ struct Delta {
     /// pore byte each of their cells was packed with.
     porous: Vec<(u32, u32, u32)>,
     pore: Vec<u8>,
+    /// Where each porous run's bytes start in `pore`.
+    porous_at: Vec<u32>,
     /// Last tick's animal cells, texture order.
     animals: Vec<u32>,
     /// This tick's cells to compose, and a bit per texel so each is listed once.
@@ -1055,6 +1264,38 @@ impl Delta {
         if self.dirty_bits[w] & b == 0 {
             self.dirty_bits[w] |= b;
             self.dirty.push(i);
+        }
+    }
+
+    /// Compare porous run `j`'s cells `lo..hi` (world indices, inside the run) against the
+    /// bytes they were packed with, and mark every texel whose byte moved.
+    fn pore_run(&mut self, pore: &[f64], j: usize, lo: usize, hi: usize) {
+        let (src, dst, _) = self.porous[j];
+        let (src, dst) = (src as usize, dst as usize);
+        let k = self.porous_at[j] as usize;
+        let mut run = [0u8; 512];
+        let mut at = lo;
+        while at < hi {
+            let n = (hi - at).min(run.len());
+            for (b, &p) in run[..n].iter_mut().zip(&pore[at..at + n]) {
+                *b = pore_byte(p);
+            }
+            let off = at - src;
+            let held = &mut self.pore[k + off..k + off + n];
+            if held != &run[..n] {
+                for j in 0..n {
+                    if held[j] != run[j] {
+                        held[j] = run[j];
+                        let i = (dst + off + j) as u32;
+                        let (wd, bit) = ((i / 64) as usize, 1u64 << (i % 64));
+                        if self.dirty_bits[wd] & bit == 0 {
+                            self.dirty_bits[wd] |= bit;
+                            self.dirty.push(i);
+                        }
+                    }
+                }
+            }
+            at += n;
         }
     }
 
@@ -1750,9 +1991,15 @@ impl Packer {
 
     /// Write the prepared tick into `out`.
     fn fill(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>) {
+        self.fill_with(view, w, h, d, out, Hint::default());
+    }
+
+    /// [`Packer::fill`] of a snapshot's views ([`snapshot`]): `hint` names the wet set the
+    /// view itself cannot give, and the only pore ranges that can have moved.
+    fn fill_with(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, out: VoxelStaging<'_>, hint: Hint<'_>) {
         self.keys_tick += 1;
         if self.incremental && !self.delta.full {
-            self.fill_delta(view, w, h, d);
+            self.fill_delta(view, w, h, d, hint);
             for &(i, _, _) in &self.delta.changed {
                 let i = i as usize;
                 let (x, y, z) = (i % w as usize, (i / w as usize) % h as usize, i / (w as usize * h as usize));
@@ -1855,6 +2102,7 @@ impl Packer {
             .extend(delta.master.iter().enumerate().filter(|(_, t)| t.0[1] != 0).map(|(i, _)| i as u32));
         self.wet = !delta.wet.is_empty();
         delta.porous.clear();
+        delta.porous_at.clear();
         delta.pore.clear();
         for y in 0..hu {
             for z in 0..du {
@@ -1868,6 +2116,7 @@ impl Packer {
                         }
                         let dst = (z * hu + y) * wu + start;
                         delta.porous.push(((row + start) as u32, dst as u32, (x - start) as u32));
+                        delta.porous_at.push(delta.pore.len() as u32);
                         delta.pore.extend((start..x).map(|x| pore_byte(view.pore[row + x])));
                     } else {
                         x += 1;
@@ -1881,7 +2130,7 @@ impl Packer {
 
     /// The change-only pack: compose the cells something may have changed in, and mark
     /// the brick of every texel that did.
-    fn fill_delta(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32) {
+    fn fill_delta(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32, hint: Hint<'_>) {
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
         let mats = &view.config.materials;
         let tex = |src: usize| {
@@ -1900,7 +2149,14 @@ impl Packer {
         // Free water: the cells that hold it now and the cells that held it.
         let wet = std::mem::take(&mut delta.wet);
         let mut cells = std::mem::take(&mut delta.wet_cells);
-        let trusted = view.wet_cells(&mut cells);
+        let trusted = match hint.wet {
+            Some(wet) => {
+                cells.clear();
+                cells.extend_from_slice(wet);
+                true
+            }
+            None => view.wet_cells(&mut cells),
+        };
         if trusted {
             for &src in &cells {
                 let i = tex(src);
@@ -1932,33 +2188,30 @@ impl Packer {
         delta.wet_cells = cells;
         lap!("free water");
         // Pore water: the porous runs against the bytes they were packed with, a run's bytes
-        // worked out together and compared whole first.
-        let mut k = 0;
-        let mut run = [0u8; 512];
-        for &(src, dst, len) in &delta.porous {
-            let (src, dst, len) = (src as usize, dst as usize, len as usize);
-            for at in (0..len).step_by(run.len()) {
-                let n = (len - at).min(run.len());
-                for (b, &p) in run[..n].iter_mut().zip(&view.pore[src + at..src + at + n]) {
-                    *b = pore_byte(p);
+        // worked out together and compared whole first. A snapshot's pack compares only the
+        // ranges its sweep moved ([`snapshot`]).
+        match hint.pore {
+            None => {
+                for j in 0..delta.porous.len() {
+                    let (src, _, len) = delta.porous[j];
+                    delta.pore_run(view.pore, j, src as usize, src as usize + len as usize);
                 }
-                let held = &mut delta.pore[k + at..k + at + n];
-                if held == &run[..n] {
-                    continue;
-                }
-                for j in 0..n {
-                    if held[j] != run[j] {
-                        held[j] = run[j];
-                        let i = (dst + at + j) as u32;
-                        let (wd, bit) = ((i / 64) as usize, 1u64 << (i % 64));
-                        if delta.dirty_bits[wd] & bit == 0 {
-                            delta.dirty_bits[wd] |= bit;
-                            delta.dirty.push(i);
+            }
+            Some(ranges) => {
+                for &(start, len) in ranges {
+                    let end = start + len;
+                    // The first run that ends past `start`: runs are in world order.
+                    let first = delta.porous.partition_point(|&(src, _, l)| (src + l) as usize <= start);
+                    for j in first..delta.porous.len() {
+                        let (src, _, l) = delta.porous[j];
+                        let (src, l) = (src as usize, l as usize);
+                        if src >= end {
+                            break;
                         }
+                        delta.pore_run(view.pore, j, src.max(start), (src + l).min(end));
                     }
                 }
             }
-            k += len;
         }
         lap!("pore water");
         // The stands' dirty cells and their neighbours along x, whose silhouette glyph
@@ -3338,5 +3591,158 @@ mod tests {
             .unwrap_or_else(|e| panic!("after slots freed: {e}"));
         o.tick(&world.view(), both.view(), none.view(), 0.0, Frame::Now)
             .unwrap_or_else(|e| panic!("a tick later: {e}"));
+    }
+
+    // ---- H3: a pack of a snapshot against a pack of the live world ----
+
+    /// One packer's side of the comparison: its buffer, owed bricks and carry.
+    struct Side {
+        packer: Packer,
+        planes: Planes,
+        owed: BrickOwed,
+        carried: Carried,
+    }
+
+    impl Side {
+        fn new(c: &Config, models: Option<Arc<ModelLibrary>>, figures: bool) -> Side {
+            let cfg = VoxelConfig {
+                sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
+                ..VoxelConfig::default()
+            };
+            let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, c).unwrap();
+            let params = params_of(&cfg, proj, true);
+            let mut packer = Packer::new(&params, models, false, SpeciesFaces::default(), Emission::OFF);
+            packer.figures = figures;
+            Side {
+                packer,
+                planes: Planes::junk(&params),
+                owed: BrickOwed::new(c.width, c.height, c.depth),
+                carried: Carried::default(),
+            }
+        }
+
+        fn pack(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, fauna: FaunaView<'_>, hint: Hint<'_>) {
+            let c = view.config;
+            self.packer.prepare(view, flora, fauna, 0.0);
+            let mut key = 0;
+            let out = self.planes.staging([true; SLOW_PLANES], &mut self.owed, &mut self.carried, &mut key);
+            self.packer.fill_with(view, c.width, c.height, c.depth, out, hint);
+        }
+    }
+
+    /// Every texel of `a` and `b` as the shader resolves it; `water_only` compares only
+    /// the free-water byte (a sweep's pore water may trail).
+    fn same_texels(a: &Packer, b: &Packer, what: &str, water_only: bool) {
+        for i in 0..a.master().len() {
+            if water_only {
+                assert_eq!(a.master()[i].0[1], b.master()[i].0[1], "{what}: texel {i}'s free water");
+            } else {
+                assert_eq!(a.resolved(i), b.resolved(i), "{what}: texel {i}");
+            }
+        }
+    }
+
+    /// The scripted world, packed live by one packer and through snapshots (copied, taken
+    /// into a mirror, packed from its views) by another: with the sweep at 1 the two draw
+    /// the same texels after every tick; with a longer sweep the free water still agrees
+    /// every tick, and once the sweep has gone round with the world standing still,
+    /// everything does.
+    fn snapshot_against_live(sweep: u32, models: bool, figures: bool) {
+        let c = config();
+        let lib = models.then(|| super::tests::models(&c));
+        let (mut live, mut snapped) = (Side::new(&c, lib.clone(), figures), Side::new(&c, lib, figures));
+        let mut copier = snapshot::SnapshotCopier::new(sweep);
+        let mut mirror = Mirror::default();
+        let mut snap = PackSnapshot::default();
+        let mut world = world(&c);
+        let mut plants = flora(&world, &[(1, 1, Species::Umbrellafrond, 1.0), (26, 3, Species::Umbrellafrond, 0.4)]);
+        let mut beast = grazer(&world, 3, 1);
+        let v = c.voxel_volume();
+        let mut pack_both = |world: &World, plants: &Flora, beast: &Fauna, what: &str, water_only: bool| {
+            live.pack(&world.view(), plants.view(), beast.view(), Hint::default());
+            copier.fill(&world.view(), plants.view(), beast.view(), &mut snap);
+            mirror.apply(&mut snap);
+            {
+                let (view, flora, fauna) = mirror.views(&snap);
+                snapped.pack(&view, flora, fauna, mirror.hint(&snap));
+            }
+            mirror.packed();
+            same_texels(&live.packer, &snapped.packer, what, water_only);
+        };
+        for t in 0..48u32 {
+            match t {
+                6 => seed(&mut plants, &world, 14, 2, Species::Bloomcrown, 0.6),
+                20 => {
+                    for x in 0..4 {
+                        set(&mut world, x, 11, 2, Material::Rock);
+                    }
+                }
+                30 => assert!(plants.apply(&world, FloraCommand::Clear { x: 1, z: 1 })),
+                _ => {}
+            }
+            if (8..30).contains(&t) {
+                for x in [2i64, 10, 16] {
+                    world.apply(Command::AddWater { x, y: 12, z: t % c.depth, volume_m3: v * 0.3 });
+                }
+            }
+            world.step_with(1);
+            plants.step(&mut world);
+            beast = grazer(&world, 3 + i64::from(t / 2), 1);
+            let what = format!("sweep {sweep}, tick {t}");
+            pack_both(&world, &plants, &beast, &what, sweep > 1);
+        }
+        // The world stands still while the sweep goes round once more.
+        for k in 0..sweep {
+            pack_both(&world, &plants, &beast, &format!("sweep {sweep}, standing {k}"), k + 1 < sweep);
+        }
+    }
+
+    #[test]
+    fn a_pack_of_a_snapshot_draws_what_a_pack_of_the_world_draws() {
+        snapshot_against_live(1, false, false);
+    }
+
+    #[test]
+    fn a_pack_of_a_snapshot_draws_what_a_pack_of_the_world_draws_with_stamped_models() {
+        snapshot_against_live(1, true, false);
+    }
+
+    #[test]
+    fn a_pack_of_a_snapshot_draws_what_a_pack_of_the_world_draws_with_model_figures() {
+        snapshot_against_live(1, true, true);
+    }
+
+    #[test]
+    fn a_swept_snapshot_keeps_free_water_current_and_catches_up_on_pore_water() {
+        snapshot_against_live(4, false, false);
+        snapshot_against_live(7, true, false);
+    }
+
+    /// A snapshot filled again before any mirror took it in keeps the pore windows it
+    /// carried: none of the grid is skipped.
+    #[test]
+    fn a_snapshot_refilled_before_it_is_taken_loses_no_pore_window() {
+        let c = config();
+        let world = world(&c);
+        let (plants, beast) = (Flora::new(FloraConfig::default()), Fauna::new(FaunaConfig::default()));
+        let mut copier = snapshot::SnapshotCopier::new(5);
+        let mut snap = PackSnapshot::default();
+        let mut mirror = Mirror::default();
+        // The first fill is whole; take it in.
+        copier.fill(&world.view(), plants.view(), beast.view(), &mut snap);
+        mirror.apply(&mut snap);
+        mirror.packed();
+        // Five fills, only the last taken in: the windows of all five arrive.
+        for _ in 0..5 {
+            copier.fill(&world.view(), plants.view(), beast.view(), &mut snap);
+        }
+        mirror.apply(&mut snap);
+        let owed = mirror.hint(&snap).pore.expect("windows, not the whole grid").to_vec();
+        let n = world.view().pore.len();
+        let mut seen = vec![false; n];
+        for (start, len) in owed {
+            seen[start..start + len].iter_mut().for_each(|s| *s = true);
+        }
+        assert!(seen.iter().all(|&s| s), "five windows of a five-tick sweep cover the grid");
     }
 }
