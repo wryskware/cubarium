@@ -13,15 +13,20 @@
 //!   scent never crosses solid rock, and the floor under a roof is not the roof.
 //! - **The update**, every [`crate::senses::UPDATE_TICKS`] ticks (0.5 s): each standing body
 //!   lays [`crate::ScentConfig::deposit_per_s`] × its organic matter × 0.5 s on its node;
-//!   each face's carrion [`crate::ScentConfig::carrion_per_s`] × its stock; each flower holding
-//!   nectar [`crate::ScentConfig::nectar_per_s`] on the surface under it (S3); every node decays
+//!   each face's carrion [`crate::ScentConfig::carrion_per_s`] × its stock; every node decays
 //!   with [`crate::ScentConfig::half_life_s`]; then a conservative mix with its neighbours,
 //!   [`crate::ScentConfig::diffuse_fraction`] of the difference shared over
 //!   `max(degree, 4)`; levels under [`crate::ScentConfig::threshold`] are dropped.
 //! - **The receptor** reads its node's level and the gradient to its neighbours, per metre
-//!   in the ring's `x` and `z` ([`ScentReading`]). A body off the ground reads nothing,
-//!   except a flyer's nectar smell (S3, [`ScentField::read_below`]), read on the surface
-//!   under it.
+//!   in the ring's `x` and `z` ([`ScentReading`]). A body off the ground reads nothing.
+//! - **Nectar is a plume in the air** (NECTAR-SCENT, [`nectar_plume`]), not a deposit: a
+//!   flower gives off its scent at its bloom, so a flyer smells it by 3D distance from the
+//!   flower head — strongest at the flower, at the flower's height — not from the soil
+//!   under the plant. Its kernel is this field's own steady state around one source on
+//!   open ground ([`plume_kernel`]), so it reaches as far as a ground scent of the same
+//!   strength; a source counts only on a clear line through the air. No wind (the world
+//!   has none). Until 2026-10-08 nectar was laid on the face graph at the plant's rooting
+//!   face, and bellwings led by it circled the roots a metre off the flower.
 //!
 //! **Cost**: the nodes are few (a 0.5 m cell holds 16 columns at 0.125 m), every node is
 //! worked each update, four channels: about `4 × nodes × degree` adds per half second. The
@@ -52,8 +57,8 @@ pub enum ScentChannel {
     Hunter,
     /// Carrion on the ground.
     Carrion,
-    /// **Nectar** (S3): the flowers holding nectar, laid on the surface under each; the
-    /// bellwing's floral smell.
+    /// **Nectar** (S3): the bellwing's floral smell. Never laid on the field: it is a plume
+    /// in the air around each flower ([`nectar_plume`], NECTAR-SCENT); the slot stays empty.
     Nectar,
 }
 
@@ -350,26 +355,9 @@ impl ScentField {
                     }
                 }
             } else if ch == ScentChannel::Nectar {
-                if s.nectar_per_s > 0.0 {
-                    for (x, y, z) in flower_faces(view, fv) {
-                        if let Some(n) = graph.node(x, y, z) {
-                            self.emit[n as usize] += s.nectar_per_s * dt;
-                            any = true;
-                        }
-                    }
-                }
-                // BELLWING: a lit lure that mimics a flower's scent lays `lure_scent` × a
-                // flower's on the face its lanternjaw stands on (× its lit fraction).
-                let ls = config.light.lure_scent;
-                if s.nectar_per_s > 0.0 && ls > 0.0 {
-                    for a in animals.iter().filter(|a| a.state != crate::State::Asleep && a.attached.is_none() && a.founder_state.lure > 0.0) {
-                        let Some((x, y, z)) = standing_face(a) else { continue };
-                        if let Some(n) = graph.node(x, y, z) {
-                            self.emit[n as usize] += s.nectar_per_s * ls * a.founder_state.lure.clamp(0.0, 1.0) * dt;
-                            any = true;
-                        }
-                    }
-                }
+                // NECTAR-SCENT: nectar is not laid on the ground; a flower's scent is a plume
+                // in the air around its bloom ([`nectar_plume`]).
+                continue;
             } else if s.deposit_per_s > 0.0 {
                 for a in animals {
                     let laid = a.founder.and_then(|fd| config.founder(fd).senses.scent);
@@ -454,16 +442,6 @@ impl ScentField {
         }
     }
 
-    /// **A flyer's smell** (S3): the reading on the support face under its body's centre
-    /// column (`y_m` its base), every channel; nothing over no support.
-    pub(crate) fn read_below(&self, view: &VoxelView<'_>, x: f64, z: f64, y_m: f64) -> [ScentReading; ScentChannel::COUNT] {
-        let mut out = [ScentReading::default(); ScentChannel::COUNT];
-        if let Some(s) = crate::flight::support_below(view, x, z, y_m) {
-            self.read_face(view, i64::from(s.x), s.y, s.z, &mut out);
-        }
-        out
-    }
-
     /// The level of `ch` on the face `(x, y, z)` (0 off the field).
     pub(crate) fn level(&self, view: &VoxelView<'_>, ch: ScentChannel, x: i64, y: u32, z: u32) -> f64 {
         let mut out = [ScentReading::default(); ScentChannel::COUNT];
@@ -472,18 +450,141 @@ impl ScentField {
     }
 }
 
-/// The support faces the flowers holding nectar lay their scent on: a bloomcrown's own site
-/// (its rooting face), and for a latticevine face in flower the surface under the voxel in
-/// front of it.
-pub(crate) fn flower_faces(view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<(i64, u32, u32)> {
+/// **The nectar plume** (NECTAR-SCENT) where a flyer smells it: the level, its gradient per
+/// metre in the ring's `x`, the height `y` and `z` (it rises toward the bloom), and the
+/// source that gives the most of it, `(x, y, z)` metres.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Plume {
+    pub level: f64,
+    pub gx: f64,
+    pub gy: f64,
+    pub gz: f64,
+    pub source: Option<(f64, f64, f64)>,
+}
+
+/// The modified Bessel function `K₀(x)`, `x > 0` (Abramowitz and Stegun 9.8.1, 9.8.5,
+/// 9.8.6; error under 1e-7): the field's steady state around one source in the plane.
+fn bessel_k0(x: f64) -> f64 {
+    if x <= 2.0 {
+        let t = (x / 3.75) * (x / 3.75);
+        let i0 = 1.0 + t * (3.5156229 + t * (3.0899424 + t * (1.2067492 + t * (0.2659732 + t * (0.0360768 + t * 0.0045813)))));
+        let u = 0.25 * x * x;
+        -(0.5 * x).ln() * i0
+            + (-0.57721566 + u * (0.42278420 + u * (0.23069756 + u * (0.03488590 + u * (0.00262698 + u * (0.00010750 + u * 0.0000074))))))
+    } else {
+        let u = 2.0 / x;
+        (-x).exp() / x.sqrt()
+            * (1.25331414 + u * (-0.07832358 + u * (0.02189568 + u * (-0.01062446 + u * (0.00587872 + u * (-0.00251540 + u * 0.00053208))))))
+    }
+}
+
+/// **The plume's kernel** (NECTAR-SCENT): the scent field's own steady state around one
+/// source of unit rate on open flat ground, `amp · K₀(r / L)`, taken by 3D distance `r` from
+/// the source. From the field's knobs and nothing else: the spread is
+/// `D = diffuse_fraction · cell² / (4 · UPDATE_S)` m²/s (the update's mix over four
+/// neighbours), the decay `ln 2 / half_life_s`, so `L = √(D · half_life_s / ln 2)` and
+/// `amp = cell² / (2π D)`. A flower's smell therefore reaches as far through the air as a
+/// body's of the same strength does over open ground. `None` when nothing spreads or lasts.
+pub(crate) fn plume_kernel(config: &FaunaConfig, voxel_m: f64) -> Option<(f64, f64)> {
+    let s = config.scent;
+    let (block, _) = grid_knobs(config, voxel_m);
+    let cell = f64::from(block) * voxel_m;
+    let f = if s.diffuse_fraction.is_finite() { s.diffuse_fraction.clamp(0.0, 1.0) } else { 0.0 };
+    let d = f * cell * cell / (4.0 * crate::senses::UPDATE_S);
+    if !(d > 0.0) || !(s.half_life_s > 0.0) || !s.half_life_s.is_finite() {
+        return None;
+    }
+    let l = (d * s.half_life_s / std::f64::consts::LN_2).sqrt();
+    Some((cell * cell / (std::f64::consts::TAU * d), l))
+}
+
+/// The point sources of nectar scent and their rates, scent units a second: every flower
+/// holding nectar at its bloom — a bloomcrown's flower head (the top of its top foliage
+/// layer, over its site), a latticevine face in flower (the voxel in front of it) — and every
+/// lit lure but `except`'s (a lanternjaw does not smell its own) at its lure point, by `lure_scent` × its lit fraction (the light
+/// layer's beacons and lures: the same flowers the eye sees).
+pub(crate) fn nectar_sources(fauna: &crate::Fauna, view: &VoxelView<'_>, except: Option<u64>) -> Vec<((f64, f64, f64), f64)> {
+    let s = fauna.config.scent;
+    if !(s.nectar_per_s > 0.0) {
+        return Vec::new();
+    }
+    let ls = fauna.config.light.lure_scent;
+    let flowers = fauna.beacons.list().iter().filter(|b| b.kind == crate::light::BeaconKind::Flower).map(|b| ((b.x, b.y_m, b.z), s.nectar_per_s));
+    let lures = crate::light::lures(fauna, view)
+        .into_iter()
+        .filter(|b| Some(b.body) != except && ls > 0.0 && b.power > 0.0)
+        .map(|b| ((b.x, b.y_m, b.z), s.nectar_per_s * ls * b.power.clamp(0.0, 1.0)));
+    flowers.chain(lures).collect()
+}
+
+/// At most this many sources, strongest first, are tested for a clear line and summed per
+/// reading (a cost bound, not ecology, as the light layer's `MAX_LIGHT_RAYS`): the plume falls
+/// off steeply, so the nearest flowers make the reading.
+const MAX_PLUME_RAYS: usize = 6;
+
+/// **A flyer's nectar smell** (NECTAR-SCENT): the plume at the point `p` (metres), summed
+/// over `sources` ([`nectar_sources`]) by the [`plume_kernel`] of each one's 3D distance,
+/// each only on a clear line through the air (no rock, no edge, no water between: scent
+/// never crosses solid rock). Nearer than one voxel a source reads as at one voxel, with no
+/// gradient (the smeller is at the bloom). Sources under the field's `threshold` are
+/// dropped, and when the sum before the line tests is under `floor` nothing is smelled (a
+/// cost bound: occlusion only lowers it); of the rest, the [`MAX_PLUME_RAYS`] strongest are
+/// read.
+pub(crate) fn nectar_plume(
+    view: &VoxelView<'_>,
+    config: &FaunaConfig,
+    sources: &[((f64, f64, f64), f64)],
+    p: (f64, f64, f64),
+    observer: u64,
+    floor: f64,
+) -> Plume {
     let v = view.config.voxel_m;
-    let mut out: Vec<(i64, u32, u32)> =
-        fv.stands.iter().filter(|st| st.nectar > 0.0).map(|st| (i64::from(st.site.x), st.site.y, st.site.z)).collect();
-    for f in fv.cover.flowers() {
-        let Some((x, y, z)) = f.face.front(view) else { continue };
-        let (cx, cz) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v);
-        if let Some(s) = crate::flight::support_below(view, cx, cz, (f64::from(y) + 1.0) * v) {
-            out.push((i64::from(s.x), s.y, s.z));
+    let ring = f64::from(view.config.width) * v;
+    let Some((amp, l)) = plume_kernel(config, v) else { return Plume::default() };
+    let threshold = config.scent.threshold.max(0.0);
+    let mut near: Vec<(f64, f64, (f64, f64, f64), (f64, f64, f64))> = Vec::new();
+    let mut total = 0.0;
+    for &(src, q) in sources {
+        let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, src.0, src.2, ring);
+        let dy = src.1 - p.1;
+        let r = (dx * dx + dy * dy + dz * dz).sqrt();
+        let x = r.max(v) / l;
+        let level = q * amp * bessel_k0(x);
+        if !(level > threshold) {
+            continue;
+        }
+        total += level;
+        near.push((level, r, (dx, dy, dz), src));
+    }
+    if total < floor || near.is_empty() {
+        return Plume::default();
+    }
+    near.sort_by(|a, b| b.0.total_cmp(&a.0));
+    near.truncate(MAX_PLUME_RAYS);
+    let mut out = Plume::default();
+    let mut best = 0.0;
+    for (level, r, (dx, dy, dz), src) in near {
+        let clear = r <= v || {
+            let dir = (dx / r, dy / r, dz / r);
+            crate::senses::ray_first_hit(view, &crate::perception::TerrainOnly, observer, p, dir, r).is_none_or(|(h, _)| h >= r - v)
+        };
+        if !clear {
+            continue;
+        }
+        out.level += level;
+        if r > v {
+            // d level / dr = q · amp · K₀'(r / L) / L < 0, so the gradient points from `p` to
+            // the source: its size along the unit vector toward it.
+            let x = r / l;
+            let e = 1e-6 * x.max(1.0);
+            let slope = level / bessel_k0(x) * (bessel_k0((x - e).max(1e-12)) - bessel_k0(x + e)) / (2.0 * e) / l;
+            out.gx += slope * dx / r;
+            out.gy += slope * dy / r;
+            out.gz += slope * dz / r;
+        }
+        if level > best {
+            best = level;
+            out.source = Some(src);
         }
     }
     out
