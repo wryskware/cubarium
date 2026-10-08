@@ -319,6 +319,7 @@ pub(crate) fn rows() -> Vec<Row> {
         .f("roll_wavelength_m", "m", p, (1.0, 8.0), "wavelength of the roll")
         .f("hardness", "0..1", f, (0.3, 0.9), "hardness of the massif's rock for erosion")
         .f("slab_m", "m", n, (0.25, 1.5), "thickness of the rock left over a hall")
+        .f("ring_m", "m", n, (0.0, 128.0), "ring length the per-ring counts, lake length and spire spacing are written for (0: as written)")
         .f("shelves.*", "shelves", at_least_0, (0.0, 5.0), "how many shelves reach out toward the glass over a hall")
         .f("shelf_m.*", "m", p, (1.0, 8.0), "a shelf's length around the ring")
         .f("hall_m.*", "m", p, (1.0, 5.0), "headroom in a hall")

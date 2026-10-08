@@ -4,7 +4,7 @@
 
 Every number of the voxel world's `Config`, the plants' `FloraConfig` and the animals' `FaunaConfig`, one row per path, at the code defaults (`design/ecology-parameter-registry-2026-09-28.md`, package R1). Set them in a config TOML's `[world]` / `[flora]` / `[fauna]` tables or with `--set PATH=VALUE`; a run writes its resolved set as `params.toml` beside its output.
 
-**`world.*`** (375 rows)
+**`world.*`** (376 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -307,6 +307,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.roll_wavelength_m` | (absent) | m | (0, inf) | 1–8 | - | placeholder | wavelength of the roll |
 | `world.landform.terrarium.hardness` | (absent) | 0..1 | [0, 1] | 0.3–0.9 | - | placeholder | hardness of the massif's rock for erosion |
 | `world.landform.terrarium.slab_m` | (absent) | m | [0, inf) | 0.25–1.5 | - | placeholder | thickness of the rock left over a hall |
+| `world.landform.terrarium.ring_m` | (absent) | m | [0, inf) | 0–128 | - | placeholder | ring length the per-ring counts, lake length and spire spacing are written for (0: as written) |
 | `world.landform.terrarium.shelves.*` | (absent) | shelves | [0, inf) | 0–5 | - | placeholder | how many shelves reach out toward the glass over a hall |
 | `world.landform.terrarium.shelf_m.*` | (absent) | m | (0, inf) | 1–8 | - | placeholder | a shelf's length around the ring |
 | `world.landform.terrarium.hall_m.*` | (absent) | m | (0, inf) | 1–5 | - | placeholder | headroom in a hall |

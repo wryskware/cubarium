@@ -118,6 +118,11 @@ pub struct Terrarium {
     pub erosion: Erosion,
     /// Thickness of the rock left over a hall.
     pub slab_m: f64,
+    /// The ring length, metres, that the per-ring counts (spires, shelves, arches), the
+    /// lake's length and the spires' spacing are written for. A longer or shorter ring
+    /// scales them by its circumference over this, so the features keep their density;
+    /// zero takes them as written whatever the ring.
+    pub ring_m: f64,
     /// How many shelves reach out toward the glass over a hall: an upper level carried
     /// forward over an open, roofed floor, seen through the glass in section.
     pub shelves: [u32; 2],
@@ -311,6 +316,7 @@ impl Terrarium {
         hardness: 0.6,
         erosion: Erosion::SMALL,
         slab_m: 0.75,
+        ring_m: 20.0,
         shelves: [2, 3],
         shelf_m: [3.0, 6.0],
         hall_m: [1.5, 2.75],
@@ -437,6 +443,7 @@ impl Terrarium {
         hardness: 0.6,
         erosion: Erosion::DEFAULT,
         slab_m: 1.0,
+        ring_m: 32.0,
         shelves: [3, 4],
         shelf_m: [4.0, 8.0],
         hall_m: [2.0, 3.5],
@@ -605,6 +612,7 @@ impl Terrarium {
             ("lake_bank_slope", self.lake_bank_slope),
             ("lake_bank_m", self.lake_bank_m),
             ("lake_end_m", self.lake_end_m),
+            ("ring_m", self.ring_m),
         ] {
             anyhow::ensure!(
                 v >= 0.0 && v.is_finite(),
@@ -870,6 +878,16 @@ impl<'a> Build<'a> {
     fn v(&self, m: f64) -> i32 {
         (m / self.c.voxel_m).round() as i32
     }
+    /// This ring's circumference over the one the preset's counts are written for.
+    fn ring_scale(&self) -> f64 {
+        if self.t.ring_m > 0.0 { self.g.w as f64 * self.c.voxel_m / self.t.ring_m } else { 1.0 }
+    }
+    /// A per-ring `[least, most]` count scaled to this ring, rounded, and drawn.
+    fn count(&mut self, r: [u32; 2]) -> usize {
+        let s = self.ring_scale();
+        let (lo, hi) = ((r[0] as f64 * s).round() as i64, (r[1] as f64 * s).round() as i64);
+        self.rng.int(lo, hi.max(lo)) as usize
+    }
     fn draw(&mut self, r: [f64; 2]) -> i32 {
         let (lo, hi) = (self.v(r[0]), self.v(r[1]));
         self.rng.int(lo as i64, hi.max(lo) as i64) as i32
@@ -1077,7 +1095,10 @@ fn layout(b: &mut Build) -> Site {
     let mut order: Vec<usize> = (0..w as usize).collect();
     order.sort_by(|&a, &c| (b.crest[a] - mid).abs().total_cmp(&(b.crest[c] - mid).abs()));
     let centre = order[b.rng.int(0, ((order.len() as f64 * t.lake_pick_share) as usize).max(1) as i64 - 1) as usize] as i64;
-    let len = b.draw(t.lake_m) as i64;
+    // One lake whatever the ring, its length scaled with the ring: one spring, one
+    // stream, one water table.
+    let ring = b.ring_scale();
+    let len = b.draw([t.lake_m[0] * ring, t.lake_m[1] * ring]) as i64;
     let half = ((len / 2) as f64).max(1.0);
     // How far its wandering outline can reach from the centre column. The yard and the
     // shelves' clearance stay measured from the drawn half-length, so the massif's plan
@@ -1096,7 +1117,7 @@ fn layout(b: &mut Build) -> Site {
 
     // Spires: the first on the seam, a second on the tallest stretch of the far half,
     // each needle standing up out of the crest near the back.
-    let count = b.rng.int(t.spires[0] as i64, t.spires[1] as i64) as usize;
+    let count = b.count(t.spires);
     let lake_off = |x: i64| (x - centre).rem_euclid(w).min((centre - x).rem_euclid(w));
     for s in 0..count {
         let r = b.draw(t.spire_radius_m) as f64;
@@ -1105,7 +1126,7 @@ fn layout(b: &mut Build) -> Site {
             lake_off(x) as f64 > t.spire_lake_clearance * (r as i64) as f64
                 && b.spires.iter().all(|sp| {
                     let o = (x as f64 + 0.5 - sp.cx).rem_euclid(w as f64);
-                    o.min(w as f64 - o) > w as f64 * t.spire_spacing_share
+                    o.min(w as f64 - o) > w as f64 * t.spire_spacing_share / ring
                 })
         };
         let cx = if s == 0 && far(0) {
@@ -1129,7 +1150,7 @@ fn layout(b: &mut Build) -> Site {
     // spread round the ring, clear of the lake and of each other. Each stands a hall and a
     // slab above the level in front of its edge.
     b.lake_x = centre;
-    let count = b.rng.int(t.shelves[0] as i64, t.shelves[1] as i64) as usize;
+    let count = b.count(t.shelves);
     let clear = len / 2 + b.v(t.shelf_lake_clear_m) as i64;
     let gap = b.v(t.shelf_gap_m) as i64;
     let mut taken = vec![(centre - clear, 2 * clear + 1)];
@@ -1377,6 +1398,22 @@ mod lowland_tests {
         halls(&mut b);
         let open = |z: i32| (2..26).flat_map(|x| (low + 1..rim).map(move |y| (x, y))).filter(|&(x, y)| !b.g.solid(x, y, z)).count();
         (open(lip), open(lip + 1))
+    }
+
+    #[test]
+    fn per_ring_counts_and_the_lake_scale_with_the_circumference() {
+        let c = config(24);
+        let circ = c.width as f64 * c.voxel_m;
+        let r = [2u32, 3];
+        for (ring_m, scale) in [(circ, 1.0), (circ / 2.0, 2.0), (circ * 2.0, 0.5), (0.0, 1.0)] {
+            let t = Terrarium { ring_m, ..shape() };
+            let mut b = Build::new(&c, &t);
+            assert_eq!(b.ring_scale(), scale);
+            let (lo, hi) = ((r[0] as f64 * scale).round() as usize, (r[1] as f64 * scale).round() as usize);
+            let drawn: Vec<usize> = (0..64).map(|_| b.count(r)).collect();
+            assert!(drawn.iter().all(|n| (lo..=hi).contains(n)), "{ring_m}: {drawn:?}");
+            assert!(drawn.contains(&lo) && drawn.contains(&hi));
+        }
     }
 
     #[test]
@@ -1762,7 +1799,7 @@ fn halls(b: &mut Build) {
 fn arches(b: &mut Build) {
     let (w, d) = (b.g.w, b.g.d);
     let t = b.t;
-    let count = b.rng.int(t.arches[0] as i64, t.arches[1] as i64) as usize;
+    let count = b.count(t.arches);
     let deck = b.v(t.arch_m).max(3);
     let window = b.v(t.arch_window_m).max(4);
     let (smin, smax) = (b.v(t.arch_span_m[0]).max(6) as i64, b.v(t.arch_span_m[1]) as i64);
