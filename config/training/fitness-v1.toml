@@ -1,0 +1,48 @@
+# All choices below are provisional pending Wrysk: training-plan-2026-10-08 §6 Q5.
+[weights]
+L = 100.0 # Required lineage/species loss; provisional pending Wrysk.
+J = 10.0 # Mean reproductive deficit; provisional pending Wrysk.
+Q = 5.0 # Cycle replenishment deficit (NA without books); provisional pending Wrysk.
+A = 2.0 # Late population band deficit; provisional pending Wrysk.
+K = 2.0 # Population peak excess; provisional pending Wrysk.
+V = 10.0 # Browser movement deficit; provisional pending Wrysk.
+Z = 2.0 # Free lanternjaw population share; provisional pending Wrysk.
+M = 3.0 # Largest meadow area deficit; provisional pending Wrysk.
+G_b = 1.0 # Largest lanternberry grove deficit; provisional pending Wrysk.
+G_v = 1.0 # New vaulttree recruitment deficit; provisional pending Wrysk.
+H = 1.0 # World-hour hunt frequency outside band; provisional pending Wrysk.
+F = 3.0 # Low-tail fullness deficit; provisional pending Wrysk.
+S = 5.0 # Observed stuck body share; provisional pending Wrysk.
+
+[population]
+k_hi = 3.0 # Upper late population band as N0 multiple; provisional pending Wrysk.
+k_peak = 5.0 # Unpenalised peak as N0 multiple; provisional pending Wrysk.
+required_animals = [] # Additional required lineage names; provisional pending Wrysk.
+required_plants = [] # Additional required species names; provisional pending Wrysk.
+slow = ["chorister", "lanternjaw"] # J reported with zero weight; lifecycle untested, provisional pending Wrysk.
+[population.references]
+# Optional lineage = N0 overrides; provisional pending Wrysk.
+
+[targets]
+moving_lineage = "frondgrazer" # Browser used for V; provisional pending Wrysk.
+moving_share = 0.30 # Awake body-time moving fraction target; provisional pending Wrysk.
+predator_lineage = "lanternjaw" # Predator share used for Z; provisional pending Wrysk.
+predator_share_lo = 0.05 # Minimum share of all animal bodies; provisional pending Wrysk.
+predator_share_hi = 0.15 # Maximum share of all animal bodies; provisional pending Wrysk.
+voxel_m = 0.125 # Metres per patch face edge; provisional pending Wrysk.
+meadow_m2 = 2.0 # Largest connected meadow area target; provisional pending Wrysk.
+grove_m2 = 0.5 # Largest connected lanternberry grove target; provisional pending Wrysk.
+vaulttree_recruits = 1.0 # New recruits over the window target; provisional pending Wrysk.
+hunt_lineages = ["chorister", "lanternjaw"] # Hunters counted by H; provisional pending Wrysk.
+hunts_per_hour_lo = 0.5 # Minimum kills per simulated world-hour; provisional pending Wrysk.
+hunts_per_hour_hi = 2.0 # Maximum kills per simulated world-hour; provisional pending Wrysk.
+fullness_p10 = 0.3 # Per-minute fullness p10 target; provisional pending Wrysk.
+
+[reproduction]
+eligible_deficit = 0.5 # J without a late birth but breeding possible; provisional pending Wrysk.
+ineligible_deficit = 1.0 # J without a late birth or eligible body; provisional pending Wrysk.
+
+[summary]
+sd_weight = 0.5 # Arm rank = mean P plus this times sample SD; provisional pending Wrysk.
+consistent_fraction = 0.75 # Same-sign paired seed fraction (6/8); provisional pending Wrysk.
+consistent_min_seeds = 8 # Minimum paired seeds before claiming consistency; provisional pending Wrysk.
