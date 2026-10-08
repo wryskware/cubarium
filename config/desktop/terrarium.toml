@@ -101,11 +101,13 @@ core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.loftstrider]
 founding_count = 2
-# The curiosity gate's ecology (the block at the end of this file).
+# Growth remains the curiosity gate's; births use the slow single-calf schedule.
+# A 120-minute world day: half a day carrying, a quarter-day surplus hold,
+# then three days refractory after each calf. Both founders can conceive.
 core.growth_max_per_s = 0.0016448517733854723
-core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.gestation_s = 329.3476097758054
-core.reproduction.surplus_hold_s = 548.9126829596756
+core.reproduction.birth_interval_s = 21600.0
+core.reproduction.gestation_s = 3600.0
+core.reproduction.surplus_hold_s = 1800.0
 
 # Roster R2b: glassfilm is seeded at founding and the ripple-snail (a water-bound film
 # grazer) is founded on it; both code defaults are off, so training worlds are unchanged.

@@ -795,7 +795,7 @@ pub fn seed_pre_rolled(
                     let size = phys.pack.map_or(0, |t| t.pack_size);
                     let before = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
                     let stores = founder_arrival(&fauna.config().founding);
-                    let _ = found_packs(world, fauna, founder, want, stores, None);
+                    let _ = found_packs(world, flora, fauna, founder, want, stores, None);
                     let after = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
                     seeded.founders[founder.index()] += after - before;
                     seeded.shortfall[founder.index()] =
@@ -1640,14 +1640,13 @@ pub fn introduce_packs(
     founder: Founder,
     n: usize,
 ) -> Result<Vec<u64>, String> {
-    let _ = flora;
     // The minimal gut: adults arrive wanting food (a stomach at `s0 K`), so a hunt shows
     // soon at the ordinary arrival stores.
     let stores = StartingStores {
         body: fauna.config().founding.arrival_body,
         reserve: fauna.config().founding.arrival_reserve,
     };
-    found_packs(world, fauna, founder, n, stores, None)
+    found_packs(world, flora, fauna, founder, n, stores, None)
 }
 
 /// [`introduce_packs`] with every pack `size` adults instead of the table's `pack_size`
@@ -1660,9 +1659,8 @@ pub fn introduce_packs_sized(
     n: usize,
     size: usize,
 ) -> Result<Vec<u64>, String> {
-    let _ = flora;
     let stores = founder_arrival(&fauna.config().founding);
-    found_packs(world, fauna, founder, n, stores, Some(size))
+    found_packs(world, flora, fauna, founder, n, stores, Some(size))
 }
 
 /// How far apart two packs' dens are founded: twice the territory radius, so neither den
@@ -1683,9 +1681,11 @@ fn den_spacing_m(t: &cubarium_voxel_fauna::Pack) -> f64 {
 /// ([`cubarium_voxel_fauna::founding_faces`], PIT: where the pack can come and go, never a
 /// covered pocket it cannot stand in). The adults are founded on the den when it is in the
 /// founding point's walking component, and otherwise on that component's face nearest the
-/// den within `den_radius_m`; a den with no such face is passed over.
+/// den itself on its range's walking component; a dry cave or hall beats an overhang,
+/// and any roof beats open ground. Terrain darkness and sky visibility break shelter ties.
 fn found_packs(
     world: &World,
+    flora: &Flora,
     fauna: &mut Fauna,
     founder: Founder,
     n: usize,
@@ -1751,74 +1751,24 @@ fn found_packs(
         let dx = dx.min(ring - dx);
         (dx * dx + (bz - az).powi(2)).sqrt()
     };
-    // Solid cells over a face in its column: (within den_cover_m, anywhere above).
-    let overhead = |s: Site| -> (bool, usize) {
-        let mut covered = false;
-        let mut count = 0usize;
-        for y in s.y + 1..view.config.height {
-            if view.material_at(i64::from(s.x), y, s.z).is_solid() {
-                count += 1;
-                if f64::from(y - s.y - 1) * v <= t.den_cover_m {
-                    covered = true;
-                }
-            }
-        }
-        (covered, count)
-    };
-    // PIT: a den goes where the pack can come and go — a dry face of the route graph's
-    // founding component (its disc clear, joined to the rest by steps it takes both ways). A
-    // covered pocket the pack could not stand in was a den its pups and its adults walking
-    // home went straight at, down slopes and channels off the graph they could not leave.
-    let all: Vec<(Site, usize)> = map
-        .faces
-        .iter()
-        .zip(&map.components)
-        .filter(|(f, _)| !wet(f) && found.contains(*f))
-        .map(|(f, c)| (*f, *c))
-        .collect();
-    // Where the pack stands for a den `d` from a founding point of component `comp`: the
-    // den itself when it is in that component, else the face of that component nearest
-    // it within `den_radius_m` (less a voxel), else nowhere.
-    let stand_for = |d: (Site, usize), comp: usize| -> Option<Site> {
-        if d.1 == comp && dry(&d.0) {
-            return Some(d.0);
-        }
-        faces
-            .iter()
-            .filter(|(f, c)| *c == comp && dist(*f, d.0) <= t.den_radius_m - v)
-            .min_by(|a, b| dist(a.0, d.0).total_cmp(&dist(b.0, d.0)))
-            .map(|(f, _)| *f)
-    };
-    // The breeder's pick near a founding point: the nearest covered face it can live by
-    // (its own component first); else the face with the most solid over it; else the
-    // point. `(den, where the pack stands, how)`.
+    // A den must itself be on the range's walking component, with a dry footprint.
+    // Rank its actual shelter, rather than roof thickness or proximity to an arbitrary
+    // founding point: a dark hall beats a bright overhang, and either beats open ground.
+    let glowcap = flora.config().species(Species::Glowcap);
+    let all: Vec<(Site, usize)> = map.faces.iter().zip(&map.components)
+        .filter(|(f, _)| dry(f) && found.contains(*f))
+        .map(|(f, c)| (*f, *c)).collect();
+    let qualities: std::collections::HashMap<Site, cubarium_voxel_fauna::DenQuality> = all.iter()
+        .map(|(s, _)| (*s, cubarium_voxel_fauna::den_quality(&view, glowcap, *s, &t))).collect();
+    let quality = |s| qualities[&s];
     let choose = |point: (Site, usize)| -> (Site, Site, DenChoice) {
-        let mut near: Vec<(bool, f64, (Site, usize))> = all
-            .iter()
-            .filter(|(f, _)| dist(*f, point.0) <= t.den_search_m)
-            .map(|&(f, c)| (c != point.1, dist(f, point.0), (f, c)))
-            .collect();
-        near.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
-        let mut most: Option<(usize, Site, Site)> = None;
-        for &(_, _, d) in &near {
-            let (covered, k) = overhead(d.0);
-            if k == 0 {
-                continue;
-            }
-            let Some(stand) = stand_for(d, point.1) else {
-                continue;
-            };
-            if covered {
-                return (d.0, stand, DenChoice::Covered);
-            }
-            if most.is_none_or(|(bk, _, _)| k > bk) {
-                most = Some((k, d.0, stand));
-            }
-        }
-        match most {
-            Some((_, den, stand)) => (den, stand, DenChoice::MostOverhead),
-            None => (point.0, point.0, DenChoice::FoundingPoint),
-        }
+        let den = all.iter()
+            .filter(|(f, c)| *c == point.1 && dist(*f, point.0) <= t.den_search_m)
+            .min_by(|a, b| quality(a.0).compare(quality(b.0))
+                .then(dist(a.0, point.0).total_cmp(&dist(b.0, point.0)))
+                .then(a.0.cmp(&b.0)))
+            .map_or(point.0, |d| d.0);
+        (den, den, quality(den).choice)
     };
     let points = strided(&faces, (16 * n).min(faces.len()));
     let mut ids = Vec::new();
@@ -1826,26 +1776,17 @@ fn found_packs(
         let dens: Vec<Site> = fauna.packs().iter().map(|p| p.den).collect();
         let spaced = |s: Site| dens.iter().all(|&d| dist(d, s) >= den_spacing_m(&t));
         let offset = (k * points.len()) / n;
-        let mut fallback: Option<(Site, Site, DenChoice)> = None;
         let mut chosen: Option<(Site, Site, DenChoice)> = None;
         for j in 0..points.len() {
             let point = points[(offset + j) % points.len()];
-            if !spaced(point.0) {
-                continue;
+            if !spaced(point.0) { continue; }
+            let candidate = choose(point);
+            if !spaced(candidate.0) { continue; }
+            if chosen.is_none_or(|old| quality(candidate.0).compare(quality(old.0)).is_lt()) {
+                chosen = Some(candidate);
             }
-            let (den, stand, how) = choose(point);
-            if !spaced(den) {
-                continue;
-            }
-            if how == DenChoice::Covered {
-                chosen = Some((den, stand, how));
-                break;
-            }
-            fallback.get_or_insert((den, stand, how));
         }
-        let Some((den, stand, how)) = chosen.or(fallback) else {
-            break;
-        };
+        let Some((den, stand, how)) = chosen else { break; };
         let founded = match size {
             Some(size) => fauna
                 .found_pack_sized(world, stand, founder, stores, spread_heading(k, n), size)

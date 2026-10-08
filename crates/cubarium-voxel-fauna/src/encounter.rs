@@ -645,6 +645,22 @@ impl RouteGraph {
         own_cols: u32,
         max_cols: u32,
     ) -> Option<Site> {
+        self.way_on_path(view, site, r, headroom, step, wade_m, own_cols, max_cols).map(|p| p.0)
+    }
+
+    /// The same recovery walk, with its entry node and step count for a travel budget.
+    #[allow(clippy::too_many_arguments)]
+    pub fn way_on_path(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        wade_m: f64,
+        own_cols: u32,
+        max_cols: u32,
+    ) -> Option<(Site, usize, u32)> {
         let v = self.voxel_m;
         let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
         let on = |f: Site| self.node_near(f, centre(f), own_cols).is_some();
@@ -659,9 +675,9 @@ impl RouteGraph {
             d.min(w - d)
         };
         // Breadth first from `site`; each face remembers the first step of the way to it.
-        let mut first: FxHashMap<Site, Site> = FxHashMap::default();
+        let mut first: FxHashMap<Site, (Site, u32)> = FxHashMap::default();
         let mut queue = std::collections::VecDeque::new();
-        first.insert(site, site);
+        first.insert(site, (site, 0));
         queue.push_back(site);
         while let Some(f) = queue.pop_front() {
             let (fx, fz) = centre(f);
@@ -690,11 +706,12 @@ impl RouteGraph {
                 if !(clear(cx, cz, ny) && clear(mx, mz, f.y) && clear(mx, mz, ny)) {
                     continue;
                 }
-                let way = if f == site { n } else { first[&f] };
-                if on(n) {
-                    return Some(way);
+                let way = if f == site { n } else { first[&f].0 };
+                let steps = first[&f].1 + 1;
+                if let Some(entry) = self.node_near(n, centre(n), own_cols) {
+                    return Some((way, entry, steps));
                 }
-                first.insert(n, way);
+                first.insert(n, (way, steps));
                 queue.push_back(n);
             }
         }

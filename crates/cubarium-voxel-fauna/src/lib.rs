@@ -90,6 +90,9 @@ pub use body::{
     Amphibious, BELLWING_MASS_RATIO, Body, CHORISTER_VOLUME_RATIO, Counter, EggSite, Face, Flight, FounderPhysiology, Founding, FoundingSite, Glider, Gut, GutSeeds, Hunter, Pack, SenseTable, StepLimits, birth_readiness,
     disc_clear_on_face, effective_config, has_headroom, motor_probe, step_voxels, wall_ascent, wall_descent,
 };
+mod den;
+pub use den::{DenQuality, den_quality};
+
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, heuristic, resolve_actions,
@@ -963,8 +966,8 @@ pub struct Animal {
     pub pack: Option<PackMember>,
     /// **Walking home to rest** (roster R3, a pack adult driven by its pack heuristic):
     /// ticks it has wanted a rest (satiated, or out of its activity phase) while away from
-    /// its den. Its rest begins only within [`Pack::den_radius_m`] of the den, or once this
-    /// reaches [`Pack::home_give_up_s`]. Zero for every other body.
+    /// its den. Rest begins at [`Pack::rest_radius_m`], or in the field if the route is
+    /// unreachable or costs more than [`Pack::home_reserve_share`] allows. Zero otherwise.
     #[serde(default)]
     pub homing_ticks: u32,
     /// **Yielding a carcass** (roster R3, the lanternjaw's heuristic): set when a body that
@@ -1107,15 +1110,15 @@ impl PackMember {
     }
 }
 
-/// How a pack's den was chosen at founding (roster R3; Fable's fallback rule).
+/// The shelter of a pack's den, chosen at founding or after it becomes unusable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DenChoice {
     /// A covered face (solid within [`Pack::den_cover_m`] over it) within
-    /// [`Pack::den_search_m`] of the founding point, the nearest.
+    /// [`Pack::den_search_m`] of its range; darker sites beat brighter ones.
     Covered,
-    /// No covered face there: the face with the most solid cells over it in its column.
+    /// A roof higher than `den_cover_m`; darkness and sky visibility choose the site.
     MostOverhead,
-    /// No face there has anything over it: the founding point.
+    /// Open ground: no reachable dry roofed site in the search range.
     FoundingPoint,
 }
 
@@ -1132,8 +1135,8 @@ pub struct PackRecord {
     pub id: u64,
     /// The lineage whose pack this is.
     pub lineage: Founder,
-    /// The den's support face: covered (solid within [`Pack::den_cover_m`] over it),
-    /// picked by the breeder at founding.
+    /// The den's dry reachable support face, chosen at founding and replaced when
+    /// flooded or disconnected. Dark roofed sites are preferred to open ground.
     pub den: Site,
     /// The one member that conceives; `None` only while no adult is left. When it dies the
     /// oldest adult in the pack takes its place.

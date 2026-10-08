@@ -106,7 +106,7 @@ fn config() -> FaunaConfig {
     let pk = c.founders[CH.index()].pack.as_mut().expect("the chorister's pack table");
     pk.pack_size = 1;
     pk.den_radius_m = 1.0;
-    pk.home_give_up_s = 1e6;
+    pk.home_reserve_share = 1.0;
     // The turn onto the north leg: a quarter voxel across its line a period, well inside the
     // column between the centre column and the ledge.
     pk.route_swing_voxels = 0.25;

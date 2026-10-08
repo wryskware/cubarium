@@ -195,6 +195,7 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
     cubarium_voxel::voxel_phase!(FaunaMaintenance, {
         // WX4: who is asleep this tick is settled before anything is paid, so the
         // upkeep, the controller stage and the act all read the same answer.
+        crate::pack::renew_dens(fauna, &view, flora.config().species(cubarium_voxel_flora::Species::Glowcap));
         circadian(fauna, &view, clock_on, daylight);
         maintenance(fauna);
         drain_riders(fauna);
@@ -630,7 +631,6 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: f64) {
     let life = fauna.config.life;
     let v = view.config.voxel_m;
-    let ring = f64::from(view.config.width) * v;
     let tick = fauna.tick;
     // The packs raising pups: an adult's bout there is a provisioning one.
     let mut nurseries: Vec<u64> = fauna
@@ -690,9 +690,9 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
             None
         };
         // R3: a pack adult under its pack heuristic rests and sleeps at its den; away from
-        // it, it stays awake and its tactic walks it home (for at most `home_give_up_s`).
+        // it, it stays awake while a reachable trip fits its reserve budget.
         let rest = match rest {
-            Some(_) if crate::pack::must_walk_home(fauna, i, v, ring) => None,
+            Some(_) if crate::pack::must_walk_home(fauna, i, view) => None,
             Some(r) => Some(r),
             None => {
                 fauna.animals[i].homing_ticks = 0;
@@ -4943,6 +4943,10 @@ mod taste_tests;
 #[cfg(test)]
 #[path = "circadian_tests.rs"]
 mod circadian_tests;
+
+#[cfg(test)]
+#[path = "den_rest_birth_tests.rs"]
+mod den_rest_birth_tests;
 #[cfg(test)]
 #[path = "detritivore_tests.rs"]
 mod detritivore_tests;
