@@ -58,7 +58,9 @@ use crate::Flora;
 //     sun_cap_loss_per_s, sun_mycelium_loss_per_s}`, `FloraLedger::sun_dried` and
 //     `DeathCause::Desiccated`.
 // 37: SUN-SHELTER — `SpeciesConfig::sun_dark_shelter`: its dark habitat shelters it from the sun.
-pub const SCHEMA: u32 = 37;
+// 38: FOLIAGE STATES — `SpeciesConfig::{foliage_state_below, foliage_state_hysteresis}`
+//     (presentation knobs carried with the species).
+pub const SCHEMA: u32 = 38;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {

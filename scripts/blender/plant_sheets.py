@@ -158,9 +158,11 @@ def clear():
     L.OVL.clear()
 
 
-def read_cvm(path):
+def read_cvm_states(path):
+    """A `.cvm` file (version 2): (states [(name, start)], steps [(h, r, variants)]) with
+    each variant one cell list per state, cells (dx, dy, dz, material name, tag)."""
     b = open(path, "rb").read()
-    assert b[:4] == b"CVM1"
+    assert b[:4] == b"CVM2", f"{path}: not a CVM2 model file"
     o = 4
     kind, nm = struct.unpack_from("<BB", b, o)
     o += 2
@@ -169,6 +171,16 @@ def read_cvm(path):
         n = b[o]
         names.append(b[o + 1:o + 1 + n].decode())
         o += 1 + n
+    states = []
+    (nst,) = struct.unpack_from("<B", b, o)
+    o += 1
+    for _ in range(nst):
+        n = b[o]
+        name = b[o + 1:o + 1 + n].decode()
+        o += 1 + n
+        (start,) = struct.unpack_from("<d", b, o)
+        o += 8
+        states.append((name, start))
     (ns,) = struct.unpack_from("<H", b, o)
     o += 2
     steps = []
@@ -177,20 +189,30 @@ def read_cvm(path):
         o += 17
         vs = []
         for _ in range(nv):
-            (nc,) = struct.unpack_from("<I", b, o)
-            o += 4
-            cells = []
-            for _ in range(nc):
-                dx, dy, dz, m, tag = struct.unpack_from("<bbbBB", b, o)
-                o += 5
-                cells.append((dx, dy, dz, names[m], tag))
-            vs.append(cells)
+            per = []
+            for _ in range(nst):
+                (nc,) = struct.unpack_from("<I", b, o)
+                o += 4
+                cells = []
+                for _ in range(nc):
+                    dx, dy, dz, m, tag = struct.unpack_from("<bbbBB", b, o)
+                    o += 5
+                    cells.append((dx, dy, dz, names[m], tag))
+                per.append(cells)
+            vs.append(per)
         steps.append((h, r, vs))
-    return steps
+    assert o == len(b), f"{path}: {len(b) - o} trailing bytes"
+    return states, steps
+
+
+def read_cvm(path, state=0):
+    """[(h, r, variants)] of one state (the full model by default)."""
+    _, steps = read_cvm_states(path)
+    return [(h, r, [per[min(state, len(per) - 1)] for per in vs]) for h, r, vs in steps]
 
 
 def tag_kind(tag):
-    return {0x00: "trunk", 0x30: "accent"}.get(tag & 0xF0, "drape" if tag & 0xF0 == 0x20 else "foliage")
+    return {0x00: "trunk", 0x30: "accent", 0x20: "drape", 0x40: "fallen"}.get(tag & 0xF0, "foliage")
 
 
 def voxel_objs(sp, cells, vox):
@@ -202,6 +224,8 @@ def voxel_objs(sp, cells, vox):
         band = round(min(max(dy, 0), top) / top * 3) if top > 0 else 3
         t = band / 3
         kind = tag_kind(tag)
+        if kind == "fallen":  # colours.rs: its layer's foliage at the top of the ramp
+            kind, t = "foliage", 1.0
         col = ramp(sp, mat, t, kind)
         # world (dx, dy up, dz away) -> Blender (x, y away, z up)
         m = Matrix.Translation(((dx + 0.5) * vox, (dz + 0.5) * vox, (dy + 0.5) * vox)) @ Matrix.Diagonal((vox, vox, vox, 1))

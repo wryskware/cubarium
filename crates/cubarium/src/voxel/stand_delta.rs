@@ -125,6 +125,10 @@ struct ModelSig {
     fruit: Band,
     /// The model of the plant over a plant beneath, whose trunk it is drawn in front of.
     over: Option<(usize, usize)>,
+    /// A species with foliage states: the state drawn and its fade. Its foliage bands
+    /// are then [`Band::ANY`] (the state model is drawn whole), and a fade restamps every
+    /// rebuild its blend moves.
+    state: Option<model::FoliageTrack>,
 }
 
 /// A model's identity: the library slice it is.
@@ -135,7 +139,8 @@ fn model_id(cells: &[ModelCell]) -> (usize, usize) {
 impl ModelSig {
     fn of(cells: &[ModelCell], id: u64, inp: &ModelInputs, over: Option<&[ModelCell]>) -> ModelSig {
         let mut foliage = [Band::ANY; MAX_FOLIAGE_LAYERS];
-        for (i, band) in foliage.iter_mut().enumerate() {
+        let thinned = if inp.state.is_some() { 0 } else { MAX_FOLIAGE_LAYERS };
+        for (i, band) in foliage.iter_mut().enumerate().take(thinned) {
             let f = effective(inp.foliage[i]);
             *band = Band::around(
                 f,
@@ -167,6 +172,7 @@ impl ModelSig {
             foliage,
             fruit,
             over: over.map(model_id),
+            state: inp.state.map(|s| s.track),
         }
     }
 
@@ -178,6 +184,7 @@ impl ModelSig {
             && self.wilt == inp.wilt
             && self.lip == inp.lip
             && self.ripe_at == (inp.ripe >= model::RIPE_AT)
+            && self.state == inp.state.map(|s| s.track)
             && self
                 .foliage
                 .iter()
@@ -359,10 +366,10 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
         c.seen = seen;
         c.order = order;
         s.placing = slot + 1;
-        match lib.and_then(|lib| model_cells(lib, flora, stand)) {
-            Some(cells) => {
-                let inp = s.model_inputs(flora, stand);
-                let over = lib.and_then(|lib| over_cells(lib, flora, stand));
+        match lib.and_then(|lib| model_cells(lib, flora, stand).map(|c| (lib, c))) {
+            Some((lib, cells)) => {
+                let inp = s.model_inputs(lib, flora, stand);
+                let over = over_cells(lib, flora, stand);
                 let held = inc(s).claimants[slot as usize]
                     .sig
                     .as_ref()
@@ -371,7 +378,7 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
                     continue;
                 }
                 let claims = collect(s, |s| {
-                    s.stamp_model(view, flora, stand, cells, over);
+                    s.stamp_model(view, lib, flora, stand, cells, over);
                 });
                 let i = inc(s);
                 i.claimants[slot as usize].sig = Some(ModelSig::of(cells, stand.id, &inp, over));
