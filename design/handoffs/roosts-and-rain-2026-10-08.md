@@ -37,6 +37,9 @@ refinement happens there. It must not teach anything wrong.
    - It stays down while it rains and flies again once the rain falls below the threshold minus a
      hysteresis.
    - It can't sip while grounded.
+   - **While grounded by rain it pays sleep-level upkeep.** Wrysk: "make sure bellwings dont use as
+     much energy when they are not flying. should basically be like sleeping while it rains." Reuse
+     the existing sleep upkeep.
    - Use the rain signal the weather and plants already use, the local rain at the animal if there
      is one. The threshold and hysteresis are knobs.
 3. **Knobs:** every number is a serde field with a doc comment and a registry row. Regenerate
