@@ -127,9 +127,17 @@ juveniles starve:
 C1 frondgrazer juveniles are fed, so food exists for a juvenile that forages well.
 JUVENILE-FOOD is diagnosing.
 
-**The stuck share reads 0.9–1.0 almost everywhere.** That includes Veilhounds resting fed at
-the den and littershredders that are feeding. It looks like misclassification, not reality.
-STUCK-AUDIT is checking it. S should not carry weight until the audit lands.
+**Stuck: mostly real, now measured as a prevalence** (STUCK-AUDIT, a67b64f8).
+- The 0.9–1.0 conditional shares were mostly true. 956 of 1,230 exposed body-minutes are
+  juveniles in emergency at near-zero fullness:
+  - pacing in place: 100–1,800 body lengths of path for under 1 BL net in 5 min;
+  - resting hungry with nothing in sense and no search;
+  - motionless in the snail's roam steer and in the shredder's shallows reflex;
+  - seedporters clinging to stems.
+- Two false positives are fixed: a pregnant Veilhound waiting at the den for the hunt quorum,
+  and digesting croppers.
+- S is now stuck body-minutes over awake body-minutes: heuristic 9.5 %, C1 5.6 %.
+- These are search failures, most likely the root of the juvenile starvation (JUVENILE-FOOD).
 
 ## 2. The fitness score
 
@@ -183,7 +191,7 @@ the band `[lo, hi]`.
 | G_b, G_v | lanternberry grove size; new established vaulttree sites | census grove/forest columns | partial |
 | H | hunts per world-hour outside the target band | strikes and kills by hunter × prey | reducer needed |
 | **F** | **condition**: mean over lineages of `h(p10 fullness / 0.3)` (VITALS emits p10, not p25) | VITALS | new (Wrysk's vitals ask) |
-| **S** | **stuck**: share of exposed bodies (awake, not voluntarily resting, no swallow for a whole 5-min window) with under 1 BL wrapped net displacement; NA without exposure | VITALS-2 | new |
+| **S** | **stuck**: stuck body-minutes over awake body-minutes. A stuck body is exposed (eating or emergency latch on, no bite for a whole 5-min window, not resting, roosting, ambushing or frozen by a threat) and has under 1 BL of wrapped net displacement | VITALS-2 + STUCK-AUDIT | new |
 
 Caveat on F (Astra I2): fullness is reserve over the body's reserve capacity, and capacity is
 a search gene. Shrinking capacity raises F without more food. F stays a warning signal beside
