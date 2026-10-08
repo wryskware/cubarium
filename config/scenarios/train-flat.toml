@@ -1,0 +1,40 @@
+# Scenario map `train-flat`: the d96 desktop terrarium (256 x 128 x 96 at 0.125 m: 32 m
+# around, 12 m deep) with a wide, consistent, connected front plain, for brain training
+# (design/training-plan-2026-10-08.md §4). Wrysk, 2026-10-08: "having maps with consistent
+# flat connected zones is useful to rule out animals getting stuck or isolated."
+#
+# What decides access is each lineage's own route map (standable faces, its step up and
+# down, climbed walls), the founding's rule; `voxel_census` prints it at founding as
+# `reach <lineage>: largest N% of F faces ...` and writes `reach.tsv` beside `vitals=DIR`.
+# A "plain" here keeps the ground's drainage fall to the lake (`ground_fall`): flat is
+# low relief and no internal steps, not level.
+#
+#   voxel_census 1 config=config/scenarios/train-flat.toml seed=N heuristic vitals=DIR
+base = "../desktop/terrarium-d96.toml"
+
+[world.landform]
+preset = "terrarium"
+# The d96 depth's 6 m of foreground lowland, 70 % of it kept as plain (the desk default is
+# 30 %): about 4.2 m of front plain all round the ring instead of 1.8 m.
+lowland_plain_share = 0.7
+# The rolling hills over the rest of the lowland at one voxel (0.125 m) instead of three:
+# below every walker's step, so the hills never split a component.
+lowland_relief_m = 0.125
+# The massif's features at their fewest: one shelf (its hall is the roofed, dark floor the
+# glowcap and so the capgnawer need), one arch, one spire. Fewer overhangs and walls to
+# strand a body behind.
+shelves = [1, 1]
+arches = [1, 1]
+spires = [1, 1]
+# The plain alone did not do it: the land that split off was the massif's upper terraces,
+# cut off by cliff risers (seedporter 79-89 %, frondgrazer down to 81 % on seed 3 with only
+# the four lines above). Risers take 30-60 % of a storey instead of 2-30 %, so most
+# terrace edges are ramps a walker can climb; still some cliff stretches, for the
+# latticevine's walls and the bellwing's nectar (40-70 % left seed 4 with no bellwing
+# placement on any of 8 redraws).
+riser = [0.3, 0.6]
+# The crest at most 9 m above the foot instead of 12.5 m: over the 6 m massif the tallest
+# stretches were steeper than any ramp a 0.25 m step climbs. The spires still stand above.
+crest_m = [2.5, 9.0]
+# The lake stays as the desk draws it (lake_m [4, 6]): water and shores feed the
+# ripple-snail and the siphonreed and give every walker a drink.

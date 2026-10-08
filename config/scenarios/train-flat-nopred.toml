@@ -1,0 +1,16 @@
+# Scenario map `train-flat-nopred`: `train-flat` with no predators, for stage 1 of the
+# brain curriculum (design/brain-contract-v3-proposal-2026-10-08.md: predator-free first).
+# The world, plants and every other founder are train-flat's.
+#
+#   voxel_census 1 config=config/scenarios/train-flat-nopred.toml seed=N heuristic vitals=DIR
+base = "train-flat.toml"
+
+# No Veilhound pack: the chorister founds in packs, and zero packs is no chorister.
+[fauna.founders.chorister]
+founding_count = 0
+
+# No lanternjaw egg bank: the lanternjaw founds as buried clutches only, and a clutch count
+# of 0 is the no-egg-bank control (the same thing `eggbank=off` does on the census line,
+# FaunaConfig::founder_counts_without_egg_bank), so no census flag is needed.
+[fauna.founders.lanternjaw]
+founding_count = 0
