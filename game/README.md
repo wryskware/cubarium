@@ -44,8 +44,22 @@ present there.
 `CUBARIUM_ANIMALS` overrides `[figures]` when the renderer starts: `classic` uses the
 original stamped voxels; `crisp` uses edged models placed at whole pixels, with eight
 headings blended over the config's `turn_blend_s`; `smooth` uses edged models with free
-turning and box-filtered subpixel placement. With no environment override, the config
-applies. The renderer logs the effective settings once at startup.
+turning and box-filtered subpixel placement; `stepped` uses edged models that hop a voxel
+at a time (their drawn place snapped to the world's voxel grid, as the stamped animals
+moved) and turn in `turn_steps` headings (16 by default), each change a snap
+(`stepped_turn_blend_s = 0`). With no environment override, the config applies
+(`[figures] movement = "smooth" | "stepped"`). The renderer logs the effective settings
+once at startup.
+
+**Settings page** (main menu or pause menu → Settings): Movement **Smooth / Stepped** and
+**Subpixel** on/off (Smooth only; greyed under Stepped) apply to the running world on its
+next frame, no restart, and are kept per viewer in `user://shell.cfg` (`[animals]`).
+Precedence: the config, then the environment at startup; then the viewer's stored choice
+as the renderer starts, except for what the environment named for this run
+(`CUBARIUM_ANIMALS` names the movement, and with `crisp`/`smooth` the placement;
+`CUBARIUM_ANIMAL_SUBPIXEL` the placement), which keeps the environment's value; then any
+change made on the page while it runs, which wins over everything. Turn counts and blends
+stay in presets, env and config.
 
 From the repository root, compare the same saved world (a slot directory with `meta.json`):
 
@@ -55,6 +69,7 @@ SAVE="$SAVES/t256-s7-midday"
 CUBARIUM_ANIMALS=classic scripts/run-game.sh -- --saves "$SAVES" --no-autoload
 CUBARIUM_ANIMALS=crisp scripts/run-game.sh -- --saves "$SAVES" --no-autoload
 CUBARIUM_ANIMALS=smooth scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=stepped scripts/run-game.sh -- --saves "$SAVES" --no-autoload
 ```
 
 After each app launch choose **Load** and the same slot (`t256-s7-midday` above). Quit
@@ -65,12 +80,14 @@ For `cubarium voxel`, build with `cargo build --release -p cubarium`, then run:
 CUBARIUM_ANIMALS=classic target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
 CUBARIUM_ANIMALS=crisp target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
 CUBARIUM_ANIMALS=smooth target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+CUBARIUM_ANIMALS=stepped target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
 ```
 
 For the wide world choose `wide-s1-midday` in both and use
 `config/desktop/terrarium-wide.toml` for `cubarium voxel`.
-`CUBARIUM_ANIMAL_TURN=free` or a positive integer (headings per turn, e.g. `16`) and
-`CUBARIUM_ANIMAL_SUBPIXEL=0|1` apply on top of any preset, or the config if no preset is
+`CUBARIUM_ANIMAL_TURN=free` or a positive integer (headings per turn, e.g. `16`; under
+`stepped` only the count applies, its headings are always stepped) and
+`CUBARIUM_ANIMAL_SUBPIXEL=0|1` (smooth only) apply on top of any preset, or the config if no preset is
 given: e.g. `CUBARIUM_ANIMALS=crisp CUBARIUM_ANIMAL_TURN=free CUBARIUM_ANIMAL_SUBPIXEL=1
 scripts/run-game.sh`. Invalid values stop startup with the valid values named.
 

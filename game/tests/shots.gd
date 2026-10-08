@@ -3,7 +3,9 @@ extends SceneTree
 ## private display (never on Wrysk's screen):
 ##   scripts/hidden.sh godot --path game --resolution 1920x1080 \
 ##       --script res://tests/shots.gd -- --out DIR
-## Writes DIR/01-founding.png … 08-rename.png from the root viewport and quits.
+## Writes DIR/01-founding.png … 08-rename.png from the root viewport and quits. With
+## `--open SAVE` it opens that save instead: 09-open-live … 13-open-settings-stepped (the
+## Settings page, then with Stepped chosen).
 
 var main
 var out := ""
@@ -177,6 +179,13 @@ func run_open(saves: String, save: String) -> void:
 	main.slots.refresh()
 	await seconds(0.5)
 	await shot("11-open-slots")
+	main.close_screen(main.slots)
+	main._on_menu("settings")
+	await seconds(0.5)
+	await shot("12-open-settings")
+	main.settings_page.choose_movement("stepped")
+	await seconds(0.5)
+	await shot("13-open-settings-stepped")
 	done()
 
 

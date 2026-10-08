@@ -77,10 +77,19 @@ func _choice(parent: Control, group: ButtonGroup, text: String, value: String) -
 	b.button_group = group
 	b.custom_minimum_size = Vector2(140, 44)
 	b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# The chosen one reads as chosen whether or not it has focus.
+	var chosen := StyleBoxFlat.new()
+	chosen.bg_color = Color(0.32, 0.36, 0.48)
+	chosen.set_corner_radius_all(3)
+	for state in ["pressed", "hover_pressed"]:
+		b.add_theme_stylebox_override(state, chosen)
+	b.add_theme_color_override("font_pressed_color", Color.WHITE)
+	b.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
 	b.toggled.connect(func(on: bool):
 		if on and movement != value:
 			movement = value
 			_sync()
+			b.grab_focus()
 			changed.emit(movement, subpixel))
 	parent.add_child(b)
 	return b

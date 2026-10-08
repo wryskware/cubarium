@@ -415,6 +415,8 @@ func current_motion() -> Dictionary:
 
 func open_settings() -> void:
 	var m := current_motion()
+	# The page stands in for the menu, which comes back with Back or Esc.
+	menu.visible = false
 	settings_page.open(m["movement"], m["subpixel"])
 
 
