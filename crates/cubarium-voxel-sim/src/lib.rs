@@ -85,6 +85,8 @@ pub mod params;
 #[cfg(test)]
 mod introduce_tests;
 pub mod saved;
+#[cfg(test)]
+mod saved_tests;
 pub mod scene;
 pub mod staged;
 pub use arena::{
