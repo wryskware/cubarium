@@ -397,7 +397,9 @@ class StudyKitTests(unittest.TestCase):
         self.mutate('vitals/plants_vitals.csv', lambda rows: [r for r in rows if r['minute'] != '4'])
         self.assertFalse(self.rescore()['rankable'])
 
-    def test_stage_condition_readouts_leave_F_pooled(self):
+    def test_stage_columns_put_F_on_adults(self):
+        # With stage columns F reads adults: juveniles run low reserves by design while they
+        # grow on a full gut, so the pooled p10 says little (JUVENILE-FOOD 2026-10-08).
         fixture(self.root)
         pooled = self.rescore()['components']['F']
         def stages(rows):
@@ -414,8 +416,8 @@ class StudyKitTests(unittest.TestCase):
         self.mutate('vitals/vitals.csv', stages)
         world = self.rescore()
         self.assertTrue(world['rankable'], world['warnings'])
-        for key in ('penalty', 'contribution', 'per_lineage_penalty'):
-            self.assertEqual(world['components']['F'][key], pooled[key])
+        self.assertEqual(world['components']['F']['penalty'], 0.0)
+        self.assertNotEqual(pooled['penalty'], 0.0)
         health = world['health']['frondgrazer']
         self.assertEqual(health['stage_fullness']['adult']['fullness_p10'], 1)
         self.assertEqual(health['stage_fullness']['juvenile']['fullness_p50'], 0)

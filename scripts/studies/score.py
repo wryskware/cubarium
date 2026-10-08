@@ -98,7 +98,7 @@ def validate_config(cfg):
 
 LABELS = {'H': 'kill rate (kills per world-hour)',
           'G_v': 'vaulttree recruitment (not established sites)',
-          'F': 'mean lineage h(fullness_p10 / target)',
+          'F': 'mean lineage h(adult fullness_p10 / target); pooled without stage columns',
           'S': 'stuck bodies among awake bodies (prevalence)'}
 TEXT_COLUMNS = {'lineage', 'species', 'origin', 'cause', 'killer_lineage', 'native', 'alive', 'adult', 'mode'}
 
@@ -427,6 +427,15 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                     values = [number(r, key) for r in exposed]
                     stage_penalties.setdefault(name, {})[stage] = (average([h(v / targets['fullness_p10']) for v in values])
                                                                    if values and all(v is not None for v in values) else None)
+            # F reads adults when the vitals carry stages: a juvenile spends its surplus on
+            # growth, so its reserve runs low by design even on a full gut (JUVENILE-FOOD
+            # 2026-10-08: capgnawer and snail juveniles at full gut use sit near 0.02).
+            adult = stage_penalties.get(name, {}).get('adult')
+            if adult is not None:
+                condition[name] = adult
+                adult_values = [number(r, 'fullness_p10_adult') for r in living if number(r, 'n_adult', 0) > 0]
+                if adult_values and all(v is not None for v in adult_values):
+                    fullness[name] = average(adult_values)
             stage_fullness = {}
             for stage in ('adult', 'juvenile', 'pup', 'rider'):
                 count_key = f'n_fullness_{stage}'
