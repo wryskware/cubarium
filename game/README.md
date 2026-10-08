@@ -31,6 +31,41 @@ opens whatever GPU Godot reports (`cubarium_gpu::vk::prefer_device`; `CUBARIUM_G
 overrides). Agents' hidden captures on Xvfb need `CUBARIUM_GODOT_GPU=1`: the 5080 cannot
 present there.
 
+## Animal rendering per run
+
+`CUBARIUM_ANIMALS` overrides `[figures]` when the renderer starts: `classic` uses the
+original stamped voxels; `crisp` uses edged models placed at whole pixels, with eight
+headings blended over the config's `turn_blend_s`; `smooth` uses edged models with free
+turning and box-filtered subpixel placement. With no environment override, the config
+applies. The renderer logs the effective settings once at startup.
+
+From the repository root, compare the same saved world (a slot directory with `meta.json`):
+
+```sh
+SAVES=/path/to/saves
+SAVE="$SAVES/t256-s7-midday"
+CUBARIUM_ANIMALS=classic scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=crisp scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+CUBARIUM_ANIMALS=smooth scripts/run-game.sh -- --saves "$SAVES" --no-autoload
+```
+
+After each app launch choose **Load** and the same slot (`t256-s7-midday` above). Quit
+between runs; loading leaves the save unchanged unless you explicitly save over it.
+For `cubarium voxel`, build with `cargo build --release -p cubarium`, then run:
+
+```sh
+CUBARIUM_ANIMALS=classic target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+CUBARIUM_ANIMALS=crisp target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+CUBARIUM_ANIMALS=smooth target/release/cubarium voxel --config config/desktop/terrarium.toml --load "$SAVE" --sink gpu --gpu-target window
+```
+
+For the wide world choose `wide-s1-midday` in both and use
+`config/desktop/terrarium-wide.toml` for `cubarium voxel`.
+`CUBARIUM_ANIMAL_TURN=free` or a positive integer (headings per turn, e.g. `16`) and
+`CUBARIUM_ANIMAL_SUBPIXEL=0|1` apply on top of any preset, or the config if no preset is
+given: e.g. `CUBARIUM_ANIMALS=crisp CUBARIUM_ANIMAL_TURN=free CUBARIUM_ANIMAL_SUBPIXEL=1
+scripts/run-game.sh`. Invalid values stop startup with the valid values named.
+
 ## Run headless (no window)
 
 ```sh

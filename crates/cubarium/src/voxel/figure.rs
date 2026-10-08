@@ -26,8 +26,8 @@
 use std::sync::Arc;
 
 use cubarium_gpu::figures::{
-    CLASS_BREATHING, CLASS_LEG1, CLASS_LEG2, CLASS_NONE, CLASS_TORSO, FigureFrame, FigureInstance, FigureTile,
-    FigureVoxel, PaletteEntry, open_faces,
+    CLASS_BREATHING, CLASS_LEG1, CLASS_LEG2, CLASS_NONE, CLASS_TORSO, FigureFrame, FigureInstance,
+    FigureTile, FigureVoxel, PaletteEntry, crease_masks, open_faces,
 };
 use cubarium_gpu::voxel::{Breath, HeadMove, PoseEntry, pose_with};
 use cubarium_voxel::VoxelView;
@@ -103,6 +103,222 @@ impl Default for FigureConfig {
             swap_s: 0.3,
             subpixel: true,
         }
+    }
+}
+
+impl FigureConfig {
+    /// Apply a per-run preset, then the turn and placement overrides. Missing values
+    /// preserve the presentation config; this is pure so tools and tests need not edit
+    /// the process environment.
+    pub fn with_overrides(
+        &self,
+        animals: Option<&str>,
+        turn: Option<&str>,
+        subpixel: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let mut cfg = self.clone();
+        match animals {
+            None => {}
+            Some("classic") => cfg.animals = AnimalDraw::Stamped,
+            Some("crisp") => {
+                cfg.animals = AnimalDraw::Models;
+                cfg.subpixel = false;
+                cfg.turn = Turn::Steps;
+                cfg.turn_steps = 8;
+            }
+            Some("smooth") => {
+                cfg.animals = AnimalDraw::Models;
+                cfg.subpixel = true;
+                cfg.turn = Turn::Free;
+            }
+            Some(value) => anyhow::bail!(
+                "unknown CUBARIUM_ANIMALS value {value:?}; valid values: classic, crisp, smooth"
+            ),
+        }
+        if let Some(value) = turn {
+            if value == "free" {
+                cfg.turn = Turn::Free;
+            } else {
+                let steps = value
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|&n| n > 0 && value.bytes().all(|b| b.is_ascii_digit()));
+                cfg.turn_steps = steps.ok_or_else(|| anyhow::anyhow!(
+                    "unknown CUBARIUM_ANIMAL_TURN value {value:?}; valid values: free or a positive integer (1..={})",
+                    u32::MAX
+                ))?;
+                cfg.turn = Turn::Steps;
+            }
+        }
+        match subpixel {
+            None => {}
+            Some("0") => cfg.subpixel = false,
+            Some("1") => cfg.subpixel = true,
+            Some(value) => anyhow::bail!(
+                "unknown CUBARIUM_ANIMAL_SUBPIXEL value {value:?}; valid values: 0, 1"
+            ),
+        }
+        Ok(cfg)
+    }
+
+    /// Read the process overrides once at renderer startup, and report the effective
+    /// settings. Low-level sinks do not read them: explicit captures and CPU/GPU parity
+    /// checks retain their own presentation config.
+    pub fn apply_env_overrides(&mut self) -> anyhow::Result<()> {
+        let read = |name: &str, valid: &str| match std::env::var(name) {
+            Ok(value) => Ok(Some(value)),
+            Err(std::env::VarError::NotPresent) => Ok(None),
+            Err(std::env::VarError::NotUnicode(value)) => Err(anyhow::anyhow!(
+                "invalid {name} value {value:?}; valid values: {valid}"
+            )),
+        };
+        let animals = read("CUBARIUM_ANIMALS", "classic, crisp, smooth")?;
+        let turn = read(
+            "CUBARIUM_ANIMAL_TURN",
+            "free or a positive integer (1..=4294967295)",
+        )?;
+        let subpixel = read("CUBARIUM_ANIMAL_SUBPIXEL", "0, 1")?;
+        *self = self.with_overrides(animals.as_deref(), turn.as_deref(), subpixel.as_deref())?;
+        eprintln!(
+            "cubarium animals: animals={} turn={} turn_steps={} turn_blend_s={} subpixel={}",
+            match self.animals {
+                AnimalDraw::Models => "models",
+                AnimalDraw::Stamped => "stamped",
+            },
+            match self.turn {
+                Turn::Free => "free",
+                Turn::Steps => "steps",
+            },
+            self.turn_steps,
+            self.turn_blend_s,
+            self.subpixel,
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod preset_tests {
+    use super::{AnimalDraw, FigureConfig, Turn};
+
+    fn config() -> FigureConfig {
+        FigureConfig {
+            animals: AnimalDraw::Stamped,
+            turn: Turn::Steps,
+            turn_steps: 17,
+            turn_blend_s: 0.75,
+            fade_s: 1.25,
+            swap_s: 2.5,
+            subpixel: false,
+        }
+    }
+
+    #[test]
+    fn animal_presets_change_only_their_named_fields() {
+        let base = config();
+        assert_eq!(base.with_overrides(None, None, None).unwrap(), base);
+        let models = FigureConfig {
+            animals: AnimalDraw::Models,
+            ..base.clone()
+        };
+        assert_eq!(
+            models.with_overrides(Some("classic"), None, None).unwrap(),
+            base
+        );
+        assert_eq!(
+            base.with_overrides(Some("crisp"), None, None).unwrap(),
+            FigureConfig {
+                animals: AnimalDraw::Models,
+                turn: Turn::Steps,
+                turn_steps: 8,
+                subpixel: false,
+                ..base.clone()
+            }
+        );
+        assert_eq!(
+            base.with_overrides(Some("smooth"), None, None).unwrap(),
+            FigureConfig {
+                animals: AnimalDraw::Models,
+                turn: Turn::Free,
+                subpixel: true,
+                ..base
+            }
+        );
+    }
+
+    #[test]
+    fn turn_and_subpixel_overrides_take_precedence_over_presets() {
+        let base = config();
+        assert_eq!(
+            base.with_overrides(Some("crisp"), Some("free"), Some("1"))
+                .unwrap(),
+            FigureConfig {
+                animals: AnimalDraw::Models,
+                turn: Turn::Free,
+                turn_steps: 8,
+                subpixel: true,
+                ..base.clone()
+            }
+        );
+        for steps in [1, 7, u32::MAX] {
+            for preset in [None, Some("classic"), Some("crisp"), Some("smooth")] {
+                let selected = base.with_overrides(preset, None, None).unwrap();
+                let cfg = base
+                    .with_overrides(preset, Some(&steps.to_string()), Some("0"))
+                    .unwrap();
+                assert_eq!(
+                    cfg,
+                    FigureConfig {
+                        turn: Turn::Steps,
+                        turn_steps: steps,
+                        subpixel: false,
+                        ..selected
+                    }
+                );
+            }
+        }
+        assert_eq!(
+            base.with_overrides(None, Some("free"), Some("1")).unwrap(),
+            FigureConfig {
+                turn: Turn::Free,
+                subpixel: true,
+                ..base
+            }
+        );
+    }
+
+    #[test]
+    fn bad_animal_overrides_name_the_variable_and_valid_values() {
+        let base = config();
+        for value in ["", "models", "Classic", " smooth"] {
+            let error = base
+                .with_overrides(Some(value), None, None)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("CUBARIUM_ANIMALS"), "{error}");
+            assert!(error.contains("classic, crisp, smooth"), "{error}");
+        }
+        for value in ["", "steps", "0", "-1", "+1", "1.5", " 8", "4294967296"] {
+            let error = base
+                .with_overrides(None, Some(value), None)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("CUBARIUM_ANIMAL_TURN"), "{error}");
+            assert!(error.contains("free or a positive integer"), "{error}");
+        }
+        for value in ["", "true", "false", "2", "01"] {
+            let error = base
+                .with_overrides(None, None, Some(value))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("CUBARIUM_ANIMAL_SUBPIXEL"), "{error}");
+            assert!(error.contains("0, 1"), "{error}");
+        }
+        assert_eq!(
+            base,
+            config(),
+            "an error leaves the caller's config untouched"
+        );
     }
 }
 
@@ -192,10 +408,20 @@ impl FigureModels {
         }
         let offsets: Vec<[i8; 3]> = cells.iter().map(|c| c.offset.map(|o| o as i8)).collect();
         let open = open_faces(&offsets);
+        let creases = crease_masks(&offsets);
         let voxels = Arc::make_mut(&mut self.voxels);
         let first = voxels.len() as u32;
-        for (((c, o), &e), &op) in cells.iter().zip(&offsets).zip(&entry).zip(&open) {
-            voxels.push(FigureVoxel::new(*o, place[e] as u8, c.class, c.head, op, c.glyph));
+        for ((((c, o), &e), &op), &crease) in cells
+            .iter()
+            .zip(&offsets)
+            .zip(&entry)
+            .zip(&open)
+            .zip(&creases)
+        {
+            voxels.push(
+                FigureVoxel::new(*o, place[e] as u8, c.class, c.head, op, c.glyph)
+                    .with_creases(crease),
+            );
         }
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for c in &cells {

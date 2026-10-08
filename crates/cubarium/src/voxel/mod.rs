@@ -899,6 +899,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         None => VoxelConfig::default(),
     };
     args.validate()?;
+    cfg.figures.apply_env_overrides()?;
     // Before the founding: until it is installed, SIGUSR1's default action ends the run.
     save::install_save_signal();
     if args.sink == VoxelSinkArg::Png && args.seconds <= 0.0 {
