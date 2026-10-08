@@ -283,3 +283,27 @@ rhythm, weather work of 2026-09-24) before designing.
 Same package, Wrysk: "rain should ground bellwings." In rain a bellwing stops flying and lands (on a
 ledge, a crown or under cover; check its perch kinds), then flies again when the rain stops. It reads
 the same rain signal the plants and weather already use.
+
+## 13. Direct an animal: select it, then command it (Wrysk, 2026-10-08, later)
+
+Wrysk: with an animal selected, let the viewer control it: make it move somewhere, eat a
+certain food, or even force it to hunt or attack something. Planned for later; not scheduled,
+no design decisions made.
+
+Shape of the idea (all open, none binding):
+- **Select, then command.** Click an animal in the viewer/app, then give it an order: go to a
+  point, eat a named food (plant species, carcass, prey), hunt or attack a chosen target.
+- **Orders feed the animal's own machinery.** The order should override or bias the target the
+  brain/heuristic picks, and the body still pays motor cost, hunger, injury and fatigue as
+  normal, so a forced animal can starve or die. Check how the brain interface (observations,
+  heuristic seeding) would take an injected goal before choosing between "bias" and "override".
+- **Open questions:** does the order expire (on arrival, after N seconds, on death of target),
+  can the animal refuse when it is exhausted or starving, do orders leave a care-journal event
+  (`--care`), and is this a display-mode feature only or also allowed in training/experiments
+  (probably display only, so runs stay unperturbed).
+- **Relation to other work:** the selection UI belongs to the Godot app shell (D-0005); the game
+  roadmap (`design/game-roadmap-2026-09-16.md`) is parked until the ambient piece is done, and
+  this feature fits there naturally.
+
+**Done looks like:** select an animal in the app, issue move / eat / hunt orders, watch it carry
+them out within its normal physics, with orders listed in the operator controls (§1).
