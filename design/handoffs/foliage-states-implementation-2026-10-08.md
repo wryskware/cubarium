@@ -55,7 +55,7 @@ or merge that branch; it is based on 5bbaf204).
    - The presenter picks the state from the stand's total foliage fraction, with hysteresis.
    - The thresholds and the hysteresis are per-species config knobs: serde fields with doc
      comments, registry rows, and a regenerated `design/parameters.md`.
-   - Start values (Fable's call, not Wrysk's; they can change):
+   - Start values (the orchestrator's call, not Wrysk's; they can change):
      - bloomcrown: browsed below 0.66, stripped below 0.25;
      - umbrellafrond: A below 0.75, B below 0.50, stripped below 0.25;
      - hysteresis 0.05.
