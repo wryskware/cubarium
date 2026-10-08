@@ -203,6 +203,7 @@ fn main() {
                 stuck_body_lengths: number("stuck_body_lengths=", 1.0),
             })
         }),
+        policies: policies.clone(),
         patch_min: args
             .iter()
             .find_map(|a| a.strip_prefix("meadow_patch_min_faces="))
@@ -527,6 +528,7 @@ fn main() {
 #[derive(Clone)]
 struct Timing {
     vitals: Option<(String, VitalsOptions)>,
+    policies: Vec<(Founder, std::path::PathBuf)>,
     /// `--weather-log FILE`: one row per finished rain event.
     weather_log: Option<String>,
     overlap: Option<bool>,
@@ -551,6 +553,18 @@ fn run(
     timing: &Timing,
     stage: Option<(staged::StageConfig, Vec<String>)>,
 ) {
+    for lineage in Founder::ALL {
+        let fauna = sim.fauna();
+        let source = if fauna.policy_driven(lineage) {
+            timing.policies.iter().find(|(f, _)| *f == lineage).map_or_else(
+                || cubarium_session::founders::BUILT_IN_POLICIES.iter()
+                    .find(|(f, _, _)| *f == lineage)
+                    .map_or_else(|| "policy".into(), |(_, name, _)| format!("built-in {name}")),
+                |(_, path)| format!("file {}", path.display()))
+        } else { "heuristic".into() };
+        eprintln!("installed_driver lineage={} source={source} weights={:016x}",
+            lineage.name(), fauna.policy_digest(lineage));
+    }
     if let Some(on) = timing.overlap {
         sim.set_overlap(on);
     }

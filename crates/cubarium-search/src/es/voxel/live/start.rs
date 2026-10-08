@@ -366,6 +366,33 @@ pub struct Change {
     pub candidate: f64,
 }
 
+/// Candidate and installed values beside the original reference/start value.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InstalledChange {
+    pub path: String,
+    pub start: f64,
+    pub candidate: f64,
+    pub installed: f64,
+}
+
+pub fn parameter_changes(start: &LayerConfig, candidate: &LayerConfig, installed: &LayerConfig) -> Vec<InstalledChange> {
+    let mut out = Vec::new();
+    for (reg, s, c, i) in [
+        (cubarium_voxel_flora::registry(), toml::Value::try_from(&start.flora).unwrap(),
+            toml::Value::try_from(&candidate.flora).unwrap(), toml::Value::try_from(&installed.flora).unwrap()),
+        (cubarium_voxel_fauna::registry(), toml::Value::try_from(&start.fauna).unwrap(),
+            toml::Value::try_from(&candidate.fauna).unwrap(), toml::Value::try_from(&installed.fauna).unwrap()),
+    ] {
+        let starts = reg.typed_leaves(&s);
+        let candidates = reg.typed_leaves(&c);
+        let installed = reg.typed_leaves(&i);
+        for ((path, a, _), ((_, b, _), (_, actual, _))) in starts.into_iter().zip(candidates.into_iter().zip(installed)) {
+            if !same(a, b) || !same(a, actual) { out.push(InstalledChange { path, start: a, candidate: b, installed: actual }); }
+        }
+    }
+    out
+}
+
 /// **The rate-only override's result**: the set to install, the rate leaves it moved, and
 /// the candidate's other differences, frozen at the start's values.
 #[derive(Clone, Debug)]
@@ -596,6 +623,14 @@ pub struct BurnIn {
 /// **How one evaluation started**, for its record.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct StartRecord {
+    /// Exact installed driver identities, including weights digests.
+    #[serde(default)]
+    pub drivers: Vec<String>,
+    /// Numeric leaves that differ from the reference/start, with installed values.
+    #[serde(default)]
+    pub parameter_changes: Vec<InstalledChange>,
+    #[serde(default)]
+    pub start_identity: Option<Identity>,
     /// [`StartSet::label`].
     pub set: String,
     pub seed: u64,

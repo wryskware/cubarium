@@ -3584,6 +3584,9 @@ pub struct Fauna {
     /// them is the same order however the world runs.
     clutches: Vec<Clutch>,
     ledger: FaunaLedger,
+    /// Exact paid body creations since construction/load; runtime instrumentation only.
+    #[serde(skip)]
+    born_by_founder: [u64; Founder::COUNT],
     /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
     /// rule and changes nothing. An isolated arena sets it false
     /// (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"); a fresh episode
@@ -4032,6 +4035,7 @@ impl Fauna {
             animals: Vec::new(),
             clutches: Vec::new(),
             ledger: FaunaLedger::default(),
+            born_by_founder: [0; Founder::COUNT],
             births_enabled: true,
             controllers: FounderControllers::default(),
             grid_scratch: senses::LiveGrid::default(),
@@ -4286,6 +4290,12 @@ impl Fauna {
         self.open_air = None;
         Ok(())
     }
+    /// Paid live births and hatchlings by lineage since construction/load. Introductions
+    /// are excluded; callers take interval differences. This counter is never saved.
+    pub fn born_by_founder(&self) -> [u64; Founder::COUNT] {
+        self.born_by_founder
+    }
+
     /// Whether paid births run. Live-world default: `true`.
     pub fn births_enabled(&self) -> bool {
         self.births_enabled

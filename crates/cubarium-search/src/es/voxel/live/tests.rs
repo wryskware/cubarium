@@ -112,7 +112,7 @@ fn a_newborn_gets_a_variant_and_its_own_window() {
         w.step(&mut sim);
     }
     let r = w.finish(&sim, 0);
-    assert_eq!(r.lineages[founder.index()].births, 1);
+    assert_eq!(r.lineages[founder.index()].births, 0, "an introduction is not a paid birth");
     let newborn: Vec<_> = r.scores.iter().filter(|b| b.newborn).collect();
     assert_eq!(newborn.len(), 1, "one newcomer scored");
     let b = newborn[0];

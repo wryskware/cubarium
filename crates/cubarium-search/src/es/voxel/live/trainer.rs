@@ -78,6 +78,8 @@ pub struct LiveSpec {
     pub world: Option<cubarium_voxel::Config>,
     /// Each lineage's curiosity (`--curiosity`; weight 0 everywhere without).
     pub curiosity: super::curiosity::Curiosity,
+    /// Experimental training reward, false keeps tissue/reserve/escrow accounting.
+    pub stomach_aware_reward: bool,
 }
 
 /// One lineage's side of a generation.
@@ -112,6 +114,7 @@ pub struct GenerationRecord {
     pub elapsed_s: f64,
     pub ticks: u64,
     pub body_windows: usize,
+    pub body_scores: Vec<BodyScore>,
     pub lineages: Vec<LineageUpdate>,
     pub replaced: Vec<Replacement>,
     pub intake_anomalies: u64,
@@ -346,7 +349,7 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
         let jobs: Vec<(&mut LiveWorld, Vec<usize>)> = worlds.iter_mut().zip(first).collect();
         let tables_ref = &tables;
         let results: Vec<WindowResult> = parallel(jobs, spec.threads, |(w, first)| {
-            window::run_window(w, tables_ref, &first, spec.window_ticks, &spec.curiosity)
+            window::run_window_with_reward(w, tables_ref, &first, spec.window_ticks, &spec.curiosity, spec.stomach_aware_reward)
         });
 
         // 3. One update per lineage, from the scores normalised within each world.
@@ -442,6 +445,7 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
 
         let ticks: u64 = results.iter().map(|r| r.ticks).sum();
         let record = GenerationRecord {
+            body_scores: results.iter().flat_map(|r| r.scores.iter().copied()).collect(),
             generation,
             wall_s: started.elapsed().as_secs_f64(),
             elapsed_s: run_started.elapsed().as_secs_f64(),

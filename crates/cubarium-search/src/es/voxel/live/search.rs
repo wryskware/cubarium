@@ -47,6 +47,7 @@ use super::screen::{RosterScreen, Rsf, ScreenSpec, Verdict, roster, rsf};
 use super::targets::{LineageOutcome, StageSpec, judge};
 use super::threads::{ThreadBudget, parallel_shared};
 use super::trainer::{ascend, parallel, pooled_scores};
+use super::accounting::{Presence, Recruitment, RequiredRoster, retain_losses};
 use super::variants::VariantTable;
 use super::window::{self, BodyScore, TICKS_PER_MIN, Window};
 use super::world;
@@ -68,6 +69,13 @@ pub struct BandSpec {
     pub moving_min: f64,
     /// Per lineage or plant species lost, and per lineage silent in the second half.
     pub missing_cost: f64,
+    /// Penalty per absent declared member, independent of paired/readout exclusions.
+    pub required_loss_weight: f64,
+    /// Disable absolute penalties only for diagnostic maps with deliberate omissions.
+    pub absolute_persistence: bool,
+    /// Experimental reward uses body + reserve + escrow + digestible stomach.
+    /// False preserves the current reward; both deltas are always recorded.
+    pub stomach_aware_reward: bool,
     /// The lanternjaws' share of the animals over the second half.
     pub lanternjaw_share: [f64; 2],
     /// Lineages held to persistence alone (by [`Founder::index`]): no late-breeding target
@@ -110,6 +118,16 @@ impl BandSpec {
                 | "share_weight_unestablished" | "balance_share" | "readout_only" | "balance"
                 | "balance_weight" | "counts_readout"
                     if self.stage.is_some() => {}
+                "required_loss_weight" => {
+                    self.required_loss_weight = v.as_float().or_else(|| v.as_integer().map(|i| i as f64))
+                        .filter(|x| *x >= 0.0 && x.is_finite()).ok_or("required_loss_weight is a number >= 0")?;
+                }
+                "absolute_persistence" => {
+                    self.absolute_persistence = v.as_bool().ok_or("absolute_persistence is a boolean")?;
+                }
+                "stomach_aware_reward" => {
+                    self.stomach_aware_reward = v.as_bool().ok_or("stomach_aware_reward is a boolean")?;
+                }
                 "persist_only" => {
                     let names = v.as_array().ok_or("persist_only is a list of lineages")?;
                     self.persist_only = [false; Founder::COUNT];
@@ -164,6 +182,9 @@ impl Default for BandSpec {
             peak_x: 5.0,
             moving_min: 0.30,
             missing_cost: 10.0,
+            required_loss_weight: 100.0,
+            absolute_persistence: true,
+            stomach_aware_reward: false,
             lanternjaw_share: [0.05, 0.15],
             persist_only: [false; Founder::COUNT],
             ready_target: 0.5,
@@ -221,6 +242,14 @@ pub struct Trace {
     pub browser_moving: f64,
     /// Lineages and plant species (present at the start) absent at the end.
     pub missing: usize,
+    /// Absolute losses of the declared pre-founding/pre-burn-in roster.
+    #[serde(default)]
+    pub lost_required: usize,
+    #[serde(default)]
+    pub lost_required_names: Vec<String>,
+    /// Effective weight (zero in diagnostic mode); always report the losses.
+    #[serde(default)]
+    pub required_loss_weight: f64,
     /// The breeding shortfall, summed over the lineages held to breeding
     /// ([`breeding_shortfall`]): 1 for a lineage lost or with no late birth and no
     /// readiness, graded below that by its readiness, 0 with late births. Costs
@@ -265,6 +294,9 @@ pub struct Penalty {
     /// The balance term ([`Trace::balance`]).
     #[serde(default)]
     pub balance: f64,
+    /// Weighted absolute persistence, never forgiven by the reference.
+    #[serde(default)]
+    pub absolute_persist: f64,
     pub total: f64,
 }
 
@@ -320,7 +352,9 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
     let stage = band.missing_cost * t.stage;
     let persist = band.missing_cost * (t.missing as f64 + t.silent_lineages) + stage;
     let counts = if t.counts_readout { 0.0 } else { bound + peak + share };
+    let absolute_persist = t.required_loss_weight * t.lost_required as f64;
     Penalty {
+        absolute_persist,
         bound,
         peak,
         lively,
@@ -329,7 +363,7 @@ pub fn penalty(t: &Trace, band: &Band) -> Penalty {
         stage,
         replenish: t.replenish,
         balance: t.balance,
-        total: counts + lively + persist + t.replenish + t.balance,
+        total: counts + lively + persist + t.replenish + t.balance + absolute_persist,
     }
 }
 
@@ -341,6 +375,8 @@ pub struct EvalSpec {
     pub world: cubarium_voxel::Config,
     /// Founders per lineage, in [`Founder::ALL`] order (the lanternjaw's are clutches).
     pub founders: [usize; Founder::COUNT],
+    /// Fixed declared roster across candidates; None derives it before placement.
+    pub required_roster: Option<RequiredRoster>,
     pub horizon_ticks: u64,
     pub window_ticks: u64,
     pub water_every: u32,
@@ -357,6 +393,8 @@ pub struct EvalSpec {
     /// Each lineage's curiosity in the brains' score (`--curiosity`; weight 0 without).
     /// A training knob, not an ecology gene: the CMA never sees it.
     pub curiosity: Curiosity,
+    /// File/control labels accompanying the installed driver digests.
+    pub driver_sources: Vec<(Founder, String)>,
     /// Found exactly the world `base` names (`Seeds::Asked`), not the first accepted from
     /// it: the grid keeps one world per seed across its cells.
     pub asked_seed: bool,
@@ -378,6 +416,7 @@ impl EvalSpec {
             // The shipped founding table: a search's candidates share it (no count is a
             // gene), and a lineage at 0 founds nothing and has no target or score term.
             founders: cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
+            required_roster: None,
             horizon_ticks,
             window_ticks,
             water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY,
@@ -386,6 +425,7 @@ impl EvalSpec {
             band: BandSpec::default(),
             score_horizon_ticks: horizon_ticks,
             curiosity: Curiosity::default(),
+            driver_sources: Vec::new(),
             asked_seed: false,
             start: super::start::StartSet::E0,
             burn_in: super::start::BurnIn::default(),
@@ -478,8 +518,12 @@ pub struct Evaluation {
     pub readout_only: Vec<bool>,
     pub ticks: u64,
     pub wall_s: f64,
-    #[serde(skip)]
     pub body_scores: Vec<BodyScore>,
+    pub required_roster: RequiredRoster,
+    pub presence_end: Presence,
+    pub lost_required: usize,
+    pub lost_required_names: Vec<String>,
+    pub recruitment: Recruitment,
     /// How it started ([`super::start::StartRecord`]).
     #[serde(default)]
     pub start: super::start::StartRecord,
@@ -503,6 +547,7 @@ pub struct BalanceReadout {
 /// What the targets read off the fauna's ledger, per lineage, at one moment.
 #[derive(Clone, Debug, Default)]
 struct Snap {
+    recruitment: Recruitment,
     assimilated: [f64; Founder::COUNT],
     hatched: [u64; Founder::COUNT],
     laid: [u64; Founder::COUNT],
@@ -537,6 +582,7 @@ impl Snap {
                 super::targets::digestible_stomach(a, sim.fauna().config().founder(f));
         }
         Snap {
+            recruitment: Recruitment::of(sim.fauna()),
             assimilated: l.assimilated_by_founder,
             hatched: l.eggs_hatched_by_founder,
             laid: l.eggs_laid_by_founder,
@@ -655,7 +701,6 @@ pub struct EvalRun {
     species_start: Vec<usize>,
     trace: Trace,
     moving: [u64; 4],
-    late_births: Vec<u64>,
     /// Second-half readiness: its sum and samples per lineage.
     readiness: Vec<(f64, u64)>,
     readouts: Vec<Vec<(String, super::readout::Pool, f64)>>,
@@ -669,13 +714,14 @@ pub struct EvalRun {
     /// What the last window counted per lineage.
     last: [LineageStats; Founder::COUNT],
     /// Targets v3's bookkeeping: the ledger at founding and one day-cycle later, the
-    /// cycle's length, the highest body id seen (a newer one is a birth), births per
+    /// cycle's length, exact recruitment event baselines, births per
     /// lineage over the run and in its second half (by tick), the founders' ids, and
     /// body-minutes per lineage.
     snap_start: Snap,
     snap_cycle: Option<Snap>,
     cycle_ticks: u64,
-    max_id: u64,
+    required_roster: RequiredRoster,
+    event_half: Option<Recruitment>,
     first_id: u64,
     births_all: [u64; Founder::COUNT],
     births_late: [u64; Founder::COUNT],
@@ -701,6 +747,8 @@ impl EvalRun {
         use super::start::{self, Residuals, StartRecord, StartSet};
         let started = Instant::now();
         let mut spec = spec.clone();
+        let declared_flora = params.flora(spec.world.voxel_m);
+        let mut required_roster = spec.required_roster.clone().unwrap_or_else(|| RequiredRoster::declared(&spec.founders, &declared_flora));
         let (mut sim, info, mut record) = match &spec.start {
             StartSet::E0 => {
                 let seeds = if spec.asked_seed {
@@ -713,6 +761,8 @@ impl EvalRun {
                 let (w, fl, fa) = sim.layers();
                 let hash = start::params_hash(&start::layers_of(fl, fa));
                 let record = StartRecord {
+                    parameter_changes: start::parameter_changes(&EcologyParams::defaults().layers(w.config().voxel_m),
+                        &params.layers(w.config().voxel_m), &start::layers_of(fl, fa)),
                     set: spec.start.label(),
                     seed: info.seed,
                     start_tick: w.tick(),
@@ -763,6 +813,8 @@ impl EvalRun {
                     stage.readout_only = [false; Founder::COUNT];
                 }
                 let record = StartRecord {
+                    parameter_changes: start::parameter_changes(&start_layers, &candidate, &o.installed),
+                    start_identity: Some(manifest.identity.clone()),
                     set: spec.start.label(),
                     seed: manifest.seed,
                     start_tick,
@@ -777,6 +829,18 @@ impl EvalRun {
                 (sim, info, record)
             }
         };
+        if spec.start.established() { required_roster.include_present(&Presence::of(&sim)); }
+        let mut lost_required_names = required_roster.losses(&Presence::of(&sim));
+        let founding_losses = lost_required_names.clone();
+        record.drivers = Founder::ALL.iter().map(|f| {
+            let what = drivers.iter().find(|(lineage, _)| lineage == f).map_or_else(
+                || "heuristic".to_string(),
+                |(_, d)| format!("{} weights={:016x}", d.name(), d.digest()));
+            let source = spec.driver_sources.iter().find(|(lineage, _)| lineage == f)
+                .map_or("in-memory", |(_, label)| label.as_str());
+            format!("{}={what} source={}", f.name(), if drivers.iter().any(|(lineage, _)| lineage == f) { source } else { "heuristic" })
+        }).collect();
+        eprintln!("arm_provenance {}", serde_json::to_string(&record).expect("provenance"));
         sim.world_mut().set_water_every(spec.water_every);
         // **The burn-in**: fixed per start, the same for every candidate, ending on the
         // day clock's window grid. A failure in it is recorded, never excluded.
@@ -794,6 +858,7 @@ impl EvalRun {
         let mut burnt = 0u64;
         while burnt < burn {
             sim.step();
+            retain_losses(&mut lost_required_names, required_roster.losses(&Presence::of(&sim)));
             burnt += 1;
             if burnt.is_multiple_of(TICKS_PER_MIN) {
                 let total = sim.fauna().view().animals.len();
@@ -816,6 +881,7 @@ impl EvalRun {
                 .map(|f| f.name().to_string())
                 .collect();
         }
+        retain_losses(&mut record.burn_in_lost, lost_required_names.iter().filter(|name| !founding_losses.contains(name)).cloned().collect());
         let (w, fl, fa) = sim.layers();
         record.residuals.push(("burn-in".into(), Residuals::of(w, fl, fa)));
         record.scoring_tick = w.tick();
@@ -840,6 +906,9 @@ impl EvalRun {
         };
         let snap_start = Snap::of(&sim);
         let trace = Trace {
+            lost_required: lost_required_names.len(),
+            lost_required_names,
+            required_loss_weight: if spec.band.absolute_persistence { spec.band.required_loss_weight } else { 0.0 },
             horizon_min: spec.horizon_ticks as f64 / TICKS_PER_MIN as f64,
             ..Trace::default()
         };
@@ -854,7 +923,6 @@ impl EvalRun {
             species_start,
             trace,
             moving: [0; 4],
-            late_births: vec![0; Founder::COUNT],
             readiness: vec![(0.0, 0); Founder::COUNT],
             readouts: Vec::new(),
             body_scores: Vec::new(),
@@ -866,7 +934,8 @@ impl EvalRun {
             snap_start,
             snap_cycle: None,
             cycle_ticks,
-            max_id,
+            required_roster,
+            event_half: None,
             first_id: max_id,
             births_all: [0; Founder::COUNT],
             births_late: [0; Founder::COUNT],
@@ -957,10 +1026,19 @@ impl EvalRun {
         let memory = std::mem::take(&mut self.memory);
         let mut w =
             Window::begin_with(&mut self.sim, tables, first_pair, ticks, &spec.curiosity, memory);
+        w.stomach_aware_reward = spec.band.stomach_aware_reward;
         let mut halt = None;
         while !w.done() {
             w.step(&mut self.sim);
             self.elapsed += 1;
+            retain_losses(&mut self.trace.lost_required_names, self.required_roster.losses(&Presence::of(&self.sim)));
+            self.trace.lost_required = self.trace.lost_required_names.len();
+            let events = Recruitment::of(self.sim.fauna());
+            self.births_all = events.since(&self.snap_start.recruitment).births;
+            if self.elapsed == half_ticks { self.event_half = Some(events); }
+            if self.elapsed > half_ticks {
+                self.births_late = events.since(self.event_half.as_ref().unwrap_or(&self.snap_start.recruitment)).births;
+            }
             if self.elapsed.is_multiple_of(TICKS_PER_MIN) {
                 if let Some(b) = &self.budget {
                     self.sim.set_threads(b.current());
@@ -981,22 +1059,6 @@ impl EvalRun {
                         r.1 += 1;
                     }
                 }
-                // Births by id, minute by minute (a body born and dead inside one minute
-                // is missed): late ones by tick, not by window.
-                let mut newest = self.max_id;
-                for a in self.sim.fauna().view().animals.iter() {
-                    if a.id <= self.max_id {
-                        continue;
-                    }
-                    newest = newest.max(a.id);
-                    if let Some(f) = a.founder {
-                        self.births_all[f.index()] += 1;
-                        if self.elapsed > half_ticks {
-                            self.births_late[f.index()] += 1;
-                        }
-                    }
-                }
-                self.max_id = newest;
                 if self.snap_cycle.is_none() && self.elapsed >= self.cycle_ticks {
                     self.snap_cycle = Some(Snap::of(&self.sim));
                 }
@@ -1006,16 +1068,17 @@ impl EvalRun {
                         self.elapsed / TICKS_PER_MIN
                     ));
                 } else if spec.stop_on_loss
-                    && scored_lost(&self.founded, &pop, &eggs(&self.sim), &readout) > 0
+                    && (scored_lost(&self.founded, &pop, &eggs(&self.sim), &readout) > 0
+                        || (spec.band.absolute_persistence && self.trace.lost_required > 0))
                 {
-                    halt = Some("a lineage died out".to_string());
+                    halt = Some("a required member or scored lineage was lost".to_string());
                 }
                 if halt.is_some() {
                     break;
                 }
             }
         }
-        let mut r = w.finish(&self.sim, 0);
+        let mut r = w.finish(&self.sim, self.info.seed as usize);
         self.memory = std::mem::take(&mut r.memory);
         self.last = r.lineages.clone();
         let b = &r.lineages[Founder::Browser.index()];
@@ -1024,9 +1087,6 @@ impl EvalRun {
         if window_start >= half_ticks {
             self.moving[0] += b.moving_minutes;
             self.moving[1] += b.body_minutes;
-            for f in Founder::ALL {
-                self.late_births[f.index()] += r.lineages[f.index()].births;
-            }
         }
         for f in Founder::ALL {
             self.body_minutes[f.index()] += r.lineages[f.index()].body_minutes;
@@ -1054,7 +1114,6 @@ impl EvalRun {
             species_start,
             mut trace,
             moving,
-            late_births,
             readiness,
             readouts,
             body_scores,
@@ -1069,8 +1128,14 @@ impl EvalRun {
             adult_ticks,
             record,
             baselines,
+            required_roster,
             ..
         } = self;
+        let late_births = births_late.to_vec();
+        let presence_end = Presence::of(&sim);
+        retain_losses(&mut trace.lost_required_names, required_roster.losses(&presence_end));
+        trace.lost_required = trace.lost_required_names.len();
+        let recruitment = Recruitment::of(sim.fauna()).since(&snap_start.recruitment);
         let readiness: Vec<f64> = readiness
             .iter()
             .map(|(sum, n)| if *n > 0 { sum / *n as f64 } else { 0.0 })
@@ -1150,6 +1215,8 @@ impl EvalRun {
             stage.balance_share,
         );
         let penalty = penalty(&trace, &band);
+        println!("world base_seed={base} accepted_seed={} lost_required={} [{}] absolute_persist={}",
+            info.seed, trace.lost_required, trace.lost_required_names.join(";"), penalty.absolute_persist);
         let readout_mean = super::readout::pool(&readouts)
             .into_iter()
             .map(|(name, v)| {
@@ -1173,6 +1240,11 @@ impl EvalRun {
             .map(|r| r.iter().map(|(n, _, v)| (n.clone(), *v)).collect())
             .unwrap_or_default();
         Evaluation {
+            lost_required: trace.lost_required,
+            lost_required_names: trace.lost_required_names.clone(),
+            required_roster,
+            presence_end,
+            recruitment,
             base_seed: base,
             world_seed: info.seed,
             trace,
@@ -1279,6 +1351,10 @@ fn outcomes(
         if bank {
             o.bank_hatches = now.hatched[i] - start.hatched[i];
         }
+        let recruitment = now.recruitment.since(&start.recruitment);
+        o.live_births = recruitment.live_births[i];
+        o.hatchings = recruitment.hatchings[i];
+        o.maturations = recruitment.maturations[i];
         o.eggs_laid = now.laid[i] - start.laid[i];
         o.hits = now.hits[i] - start.hits[i];
         o.intake_run = now.assimilated[i] - start.assimilated[i];
@@ -1469,6 +1545,8 @@ pub struct CandidateRecord {
     pub soft: f64,
     pub screened_out: bool,
     pub evaluations: Vec<Evaluation>,
+    pub lost_required: usize,
+    pub lost_required_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1498,6 +1576,7 @@ pub struct WindowLog {
     pub wall_s: f64,
     /// The centre key ([`centre_key`], all lineages XORed) each running world was handed.
     pub world_keys: Vec<u64>,
+    pub body_scores: Vec<BodyScore>,
     pub lineages: Vec<LineageWindow>,
 }
 
@@ -1521,6 +1600,8 @@ pub struct LineageWindow {
     pub mean_novelty: f64,
     pub mean_curiosity: f64,
     pub sd_energy: f64,
+    pub mean_delta_body: f64,
+    pub mean_delta_stomach_aware: f64,
     pub sd_novelty: f64,
     /// Moving body-minutes over body-minutes, every body of the lineage in the window.
     pub moving_share: f64,
@@ -1739,6 +1820,8 @@ fn lockstep(
                 mean_novelty: mean(&novelty),
                 mean_curiosity: mean(&curiosity),
                 sd_energy: within_world_sd(&energy),
+                mean_delta_body: mean(&part(|b| b.delta_body_normalized)),
+                mean_delta_stomach_aware: mean(&part(|b| b.delta_stomach_aware_normalized)),
                 sd_novelty: within_world_sd(&novelty),
                 moving_share: if minutes > 0 { moving as f64 / minutes as f64 } else { f64::NAN },
                 sd_energy_lived: within_world_sd(&lived(|b| {
@@ -1755,6 +1838,7 @@ fn lockstep(
             window,
             brain_step: *brain_step,
             wall_s: started.elapsed().as_secs_f64(),
+            body_scores: results.iter().flat_map(|(scores, _)| scores.iter().copied()).collect(),
             world_keys: ran
                 .iter()
                 .map(|&i| *runs[i].keys.last().expect("it ran a window"))
@@ -1783,7 +1867,7 @@ pub fn window_line(w: &WindowLog) -> String {
     for l in &w.lineages {
         s.push_str(&format!(
             " | {} n={} twin={:.3} pair={:.3} ratio={:.2} rms={:.2e} nov={:.3} cur={:.3} \
-             sdE={:.3} sdN={:.3} mov={:.2} lived:sdE={:.3} sdN={:.4} died={:.2} gave={:.2}",
+             deltaE={:.3} deltaEstar={:.3} sdE={:.3} sdN={:.3} mov={:.2} lived:sdE={:.3} sdN={:.4} died={:.2} gave={:.2}",
             l.lineage,
             l.bodies,
             l.twin_diff,
@@ -1792,6 +1876,8 @@ pub fn window_line(w: &WindowLog) -> String {
             l.update_rms,
             l.mean_novelty,
             l.mean_curiosity,
+            l.mean_delta_body,
+            l.mean_delta_stomach_aware,
             l.sd_energy,
             l.sd_novelty,
             l.moving_share,
@@ -1921,6 +2007,11 @@ pub fn start_from(search: &Genome, start: &Genome) -> Result<Genome, String> {
 /// evaluated so far), `mean.toml` (the search mean), and each as a resolved parameter
 /// file (`best-params.toml`, `mean-params.toml`) under `out`.
 pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
+    let mut configured = spec.clone();
+    configured.eval.required_roster = Some(spec.eval.required_roster.clone().unwrap_or_else(||
+        RequiredRoster::declared(&spec.eval.founders, &EcologyParams::Genome(spec.genome.clone()).flora(spec.eval.world.voxel_m))));
+    configured.eval.driver_sources = spec.centres.iter().map(|(f, p)| (*f, p.display().to_string())).collect();
+    let spec = &configured;
     let run_started = Instant::now();
     std::fs::create_dir_all(&spec.out)
         .map_err(|e| format!("cannot create {}: {e}", spec.out.display()))?;
@@ -2137,6 +2228,12 @@ pub fn search(spec: &SearchSpec) -> Result<Vec<SearchRecord>, String> {
                 screen: verdicts[k],
                 soft: if run[k] { spec.screen.soft_with(&screens[k], &rosters[k]) } else { 0.0 },
                 screened_out,
+                lost_required: mine.iter().map(|e| e.lost_required).sum(),
+                lost_required_names: {
+                    let mut names = Vec::new();
+                    for e in &mine { retain_losses(&mut names, e.lost_required_names.clone()); }
+                    names
+                },
                 evaluations: mine,
             });
         }
@@ -2254,6 +2351,9 @@ fn summary(r: &SearchRecord, best: Option<f64>) -> String {
             end.join(","),
         ));
     }
+    for c in &r.candidates {
+        s.push_str(&format!(" | {} lost_required={} [{}]", c.label, c.lost_required, c.lost_required_names.join(";")));
+    }
     s
 }
 
@@ -2326,11 +2426,31 @@ pub fn check(
         let path = out.join(format!("{name}__seed{seed}.csv"));
         let mut f = std::fs::File::create(&path)
             .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-        let mut header = vec!["minute".to_string(), "world_seed".into(), "animals".into()];
+        let (w, fl, fa) = sim.layers();
+        let installed = super::start::layers_of(fl, fa);
+        let provenance = super::start::StartRecord {
+            set: "E0".into(), seed: info.seed, start_tick: w.tick(),
+            parameter_changes: super::start::parameter_changes(&EcologyParams::defaults().layers(w.config().voxel_m),
+                &params.layers(w.config().voxel_m), &installed),
+            drivers: Founder::ALL.iter().map(|f| drivers.iter().find(|(lineage, _)| lineage == f)
+                .map_or_else(|| format!("{}=heuristic", f.name()), |(_, d)| {
+                    let source = centres.iter().find(|(lineage, _)| lineage == f).map(|(_, p)| p.display().to_string()).unwrap_or_default();
+                    format!("{}={} source={source} weights={:016x}", f.name(), d.name(), d.digest())
+                })).collect(),
+            ..super::start::StartRecord::default()
+        };
+        std::fs::write(path.with_extension("provenance.json"), serde_json::to_vec_pretty(&provenance).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("cannot write provenance: {e}"))?;
+        let required = RequiredRoster::declared(&founders, &params.flora(w.config().voxel_m));
+        let mut lost_required = required.losses(&Presence::of(&sim));
+        let mut header = vec!["minute".to_string(), "world_seed".into(), "animals".into(), "lost_required".into(), "lost_required_names".into()];
         for l in Founder::ALL {
             header.push(format!("{}.population", l.name()));
             header.push(format!("{}.eggs", l.name()));
             header.push(format!("{}.births", l.name()));
+            for field in ["live_births", "hatchings", "eggs_laid", "maturations", "r_hat_surplus_extrapolated"] {
+                header.push(format!("{}.{field}", l.name()));
+            }
             for d in cubarium_voxel_fauna::Departure::ALL {
                 header.push(format!("{}.{}", l.name(), d.name()));
             }
@@ -2345,6 +2465,8 @@ pub fn check(
         }
         for s in Species::ALL {
             header.push(format!("stands.{}", s.name()));
+            header.push(format!("dormant.{}", s.name()));
+            header.push(format!("seed_banks.{}", s.name()));
         }
         header.extend(
             [
@@ -2367,6 +2489,7 @@ pub fn check(
             let mut w = Window::begin_with(&mut sim, &tables, &zeros, ticks, curiosity, memory);
             while !w.done() {
                 w.step(&mut sim);
+                retain_losses(&mut lost_required, required.losses(&Presence::of(&sim)));
             }
             elapsed += ticks;
             let mut r = w.finish(&sim, 0);
@@ -2382,12 +2505,16 @@ pub fn check(
                 format!("{:.0}", elapsed as f64 / TICKS_PER_MIN as f64),
                 info.seed.to_string(),
                 sim.fauna().view().animals.len().to_string(),
+                lost_required.len().to_string(),
+                lost_required.join(";"),
             ];
             for l in Founder::ALL {
                 let s = &r.lineages[l.index()];
                 row.push(pop[l.index()].to_string());
                 row.push(sim.fauna().view().eggs_by_founder(l).to_string());
                 row.push(s.births.to_string());
+                for count in [s.live_births, s.hatchings, s.eggs_laid, s.maturations] { row.push(count.to_string()); }
+                row.push(s.balance.r_hat.to_string());
                 for d in s.deaths {
                     row.push(d.to_string());
                 }
@@ -2421,8 +2548,11 @@ pub fn check(
                 }
             }
             let scan = Scan::of(&sim);
+            let presence = Presence::of(&sim);
             for s in Species::ALL {
                 row.push(scan.stands[s.index()].to_string());
+                row.push(presence.dormant_plants[s.index()].to_string());
+                row.push(presence.seed_banks[s.index()].to_string());
             }
             row.push(format!("{:.3}", scan.foliage));
             row.push(format!("{:.3}", scan.litter));
@@ -2501,6 +2631,7 @@ pub fn finalist(
         let horizon = (hours * 3600.0 * hz).round() as u64;
         let mut eval = EvalSpec::new(world_cfg.clone(), horizon, (window_min * 60.0 * hz).round() as u64);
         eval.founders = founders;
+        eval.driver_sources = centres.iter().map(|(f, p)| (*f, p.display().to_string())).collect();
         eval.water_every = water_every;
         eval.stop_on_loss = false;
         let rest = params.genome().map(|g| g.rest.clone()).unwrap_or_default();

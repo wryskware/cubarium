@@ -180,9 +180,12 @@ pub struct LineageOutcome {
     /// Living bodies at the end (riders included) and eggs.
     pub alive_end: usize,
     pub eggs_end: usize,
-    /// Bodies born in the second half, and in the whole run (by id, minute by minute).
+    /// Bodies born in the second half, and in the whole run (exact creation events).
     pub late_births: u64,
     pub births: u64,
+    pub live_births: u64,
+    pub hatchings: u64,
+    pub maturations: u64,
     /// Second-half mean breeding readiness.
     pub readiness: f64,
     /// Hatches out of the founding egg bank (an egg-bank lineage), and eggs adults laid.
@@ -264,6 +267,9 @@ impl LineageOutcome {
             eggs_end: 0,
             late_births: 0,
             births: 0,
+            live_births: 0,
+            hatchings: 0,
+            maturations: 0,
             readiness: 0.0,
             bank_hatches: 0,
             eggs_laid: 0,
