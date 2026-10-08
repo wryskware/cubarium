@@ -1,8 +1,8 @@
 [gd_scene load_steps=4 format=3]
 
-[ext_resource type="Script" path="res://world/world_view.gd" id="1"]
-[ext_resource type="Script" path="res://world/organisms.gd" id="2"]
-[ext_resource type="Script" path="res://world/weather.gd" id="3"]
+[ext_resource type="Script" path="res://world/legacy/world_view.gd" id="1"]
+[ext_resource type="Script" path="res://world/legacy/organisms.gd" id="2"]
+[ext_resource type="Script" path="res://world/legacy/weather.gd" id="3"]
 
 [node name="WorldView" type="Node3D"]
 script = ExtResource("1")

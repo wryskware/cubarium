@@ -1,4 +1,4 @@
-class_name WorldView
+class_name LegacyWorldView
 extends Node3D
 ## **The development presentation of a world** (package B, `design/handoffs/godot-direction-
 ## 2026-10-07.md`): terrain and water from the feed's chunks, the organisms as their baked
@@ -34,8 +34,8 @@ signal animal_clicked(id: int)
 const PALETTE_PATH := "res://world/data/palette.json"
 ## Which model cells emit light (`VoxelModels.set_emissive`).
 const EMISSION_PATH := "res://world/data/emission.json"
-const LightSettingsScript := preload("res://world/light_settings.gd")
-const EmitterLightsScript := preload("res://world/emitter_lights.gd")
+const LightSettingsScript := preload("res://world/legacy/light_settings.gd")
+const EmitterLightsScript := preload("res://world/legacy/emitter_lights.gd")
 ## The emitters' material: the cell's colour, emitting it at `energy`; a glowcap's lip
 ## (instance `candle` 1) wanders between `candle_min` and full, each its own phase.
 const GLOW_SHADER := """

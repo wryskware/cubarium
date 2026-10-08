@@ -1,7 +1,7 @@
 extends Node
 ## **The dev scene** for `WorldView`: a world shown through it, for checks and pictures.
 ##
-##   godot --path game res://world/dev_view.tscn -- [options]     (through scripts/hidden.sh)
+##   godot --path game res://world/legacy/dev_view.tscn -- [options]     (through scripts/hidden.sh)
 ##
 ## A world, one of:
 ##   --seed N [--config PATH]   found one (default config ../config/desktop/terrarium.toml)
@@ -30,7 +30,7 @@ extends Node
 ## Keys: the view's own pan keys; Esc quits.
 
 const DEFAULT_CONFIG := "../config/desktop/terrarium.toml"
-const LightSettingsScript := preload("res://world/light_settings.gd")
+const LightSettingsScript := preload("res://world/legacy/light_settings.gd")
 const SETTLE_S := 2.0
 
 var session
