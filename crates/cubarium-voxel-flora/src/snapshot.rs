@@ -1,18 +1,23 @@
-//! Save/load as postcard bytes behind a schema tag, the way
-//! [`cubarium_voxel::snapshot`] and `cubarium_voxel_fauna::snapshot` do it. A different
-//! tag is refused; there is no migration, ever.
-//!
-//! `always-fresh-never-migrate`: a new schema refuses old worlds and nothing is
-//! synthesized or re-anchored. Nothing in the host writes one of these yet.
+//! Save/load the way [`cubarium_voxel::snapshot`] does it: the plant layer's **state** as
+//! postcard bytes behind a schema tag, its **config** beside it as a named-field document
+//! ([`cubarium_voxel::savedoc`]). A different state tag is refused as another version
+//! (`always-fresh-never-migrate` holds for the state and for meaning); a config knob added or
+//! dropped since the save is not a new version.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::Flora;
+use crate::{Flora, FloraConfig};
 
-/// The plant layer's snapshot format. Bumped whenever a serialized field, the config
-/// inside the snapshot, or what a saved field means changes. Postcard is not
-/// self-describing, so other tags are refused, never migrated.
+/// The plant layer's state format.
+///
+/// **What needs a bump** (Wrysk, 2026-10-08): a change to the *state's* layout (a serialized
+/// field of `Flora` or anything it holds, other than its config, added, removed, reordered or
+/// retyped), or a change to what a saved field or knob *means*. **What does not:** adding,
+/// removing or retuning a config knob (`FloraConfig` and everything inside it) — the document
+/// carries names, so an older save takes the new knob's default.
+///
+/// Before 39 the config sat inside the positional state and every knob was a bump:
 // 13: F1 (tests-first stubs) — `Stand::nectar`, `SpeciesConfig::{nectar_per_s, nectar_cap}`.
 // 14: F1 — bloomcrown's nectar is made and taken; `SpeciesConfig::nectar_mineral_fraction`.
 // 15: F3 (tests-first stubs) — `Stand::fruit`, `SpeciesConfig::{fruit_per_s, fruit_cap,
@@ -60,48 +65,110 @@ use crate::Flora;
 // 37: SUN-SHELTER — `SpeciesConfig::sun_dark_shelter`: its dark habitat shelters it from the sun.
 // 38: FOLIAGE STATES — `SpeciesConfig::{foliage_state_below, foliage_state_hysteresis}`
 //     (presentation knobs carried with the species).
-pub const SCHEMA: u32 = 38;
+// 39: SAVE-EXTENSIBLE — the config moved out of the positional state into a named-field
+//     document beside it.
+pub const SCHEMA: u32 = 39;
 
-#[derive(Serialize, Deserialize)]
-struct Envelope {
+/// **The one-version legacy reader's tag** ([`decode_legacy`]): schema 38, the last whose
+/// config sat positionally inside the state, kept so the 2026-10-08 training starts load.
+/// Retire it (delete this, [`decode_legacy`] and its arm in [`decode`]) once those saves are
+/// rewritten in the current format (`voxel_resave`) or no longer wanted; it can read them only
+/// while `FloraConfig`'s positional layout is still schema 38's, so the first plant knob added
+/// after SAVE-EXTENSIBLE retires it in practice.
+pub const LEGACY_SCHEMA: u32 = 38;
+
+#[derive(Serialize)]
+struct EnvelopeOut<'a> {
     schema: u32,
+    config: Vec<u8>,
+    flora: &'a Flora,
+}
+
+#[derive(Deserialize)]
+struct EnvelopeIn {
+    _schema: u32,
+    config: Vec<u8>,
     flora: Flora,
 }
 
 pub fn encode(flora: &Flora) -> Vec<u8> {
-    postcard::to_stdvec(&Envelope {
+    postcard::to_stdvec(&EnvelopeOut {
         schema: SCHEMA,
-        flora: flora.clone(),
+        config: cubarium_voxel::savedoc::to_doc(&flora.config),
+        flora,
     })
     .expect("a Flora always serializes")
 }
 
-/// Read a plant layer back. A payload tagged with any other schema is refused with the
+/// Read a plant layer back. A payload tagged with another state schema is refused with the
 /// tag it carries: start a fresh world.
 pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
-    let (tag, _): (u32, &[u8]) =
+    let (tag, rest): (u32, &[u8]) =
         postcard::take_from_bytes(bytes).context("reading the flora snapshot's schema tag")?;
-    if tag != SCHEMA {
-        bail!(
-            "this flora snapshot is schema {tag} and this build reads schema {SCHEMA}: \
-             plant layers are never migrated, start a fresh world"
-        );
-    }
-    let envelope: Envelope =
-        postcard::from_bytes(bytes).context("decoding the flora snapshot's payload")?;
-    envelope.flora.config().validate().map_err(|e| {
+    let mut flora = match tag {
+        SCHEMA => {
+            let env: EnvelopeIn = postcard::from_bytes(bytes).with_context(|| {
+                format!(
+                    "the flora state does not read as schema {SCHEMA} (a damaged file, or a build \
+                     that changed the state layout without bumping the schema)"
+                )
+            })?;
+            // The saved config is the one the layer ran, at the world's cell size; a knob
+            // the save lacks takes the default at that same cell size.
+            let voxel_m = cubarium_voxel::savedoc::field_f64(&env.config, "voxel_m")
+                .unwrap_or(FloraConfig::default().voxel_m);
+            let base = FloraConfig::default().rescaled_to(voxel_m);
+            let (config, ignored) = cubarium_voxel::savedoc::from_doc(&env.config, &base)
+                .context("the flora snapshot's config")?;
+            cubarium_voxel::savedoc::note_ignored("flora", &ignored);
+            let mut flora = env.flora;
+            flora.config = config;
+            flora
+        }
+        LEGACY_SCHEMA => decode_legacy(rest)?,
+        found => bail!(
+            "this flora snapshot is schema {found} and this build reads schema {SCHEMA}: made by \
+             another version of Cubarium whose plant state has another layout; start a fresh world"
+        ),
+    };
+    flora.config().validate().map_err(|e| {
         anyhow::anyhow!("the saved flora config is not one a plant can live under: {e}")
     })?;
-    let mut flora = envelope.flora;
     // The crowns are derived and not saved.
     flora.refresh_crowns(None);
+    Ok(flora)
+}
+
+/// **One-version legacy reader** ([`LEGACY_SCHEMA`]): a schema-38 plant layer, whose config
+/// sat positionally at the head of the state. Postcard frames nothing, so it is the config's
+/// bytes followed by exactly the state the current envelope carries.
+fn decode_legacy(rest: &[u8]) -> anyhow::Result<Flora> {
+    let (config, state): (FloraConfig, &[u8]) = postcard::take_from_bytes(rest).context(
+        "a schema-38 (legacy) flora layer whose config this build no longer reads positionally; \
+         rewrite it with voxel_resave from a build before the plant config changed",
+    )?;
+    let mut flora: Flora = postcard::from_bytes(state)
+        .context("the state of a schema-38 (legacy) flora layer does not read")?;
+    flora.config = config;
     Ok(flora)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Flora, FloraConfig};
+
+    fn with_doc(flora: &Flora, doc: Vec<u8>) -> Vec<u8> {
+        postcard::to_stdvec(&EnvelopeOut { schema: SCHEMA, config: doc, flora }).unwrap()
+    }
+
+    fn edited_doc(config: &FloraConfig, f: impl FnOnce(&mut Vec<(ciborium::Value, ciborium::Value)>)) -> Vec<u8> {
+        let mut v = ciborium::Value::serialized(config).unwrap();
+        let ciborium::Value::Map(m) = &mut v else { panic!("a config is a map") };
+        f(m);
+        let mut doc = Vec::new();
+        ciborium::into_writer(&v, &mut doc).unwrap();
+        doc
+    }
 
     #[test]
     fn a_round_trip_keeps_the_layers_and_a_foreign_tag_is_refused() {
@@ -112,6 +179,64 @@ mod tests {
 
         let mut wrong = postcard::to_stdvec(&(SCHEMA + 1)).expect("a tag");
         wrong.extend_from_slice(&bytes[wrong.len().min(bytes.len())..]);
-        assert!(decode(&wrong).is_err(), "a foreign schema must be refused");
+        let err = format!("{:#}", decode(&wrong).expect_err("a foreign schema must be refused"));
+        assert!(err.contains("another version"), "{err}");
+
+        let err = format!("{:#}", decode(&bytes[..bytes.len() / 2]).expect_err("half a state"));
+        assert!(err.contains("does not read as schema"), "{err}");
+    }
+
+    /// Every value of a config at a fine cell size comes back, rescaled fields included.
+    #[test]
+    fn a_round_trip_keeps_every_config_value() {
+        let config = FloraConfig::default().rescaled_to(0.125);
+        let flora = Flora::new(config.clone());
+        assert_eq!(decode(&encode(&flora)).unwrap().config(), &config);
+    }
+
+    /// A save written before a knob existed: the knob takes its default **at the save's
+    /// cell size**. Every knob of the default config, one at a time, and one through the
+    /// whole envelope.
+    #[test]
+    fn a_save_without_a_knob_takes_its_default() {
+        assert_eq!(
+            cubarium_voxel::savedoc::knobs_a_save_cannot_lack(&FloraConfig::default()),
+            Vec::<String>::new()
+        );
+        let config = FloraConfig::default().rescaled_to(0.125);
+        let flora = Flora::new(config.clone());
+        let doc = edited_doc(&config, |m| {
+            // A table of a species: drop one of its knobs.
+            let (_, species) = m
+                .iter_mut()
+                .find(|(_, v)| matches!(v, ciborium::Value::Map(_)))
+                .expect("a species table");
+            let ciborium::Value::Map(knobs) = species else { unreachable!() };
+            knobs.pop();
+        });
+        let back = decode(&with_doc(&flora, doc)).expect("a save without a knob loads");
+        assert_eq!(back.config(), &config);
+    }
+
+    #[test]
+    fn a_save_with_an_unknown_knob_loads() {
+        let flora = Flora::new(FloraConfig::default());
+        let doc = edited_doc(flora.config(), |m| {
+            m.push(("a_knob_from_another_build".into(), 1.into()));
+        });
+        let back = decode(&with_doc(&flora, doc)).expect("an unknown knob is dropped");
+        assert_eq!(back.config(), flora.config());
+    }
+
+    /// The one-version legacy reader: a schema-38 layer, its config positional at the head
+    /// of the state.
+    #[test]
+    fn the_legacy_reader_loads_a_positional_config_layer() {
+        let config = FloraConfig::default().rescaled_to(0.125);
+        let flora = Flora::new(config.clone());
+        let legacy = postcard::to_stdvec(&(LEGACY_SCHEMA, &config, &flora)).unwrap();
+        let back = decode(&legacy).expect("a schema-38 layer");
+        assert_eq!(back.config(), &config);
+        assert_eq!(back.view().ground.len(), flora.view().ground.len());
     }
 }

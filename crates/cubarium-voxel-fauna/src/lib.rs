@@ -123,7 +123,7 @@ pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, att
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
-pub use snapshot::SCHEMA;
+pub use snapshot::{LEGACY_SCHEMA, SCHEMA};
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
 /// This is a read-only diagnostic projection of the same ray result the founder
@@ -2227,6 +2227,8 @@ impl SpeciesConfig {
 /// no global constant in this layer — no decomposition, no cap, no lottery — because every
 /// rule it has belongs to an animal.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+// A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
+#[serde(default)]
 pub struct FaunaConfig {
     pub frondgrazer: SpeciesConfig,
     /// The two phase-one founders' own physiology and cost settings
@@ -3570,6 +3572,9 @@ pub struct FaunaTick(step::TickStart);
 /// The animal layer. Owns its animals; borrows the world and the plant layer per call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
+    /// Saved beside the state as a named-field document (`cubarium_voxel::savedoc`), not in
+    /// its positional bytes: a new knob is not a new state layout.
+    #[serde(skip)]
     config: FaunaConfig,
     /// Last world's (ring circumference, voxel size), rebuilt on introduction/step for
     /// exact death readouts that need cover geometry. Runtime cache, never saved.

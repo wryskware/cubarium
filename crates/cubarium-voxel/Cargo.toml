@@ -26,6 +26,8 @@ rayon = { version = "1", optional = true }
 rustc-hash = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 postcard = { version = "1", features = ["use-std"] }
+# The configs inside a save as named-field documents (`savedoc`).
+ciborium = "0.2"
 png = { workspace = true }
 # A config file's `[world]` table (`world_table`), shared by the app and the harness.
 toml = "0.8"
