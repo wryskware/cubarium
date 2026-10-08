@@ -12,3 +12,6 @@ cubarium-voxel-sim.workspace = true
 serde = { version = "1", features = ["derive"] }
 cubarium-voxel.workspace = true
 toml = "0.8"
+
+[lints]
+workspace = true

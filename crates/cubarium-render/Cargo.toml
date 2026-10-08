@@ -8,3 +8,6 @@ description = "Linear-light canvas, seam-aware body/trail/field rasterization, o
 [dependencies]
 cube-proto = { workspace = true }
 cubarium-surface = { workspace = true }
+
+[lints]
+workspace = true

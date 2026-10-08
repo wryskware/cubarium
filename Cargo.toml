@@ -25,6 +25,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 cube-proto = { path = "vendor/cube-proto" }
 cubarium-surface = { path = "crates/cubarium-surface" }

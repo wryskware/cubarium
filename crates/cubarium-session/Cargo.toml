@@ -24,3 +24,6 @@ serde_json = "1"
 toml = "0.8"
 # The schema tag at the front of a saved layer, read without decoding the layer.
 postcard = { version = "1", features = ["use-std"] }
+
+[lints]
+workspace = true

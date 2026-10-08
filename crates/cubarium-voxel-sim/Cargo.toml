@@ -35,3 +35,6 @@ bevy_ecs.workspace = true
 [[example]]
 name = "bench"
 required-features = ["profile"]
+
+[lints]
+workspace = true
