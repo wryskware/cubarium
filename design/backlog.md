@@ -233,3 +233,20 @@ game loads. The study tools write the older three-file layout (`world.bin`, `flo
 whole-save format down into the sim crate (the session crate sits above it) and pointing every
 study tool at the one writer and loader. Medium; touches tools other threads use mid-study.
 `cubarium-world found|advance` covers making game-loadable saves headless meanwhile.
+
+## 10. Water table as a new-world setting (Wrysk, 2026-10-07)
+
+The wide terrarium's lake grows by its water table (`water_level_m`), and Wrysk picks 0.375
+or 0.75 per seed. He would like to set it when choosing a seed in the new-world screen
+(`design/handoffs/godot-direction-2026-10-07.md`): "it could be sortof approximate. doesnt
+have to be a full recomputed world which might take way too long when just like moving a
+slider". A cheap preview is possible because the table only decides what floods on a fixed
+heightfield: re-flood the generated terrain at the slider's level without regenerating.
+First pass: "lets not put a lot of effort on it and regenerating the worlds is fine until i
+get tired of waiting lol".
+
+`lake_scale` (a larger carved basin) is parked at 1.0 in the wide config: at 1.5 and 2.5 it
+read as a dug-out. Its basin shaping needs rework before it is used; an unmerged attempt at
+shaping the basin before erosion is on branch `water-table-basin-wip` (erosion silts such a
+basin level with the yard; the massif's first riser is a long straight cliff any high table
+reaches).
