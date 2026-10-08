@@ -77,6 +77,8 @@ mod snail_land_tests;
 mod flight_tests;
 #[cfg(test)]
 mod seedporter_tests;
+#[cfg(test)]
+mod roost_rain_tests;
 mod flight;
 #[cfg(test)]
 mod slide_tests;
@@ -743,6 +745,12 @@ pub struct Mobility {
     /// day): it is held to the water-bound rule and its heuristic heads for water.
     #[serde(default)]
     pub thirsty: bool,
+    /// **Grounded by rain** (a flyer; backlog §12): set when the rain reaches its
+    /// [`crate::Flight::rain_ground_m_per_s`], cleared once it falls under that less the
+    /// hysteresis. While set it comes down, does not take off and does not sip. Always
+    /// `false` for a body without a flight table.
+    #[serde(default)]
+    pub rain_grounded: bool,
 }
 
 /// A body's locomotion mode ([`Mobility::mode`], predation-and-flight §3.1).
@@ -770,6 +778,25 @@ pub enum MobilityMode {
 pub struct Perch {
     pub kind: PerchKind,
     pub anchor: PerchAnchor,
+}
+
+/// **A roost ledge** (backlog §12, Wrysk 2026-10-08: "up top mesas they can reach by
+/// climbing latticevine"): one side of one wall column whose latticevine cover runs from
+/// the foot to within reach of the lip, with a support face on top. Derived from the
+/// terrain and the cover ([`Fauna::ledges`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Ledge {
+    /// The lowest covered face on the wall: its column and side.
+    pub face: cubarium_voxel_flora::Face,
+    /// The support face in front of the wall the climb starts from.
+    pub foot: Site,
+    /// The support face on top of the wall column: the lip.
+    pub top: Site,
+    /// The lowest and highest covered rows, and the most uncovered rows between two covered
+    /// ones.
+    pub low: u32,
+    pub high: u32,
+    pub gap: u32,
 }
 
 /// What holds a perch ([`Perch::anchor`]).
@@ -3695,6 +3722,11 @@ pub struct Fauna {
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
     pub(crate) route_flee: FxHashMap<u64, u64>,
+    /// ROOSTS (backlog §12): the latticevine ledges a glider may roost on ([`Ledge`]) and
+    /// the tick they were read, re-read at the teachers' `route_refresh_s`. Derived from the
+    /// terrain and the cover: not saved.
+    #[serde(skip)]
+    pub(crate) ledges: (Option<u64>, Vec<Ledge>),
     /// DROP: per grounded body, its trapped clock (`step::jump::Trapped`). Session state:
     /// not saved.
     #[serde(skip)]
@@ -4031,6 +4063,7 @@ impl Fauna {
             drop_plans: FxHashMap::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
+            ledges: (None, Vec::new()),
         })
     }
 

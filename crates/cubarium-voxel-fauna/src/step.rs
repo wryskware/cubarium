@@ -196,7 +196,8 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
         // WX4: who is asleep this tick is settled before anything is paid, so the
         // upkeep, the controller stage and the act all read the same answer.
         crate::pack::renew_dens(fauna, &view, flora.config().species(cubarium_voxel_flora::Species::Glowcap));
-        circadian(fauna, &view, clock_on, daylight);
+        circadian(fauna, &view, &flora.view(), clock_on, daylight);
+        rain_latch(fauna, sky.rain_m_per_s);
         maintenance(fauna);
         drain_riders(fauna);
         // The minimal gut: the stomach digests into the room upkeep and the rider's
@@ -609,6 +610,29 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
     }
 }
 
+/// **Rain grounds flyers** (backlog §12, Wrysk 2026-10-08: "rain should ground
+/// bellwings"): each flying lineage's latch ([`Mobility::rain_grounded`]) goes on at the
+/// world's rain rate (`rain`, m/s; the weather's one rate, what the plants read too) at or
+/// over its [`crate::Flight::rain_ground_m_per_s`], and off once the rain is under that
+/// less [`crate::Flight::rain_ground_hysteresis_m_per_s`] or has stopped.
+fn rain_latch(fauna: &mut Fauna, rain: f64) {
+    for k in 0..fauna.animals.len() {
+        let Some(founder) = fauna.animals[k].founder else {
+            continue;
+        };
+        let Some(flight) = fauna.config.founder(founder).flight else {
+            continue;
+        };
+        let m = &mut fauna.animals[k].mobility;
+        m.rain_grounded = rain > 0.0
+            && if m.rain_grounded {
+                rain >= flight.rain_ground_m_per_s - flight.rain_ground_hysteresis_m_per_s
+            } else {
+                rain >= flight.rain_ground_m_per_s
+            };
+    }
+}
+
 /// Step 1b: who sleeps this tick, and the two latches — **one precedence**
 /// (`design/metabolism-meals-2026-10-02.md` repair 2 item 7):
 ///
@@ -628,7 +652,8 @@ fn void_guts(fauna: &mut Fauna, flora: &mut Flora) {
 /// only at a full event, where the intake is. A body that falls asleep drops its held
 /// actions, so waking does not replay a stale stride; heuristic bodies carry no lineage
 /// and never sleep. A recovery is dropped by a sleep that outlasts it.
-fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: f64) {
+fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, clock_on: bool, daylight: f64) {
+    let downpour = view.weather.mode == cubarium_voxel::weather::RainMode::Downpour;
     let life = fauna.config.life;
     let v = view.config.voxel_m;
     let tick = fauna.tick;
@@ -691,8 +716,20 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool, daylight: 
         };
         // R3: a pack adult under its pack heuristic rests and sleeps at its den; away from
         // it, it stays awake while a reachable trip fits its reserve budget.
+        // ROOSTS (backlog §12): a glider under its own heuristic, about to fall asleep on a
+        // perch, stays up while a better roost (a vaulttree crown, a vine-climbed ledge top)
+        // is in reach of its budget and reserve — den rest's rule. One already asleep stays.
         let rest = match rest {
             Some(_) if crate::pack::must_walk_home(fauna, i, view) => None,
+            Some(_)
+                if phys.glider.is_some()
+                    && !downpour
+                    && fauna.animals[i].state != State::Asleep
+                    && fauna.controllers.flees(fauna.animals[i].id)
+                    && glider::better_roost(fauna, i, view, fv).is_some() =>
+            {
+                None
+            }
             Some(r) => Some(r),
             None => {
                 fauna.animals[i].homing_ticks = 0;
@@ -933,9 +970,13 @@ fn maintenance(fauna: &mut Fauna) {
         // A founder body pays upkeep under its own physiology's rate.
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let is_founder = fauna.animals[i].founder.is_some();
-        // Asleep it pays its lineage's sleep factor of it.
+        // Asleep it pays its lineage's sleep factor of it; so does a flyer sitting out the
+        // rain on a perch (backlog §12, Wrysk 2026-10-08: "should basically be like
+        // sleeping while it rains").
+        let m = fauna.animals[i].mobility;
+        let rain_rest = m.rain_grounded && m.mode == crate::MobilityMode::Perched;
         let rest = match fauna.animals[i].founder {
-            Some(founder) if fauna.animals[i].state == State::Asleep => {
+            Some(founder) if fauna.animals[i].state == State::Asleep || rain_rest => {
                 fauna.config.founder(founder).sleep_upkeep
             }
             _ => 1.0,
@@ -2353,9 +2394,12 @@ fn founder_act(
 ///    takes off when it is awake, the sky allows it and its reserve pays a takeoff; else
 ///    it **drops** — straight down at the lift speed, paying nothing aloft — onto the
 ///    first perch below.
-/// 2. **Forced down**: in a downpour, or sleepy (its lineage's rest hour and not hungry),
-///    a flyer aloft descends (`lift` −1, steering as it likes) and a perched one cannot
-///    take off. Asleep it does nothing else (it sleeps only perched).
+/// 2. **Forced down**: in a downpour, grounded by rain ([`Mobility::rain_grounded`],
+///    backlog §12), or sleepy (its lineage's rest hour and not hungry), a flyer aloft
+///    descends (`lift` −1, steering as it likes) and a perched one cannot take off.
+///    Grounded by the weather and awake, it instead rises under cover it can reach
+///    overhead ([`crate::flight::cover_overhead`]: a crown or an overhang, the underside
+///    roost), and it does not sip. Asleep it does nothing else (it sleeps only perched).
 /// 3. **Perched**: `lift` up (down from an underside) or `forward` takes off, paying
 ///    `takeoff_s` of flight out of the reserve; otherwise it may turn where it is, and sip.
 /// 4. **Aloft**: it pays `(factor − 1) ×` basal for the second beyond the upkeep it has
@@ -2399,7 +2443,9 @@ fn flyer_act(
     let takeoff_cost = flight.takeoff_s * flight.flight_factor * basal;
     let sleepy = !phys.active.awake_in(sky.clock_on, sky.daylight, 1.0, fauna.night, phys.active_window, &life)
         && !fauna.animals[i].emergency;
-    let grounded = sky.downpour || sleepy;
+    // Backlog §12: a downpour, or rain over its threshold (the latch), grounds it.
+    let weather = sky.downpour || fauna.animals[i].mobility.rain_grounded;
+    let grounded = weather || sleepy;
     let can_pay = |a: &Animal| a.reserve >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
 
@@ -2431,7 +2477,18 @@ fn flyer_act(
     if falling {
         (forward, turn, lift) = (0.0, 0.0, -1.0);
     } else if grounded {
-        lift = -1.0;
+        // Grounded by the weather (awake), it rises to hang under cover it can reach
+        // overhead; anything else brings it down onto what is below.
+        let a = &fauna.animals[i];
+        lift = if weather
+            && !sleepy
+            && mode == MobilityMode::Fly
+            && flight::cover_overhead(view, &flora.view(), shape, flight.band_max_m, &a.pose)
+        {
+            1.0
+        } else {
+            -1.0
+        };
     }
 
     // 3. Perched.
@@ -2456,8 +2513,10 @@ fn flyer_act(
                 a.pose.y_m = crate::surface_m(site.y, view.config.voxel_m)
                     + view.standing_depth_m(i64::from(site.x), site.y, site.z);
             }
+            // Grounded by the weather it does not sip (backlog §12).
             let fed = due
                 && held.feed > 0.0
+                && !weather
                 && flyer_sip(fauna, i, view, flora, &manifest, &phys, shape, held.feed);
             fauna.animals[i].state = if fed { State::Cropping } else { State::Resting };
             return;
@@ -2529,6 +2588,7 @@ fn flyer_act(
         && !falling
         && held.feed > 0.0
         && hovering
+        && !weather
         && flyer_sip(fauna, i, view, flora, &manifest, &phys, shape, held.feed);
     fauna.animals[i].state = if fed {
         State::Cropping

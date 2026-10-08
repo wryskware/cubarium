@@ -252,7 +252,7 @@ fn founder_rows() -> Vec<Row> {
         r("catch_foray_s", "s", nonneg, "MIMIC-2: maximum catch foray without a reward, before avoiding its patch"),
         r("active_window.before_rise_h", "h on the 24-h day clock", nonneg, "it wakes this long before sunrise on top of its rhythm (LURE: dawn flight)").prov("decision"),
         r("active_window.after_set_h", "h on the 24-h day clock", nonneg, "it stays awake this long after sunset on top of its rhythm (LURE: dusk flight)").prov("decision"),
-        r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep").search(0.1, 1.0).prov("decision"),
+        r("sleep_upkeep", "x basal upkeep", fraction, "upkeep while asleep (and a flyer perched out the rain)").search(0.1, 1.0).prov("decision"),
         r("wake_hunger", "hunger 0..1", fraction, "the emergency latch goes on (awake in any phase) at this reserve hunger").search(0.1, 1.0),
         r("emergency_clear_hunger", "hunger 0..1", fraction, "the emergency latch goes off below this reserve hunger")
             .search(0.0, 0.9).prov("decision"),
@@ -368,6 +368,8 @@ fn founder_rows() -> Vec<Row> {
         r("flight.lift_speed_fraction", "x cruise speed", nonneg, "vertical speed at full lift, either way").optional(),
         r("flight.egg_headroom_m", "m", nonneg, "a flyer lays only on a face with this clear over its hatchling's body").optional(),
         r("flight.egg_air_refresh_s", "s", nonneg, "the open air a flyer's egg site must reach is rebuilt at most this often").optional(),
+        r("flight.rain_ground_m_per_s", "m/s of rain", nonneg, "at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips").optional(),
+        r("flight.rain_ground_hysteresis_m_per_s", "m/s of rain", nonneg, "a rain-grounded flyer flies again once the rain is under the threshold less this").optional(),
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
@@ -376,6 +378,9 @@ fn founder_rows() -> Vec<Row> {
         r("glider.glide_min_height_m", "m", nonneg, "a glide starts only from this height over the landing surface").optional().prov("decision"),
         r("glider.roost_search_m", "m", nonneg, "at its rest hour or in a downpour a grounded glider walks to the nearest climbable stand within this").optional(),
         r("glider.fruit_search_m", "m", nonneg, "a hungry grounded glider on its heuristic walks to the nearest fruiting stand within this (a world query, not a sense)").optional(),
+        r("glider.roost_budget_m", "m", nonneg, "at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off)").optional(),
+        r("glider.roost_reserve_share", "fraction of reserve above emergency floor", fraction, "a preferred roost's trip (walk and climb) may spend this share").optional(),
+        r("glider.roost_ledge_min_m", "m", nonneg, "a roost ledge stands at least this over the foot of its vine wall").optional(),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),
