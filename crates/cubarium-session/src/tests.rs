@@ -330,6 +330,44 @@ fn candidates_are_independent_and_promoting_one_drops_the_others() {
     assert_eq!(Some(st.label), infos[0].label.clone(), "it is candidate 0");
 }
 
+/// The new-world picker's load, in one process: candidates founding side by side on the
+/// shared water pool (worlds of 512 columns and more step water on it), each with seeds
+/// drawn rather than asked and more frondgrazer founders than a small world can place,
+/// so the habitat check refuses every draw and the loop drops it and generates another
+/// (the path the app was on when it died on 2026-10-08); and a second batch of a
+/// different size started while the first is still founding. Nothing crashes, and every
+/// candidate of the batch that counts comes out ready.
+#[test]
+fn candidates_of_two_sizes_found_side_by_side_with_drawn_seeds() {
+    let scratch = Scratch::new("candidates-drawn");
+    let session = Session::new(options());
+    let drawn = |size: [u32; 3]| WorldSpec {
+        config: Some(tiny_config(&scratch.0)),
+        size: Some(size),
+        seed: None,
+        sets: vec!["fauna.founders.frondgrazer.founding_count=100000".into()],
+        ..WorldSpec::default()
+    };
+    session.generate_candidates(&drawn([64, 24, 8]), 4).expect("starts");
+    session.generate_candidates(&drawn([96, 20, 6]), 4).expect("starts");
+    let deadline = Instant::now() + Duration::from_secs(240);
+    let infos = loop {
+        let infos = session.candidates();
+        assert_eq!(infos.len(), 4);
+        assert!(infos.iter().all(|c| c.state != "failed"), "{infos:?}");
+        if infos.iter().all(|c| c.state == "ready") {
+            break infos;
+        }
+        assert!(Instant::now() < deadline, "the candidates did not found in time");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    for (k, info) in infos.iter().enumerate() {
+        assert!(info.summary.is_some(), "candidate {k} has no summary");
+        let view = session.candidate_view(k).expect("a ready candidate's view");
+        assert!(view.full && view.frame.is_some(), "candidate {k}'s view");
+    }
+}
+
 #[test]
 fn a_changed_voxel_appears_in_the_next_view() {
     let (session, _dir) = running("voxel");
