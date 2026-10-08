@@ -41,6 +41,7 @@ pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 mod gait;
 pub use gait::Sprint;
 pub use step::jump::DropRule;
+pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
@@ -3725,6 +3726,13 @@ pub struct Fauna {
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
     pub(crate) route_flee: FxHashMap<u64, u64>,
+    /// FORAGE-LEAVE: per heuristic body, its patch record — the stay under way and the
+    /// patch it gave up (`step::forage`). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) forage: FxHashMap<u64, step::forage::Patch>,
+    /// FORAGE-LEAVE's readout per lineage ([`ForageTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) forage_tally: [ForageTally; Founder::COUNT],
     /// ROOSTS (backlog §12): the latticevine ledges a glider may roost on ([`Ledge`]) and
     /// the tick they were read, re-read at the teachers' `route_refresh_s`. Derived from the
     /// terrain and the cover: not saved.
@@ -3770,11 +3778,13 @@ pub enum Steer {
     Light,
     /// DROP: a trapped body's jump down.
     Drop,
+    /// FORAGE-LEAVE: the walk off a patch given up.
+    Leave,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 13] = [
+    pub const ALL: [Steer; 14] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3788,6 +3798,7 @@ impl Steer {
         Steer::Pack,
         Steer::Light,
         Steer::Drop,
+        Steer::Leave,
     ];
 
     /// A short name for tables.
@@ -3806,6 +3817,7 @@ impl Steer {
             Steer::Pack => "pack",
             Steer::Light => "light",
             Steer::Drop => "drop",
+            Steer::Leave => "leave",
         }
     }
 }
@@ -4067,6 +4079,8 @@ impl Fauna {
             drop_plans: FxHashMap::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
+            forage: FxHashMap::default(),
+            forage_tally: [ForageTally::default(); Founder::COUNT],
             ledges: (None, Vec::new()),
         })
     }
@@ -4119,6 +4133,19 @@ impl Fauna {
             }
         }
         self.walk_shun.get(&id).map_or(Vec::new(), |l| l.iter().filter(|&&(_, u)| now < u).map(|&(k, _)| k).collect())
+    }
+
+    /// FORAGE-LEAVE: body `id` gives up target `key` (a stand it fed from) until tick
+    /// `until`, in the same list a pressed walk's targets go to ([`Fauna::walk_shunned`]).
+    pub(crate) fn shun_target(&mut self, id: u64, key: u64, until: u64) {
+        let now = self.tick;
+        let list = self.walk_shun.entry(id).or_default();
+        list.retain(|&(k, u)| k != key && now < u);
+        if list.len() >= WALK_SHUN_SLOTS {
+            list.sort_by_key(|&(_, u)| std::cmp::Reverse(u));
+            list.truncate(WALK_SHUN_SLOTS - 1);
+        }
+        list.push((key, until));
     }
 
     /// EDGE: a reflex walk for layer `kind` takes body `id` to target `key` this sample.

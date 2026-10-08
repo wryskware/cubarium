@@ -132,7 +132,10 @@ use crate::Fauna;
 // 68: ROOSTS-RAIN — `Glider::{roost_budget_m, roost_reserve_share, roost_ledge_min_m}`,
 //     `Flight::{rain_ground_m_per_s, rain_ground_hysteresis_m_per_s}`,
 //     `Mobility::rain_grounded`; a vine climb that tops out perches on the ledge top.
-pub const SCHEMA: u32 = 68;
+// 69: FORAGE-LEAVE — `TeacherConfig::{give_up_fraction, give_up_min_s, give_up_window_s,
+//     give_up_shun_s, give_up_zone_bl, give_up_leave_s}`; a heuristic forager leaves a patch whose bites
+//     cannot end a meal.
+pub const SCHEMA: u32 = 69;
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
