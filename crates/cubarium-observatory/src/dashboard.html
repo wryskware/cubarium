@@ -280,6 +280,7 @@ function lineChart(el, xs, series, opt = {}) {
   const Y = (v) => T + ih - (v - lo) / (hi - lo) * ih;
   let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(opt.label || "chart")}">`;
   for (const g of [lo, (lo + hi) / 2, hi]) {
+    if (opt.counts && !Number.isInteger(g)) continue; // no half an animal on a count axis
     svg += `<line x1="${L}" x2="${W - R}" y1="${Y(g)}" y2="${Y(g)}" stroke="${g === lo ? "var(--axis)" : "var(--grid)"}" stroke-width="1"/>`;
     svg += `<text x="${L - 6}" y="${Y(g) + 4}" text-anchor="end" fill="var(--muted)" font-size="11" class="num">${sig(g)}</text>`;
   }
@@ -393,7 +394,7 @@ function renderPopulations() {
       { name: "adults", color: SERIES[0], values: samples.map((s) => s.adults[k]) },
       { name: "young", color: SERIES[1], values: samples.map((s) => s.juveniles[k]) },
       { name: "eggs", color: SERIES[2], values: samples.map((s) => s.eggs[k]) },
-    ], { height: 86, label: a.label + " population", when });
+    ], { height: 86, label: a.label + " population", when, counts: true });
   });
   const pk = $("plantCharts").children;
   P.forEach((p, k) => {
