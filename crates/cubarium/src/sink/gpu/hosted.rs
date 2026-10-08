@@ -541,12 +541,17 @@ pub struct HostedStats {
     pub frames: u64,
     /// Milliseconds: recording and submitting a frame (CPU), the GPU's three stages
     /// (uploads, the walk, the present pass; the last retired frame's), copying a frame out
-    /// of its read-back slot, and packing a tick (on the loop).
+    /// of its read-back slot, and successful packs (on the pack thread). Pack time
+    /// excludes renderer-lock waits, pick publication and refused sky-wait retries.
     pub record_ms: f64,
     pub gpu_ms: f64,
     pub copy_ms: f64,
     pub pack_ms: f64,
     pub packs: u64,
+    /// Current world's image-upload bytes and staged batches recorded for submission.
+    /// Empty batches count; overwritten packs do not. Uniforms and the model atlas are separate.
+    pub upload_bytes: u64,
+    pub uploads: u64,
     /// Milliseconds the loop spent copying what the pack reads (H3: the pack's whole cost
     /// to the loop), over this many snapshots.
     pub snapshot_ms: f64,
@@ -736,13 +741,14 @@ impl Shared {
     /// publish its pick map, and move the frame clock to its tick. `solid` caches the solid
     /// bits by world generation and terrain version.
     fn pack_snapshot(&self, snap: &mut PackSnapshot, solid: &mut Option<(u64, u64, Arc<Vec<u64>>)>) -> Packed {
-        let at = Instant::now();
         let Ok(mut guard) = self.sink.lock() else { return Packed::Stale };
         let Some(st) = guard.as_mut() else { return Packed::Stale };
         if st.generation != snap.generation {
             return Packed::Stale;
         }
+        let started = Instant::now();
         let staged = st.sink.stage_snapshot(snap);
+        let pack_ms = if staged { started.elapsed().as_secs_f64() * 1e3 } else { 0.0 };
         let mut packed = Packed::Refused;
         if staged {
             if !st.ready && !st.sink.light_pending() {
@@ -774,7 +780,7 @@ impl Shared {
             }
         }
         if let Ok(mut s) = self.stats.lock() {
-            s.pack_ms += at.elapsed().as_secs_f64() * 1e3;
+            s.pack_ms += pack_ms;
             s.packs += u64::from(staged);
         }
         packed
@@ -1168,6 +1174,7 @@ impl Hosted {
             && let Some(st) = g.as_ref()
         {
             s.packs_refused = st.sink.packs_skipped;
+            (s.upload_bytes, s.uploads) = st.sink.renderer.upload_totals();
         }
         s
     }

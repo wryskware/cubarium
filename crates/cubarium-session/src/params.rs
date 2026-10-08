@@ -202,14 +202,41 @@ impl SimParams {
     /// decision is the voxel crate's: `default_threads` is every core the OS reports but
     /// one, so the thread that presents is not competing with the tick for the last core.
     pub fn sim_config(&self) -> SimConfig {
+        self.sim_config_with_reserve(1)
+    }
+
+    /// Size automatic pools to the inherited CPU allowance, leaving `reserve` logical
+    /// CPUs for the host's other work. Explicit config and environment counts win.
+    pub fn sim_config_with_reserve(&self, reserve: usize) -> SimConfig {
         SimConfig {
-            threads: if self.threads == 0 {
-                cubarium_voxel::default_threads()
-            } else {
-                self.threads
-            },
+            threads: worker_threads(
+                std::thread::available_parallelism().map_or(1, std::num::NonZero::get),
+                reserve,
+                (self.threads != 0).then_some(self.threads).or_else(cubarium_voxel::thread_override),
+            ),
             water_every: self.water_every.max(1),
             ..SimConfig::default()
+        }
+    }
+}
+
+fn worker_threads(available: usize, reserve: usize, asked: Option<usize>) -> usize {
+    asked.unwrap_or_else(|| available.saturating_sub(reserve).max(1))
+}
+
+#[cfg(test)]
+mod worker_budget_tests {
+    use super::worker_threads;
+
+    #[test]
+    fn automatic_workers_leave_the_requested_capacity_and_explicit_counts_win() {
+        for available in [1, 3, 9, 27] {
+            for reserve in [0, 1, 2, 5] {
+                assert_eq!(worker_threads(available, reserve, None), available.saturating_sub(reserve).max(1));
+                for asked in [1, 7, 23] {
+                    assert_eq!(worker_threads(available, reserve, Some(asked)), asked);
+                }
+            }
         }
     }
 }

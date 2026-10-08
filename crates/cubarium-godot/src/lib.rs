@@ -101,7 +101,10 @@ pub struct CubariumSession {
 #[godot_api]
 impl IRefCounted for CubariumSession {
     fn init(base: Base<RefCounted>) -> Self {
-        let session = Session::new(SessionOptions::default());
+        let session = Session::new(SessionOptions {
+            worker_reserve: cubarium::sink::gpu::voxel::WORKER_RESERVE,
+            ..SessionOptions::default()
+        });
         teardown::session(session.stopper());
         CubariumSession { base, session }
     }

@@ -46,6 +46,9 @@ pub struct SessionOptions {
     /// Execution settings (threads, water fidelity, history sampling) for worlds that are
     /// loaded rather than made from a [`WorldSpec`].
     pub exec: SimParams,
+    /// Logical CPUs left outside automatically sized sim pools for the host. Applied
+    /// before the first Sim initializes the process-global compute pool.
+    pub worker_reserve: usize,
     /// Build the view feed. Off, the loop pays nothing for it and [`Session::take_view`]
     /// returns only the world's shape.
     pub feed: bool,
@@ -71,6 +74,7 @@ impl Default for SessionOptions {
     fn default() -> SessionOptions {
         SessionOptions {
             exec: SimParams::default(),
+            worker_reserve: 1,
             feed: true,
             feed_config: FeedConfig::default(),
             cadence: Cadence::default(),
@@ -1340,7 +1344,7 @@ impl Loop {
         let c = p.world.config();
         let dims = (c.width, c.height, c.depth);
         let voxel_m = c.voxel_m;
-        let mut sim = create::ready_sim(p.world, p.flora, p.fauna, p.exec.sim_config());
+        let mut sim = create::ready_sim(p.world, p.flora, p.fauna, p.exec.sim_config_with_reserve(self.options.worker_reserve));
         create::set_water_every(&mut sim, p.exec.water_every);
         create::open_closed_outlet(&mut sim);
         self.generation += 1;

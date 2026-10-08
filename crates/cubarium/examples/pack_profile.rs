@@ -17,7 +17,9 @@
 //! `--mode overlap` (H3) packs a snapshot of the last tick on its own thread while the next
 //! tick steps (`VoxelGpuSink::stage_snapshot_beside`), then copies the next snapshot: a
 //! tick costs the copy plus the longer of the two. Both print the step, the pack, the copy
-//! and the whole tick, ms.
+//! and the whole tick, ms. `--mode snapshot` serializes the same snapshot pack;
+//! `--mode compare` interleaves it with overlap, balancing tick cadences and host load.
+//! Both include per-phase step timings; explicit thread counts override the GPU budget.
 //!
 //! Prints the pack's median, p95 and max ms per tick (over every tick, then the dry and the
 //! raining ones), the bytes the voxel plane uploads per tick, and each phase's.
@@ -36,7 +38,7 @@ use cubarium::voxel::{LayerConfig, Seeds, VoxelConfig, found as found_habitat, p
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
-use cubarium_voxel_sim::{Sim, SimConfig};
+use cubarium_voxel_sim::Sim;
 
 fn main() -> Result<()> {
     let mut config = PathBuf::from("config/desktop/terrarium.toml");
@@ -46,6 +48,8 @@ fn main() -> Result<()> {
     let mut png: Option<PathBuf> = None;
     let mut check = false;
     let mut overlap = false;
+    let mut compare = false;
+    let mut snapshot_serial = false;
     let (mut seed, mut found_ticks, mut ticks, mut shower_at, mut px) = (1u64, 0u64, 1200u64, None, None);
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -62,10 +66,12 @@ fn main() -> Result<()> {
             "--px" => px = Some(v()?.parse::<u32>()?),
             "--png" => png = Some(v()?.into()),
             "--check-raster" => check = true,
-            "--mode" => overlap = match v()?.as_str() {
-                "serial" => false,
-                "overlap" => true,
-                m => bail!("--mode serial | overlap, not {m}"),
+            "--mode" => (overlap, compare, snapshot_serial) = match v()?.as_str() {
+                "serial" => (false, false, false),
+                "overlap" => (true, false, false),
+                "snapshot" => (false, false, true),
+                "compare" => (true, true, false),
+                m => bail!("--mode serial | overlap | snapshot | compare, not {m}"),
             },
             _ => bail!("unknown argument {k}"),
         }
@@ -86,6 +92,9 @@ fn main() -> Result<()> {
     if let Some(px) = px {
         cfg.px_per_voxel = px;
     }
+    if overlap || snapshot_serial {
+        cfg.sim.threads = cfg.sim.sim_config_with_reserve(cubarium::sink::gpu::voxel::WORKER_RESERVE).threads;
+    }
     let mut sim = match &save {
         Some(dir) => {
             let p = cubarium_session::prepare_loaded(&cfg.sim, dir).map_err(anyhow::Error::msg)?;
@@ -98,8 +107,7 @@ fn main() -> Result<()> {
             let (world, flora, fauna) = load_or_found(&cfg, seed, found_ticks, state.as_ref())?;
             let mut senses = cubarium_voxel_fauna::Senses::with_cue(fauna.config().cue);
             senses.settle(&world.view(), &flora.view());
-            let threads = cubarium_voxel::default_threads();
-            Sim::new(world, flora, fauna, SimConfig::with_threads(threads), Some(senses))
+            Sim::new(world, flora, fauna, cfg.sim.sim_config(), Some(senses))
         }
     };
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.sim.world)?;
@@ -133,9 +141,12 @@ fn main() -> Result<()> {
     );
     let mut rows: Vec<(bool, f64, f64, Vec<(&'static str, f64)>)> = Vec::new();
     let (mut sim_ms, mut copy_ms, mut tick_ms) = (Vec::new(), Vec::new(), Vec::new());
+    use cubarium_voxel::profile::{self, Phase};
+    let mut step_phases: Vec<Vec<f64>> = vec![Vec::new(); Phase::COUNT];
+    eprintln!("sim pools: threads {}, water/bio {:?}", sim.config().threads, sim.config().overlap_split());
     let mut copier = SnapshotCopier::new(cfg.pack.pore_sweep);
     let mut snap = PackSnapshot::default();
-    if overlap {
+    if overlap || snapshot_serial {
         let (world, flora, fauna) = sim.layers();
         copier.fill(&world.view(), flora.view(), fauna.view(), &mut snap);
     }
@@ -145,12 +156,21 @@ fn main() -> Result<()> {
             eprintln!("pack_profile: a shower forced at tick {k}: {ok}");
         }
         let whole = Instant::now();
-        let (ms, phases) = if overlap {
-            let (staged, step) = sink.stage_snapshot_beside(&mut snap, || {
+        let before: Vec<_> = Phase::ALL.iter().copied().map(profile::nanos).collect();
+        let (ms, phases) = if overlap || snapshot_serial {
+            let mut step = || {
                 let t = Instant::now();
                 sim.step();
                 t.elapsed().as_secs_f64() * 1e3
-            });
+            };
+            // Bit-count parity balances both modes within each power-of-two tick
+            // cadence. Simple odd/even alternation puts every plant tick in one mode.
+            let (staged, step) = if snapshot_serial || (compare && k.count_ones() % 2 == 1) {
+                let staged = sink.stage_snapshot(&mut snap);
+                (staged, step())
+            } else {
+                sink.stage_snapshot_beside(&mut snap, step)
+            };
             if !staged {
                 bail!("the renderer refused a pack with no frame in flight");
             }
@@ -171,6 +191,9 @@ fn main() -> Result<()> {
             (t.elapsed().as_secs_f64() * 1e3, pack_timer::phases())
         };
         tick_ms.push(whole.elapsed().as_secs_f64() * 1e3);
+        for (p, ns) in Phase::ALL.iter().copied().zip(before) {
+            step_phases[p.index()].push(profile::nanos(p).saturating_sub(ns) as f64 / 1e6);
+        }
         let kib = sink.last_upload_kib();
         rows.push((sim.world().view().is_raining(), ms, kib, phases));
         sink.set_clock(sink.staged_tick().unwrap_or(0), 0.0);
@@ -209,12 +232,37 @@ fn main() -> Result<()> {
             println!("    {n:16} {}", q(v));
         }
     }
-    println!("mode {}", if overlap { "overlap" } else { "serial" });
-    println!("  sim step ms      {}", q(sim_ms));
-    if overlap {
-        println!("  copy ms          {}", q(copy_ms));
+    println!("mode {}", if compare { "compare" } else if overlap { "overlap" } else if snapshot_serial { "snapshot" } else { "serial" });
+    println!("  sim step ms      {}", q(sim_ms.clone()));
+    if overlap || snapshot_serial {
+        println!("  copy ms          {}", q(copy_ms.clone()));
     }
-    println!("  tick ms          {}", q(tick_ms));
+    println!("  tick ms          {}", q(tick_ms.clone()));
+    for p in Phase::ALL {
+        let v = step_phases[p.index()].clone();
+        if v.iter().any(|&ms| ms > 0.0) {
+            println!("  step {:16} {}", p.name(), q(v));
+        }
+    }
+    if compare {
+        for (parity, label) in [(1, "snapshot serial"), (0, "snapshot overlap")] {
+            let selected = |k: usize| k.count_ones() % 2 == parity;
+            let select = |v: &[f64]| v.iter().copied().enumerate()
+                .filter_map(|(k, ms)| selected(k).then_some(ms)).collect();
+            println!("compare {label}");
+            println!("  sim step ms      {}", q(select(&sim_ms)));
+            println!("  pack ms          {}", q(rows.iter().enumerate()
+                .filter_map(|(k, r)| selected(k).then_some(r.1)).collect()));
+            println!("  copy ms          {}", q(select(&copy_ms)));
+            println!("  tick ms          {}", q(select(&tick_ms)));
+            for p in Phase::ALL {
+                let v = select(&step_phases[p.index()]);
+                if v.iter().any(|&ms| ms > 0.0) {
+                    println!("  step {:16} {}", p.name(), q(v));
+                }
+            }
+        }
+    }
     if check {
         // The image the brick uploads built against a whole upload of the same world: the
         // same tick staged once more change-only (nothing moves), then once in full.
@@ -271,7 +319,7 @@ fn load_or_found(cfg: &VoxelConfig, seed: u64, ticks: u64, state: Option<&PathBu
     if ticks > 0 {
         let mut senses = cubarium_voxel_fauna::Senses::with_cue(fauna.config().cue);
         senses.settle(&world.view(), &flora.view());
-        let mut sim = Sim::new(world, flora, fauna, SimConfig::with_threads(cubarium_voxel::default_threads()), Some(senses));
+        let mut sim = Sim::new(world, flora, fauna, cfg.sim.sim_config(), Some(senses));
         for _ in 0..ticks {
             sim.step();
         }

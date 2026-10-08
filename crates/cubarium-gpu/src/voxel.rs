@@ -1452,6 +1452,62 @@ pub struct Carried {
     pub bricks: Vec<u32>,
 }
 
+fn image_upload_bytes(p: &VoxelParams, carried: &Carried, slow: [bool; SLOW_PLANES]) -> usize {
+    let n = p.voxel_count();
+    let voxels = if carried.full { n } else { carried.bricks.len() * BRICK_TEXELS } * 4;
+    let sizes = [n, p.glyph_bytes(), p.sky_bytes(), p.glow_bytes(),
+        MAX_STYLES * std::mem::size_of::<VoxelStyle>(), p.canopy_bytes()];
+    voxels + slow.iter().enumerate()
+        .filter(|&(k, &up)| up && (p.lit || !matches!(k, PLANE_SKY | PLANE_GLOW | PLANE_CANOPY)))
+        .map(|(k, _)| sizes[k]).sum::<usize>()
+}
+
+#[cfg(test)]
+mod upload_stats_tests {
+    use super::*;
+
+    #[test]
+    fn upload_totals_count_drawn_batches_and_leave_unchanged_ticks_empty() {
+        let gpu = Gpu::open(&[]).expect("headless Vulkan device");
+        let p = tests::params();
+        let mut r = VoxelRenderer::new(&gpu, p, &VoxelTextures::empty(p.s, p.rise)).unwrap();
+        let mut target = crate::target::Headless::new(&gpu, &r).unwrap();
+        let master = vec![VoxelTexel::default(); p.voxel_count()];
+        let stage = |r: &mut VoxelRenderer, changed: bool| {
+            assert!(r.stage([1; SLOW_PLANES], |st| {
+                if changed { st.owed.mark(0); }
+                write_upload(&master, p.width, p.height, p.depth, st.owed, st.voxels, st.carried);
+                st.roof.fill(0);
+                st.glyphs.fill(0);
+                st.sky.fill(255);
+                st.canopy.fill(0);
+                st.glow.fill(0);
+            }));
+        };
+        stage(&mut r, false);
+        assert_eq!(r.upload_totals(), (0, 0), "a stage has not uploaded");
+        target.draw(&gpu, &mut r, ()).unwrap();
+        let first = r.upload_totals();
+        assert!(first.0 > 0);
+        stage(&mut r, false);
+        assert_eq!(r.last_upload_bytes(), 0, "an unchanged tick owes no images");
+        target.draw(&gpu, &mut r, ()).unwrap();
+        let empty = r.upload_totals();
+        assert_eq!(empty.0, first.0, "a tick does not upload the full capacity");
+        target.draw(&gpu, &mut r, ()).unwrap();
+        assert_eq!(r.upload_totals(), empty, "a re-present uploads nothing");
+        stage(&mut r, true);
+        stage(&mut r, true);
+        let bytes = r.last_upload_bytes() as u64;
+        assert!(bytes > 0);
+        assert_eq!(r.upload_totals(), empty, "overwritten stages are not uploads");
+        target.draw(&gpu, &mut r, ()).unwrap();
+        assert_eq!(r.upload_totals(), (empty.0 + bytes, empty.1 + 1));
+        target.destroy(&gpu);
+        r.destroy(&gpu);
+    }
+}
+
 /// Write what `owed` says the images lack from `master` (texture order) into a staging
 /// buffer's `voxels`, and say what it carries in `carried`. The whole volume when it is
 /// owed, when the owed bricks are over a quarter of them, or when they do not fit.
@@ -1847,6 +1903,9 @@ pub struct VoxelRenderer {
     /// What the last pack will upload, bytes: its voxels and the slow planes the images
     /// lack.
     last_upload: usize,
+    /// Recorded image-upload bytes and batches; discarded records are subtracted.
+    upload_totals: (u64, u64),
+    frame_uploads: Vec<(u64, u64)>,
     /// Byte offsets into each of [`VoxelRenderer::staging`] of the six planes, indexed
     /// by the `AT_*` constants; the last is the buffer's size.
     offsets: [u64; 8],
@@ -2516,6 +2575,8 @@ impl VoxelRenderer {
             owed: BrickOwed::new(params.width, params.height, params.depth),
             carried: vec![Carried::default(); STAGING_RING],
             last_upload: 0,
+            upload_totals: (0, 0),
+            frame_uploads: vec![(0, 0); STAGING_RING],
             offsets,
             dirty: false,
             raster_current: false,
@@ -2808,27 +2869,7 @@ impl VoxelRenderer {
             write,
         });
         self.slow.restamp(into, PLANE_STYLES, styles_key);
-        let c = &self.carried[into];
-        let voxels = if c.full { n } else { c.bricks.len() * BRICK_TEXELS } * 4;
-        let p = &self.params;
-        let sizes = [
-            n,
-            p.glyph_bytes(),
-            p.sky_bytes(),
-            p.glow_bytes(),
-            MAX_STYLES * std::mem::size_of::<VoxelStyle>(),
-            p.canopy_bytes(),
-        ];
-        let lit = |plane: usize| p.lit || !matches!(plane, PLANE_SKY | PLANE_GLOW | PLANE_CANOPY);
-        let planes: usize = self
-            .slow
-            .would_upload(into)
-            .iter()
-            .enumerate()
-            .filter(|&(k, &up)| up && lit(k))
-            .map(|(k, _)| sizes[k])
-            .sum();
-        self.last_upload = voxels + planes;
+        self.last_upload = image_upload_bytes(&self.params, &self.carried[into], self.slow.would_upload(into));
         self.ring.packed(into);
         self.dirty = true;
         self.staged = true;
@@ -2853,6 +2894,9 @@ impl VoxelRenderer {
         let frame = self.ring.discard();
         if let Some(f) = frame {
             self.sunvis.discarded(f.slot);
+            let (bytes, batches) = std::mem::take(&mut self.frame_uploads[f.slot]);
+            self.upload_totals.0 -= bytes;
+            self.upload_totals.1 -= batches;
         }
         if let Some(frame) = frame
             && frame.staging.is_some()
@@ -2870,6 +2914,13 @@ impl VoxelRenderer {
     /// What the last pack will upload when its frame runs, bytes.
     pub fn last_upload_bytes(&self) -> usize {
         self.last_upload
+    }
+
+    /// Cumulative image-upload bytes and staged batches recorded for submission.
+    /// Overwritten packs and discarded records contribute nothing. Uniforms and model
+    /// buffers are separate, as in [`Self::last_upload_bytes`].
+    pub fn upload_totals(&self) -> (u64, u64) {
+        self.upload_totals
     }
 
     /// Whether the last recorded frame redrew the world raster.
@@ -2927,6 +2978,12 @@ impl VoxelRenderer {
         if upload && let Some(i) = frame.staging {
             self.owed.taken(&self.carried[i]);
         }
+        let bytes = frame.staging.filter(|_| upload)
+            .map_or(0, |i| image_upload_bytes(&self.params, &self.carried[i], slow) as u64);
+        let batches = u64::from(upload);
+        self.frame_uploads[frame.slot] = (bytes, batches);
+        self.upload_totals.0 += bytes;
+        self.upload_totals.1 += batches;
         // The raster already holds this picture unless something changed it, and the
         // upload only ever comes with a change.
         let redraw = !self.raster_current || self.sunvis.owed();
@@ -4287,4 +4344,3 @@ pub(crate) mod tests {
         assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
     }
 }
-

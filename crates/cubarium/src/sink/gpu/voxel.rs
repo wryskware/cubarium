@@ -83,6 +83,11 @@ pub mod hosted;
 pub mod snapshot;
 use snapshot::{Hint, Mirror, PackSnapshot};
 
+/// Capacity for the sim driver, the bio leg's coordinator, the pack and presenter.
+/// This bounds both automatic sim pools before they are initialized; explicit worker
+/// counts remain a host override. No CPU identifiers or machine topology are assumed.
+pub const WORKER_RESERVE: usize = 4;
+
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
 pub struct VoxelGpuSinkOptions {
@@ -255,7 +260,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
                 .context("opening the Vulkan device for --sink gpu")?,
         );
         eprintln!(
-            "cubarium voxel: --sink gpu on {} ({:.0} KiB per tick)",
+            "cubarium voxel: --sink gpu on {} ({:.0} KiB voxel buffers)",
             gpu.name,
             params.upload_bytes() as f64 / 1024.0
         );
@@ -916,8 +921,8 @@ impl VoxelGpuSink<GpuTarget> {
         eprintln!(
             "cubarium voxel --sink gpu: {} frames at {}x{} ({} px/voxel, depth step {}); \
              GPU {:.3} ms/frame (upload {:.3}, slab walk {:.3}, present {:.3}); \
-             target draw {:.3} ms/frame; pack {:.3} ms/tick over {} ticks, \
-             {:.0} KiB per tick; {} frames re-presented an unchanged raster; \
+             target draw {:.3} ms/frame; pack {:.3} ms/pack over {} packs, \
+             {:.0} KiB per pack; {} frames re-presented an unchanged raster; \
              roof from {}",
             self.frames,
             p.raster_w,
@@ -931,7 +936,7 @@ impl VoxelGpuSink<GpuTarget> {
             self.present_ms / n,
             self.pack_ms / t,
             self.ticks_staged,
-            p.upload_bytes() as f64 / 1024.0,
+            self.renderer.upload_totals().0 as f64 / 1024.0 / t,
             self.reshown,
             if p.roof_from_texture {
                 "the uploaded table"
@@ -1063,7 +1068,7 @@ impl Stager<'_> {
         } else {
             view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
         };
-        let slow = self.packer.prepare(view, flora, fauna, candle_s);
+        let slow = self.packer.prepare_with(view, flora, fauna, candle_s, hint);
         if let Some(sv) = self.sunvis.as_mut() {
             let packer = &*self.packer;
             let snapshot = || {
@@ -1075,7 +1080,7 @@ impl Stager<'_> {
         if *self.awaiting_light {
             let pending = self.packer.light_pending() || self.sunvis.as_ref().is_some_and(|s| s.pending());
             if pending {
-                done(self.pack_ms, self.last_pack_ms);
+                *self.last_pack_ms = started.elapsed().as_secs_f64() * 1e3;
                 return false;
             }
             *self.awaiting_light = false;
@@ -1195,6 +1200,10 @@ struct Packer {
     /// world starts at zero, as the empty founding world does), so the materials
     /// themselves are compared too, as bytes.
     roof_materials: Vec<Material>,
+    /// Retained so identity remains valid while testing the next snapshot's terrain.
+    roof_snapshot: Option<Arc<Vec<Material>>>,
+    #[cfg(test)]
+    terrain_compares: u64,
     roof_version: Option<u64>,
     /// Bumped every time `roof` is rebuilt: the key its plane is uploaded under.
     roof_key: u64,
@@ -1449,6 +1458,9 @@ impl Packer {
             style_overflow: 0,
             roof: vec![0; n],
             roof_materials: Vec::new(),
+            roof_snapshot: None,
+            #[cfg(test)]
+            terrain_compares: 0,
             roof_version: None,
             roof_key: 0,
             glyphs,
@@ -1581,9 +1593,27 @@ impl Packer {
         fauna: FaunaView<'_>,
         candle_s: f64,
     ) -> [u64; SLOW_PLANES] {
+        self.prepare_with(view, flora, fauna, candle_s, Hint::default())
+    }
+
+    fn prepare_with(
+        &mut self,
+        view: &VoxelView<'_>,
+        flora: FloraView<'_>,
+        fauna: FaunaView<'_>,
+        candle_s: f64,
+        hint: Hint<'_>,
+    ) -> [u64; SLOW_PLANES] {
         // The terrain first: a moved terrain (or another world) packs in full.
+        let same_snapshot = hint.terrain.zip(self.roof_snapshot.as_ref())
+            .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
         let terrain_moved = self.roof_version != Some(view.terrain_version)
-            || material_bytes(&self.roof_materials) != material_bytes(view.material);
+            || (!same_snapshot && {
+                #[cfg(test)]
+                { self.terrain_compares += 1; }
+                material_bytes(&self.roof_materials) != material_bytes(view.material)
+            });
+        self.roof_snapshot = hint.terrain.cloned();
         if terrain_moved {
             let c = view.config;
             roof_table(view.material, c.width, c.height, c.depth, &mut self.roof);
@@ -3629,7 +3659,7 @@ mod tests {
 
         fn pack(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, fauna: FaunaView<'_>, hint: Hint<'_>) {
             let c = view.config;
-            self.packer.prepare(view, flora, fauna, 0.0);
+            self.packer.prepare_with(view, flora, fauna, 0.0, hint);
             let mut key = 0;
             let out = self.planes.staging([true; SLOW_PLANES], &mut self.owed, &mut self.carried, &mut key);
             self.packer.fill_with(view, c.width, c.height, c.depth, out, hint);
@@ -3706,6 +3736,30 @@ mod tests {
     #[test]
     fn a_pack_of_a_snapshot_draws_what_a_pack_of_the_world_draws() {
         snapshot_against_live(1, false, false);
+    }
+
+    #[test]
+    fn shared_snapshot_terrain_skips_compare_and_a_new_allocation_is_checked() {
+        let c = config();
+        let world = world(&c);
+        let flora = flora(&world, &[]);
+        let fauna = Fauna::new(FaunaConfig::default());
+        let mut side = Side::new(&c, None, false);
+        let mut copier = snapshot::SnapshotCopier::new(1);
+        let mut snap = PackSnapshot::default();
+        let mut mirror = Mirror::default();
+        let mut pack = |copier: &mut snapshot::SnapshotCopier| {
+            copier.fill(&world.view(), flora.view(), fauna.view(), &mut snap);
+            mirror.apply(&mut snap);
+            let (v, f, a) = mirror.views(&snap);
+            side.pack(&v, f, a, mirror.hint(&snap));
+            mirror.packed();
+            side.packer.terrain_compares
+        };
+        let first = pack(&mut copier);
+        assert_eq!(pack(&mut copier), first, "unchanged Arc needs no grid compare");
+        assert!(pack(&mut snapshot::SnapshotCopier::new(1)) > first,
+            "another allocation at the same version must be checked");
     }
 
     #[test]

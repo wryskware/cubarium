@@ -327,6 +327,7 @@ pub struct Mirror {
 /// rebuild from the free-water grid, and the only pore ranges that can have moved.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Hint<'a> {
+    pub terrain: Option<&'a Arc<Vec<Material>>>,
     pub wet: Option<&'a [usize]>,
     pub pore: Option<&'a [(usize, usize)]>,
 }
@@ -416,6 +417,7 @@ impl Mirror {
     /// What the pack of the snapshot last taken in may skip.
     pub(crate) fn hint<'a>(&'a self, snap: &'a PackSnapshot) -> Hint<'a> {
         Hint {
+            terrain: Some(&snap.world.material),
             wet: snap.wet_trusted.then_some(snap.wet.as_slice()),
             pore: self.owed.as_deref(),
         }

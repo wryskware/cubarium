@@ -191,7 +191,8 @@ impl WorldRenderer {
     /// `gpu_ms`, `copy_ms` (the read-back copy), `pack_ms` over `packs` (on the pack thread),
     /// `snapshot_ms` over `snapshots` (the loop's copy for the pack); `packs_refused`,
     /// `displaced` (frames posted over an untaken one), `unlit` (a still world drawn before its
-    /// sky plane arrived).
+    /// sky plane arrived); `upload_bytes` and `uploads` (the current world's recorded image
+    /// bytes and staged batches, including empty batches).
     #[func]
     fn stats(&self) -> VarDictionary {
         let mut d = VarDictionary::new();
@@ -203,6 +204,8 @@ impl WorldRenderer {
             d.set("copy_ms", &s.copy_ms.to_variant());
             d.set("pack_ms", &s.pack_ms.to_variant());
             d.set("packs", &(s.packs as i64).to_variant());
+            d.set("upload_bytes", &(s.upload_bytes as i64).to_variant());
+            d.set("uploads", &(s.uploads as i64).to_variant());
             d.set("snapshot_ms", &s.snapshot_ms.to_variant());
             d.set("snapshots", &(s.snapshots as i64).to_variant());
             d.set("packs_refused", &(s.packs_refused as i64).to_variant());

@@ -984,8 +984,13 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     // `default_threads` is every core the OS reports but one, so the thread that
     // records, submits and presents the frame is not competing with the tick for the
     // last core. `SimConfig::default()` takes every core instead and is not what the
-    // panel wants.
-    let sim_config = cfg.sim.sim_config();
+    // panel wants. The GPU path also leaves capacity for its asynchronous pack
+    // and the bio coordinator, before either pool is initialized.
+    let sim_config = if args.sink == VoxelSinkArg::Gpu {
+        cfg.sim.sim_config_with_reserve(crate::sink::gpu::voxel::WORKER_RESERVE)
+    } else {
+        cfg.sim.sim_config()
+    };
     let speed = args.speed.clamp(MIN_SPEED, MAX_SPEED);
     // **The output is opened before the world exists.** Founding one is minutes of work
     // on the board — a seed gate of up to `LAKE_SEED_TRIES` candidates, each settled,
