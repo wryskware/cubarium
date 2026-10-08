@@ -575,6 +575,37 @@ fn run(
     }
     let save_min = save.map(|s| s.minute.unwrap_or(minute0 + total_ticks / TICKS_PER_MIN));
     eprintln!("census: actual world seed {}", sim.world().config().seed);
+    // The reachability readout at founding (training maps): per lineage, how its walkable
+    // land splits under its own route map; `reach.tsv` beside the vitals when asked.
+    if minute0 == 0 {
+        let reach = habitat::reachability(sim.world(), sim.flora(), sim.fauna());
+        let mut tsv = format!("{}\n", habitat::Reach::TSV_HEADER);
+        for (f, r) in Founder::ALL.iter().zip(reach.iter()) {
+            if r.flyer {
+                eprintln!("reach {}: flyer, bodies={}", f.name(), r.bodies);
+            } else {
+                eprintln!(
+                    "reach {}: largest {:.1}% of {} faces ({} components), food in {} components{}, bodies {}/{} in largest",
+                    f.name(),
+                    100.0 * r.largest_share,
+                    r.faces,
+                    r.components,
+                    r.food_components,
+                    if r.largest_has_food { " incl. largest" } else { "" },
+                    r.bodies_in_largest,
+                    r.bodies
+                );
+            }
+            tsv.push_str(&r.tsv_row(*f));
+            tsv.push('\n');
+        }
+        if let Some((dir, _)) = &timing.vitals {
+            let path = std::path::Path::new(dir).join("reach.tsv");
+            if let Err(e) = std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, tsv)) {
+                eprintln!("could not write {}: {e}", path.display());
+            }
+        }
+    }
     print_header();
     if minute0 == 0 {
         print_row(0, sim, 0.0, timing.patch_min);
