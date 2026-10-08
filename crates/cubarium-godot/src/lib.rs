@@ -12,6 +12,10 @@
 
 use std::path::PathBuf;
 
+pub mod mesher;
+pub mod models;
+pub mod palette;
+
 use cubarium_observatory::Command;
 use cubarium_session::{Session, SessionOptions, View, WorldSpec};
 use godot::prelude::*;
