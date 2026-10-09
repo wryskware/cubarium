@@ -1,0 +1,268 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="2_world"]
+[ext_resource type="Material" path="res://ui/neon/neon_scrim.tres" id="3_scrim"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_button"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_label"]
+[ext_resource type="PackedScene" path="res://ui/field_guide/field_guide.tscn" id="6_guide"]
+[ext_resource type="PackedScene" path="res://ui/settings.tscn" id="7_settings"]
+[ext_resource type="Script" path="res://ui/tabbed_page/tabbed_page.gd" id="8_page"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_5euc7"]
+
+[node name="TabbedPage" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("1_theme")
+script = ExtResource("8_page")
+
+[node name="World" type="TextureRect" parent="." unique_id=1191512469]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_world")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="." unique_id=437573542]
+material = ExtResource("3_scrim")
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="." unique_id=568625704]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="Control" parent="Center" unique_id=1810872512]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Top" type="HBoxContainer" parent="Center/Page" unique_id=840215205]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 40.0
+offset_right = 1824.0
+offset_bottom = 104.0
+mouse_filter = 2
+
+[node name="Tabs" type="PanelContainer" parent="Center/Page/Top" unique_id=1872444070]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"TabBarBox"
+
+[node name="TabStrip" type="HBoxContainer" parent="Center/Page/Top/Tabs" unique_id=53921209]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TabStrip"
+
+[node name="FieldguideTab" type="BaseButton" parent="Center/Page/Top/Tabs/TabStrip" unique_id=695490960]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("ButtonGroup_5euc7")
+script = ExtResource("4_button")
+
+[node name="Label" type="Label" parent="Center/Page/Top/Tabs/TabStrip/FieldguideTab" unique_id=1749307858]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Field guide"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="PopulationsTab" type="BaseButton" parent="Center/Page/Top/Tabs/TabStrip" unique_id=512964504]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+disabled = true
+toggle_mode = true
+button_group = SubResource("ButtonGroup_5euc7")
+script = ExtResource("4_button")
+
+[node name="Label" type="Label" parent="Center/Page/Top/Tabs/TabStrip/PopulationsTab" unique_id=1072565641]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Populations"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="SettingsTab" type="BaseButton" parent="Center/Page/Top/Tabs/TabStrip" unique_id=765625509]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_5euc7")
+script = ExtResource("4_button")
+
+[node name="Label" type="Label" parent="Center/Page/Top/Tabs/TabStrip/SettingsTab" unique_id=979503657]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Settings"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="Spacer" type="Control" parent="Center/Page/Top" unique_id=1525842487]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Clock" type="HBoxContainer" parent="Center/Page/Top" unique_id=802392212]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"Clock"
+
+[node name="DayLabel" type="Label" parent="Center/Page/Top/Clock" unique_id=1320153591]
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Day"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Day" type="Label" parent="Center/Page/Top/Clock" unique_id=70816551]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "3"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Time" type="Label" parent="Center/Page/Top/Clock" unique_id=192269997]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "14:20"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Paused" type="Label" parent="Center/Page/Top/Clock" unique_id=1842913495]
+layout_mode = 2
+theme_type_variation = &"WarningLabel"
+text = "Paused"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Body" type="PanelContainer" parent="Center/Page" unique_id=1161858305]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 128.0
+offset_right = 1824.0
+offset_bottom = 976.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="FieldGuide" parent="Center/Page/Body" instance=ExtResource("6_guide")]
+layout_mode = 2
+
+[node name="Settings" parent="Center/Page/Body" instance=ExtResource("7_settings")]
+visible = false
+layout_mode = 2
+
+[node name="Hints" type="HBoxContainer" parent="Center/Page" unique_id=1331831584]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 1008.0
+offset_right = 1824.0
+offset_bottom = 1046.0
+mouse_filter = 2
+theme_type_variation = &"KeyHints"
+alignment = 2
+
+[node name="SelectHint" type="HBoxContainer" parent="Center/Page/Hints" unique_id=1616505735]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/SelectHint" unique_id=1674468209]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/SelectHint" unique_id=1108908626]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Select"
+vertical_alignment = 1
+uppercase = true
+
+[node name="ChangeHint" type="HBoxContainer" parent="Center/Page/Hints"]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/ChangeHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/ChangeHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Change"
+vertical_alignment = 1
+uppercase = true
+
+[node name="BackHint" type="HBoxContainer" parent="Center/Page/Hints" unique_id=732335692]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/BackHint" unique_id=921444070]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/BackHint" unique_id=653366267]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Back"
+vertical_alignment = 1
+uppercase = true
+
+[node name="TabHint" type="HBoxContainer" parent="Center/Page/Hints" unique_id=991361137]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap1" type="Label" parent="Center/Page/Hints/TabHint" unique_id=730136780]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " LB "
+vertical_alignment = 1
+
+[node name="Keycap2" type="Label" parent="Center/Page/Hints/TabHint" unique_id=1408111316]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " RB "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/TabHint" unique_id=285574196]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Switch tab"
+vertical_alignment = 1
+uppercase = true

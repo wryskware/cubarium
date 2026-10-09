@@ -3,8 +3,12 @@ extends SceneTree
 ## mechanisms only, never tuned numbers.
 ##   godot --headless --path game --script res://tests/guide_test.gd -- --open SAVE
 ## Opens the save (a slot directory, e.g. from `cubarium-world found`) in main.tscn and
-## checks: the pause menu's Field guide opens it and back (the pad's B) returns to the menu;
-## G opens it over the running world and Esc closes it; the pad's Y opens it and B closes
+## checks: the pause menu's Field guide opens it (the tabbed page on Field guide), the world
+## runs under it, and back (the pad's B) returns to the menu, which pauses again; the
+## menu's Settings opens the tabbed page on Settings, LB/RB, Q/E and a click switch tabs,
+## and Esc returns to the menu; G opens it over the running world on Field guide without
+## changing the pause state (nor does E, to Settings; G there goes back to Field guide),
+## and Esc closes it; the pad's Y opens it and B closes
 ## it; the list holds every species in game/data/field_guide.md with the populations
 ## query's counts; search filters by name; the facts come from the `guide` query; Show in
 ## world selects a living animal of the species; no error is logged. Prints PASS/FAIL lines,
@@ -77,9 +81,36 @@ func run(save: String) -> void:
 	main.menu.buttons["guide"].pressed.emit()
 	await frames(3)
 	check(guide.visible and not main.menu.visible, "Field guide opens from the menu")
-	check(await until(func(): return main.session.status().get("paused", false), 5.0), "the world stays paused under it")
+	check(main.tabbed.visible and main.tabbed.tab == "guide", "the menu's Field guide opens the tabbed page on Field guide")
+	# Only the pause menu pauses: the world runs under the tabbed page, and back to the menu
+	# pauses it again (Wrysk, 2026-10-09: "field guide doesnt pause the world").
+	check(await until(func(): return not main.session.status().get("paused", true), 5.0), "the world runs under it")
 	await key(pad(JOY_BUTTON_B))
 	check(not guide.visible and main.menu.visible, "back closes it to the menu")
+	check(await until(func(): return main.session.status().get("paused", false), 5.0), "back to the menu pauses the world again")
+
+	# The menu's Settings opens it on Settings; LB/RB and Q/E switch tabs; back goes to the menu.
+	main.menu.buttons["settings"].pressed.emit()
+	await frames(3)
+	check(main.tabbed.visible and main.tabbed.tab == "settings" and main.settings_page.visible and not guide.visible,
+		"the menu's Settings opens the tabbed page on Settings")
+	check(await until(func(): return not main.session.status().get("paused", true), 5.0), "the world runs under the Settings tab")
+	await key(pad(JOY_BUTTON_LEFT_SHOULDER))
+	check(main.tabbed.tab == "guide" and guide.visible and not main.settings_page.visible, "LB switches to the Field guide tab (Populations is skipped, it's off)")
+	await key(pad(JOY_BUTTON_LEFT_SHOULDER))
+	check(main.tabbed.tab == "guide", "LB at the first tab stays there")
+	await key(pad(JOY_BUTTON_RIGHT_SHOULDER))
+	check(main.tabbed.tab == "settings" and main.settings_page.visible and not guide.visible, "RB switches to the Settings tab")
+	await key(keyev(KEY_Q))
+	check(main.tabbed.tab == "guide" and guide.visible, "Q switches to the tab on the left")
+	await key(keyev(KEY_E))
+	check(main.tabbed.tab == "settings" and main.settings_page.visible, "E switches to the tab on the right")
+	main.tabbed.buttons["guide"].pressed.emit()
+	await frames(2)
+	check(main.tabbed.tab == "guide" and guide.visible, "a click on a tab switches to it")
+	await key(keyev(KEY_ESCAPE))
+	check(not main.tabbed.visible and main.menu.visible, "Esc closes it back to the menu")
+	check(await until(func(): return main.session.status().get("paused", false), 5.0), "and the menu pauses the world again")
 	main.close_menu()
 	await frames(2)
 
@@ -87,7 +118,13 @@ func run(save: String) -> void:
 	var was_paused: bool = main.session.status().get("paused", false)
 	await key(keyev(KEY_G))
 	check(guide.visible and not main.menu.visible, "G opens it over the world")
+	check(main.tabbed.visible and main.tabbed.tab == "guide", "G opens the tabbed page on Field guide")
 	check(main.session.status().get("paused", false) == was_paused, "opening it leaves the pause state")
+	await key(keyev(KEY_E))
+	check(main.tabbed.tab == "settings" and main.session.status().get("paused", false) == was_paused,
+		"switching tabs leaves the pause state")
+	await key(keyev(KEY_G))
+	check(main.tabbed.tab == "guide" and guide.visible, "G on another tab goes to Field guide")
 	await key(keyev(KEY_ESCAPE))
 	check(not guide.visible and not main.menu.visible, "Esc closes it back to the world")
 	await key(pad(JOY_BUTTON_Y))
