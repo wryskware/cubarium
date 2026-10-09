@@ -189,6 +189,12 @@ minute 63), seeds 1–8, 2 h. Report: `runs/bl4-2026-10-08/report.md`.
 - Every snail and capgnawer juvenile is still below the starving line. That is growth by
   design (JUVENILE-FOOD), not hunger.
 
+**Baseline v5** (`runs/bl5-2026-10-08`: v4 plus NECTAR-SCENT and SAVE-EXTENSIBLE, from the
+resaved library) repeats v4:
+- C1 wins 8/8 on V alone; stuck S is 0.5–0.7 %.
+- Bellwings are more numerous at the same condition: 93.5 against 84.5 alive, 41.5 against 34
+  adults, adult p10 0.18. The scent now feeds more of them.
+
 ### 1c. Brain pilot (eidolon, 09:35–14:15)
 
 Setup:
