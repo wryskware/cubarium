@@ -3,83 +3,85 @@ extends Control
 ## load. Each slot shows its thumbnail, the world day and a species summary from its
 ## `meta.json`, read without loading the world. A save from another version stays
 ## listed, says it can't be loaded, and can still be deleted.
+##
+## The look is save_slots.tscn and one save_slot_row.tscn per slot, laid out in the editor
+## from ui/neon/ (the field guide's frame, scrim, list rows, search box and buttons): this
+## script only fills them. The row holding focus shows as the selected list row. Without
+## a shell (opened in the editor, or by itself) the scene's three sample slots stay.
 
 signal back
 
-const THUMB_SIZE := Vector2(240, 120)
+const ROW := preload("res://ui/save_slot_row.tscn")
+const GLOW := preload("res://ui/neon/styles/glow_focus.tres")
+const ACTIONS := ["load", "overwrite", "rename", "delete"]
 
 var shell  # main.gd
-var _title: Label
-var _new_row: HBoxContainer
-var _name: LineEdit
-var _save_new: Button
-var _list: VBoxContainer
-var _status: Label
-var _back: Button
-var _empty: Label
-var _rows := {}  # slot name -> {"row", "load", "overwrite", "rename", "delete"}
+var _rows := {}  # slot name -> {"row", "load", "overwrite", "rename", "delete", "loadable"}
 var _mode := "save"
 
+@onready var _world: Control = $World
+@onready var _stack: Control = $Center/Page/Body/Margin/Stack
+@onready var _title: Label = _stack.get_node("Title")
+@onready var _new_row: Control = _stack.get_node("NewMargin")
+@onready var _name_box: Control = _stack.get_node("NewMargin/NewRow/NameBox")
+@onready var _name: LineEdit = _stack.get_node("NewMargin/NewRow/NameBox/Name")
+@onready var _save_new: BaseButton = _stack.get_node("NewMargin/NewRow/SaveNew")
+@onready var _fade: Control = _stack.get_node("ListFade")
+@onready var _scroll: ScrollContainer = _stack.get_node("ListFade/ListScroll")
+@onready var _list: VBoxContainer = _stack.get_node("ListFade/ListScroll/List")
+@onready var _empty: Label = _list.get_node("Empty")
+@onready var _back: BaseButton = _stack.get_node("BottomMargin/Bottom/Back")
+@onready var _status: Label = _stack.get_node("BottomMargin/Bottom/Status")
 
-func _init() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	visible = false
-	var dim := Panel.new()
-	dim.theme_type_variation = &"Dim"
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right"]:
-		margin.add_theme_constant_override("margin_" + side, 160)
-	for side in ["top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 60)
-	add_child(margin)
-	var panel := PanelContainer.new()
-	margin.add_child(panel)
-	var box := VBoxContainer.new()
-	panel.add_child(box)
-	_title = Label.new()
-	_title.theme_type_variation = &"Title"
-	box.add_child(_title)
-	_new_row = HBoxContainer.new()
-	box.add_child(_new_row)
-	var label := Label.new()
-	label.text = "New save"
-	_new_row.add_child(label)
-	_name = LineEdit.new()
-	_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_name.placeholder_text = "a name for this save"
-	_name.max_length = 40
+
+func _ready() -> void:
 	_name.text_submitted.connect(func(_t): _on_save_new())
-	_new_row.add_child(_name)
-	_save_new = Button.new()
-	_save_new.text = "Save"
+	# The name field draws no focus of its own: its box glows, as the guide's search box does.
+	_name.focus_entered.connect(_name_box.queue_redraw)
+	_name.focus_exited.connect(_name_box.queue_redraw)
+	_name_box.draw.connect(_draw_name_focus)
 	_save_new.pressed.connect(_on_save_new)
-	_new_row.add_child(_save_new)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.follow_focus = true
-	box.add_child(scroll)
-	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_list)
-	_empty = Label.new()
-	_empty.text = "No saves yet."
-	_empty.theme_type_variation = &"Small"
-	_list.add_child(_empty)
-	var bottom := HBoxContainer.new()
-	box.add_child(bottom)
-	_back = Button.new()
-	_back.text = "Back"
-	_back.custom_minimum_size = Vector2(120, 40)
 	_back.pressed.connect(back.emit)
-	bottom.add_child(_back)
-	_status = Label.new()
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	bottom.add_child(_status)
+	get_viewport().gui_focus_changed.connect(_on_focus_changed)
+	if shell == null:
+		return
+	visible = false
+	# The live world shows through the scrim; the picture is the editor's stand-in.
+	_world.visible = false
+	_status.text = ""
+	for c in _list.get_children():
+		if c != _empty:
+			_list.remove_child(c)
+			c.queue_free()
+
+
+func _draw_name_focus() -> void:
+	if _name.has_focus():
+		_name_box.draw_style_box(GLOW, Rect2(Vector2.ZERO, _name_box.size))
+
+
+## The row holding focus is the selected one, and stays clear of the list's fades, focus
+## glow included (as the field guide's species list does).
+func _on_focus_changed(c: Control) -> void:
+	if c == null or not visible:
+		return
+	for r in _rows.values():
+		r["row"].set_pressed_no_signal(r["row"].is_ancestor_of(c))
+	if not _list.is_ancestor_of(c):
+		return
+	var row: Control = c
+	while row.get_parent() != _list:
+		row = row.get_parent()
+	var margin := float(maxi(_fade.fade, _fade.fade_top))
+	var top := row.get_global_rect().position.y - _list.get_global_rect().position.y
+	var bottom := top + row.size.y
+	var v := float(_scroll.scroll_vertical)
+	var h := _scroll.size.y
+	if top - margin < v:
+		v = top - margin
+	elif bottom + margin > v + h:
+		v = bottom + margin - h
+	_scroll.scroll_vertical = int(clampf(v, 0.0, maxf(_list.size.y - h, 0.0)))
 
 
 ## Show the slots: `mode` "save" (from the menu's Save) or "load".
@@ -88,6 +90,7 @@ func open(mode: String) -> void:
 	_title.text = "Save" if mode == "save" else "Load"
 	_status.text = ""
 	visible = true
+	_scroll.scroll_vertical = 0
 	refresh()
 
 
@@ -112,8 +115,8 @@ func refresh() -> void:
 	_update_busy()
 	if focus_meta != "":
 		for row in _rows.values():
-			for key in ["load", "overwrite", "rename", "delete"]:
-				var b: Button = row[key]
+			for key in ACTIONS:
+				var b: BaseButton = row[key]
 				if b.get_meta("slot_action") == focus_meta and not b.disabled and b.visible:
 					b.grab_focus()
 					return
@@ -151,7 +154,7 @@ func _update_busy() -> void:
 
 
 func _process(_delta: float) -> void:
-	if visible:
+	if visible and shell != null:
 		_update_busy()
 
 
@@ -159,35 +162,17 @@ func _row(s: Dictionary, has_world: bool) -> Control:
 	var name: String = s["name"]
 	var meta = s.get("meta")
 	var loadable: bool = s.get("loadable", false)
-	var row := PanelContainer.new()
-	row.theme_type_variation = &"Row"
-	var h := HBoxContainer.new()
-	row.add_child(h)
-	var thumb := TextureRect.new()
-	thumb.custom_minimum_size = THUMB_SIZE
-	thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	var row: Control = ROW.instantiate()
+	var info := row.get_node("Margin/Columns/Info")
+	var thumb: TextureRect = row.get_node("Margin/Columns/Thumb/Picture")
+	thumb.texture = null
 	if s.get("thumb", "") != "":
 		var img := Image.load_from_file(s["thumb"])
 		if img != null:
 			thumb.texture = ImageTexture.create_from_image(img)
-	h.add_child(thumb)
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 4)
-	h.add_child(info)
-	var title := Label.new()
-	title.text = name
-	title.add_theme_font_size_override("font_size", 21)
-	info.add_child(title)
-	var line := Label.new()
-	line.theme_type_variation = &"Small"
-	line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info.add_child(line)
-	var species := Label.new()
-	species.theme_type_variation = &"Small"
-	species.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	info.add_child(species)
+	info.get_node("Name").text = name
+	var line: Label = info.get_node("Details")
+	var species: Label = info.get_node("Species")
 	if meta != null:
 		var size: Array = meta.get("size", [0, 0, 0])
 		var saved := Time.get_datetime_string_from_unix_time(int(meta.get("saved_unix_s", 0)) + _utc_offset_s(), true)
@@ -197,26 +182,20 @@ func _row(s: Dictionary, has_world: bool) -> Control:
 		species.text = species_summary(meta)
 	else:
 		line.text = "No details."
+		species.visible = false
+	var why: Label = info.get_node("Why")
+	why.visible = not loadable
 	if not loadable:
-		var why := Label.new()
-		why.theme_type_variation = &"Warn"
-		why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		var problem: String = str(s.get("problem", ""))
 		var older := problem.contains("another version") or problem.contains("older build")
 		why.text = "Made by an older version — can't be loaded." if older else "Can't be loaded: " + problem
 		why.tooltip_text = problem
-		info.add_child(why)
-	var buttons := VBoxContainer.new()
-	buttons.add_theme_constant_override("separation", 6)
-	h.add_child(buttons)
 	var r := {"row": row, "loadable": loadable}
-	for item in [["load", "Load"], ["overwrite", "Overwrite"], ["rename", "Rename"], ["delete", "Delete"]]:
-		var b := Button.new()
-		b.text = item[1]
-		b.custom_minimum_size = Vector2(130, 0)
-		b.set_meta("slot_action", item[0] + ":" + name)
-		buttons.add_child(b)
-		r[item[0]] = b
+	var actions := info.get_node("ActionsMargin/Actions")
+	for key in ACTIONS:
+		var b: BaseButton = actions.get_node(String(key).capitalize())
+		b.set_meta("slot_action", key + ":" + name)
+		r[key] = b
 	r["load"].visible = loadable
 	r["overwrite"].visible = has_world
 	r["load"].pressed.connect(func(): shell.load_slot(name))

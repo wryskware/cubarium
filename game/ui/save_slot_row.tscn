@@ -1,0 +1,168 @@
+[gd_scene format=3]
+
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="1_world"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_button"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_label"]
+
+[node name="SaveSlotRow" type="BaseButton"]
+layout_mode = 2
+focus_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ListRow"
+toggle_mode = true
+script = ExtResource("4_button")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 0
+mouse_filter = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 16
+
+[node name="Columns" type="HBoxContainer" parent="Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 32
+
+[node name="Thumb" type="PanelContainer" parent="Margin/Columns"]
+layout_mode = 2
+size_flags_vertical = 0
+mouse_filter = 2
+theme_type_variation = &"InnerBox"
+
+[node name="Picture" type="TextureRect" parent="Margin/Columns/Thumb"]
+clip_contents = true
+custom_minimum_size = Vector2(320, 160)
+layout_mode = 2
+mouse_filter = 2
+texture = ExtResource("1_world")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Info" type="VBoxContainer" parent="Margin/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 6
+
+[node name="Name" type="Label" parent="Margin/Columns/Info"]
+layout_mode = 2
+theme_type_variation = &"ListText"
+text = "World 1"
+vertical_alignment = 1
+script = ExtResource("5_label")
+look = &"ListText"
+pressed_look = &"ListTextSelected"
+
+[node name="Details" type="Label" parent="Margin/Columns/Info"]
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Day 3, afternoon  ·  160 × 64 × 160  ·  terrarium, temperate  ·  saved 2026-10-09 06:12"
+autowrap_mode = 3
+
+[node name="Species" type="Label" parent="Margin/Columns/Info"]
+layout_mode = 2
+theme_type_variation = &"SmallText"
+text = "38 animals: 12 Littershredder, 9 Frondgrazer, 7 Ripple-snail, 4 Bellwing, +3 more  ·  227 plant stands"
+autowrap_mode = 3
+
+[node name="Why" type="Label" parent="Margin/Columns/Info"]
+visible = false
+layout_mode = 2
+theme_type_variation = &"WarningText"
+text = "Made by an older version — can't be loaded."
+autowrap_mode = 3
+
+[node name="ActionsMargin" type="MarginContainer" parent="Margin/Columns/Info"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="Actions" type="HBoxContainer" parent="Margin/Columns/Info/ActionsMargin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 16
+
+[node name="Load" type="BaseButton" parent="Margin/Columns/Info/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Margin/Columns/Info/ActionsMargin/Actions/Load"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Margin/Columns/Info/ActionsMargin/Actions/Load/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Load "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Overwrite" type="BaseButton" parent="Margin/Columns/Info/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Margin/Columns/Info/ActionsMargin/Actions/Overwrite"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Margin/Columns/Info/ActionsMargin/Actions/Overwrite/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Overwrite "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Rename" type="BaseButton" parent="Margin/Columns/Info/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Margin/Columns/Info/ActionsMargin/Actions/Rename"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Margin/Columns/Info/ActionsMargin/Actions/Rename/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Rename "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Delete" type="BaseButton" parent="Margin/Columns/Info/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Margin/Columns/Info/ActionsMargin/Actions/Delete"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Margin/Columns/Info/ActionsMargin/Actions/Delete/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Delete "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelSecondary"

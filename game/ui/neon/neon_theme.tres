@@ -330,6 +330,8 @@ content_margin_right = 12.0
 content_margin_bottom = 8.0
 bg_color = Color(0.99215686, 0.63529414, 0.2627451, 0.12)
 
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_grouptoggle"]
+
 [resource]
 default_font = ExtResource("2_y1hr3")
 default_font_size = 23
@@ -423,6 +425,14 @@ GroupRule/styles/panel = SubResource("StyleBox_jddy1")
 HotRule/base_type = &"HSeparator"
 HotRule/constants/separation = 3
 HotRule/styles/separator = ExtResource("13_dnkit")
+GroupToggle/base_type = &"Button"
+GroupToggle/constants/press_drop = 0
+GroupToggle/styles/disabled = SubResource("StyleBoxEmpty_grouptoggle")
+GroupToggle/styles/focus = ExtResource("4_ttwyh")
+GroupToggle/styles/hover = ExtResource("4_ttwyh")
+GroupToggle/styles/hover_pressed = ExtResource("4_ttwyh")
+GroupToggle/styles/normal = SubResource("StyleBoxEmpty_grouptoggle")
+GroupToggle/styles/pressed = SubResource("StyleBoxEmpty_grouptoggle")
 IndexColumn/base_type = &"PanelContainer"
 IndexColumn/styles/panel = SubResource("StyleBoxFlat_mbg7r")
 InnerBox/base_type = &"PanelContainer"
@@ -485,6 +495,8 @@ MainButton/styles/normal = SubResource("StyleBoxEmpty_iigm0")
 MainButton/styles/pressed = SubResource("StyleBoxEmpty_iigm0")
 MainPanel/base_type = &"PanelContainer"
 MainPanel/styles/panel = ExtResource("16_mcouh")
+NoticeBox/base_type = &"PanelContainer"
+NoticeBox/styles/panel = ExtResource("19_16l26")
 Panel/styles/panel = ExtResource("16_mcouh")
 PanelContainer/styles/panel = ExtResource("16_mcouh")
 RowContent/base_type = &"HBoxContainer"
@@ -552,3 +564,7 @@ WarningLabel/colors/font_color = Color(0.99215686, 0.63529414, 0.2627451, 1)
 WarningLabel/font_sizes/font_size = 26
 WarningLabel/fonts/font = ExtResource("3_k88so")
 WarningLabel/styles/normal = SubResource("StyleBoxFlat_t65y5")
+WarningText/base_type = &"Label"
+WarningText/colors/font_color = Color(0.99215686, 0.63529414, 0.2627451, 1)
+WarningText/font_sizes/font_size = 18
+WarningText/fonts/font = ExtResource("2_y1hr3")

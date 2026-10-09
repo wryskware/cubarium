@@ -1,0 +1,177 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="2_world"]
+[ext_resource type="Material" path="res://ui/neon/neon_scrim.tres" id="3_scrim"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_button"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_label"]
+[ext_resource type="FontVariation" path="res://ui/neon/fonts/text.tres" id="6_text"]
+[ext_resource type="Script" path="res://ui/dialog.gd" id="7_dialog"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_field"]
+
+[node name="Dialog" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("1_theme")
+script = ExtResource("7_dialog")
+
+[node name="World" type="TextureRect" parent="."]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_world")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="."]
+material = ExtResource("3_scrim")
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="CenterContainer" parent="Center"]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Body" type="PanelContainer" parent="Center/Page"]
+custom_minimum_size = Vector2(780, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="Margin" type="MarginContainer" parent="Center/Page/Body"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 44
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 44
+
+[node name="Stack" type="VBoxContainer" parent="Center/Page/Body/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="Message" type="Label" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+theme_type_variation = &"BodyText"
+text = "Rename \"World 1\" to:"
+autowrap_mode = 3
+
+[node name="FieldMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="NameBox" type="PanelContainer" parent="Center/Page/Body/Margin/Stack/FieldMargin"]
+custom_minimum_size = Vector2(0, 46)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"SearchBox"
+
+[node name="Field" type="LineEdit" parent="Center/Page/Body/Margin/Stack/FieldMargin/NameBox"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.8627451, 0.81960785, 0.96862745, 1)
+theme_override_colors/font_placeholder_color = Color(0.64705884, 0.58431375, 0.84705883, 1)
+theme_override_colors/caret_color = Color(0.25882354, 0.77254903, 0.972549, 1)
+theme_override_colors/selection_color = Color(0.7607843, 0.24705882, 0.827451, 0.45)
+theme_override_fonts/font = ExtResource("6_text")
+theme_override_font_sizes/font_size = 18
+theme_override_styles/normal = SubResource("StyleBoxEmpty_field")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_field")
+theme_override_styles/read_only = SubResource("StyleBoxEmpty_field")
+text = "Beta"
+placeholder_text = "A name"
+max_length = 40
+flat = true
+caret_blink = true
+
+[node name="ProblemMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="Problem" type="Label" parent="Center/Page/Body/Margin/Stack/ProblemMargin"]
+layout_mode = 2
+theme_type_variation = &"WarningText"
+text = "There is already a save called \"Beta\"."
+autowrap_mode = 3
+
+[node name="ActionsMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 0
+theme_override_constants/margin_top = 36
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="Actions" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/ActionsMargin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 20
+alignment = 2
+
+[node name="Cancel" type="BaseButton" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions/Cancel"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions/Cancel/Content"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions/Cancel/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Cancel "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Ok" type="BaseButton" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+script = ExtResource("4_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions/Ok"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/ActionsMargin/Actions/Ok/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Rename "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_label")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"

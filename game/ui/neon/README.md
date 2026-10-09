@@ -16,8 +16,9 @@ Where to edit what:
 | Rules | `styles/fact_rule.tres`, `hot_rule.tres` (StyleBoxNeonDashes) | Color, Dash, Gap, Thickness, sides |
 | Scrim | `neon_scrim.tres` (ShaderMaterial on `neon_scrim.gdshader`) | Shader parameters |
 | Heights, press drop, disabled opacity | `neon_theme.tres`, Button variations (MainButton, SecondaryButton, Tab, ListRow, Chip) | Constants min_height, press_drop, disabled_opacity |
+| Notices and the paused badge over the world, warning text, the guide's group toggles | `neon_theme.tres`: NoticeBox (the tab bar's box), WarningText (text in warm), GroupToggle (no box, glow focus) | Theme editor |
 
-Scenes: `gallery.tscn` shows every component in every state; `field_guide_mock.tscn` is round 3's Lanternjaw page with static content. Buttons that hold several parts are `NeonButton`s; the labels inside that change when the button is pressed or selected are `NeonLabel`s (look / pressed look).
+Scenes: `gallery.tscn` shows every component in every state; `field_guide_mock.tscn` is round 3's Lanternjaw page with static content. The app's screens built from these are `ui/field_guide/field_guide.tscn`, `ui/pause_menu.tscn`, `ui/dialog.tscn`, `ui/save_slots.tscn` (rows: `ui/save_slot_row.tscn`), `ui/inspect_panel.tscn`, `ui/notices.tscn` (each: `ui/notice.tscn`), `ui/paused_badge.tscn` and `ui/busy_panel.tscn`; each shows sample content when opened with no world. Buttons that hold several parts are `NeonButton`s; the labels inside that change when the button is pressed or selected are `NeonLabel`s (look / pressed look).
 
 Hover isn't designed: every hover style is the normal style plus the focus glow (a StyleBoxNeonStack).
 
