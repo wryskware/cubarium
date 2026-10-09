@@ -42,7 +42,7 @@ fn deep_night_hour() -> f64 {
 
 /// The default table with the bellwing's window `w` and its live senses read every tick.
 fn config(w: ActiveWindow) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c.founders[BW.index()].active_window = w;
     c

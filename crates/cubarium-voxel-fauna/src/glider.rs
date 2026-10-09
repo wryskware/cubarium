@@ -1314,8 +1314,7 @@ pub(super) fn roost_reflex(
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
     let glider = phys.glider?;
-    let sleepy = !phys.active.awake_in(sky.clock_on, sky.daylight, 1.0, fauna.night, phys.active_window, &fauna.config.life)
-        && !a.emergency;
+    let sleepy = crate::step::off_phase(fauna, i, sky.clock_on, sky.daylight) && !a.emergency;
     if !(sleepy || sky.downpour) {
         return None;
     }

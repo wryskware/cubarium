@@ -196,6 +196,10 @@ pub struct Vigilance {
     /// **FEAR-2** (module note): a flight, or a refuge watch, whose hunter it has not known
     /// within `flee_stop_m` for this long ends where it is, seconds; 0 never (S2's hold).
     pub lost_calm_s: f64,
+    /// **Woken by an alarm** (RHYTHMS-CADENCE, [`crate::rhythm::alarm_wakes`]): asleep it hears
+    /// a running body (fleeing or bolting) at this share of its awake sensitivity (its hearing
+    /// floor over this) and wakes; 0 sleeps through. Fraction.
+    pub sleep_hearing: f64,
 }
 
 impl Default for Vigilance {
@@ -225,6 +229,7 @@ impl Default for Vigilance {
             calm_margin_m: 0.0,
             calm_facing_deg: 0.0,
             lost_calm_s: 0.0,
+            sleep_hearing: 0.0,
         }
     }
 }
@@ -265,6 +270,7 @@ const NONE: Vigilance = Vigilance {
     calm_margin_m: 0.0,
     calm_facing_deg: 0.0,
     lost_calm_s: 0.0,
+    sleep_hearing: 0.0,
 };
 
 /// **A lineage's hunker** (module note, HUNKER): its knobs. Inert unless `enabled` and its
@@ -449,6 +455,13 @@ pub fn hunker_of(founder: Founder) -> Hunker {
 /// **Each lineage's ground response** (review §1 and §4, Astra's per-species rows),
 /// placeholders at the terrarium's scale.
 pub fn vigilance_of(founder: Founder) -> Vigilance {
+    // RHYTHMS-CADENCE: every lineage that hears wakes to a nearby run at half its awake
+    // sensitivity (sleep raises the arousal threshold; a herd's sleepers still wake to an
+    // alarm), untuned. Inert for a lineage that does not hear.
+    Vigilance { sleep_hearing: 0.5, ..vigilance_table(founder) }
+}
+
+fn vigilance_table(founder: Founder) -> Vigilance {
     let none = Vigilance::default();
     match founder {
         // Astra: alternate cropping with brief scans; orient to uncertain sounds, flee a

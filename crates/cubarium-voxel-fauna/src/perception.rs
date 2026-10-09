@@ -575,7 +575,8 @@ impl Bins {
 fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usize, cost: &mut Cost, scratch: &mut Vec<u32>) -> Vec<Track> {
     let b = &fauna.animals[i];
     let Some(f) = b.founder else { return Vec::new() };
-    let table = fauna.config.founder(f).senses;
+    // RHYTHMS-CADENCE: a body that has stood still senses farther (`SenseTable::still_gain`).
+    let table = fauna.config.founder(f).senses.sensing(b.still_ticks);
     let reach = table.reach_m(day);
     if !(reach > 0.0) {
         return Vec::new();

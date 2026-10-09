@@ -80,7 +80,7 @@ fn own_food(config: &FaunaConfig, f: Founder) -> Food {
 /// standing walker's carrion diet at yield 0.5 and its own food's `τ`; no lifespan, no
 /// breeding.
 fn carrion_config(f: Founder) -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     let tau = c.founder(f).gut.digestion_s[own_food(&c, f).index()];
     let p = &mut c.founders[f.index()];
     p.diet = Diet::only(Food::Carrion);
@@ -212,7 +212,7 @@ fn assert_books(fauna: &Fauna, when: &str, ticks: u64) {
 /// its basal upkeep. No tuned number is pinned.
 #[test]
 fn the_gut_tables_keep_their_derived_relations() {
-    let c = FaunaConfig::default();
+    let c = crate::rhythm::fixed_config();
     let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1e-12);
     for f in Founder::ALL {
         let p = c.founder(f);
@@ -481,7 +481,7 @@ fn a_pack_hunts_when_half_want_food_or_one_is_in_emergency() {
     for (wanting, emergency, hunts) in [(0, 0, false), (1, 0, false), (2, 0, true), (0, 1, true)] {
         let world = clock_off(8);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut c = FaunaConfig::default();
+        let mut c = crate::rhythm::fixed_config();
         c.founders[Founder::Chorister.index()].active = Activity::Always;
         // The hunt-start rule alone: a grazer that does not hunker (PACK-TUNE's prey choice
         // would leave an armoured one to a lone member in emergency).
@@ -544,7 +544,7 @@ fn a_pack_hunts_when_half_want_food_or_one_is_in_emergency() {
 fn regurgitation_conserves_and_keeps_composition() {
     let world = clock_off(9);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     c.founders[Founder::Chorister.index()].active = Activity::Always;
     let mut p = c.founders[Founder::Chorister.index()].pack.expect("a pack lineage");
     p.pack_size = 1;
@@ -932,7 +932,7 @@ fn a_two_pool_digestion_by_the_numbers() {
 #[test]
 fn a_starving_body_just_full_waits_for_the_refill_gap() {
     let f = Founder::Browser;
-    let c = FaunaConfig::default();
+    let c = crate::rhythm::fixed_config();
     let gut = c.founder(f).gut;
     assert_eq!(gut.refill_gap, 0.1);
     assert!((gut.s_start(1.0) - 0.88).abs() < 1e-12, "{}", gut.s_start(1.0));
@@ -958,7 +958,7 @@ fn attached_and_falling_bodies_stay_awake() {
     // A nocturnal lanternjaw riding a grazer at noon.
     let world = at_hour(12.0, 23);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     fauna.set_births_enabled(false);
     let host = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     let rider = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores { body: 0.2, reserve: 1.0 });
@@ -969,7 +969,7 @@ fn attached_and_falling_bodies_stay_awake() {
     }
     // A diurnal grazer falling at midnight.
     let world = at_hour(0.0, 24);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     fauna.set_births_enabled(false);
     let g = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     animal_mut(&mut fauna, g).mobility.falling = true;
@@ -986,7 +986,7 @@ fn pack_scene(at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna
 /// [`pack_scene`] on a given world.
 fn pack_scene_on(world: World, at: &[(f64, f64, bool)], prey: (f64, f64)) -> (World, Flora, Fauna, Vec<u64>, u64) {
     let flora = Flora::new(FloraConfig::default());
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     c.founders[Founder::Chorister.index()].active = Activity::Always;
     let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
     pk.pack_size = at.len();
@@ -1315,7 +1315,7 @@ fn a_pack_takes_the_wide_way_round_not_the_narrow_stair() {
 fn the_reserve_fallback_does_not_need_the_pups_latch() {
     let world = clock_off(26);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     c.founders[Founder::Chorister.index()].active = Activity::Always;
     let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
     pk.pack_size = 1;
@@ -1370,7 +1370,7 @@ fn a_removed_body_exports_its_stomach() {
 fn a_fed_bellwing_perches_and_rests() {
     let world = clock_off(28);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     fauna.set_births_enabled(false);
     assert!(fauna.apply(
         &world,
@@ -1401,7 +1401,7 @@ fn a_fed_bellwing_perches_and_rests() {
 #[test]
 fn a_snapshot_keeps_a_mixed_stomach_and_refuses_a_bad_one() {
     let world = clock_off(29);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let id = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     {
         let a = animal_mut(&mut fauna, id);

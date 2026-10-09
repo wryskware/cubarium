@@ -409,7 +409,8 @@ fn the_seedporter_table_scales_the_browsers_and_glides() {
         / (grazer.adult_length_m * grazer.adult_width_m * grazer.adult_height_m);
     assert!(close(x1.core.body_max, grazer.core.body_max * r), "the browser's by volume");
     assert!(close(sp.wall_climb_cost_factor, shredder.wall_climb_cost_factor), "the shredder's climb cost");
-    assert_eq!(sp.active, crate::Activity::Diurnal);
+    // RHYTHMS-CADENCE: a diurnal leaning.
+    assert_eq!(sp.active, crate::Activity::Leaning);
     assert_eq!((sp.founding, sp.founding_site), (Founding::Bodies, FoundingSite::AtFood));
     assert!(sp.hunter.expect("the opportunistic insect catcher").hunts(Founder::Bellwing));
     assert!(sp.flight.is_none(), "it glides, it does not fly");

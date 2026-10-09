@@ -95,9 +95,10 @@ impl Controller for Counting {
 
 #[test]
 fn the_founders_have_their_activity() {
+    // RHYTHMS-CADENCE: both lean (`rhythm_tests`); the cases below set the old rhythms.
     let c = FaunaConfig::default();
-    assert_eq!(c.founder(Founder::Browser).active, Activity::Diurnal);
-    assert_eq!(c.founder(Founder::Blind).active, Activity::Nocturnal);
+    assert_eq!(c.founder(Founder::Browser).active, Activity::Leaning);
+    assert_eq!(c.founder(Founder::Blind).active, Activity::Leaning);
 }
 
 #[test]
@@ -144,7 +145,7 @@ fn a_diurnal_browser_sleeps_at_midnight_and_pays_half_upkeep() {
     let world = at_hour(0.0);
     assert_eq!(world.life_daylight(), 0.0);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let i = founder(&mut fauna, &world, Founder::Browser, 1.0);
     let phys = *fauna.config.founder(Founder::Browser);
     let body = fauna.animals[i].body;
@@ -165,7 +166,7 @@ fn the_same_browser_is_awake_at_noon_and_pays_full_upkeep() {
     let world = at_hour(12.0);
     assert_eq!(world.life_daylight(), 1.0);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let i = founder(&mut fauna, &world, Founder::Browser, 1.0);
     let phys = *fauna.config.founder(Founder::Browser);
     let body = fauna.animals[i].body;
@@ -184,7 +185,7 @@ fn the_same_browser_is_awake_at_noon_and_pays_full_upkeep() {
 fn a_starving_browser_stays_awake_at_midnight() {
     let world = at_hour(0.0);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let starving = founder(&mut fauna, &world, Founder::Browser, 0.0);
     let fed = founder(&mut fauna, &world, Founder::Browser, 1.0);
     fauna.step_with(&world, &mut flora, 1);
@@ -198,7 +199,7 @@ fn a_nocturnal_shredder_is_awake_at_midnight_and_asleep_at_noon() {
     for (hour, asleep) in [(0.0, false), (12.0, true)] {
         let world = at_hour(hour);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::rhythm::fixed_config());
         let i = founder(&mut fauna, &world, Founder::Blind, 1.0);
         fauna.step_with(&world, &mut flora, 1);
         assert_eq!(
@@ -218,7 +219,7 @@ fn with_the_clock_off_no_animal_sleeps() {
         ..DayClock::default()
     });
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let browser = founder(&mut fauna, &world, Founder::Browser, 1.0);
     let shredder = founder(&mut fauna, &world, Founder::Blind, 1.0);
     for _ in 0..5 {
@@ -235,7 +236,7 @@ fn an_asleep_animal_is_not_consulted_and_does_not_move() {
     for (hour, asleep) in [(0.0, true), (12.0, false)] {
         let world = at_hour(hour);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::rhythm::fixed_config());
         let i = founder(&mut fauna, &world, Founder::Browser, 1.0);
         let calls = Arc::new(AtomicUsize::new(0));
         let id = fauna.animals[i].id;
@@ -268,7 +269,7 @@ fn a_browser_sleeps_and_wakes_over_a_day_and_the_ledgers_stay_closed() {
         ..DayClock::default()
     });
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let i = founder(&mut fauna, &world, Founder::Browser, 1.0);
     let (mut slept, mut woke) = (0u32, 0u32);
     let mut last = State::Resting;

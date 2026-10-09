@@ -229,8 +229,8 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     assert!(!ch.core.reproduction.dormant, "no egg bank");
     assert_eq!(
         ch.active,
-        Activity::Diurnal,
-        "the lanternjaw keeps the night"
+        Activity::Leaning,
+        "RHYTHMS-CADENCE: any hour, long rests; the lanternjaw keeps the night"
     );
     assert_eq!(ch.diet, Diet::only(Food::Carrion));
 

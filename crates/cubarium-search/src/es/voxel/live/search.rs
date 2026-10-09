@@ -1478,8 +1478,7 @@ fn balance_readout(
             births += b;
             valued += b * qc.body_max * (1.0 + qc.reserve_cap) * y;
         }
-        let bouts = super::screen::sleep_bouts_s(&sim.world().config().day, p.active, &life);
-        let asleep: f64 = bouts.iter().sum();
+        let asleep = super::screen::founder_sleep(&sim.world().config().day, p, &life).asleep_s;
         let one = p.core.maintenance_per_s
             * p.core.body_max
             * ((day_s - asleep) + p.sleep_upkeep * asleep);

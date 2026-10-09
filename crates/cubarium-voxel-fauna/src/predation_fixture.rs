@@ -85,10 +85,11 @@ pub(super) fn clock_off(seed: u64) -> World {
     )
 }
 
-/// The default table with the lanternjaw awake at every hour, so a case can pick the
+/// The default table, its rhythms on/off, with the lanternjaw awake at every hour, so a case can pick the
 /// prey's state by the hour alone and still have a striker.
 pub(super) fn hunting_config() -> FaunaConfig {
-    let mut c = FaunaConfig::default();
+    // The on/off rhythms (RHYTHMS-CADENCE's leanings have random rests; `rhythm_tests`).
+    let mut c = crate::rhythm::fixed_config();
     c.founders[Founder::Lanternjaw.index()].active = Activity::Always;
     c
 }

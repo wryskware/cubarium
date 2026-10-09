@@ -44,6 +44,8 @@ pub use herding::{HerdTally, Herding};
 mod herding_tests;
 mod gait;
 pub use gait::Sprint;
+pub mod rhythm;
+pub use rhythm::{Cadence, Horizon, Pace, Rhythm};
 pub use step::jump::DropRule;
 pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
@@ -604,6 +606,10 @@ pub enum Activity {
     /// hall. Photonegative rather than clock-bound, like a woodlouse. In open sky it is
     /// the nocturnal rhythm; read without a face ([`Activity::awake`]) it is too.
     DarkActive,
+    /// **A leaning** (RHYTHMS-CADENCE, Wrysk 2026-10-09): awake by its lineage's
+    /// [`crate::Rhythm`], a chance by the time of day with rests in random bouts, read per body
+    /// in the circadian stage ([`crate::rhythm`]). Read alone, without a body, it is awake.
+    Leaning,
 }
 
 impl Activity {
@@ -626,6 +632,7 @@ impl Activity {
             Activity::Nocturnal => daylight < life.day_line,
             Activity::Crepuscular => daylight > life.twilight_lo && daylight < life.twilight_hi,
             Activity::DarkActive => sky.clamp(0.0, 1.0) * daylight < life.day_line,
+            Activity::Leaning => true,
         }
     }
 
@@ -1002,6 +1009,11 @@ pub struct Animal {
     /// unreachable or costs more than [`Pack::home_reserve_share`] allows. Zero otherwise.
     #[serde(default)]
     pub homing_ticks: u32,
+    /// **What is left of its rest bout**, ticks (RHYTHMS-CADENCE, [`crate::rhythm`]): a body of
+    /// a [`Activity::Leaning`] lineage sleeps while this is above 0 (unless kept up), and an
+    /// awake one starts a bout at random. Always 0 for every other body and with the clock off.
+    #[serde(default)]
+    pub rest_ticks: u32,
     /// **Yielding a carcass** (roster R3, the lanternjaw's heuristic): set when a body that
     /// hunts it came within `carcass_yield_radius_m` while it fed, cleared once none is
     /// within `threat_clear_m` ([`crate::PredationConfig`]); while set it walks directly
@@ -3242,6 +3254,23 @@ pub struct FaunaLedger {
     /// above the day line, so a nocturnal body would have slept.
     #[serde(default)]
     pub dark_awake_ticks_by_founder: [u64; Founder::COUNT],
+    /// **RHYTHMS-CADENCE readouts** (counters only, no rule reads them): ticks a free founder
+    /// body was alive with the sun up, and awake with the sun up (the night's are the totals
+    /// above less these); rest bouts begun (a leaning); sleepers woken by an alarm.
+    #[serde(default)]
+    pub alive_day_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub awake_day_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub rest_bouts_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub alarm_wakes_by_founder: [u64; Founder::COUNT],
+    /// Ticks a heuristic walker was paced (searching or foraging on its own steering, moving
+    /// faster than a stay on food, not fleeing) and, of them, paused ([`crate::Cadence`]).
+    #[serde(default)]
+    pub paced_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub paused_ticks_by_founder: [u64; Founder::COUNT],
     /// Controller samples in which a body driven by its heuristic held still to feed (feed
     /// on, forward at most the teachers' `forage_stay_forward`): the stay-on-food reflex.
     #[serde(default)]
@@ -3644,6 +3673,10 @@ pub struct Fauna {
     /// at the start of every tick, read by the activity windows. Derived, so not saved.
     #[serde(skip)]
     pub(crate) night: NightClock,
+    /// **Where in the day this tick is** (RHYTHMS-CADENCE, [`Horizon`]): set from the world's
+    /// sun at the start of every tick, read by the leanings. Derived, so not saved.
+    #[serde(skip)]
+    pub(crate) horizon: Horizon,
     /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
     /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
     #[serde(default)]
@@ -4080,6 +4113,7 @@ impl Fauna {
             policy_digest: [0; Founder::COUNT],
             last_daylight: None,
             night: NightClock::DAY,
+            horizon: Horizon::NOON,
             last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
@@ -4931,6 +4965,7 @@ impl Fauna {
             gut_seeds: GutSeedLots::default(),
             pack: None,
             homing_ticks: 0,
+            rest_ticks: 0,
             yielding: false,
             hunkered: false,
             stomach: Stomach::default(),

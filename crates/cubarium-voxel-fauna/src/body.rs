@@ -392,8 +392,9 @@ pub struct FounderPhysiology {
     /// raised paid structure when the founder was sized from a core budget; it came
     /// with no free reserve or energy.
     pub organ_structure_fraction: f64,
-    /// When this lineage is awake: the browser is diurnal, the shredder nocturnal.
-    /// Placeholders, `design/backlog.md` §1.
+    /// When this lineage is awake. RHYTHMS-CADENCE (Wrysk 2026-10-09): every lineage but the
+    /// lanternjaw (dark-active) and the ripple-snail (its own night-and-rain rule) leans
+    /// ([`crate::Activity::Leaning`], its [`FounderPhysiology::rhythm`]).
     pub active: crate::Activity,
     /// **Its activity window** (LURE, [`crate::ActiveWindow`]): hours after sunset and before
     /// sunrise it is awake on top of [`FounderPhysiology::active`]. Zero for every lineage
@@ -567,6 +568,14 @@ pub struct FounderPhysiology {
     /// the bellwing and the ripple-snail.
     #[serde(default)]
     pub drop: crate::DropRule,
+    /// **Its daily leaning** (RHYTHMS-CADENCE, [`crate::Rhythm`]): read while
+    /// [`FounderPhysiology::active`] is [`crate::Activity::Leaning`].
+    #[serde(default)]
+    pub rhythm: crate::Rhythm,
+    /// **Its stop-and-go pace** (RHYTHMS-CADENCE, [`crate::Cadence`]) while it searches or
+    /// forages on its own heuristic. Off for the lineages that are not paced.
+    #[serde(default)]
+    pub cadence: crate::Cadence,
     /// `Some` for a **pack lineage** (roster R3, the chorister; predation-and-flight
     /// §2.10, §2.14): its pack, den, breeding, provisioning, territory, chase and call
     /// numbers ([`Pack`]). `None` for every other lineage.
@@ -1754,6 +1763,8 @@ impl FounderPhysiology {
         p.hunker = crate::vigil::hunker_of(founder);
         p.herding = crate::herding::herding_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
+        p.rhythm = crate::rhythm::rhythm_of(founder);
+        p.cadence = crate::rhythm::cadence_of(founder);
         p
     }
 
@@ -1826,7 +1837,7 @@ impl FounderPhysiology {
                     FOLIAGE_YIELD,
                 ],
                 organ_structure_fraction: 0.05,
-                active: crate::Activity::Nocturnal,
+                active: crate::Activity::Leaning,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
@@ -1869,6 +1880,8 @@ impl FounderPhysiology {
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
+                rhythm: crate::Rhythm::default(),
+                cadence: crate::Cadence::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
@@ -1910,7 +1923,7 @@ impl FounderPhysiology {
                 // same number so that a class it cannot reach is never a silent zero.
                 yield_by_food: [FOLIAGE_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
-                active: crate::Activity::Diurnal,
+                active: crate::Activity::Leaning,
                 active_window: crate::ActiveWindow { before_rise_h: 0.0, after_set_h: 0.0 },
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
@@ -1951,6 +1964,8 @@ impl FounderPhysiology {
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
+                rhythm: crate::Rhythm::default(),
+                cadence: crate::Cadence::default(),
                 pack: None,
             },
             // The lanternjaw (`design/predation-and-flight-2026-09-28.md` §2.12): a slim
@@ -2056,6 +2071,8 @@ impl FounderPhysiology {
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
+                rhythm: crate::Rhythm::default(),
+                cadence: crate::Cadence::default(),
                 pack: None,
             },
             // The capgnawer (roster R1, `design/handoffs/voxel-roster-2026-10-01.md`): the
@@ -2244,7 +2261,7 @@ impl FounderPhysiology {
                         y
                     },
                     organ_structure_fraction: 0.10,
-                    active: crate::Activity::Diurnal,
+                    active: crate::Activity::Leaning,
                     // LURE (Wrysk 2026-10-06: "dusk/dawn is fine for them to fly as well as
                     // day"): a twilight flyer, awake from an hour before sunrise to an hour
                     // after sunset, asleep only in deep night. Many moths and other insects
@@ -2309,7 +2326,7 @@ impl FounderPhysiology {
                         y[crate::Food::Fruit.index()] = FRUIT_YIELD;
                         y
                     },
-                    active: crate::Activity::Diurnal,
+                    active: crate::Activity::Leaning,
                     diet: crate::Diet::of(&[crate::Food::Fruit, crate::Food::Carrion]),
                     catch_bellwings: true,
                     opportunist: true,
@@ -2390,8 +2407,8 @@ impl FounderPhysiology {
                     adult_length_m: 1.4,
                     adult_width_m: 0.35,
                     adult_height_m: 0.6,
-                    // With its daylight switch off, the lanternjaw keeps the night.
-                    active: crate::Activity::Diurnal,
+                    // RHYTHMS-CADENCE: any hour, long rests ([`crate::rhythm::rhythm_of`]).
+                    active: crate::Activity::Leaning,
                     lure_daylight: false,
                     // The lanternjaw's strike table, no lure, its own list (§2.14): the
                     // frondgrazer, the loftstrider (only a pack's window takes an adult),
@@ -2425,6 +2442,8 @@ impl FounderPhysiology {
                 let film_yield = grazer.yield_by_food[crate::Food::Foliage.index()];
                 FounderPhysiology {
                     core,
+                    // Its own rule (night and after rain, `Amphibious`): not a leaning.
+                    active: crate::Activity::Nocturnal,
                     adult_length_m: 0.19,
                     adult_width_m: 0.19,
                     adult_height_m: 0.063,
@@ -5989,6 +6008,14 @@ pub struct SenseTable {
     /// At most this many of its own lineage are weighed per remote sensing, nearest first
     /// (S2: a herd hears its neighbours bolt). 1.
     pub kin_tracks: u32,
+    /// **Still, it senses farther** (RHYTHMS-CADENCE, [`crate::rhythm`]): while the body itself
+    /// has been still for `still_settle_s`, its sight and hearing and tremor ranges are this ×
+    /// theirs and its hearing and tremor floors this ÷ theirs (saltatory search: a pause to look
+    /// and listen detects more; a moving body's own footfall masks what it hears and feels).
+    /// 1 is no change.
+    pub still_gain: f64,
+    /// Seconds the body has been still before [`SenseTable::still_gain`] applies.
+    pub still_settle_s: f64,
 }
 
 impl Default for SenseTable {
@@ -6013,6 +6040,8 @@ impl Default for SenseTable {
             loom_m: 0.0,
             feeding_sight_fraction: 1.0,
             kin_tracks: 1,
+            still_gain: 1.0,
+            still_settle_s: 0.0,
         }
     }
 }
@@ -6021,6 +6050,28 @@ impl SenseTable {
     /// The longest of its pairwise ranges at this light, metres.
     pub fn reach_m(&self, day: bool) -> f64 {
         self.sight_range_m(day).max(self.hearing_m).max(self.tremor_m)
+    }
+
+    /// This table as a body that has been still for `still_ticks` senses
+    /// ([`SenseTable::still_gain`]): itself while it moves or the gain is at most 1.
+    pub fn sensing(&self, still_ticks: u64) -> SenseTable {
+        let g = self.still_gain;
+        if !(g.is_finite() && g > 1.0) {
+            return *self;
+        }
+        let settle = if self.still_settle_s > 0.0 { cubarium_voxel::ticks_at_least_one(self.still_settle_s) } else { 1 };
+        if still_ticks < settle {
+            return *self;
+        }
+        SenseTable {
+            sight_m: self.sight_m * g,
+            sight_night_m: self.sight_night_m * g,
+            hearing_m: self.hearing_m * g,
+            hearing_min: self.hearing_min / g,
+            tremor_m: self.tremor_m * g,
+            tremor_min: self.tremor_min / g,
+            ..*self
+        }
     }
 
     /// Sight's range for a moving body at this light, metres.
@@ -6044,7 +6095,9 @@ impl SenseTable {
 pub fn senses_of(founder: Founder) -> SenseTable {
     use crate::ScentChannel::{Grazer, Hunter, SmallPrey};
     use crate::scent::{SMELL_AT_2_5_M, SMELL_AT_2_M, SMELL_AT_3_5_M, SMELL_AT_6_M};
-    let t = SenseTable::default();
+    // RHYTHMS-CADENCE: every lineage senses a quarter farther after half a second still (a
+    // modest gain; Kramer & McLaughlin 2001 on intermittent locomotion), untuned.
+    let t = SenseTable { still_gain: 1.25, still_settle_s: 0.5, ..SenseTable::default() };
     match founder {
         // Eyeless (dossier): substrate tremor ~1 m, 2 m for heavy steps; litter chemistry is
         // its own detritus field.
