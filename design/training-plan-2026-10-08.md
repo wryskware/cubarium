@@ -816,6 +816,15 @@ control and the reward accounting; display targets after seeing results.
        - A: `spur_share` 0.01;
        - B: A plus a high floor;
        - C: bites and pollination act over a body-sized patch, not one face.
+     - **Decided (Wrysk, 2026-10-09): C.** "yah do C. bellwings can also nest in the vines.
+       they cant nest on bloomcrowns."
+       - Seedporter bites and bellwing sips reach every vine face within reach, in metres.
+       - A bellwing visit pollinates the vine flowers within its body span.
+       - The small floor stays.
+       - Bellwings lay their clutches on latticevine faces, never at bloomcrowns.
+       - Other per-face foods (litter, film, turf, vine foliage) are audited for the same
+         scale problem; fixing them is a separate decision.
+       - VINE-C (opus-high, worktree `vine-c`, brief `briefs/vine-c.md`) is running.
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
