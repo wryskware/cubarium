@@ -43,6 +43,15 @@ fn founding_glowcaps_use_shaded_faces_and_report_their_actual_light() {
             }
         }
     }
+    // Isolate the smaller shaded grove from the larger bright ground, including
+    // across the ring seam. A largest-component-only placement misses its food.
+    for z in 0..9 {
+        for x in [0, 4] {
+            for y in 3..=7 {
+                world.apply(Command::SetMaterial { x, y, z, material: Material::Rock });
+            }
+        }
+    }
     let mut config = FloraConfig::for_voxel_size(1.0);
     for species in Species::ALL {
         config.species_mut(species).founder_per_m2 = 0.0;
@@ -75,14 +84,12 @@ fn founding_glowcaps_use_shaded_faces_and_report_their_actual_light() {
     let mut flora = Flora::new(config);
     let mut fauna_config = FaunaConfig::placeholder();
     fauna_config.founding.reference_land_m2 = 0.0;
+    // This fixture checks shade and placement; stock thresholds have their own tests.
+    fauna_config.founding.accept_founder_hours = 0.0;
     let mut fauna = Fauna::new(fauna_config);
-    habitat::seed_pre_rolled(
-        &mut world,
-        &mut flora,
-        &mut fauna,
-        &pre,
-        [0; Founder::COUNT],
-    );
+    let mut counts = [0; Founder::COUNT];
+    counts[Founder::Capgnawer.index()] = 1;
+    let seeded = habitat::seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, counts);
     let v = flora.view();
     let fungi: Vec<_> = v
         .stands
@@ -108,6 +115,37 @@ fn founding_glowcaps_use_shaded_faces_and_report_their_actual_light() {
             "a founder on a lit face: {fungus:?}"
         );
     }
+    assert_eq!(
+        seeded.founders[Founder::Capgnawer.index()],
+        counts[Founder::Capgnawer.index()]
+    );
+    let phys = fauna.config().founder(Founder::Capgnawer);
+    let graph = cubarium_voxel_fauna::RouteGraph::for_founder(
+        &world.view(),
+        phys,
+        fauna.config().founding.clearance_margin_m,
+    );
+    for body in fauna
+        .view()
+        .animals
+        .iter()
+        .filter(|a| a.founder == Some(Founder::Capgnawer))
+    {
+        let component = graph
+            .component_of(body.site)
+            .expect("founder stands on the walk graph");
+        let mut sizes = std::collections::BTreeMap::<usize, usize>::new();
+        for c in &graph.components { *sizes.entry(*c).or_default() += 1; }
+        assert!(sizes[&component] < *sizes.values().max().unwrap(), "food is outside the largest component");
+        assert!(
+            v.stands
+                .iter()
+                .filter(|s| s.species == Species::Glowcap && s.light <= threshold)
+                .any(|s| graph.component_of(s.site) == Some(component)),
+            "the component holds dark glowcaps"
+        );
+    }
+    assert!(seeded.acceptance.accepted, "{:?}", seeded.acceptance);
     for (held, expected) in [
         (v.organic(), v.ledger.expected_organic()),
         (v.mineral(), v.ledger.expected_mineral()),

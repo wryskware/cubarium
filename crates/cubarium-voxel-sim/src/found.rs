@@ -1,5 +1,5 @@
 //! **The founding loop** — lake gate, pre-roll, seeding and the acceptance check,
-//! redrawn on a refusal — shared by the host, the live trainer's worlds and the frozen
+//! placement retried on settled water — shared by the host, the live trainer's worlds and the frozen
 //! trainer's landscapes: [`found`] on a [`LayerConfig`], the config in force.
 //!
 //! A founding can also keep the kept try's world half way through its opening shower
@@ -11,6 +11,7 @@ use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder};
 use cubarium_voxel_flora::{Flora, FloraConfig};
 
 use crate::habitat;
+use crate::habitat::FoundingWatch;
 use crate::params::Params;
 
 /// Ticks a candidate world is settled for before its water is judged.
@@ -29,9 +30,8 @@ const WALK_STEP_M: f64 = 0.5;
 /// Random seeds tried before the generator gives up and keeps the wettest world it saw.
 pub const LAKE_SEED_TRIES: usize = 24;
 
-/// Habitat tries: how many lake-gated worlds the founding loop pre-rolls, seeds and
-/// judges before it keeps the best of them. Bounded apart from [`LAKE_SEED_TRIES`]:
-/// each try draws its own world through the lake gate.
+/// Terrain tries for structural habitat refusals before the pre-roll. Placement
+/// retries are bounded separately by [`PLACEMENT_TRIES`] and reuse settled water.
 pub const HABITAT_TRIES: usize = 8;
 
 /// **The episode-fixture config**: the plant and animal configs a world's layers are
@@ -112,7 +112,7 @@ pub struct Founded {
     pub seed: u64,
     /// Seeds the lake gate rejected, over every habitat try.
     pub lake_rejected: usize,
-    /// Worlds that were seeded and failed the acceptance check.
+    /// Placements refused on the retained terrain.
     pub habitat_rejected: usize,
     /// Whether the returned world passed the acceptance check.
     pub accepted: bool,
@@ -124,11 +124,10 @@ pub struct Founded {
     pub mid_shower: Option<World>,
 }
 
-/// **The founding loop**: lake gate → pre-roll → seed → acceptance, redrawing the
-/// terrain seed on a refusal, up to [`HABITAT_TRIES`]; the accepted world (or, when none
-/// passes, the one with the best worse-lineage stock) is returned already seeded with
-/// `founder_counts` on `layers`. `keep_mid_shower` also keeps each try's world half way
-/// through its opening shower ([`Founded::mid_shower`]).
+/// **The founding loop**: lake gate → structural habitat check → one pre-roll →
+/// placement and acceptance. A refused placement retries on the same settled world.
+/// Only a structural terrain refusal draws another terrain. The returned world is
+/// already seeded; `keep_mid_shower` keeps its opening shower midpoint too.
 pub fn found(
     cfg: &cubarium_voxel::Config,
     layers: &LayerConfig,
@@ -146,6 +145,27 @@ pub fn found(
     )
 }
 
+/// Found with the caller's water fidelity already in force during the pre-roll.
+/// The display's [`found`] keeps live water; experiment tools pass their preset here.
+pub fn found_with_water_every(
+    cfg: &cubarium_voxel::Config,
+    layers: &LayerConfig,
+    founder_counts: [usize; Founder::COUNT],
+    seeds: Seeds,
+    keep_mid_shower: bool,
+    water_every: u32,
+) -> Founded {
+    found_judged_with_water(
+        cfg,
+        layers,
+        founder_counts,
+        seeds,
+        keep_mid_shower,
+        water_every,
+        |s| s.acceptance.accepted,
+    )
+}
+
 /// [`found`] with the verdict `accept` in place of the acceptance check.
 fn found_judged(
     cfg: &cubarium_voxel::Config,
@@ -155,8 +175,31 @@ fn found_judged(
     keep_mid_shower: bool,
     accept: impl Fn(&habitat::Seeded) -> bool,
 ) -> Founded {
+    found_judged_with_water(
+        cfg,
+        layers,
+        founder_counts,
+        seeds,
+        keep_mid_shower,
+        1,
+        accept,
+    )
+}
+
+fn found_judged_with_water(
+    cfg: &cubarium_voxel::Config,
+    layers: &LayerConfig,
+    founder_counts: [usize; Founder::COUNT],
+    seeds: Seeds,
+    keep_mid_shower: bool,
+    water_every: u32,
+    accept: impl Fn(&habitat::Seeded) -> bool,
+) -> Founded {
     let (asked, mut next_seed): (Option<u64>, Box<dyn FnMut() -> u64>) = match seeds {
-        Seeds::Asked(seed) => (Some(seed), Box::new(|| unreachable!("an asked seed draws none"))),
+        Seeds::Asked(seed) => (
+            Some(seed),
+            Box::new(|| unreachable!("an asked seed draws none")),
+        ),
         Seeds::Counting { base, stride } => {
             let mut next = base;
             (
@@ -171,104 +214,109 @@ fn found_judged(
         Seeds::Derived { base } => (None, Box::new(derived_seeds(base))),
         Seeds::Drawn(draw) => (None, Box::new(derived_seeds(draw()))),
     };
-    let mut lake_rejected = 0usize;
-    let found = |world: World| {
-        let mut world = world;
-        let (mut flora, mut fauna) = layers.layers();
+    let mut lake_rejected = 0;
+    let mut warnings = Vec::new();
+    for terrain_attempt in 0..if asked.is_some() { 1 } else { HABITAT_TRIES } {
+        let (mut world, seed, rejected) =
+            generate_with_a_lake(cfg, asked, LAKE_SEED_TRIES, &mut next_seed);
+        lake_rejected += rejected;
+        if let Some(why) = terrain_refusal(&world, layers, founder_counts) {
+            let warning =
+                format!("cubarium voxel: terrain seed {seed} refused before pre-roll: {why}");
+            eprintln!("{warning}");
+            warnings.push(warning);
+            if asked.is_none() && terrain_attempt + 1 < HABITAT_TRIES {
+                continue;
+            }
+            let (flora, fauna) = layers.layers();
+            return Founded {
+                world,
+                flora,
+                fauna,
+                seeded: habitat::Seeded::default(),
+                seed,
+                lake_rejected,
+                habitat_rejected: 0,
+                accepted: false,
+                warnings,
+                mid_shower: None,
+            };
+        }
+        world.set_water_every(water_every.max(1));
+        let clock = habitat::FoundingClock::new(&());
+        clock.attempt(0, PLACEMENT_TRIES, seed);
         let mut mid_shower = None;
-        let seeded = habitat::seed_with_founder_counts_capturing(
+        let pre = habitat::pre_roll_watched(
             &mut world,
-            &mut flora,
-            &mut fauna,
-            founder_counts,
+            true,
             keep_mid_shower.then_some(&mut mid_shower),
+            &clock,
+        )
+        .expect("an unwatched founding completes");
+        let (batch, accepted, attempts) = place_settled(
+            world,
+            seed,
+            layers,
+            founder_counts,
+            PLACEMENT_TRIES,
+            &pre,
+            &clock,
+            &accept,
+        )
+        .expect("an unwatched placement completes");
+        clock.report(seed, attempts);
+        eprintln!(
+            "cubarium voxel: founding attempts terrain={} placements={attempts} lake_rejected={lake_rejected}",
+            terrain_attempt + 1
         );
-        (world, flora, fauna, seeded, mid_shower)
-    };
-    if let Some(seed) = asked {
-        let (world, seed, _) = generate_with_a_lake(cfg, Some(seed), LAKE_SEED_TRIES, &mut next_seed);
-        let (world, flora, fauna, seeded, mid_shower) = found(world);
-        let accepted = accept(&seeded);
-        let mut warnings = Vec::new();
+        if !accepted && let Some(why) = habitat::food_capacity_refusal(&batch.world, &batch.flora, &batch.fauna, &batch.seeded) {
+            let warning = format!("cubarium voxel: terrain seed {seed} refused: {why}");
+            eprintln!("{warning}");
+            warnings.push(warning);
+            if asked.is_none() && terrain_attempt + 1 < HABITAT_TRIES { continue; }
+        }
         if !accepted {
-            let w = format!(
-                "cubarium voxel: seed {seed} was asked for, so it is kept — but its habitat \
-                 fails the acceptance check ({})",
-                seeded.acceptance.reasons()
+            let warning = format!(
+                "cubarium voxel: {}terrain seed {seed} kept after {attempts} placement refusals on the settled world: {}",
+                if asked.is_some() { "asked-for " } else { "" },
+                batch.seeded.acceptance.reasons()
             );
-            eprintln!("{w}");
-            warnings.push(w);
+            eprintln!("{warning}");
+            warnings.push(warning);
         }
         return Founded {
-            world,
-            flora,
-            fauna,
-            seeded,
+            world: batch.world,
+            flora: batch.flora,
+            fauna: batch.fauna,
+            seeded: batch.seeded,
             seed,
-            lake_rejected: 0,
-            habitat_rejected: 0,
+            lake_rejected,
+            habitat_rejected: batch.refused.len(),
             accepted,
             warnings,
             mid_shower,
         };
     }
-    let tries = HABITAT_TRIES;
-    let mut best: Option<Founded> = None;
-    for k in 0..tries {
-        let (world, seed, rejected) = generate_with_a_lake(cfg, None, LAKE_SEED_TRIES, &mut next_seed);
-        lake_rejected += rejected;
-        let (world, flora, fauna, seeded, mid_shower) = found(world);
-        let founded = Founded {
-            world,
-            flora,
-            fauna,
-            seeded,
-            seed,
-            lake_rejected,
-            habitat_rejected: k,
-            accepted: false,
-            warnings: Vec::new(),
-            mid_shower,
-        };
-        if accept(&founded.seeded) {
-            if k > 0 {
-                eprintln!("cubarium voxel: seed {seed} accepted as a habitat after {k} refused");
-            }
-            return Founded {
-                accepted: true,
-                ..founded
-            };
-        }
-        eprintln!(
-            "cubarium voxel: seed {seed} refused as a habitat: {} (worse lineage at {:.2} \
-             founder-hours per founder)",
-            founded.seeded.acceptance.reasons(),
-            founded.seeded.acceptance.worse_ratio(),
-        );
-        let ratio = founded.seeded.acceptance.worse_ratio();
-        if best
-            .as_ref()
-            .is_none_or(|b| ratio > b.seeded.acceptance.worse_ratio())
-        {
-            best = Some(founded);
-        }
-    }
-    let mut best = best.expect("at least one try");
-    let w = format!(
-        "cubarium voxel: NO SEED of {tries} passed the habitat acceptance check; keeping \
-         seed {} with the best worse-lineage stock of {:.2} founder-hours per founder — \
-         {}",
-        best.seed,
-        best.seeded.acceptance.worse_ratio(),
-        best.seeded.acceptance.reasons(),
-    );
-    eprintln!("{w}");
-    best.warnings.push(w);
-    best.habitat_rejected = tries;
-    best.lake_rejected = lake_rejected;
-    best
+    unreachable!("the last refused terrain is returned with its warning")
 }
 
+/// A structural refusal, before paying for water. Plant crowns cannot supply a dark
+/// terrain habitat when the terrain has no shaded support face anywhere.
+fn terrain_refusal(
+    world: &World,
+    layers: &LayerConfig,
+    counts: [usize; Founder::COUNT],
+) -> Option<String> {
+    if counts[Founder::Capgnawer.index()] == 0 {
+        return None;
+    }
+    let sc = &layers.flora.glowcap;
+    let view = world.view();
+    let dark = habitat::support_sites(world)
+        .into_iter()
+        .any(|s| view.sky_visibility(i64::from(s.x), s.y, s.z) <= sc.sun_shade_max);
+    (!dark).then(|| "no dark support face for glowcaps and their capgnawer founders".to_string())
+}
 /// Draw generated worlds until one has a lake the camera can actually read.
 ///
 /// **A ring with no visible water is not a habitat** (Wrysk, 2026-09-21: "reject any
@@ -296,10 +344,15 @@ pub fn generate_with_a_lake(
     // them and ask for none.
     let water = cfg.landform.water().copied();
     let build = |seed: u64| {
+        let started = std::time::Instant::now();
         let (world, report) = World::new_reporting(cubarium_voxel::Config {
             seed,
             ..cfg.clone()
         });
+        eprintln!(
+            "cubarium voxel: terrain timing seed={seed} generation={:.3}s",
+            started.elapsed().as_secs_f64()
+        );
         let short = water.and_then(|w| features_short(&w, report.as_ref()));
         (world, short)
     };
@@ -403,8 +456,7 @@ pub fn generate_with_a_lake(
 
 /// How many times founding a **picked** terrain places its founders before it gives up
 /// ([`found_terrain`]): the first try on the terrain's own seed, each later one with the
-/// weather and the layers' keyed draws re-keyed ([`World::reseed`]), never a new terrain.
-/// It stops sooner when two tries running are refused for the same reasons.
+/// layers' keyed draws re-keyed ([`World::reseed`]), never new terrain or water.
 pub const PLACEMENT_TRIES: usize = 3;
 
 /// The `k`-th placement seed of a terrain seeded `seed` (`k ≥ 1`; try 0 is `seed` itself).
@@ -500,7 +552,9 @@ pub fn draw_terrain(
     // One draw, judged: its features, its lake after the gate's settle, and (when asked)
     // its feasibility, read on the same settled probe.
     let judge = |seed: u64| {
+        let started = std::time::Instant::now();
         let (world, report) = World::new_reporting(cubarium_voxel::Config { seed, ..cfg.clone() });
+        eprintln!("cubarium voxel: terrain timing seed={seed} generation={:.3}s", started.elapsed().as_secs_f64());
         let short = water.and_then(|w| features_short(&w, report.as_ref()));
         let mut probe = world.clone();
         probe.settle(GATE_SETTLE_TICKS);
@@ -623,20 +677,15 @@ pub struct FoundedTerrain {
     pub seeded: habitat::Seeded,
     /// The terrain's seed, which the world carries again once founded.
     pub seed: u64,
-    /// The seed the accepted try's weather and keyed draws ran on ([`placement_seed`]).
+    /// The seed the accepted placement's keyed draws ran on ([`placement_seed`]).
     pub placement_seed: u64,
     /// Tries refused before it, and why.
     pub refused: Vec<String>,
 }
 
-/// **Found a picked terrain, keeping it**: pre-roll, seed and judge it as [`found`] does,
-/// and on a refusal try the placement again **on the same terrain** — the weather and the
-/// layers' keyed draws re-keyed to [`placement_seed`] (`World::reseed`), so the shower,
-/// the water the founders are judged against and the keyed draws differ — up to `tries`
-/// times, or until two tries running are refused for the same reasons (the weather made no
-/// difference, and each try is a whole pre-roll). Never draws a new terrain. When a try is accepted the world is re-keyed back to
-/// its terrain seed, so it carries the seed it was picked by. `watcher` hears each try
-/// ([`FoundingWatch::attempt`]) and every tick of its pre-roll, and can stop it.
+/// **Found a picked terrain, keeping it**: one pre-roll, then up to `tries` placements
+/// on clones of that settled world with new placement seeds. No water is rerun. The
+/// returned world carries its terrain seed again; the watcher can cancel at any phase.
 pub fn found_terrain(
     world: World,
     seed: u64,
@@ -645,9 +694,15 @@ pub fn found_terrain(
     tries: usize,
     watcher: &dyn habitat::FoundingWatch,
 ) -> TerrainFounding {
-    found_terrain_judged(world, seed, layers, founder_counts, tries, watcher, |s: &habitat::Seeded| {
-        s.acceptance.accepted
-    })
+    found_terrain_judged(
+        world,
+        seed,
+        layers,
+        founder_counts,
+        tries,
+        watcher,
+        |s: &habitat::Seeded| s.acceptance.accepted,
+    )
 }
 
 /// [`found_terrain`] with the verdict `accept` in place of the acceptance check.
@@ -660,64 +715,108 @@ pub fn found_terrain_judged(
     watcher: &dyn habitat::FoundingWatch,
     accept: impl Fn(&habitat::Seeded) -> bool,
 ) -> TerrainFounding {
-    let tries = tries.max(1);
+    if !watcher.go_on() {
+        return TerrainFounding::Cancelled;
+    }
+    if let Some(why) = terrain_refusal(&world, layers, founder_counts) {
+        eprintln!("cubarium voxel: terrain seed {seed} refused before pre-roll: {why}");
+        return TerrainFounding::Refused(vec![why]);
+    }
+    let clock = habitat::FoundingClock::new(watcher);
+    clock.attempt(0, tries.max(1), seed);
+    let mut world = world;
+    let Some(pre) = habitat::pre_roll_watched(&mut world, true, None, &clock) else {
+        return TerrainFounding::Cancelled;
+    };
+    let Some((batch, accepted, attempts)) = place_settled(
+        world,
+        seed,
+        layers,
+        founder_counts,
+        tries,
+        &pre,
+        &clock,
+        &accept,
+    ) else {
+        return TerrainFounding::Cancelled;
+    };
+    clock.report(seed, attempts);
+    if accepted {
+        TerrainFounding::Founded(Box::new(batch))
+    } else {
+        TerrainFounding::Refused(batch.refused)
+    }
+}
+
+/// Retry only placement: every try starts from the same settled water and wettest faces.
+#[allow(clippy::too_many_arguments)]
+fn place_settled(
+    settled: World,
+    seed: u64,
+    layers: &LayerConfig,
+    counts: [usize; Founder::COUNT],
+    tries: usize,
+    pre: &habitat::PreRoll,
+    watcher: &dyn habitat::FoundingWatch,
+    accept: &impl Fn(&habitat::Seeded) -> bool,
+) -> Option<(FoundedTerrain, bool, usize)> {
+    let mut best: Option<FoundedTerrain> = None;
     let mut refused = Vec::new();
-    let mut world = Some(world);
-    for k in 0..tries {
+    for k in 0..tries.max(1) {
         let placement = placement_seed(seed, k as u64);
-        watcher.attempt(k, tries, placement);
-        // The last try takes the terrain itself; every other a copy of it.
-        let mut w = if k + 1 == tries {
-            world.take().expect("the terrain is kept until the last try")
-        } else {
-            world.as_ref().expect("the terrain is kept until the last try").clone()
-        };
-        if k > 0 {
-            w.reseed(placement);
-        }
-        let Some(pre) = habitat::pre_roll_watched(&mut w, true, None, watcher) else {
-            return TerrainFounding::Cancelled;
-        };
-        watcher.progress(habitat::FoundingPhase::Placing, 0);
-        let (mut flora, mut fauna) = layers.layers();
-        let seeded = habitat::seed_pre_rolled(&mut w, &mut flora, &mut fauna, &pre, founder_counts);
         if !watcher.go_on() {
-            return TerrainFounding::Cancelled;
+            return None;
         }
-        if accept(&seeded) {
-            if k > 0 {
-                eprintln!(
-                    "cubarium voxel: seed {seed} founded on placement try {} of {tries} (placement seed \
-                     {placement})",
-                    k + 1
-                );
-                w.reseed(seed);
-            }
-            return TerrainFounding::Founded(Box::new(FoundedTerrain {
-                world: w,
-                flora,
-                fauna,
-                seeded,
-                seed,
-                placement_seed: placement,
-                refused,
-            }));
+        if k > 0 {
+            watcher.attempt(k, tries.max(1), placement);
         }
-        let why = seeded.acceptance.reasons();
-        eprintln!(
-            "cubarium voxel: seed {seed}, placement try {} of {tries} (placement seed {placement}) \
-             refused as a habitat: {why}",
-            k + 1
+        let mut world = settled.clone();
+        world.reseed(placement);
+        let (mut flora, mut fauna) = layers.layers();
+        let seeded = habitat::seed_pre_rolled_watched(
+            &mut world, &mut flora, &mut fauna, pre, counts, watcher,
         );
-        // The weather made no difference: the same refusal twice running is what the rest
-        // would say too, and each try is a whole pre-roll.
-        let same = refused.last() == Some(&why);
+        if !watcher.go_on() {
+            return None;
+        }
+        let accepted = accept(&seeded);
+        if !watcher.go_on() {
+            return None;
+        }
+        world.reseed(seed);
+        let made = FoundedTerrain {
+            world,
+            flora,
+            fauna,
+            seeded,
+            seed,
+            placement_seed: placement,
+            refused: Vec::new(),
+        };
+        if accepted {
+            return Some((FoundedTerrain { refused, ..made }, true, k + 1));
+        }
+        let why = made.seeded.acceptance.reasons();
+        eprintln!(
+            "cubarium voxel: terrain seed {seed}, placement try {} of {} (placement seed {placement}) refused: {why}; settled terrain retained",
+            k + 1,
+            tries.max(1)
+        );
         refused.push(why);
-        if same {
-            break;
+        if best.as_ref().is_none_or(|b| {
+            made.seeded.acceptance.worse_ratio() > b.seeded.acceptance.worse_ratio()
+        }) {
+            best = Some(made);
         }
     }
-    TerrainFounding::Refused(refused)
+    Some((
+        FoundedTerrain {
+            refused,
+            ..best.expect("at least one placement")
+        },
+        false,
+        tries.max(1),
+    ))
 }
 
 /// Why a terrarium build falls short of the water recipe's feature bar
@@ -821,11 +920,11 @@ mod tests {
     }
 
     /// **The founding loop** (item 5): lake gate, pre-roll, seed, acceptance. A world the
-    /// verdict refuses is redrawn and the next one is returned **already seeded**, never
+    /// verdict refuses keeps its settled terrain for the next placement, returned seeded, never
     /// seeded twice; a seed that was asked for is kept whatever its verdict, with a
     /// warning.
     #[test]
-    fn the_founding_loop_redraws_a_refused_habitat_and_returns_it_seeded() {
+    fn the_founding_loop_retries_placement_and_returns_it_seeded() {
         let mut recipe = cubarium_voxel::Recipe::DEFAULT;
         recipe.water.min_lake_m2 = 0.0;
         recipe.water.min_tier_pools = 0;
@@ -837,7 +936,7 @@ mod tests {
             landform: Landform::Staged(recipe),
             ..cubarium_voxel::Config::default()
         };
-        // A shower of a second, so two pre-rolls stay short.
+        // A shower of a second keeps this mechanism test short.
         cfg.climate.opening_min_s = 1.0;
         let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
         let judged = std::cell::Cell::new(0usize);
@@ -845,12 +944,23 @@ mod tests {
             judged.set(judged.get() + 1);
             judged.get() > 1
         };
-        // A random draw supplies only the base; a refusal must derive its retry rather
-        // than call this draw again (which would return the same refused seed here).
-        let founded = found_judged(&cfg, &layers, [2, 2, 0, 0, 0, 0, 0, 0, 0], Seeds::Drawn(|| 5), false, first_fails);
-        assert_eq!(judged.get(), 2, "two worlds were judged");
-        assert_eq!(founded.seed, derived_seed(5, 1), "the refused first draw was replaced by the first redraw");
-        assert_eq!(founded.world.config().seed, founded.seed, "report the kept world's seed");
+        // A random draw supplies the terrain seed once; a refusal changes placement,
+        // never the drawn terrain or its settled water.
+        let founded = found_judged(
+            &cfg,
+            &layers,
+            [2, 2, 0, 0, 0, 0, 0, 0, 0],
+            Seeds::Drawn(|| 6),
+            false,
+            first_fails,
+        );
+        assert_eq!(judged.get(), 2, "two placements were judged");
+        assert_eq!(founded.seed, 6, "placement retries keep the first terrain");
+        assert_eq!(
+            founded.world.config().seed,
+            founded.seed,
+            "report the kept world's seed"
+        );
         assert!(founded.accepted && founded.habitat_rejected == 1);
         assert!(
             founded.seeded.stands > 0,
@@ -945,7 +1055,10 @@ mod tests {
         let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
         let counts = [2, 2, 0, 0, 0, 0, 0, 0, 0];
         // Seed 6: a ring with stands on it, so "seeded" can be checked.
-        let terrain = World::new(cubarium_voxel::Config { seed: 6, ..cfg.clone() });
+        let terrain = World::new(cubarium_voxel::Config {
+            seed: 6,
+            ..cfg.clone()
+        });
         let hash = terrain.terrain_hash();
 
         let judged = std::cell::Cell::new(0usize);
@@ -960,23 +1073,104 @@ mod tests {
             panic!("the second try is accepted");
         };
         assert_eq!(judged.get(), 2);
-        assert_eq!(f.world.terrain_hash(), hash, "the founded world has the picked terrain");
+        assert_eq!(
+            f.world.terrain_hash(),
+            hash,
+            "the founded world has the picked terrain"
+        );
         assert_eq!(f.refused.len(), 1);
         assert_eq!(f.placement_seed, placement_seed(6, 1));
-        assert_eq!(f.world.config().seed, 6, "it carries its terrain seed again");
-        assert_eq!(*watch.attempts.borrow(), vec![(0, 3, 6), (1, 3, placement_seed(6, 1))]);
-        assert!(f.world.tick() > 0 && f.seeded.stands > 0, "pre-rolled and seeded");
-        assert_eq!(watch.phases.borrow().first(), Some(&habitat::FoundingPhase::Settling));
-        assert_eq!(watch.phases.borrow().last(), Some(&habitat::FoundingPhase::Placing));
+        assert_eq!(
+            f.world.config().seed,
+            6,
+            "it carries its terrain seed again"
+        );
+        assert_eq!(
+            *watch.attempts.borrow(),
+            vec![(0, 3, 6), (1, 3, placement_seed(6, 1))]
+        );
+        assert!(
+            f.world.tick() > 0 && f.seeded.stands > 0,
+            "pre-rolled and seeded"
+        );
+        assert_eq!(
+            watch.phases.borrow().first(),
+            Some(&habitat::FoundingPhase::Settling)
+        );
+        assert_eq!(
+            watch.phases.borrow().last(),
+            Some(&habitat::FoundingPhase::Placing)
+        );
+        assert_eq!(
+            watch
+                .phases
+                .borrow()
+                .iter()
+                .filter(|&&p| p == habitat::FoundingPhase::Settling)
+                .count(),
+            1,
+            "pre-roll ran once"
+        );
+        assert_eq!(
+            watch
+                .phases
+                .borrow()
+                .iter()
+                .filter(|&&p| p == habitat::FoundingPhase::Shower)
+                .count(),
+            1,
+            "shower ran once"
+        );
 
         let watch = Recorder::default();
-        let TerrainFounding::Refused(why) =
-            found_terrain_judged(terrain.clone(), 6, &layers, counts, 2, &watch, |_: &habitat::Seeded| false)
-        else {
+        let TerrainFounding::Refused(why) = found_terrain_judged(
+            terrain.clone(),
+            6,
+            &layers,
+            counts,
+            2,
+            &watch,
+            |_: &habitat::Seeded| false,
+        ) else {
             panic!("every try is refused");
         };
         assert_eq!(why.len(), 2, "both tries reported");
         assert_eq!(watch.attempts.borrow().len(), 2, "and no more were made");
+    }
+
+    #[test]
+    fn a_terrain_without_dark_faces_is_refused_before_the_pre_roll() {
+        let mut world = World::empty(cubarium_voxel::Config {
+            width: 8,
+            height: 8,
+            depth: 8,
+            voxel_m: 1.0,
+            ..Default::default()
+        });
+        for z in 0..8 {
+            for x in 0..8 {
+                world.apply(cubarium_voxel::Command::SetMaterial {
+                    x,
+                    y: 1,
+                    z,
+                    material: cubarium_voxel::Material::Soil,
+                });
+            }
+        }
+        let tick = world.tick();
+        let mut layers = LayerConfig::new(&Params::defaults(), world.config().voxel_m);
+        layers.flora.glowcap.sun_shade_max = 0.5;
+        let mut counts = [0; Founder::COUNT];
+        counts[Founder::Capgnawer.index()] = 1;
+        let watch = Recorder::default();
+        let TerrainFounding::Refused(why) = found_terrain(world, 1, &layers, counts, 3, &watch)
+        else {
+            panic!("no shade is a terrain refusal");
+        };
+        assert!(why[0].contains("no dark"));
+        assert!(watch.phases.borrow().is_empty(), "no pre-roll phases");
+        assert!(watch.attempts.borrow().is_empty(), "no placement attempts");
+        assert_eq!(tick, 0);
     }
 
     /// A watcher that says stop stops the founding part way through.
