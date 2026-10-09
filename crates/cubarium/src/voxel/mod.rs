@@ -111,7 +111,7 @@ use cubarium_session::create::{Populate, Scene, StartLayers, StartSpec};
 use cubarium_session::create::random_seed;
 use cubarium_session::founders::FounderRecipe;
 #[cfg(test)]
-use cubarium_session::founders::{BUILT_IN_POLICIES, built_in_driver, install_founder_controllers};
+use cubarium_session::founders::install_founder_controllers;
 use cubarium_session::params::{SimParams, config_table};
 use cubarium_session::store::{save_voxel_snapshot, save_whole_world};
 #[cfg(test)]
@@ -1413,7 +1413,7 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
     Ok(())
 }
 
-// The trained centres, their installation and each lineage's recipe live in the session
+// Explicit policies, their installation and each lineage's recipe live in the session
 // crate (`cubarium_session::founders`), shared with the Godot session; re-exported here
 // for the examples.
 pub use cubarium_session::founders::{
@@ -1421,7 +1421,7 @@ pub use cubarium_session::founders::{
 };
 
 /// Each lineage's driver for the ambient run, from the command line: `--founder-policy`
-/// first, then `--founder-heuristic`, otherwise the built-in centre
+/// when supplied, otherwise the default heuristic
 /// ([`cubarium_session::founders::founder_recipes`]).
 fn founder_recipes(args: &Voxel) -> Result<Vec<FounderRecipe>> {
     cubarium_session::founders::founder_recipes(&args.founder_policies()?, &args.founder_heuristics()?)
@@ -3289,15 +3289,13 @@ width = 64
         let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
         crate::voxel::habitat::install_heuristics(&mut loaded);
         //
-        // With the trained centres as the default, an empty driver list is what
-        // `--founder-heuristic` produces, so this is exactly the demotion the flag could
-        // ask for, and the message names both ways back.
+        // Default heuristics cannot replace a saved policy. The refusal names the
+        // explicit policy needed to resume this lineage.
         let err = format!(
             "{:#}",
             install_founder_controllers(&mut loaded, &[]).expect_err("a demotion in silence")
         );
         assert!(err.contains("littershredder"), "{err}");
-        assert!(err.contains("--founder-heuristic"), "{err}");
         assert!(err.contains("--founder-policy"), "{err}");
 
         // With the flag back, it loads.
@@ -3406,15 +3404,7 @@ width = 64
         assert!(loaded.policy_driven(Founder::Blind));
     }
 
-    /// **The ambient run's default is the trained centres, and the binary carries them —
-    /// or, when this build refuses one, the heuristic, loudly.**
-    ///
-    /// The two embedded files are the trainer's own output and validate themselves
-    /// against *this* build — schema token, declared lineage, weight count, finite
-    /// weights, and the founder-manifest digest. Contract v2 (P5-A) moved the digests, so
-    /// on the retrain branch the schema-1 centres are refused and each lineage falls back
-    /// to its heuristic until P5-C copies the new centres in; a centre that validates
-    /// drives its own lineage.
+    /// Explicit policies name exactly one file per lineage.
     #[test]
     fn policy_arguments_name_one_file_per_lineage() {
         let args = |v: &[&str]| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
@@ -3444,105 +3434,75 @@ width = 64
             &mut fauna,
             &[(Founder::Browser, PathBuf::from("/nonexistent/centre.json"))],
         )
-        .expect_err("a missing file is refused, not replaced by the built-in");
+        .expect_err("a missing explicit file is refused");
         assert!(format!("{err:#}").contains("centre.json"), "{err:#}");
     }
 
     #[test]
-    fn the_built_in_centres_drive_their_own_lineage_by_default() {
+    fn no_lineage_gets_a_brain_unless_a_policy_is_given() {
         use clap::Parser;
-
-        // A lineage with no built-in centre (the lanternjaw, until P2) runs its heuristic.
-        let has_centre =
-            |founder: Founder| BUILT_IN_POLICIES.iter().any(|(f, _, _)| *f == founder);
-        let validates: Vec<bool> = Founder::ALL
-            .iter()
-            .map(|&founder| match built_in_driver(founder) {
-                _ if !has_centre(founder) => false,
-                Ok(driver) => {
-                    assert!(
-                        driver.name().contains("gru"),
-                        "{} runs a trained centre, not a control: {}",
-                        founder.name(),
-                        driver.name()
-                    );
-                    true
-                }
-                Err(e) => {
-                    assert!(
-                        format!("{e:#}").contains("digest"),
-                        "{}: refused for its manifest digest, not something else: {e:#}",
-                        founder.name()
-                    );
-                    false
-                }
-            })
-            .collect();
+        use cubarium_search::es::voxel::{
+            VoxelPolicyFile, store::POLICY_SCHEMA, task, voxel_schema_digest,
+        };
 
         let voxel = |args: &[&str]| -> crate::cli::Voxel {
             let mut line = vec!["cubarium", "voxel"];
             line.extend(args.iter().copied());
             match crate::cli::Cli::parse_from(line).command {
                 crate::cli::Command::Voxel(v) => v,
-                other => panic!("expected a voxel command, got {other:?}"),
+                other => panic!("expected voxel, got {other:?}"),
             }
         };
-
-        // No flags: every lineage is driven by its built-in centre, or says loudly that
-        // it fell back.
-        let recipes = founder_recipes(&voxel(&[])).expect("the default run");
-        assert_eq!(recipes.len(), Founder::ALL.len());
-        for recipe in &recipes {
-            if !has_centre(recipe.founder) {
-                assert!(recipe.driver.is_none(), "{}", recipe.source);
-                continue;
-            }
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
+        habitat::install_heuristics(&mut fauna);
+        for flags in [&[][..], &["--founder-heuristic", "all"][..]] {
+            let recipes = founder_recipes(&voxel(flags)).expect("heuristic defaults");
             assert_eq!(
-                recipe.driver.is_some(),
-                validates[recipe.founder.index()],
-                "{}: {}",
-                recipe.founder.name(),
-                recipe.source
+                recipes.iter().map(|r| r.founder).collect::<Vec<_>>(),
+                Founder::ALL.to_vec()
             );
-            assert!(recipe.source.contains("built-in"), "{}", recipe.source);
-            if recipe.driver.is_none() {
-                assert!(recipe.source.contains("FALLBACK"), "{}", recipe.source);
-            }
+            assert!(recipes.iter().all(|r| r.driver.is_none()));
         }
+        install_default_founders(&mut fauna).expect("default controllers");
+        assert!(policy_founders(&[]).is_empty());
+        assert!(Founder::ALL.into_iter().all(|f| !fauna.policy_driven(f)));
 
-        // `--founder-heuristic all` is the control: no driver for either lineage, so the
-        // seeder's heuristic stands and `install_founder_controllers` records nothing.
-        let recipes = founder_recipes(&voxel(&["--founder-heuristic", "all"])).expect("control");
-        assert!(recipes.iter().all(|r| r.driver.is_none()));
-        assert!(
-            recipes
-                .iter()
-                .all(|r| r.source.contains("--founder-heuristic"))
-        );
-
-        // One lineage on the control, the other still on its centre.
-        let recipes =
-            founder_recipes(&voxel(&["--founder-heuristic", "blind"])).expect("one lineage");
-        let blind = recipes
-            .iter()
-            .find(|r| r.founder == Founder::Blind)
-            .expect("the blind lineage");
-        let browser = recipes
-            .iter()
-            .find(|r| r.founder == Founder::Browser)
-            .expect("the browser lineage");
-        assert!(blind.driver.is_none(), "{}", blind.source);
-        assert!(
-            blind.source.contains("--founder-heuristic"),
-            "{}",
-            blind.source
-        );
-        assert_eq!(
-            browser.driver.is_some(),
-            validates[Founder::Browser.index()],
-            "{}",
-            browser.source
-        );
+        // A generated policy fixture exercises explicit loading without tuned weights.
+        let founder = Founder::Blind;
+        let file = VoxelPolicyFile {
+            schema: POLICY_SCHEMA.into(),
+            build: "test".into(),
+            founder: founder.name().into(),
+            digest: voxel_schema_digest(founder),
+            train_seed: 5,
+            generation: None,
+            score: None,
+            start_heading: task::START_HEADING_PROTOCOL.into(),
+            starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+            arena_protocol: task::arena_protocol(founder, task::Stage::A, task::Band::Landed),
+            protocol_hash: None,
+            imitation: None,
+            stage: task::Stage::A.as_str().into(),
+            theta: cubarium_search::es::tensor::initial_center_shape::<23, 3>(5),
+        };
+        let path =
+            std::env::temp_dir().join(format!("cubarium-explicit-policy-{}.json", random_seed()));
+        file.write(&path).expect("write generated policy fixture");
+        let spec = format!("{}={}", founder.name(), path.display());
+        let args = voxel(&["--founder-policy", &spec, "--founder-heuristic", "all"]);
+        args.validate()
+            .expect("legacy no-op beside explicit policy");
+        let recipes = founder_recipes(&args).expect("explicit policy loads");
+        for recipe in recipes {
+            assert_eq!(recipe.driver.is_some(), recipe.founder == founder);
+        }
+        let policies = policy_args(&[format!("policy={spec}")]).expect("example policy argument");
+        assert_eq!(policy_founders(&policies), vec![founder]);
+        install_founders_with(&mut fauna, &policies).expect("explicit policy installs");
+        for lineage in Founder::ALL {
+            assert_eq!(fauna.policy_driven(lineage), lineage == founder);
+        }
+        std::fs::remove_file(path).expect("remove generated fixture");
     }
 
     #[test]

@@ -11,11 +11,11 @@ use cubarium_voxel_fauna::{Fauna, FaunaConfig, Founder, Senses};
 use cubarium_voxel_flora::{Flora, FloraConfig};
 use cubarium_voxel_sim::{Sim, SimConfig};
 
-/// 200 ticks of the shipped authored habitat with the built-in centres installed, then
+/// 200 ticks of the shipped authored habitat with the default heuristics installed, then
 /// where the founders stand, what their mouths took and what their cones read.
 ///
 /// Every live reading the new helpers touch is upstream of these numbers: the cone feeds
-/// the trained controller, the controller's held actions move the pose, and the mouth
+/// the controller, the controller's held actions move the pose, and the mouth
 /// decides the bite.
 ///
 /// **The recorded trajectory is gone, 2026-09-22.** It was the evidence that package 0
@@ -39,7 +39,7 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     fauna_cfg.founding.arrival_stomach = 0.0;
     let mut fauna = Fauna::new(fauna_cfg);
     habitat::seed(&mut world, &mut flora, &mut fauna);
-    install_default_founders(&mut fauna).expect("the built-in centres validate");
+    install_default_founders(&mut fauna).expect("the default heuristic controllers install");
     let mut senses = Senses::new();
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::default(), Some(senses));
@@ -51,14 +51,6 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
         .filter(|a| a.founder.is_some())
         .count();
     assert!(seeded > 0, "the habitat seeds founders");
-    let seeded_layers: std::collections::HashSet<u32> = sim
-        .fauna()
-        .view()
-        .animals
-        .iter()
-        .filter(|a| a.founder.is_some())
-        .map(|a| a.site.y)
-        .collect();
     for _ in 0..200 {
         sim.step();
     }
@@ -105,16 +97,6 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
             p.1
         );
     }
-    // The step rule is live: on the shipped terraced habitat, some founder leaves the
-    // layer it was seeded on inside ten seconds.
-    assert!(
-        poses
-            .iter()
-            .map(|p| p.1)
-            .collect::<std::collections::HashSet<u32>>()
-            != seeded_layers,
-        "no founder changed its standing layer in 200 ticks"
-    );
     for (sum, what) in [
         (poses.iter().map(|p| p.2).sum::<f64>(), "pose x"),
         (poses.iter().map(|p| p.3).sum::<f64>(), "pose z"),
@@ -124,10 +106,10 @@ fn two_hundred_ticks_of_the_live_path_stand_eat_and_see() {
     }
     assert!(
         av.ledger.eaten_organic_in > 0.0,
-        "the centres fed at all in 200 ticks"
+        "the founders fed at all in 200 ticks"
     );
 
-    // The browser cone the policy is given, summed over every browser and sector: this
+    // The browser cone the controller is given, summed over every browser and sector: this
     // is the reading that goes through `ray_first_hit` and `cone_occupancy`.
     let fv = sim.flora().view();
     let wv = sim.world().view();

@@ -18,10 +18,9 @@
 //! total litter organic. The seed report goes to
 //! stderr so it never mixes with the CSV.
 //!
-//! The founders are driven by the built-in trained centres by default — the same drivers
-//! `cubarium voxel`'s ambient run installs — so this measures the world that ships, not
-//! the seeder's bare heuristics. A trailing `heuristic` argument keeps the old,
-//! observation-only control:
+//! Every lineage runs its observation-only heuristic by default, as in the ambient run.
+//! `policy=LINEAGE=FILE` explicitly installs a saved policy for that lineage.
+//! A trailing `heuristic` argument is accepted as a legacy no-op:
 //!
 //! ```text
 //! cargo run --release -p cubarium --example voxel_census -- 1 generated closed heuristic
@@ -194,8 +193,7 @@ fn main() {
     {
         cubarium_voxel::set_thread_override(n);
     }
-    // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
-    // built-in centre (P5-C).
+    // `policy=<lineage>=<file>` explicitly replaces that lineage's default heuristic.
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse()
@@ -219,11 +217,7 @@ fn main() {
         .iter()
         .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
         .unwrap_or(PRESET_SEED_BASE);
-    // The shipped world's founders are driven by the built-in trained centres by
-    // default, exactly as `cubarium voxel`'s ambient run installs them — this measures
-    // the world that ships, not the seeder's bare heuristics. `heuristic` as a trailing
-    // argument keeps the old, observation-only control.
-    let heuristic = args.iter().any(|a| a == "heuristic");
+    // `heuristic` remains accepted as a legacy no-op; explicit policies win.
     // `pin=B`: the overlapped tick's plant and animal leg on the last `B` physical cores,
     // the water on the rest (`chiplet::split_overlap_pools`). Measurement.
     if let Some(b) = args
@@ -373,7 +367,6 @@ fn main() {
         let (mut sim, minute0) = load_run(
             std::path::Path::new(dir),
             &args,
-            heuristic,
             &policies,
             &sets,
             genome.as_ref(),
@@ -432,11 +425,7 @@ fn main() {
             seeded.stands,
             seeded.animals()
         );
-        if heuristic {
-            eprintln!("founders: the observation-only heuristic (control)");
-        } else {
-            install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
-        }
+        install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
@@ -530,11 +519,7 @@ fn main() {
             seeded.wanted,
             seeded.shortfall,
         );
-        if heuristic {
-            eprintln!("founders: the observation-only heuristic (control)");
-        } else {
-            install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
-        }
+        install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
         run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
@@ -589,11 +574,7 @@ fn main() {
         seeded.founders,
         seeded.animals()
     );
-    if heuristic {
-        eprintln!("founders: the observation-only heuristic (control)");
-    } else {
-        install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
-    }
+    install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
     introduce_into(&world, &flora, &mut fauna);
 
     // The live founders sense a settled litter field; the ambient run settles it the
@@ -648,9 +629,7 @@ fn run(
         let fauna = sim.fauna();
         let source = if fauna.policy_driven(lineage) {
             timing.policies.iter().find(|(f, _)| *f == lineage).map_or_else(
-                || cubarium_session::founders::BUILT_IN_POLICIES.iter()
-                    .find(|(f, _, _)| *f == lineage)
-                    .map_or_else(|| "policy".into(), |(_, name, _)| format!("built-in {name}")),
+                || "explicit policy".into(),
                 |(_, path)| format!("file {}", path.display()))
         } else { "heuristic".into() };
         eprintln!("installed_driver lineage={} source={source} weights={:016x}",
@@ -1250,7 +1229,6 @@ fn genome_or_expand(base: &Params, text: &str, genes: &[(String, f64)], expand: 
 fn load_run(
     dir: &std::path::Path,
     args: &[String],
-    heuristic: bool,
     policies: &[(Founder, std::path::PathBuf)],
     sets: &[String],
     genome: Option<&(String, Vec<(String, f64)>)>,
@@ -1270,8 +1248,8 @@ fn load_run(
         "load= resumes a saved world; {shaping:?} only shape a new one — drop them"
     );
     // The one safe load: every body's heuristic back, and a lineage the save ran on a
-    // policy refused unless this run drives it by one (the built-in centres, `policy=`).
-    let driven_by_policy = if heuristic { Vec::new() } else { cubarium::voxel::policy_founders(policies) };
+    // policy refused unless this run explicitly supplies it (`policy=`).
+    let driven_by_policy = cubarium::voxel::policy_founders(policies);
     let saved = cubarium_voxel_sim::saved::load(dir, &driven_by_policy).unwrap_or_else(|e| panic!("load: {e}"));
     let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
     eprintln!(
@@ -1320,11 +1298,7 @@ fn load_run(
             .unwrap_or_else(|e| panic!("load: {e}"));
     }
     write_params(&loaded.params);
-    if heuristic {
-        eprintln!("founders: the observation-only heuristic (control)");
-    } else {
-        install_founders_with(&mut fauna, policies).expect("the founder centres validate");
-    }
+    install_founders_with(&mut fauna, policies).expect("the explicit founder policies validate");
     let sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
     (sim, minute)
 }

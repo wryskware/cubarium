@@ -12,9 +12,8 @@
 //! founder) — introduced hungry through `Command::IntroduceFounder` with their own
 //! observation-only heuristics installed. The legacy `Species::Frondgrazer` animal is
 //! still in the fauna crate and still reachable from the `g` stdin line; this seeder
-//! stopped placing it. Those heuristics are the seeder's floor: the ambient run installs
-//! the trained P3-C centres over them by default (`crates/cubarium/assets/policies`),
-//! and `--founder-heuristic` is what leaves this floor standing.
+//! stopped placing it. Those heuristics are also the ambient run's default; only an
+//! explicitly supplied policy replaces a lineage's controllers.
 //!
 //! **It is a stage-1 dev scene, not a tuned ecology.** The species are placed by simple
 //! environment proxies — standing water, rock or soil, height band — in clustered,
@@ -895,12 +894,8 @@ pub fn seed_pre_rolled(
     // **birth factory** too, so a founder born here is handed a fresh controller of its
     // parent's kind instead of resting for ever while paying upkeep.
     //
-    // That heuristic is the seeder's floor, not the live run's default: the ambient run
-    // replaces both the factory and the standing bodies' controllers afterwards with the
-    // trained P3-C centre built into the binary (`crates/cubarium/assets/policies`),
-    // unless `--founder-heuristic` asks for this floor as the disclosed control or
-    // `--founder-policy` names another centre. A caller that seeds a habitat without
-    // going through `cubarium voxel` gets the heuristics and nothing else.
+    // These heuristics also drive the ambient run by default. An explicit
+    // `--founder-policy` replaces the named lineage's factory and standing bodies.
     install_heuristics(fauna);
 
     // **Founders only where they can live** (decisions §8). Each lineage's walkable

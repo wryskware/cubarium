@@ -43,6 +43,10 @@ Start with [design/README.md](design/README.md) for the current map,
 
 ## Run it
 
+Every lineage runs its heuristic by default. Use `--founder-policy LINEAGE=FILE`
+(or `policy=LINEAGE=FILE` in the census) to supply a trained policy explicitly.
+The legacy `--founder-heuristic` / `heuristic` selections remain accepted as no-ops.
+
 Local GPU window (seeded example habitat by default; `--empty` for the bare
 world):
 

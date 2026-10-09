@@ -12,8 +12,9 @@
 //! (`design/7_Research/organism-systems-audit-2026-09-21.md` §2, §10 order 0).
 //!
 //! This steps the shipped world exactly as the census does — same preset arm, same lake
-//! gate, same seeded habitat, same built-in trained centres — and at `t = 0` and every
-//! thirty simulated minutes prints three CSV blocks measuring the chain:
+//! gate, same seeded habitat, same default heuristics — and at `t = 0` and every
+//! thirty simulated minutes prints three CSV blocks measuring the chain. `heuristic`
+//! is a legacy no-op; `policy=LINEAGE=FILE` explicitly installs a saved policy:
 //!
 //! 1. `stock`, per plant species: stands, foliage organic, and the organic that is
 //!    reachable, visible and route-connected under the **implemented** rules, plus one
@@ -80,8 +81,7 @@ fn main() {
     {
         cubarium_voxel::set_thread_override(n);
     }
-    // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
-    // built-in centre (P5-C).
+    // `policy=<lineage>=<file>` explicitly replaces that lineage's default heuristic.
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse().expect(
@@ -102,7 +102,7 @@ fn main() {
         .iter()
         .find_map(|a| a.strip_prefix("seed=").and_then(|s| s.parse().ok()))
         .unwrap_or(PRESET_SEED_BASE);
-    let heuristic = args.iter().any(|a| a == "heuristic");
+    // `heuristic` remains accepted as a legacy no-op; explicit policies win.
     // The **before** arm, on this build: every plant reduced to the one-disc lollipop
     // the model was before `design/handoffs/voxel-plant-layers-2026-09-22.md`, so a
     // reach or route number can be compared against the layered one on the same
@@ -166,11 +166,7 @@ fn main() {
         seeded.founders,
         seeded.animals()
     );
-    if heuristic {
-        eprintln!("founders: the observation-only heuristic (control)");
-    } else {
-        install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
-    }
+    install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
 
     print_headers();
