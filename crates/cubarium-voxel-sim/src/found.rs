@@ -271,13 +271,21 @@ impl std::fmt::Display for TerrainRejection {
     }
 }
 
+impl TerrainRejection {
+    /// A short lake or missing scenario features make a poor picture, not an impossible
+    /// founding. Only a caller that may redraw refuses the terrain for them; one that keeps
+    /// its terrain (an asked-for seed, a picked candidate) founds it with a warning.
+    pub fn is_soft(&self) -> bool {
+        matches!(self, Self::NoLake { .. } | Self::MissingScenarioFeatures { .. })
+    }
+}
+
 /// Structural checks deliberately assume the opening shower can improve moisture and
 /// that plants can supply later shade. They refuse only missing terrain or food potential.
-fn terrain_refusal(
+fn structural_refusal(
     world: &World,
     layers: &LayerConfig,
     counts: [usize; Founder::COUNT],
-    settled: bool,
 ) -> Option<TerrainRejection> {
     let sites = habitat::support_sites(world);
     if sites.is_empty() || !cubarium_voxel::walk::around_the_ring(world, WALK_STEP_M) {
@@ -289,9 +297,12 @@ fn terrain_refusal(
     ) {
         return Some(TerrainRejection::NoDarkFoodHabitat { plant: Species::Glowcap, lineage: Founder::Capgnawer });
     }
-    if let Some(why) = habitat::terrain_food_refusal(world, layers, counts, &sites) {
-        return Some(why);
-    }
+    habitat::terrain_food_refusal(world, layers, counts, &sites)
+}
+
+/// The recipe's lake bar, read on `world` as it stands when `settled`, else on a settled
+/// probe of it. A soft refusal ([`TerrainRejection::is_soft`]).
+fn water_refusal(world: &World, settled: bool) -> Option<TerrainRejection> {
     let water = world.config().landform.water()?;
     let (want, want_tiers) = (water.min_lake_m2, water.min_tier_pools as usize);
     if want <= 0.0 && want_tiers == 0 { return None; }
@@ -339,8 +350,20 @@ fn founding_loop(
         if !watcher.go_on() { return None; }
         let (mut world, seed, features) = draw();
         terrain_attempts += 1;
-        let early = features.map(|reason| TerrainRejection::MissingScenarioFeatures { reason })
-            .or_else(|| terrain_refusal(&world, layers, counts, false));
+        let soft_redraw = matches!(policy, TerrainPolicy::Redraw)
+            && lake_rejected + 1 < LAKE_SEED_TRIES
+            && terrain_rejected < HABITAT_TRIES;
+        let early = structural_refusal(&world, layers, counts).or_else(|| {
+            let soft = features.map(|reason| TerrainRejection::MissingScenarioFeatures { reason })
+                .or_else(|| water_refusal(&world, false))?;
+            if soft_redraw {
+                return Some(soft);
+            }
+            let warning = format!("cubarium voxel: terrain seed {seed} kept, though short: {soft}");
+            eprintln!("{warning}");
+            warnings.push(warning);
+            None
+        });
         let (batch, accepted, rejection, mid_shower, attempts) = if let Some(why) = early {
             let (flora, fauna) = layers.layers();
             (FoundedTerrain { world, flora, fauna, seeded: habitat::Seeded::default(), seed,
@@ -816,7 +839,7 @@ fn place_settled(
         if k > 0 {
             // Settled water can remove potential habitat. Use an optimistic source
             // bound again, never one unlucky plant layout as proof of impossibility.
-            rejection = terrain_refusal(&settled, layers, counts, true);
+            rejection = structural_refusal(&settled, layers, counts);
             if rejection.is_some() { break; }
             watcher.attempt(k, tries.max(1), placement);
         }
@@ -1272,8 +1295,10 @@ mod tests {
         }
     }
 
+    /// A short lake is a poor picture, not an impossible founding: a picked terrain is
+    /// founded anyway, with a warning. Only a redrawing caller refuses it.
     #[test]
-    fn missing_required_lake_is_a_typed_refusal_before_pre_roll() {
+    fn a_short_lake_keeps_a_picked_terrain() {
         let mut world = flat_terrain(cubarium_voxel::Material::Soil);
         let mut cfg = world.config().clone();
         let required_m2 = cfg.cell_area();
@@ -1288,9 +1313,9 @@ mod tests {
         }
         let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
         let watch = Recorder::default();
-        assert!(matches!(found_terrain(world, 1, &layers, [0; Founder::COUNT], 3, &watch),
-            TerrainFounding::Rejected(TerrainRejection::NoLake { .. })));
-        assert!(watch.phases.borrow().is_empty());
+        assert!(!matches!(found_terrain(world, 1, &layers, [0; Founder::COUNT], 3, &watch),
+            TerrainFounding::Rejected(_)));
+        assert!(!watch.phases.borrow().is_empty(), "the pre-roll ran");
     }
 
     #[test]
