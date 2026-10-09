@@ -412,7 +412,7 @@ fn cap_config(near_m: f64, light_m: f64) -> FaunaConfig {
     c.light.mark_s = 6.0;
     let s = &mut c.founders[CAP.index()].senses;
     s.live = true;
-    s.uv = false;
+    s.nir = false;
     s.light_m = light_m;
     s.light_min = 0.00001;
     c

@@ -5921,9 +5921,10 @@ pub struct SenseTable {
     pub light_m: f64,
     /// The faintest beacon level it reads ([`crate::LightConfig`]'s contrast × falloff).
     pub light_min: f64,
-    /// It sees the flowers' UV (the bellwing), not only the cyan of glowcaps and lures (a
+    /// It sees the flowers' near-IR (the bellwing), not only the cyan of glowcaps and lures (a
     /// switch, no registry row).
-    pub uv: bool,
+    #[serde(alias = "uv")]
+    pub nir: bool,
     /// **Looming**: a moving body (any but its own lineage) within this, metres (3D), is a
     /// shadow falling on it; 0 reads none.
     pub loom_m: f64,
@@ -5952,7 +5953,7 @@ impl Default for SenseTable {
             scent: None,
             light_m: 0.0,
             light_min: 0.0,
-            uv: false,
+            nir: false,
             loom_m: 0.0,
             feeding_sight_fraction: 1.0,
             kin_tracks: 1,
@@ -6061,7 +6062,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             scent: Some(Grazer),
             ..t
         },
-        // D3: no form vision. S3: live; one photoreceptor (UV and blue) reads the brightest still
+        // D3: no form vision. S3: live; one photoreceptor (near-IR and cyan) reads the brightest still
         // beacon to 4 m (Astra: flowers ~4 m by day, a lure 2–3 m against the dark) and a
         // looming shadow within 1 m; floral smell on the nectar channel to ~6 m (Astra 4–6);
         // perch vibration over ~0.5 m.
@@ -6073,7 +6074,7 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             scent: Some(SmallPrey),
             light_m: 4.0,
             light_min: 0.05,
-            uv: true,
+            nir: true,
             loom_m: 1.0,
             ..t
         },

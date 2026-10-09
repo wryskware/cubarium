@@ -10,7 +10,9 @@
 //!   or a species' own default, not a generic one;
 //! - a knob the save has and this build does not know is dropped, and named once on stderr
 //!   ([`note_ignored`]);
-//! - so **adding a knob needs no schema bump**. Changing what a knob *means* still does.
+//! - so **adding a knob needs no schema bump**. Changing what a knob *means* still does;
+//! - **renaming a knob** needs none either: the layer lists the old name beside the new
+//!   ([`from_doc_renamed`]), and a saved value under the old name lands in the new field.
 //!
 //! The overlay walks the two trees together: maps (structs) merge key by key, arrays of the
 //! same length element by element, and anything else (a number, a string, an array of another
@@ -38,10 +40,22 @@ pub fn to_doc<T: Serialize>(cfg: &T) -> Vec<u8> {
 /// A config read from a saved document over `base` (the code defaults), and the paths of the
 /// saved knobs this build does not know (dropped).
 pub fn from_doc<T: Serialize + DeserializeOwned>(doc: &[u8], base: &T) -> Result<(T, Vec<String>)> {
+    from_doc_renamed(doc, base, &[])
+}
+
+/// [`from_doc`] for a layer whose knobs were renamed: `renames` lists `(old, new)` field
+/// names. A saved field under `old` reads as `new` in any struct of the tree that has a `new`
+/// field and was not saved with one too (a save that has both keeps `new`). Keep a rename
+/// listed for as long as saves made before it should load.
+pub fn from_doc_renamed<T: Serialize + DeserializeOwned>(
+    doc: &[u8],
+    base: &T,
+    renames: &[(&str, &str)],
+) -> Result<(T, Vec<String>)> {
     let saved: Value = ciborium::from_reader(doc).context("the saved config is not a CBOR document")?;
     let base = Value::serialized(base).context("serializing the default config")?;
     let mut ignored = Vec::new();
-    let merged = overlay(base, saved, String::new(), &mut ignored);
+    let merged = overlay_in(base, saved, String::new(), &[], renames, &mut ignored);
     let cfg = merged
         .deserialized::<T>()
         .map_err(|e| anyhow::anyhow!("the saved config does not read as this build's: {e}"))?;
@@ -154,15 +168,19 @@ fn key_name(k: &Value) -> String {
     }
 }
 
-fn overlay(base: Value, saved: Value, path: String, ignored: &mut Vec<String>) -> Value {
-    overlay_in(base, saved, path, &[], ignored)
-}
-
-/// [`overlay`], with the elements of the array `base` sits in (`siblings`, empty outside an
-/// array): a field whose base is `None` and whose saved value is a struct takes a sibling's
-/// struct as its base (one lineage's `hunter` over another's), so its missing knobs get a real
-/// default of the same type rather than none.
-fn overlay_in(base: Value, saved: Value, path: String, siblings: &[Value], ignored: &mut Vec<String>) -> Value {
+/// The overlay of `saved` on `base`, with the elements of the array `base` sits in
+/// (`siblings`, empty outside an array): a field whose base is `None` and whose saved value is
+/// a struct takes a sibling's struct as its base (one lineage's `hunter` over another's), so
+/// its missing knobs get a real default of the same type rather than none. `renames` as in
+/// [`from_doc_renamed`].
+fn overlay_in(
+    base: Value,
+    saved: Value,
+    path: String,
+    siblings: &[Value],
+    renames: &[(&str, &str)],
+    ignored: &mut Vec<String>,
+) -> Value {
     match (base, saved) {
         (Value::Map(mut b), Value::Map(s)) => {
             // An externally tagged enum switched to another variant: `{"A": ..}` over
@@ -170,7 +188,20 @@ fn overlay_in(base: Value, saved: Value, path: String, siblings: &[Value], ignor
             if b.len() == 1 && s.len() == 1 && b[0].0 != s[0].0 {
                 return Value::Map(s);
             }
-            for (k, sv) in s {
+            let saved_keys: Vec<Value> = s.iter().map(|(k, _)| k.clone()).collect();
+            for (mut k, sv) in s {
+                // A renamed knob: the old name reads as the new where this struct has it.
+                if let Value::Text(name) = &k {
+                    if let Some((_, new)) = renames.iter().find(|(old, _)| name == old) {
+                        let current = Value::Text((*new).into());
+                        if b.iter().any(|(bk, _)| *bk == current) {
+                            if saved_keys.contains(&current) {
+                                continue;
+                            }
+                            k = current;
+                        }
+                    }
+                }
                 let at = if path.is_empty() {
                     key_name(&k)
                 } else {
@@ -184,7 +215,7 @@ fn overlay_in(base: Value, saved: Value, path: String, siblings: &[Value], ignor
                                 old = borrowed;
                             }
                         }
-                        *bv = overlay_in(old, sv, at, &[], ignored);
+                        *bv = overlay_in(old, sv, at, &[], renames, ignored);
                     }
                     None => ignored.push(at),
                 }
@@ -198,7 +229,7 @@ fn overlay_in(base: Value, saved: Value, path: String, siblings: &[Value], ignor
             Value::Array(
                 s.into_iter()
                     .enumerate()
-                    .map(|(i, sv)| overlay_in(b[i.min(last)].clone(), sv, format!("{path}[{i}]"), &b, ignored))
+                    .map(|(i, sv)| overlay_in(b[i.min(last)].clone(), sv, format!("{path}[{i}]"), &b, renames, ignored))
                     .collect(),
             )
         }

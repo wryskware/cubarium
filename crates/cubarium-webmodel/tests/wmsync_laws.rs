@@ -39,7 +39,7 @@ fn body(p: &FounderPhysiology, condition: f64) -> laws::Body {
 fn flyer() -> FounderPhysiology {
     let mut p = FounderPhysiology::frozen(Founder::Bellwing);
     p.senses.live = true;
-    p.senses.uv = true;
+    p.senses.nir = true;
     p.senses.light_m = 4.0;
     p.senses.light_min = 0.01;
     p
@@ -48,7 +48,7 @@ fn flyer() -> FounderPhysiology {
 fn light() -> LightConfig {
     LightConfig {
         lure_emission: 1.0,
-        lure_uv: 1.0,
+        lure_nir: 1.0,
         lure_scent: 0.0,
         flower_reflectance: 1.0,
         glowcap_emission: 0.5,
@@ -198,7 +198,7 @@ fn lure_visits_need_awake_flyers_a_lit_signal_and_lose_to_competing_beacons() {
     assert!(visits(&cfg, 1.0, 1.0, 100.0, 0.0, 1.0) < day);
     let mut dark = cfg;
     dark.lure_emission = 0.0;
-    dark.lure_uv = 0.0;
+    dark.lure_nir = 0.0;
     dark.lure_scent = 0.0;
     assert_eq!(visits(&dark, 1.0, 1.0, 0.0, 0.0, 0.0), 0.0);
 }

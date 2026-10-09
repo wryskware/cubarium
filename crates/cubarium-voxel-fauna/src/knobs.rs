@@ -989,7 +989,7 @@ impl Default for ScentConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LightConfig {
-    /// A nectar flower's brightness (its UV) per unit of the light falling on it (`sky ×
+    /// A nectar flower's brightness (its near-IR) per unit of the light falling on it (`sky ×
     /// daylight` at its head): a reflector, dark at night. 1.
     pub flower_reflectance: f64,
     /// A glowcap's own light, in the same units (it needs no light to be seen). 0.3.
@@ -997,15 +997,16 @@ pub struct LightConfig {
     /// A fully lit lure's own light (its cyan). 1.
     pub lure_emission: f64,
     /// **The lure mimics a flower** (BELLWING, Wrysk 2026-10-06: "make lure mimic flowers"):
-    /// a fully lit lure also shows UV, this × a flower's reflectance (`flower_reflectance`) —
-    /// what a flower in full light shows. A body with the `uv` channel sees the lure's UV and
-    /// its cyan together and reads it as the **UV class** (a flower): its learned UV
-    /// expectation draws it; a visit that finds no nectar is a failed UV visit. A body
-    /// without UV sees the cyan alone (the cyan class, as before). 0: no UV, the lure is
+    /// a fully lit lure also emits near-IR, this × a flower's reflectance (`flower_reflectance`) —
+    /// what a flower in full light shows. A body with the `nir` channel sees the lure's near-IR and
+    /// its cyan together and reads it as the **near-IR class** (a flower): its learned near-IR
+    /// expectation draws it; a visit that finds no nectar is a failed near-IR visit. A body
+    /// without near-IR sees the cyan alone (the cyan class, as before). 0: no near-IR, the lure is
     /// cyan to every eye. 1: aggressive mimicry matches its model's signal (Photuris
     /// fireflies copy the prey species' flash code, Lloyd 1965; bolas spiders the moth's
     /// sex pheromone, Eberhard 1977; the anglerfish's lure is light alone).
-    pub lure_uv: f64,
+    #[serde(alias = "lure_uv")]
+    pub lure_nir: f64,
     /// **The lure's scent** (BELLWING): a lit lure lays this × a flower's nectar scent
     /// (`fauna.scent.nectar_per_s`) on the face its lanternjaw stands on, × its lit fraction,
     /// so a flyer that smells nectar is led toward it as toward a flower (bolas spiders lure
@@ -1049,15 +1050,16 @@ pub struct LightConfig {
     /// — is below this. 0.05.
     pub glow_scent_gate: f64,
     /// **Which light pays** (S3b, [`crate::light`] "Learning"): a flyer with a light sense
-    /// keeps a reward expectation per beacon class — UV (flowers) and cyan (glowcaps, lures)
+    /// keeps a reward expectation per beacon class — near-IR (flowers) and cyan (glowcaps, lures)
     /// — and is drawn to a still beacon by its level × its class's expectation. Off: by its
     /// level alone (S3). A switch, no registry row. On.
     pub learn: bool,
-    /// The **innate** expectation (a probability of reward, `0..=1`) of a UV reflector: what
+    /// The **innate** expectation (a probability of reward, `0..=1`) of a near-IR reflector: what
     /// a naive body expects, and what a learned one relaxes back to. 0.5: either colour may pay
     /// (pollinators come with a colour bias but are drawn to both; Giurfa et al. 1995).
-    pub uv_innate: f64,
-    /// The innate expectation of a cyan emitter. 0.5, like UV: a naive bellwing is drawn to
+    #[serde(alias = "uv_innate")]
+    pub nir_innate: f64,
+    /// The innate expectation of a cyan emitter. 0.5, like near-IR: a naive bellwing is drawn to
     /// any bright thing, so the still lure works on the young and the inexperienced.
     pub cyan_innate: f64,
     /// Each outcome moves its class's expectation this fraction of the way to it: 1 after a
@@ -1084,7 +1086,7 @@ impl Default for LightConfig {
             flower_reflectance: 1.0,
             glowcap_emission: 0.3,
             lure_emission: 1.0,
-            lure_uv: 1.0,
+            lure_nir: 1.0,
             lure_scent: 1.0,
             background_floor: 0.05,
             half_m: 1.0,
@@ -1099,7 +1101,7 @@ impl Default for LightConfig {
             near_forward: 0.3,
             glow_scent_gate: 0.05,
             learn: true,
-            uv_innate: 0.5,
+            nir_innate: 0.5,
             cyan_innate: 0.5,
             learn_rate: 0.3,
             forget_s: 3600.0,

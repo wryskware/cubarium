@@ -260,7 +260,7 @@ pub struct Percept {
     /// **Its ground response's state** (S2, [`crate::vigil`]): scans, flight, alarm,
     /// orientation, freeze.
     pub vigil: crate::Vigil,
-    /// **Which light pays** (S3b, [`crate::light::expectation`]): per beacon class (UV,
+    /// **Which light pays** (S3b, [`crate::light::expectation`]): per beacon class (near-IR,
     /// cyan) the learned offset from the innate reward expectation as of `expect_tick`; it
     /// relaxes back over `forget_s`. All zero: naive.
     pub expect: [f64; crate::light::CLASSES],

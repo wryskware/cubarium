@@ -145,11 +145,11 @@ fn main() {
                         "-".to_string()
                     };
                     let visit = if p.visit.active { (fauna.view().tick.saturating_sub(p.visit.since)).to_string() } else { "-".to_string() };
-                    // The class expectations (UV, cyan), the nearest lit lure and the nearest
+                    // The class expectations (near-IR, cyan), the nearest lit lure and the nearest
                     // nectar-holding stand (horizontal metres, its site's cell height), for the
                     // light and smell leads.
                     let now = fauna.view().tick;
-                    let (uv, cyan) = (
+                    let (nir, cyan) = (
                         cubarium_voxel_fauna::light::expectation_of(&config.light, p, 0, now),
                         cubarium_voxel_fauna::light::expectation_of(&config.light, p, 1, now),
                     );
@@ -180,7 +180,7 @@ fn main() {
                         .min_by(|p, q| p.0.total_cmp(&q.0))
                         .map_or("-".to_string(), |(d, y, h, n)| format!("{d:.2}/c{y}/head{h}/{n:.4}"));
                     format!(
-                        " amb={:.3} beacon={beacon} visit={visit} marks={} expect={uv:.2}/{cyan:.2} lure={lure} stand={stand}",
+                        " amb={:.3} beacon={beacon} visit={visit} marks={} expect={nir:.2}/{cyan:.2} lure={lure} stand={stand}",
                         l.ambient,
                         p.marks.iter().filter(|m| m.until_tick > now).count()
                     )

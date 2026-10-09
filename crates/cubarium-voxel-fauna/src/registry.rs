@@ -283,7 +283,7 @@ fn founder_rows() -> Vec<Row> {
         r("senses.tremor_m", "m", nonneg, "tremor's range for bodies on the ground (0: none)"),
         r("senses.tremor_min", "organic x m/s / m^2", nonneg, "the faintest footfall felt (mass x speed / d^2, through terrain x occlusion)"),
         r("senses.smell_min", "scent units", nonneg, "the faintest scent level smelled on the scent field (0: no smell)").log(),
-        // `senses.uv` is a switch: no row.
+        // `senses.nir` is a switch: no row.
         r("senses.light_m", "m", nonneg, "the photoreceptor's range for a beacon (3D; 0: no light sense)"),
         r("senses.light_min", "contrast", nonneg, "the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2)").log(),
         r("senses.loom_m", "m", nonneg, "a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none)"),
@@ -679,11 +679,11 @@ fn knob_rows() -> Vec<Row> {
         r(&format!("fauna.light.{path}"), unit, range, what)
     };
     rows.extend([
-        lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (UV) per unit of the light falling on it").search(0.1, 4.0),
+        lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (near-IR) per unit of the light falling on it").search(0.1, 4.0),
         lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
         lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light (cyan)").search(0.0, 4.0),
         lk("lure_scent", "x nectar_per_s", nonneg, "BELLWING: a lit lure gives off this x a flower's nectar scent at its lure point (0: light alone)").search(0.0, 2.0),
-        lk("lure_uv", "x flower_reflectance", nonneg, "BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only").search(0.0, 2.0),
+        lk("lure_nir", "x flower_reflectance", nonneg, "BELLWING: a fully lit lure's near-IR, x a flower's; a near-IR eye reads the lure as a flower (near-IR class), 0: cyan only").search(0.0, 2.0),
         lk("background_floor", "light", pos, "a beacon's contrast is its brightness over the light around it plus this (the darkest background)").search(0.01, 0.5).log(),
         lk("half_m", "m", pos, "a beacon's received level halves at this distance").search(0.25, 4.0),
         lk("lure_height_fraction", "x body height", nonneg, "the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle"),
@@ -697,7 +697,7 @@ fn knob_rows() -> Vec<Row> {
         lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
         lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
         // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
-        lk("uv_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it"),
+        lk("nir_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a near-IR reflector (flowers); learned ones relax back to it"),
         lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
         lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),
         lk("forget_s", "s", pos, "S3b: a learned expectation relaxes back to innate with this time constant").search(300.0, 21600.0).log(),

@@ -1,5 +1,5 @@
 //! **S3b: which light pays** (`light.rs` module note, "Learning"): a bellwing keeps a reward
-//! expectation per beacon class — UV (flowers) and cyan (glowcaps, lures) — that a sip raises,
+//! expectation per beacon class — near-IR (flowers) and cyan (glowcaps, lures) — that a sip raises,
 //! a failed visit lowers and time relaxes back to the innate value; a still beacon draws it by
 //! its level × that expectation. Also S3b's two repairs: a beacon it cannot reach is given up,
 //! and a moving body looms only while it closes in; and the flight ceiling stops at the
@@ -67,7 +67,7 @@ fn beacon(kind: BeaconKind, x: f64, y_m: f64, sky: f64) -> Beacon {
     Beacon { kind, x, z: LANE_Z, y_m, sky, power: 1.0, moving: false, body: 0 }
 }
 
-/// The scene: a UV flower in full light `SIDE_M` to the bellwing's right (+x) and a glowcap
+/// The scene: a near-IR flower in full light `SIDE_M` to the bellwing's right (+x) and a glowcap
 /// in deep shade (sky 0) the same distance to its left, both at its eye.
 fn scene(fauna: &mut Fauna, world: &World, flora: &Flora, bw: u64) -> (Beacon, Beacon) {
     let y = eye_y(fauna, bw);
@@ -122,7 +122,7 @@ fn failures_to_flip(c: &FaunaConfig, flower: &Beacon, glowcap: &Beacon) -> u32 {
     (0..200)
         .find(|&n| {
             let e = cyan_after(c, n);
-            e < c.light.expect_min || e * cg < c.light.uv_innate * cf
+            e < c.light.expect_min || e * cg < c.light.nir_innate * cf
         })
         .expect("the cyan expectation falls toward 0")
 }
@@ -130,9 +130,9 @@ fn failures_to_flip(c: &FaunaConfig, flower: &Beacon, glowcap: &Beacon) -> u32 {
 // ------------------------------------------------------- learning which light pays
 
 /// Naive, the bellwing goes to the brighter glowcap; after the configured number of failed
-/// cyan visits it goes to the UV flower the same distance away instead.
+/// cyan visits it goes to the near-IR flower the same distance away instead.
 #[test]
-fn after_failed_cyan_visits_a_bellwing_chooses_a_uv_flower_over_a_brighter_glowcap() {
+fn after_failed_cyan_visits_a_bellwing_chooses_a_nir_flower_over_a_brighter_glowcap() {
     let world = clock_off(41);
     let flora = Flora::new(FloraConfig::default());
     let c = config(0.3, 1e9);
@@ -140,7 +140,7 @@ fn after_failed_cyan_visits_a_bellwing_chooses_a_uv_flower_over_a_brighter_glowc
     let bw = bellwing(&mut fauna, &world, MID_X, LANE_Z, NORTH);
     let (flower, glowcap) = scene(&mut fauna, &world, &flora, bw);
     assert!(glowcap.contrast(&c.light, 1.0) > flower.contrast(&c.light, 1.0), "fixture: the glowcap is the brighter");
-    assert!(c.light.uv_innate >= c.light.cyan_innate, "fixture: innate values do not already favour cyan");
+    assert!(c.light.nir_innate >= c.light.cyan_innate, "fixture: innate values do not already favour cyan");
     let (act, _) = steer(&mut fauna, &world, &flora, bw, 1.0).expect("a still light draws it");
     let l = reading(&fauna, bw);
     assert_eq!(l.beacon_kind, BeaconKind::Glowcap.index() as u8, "naive: the brighter glowcap: {l:?}");
@@ -163,7 +163,7 @@ fn after_failed_cyan_visits_a_bellwing_chooses_a_uv_flower_over_a_brighter_glowc
     assert!(act.turn > 0.0, "to its right: {act:?}");
 }
 
-/// A sip raises the class it came to: the UV expectation after a sip bout is above innate.
+/// A sip raises the class it came to: the near-IR expectation after a sip bout is above innate.
 #[test]
 fn a_sip_raises_the_expectation_of_its_class() {
     let world = clock_off(43);
@@ -177,9 +177,9 @@ fn a_sip_raises_the_expectation_of_its_class() {
     let sip = Actions { forward: 0.0, turn: 0.0, feed: 1.0 };
     assert!(light::steer_flyer(&mut fauna, i, &world.view(), &flora.view(), 1.0, sip, 0.0).is_none(), "a sip stands");
     let p = *fauna.percept(bw).expect("a record");
-    let uv = light::expectation(&c.light, &p, BeaconKind::Flower, fauna.tick);
+    let nir = light::expectation(&c.light, &p, BeaconKind::Flower, fauna.tick);
     let cyan = light::expectation(&c.light, &p, BeaconKind::Glowcap, fauna.tick);
-    assert!(uv > c.light.uv_innate, "the UV expectation rose: {uv}");
+    assert!(nir > c.light.nir_innate, "the near-IR expectation rose: {nir}");
     assert!((cyan - c.light.cyan_innate).abs() < 1e-12, "the cyan one did not move: {cyan}");
 }
 
@@ -220,9 +220,9 @@ fn a_naive_bellwing_approaches_a_still_lit_lure() {
     let world = clock_off(53);
     let flora = Flora::new(FloraConfig::default());
     let mut c = config(0.3, 1e9);
-    // The cyan lure (BELLWING: a lure that mimics a flower is UV to this eye; see
+    // The cyan lure (BELLWING: a lure that mimics a flower is near-IR to this eye; see
     // `bellwing_lure_tests`).
-    c.light.lure_uv = 0.0;
+    c.light.lure_nir = 0.0;
     // The light alone: since NECTAR-SCENT the lit lure's plume is smelled at once.
     c.light.lure_scent = 0.0;
     let lure_scene = |fauna: &mut Fauna| {
