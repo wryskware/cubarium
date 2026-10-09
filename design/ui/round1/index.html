@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cubarium UI directions, round 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;1,400&family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif:ital@0;1&family=Jersey+15&family=Lexend:wght@300;400;500;600&family=Pixelify+Sans:wght@400;500;600;700&family=Saira+Semi+Condensed:wght@500;600&family=Silkscreen&family=Tiny5&family=Unbounded:wght@500;600&family=VT323&display=swap">
+<style>
+/* ---------- page chrome: not part of the proposal ---------- */
+html,body{margin:0;background:#101014;color:#d8d8e0;font:14px/1.4 system-ui,sans-serif}
+.bar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;padding:12px 24px;background:#16161c;border-bottom:1px solid #2a2a34}
+.bar h1{font-size:15px;margin:0 8px 0 0;font-weight:600;color:#fff}
+.seg{display:flex;gap:2px;background:#22222b;border-radius:8px;padding:2px}
+.seg button{all:unset;cursor:pointer;padding:6px 12px;border-radius:6px;color:#b8b8c6}
+.seg button.on{background:#3a3a48;color:#fff}
+.legend{color:#8a8a99;font-size:13px;flex-basis:100%}
+#stage{padding:24px}
+.grid{display:grid;grid-template-columns:110px repeat(3,minmax(0,1fr));gap:14px 18px;align-items:start}
+.colh{font-weight:600;color:#fff}
+.rowh{font-weight:600;color:#fff;padding-top:4px}
+.cell{cursor:pointer}
+.frame{position:relative;overflow:hidden;border-radius:6px;box-shadow:0 0 0 1px #2a2a34;background:#0B0525}
+.frame>.screen{transform-origin:0 0;position:absolute;left:0;top:0}
+.cell:hover .frame{box-shadow:0 0 0 2px #7b7bff}
+.single-cap{margin:0 0 10px;color:#fff;font-weight:600}
+body.shot{background:#000}
+body.shot .bar{display:none}
+body.shot #stage{padding:0}
+
+/* ---------- proposal: shared layout (1920x1080 game screen) ---------- */
+.screen,.screen *{box-sizing:border-box}
+.screen{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0B0525;color:var(--ink);font-family:var(--f-body);-webkit-font-smoothing:antialiased}
+.world{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-rendering:pixelated}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+.top{position:absolute;left:96px;right:96px;top:40px;height:64px;display:flex;align-items:center;justify-content:space-between}
+.tabs{display:flex;align-items:center;height:100%}
+.tab{display:flex;align-items:center;height:100%;color:var(--mute);text-decoration:none;font-family:var(--f-label);font-size:16px;white-space:nowrap}
+.tab .ix{font-family:var(--f-num);font-size:12px;margin-right:10px;color:var(--faint);letter-spacing:0}
+.tab.on{color:var(--ink)}
+.clock{display:flex;align-items:center;gap:14px;font-family:var(--f-num);font-size:16px;color:var(--ink2)}
+.clock .lbl{font-family:var(--f-label);font-size:13px;color:var(--mute)}
+.paused{font-family:var(--f-label);font-size:12px;color:var(--warm);padding:5px 10px;border:1px solid currentColor}
+.body{position:absolute;left:96px;top:128px;width:1728px;height:848px;display:flex}
+.card{position:relative}
+.index{width:400px;flex:none;display:flex;flex-direction:column;padding:28px 0}
+.search{display:flex;align-items:center;gap:12px;margin:0 28px 18px;height:46px;padding:0 14px;border:1px solid var(--line);color:var(--mute)}
+.search input{all:unset;flex:1;font-family:var(--f-body);font-size:16px;color:var(--ink)}
+.search input::placeholder{color:var(--mute);opacity:1}
+.grp{display:flex;align-items:center;justify-content:space-between;padding:16px 28px 10px;font-family:var(--f-label);font-size:13px;color:var(--mute)}
+.grp .g{display:inline-flex;align-items:center;gap:10px}
+.grp .num{font-family:var(--f-num)}
+.grp.closed{margin-top:auto;border-top:1px solid var(--line);padding-top:20px}
+.list{list-style:none;margin:0;padding:0}
+.row{position:relative;display:flex;align-items:center;gap:14px;height:46px;padding:0 28px;font-size:17px;color:var(--ink2)}
+.dot{display:inline-block;width:10px;height:10px;flex:none;background:var(--c)}
+.row .n{margin-left:auto;font-family:var(--f-num);font-size:15px;color:var(--mute)}
+.row.sel{color:var(--ink)}
+.entry{flex:1;display:flex;gap:56px;padding:48px 56px;min-width:0}
+.platecol{width:540px;flex:none;display:flex;flex-direction:column;gap:24px}
+.plate{position:relative;margin:0;height:500px;flex:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.art{position:relative;z-index:2;width:430px;height:auto}
+.platecap{position:absolute;left:18px;top:14px;z-index:3;font-family:var(--f-num);font-size:12px;color:var(--mute)}
+.scalebar{position:absolute;right:20px;bottom:16px;z-index:3;display:flex;flex-direction:column;align-items:flex-end;gap:6px;font-family:var(--f-num);font-size:12px;color:var(--mute)}
+.scalebar .sb{width:84px;height:6px;border:1px solid var(--mute);border-top:none}
+.live{flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:20px 24px}
+.live .lbl{font-family:var(--f-label);font-size:13px;color:var(--mute)}
+.livebody{display:flex;align-items:flex-end;gap:28px}
+.big{font-family:var(--f-num);font-size:52px;line-height:1;color:var(--accent)}
+.stages{margin-top:10px;font-size:15px;color:var(--ink2);white-space:nowrap}
+.chart{flex:1;min-width:0}
+.chart svg.spark{display:block;width:100%;height:64px;overflow:visible}
+.spark .line{fill:none;stroke:var(--accent);stroke-width:1.6;stroke-linejoin:round}
+.spark .area{fill:none}
+.spark .end{fill:var(--accent)}
+.bars{display:flex;align-items:flex-end;justify-content:flex-end;gap:3px;height:64px}
+.bars i{display:block;flex:1 1 0;min-width:3px;max-width:6px;background:var(--bar,var(--accent));opacity:.55}
+.bars i:last-child{opacity:1}
+.axis{display:flex;justify-content:space-between;margin-top:8px;font-family:var(--f-num);font-size:11px;color:var(--mute)}
+.textcol{flex:1;display:flex;flex-direction:column;min-width:0;padding-top:6px}
+.kicker{font-family:var(--f-label);font-size:14px;color:var(--accent)}
+.name{margin:14px 0 6px;font-family:var(--f-head);font-weight:500;font-size:76px;line-height:1;color:var(--ink)}
+.binom{font-style:italic;font-size:18px;color:var(--mute)}
+.rule{height:1px;background:var(--line);margin:28px 0}
+.field{margin:0;font-size:19px;line-height:1.62;color:var(--ink2);max-width:640px}
+.facts{display:grid;grid-template-columns:120px 1fr;margin:28px 0 0}
+.facts dt,.facts dd{margin:0;padding:13px 0;border-top:1px solid var(--line)}
+.facts dt{font-family:var(--f-label);font-size:13px;color:var(--mute);padding-top:16px}
+.facts dd{font-size:17px;color:var(--ink)}
+.facts .num{font-family:var(--f-num)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;font-size:15px;border:1px solid var(--line);color:var(--ink2)}
+.chip .dot{width:8px;height:8px}
+.actions{margin-top:auto;display:flex;gap:16px}
+.btn{display:inline-flex;align-items:center;gap:12px;height:54px;padding:0 26px 0 14px;font-family:var(--f-label);font-size:15px;color:var(--ink2);background:transparent;border:1px solid var(--line);cursor:pointer}
+.key{display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 6px;font-family:var(--f-num);font-size:13px;border:1px solid currentColor;border-radius:14px;letter-spacing:0;text-transform:none}
+.hints{position:absolute;left:96px;right:96px;bottom:34px;display:flex;justify-content:flex-end;gap:36px;font-size:15px;color:var(--ink2)}
+.hints>span{display:inline-flex;align-items:center;gap:10px}
+.tick,.sun,.horizon{display:none}
+
+/* ---------- feel: Observatory instrument ---------- */
+.v-obs{--ink:#EEEAFF;--ink2:#CDC6F0;--mute:#8C85BF;--faint:#5F5993;--accent:#42C5F8;--warm:#FDA243;--line:rgba(156,149,201,.24);--line-acc:rgba(66,197,248,.32);--scrim:rgba(7,4,26,.64);
+  --f-head:'Saira Semi Condensed',sans-serif;--f-body:'IBM Plex Sans',sans-serif;--f-label:'Saira Semi Condensed',sans-serif;--f-num:'IBM Plex Mono',monospace}
+.v-obs :is(.tab,.grp,.live .lbl,.kicker,.facts dt,.btn,.clock .lbl,.paused){text-transform:uppercase;letter-spacing:.16em;font-weight:600}
+.v-obs .tabs{gap:44px}
+.v-obs .tab{border-bottom:2px solid transparent;border-top:2px solid transparent}
+.v-obs .tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.v-obs .body{background:rgba(10,7,36,.90);border:1px solid var(--line-acc)}
+.v-obs .index{border-right:1px solid var(--line)}
+.v-obs .tick{display:block;position:absolute;width:14px;height:14px;border:0 solid var(--accent);z-index:4}
+.v-obs .tick.tl{left:-1px;top:-1px;border-width:2px 0 0 2px}
+.v-obs .tick.tr{right:-1px;top:-1px;border-width:2px 2px 0 0}
+.v-obs .tick.bl{left:-1px;bottom:-1px;border-width:0 0 2px 2px}
+.v-obs .tick.br{right:-1px;bottom:-1px;border-width:0 2px 2px 0}
+.v-obs .row.sel{background:rgba(66,197,248,.10)}
+.v-obs .row.sel .n{color:var(--accent)}
+.v-obs .row.sel::before{content:"";position:absolute;left:12px;top:21px;width:4px;height:4px;background:var(--accent)}
+.v-obs .plate{border:1px solid var(--line);background-color:rgba(24,17,93,.30);
+  background-image:linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent)),linear-gradient(var(--accent),var(--accent));
+  background-size:1px 10px,1px 10px,10px 1px,10px 1px;background-position:50% 0,50% 100%,0 50%,100% 50%;background-repeat:no-repeat}
+.v-obs .live{border:1px solid var(--line)}
+.v-obs .rule{height:7px;background:repeating-linear-gradient(90deg,var(--line-acc) 0 1px,transparent 1px 16px) top/100% 6px no-repeat,linear-gradient(var(--line),var(--line)) bottom/100% 1px no-repeat}
+.v-obs .name{letter-spacing:.01em}
+.v-obs .btn.primary{border-color:var(--accent);color:var(--accent);background:rgba(66,197,248,.10)}
+.v-obs .btn.focus{outline:2px solid var(--accent);outline-offset:5px}
+
+/* ---------- feel: Neon diorama ---------- */
+.v-neon{--ink:#F7F0FF;--ink2:#DCD1F7;--mute:#A595D8;--faint:#7465AA;--accent:#42C5F8;--hot:#F25BDB;--warm:#FDA243;--line:rgba(176,55,196,.32);
+  --scrim:linear-gradient(180deg,rgba(11,5,37,.40),rgba(11,5,37,.78) 55%,rgba(11,5,37,.92));
+  --f-head:'Unbounded',sans-serif;--f-body:'Lexend',sans-serif;--f-label:'Lexend',sans-serif;--f-num:'Lexend',sans-serif}
+.v-neon :is(.clock .lbl,.kicker,.grp,.live .lbl,.facts dt){text-transform:uppercase;letter-spacing:.18em;font-weight:500}
+.v-neon .big{font-family:'Unbounded',sans-serif;font-weight:500;text-shadow:0 0 18px rgba(66,197,248,.6)}
+.v-neon .tabs{gap:6px;padding:6px;height:60px;border-radius:999px;background:rgba(11,5,37,.62);box-shadow:inset 0 0 0 1px var(--line)}
+.v-neon .tab{height:48px;padding:0 22px;border-radius:999px;font-weight:500}
+.v-neon .tab.on{background:linear-gradient(90deg,#B037C4,#5A1D9D);color:#fff;box-shadow:0 0 22px rgba(176,55,196,.55)}
+.v-neon .tab .ix{display:none}
+.v-neon .paused{border-radius:999px;text-transform:uppercase;letter-spacing:.14em}
+.v-neon .body{border-radius:24px;border:1px solid transparent;
+  background:linear-gradient(165deg,rgba(40,20,110,.90),rgba(11,5,37,.95)) padding-box,linear-gradient(120deg,#F25BDB,#5A1D9D 45%,#42C5F8) border-box;
+  box-shadow:0 0 48px rgba(176,55,196,.32),0 0 120px rgba(66,197,248,.10)}
+.v-neon .index{border-right:1px solid var(--line)}
+.v-neon .search{border-radius:999px;background:rgba(11,5,37,.5)}
+.v-neon .row{margin:0 14px;padding:0 16px;border-radius:12px}
+.v-neon .row .dot,.v-neon .chip .dot{border-radius:50%;box-shadow:0 0 10px var(--c)}
+.v-neon .row.sel{background:linear-gradient(90deg,rgba(176,55,196,.45),rgba(90,29,157,.12));color:#fff;box-shadow:inset 0 0 0 1px rgba(242,91,219,.45)}
+.v-neon .row.sel .n{color:#fff}
+.v-neon .grp.closed{border-top-color:var(--line)}
+.v-neon .plate{border-radius:18px;background:linear-gradient(180deg,rgba(24,10,70,0),rgba(11,5,37,.6));box-shadow:inset 0 0 0 1px var(--line)}
+.v-neon .sun{display:block;position:absolute;left:50%;top:70px;width:300px;height:300px;margin-left:-150px;border-radius:50%;
+  background:linear-gradient(180deg,#FDA243 0%,#F25BDB 55%,#5A1D9D 100%);opacity:.55;
+  -webkit-mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%);
+          mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%)}
+.v-neon .horizon{display:block;position:absolute;left:0;right:0;bottom:0;height:130px;
+  background:repeating-linear-gradient(180deg,rgba(242,91,219,.38) 0 1px,transparent 1px 22px);
+  -webkit-mask:linear-gradient(180deg,transparent,#000);mask:linear-gradient(180deg,transparent,#000)}
+.v-neon .scalebar,.v-neon .platecap{color:var(--ink2)}
+.v-neon .live{border-radius:18px;box-shadow:inset 0 0 0 1px var(--line);background:rgba(11,5,37,.35)}
+.v-neon .kicker{color:var(--hot)}
+.v-neon .name{font-weight:600;font-size:64px;letter-spacing:-.01em;text-shadow:0 0 24px rgba(66,197,248,.45)}
+.v-neon .rule{background:linear-gradient(90deg,#F25BDB,rgba(66,197,248,.6),transparent)}
+.v-neon .chip{border-radius:999px;background:rgba(90,29,157,.25);border-color:rgba(242,91,219,.35)}
+.v-neon .btn{border-radius:999px;font-weight:500;border-color:rgba(165,149,216,.45);font-size:16px}
+.v-neon .btn.primary{border-color:transparent;color:#fff;background:linear-gradient(90deg,#C23FD3,#6A23B5);box-shadow:0 0 26px rgba(176,55,196,.6)}
+.v-neon .btn.focus{box-shadow:0 0 0 3px #0B0525,0 0 0 5px var(--accent),0 0 30px rgba(66,197,248,.7)}
+.v-neon .key{border:none;background:rgba(255,255,255,.14)}
+.v-neon .btn.primary .key{background:rgba(255,255,255,.24)}
+.v-neon .hints .key{box-shadow:inset 0 0 0 1px rgba(66,197,248,.55);background:rgba(11,5,37,.5)}
+.v-neon .spark .area{fill:rgba(66,197,248,.14)}
+.v-neon .spark{filter:drop-shadow(0 0 6px rgba(66,197,248,.75))}
+.v-neon .spark .line{stroke-width:2}
+
+/* ---------- feel: Quiet glass ---------- */
+.v-glass{--ink:#FCFAFF;--ink2:#E4DEF8;--mute:#B9B0E2;--faint:#8D84BD;--accent:#8EDCFA;--warm:#FFC07A;--line:rgba(255,255,255,.13);--scrim:rgba(11,5,37,.20);--glass:rgba(22,12,62,.60);
+  --f-head:'Instrument Serif',serif;--f-body:'Instrument Sans',sans-serif;--f-label:'Instrument Sans',sans-serif;--f-num:'Instrument Sans',sans-serif}
+.v-glass .num{font-variant-numeric:tabular-nums}
+.v-glass .body{gap:24px}
+.v-glass :is(.card,.tabs,.clock){background:var(--glass);-webkit-backdrop-filter:blur(30px) saturate(1.35);backdrop-filter:blur(30px) saturate(1.35);box-shadow:inset 0 0 0 1px var(--line),0 24px 70px rgba(5,2,20,.40)}
+.v-glass .card{border-radius:28px}
+.v-glass .tabs{gap:4px;padding:6px;height:58px;border-radius:999px}
+.v-glass .tab{height:46px;padding:0 22px;border-radius:999px;font-weight:500}
+.v-glass .tab.on{background:rgba(255,255,255,.16)}
+.v-glass .tab .ix{display:none}
+.v-glass .clock{height:58px;padding:0 22px;border-radius:999px}
+.v-glass :is(.clock .lbl,.kicker,.grp,.live .lbl,.facts dt){text-transform:uppercase;letter-spacing:.12em;font-weight:600;font-size:12px}
+.v-glass .paused{border:none;background:rgba(255,192,122,.16);border-radius:999px;font-weight:600}
+.v-glass .index{padding-top:24px}
+.v-glass .search{border:none;border-radius:14px;background:rgba(255,255,255,.08)}
+.v-glass .row{margin:0 14px;padding:0 14px;border-radius:14px}
+.v-glass .row .dot,.v-glass .chip .dot{border-radius:50%}
+.v-glass .row.sel{background:rgba(255,255,255,.13)}
+.v-glass .grp.closed{border-top:none}
+.v-glass .plate{border-radius:22px;background:rgba(255,255,255,.05)}
+.v-glass .live{border-radius:22px;background:rgba(255,255,255,.05)}
+.v-glass .kicker{color:var(--mute)}
+.v-glass .name{font-weight:400;font-size:96px;letter-spacing:-.01em;margin-top:6px}
+.v-glass .binom{font-family:'Instrument Serif',serif;font-size:26px}
+.v-glass .big{color:var(--ink);font-weight:500;font-size:56px}
+.v-glass .chip{border:none;background:rgba(255,255,255,.09);border-radius:999px}
+.v-glass .btn{border:none;border-radius:16px;background:rgba(255,255,255,.10);font-weight:500;font-size:16px;color:var(--ink)}
+.v-glass .btn.primary{background:#F2EDFF;color:#1B1044}
+.v-glass .btn.focus{outline:2px solid #fff;outline-offset:4px}
+.v-glass .key{border:none;background:rgba(255,255,255,.16)}
+.v-glass .btn.primary .key{background:rgba(27,16,68,.12)}
+.v-glass .spark .area{fill:rgba(255,255,255,.10)}
+.v-glass .spark .line{stroke:#fff;stroke-width:2}
+.v-glass .spark .end{fill:#fff}
+.v-glass{--bar:#fff}
+
+/* ---------- treatments: shared pixel chrome (hybrid and pixel) ---------- */
+.t-hybrid,.t-pixel{--u:3px}
+.t-hybrid :is(.search,.chip,.btn,.key,.plate,.live,.row.sel,.paused,.tab.on),
+.t-pixel :is(.search,.chip,.btn,.key,.plate,.live,.row.sel,.paused,.tab.on){
+  border:none;border-radius:0;
+  box-shadow:0 calc(-1*var(--u)) 0 0 var(--rc,var(--line)),0 var(--u) 0 0 var(--rc,var(--line)),calc(-1*var(--u)) 0 0 0 var(--rc,var(--line)),var(--u) 0 0 0 var(--rc,var(--line))}
+.t-hybrid .key,.t-pixel .key{--rc:currentColor;background:none}
+.t-hybrid .dot,.t-pixel .dot{border-radius:0!important;box-shadow:none!important}
+.t-hybrid :is(.grp,.live .lbl,.kicker,.facts dt,.clock .lbl,.paused,.tab,.btn,.platecap,.axis,.key,.scalebar),
+.t-pixel :is(.grp,.live .lbl,.kicker,.facts dt,.clock .lbl,.paused,.tab,.btn,.platecap,.axis,.key,.scalebar){font-size:16px;letter-spacing:.06em;font-weight:400}
+.t-hybrid :is(.row .n,.clock .num,.grp .num,.tab .ix),.t-pixel :is(.row .n,.clock .num,.grp .num,.tab .ix){font-size:16px}
+.t-hybrid .big,.t-pixel .big{font-size:48px;text-shadow:none}
+.t-hybrid .rule,.t-pixel .rule{height:3px;background:repeating-linear-gradient(90deg,var(--rule,var(--line)) 0 3px,transparent 3px 6px)}
+.t-hybrid :is(.facts dt,.facts dd),.t-pixel :is(.facts dt,.facts dd){border-top:none;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.t-hybrid .grp.closed,.t-pixel .grp.closed{border-top:none;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.t-hybrid .btn.focus,.t-pixel .btn.focus{outline:3px solid var(--accent);outline-offset:7px}
+.t-hybrid .row,.t-pixel .row{border-radius:0}
+.t-hybrid .tab,.t-pixel .tab{border-radius:0}
+.t-hybrid .tabs,.t-pixel .tabs{border-radius:0}
+
+/* hybrid: smooth reading text, pixel labels, numbers and chrome */
+.v-obs.t-hybrid{--f-label:'Silkscreen',monospace;--f-num:'Silkscreen',monospace}
+.v-neon.t-hybrid{--f-label:'Tiny5',monospace;--f-num:'Tiny5',monospace}
+.v-glass.t-hybrid{--f-label:'Pixelify Sans',sans-serif;--f-num:'Pixelify Sans',sans-serif}
+.v-neon.t-hybrid .big{font-family:var(--f-num)}
+
+/* obs, hybrid + pixel */
+.v-obs:is(.t-hybrid,.t-pixel) .body{border:none;box-shadow:0 -3px 0 0 var(--line-acc),0 3px 0 0 var(--line-acc),-3px 0 0 0 var(--line-acc),3px 0 0 0 var(--line-acc)}
+.v-obs:is(.t-hybrid,.t-pixel) .tick{border-width:0;width:9px;height:9px;background:var(--accent)}
+.v-obs:is(.t-hybrid,.t-pixel) .tick.tl{left:-6px;top:-6px}
+.v-obs:is(.t-hybrid,.t-pixel) .tick.tr{right:-6px;top:-6px}
+.v-obs:is(.t-hybrid,.t-pixel) .tick.bl{left:-6px;bottom:-6px}
+.v-obs:is(.t-hybrid,.t-pixel) .tick.br{right:-6px;bottom:-6px}
+.v-obs:is(.t-hybrid,.t-pixel) .index{border-right:none;background:repeating-linear-gradient(180deg,var(--line) 0 3px,transparent 3px 6px) right/3px 100% no-repeat}
+.v-obs:is(.t-hybrid,.t-pixel) .tab{border:none}
+.v-obs:is(.t-hybrid,.t-pixel) .tab.on{--rc:var(--accent);background:rgba(66,197,248,.12);height:44px;padding:0 14px}
+.v-obs:is(.t-hybrid,.t-pixel) .tabs{gap:30px}
+.v-obs:is(.t-hybrid,.t-pixel) .row.sel{--rc:rgba(66,197,248,.55)}
+.v-obs:is(.t-hybrid,.t-pixel) .row.sel::before{width:6px;height:6px;top:20px;left:10px}
+.v-obs:is(.t-hybrid,.t-pixel) .btn.primary{--rc:var(--accent)}
+.v-obs:is(.t-hybrid,.t-pixel) .rule{--rule:var(--line-acc);height:9px;background:repeating-linear-gradient(90deg,var(--accent) 0 3px,transparent 3px 48px) top/100% 6px no-repeat,repeating-linear-gradient(90deg,var(--line-acc) 0 3px,transparent 3px 6px) bottom/100% 3px no-repeat}
+.v-obs:is(.t-hybrid,.t-pixel) .plate{background-size:3px 12px,3px 12px,12px 3px,12px 3px}
+
+/* neon, hybrid + pixel */
+.v-neon:is(.t-hybrid,.t-pixel) .body{border:none;border-radius:0;background:linear-gradient(165deg,rgba(40,20,110,.90),rgba(11,5,37,.95));
+  box-shadow:0 -3px 0 0 #C23FD3,0 3px 0 0 #C23FD3,-3px 0 0 0 #C23FD3,3px 0 0 0 #C23FD3,
+             0 -6px 0 -3px rgba(66,197,248,.8),0 6px 0 -3px rgba(66,197,248,.8),-6px 0 0 -3px rgba(66,197,248,.8),6px 0 0 -3px rgba(66,197,248,.8),
+             0 0 48px rgba(176,55,196,.30)}
+.v-neon:is(.t-hybrid,.t-pixel) .tabs{background:rgba(11,5,37,.7);box-shadow:0 -3px 0 0 var(--line),0 3px 0 0 var(--line),-3px 0 0 0 var(--line),3px 0 0 0 var(--line)}
+.v-neon:is(.t-hybrid,.t-pixel) .tab.on{--rc:#F25BDB;background:#8A2BA6}
+.v-neon:is(.t-hybrid,.t-pixel) .row.sel{--rc:rgba(242,91,219,.6);background:rgba(176,55,196,.35)}
+.v-neon:is(.t-hybrid,.t-pixel) .search{background:rgba(11,5,37,.5)}
+.v-neon:is(.t-hybrid,.t-pixel) .btn.primary{--rc:#F25BDB;background:#8A2BA6;
+  box-shadow:inset 0 3px 0 0 #C95BE0,inset 0 -3px 0 0 #5A1D9D,0 -3px 0 0 #F25BDB,0 3px 0 0 #F25BDB,-3px 0 0 0 #F25BDB,3px 0 0 0 #F25BDB,0 0 26px rgba(176,55,196,.55)}
+.v-neon:is(.t-hybrid,.t-pixel) .btn.focus{outline-color:var(--accent)}
+.v-neon:is(.t-hybrid,.t-pixel) .rule{--rule:#F25BDB}
+.v-neon:is(.t-hybrid,.t-pixel) .sun{background:linear-gradient(180deg,#FDA243 0 22%,#F98C78 22% 38%,#F25BDB 38% 58%,#B037C4 58% 78%,#5A1D9D 78%)}
+.v-neon:is(.t-hybrid,.t-pixel) .horizon{background:repeating-linear-gradient(180deg,rgba(242,91,219,.45) 0 3px,transparent 3px 24px)}
+.v-neon:is(.t-hybrid,.t-pixel) .plate{--rc:var(--line);background:none}
+.v-neon:is(.t-hybrid,.t-pixel) .live{--rc:var(--line)}
+.v-neon:is(.t-hybrid,.t-pixel) .chip{background:rgba(90,29,157,.25);--rc:rgba(242,91,219,.4)}
+
+/* glass, hybrid + pixel */
+.v-glass:is(.t-hybrid,.t-pixel) :is(.card,.tabs,.clock){border-radius:0;
+  box-shadow:0 -3px 0 0 rgba(255,255,255,.22),0 3px 0 0 rgba(255,255,255,.22),-3px 0 0 0 rgba(255,255,255,.22),3px 0 0 0 rgba(255,255,255,.22),0 24px 70px rgba(5,2,20,.40)}
+.v-glass:is(.t-hybrid,.t-pixel) .search{background:rgba(255,255,255,.08);--rc:transparent}
+.v-glass:is(.t-hybrid,.t-pixel) .row.sel{--rc:rgba(255,255,255,.28);background:rgba(255,255,255,.12)}
+.v-glass:is(.t-hybrid,.t-pixel) .tab.on{--rc:rgba(255,255,255,.3);background:rgba(255,255,255,.14)}
+.v-glass:is(.t-hybrid,.t-pixel) :is(.plate,.live){--rc:transparent}
+.v-glass:is(.t-hybrid,.t-pixel) .btn{--rc:rgba(255,255,255,.18)}
+.v-glass:is(.t-hybrid,.t-pixel) .btn.primary{--rc:#fff}
+.v-glass:is(.t-hybrid,.t-pixel) .btn.focus{outline-color:#fff}
+.v-glass:is(.t-hybrid,.t-pixel) .chip{--rc:transparent}
+.v-glass:is(.t-hybrid,.t-pixel) .paused{--rc:transparent}
+
+/* ---------- treatment: pixel (everything pixel, the art as a sprite) ---------- */
+.t-pixel .art{width:528px;image-rendering:pixelated}
+.t-pixel .scalebar{display:none}
+.t-pixel .platecap{left:12px;top:10px}
+.t-pixel .scrim{background:repeating-conic-gradient(rgba(7,4,26,.88) 0 25%,rgba(7,4,26,.62) 0 50%) 0 0/6px 6px}
+.t-pixel .binom{font-style:normal}
+.t-pixel .tab,.t-pixel .clock .lbl,.t-hybrid .tab{color:var(--ink2)}
+.t-pixel .tab .ix,.t-hybrid .tab .ix{color:var(--mute)}
+.t-pixel .tab.on,.t-hybrid .tab.on{color:var(--ink)}
+.v-obs.t-pixel .tab.on,.v-obs.t-hybrid .tab.on{color:var(--accent)}
+.v-obs.t-pixel{--f-head:'Doto',monospace;--f-body:'VT323',monospace;--f-label:'Silkscreen',monospace;--f-num:'Doto',monospace}
+.v-obs.t-pixel .body{background:rgba(9,6,32,.94)}
+.v-obs.t-pixel .name{font-weight:900;font-size:80px;letter-spacing:.02em}
+.v-obs.t-pixel .big{font-weight:900;font-size:56px}
+.v-obs.t-pixel :is(.row .n,.clock .num,.grp .num,.tab .ix,.axis,.platecap,.key,.facts .num){font-family:'Silkscreen',monospace;font-weight:400}
+.v-obs.t-pixel .field{font-size:24px;line-height:1.2}
+.v-obs.t-pixel :is(.row,.facts dd,.search input,.hints,.binom){font-size:22px}
+.v-obs.t-pixel .stages{font-size:20px}
+.v-obs.t-pixel .chip{font-size:20px;height:30px}
+.v-obs.t-pixel .facts dd{padding:9px 0}
+.v-obs.t-pixel .rule{margin:22px 0}
+.v-neon.t-pixel{--f-head:'Jersey 15',sans-serif;--f-body:'Pixelify Sans',sans-serif;--f-label:'Tiny5',monospace;--f-num:'Jersey 15',sans-serif}
+.v-neon.t-pixel :is(.name,.big){font-family:var(--f-head)}
+.v-neon.t-pixel .name{font-size:90px;font-weight:400;letter-spacing:.01em;text-shadow:3px 3px 0 #5A1D9D}
+.v-neon.t-pixel .big{font-size:60px}
+.v-neon.t-pixel :is(.row .n,.clock .num,.grp .num,.facts .num){font-size:24px}
+.v-neon.t-pixel .body{background:linear-gradient(180deg,#2A1470 0 18%,#24115F 18% 36%,#1D0D50 36% 56%,#160A41 56% 76%,#100632 76%)}
+.v-neon.t-pixel .field{font-size:21px;line-height:1.5}
+.v-neon.t-pixel :is(.row,.facts dd){font-size:19px}
+.v-neon.t-pixel .chip{font-size:16px}
+.v-neon.t-pixel .spark{filter:none}
+.v-glass.t-pixel{--f-head:'Pixelify Sans',sans-serif;--f-body:'Pixelify Sans',sans-serif;--f-label:'Silkscreen',monospace;--f-num:'Pixelify Sans',sans-serif}
+.v-glass.t-pixel .binom{font-family:var(--f-body);font-size:22px}
+.v-glass.t-pixel .name{font-size:80px;font-weight:600}
+.v-glass.t-pixel .field{font-size:21px;line-height:1.5}
+.v-glass.t-pixel :is(.row,.facts dd){font-size:19px}
+.v-glass.t-pixel .chip{font-size:16px}
+.v-glass.t-pixel :is(.card,.tabs,.clock){-webkit-backdrop-filter:none;backdrop-filter:none;
+  background:linear-gradient(rgba(22,12,62,.72),rgba(22,12,62,.72)),url(assets/world-mosaic.png);
+  background-size:auto,1920px 1080px;background-position:0 0,var(--bx,0) var(--by,0)}
+.v-glass.t-pixel .scrim{background:repeating-conic-gradient(rgba(11,5,37,.40) 0 25%,rgba(11,5,37,.12) 0 50%) 0 0/6px 6px}
+</style>
+</head>
+<body>
+<div class="bar">
+  <h1>Cubarium UI directions · round 1</h1>
+  <div class="seg" id="viewSeg"><button data-v="all">All nine</button><button data-v="single">One at full size</button></div>
+  <div class="seg" id="feelSeg"></div>
+  <div class="seg" id="treatSeg"></div>
+  <div class="legend">Same field-guide page in every frame, over a terrarium capture at 1920×1080. <b>Smooth</b>: vector panels and normal fonts. <b>Hybrid</b>: reading text stays smooth; labels, numbers, borders, icons and the chart go pixel. <b>Pixel</b>: everything pixel, the art shown as a sprite. Fonts are one candidate per frame (round 2 is fonts). Numbers are sample data. Click a frame to see it full size.</div>
+</div>
+<div id="stage"></div>
+<script>
+const FEELS=[['obs','Observatory'],['neon','Neon diorama'],['glass','Quiet glass']];
+const TREATS=[['smooth','Smooth'],['hybrid','Hybrid'],['pixel','Pixel']];
+const ANIMALS=[['Frondgrazer','#FB8162',42],['Littershredder','#FED24E',118],['Bellwing','#C19BFC',23],['Lanternjaw','#9168A1',7],['Veilhound','#6C55D5',4],['Loftstrider','#22B4D2',3],['Capgnawer','#A76982',31],['Ripple-snail','#5081F2',56],['Seedporter','#889335',19]];
+const PREY=[['Frondgrazers','#FB8162'],['Littershredders','#FED24E'],['Capgnawers','#A76982'],['Grounded seedporters','#889335'],['Newborn loftstriders','#22B4D2'],['Carrion','#8C85BF']];
+const SERIES=[4,4,5,5,5,6,6,6,5,5,6,7,7,7,8,8,7,7,7,6,6,7,7,8,8,8,7,7,7,7,8,7,7,7,7,7];
+const FONTS={obs:{smooth:'Saira Semi Condensed · IBM Plex Sans · IBM Plex Mono',hybrid:'Saira Semi Condensed · IBM Plex Sans · Silkscreen',pixel:'Doto · VT323 · Silkscreen'},
+  neon:{smooth:'Unbounded · Lexend',hybrid:'Unbounded · Lexend · Tiny5',pixel:'Jersey 15 · Pixelify Sans · Tiny5'},
+  glass:{smooth:'Instrument Serif · Instrument Sans',hybrid:'Instrument Serif · Instrument Sans · Pixelify Sans',pixel:'Pixelify Sans · Silkscreen'}};
+
+function pxIcon(cells,u,w,h){
+  return `<svg width="${w*u}" height="${h*u}" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true">${cells.map(([x,y])=>`<rect x="${x}" y="${y}" width="1" height="1"/>`).join('')}</svg>`;
+}
+const SEARCH_PX=[[2,0],[3,0],[4,0],[1,1],[5,1],[0,2],[6,2],[0,3],[6,3],[0,4],[6,4],[1,5],[5,5],[2,6],[3,6],[4,6],[6,6],[7,7],[8,8]];
+const CHEV_PX=[[0,0],[1,1],[2,2],[1,3],[0,4]];
+const SEARCH_SM='<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7.5" cy="7.5" r="5.5"/><path d="M12 12l4.5 4.5"/></svg>';
+const CHEV_SM='<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 2l5 5-5 5"/></svg>';
+
+function chart(t){
+  if(t!=='smooth'){
+    return `<div class="bars">${SERIES.map(v=>`<i style="height:${(v-2)*8}px"></i>`).join('')}</div>`;
+  }
+  const W=320,n=SERIES.length;
+  const pts=SERIES.map((v,i)=>[+(i*W/(n-1)).toFixed(1),60-(v-3)*9]);
+  const line=pts.map(p=>p.join(',')).join(' ');
+  const last=pts[pts.length-1];
+  return `<svg class="spark" viewBox="0 0 ${W} 64" preserveAspectRatio="none" aria-hidden="true"><polygon class="area" points="0,64 ${line} ${W},64"/><polyline class="line" points="${line}"/><circle class="end" cx="${last[0]}" cy="${last[1]}" r="3.5"/></svg>`;
+}
+
+function screen(f,t){
+  const px=t!=='smooth';
+  const rows=ANIMALS.map(([n,c,k])=>`<li class="row${n==='Lanternjaw'?' sel':''}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n num">${k}</span></li>`).join('');
+  const chips=PREY.map(([n,c])=>`<span class="chip"><span class="dot" style="--c:${c}"></span>${n}</span>`).join('');
+  const art=t==='pixel'?'assets/lanternjaw-px.png':'assets/lanternjaw.webp';
+  return `<div class="screen v-${f} t-${t}">
+  <img class="world" src="assets/world.png" alt="">
+  <div class="scrim"></div>
+  <header class="top">
+    <nav class="tabs" aria-label="Menu">
+      <a class="tab on" href="#" onclick="return false"><span class="ix num">01</span>Field guide</a>
+      <a class="tab" href="#" onclick="return false"><span class="ix num">02</span>Populations</a>
+      <a class="tab" href="#" onclick="return false"><span class="ix num">03</span>World</a>
+      <a class="tab" href="#" onclick="return false"><span class="ix num">04</span>Settings</a>
+    </nav>
+    <div class="clock"><span class="lbl">Day</span><span class="num">3</span><span class="num">14:20</span><span class="paused">Paused</span></div>
+  </header>
+  <main class="body">
+    <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+    <aside class="index card">
+      <label class="search">${px?pxIcon(SEARCH_PX,2,9,9):SEARCH_SM}<input type="text" placeholder="Search species" aria-label="Search species"></label>
+      <div class="grp"><span>Animals</span><span class="num">9</span></div>
+      <ul class="list">${rows}</ul>
+      <div class="grp closed"><span class="g">${px?pxIcon(CHEV_PX,2,3,5):CHEV_SM}Plants</span><span class="num">10</span></div>
+    </aside>
+    <section class="entry card">
+      <div class="platecol">
+        <figure class="plate">
+          <div class="sun"></div><div class="horizon"></div>
+          <img class="art" src="${art}" alt="Lanternjaw">
+          <figcaption class="platecap">Plate 04 · Adult</figcaption>
+          <div class="scalebar"><span class="sb"></span><span>0.25 m</span></div>
+        </figure>
+        <div class="live">
+          <div class="lbl">In this world</div>
+          <div class="livebody">
+            <div><div class="big num">7</div><div class="stages">5 adults · 2 juveniles</div></div>
+            <div class="chart">${chart(t)}<div class="axis num"><span>−6 h</span><span>now</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="textcol">
+        <div class="kicker">Animal · Predator</div>
+        <h1 class="name">Lanternjaw</h1>
+        <div class="binom">[binomial]</div>
+        <div class="rule"></div>
+        <p class="field">A low violet scorpid that hunts by waiting. Its forked tail arches over its back and holds two cyan lures before its face, dead still, until prey comes within reach of its mantis striking arms. Keeping the lures costs it reserve. At the edge of another hunter's kill, it takes what it can.</p>
+        <dl class="facts">
+          <dt>Role</dt><dd>Ambush mesopredator</dd>
+          <dt>Body</dt><dd><span class="num">1.0 m</span> long · <span class="num">0.45 m</span> tall</dd>
+          <dt>Hunts</dt><dd>Long stillness, then a brief strike</dd>
+          <dt>Eats</dt><dd><div class="chips">${chips}</div></dd>
+        </dl>
+        <div class="actions">
+          <button class="btn primary focus" type="button"><span class="key">Y</span>Show in world</button>
+          <button class="btn" type="button"><span class="key">X</span>Populations</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="hints"><span><span class="key">A</span>Select</span><span><span class="key">B</span>Back</span><span><span class="key">LB</span><span class="key">RB</span>Switch tab</span></footer>
+</div>`;
+}
+
+let st={view:'all',feel:'obs',treat:'smooth',shot:false};
+function readHash(){
+  const h=location.hash.slice(1).split('&');
+  st.shot=h.includes('shot');
+  const m=/^(obs|neon|glass)-(smooth|hybrid|pixel)$/.exec(h[0]||'');
+  if(m){st.view='single';st.feel=m[1];st.treat=m[2];}else{st.view='all';}
+}
+function go(){location.hash=st.view==='all'?'all':`${st.feel}-${st.treat}`;}
+function frame(f,t){return `<div class="frame" data-f="${f}" data-t="${t}">${screen(f,t)}</div>`;}
+function render(){
+  document.body.classList.toggle('shot',st.shot);
+  const stage=document.getElementById('stage');
+  if(st.view==='all'){
+    let h='<div class="grid"><div></div>'+TREATS.map(([,n])=>`<div class="colh">${n}</div>`).join('');
+    for(const [f,fn] of FEELS){
+      h+=`<div class="rowh">${fn}</div>`;
+      for(const [t] of TREATS){h+=`<div class="cell" data-f="${f}" data-t="${t}">${frame(f,t)}</div>`;}
+    }
+    stage.innerHTML=h+'</div>';
+    stage.querySelectorAll('.cell').forEach(c=>c.onclick=()=>{st.view='single';st.feel=c.dataset.f;st.treat=c.dataset.t;go();});
+  }else{
+    const fn=FEELS.find(x=>x[0]===st.feel)[1],tn=TREATS.find(x=>x[0]===st.treat)[1];
+    stage.innerHTML=(st.shot?'':`<p class="single-cap">${fn} · ${tn} <span style="color:#8a8a99;font-weight:400">· ${FONTS[st.feel][st.treat]}</span></p>`)+frame(st.feel,st.treat);
+  }
+  document.querySelectorAll('#viewSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===st.view));
+  document.querySelectorAll('#feelSeg button').forEach(b=>b.classList.toggle('on',st.view==='single'&&b.dataset.f===st.feel));
+  document.querySelectorAll('#treatSeg button').forEach(b=>b.classList.toggle('on',st.view==='single'&&b.dataset.t===st.treat));
+  fit();
+  glassOffsets();
+}
+function fit(){
+  document.querySelectorAll('.frame').forEach(fr=>{
+    const w=st.shot?1920:Math.min(1920,fr.parentElement.clientWidth);
+    fr.style.width=w+'px';
+    const s=w/1920;fr.style.height=(1080*s)+'px';
+    fr.firstElementChild.style.transform=`scale(${s})`;
+  });
+}
+function glassOffsets(){
+  document.querySelectorAll('.screen.v-glass.t-pixel').forEach(sc=>{
+    sc.querySelectorAll('.card,.tabs,.clock').forEach(el=>{
+      let x=0,y=0,n=el;
+      while(n&&n!==sc){x+=n.offsetLeft;y+=n.offsetTop;n=n.offsetParent;}
+      el.style.setProperty('--bx',(-x)+'px');el.style.setProperty('--by',(-y)+'px');
+    });
+  });
+}
+document.getElementById('feelSeg').innerHTML=FEELS.map(([f,n])=>`<button data-f="${f}">${n}</button>`).join('');
+document.getElementById('treatSeg').innerHTML=TREATS.map(([t,n])=>`<button data-t="${t}">${n}</button>`).join('');
+document.querySelectorAll('#viewSeg button').forEach(b=>b.onclick=()=>{st.view=b.dataset.v;go();});
+document.querySelectorAll('#feelSeg button').forEach(b=>b.onclick=()=>{st.view='single';st.feel=b.dataset.f;go();});
+document.querySelectorAll('#treatSeg button').forEach(b=>b.onclick=()=>{st.view='single';st.treat=b.dataset.t;go();});
+window.addEventListener('hashchange',()=>{readHash();render();});
+window.addEventListener('resize',fit);
+readHash();render();
+if(document.fonts)document.fonts.ready.then(glassOffsets);
+</script>
+</body>
+</html>

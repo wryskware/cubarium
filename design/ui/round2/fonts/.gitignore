@@ -1,0 +1,3 @@
+# The font files stay out of git (Wrysk 2026-10-09: "dont commit any fonts. theyre not scarce").
+# fonts.json has each one's download_url; unpack into <slug>/ to restore a folder.
+*/

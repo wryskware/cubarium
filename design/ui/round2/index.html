@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cubarium UI round 2: type</title>
+<link rel="stylesheet" href="https://use.typekit.net/ctc3iah.css">
+<script src="fonts/fonts.js"></script>
+<style>
+/* ---------- page chrome: not part of the proposal ---------- */
+html,body{margin:0;background:#101014;color:#d8d8e0;font:14px/1.4 system-ui,sans-serif}
+body{display:flex;align-items:flex-start}
+.bar{position:sticky;top:0;flex:none;width:380px;height:100vh;overflow:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:18px;padding:16px 18px 28px;background:#16161c;border-right:1px solid #2a2a34}
+.bar h1{font-size:15px;margin:0;font-weight:600;color:#fff}
+.ctl{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#8a8a99}
+.seg{display:flex;flex-wrap:wrap;gap:2px;background:#22222b;border-radius:8px;padding:2px}
+.seg button{all:unset;cursor:pointer;padding:5px 10px;border-radius:6px;color:#b8b8c6}
+.seg button.on{background:#3a3a48;color:#fff}
+select{width:100%;background:#22222b;color:#fff;border:1px solid #3a3a48;border-radius:6px;padding:6px 8px;font:inherit}
+.role{display:flex;flex-direction:column;gap:10px;padding-top:14px;border-top:1px solid #2a2a34}
+.role h2{display:flex;justify-content:space-between;align-items:baseline;font-size:14px}
+.role h2 small{font-weight:400;color:#8a8a99;font-size:12px}
+.presets{display:flex;flex-wrap:wrap;gap:4px}
+.presets button{all:unset;cursor:pointer;padding:3px 8px;border-radius:5px;background:#22222b;color:#b8b8c6;font-size:12px}
+.presets button:hover{background:#3a3a48;color:#fff}
+.ax{display:grid;grid-template-columns:86px 1fr 44px;align-items:center;gap:8px;color:#b8b8c6}
+.ax input{width:100%;accent-color:#9a9aff}
+.ax output{color:#fff;text-align:right;font-variant-numeric:tabular-nums}
+.ax .hint{grid-column:2 / 4;margin-top:-6px;color:#6e6e7c;font-size:11px}
+.css{font:11px/1.4 ui-monospace,monospace;color:#9a9aff;word-break:break-word;user-select:all}
+.legend{color:#8a8a99;font-size:12px}
+main.page{flex:1;min-width:0;padding:24px;display:flex;flex-direction:column;gap:28px}
+h2{margin:0;color:#fff;font-size:16px;font-weight:600}
+.sub{color:#8a8a99;margin-top:2px}
+.strips{display:grid;grid-template-columns:repeat(auto-fill,minmax(820px,1fr));gap:18px}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;margin-bottom:8px}
+.meta b{color:#fff;font-size:14px}
+.meta span{color:#8a8a99;font-size:12px}
+.meta .pick{all:unset;cursor:pointer;color:#9a9aff;font-size:12px}
+.frame{position:relative;overflow:hidden;border-radius:6px;box-shadow:0 0 0 1px #2a2a34;background:#0B0525}
+.frame>.screen{transform-origin:0 0;position:absolute;left:0;top:0}
+
+/* ---------- proposal tokens: pixel Neon diorama ---------- */
+.neon{--ink:#F7F0FF;--ink2:#DCD1F7;--accent:#42C5F8;--hot:#F25BDB;--warm:#FDA243;--line:rgba(176,55,196,.32);
+  /* the three type roles are set per font and by the controls */
+  --f-head:'F-jersey-15',sans-serif;--f-body:'F-pixelify-sans',sans-serif;
+  --lf:'F-silkscreen',monospace;--ls:16px;--lu:2px;--ltt:uppercase;--lsp:var(--lu);
+  --lab:#A595D8;--tab:#A595D8;--tab-on:#FFFFFF;--kick:#F25BDB;--tabs-bg:rgba(11,5,37,.70)}
+.neon.bright{--lab:#D9CEF7;--tab:#E6DEFF;--kick:#FF9BEA;--tabs-bg:rgba(11,5,37,.88)}
+.neon.mixed{--ltt:none;--lsp:0px}
+.ring{box-shadow:0 -3px 0 0 var(--rc,var(--line)),0 3px 0 0 var(--rc,var(--line)),-3px 0 0 0 var(--rc,var(--line)),3px 0 0 0 var(--rc,var(--line))}
+.lt{font-family:var(--lf);font-size:var(--ls);letter-spacing:var(--lsp);text-transform:var(--ltt);font-variation-settings:var(--lfv,normal);font-weight:400;font-synthesis:none;line-height:1.15}
+
+/* specimen strip */
+.spec{position:relative;padding:22px 26px;display:flex;flex-direction:column;gap:18px;color:var(--ink);
+  background:linear-gradient(180deg,#2A1470 0 18%,#24115F 18% 36%,#1D0D50 36% 56%,#160A41 56% 76%,#100632 76%);
+  margin:3px;box-shadow:0 -3px 0 0 #C23FD3,0 3px 0 0 #C23FD3,-3px 0 0 0 #C23FD3,3px 0 0 0 #C23FD3}
+.spec .tabsrow{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 20px}
+.tabs{display:flex;align-items:center;gap:6px;padding:6px;background:var(--tabs-bg)}
+.tab{display:flex;align-items:center;padding:0 18px;height:calc(var(--ls) * 1.15 + 22px);color:var(--tab);white-space:nowrap}
+.tab.on{--rc:#F25BDB;background:#8A2BA6;color:var(--tab-on)}
+.clock{display:flex;align-items:center;gap:12px;color:var(--ink2)}
+.clock .l{color:var(--lab)}
+.paused{--rc:transparent;color:var(--warm);padding:6px 10px;background:rgba(253,162,67,.12)}
+.lblrow{display:flex;flex-wrap:wrap;align-items:center;gap:14px 34px}
+.lbl{color:var(--lab)}
+.kick{color:var(--kick)}
+.grp{display:flex;gap:14px;align-items:center}
+.grp .n{color:var(--ink2)}
+.keys{display:flex;align-items:center;gap:12px;color:var(--ink2);margin-left:auto}
+.key{--rc:currentColor;display:inline-flex;align-items:center;justify-content:center;min-width:calc(var(--ls) + 12px);height:calc(var(--ls) + 12px);padding:0 6px;text-transform:none;letter-spacing:0}
+.txt{margin:0;font-family:var(--f-body);font-size:var(--t1);font-variation-settings:var(--bfv,normal);font-synthesis:none;line-height:1.5;color:var(--ink2)}
+.txt b{font-weight:inherit;color:var(--ink)}
+
+/* ---------- full screen preview (round 1's pixel neon, fonts swapped) ---------- */
+.screen,.screen *{box-sizing:border-box}
+.screen{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0B0525;color:var(--ink);font-family:var(--f-body);font-variation-settings:var(--bfv,normal);font-synthesis:none}
+.world{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-rendering:pixelated}
+.scrim{position:absolute;inset:0;background:repeating-conic-gradient(rgba(7,4,26,.88) 0 25%,rgba(7,4,26,.62) 0 50%) 0 0/6px 6px}
+.top{position:absolute;left:96px;right:96px;top:40px;height:64px;display:flex;align-items:center;justify-content:space-between}
+.screen .tabs{box-shadow:0 -3px 0 0 var(--line),0 3px 0 0 var(--line),-3px 0 0 0 var(--line),3px 0 0 0 var(--line)}
+.body{position:absolute;left:96px;top:128px;width:1728px;height:848px;display:flex;overflow:hidden;
+  background:linear-gradient(180deg,#2A1470 0 18%,#24115F 18% 36%,#1D0D50 36% 56%,#160A41 56% 76%,#100632 76%);
+  box-shadow:0 -3px 0 0 #C23FD3,0 3px 0 0 #C23FD3,-3px 0 0 0 #C23FD3,3px 0 0 0 #C23FD3,0 -6px 0 -3px rgba(66,197,248,.8),0 6px 0 -3px rgba(66,197,248,.8),-6px 0 0 -3px rgba(66,197,248,.8),6px 0 0 -3px rgba(66,197,248,.8),0 0 48px rgba(176,55,196,.30)}
+.index{width:400px;flex:none;display:flex;flex-direction:column;padding:28px 0;border-right:1px solid var(--line)}
+.search{--rc:var(--line);display:flex;align-items:center;gap:12px;margin:0 28px 18px;height:46px;padding:0 14px;background:rgba(11,5,37,.5);color:var(--lab)}
+.search input{all:unset;flex:1;min-width:0;font-family:var(--f-body);font-variation-settings:var(--bfv,normal);font-size:var(--t3);color:var(--ink)}
+.search input::placeholder{color:var(--lab);opacity:1}
+.screen .grp{justify-content:space-between;padding:16px 28px 10px}
+.grp.closed{margin-top:auto;padding-top:20px;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.grp .g{display:inline-flex;align-items:center;gap:10px}
+.list{list-style:none;margin:0;padding:0}
+.row{position:relative;display:flex;align-items:center;gap:14px;height:46px;margin:0 14px;padding:0 16px;font-size:var(--t2);color:var(--ink2);white-space:nowrap}
+.row.sel{--rc:rgba(242,91,219,.6);background:rgba(176,55,196,.35);color:#fff}
+.dot{display:inline-block;width:10px;height:10px;flex:none;background:var(--c)}
+.row .n{margin-left:auto;color:var(--ink2)}
+.entry{flex:1;display:flex;gap:56px;padding:48px 56px;min-width:0}
+.platecol{width:540px;flex:none;display:flex;flex-direction:column;gap:24px}
+.plate{--rc:var(--line);position:relative;margin:0;height:500px;flex:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.sun{position:absolute;left:50%;top:70px;width:300px;height:300px;margin-left:-150px;border-radius:50%;opacity:.55;
+  background:linear-gradient(180deg,#FDA243 0 22%,#F98C78 22% 38%,#F25BDB 38% 58%,#B037C4 58% 78%,#5A1D9D 78%);
+  -webkit-mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%);
+          mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%)}
+.horizon{position:absolute;left:0;right:0;bottom:0;height:130px;background:repeating-linear-gradient(180deg,rgba(242,91,219,.45) 0 3px,transparent 3px 24px);-webkit-mask:linear-gradient(180deg,transparent,#000);mask:linear-gradient(180deg,transparent,#000)}
+.art{position:relative;z-index:2;width:528px;image-rendering:pixelated}
+.platecap{position:absolute;left:12px;top:10px;z-index:3;color:var(--ink2)}
+.live{--rc:var(--line);flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:20px 24px}
+.livebody{display:flex;align-items:flex-end;gap:28px}
+.big{font-family:var(--f-head);font-variation-settings:var(--hfv,normal);font-size:var(--bigs,60px);line-height:1;color:var(--accent)}
+.stages{margin-top:10px;font-size:var(--t3);color:var(--ink2);white-space:nowrap}
+.chart{flex:1;min-width:0}
+.bars{display:flex;align-items:flex-end;justify-content:flex-end;gap:3px;height:64px}
+.bars i{display:block;flex:1 1 0;min-width:3px;max-width:6px;background:var(--accent);opacity:.55}
+.bars i:last-child{opacity:1}
+.axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--lab)}
+.textcol{flex:1;display:flex;flex-direction:column;min-width:0;padding-top:6px}
+.name{margin:14px 0 6px;font-family:var(--f-head);font-variation-settings:var(--hfv,normal);font-weight:400;font-size:var(--hs,90px);line-height:1;letter-spacing:.01em;color:var(--ink);text-shadow:var(--hsh,none);white-space:nowrap}
+.binom{font-size:var(--t3);color:var(--lab)}
+.rule{height:3px;margin:28px 0;background:repeating-linear-gradient(90deg,#F25BDB 0 3px,transparent 3px 6px)}
+.field{margin:0;font-size:var(--t1);line-height:1.5;color:var(--ink2);max-width:640px}
+.facts{display:grid;grid-template-columns:130px 1fr;margin:28px 0 0}
+.facts dt,.facts dd{margin:0;padding:13px 0;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.facts dt{color:var(--lab);padding-top:16px}
+.facts dd{font-size:var(--t2);color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:10px}
+.chip{--rc:rgba(242,91,219,.4);display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:4px 12px;font-size:var(--t3);background:rgba(90,29,157,.25);color:var(--ink2)}
+.chip .dot{width:8px;height:8px}
+.actions{margin-top:auto;display:flex;gap:16px}
+.btn{--rc:rgba(165,149,216,.45);display:inline-flex;align-items:center;gap:12px;height:54px;padding:0 26px 0 14px;background:transparent;border:none;color:var(--ink2);cursor:pointer}
+.btn.primary{background:#8A2BA6;color:#fff;box-shadow:inset 0 3px 0 0 #C95BE0,inset 0 -3px 0 0 #5A1D9D,0 -3px 0 0 #F25BDB,0 3px 0 0 #F25BDB,-3px 0 0 0 #F25BDB,3px 0 0 0 #F25BDB,0 0 26px rgba(176,55,196,.55)}
+.btn.focus{outline:3px solid var(--accent);outline-offset:7px}
+.hints{position:absolute;left:96px;right:96px;bottom:34px;display:flex;justify-content:flex-end;gap:36px;color:var(--ink2)}
+.hints>span{display:inline-flex;align-items:center;gap:10px}
+</style>
+</head>
+<body>
+<aside class="bar">
+  <h1>Cubarium UI · round 2 · type</h1>
+  <div class="ctl">Show <div class="seg" id="viewSeg"><button data-v="strips">Chrome fonts</button><button data-v="screen">Full screen</button></div></div>
+  <div class="ctl">List <div class="seg" id="listSeg"><button data-v="short">Shortlist</button><button data-v="all">All</button></div></div>
+  <div class="ctl">Chrome case <div class="seg" id="caseSeg"><button data-v="upper">UPPER</button><button data-v="mixed">Mixed</button></div></div>
+  <div class="ctl">Chrome colour <div class="seg" id="colSeg"><button data-v="r1">As round 1</button><button data-v="bright">Brighter</button></div></div>
+  <section class="role" id="role-title"></section>
+  <section class="role" id="role-text"></section>
+  <section class="role" id="role-chrome"></section>
+  <div class="legend">Three type roles: <b>Title</b> (species names, the big population number), <b>Text</b> (names in lists, the field note, facts, chips) and <b>Chrome</b> (tabs, labels, the clock, keycaps, axis labels). "Chrome fonts" shows every chrome candidate with your title and text picks; "Full screen" shows all three on the Lanternjaw page. Fonts with a pixel grid are drawn at whole multiples of it, so Size steps one multiple. Variable fonts get a slider per axis; the line under the sliders is the CSS to send back. Numbers are sample data. Settings stay in this browser.</div>
+</aside>
+<main class="page" id="page"></main>
+<script>
+const FONTS=(window.FONTS||[]).slice();
+const ANIMALS=[['Frondgrazer','#FB8162',42],['Littershredder','#FED24E',118],['Bellwing','#C19BFC',23],['Lanternjaw','#9168A1',7],['Veilhound','#6C55D5',4],['Loftstrider','#22B4D2',3],['Capgnawer','#A76982',31],['Ripple-snail','#5081F2',56],['Seedporter','#889335',19]];
+const PREY=[['Littershredders','#FED24E'],['Frondgrazers','#FB8162'],['Capgnawers','#A76982'],['Ripple-snails','#5081F2'],['Resting bellwings','#C19BFC'],['Grounded seedporters','#889335'],['Carrion','#A595D8']];
+const SERIES=[4,4,5,5,5,6,6,6,5,5,6,7,7,7,8,8,7,7,7,6,6,7,7,8,8,8,7,7,7,7,8,7,7,7,7,7];
+// Wrysk's Adobe kit (web use only here; shipping it in the game needs a licence from the foundry).
+// Its grid is read from the kit file: 400-unit dots at 5200 upm, capitals 7 dots, no minus sign.
+FONTS.push({slug:'gridlite',family:'Gridlite PE (Adobe)',css:"'gridlite-pe-variable'",designer:'Adobe Fonts kit',license:'Adobe Fonts: web and desktop; a game needs a separate licence',native_px:13,cap_height_px:7,has_lowercase:true,no_minus:true,notes:'Variable: weight, background, rectangle, shape',short:true});
+// Doto's grid, read from its file: 100-unit dots at 1000 upm, capitals 7 dots
+for(const f of FONTS)if(f.slug==='doto'&&!f.native_px){f.native_px=10;f.cap_height_px=7;}
+// Wrysk's picks first
+const FIRST=['silkscreen','pixelify','gridlite'];
+FONTS.sort((a,b)=>{const ra=FIRST.findIndex(k=>(a.slug+a.family).toLowerCase().includes(k)),rb=FIRST.findIndex(k=>(b.slug+b.family).toLowerCase().includes(k));return (ra<0?99:ra)-(rb<0?99:rb);});
+const LEAN=['jersey-15','doto','gridlite','pixelify-sans'];
+
+// variable axes, read from each font's fvar: [tag, name, min, max, step, hint]
+const AXES={
+  gridlite:[['wght','Weight',1,900,1,'lit dot size'],['BACK','Background',1,900,1,'unlit dots behind each letter'],['RECT','Rectangle',1,900,1,'unlit dots across the whole line'],['ELSH','Shape',1,4,0.05,'1 rows · 2 columns · 3 squares · 4 rounds']],
+  doto:[['wght','Weight',100,900,1,'dot size'],['ROND','Roundness',0,100,1,'square to round dots']],
+  handjet:[['wght','Weight',100,900,1,''],['ELGR','Element grid',1,2,0.05,''],['ELSH','Element shape',0,16,0.1,'']],
+  'pixelify-sans':[['wght','Weight',400,700,1,'']],
+  sixtyfour:[['SCAN','Scanlines',-53,100,1,''],['BLED','Bleed',0,100,1,'']],
+  workbench:[['SCAN','Scanlines',-53,100,1,''],['BLED','Bleed',0,100,1,'']]};
+const AXDEF={gridlite:{wght:700,BACK:1,RECT:153,ELSH:4},doto:{wght:900,ROND:0},handjet:{wght:400,ELGR:1,ELSH:2},'pixelify-sans':{wght:400},sixtyfour:{SCAN:0,BLED:0},workbench:{SCAN:0,BLED:0}};
+// Wrysk's picks, 2026-10-09: Gridlite for title and chrome, Pixelify Sans for text
+const ROLEDEF={title:{'pixelify-sans':{wght:600},gridlite:{wght:700,BACK:90,RECT:120,ELSH:3.5}},chrome:{gridlite:{wght:691,BACK:135,RECT:71,ELSH:2.65}},text:{gridlite:{wght:700,BACK:1,RECT:1,ELSH:3}}};
+// Gridlite's named instances, plus Wrysk's example
+const PRESETS={gridlite:[['Your title',{wght:700,BACK:90,RECT:120,ELSH:3.5}],['Your chrome',{wght:691,BACK:135,RECT:71,ELSH:2.65}],['Plain □ 700',{wght:700,BACK:1,RECT:1,ELSH:3}],['Your first example',{wght:700,BACK:1,RECT:153,ELSH:4}],['Positive ○',{wght:700,BACK:1,RECT:1,ELSH:4}],['Halfway ○',{wght:700,BACK:200,RECT:200,ELSH:4}],['Halfway □',{wght:700,BACK:200,RECT:200,ELSH:3}],['Negative ○',{wght:1,BACK:700,RECT:700,ELSH:4}],['Negative □',{wght:1,BACK:700,RECT:700,ELSH:3}],['Rows',{wght:900,BACK:1,RECT:1,ELSH:1}],['Columns',{wght:900,BACK:1,RECT:1,ELSH:2}]],
+  doto:[['Square',{wght:900,ROND:0}],['Round',{wght:900,ROND:100}],['Fine round',{wght:400,ROND:100}]]};
+
+const ROLES={title:{label:'Title',what:'species name, big number'},text:{label:'Text',what:'lists, field note, facts'},chrome:{label:'Chrome',what:'tabs, labels, keycaps'}};
+let st={view:'strips',list:'short',case:'upper',col:'r1',
+  title:{font:'gridlite',size:0,fx:'offset',ax:{}},
+  text:{font:'pixelify-sans',size:0,px:23,ax:{}},
+  chrome:{font:'gridlite',size:0,ax:{}}};
+const KEY='cub-ui-r2-type';
+function merge(a,b){for(const k in b){if(b[k]&&typeof b[k]==='object'&&!Array.isArray(b[k])&&a[k]&&typeof a[k]==='object')merge(a[k],b[k]);else a[k]=b[k];}return a;}
+try{merge(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
+
+// @font-face per manifest entry
+const css=FONTS.filter(f=>!f.css).map(f=>`@font-face{font-family:"F-${f.slug}";src:url("fonts/${f.file}");font-display:block}`).join('\n');
+const tag=document.createElement('style');tag.textContent=css;document.head.appendChild(tag);
+
+const bySlug=s=>FONTS.find(f=>f.slug===s)||FONTS[0];
+const fam=f=>f.css?f.css:`'F-${f.slug}'`;
+const grid=f=>!!(f.native_px&&f.cap_height_px);
+// whole multiple of the font's grid that puts its capitals nearest `cap` px
+const mult=(f,cap,adj)=>Math.max(1,Math.round(cap/f.cap_height_px)+adj);
+function axOf(role,slug){return Object.assign({},AXDEF[slug],(ROLEDEF[role]||{})[slug],st[role].ax[slug]);}
+function fvs(role,slug){
+  if(!AXES[slug])return 'normal';
+  const a=axOf(role,slug);
+  return AXES[slug].map(([t])=>`'${t}' ${a[t]}`).join(', ');
+}
+function chromePx(f){return grid(f)?f.native_px*mult(f,11,st.chrome.size):18+4*st.chrome.size;}
+function titlePx(f){return grid(f)?f.native_px*mult(f,50,st.title.size):84+12*st.title.size;}
+function textVars(f){
+  if(grid(f)){const p=f.native_px*mult(f,14,st.text.size);return `--t1:${p}px;--t2:${p}px;--t3:${p}px`;}
+  // off-grid text steps by whole pixels: the field note is `px`, lists and chips keep round 1's ratios
+  const p=st.text.px||23;
+  return `--t1:${p}px;--t2:${Math.round(p*19/21)}px;--t3:${Math.round(p*16/21)}px`;
+}
+function styleFor(cs){
+  const c=bySlug(cs),t=bySlug(st.text.font),h=bySlug(st.title.font);
+  const n=grid(c)?mult(c,11,st.chrome.size):1;
+  // the title's offset shadow is one of its own pixels
+  const hn=grid(h)?mult(h,50,st.title.size):3;
+  const sh=st.title.fx==='offset'?`${hn}px ${hn}px 0 #5A1D9D`:st.title.fx==='glow'?`0 0 ${2*hn}px #F25BDB, 0 0 ${6*hn}px rgba(242,91,219,.55)`:'none';
+  const big=grid(h)?h.native_px*mult(h,30,0):60;
+  return `--lf:${fam(c)},monospace;--ls:${chromePx(c)}px;--lu:${n}px;--lfv:${fvs('chrome',c.slug)};`+
+    `--f-body:${fam(t)},sans-serif;--bfv:${fvs('text',t.slug)};${textVars(t)};`+
+    `--f-head:${fam(h)},sans-serif;--hs:${titlePx(h)}px;--hfv:${fvs('title',h.slug)};--hsh:${sh};--bigs:${big}px`;
+}
+function neonClass(){return 'neon'+(st.col==='bright'?' bright':'')+(st.case==='mixed'?' mixed':'');}
+function licence(f){
+  const a=f.attribution_required;
+  const credit=(a===true||(a&&a.required))?' · credit required':'';
+  return `${f.license}${credit}`;
+}
+function sizeNote(f,role){
+  if(!grid(f))return `not on a strict pixel grid, drawn at ${role==='chrome'?chromePx(f):titlePx(f)} px`;
+  const n=role==='chrome'?mult(f,11,st.chrome.size):role==='title'?mult(f,50,st.title.size):mult(f,14,st.text.size);
+  return `${+f.native_px.toFixed(2)} px grid → ${+(f.native_px*n).toFixed(2)} px (×${n}) · capitals ${f.cap_height_px*n} px`;
+}
+function glyphs(){
+  const c=bySlug(st.chrome.font),t=bySlug(st.text.font);
+  return {M:c.no_minus?'-':'−',D:c.no_middot?'/':'·',TD:t.no_middot?'/':'·'};
+}
+
+function strip(f){
+  const M=f.no_minus?'-':'−',D=f.no_middot?'/':'·',TD=glyphs().TD;
+  const lower=f.has_lowercase?'':' · capitals only';
+  return `<section>
+  <div class="meta"><b>${f.family}</b><span>${f.designer||''}</span><span>${licence(f)}</span><span>${sizeNote(f,'chrome')}${lower}</span><span>${f.notes||''}</span><button class="pick" data-slug="${f.slug}">see full screen →</button></div>
+  <div class="${neonClass()}" data-chrome="${f.slug}">
+    <div class="spec">
+      <div class="tabsrow">
+        <nav class="tabs ring"><span class="tab on ring lt">Field guide</span><span class="tab lt">Populations</span><span class="tab lt">World</span><span class="tab lt">Settings</span></nav>
+        <div class="clock lt"><span class="l">Day</span><span>3</span><span>14:20</span><span class="paused ring">Paused</span></div>
+      </div>
+      <div class="lblrow lt">
+        <span class="grp"><span class="lbl">Animals</span><span class="n">9</span></span>
+        <span class="kick">Animal ${D} Predator</span>
+        <span class="lbl">Role</span><span class="lbl">Body</span><span class="lbl">Hunts</span><span class="lbl">Eats</span>
+        <span class="lbl">In this world</span>
+        <span class="lbl">Plate 04 ${D} Adult</span>
+      </div>
+      <p class="txt"><b>Lanternjaw</b> ${TD} 5 adults, 2 juveniles. A low violet scorpid that hunts by waiting, two cyan lures held still before its face.</p>
+      <div class="lblrow lt">
+        <span class="lbl">${M}6 h</span><span class="lbl">now</span><span class="lbl">1.0 m ${D} 0.45 m</span><span class="lbl">0123456789</span>
+        <span class="keys"><span class="key ring">A</span>Select<span class="key ring">B</span>Back<span class="key ring">LB</span><span class="key ring">RB</span>Switch tab</span>
+      </div>
+    </div>
+  </div>
+</section>`;
+}
+function screen(){
+  const {M,D,TD}=glyphs();
+  const rows=ANIMALS.map(([n,c,k])=>`<li class="row${n==='Lanternjaw'?' sel ring':''}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n lt">${k}</span></li>`).join('');
+  const chips=PREY.map(([n,c])=>`<span class="chip ring"><span class="dot" style="--c:${c}"></span>${n}</span>`).join('');
+  const bars=SERIES.map(v=>`<i style="height:${(v-2)*8}px"></i>`).join('');
+  const chev='<svg width="6" height="10" viewBox="0 0 3 5" shape-rendering="crispEdges" fill="currentColor"><rect x="0" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg>';
+  const search='<svg width="18" height="18" viewBox="0 0 9 9" shape-rendering="crispEdges" fill="currentColor">'+[[2,0],[3,0],[4,0],[1,1],[5,1],[0,2],[6,2],[0,3],[6,3],[0,4],[6,4],[1,5],[5,5],[2,6],[3,6],[4,6],[6,6],[7,7],[8,8]].map(([x,y])=>`<rect x="${x}" y="${y}" width="1" height="1"/>`).join('')+'</svg>';
+  return `<div class="screen ${neonClass()}" data-chrome="${st.chrome.font}">
+  <img class="world" src="../round1/assets/world.png" alt="">
+  <div class="scrim"></div>
+  <header class="top">
+    <nav class="tabs"><span class="tab on ring lt">Field guide</span><span class="tab lt">Populations</span><span class="tab lt">World</span><span class="tab lt">Settings</span></nav>
+    <div class="clock lt"><span class="l">Day</span><span>3</span><span>14:20</span><span class="paused ring">Paused</span></div>
+  </header>
+  <main class="body">
+    <aside class="index">
+      <label class="search ring">${search}<input type="text" placeholder="Search species" aria-label="Search species"></label>
+      <div class="grp lt"><span class="lbl">Animals</span><span class="n">9</span></div>
+      <ul class="list">${rows}</ul>
+      <div class="grp closed lt"><span class="g lbl">${chev}Plants</span><span class="n">10</span></div>
+    </aside>
+    <section class="entry">
+      <div class="platecol">
+        <figure class="plate ring"><div class="sun"></div><div class="horizon"></div>
+          <img class="art" src="../round1/assets/lanternjaw-px.png" alt="Lanternjaw">
+          <figcaption class="platecap lt">Plate 04 ${D} Adult</figcaption></figure>
+        <div class="live ring">
+          <div class="lbl lt">In this world</div>
+          <div class="livebody">
+            <div><div class="big">7</div><div class="stages">5 adults ${TD} 2 juveniles</div></div>
+            <div class="chart"><div class="bars">${bars}</div><div class="axis lt"><span>${M}6 h</span><span>now</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="textcol">
+        <div class="kick lt">Animal ${D} Predator</div>
+        <h1 class="name">Lanternjaw</h1>
+        <div class="binom">[binomial]</div>
+        <div class="rule"></div>
+        <p class="field">A low violet scorpid that hunts by waiting. Its forked tail arches over its back and holds two cyan lures before its face, dead still, until prey comes within reach of its mantis striking arms. Keeping the lures costs it reserve. At the edge of another hunter's kill, it takes what it can.</p>
+        <dl class="facts">
+          <dt class="lt">Role</dt><dd>Ambush mesopredator</dd>
+          <dt class="lt">Body</dt><dd>1.0 m long ${TD} 0.45 m tall</dd>
+          <dt class="lt">Hunts</dt><dd>Long stillness, then a brief strike</dd>
+          <dt class="lt">Eats</dt><dd><div class="chips">${chips}</div></dd>
+        </dl>
+        <div class="actions">
+          <button class="btn primary focus lt" type="button"><span class="key ring">Y</span>Show in world</button>
+          <button class="btn ring lt" type="button"><span class="key ring">X</span>Populations</button>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="hints lt"><span><span class="key ring">A</span>Select</span><span><span class="key ring">B</span>Back</span><span><span class="key ring">LB</span><span class="key ring">RB</span>Switch tab</span></footer>
+</div>`;
+}
+function fit(){
+  document.querySelectorAll('.frame').forEach(fr=>{
+    const w=document.body.classList.contains('shot')?1920:Math.min(1920,fr.parentElement.clientWidth);
+    fr.style.width=w+'px';const s=w/1920;fr.style.height=(1080*s)+'px';
+    fr.firstElementChild.style.transform=`scale(${s})`;
+  });
+}
+// slider moves only restyle; font and view changes rebuild the page
+function applyVars(){document.querySelectorAll('[data-chrome]').forEach(el=>el.style.cssText=styleFor(el.dataset.chrome));}
+let queued=false;
+function restyle(){if(queued)return;queued=true;requestAnimationFrame(()=>{queued=false;applyVars();});}
+function render(){
+  save();
+  const page=document.getElementById('page');
+  if(!FONTS.length){page.innerHTML='<p>fonts/fonts.js is missing.</p>';return;}
+  if(st.view==='strips'){
+    const shown=st.list==='all'?FONTS:FONTS.filter(x=>x.short);
+    const t=bySlug(st.text.font),h=bySlug(st.title.font);
+    page.innerHTML=`<div><h2>Chrome, ${shown.length} of ${FONTS.length} fonts</h2><div class="sub">Tabs, labels, the clock, axis labels and keycaps on the neon pixel panel. The line of body copy in each is your text font (${t.family}); your title font is ${h.family}.</div></div><div class="strips">${shown.map(strip).join('')}</div>`;
+    page.querySelectorAll('.pick').forEach(b=>b.onclick=()=>{st.chrome.font=b.dataset.slug;st.view='screen';sync();roleBar('chrome');render();scrollTo(0,0);});
+  }else{
+    const [h,t,c]=[st.title.font,st.text.font,st.chrome.font].map(bySlug);
+    const head=document.body.classList.contains('shot')?'':`<div><h2>Title ${h.family} · Text ${t.family} · Chrome ${c.family}</h2><div class="sub">Title: ${licence(h)}. Text: ${licence(t)}. Chrome: ${licence(c)}.</div></div>`;
+    page.innerHTML=head+`<div><div class="frame">${screen()}</div></div>`;
+  }
+  applyVars();fit();
+}
+
+// sidebar: one panel per role
+function options(role){
+  const opt=f=>`<option value="${f.slug}">${f.family}</option>`;
+  if(role==='title')return `<optgroup label="Leaning">${LEAN.map(bySlug).map(opt).join('')}</optgroup><optgroup label="Every font">${FONTS.map(opt).join('')}</optgroup>`;
+  return `<optgroup label="Shortlist">${FONTS.filter(f=>f.short).map(opt).join('')}</optgroup><optgroup label="The rest">${FONTS.filter(f=>!f.short).map(opt).join('')}</optgroup>`;
+}
+function seg(id,items,v){return `<div class="seg" data-seg="${id}">${items.map(([k,l])=>`<button data-v="${k}" class="${String(k)===String(v)?'on':''}">${l}</button>`).join('')}</div>`;}
+function roleBar(role){
+  const el=document.getElementById('role-'+role),r=st[role],f=bySlug(r.font),a=axOf(role,f.slug);
+  let h=`<h2>${ROLES[role].label} <small>${ROLES[role].what}</small></h2><select>${options(role)}</select>`;
+  if(role==='text'&&!grid(f))h+=`<label class="ax"><span>Size</span><input type="range" min="14" max="32" step="1" value="${r.px||23}" data-px><output>${r.px||23} px</output><span class="hint">field note size; lists and chips scale with it</span></label>`;
+  else h+=`<div class="ctl">Size ${seg('size',[[-1,'Smaller'],[0,'Auto'],[1,'Larger'],[2,'Larger +']],r.size)}</div>`;
+  if(role==='title')h+=`<div class="ctl">Effect ${seg('fx',[['offset','Offset shadow'],['glow','Glow'],['none','None']],r.fx)}</div>`;
+  if(PRESETS[f.slug])h+=`<div class="presets">${PRESETS[f.slug].map(([n],i)=>`<button data-p="${i}">${n}</button>`).join('')}</div>`;
+  for(const [t,name,lo,hi,step,hint] of AXES[f.slug]||[])
+    h+=`<label class="ax"><span>${name}</span><input type="range" min="${lo}" max="${hi}" step="${step}" value="${a[t]}" data-ax="${t}"><output>${a[t]}</output>${hint?`<span class="hint">${hint}</span>`:''}</label>`;
+  if(AXES[f.slug])h+=`<div class="css">font-variation-settings: ${fvs(role,f.slug)};</div>`;
+  el.innerHTML=h;
+  const sel=el.querySelector('select');sel.value=r.font;
+  sel.onchange=()=>{r.font=sel.value;if(role==='chrome'&&st.view==='strips'){st.view='screen';sync();}roleBar(role);render();};
+  const px=el.querySelector('[data-px]');
+  if(px)px.oninput=()=>{r.px=+px.value;px.nextElementSibling.textContent=px.value+' px';save();restyle();};
+  el.querySelectorAll('[data-seg] button').forEach(b=>b.onclick=()=>{const k=b.parentElement.dataset.seg;r[k]=k==='size'?+b.dataset.v:b.dataset.v;roleBar(role);render();});
+  el.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{r.ax[f.slug]=Object.assign({},PRESETS[f.slug][+b.dataset.p][1]);roleBar(role);save();applyVars();});
+  el.querySelectorAll('[data-ax]').forEach(inp=>inp.oninput=()=>{
+    (r.ax[f.slug]=r.ax[f.slug]||{})[inp.dataset.ax]=+inp.value;
+    inp.nextElementSibling.textContent=inp.value;
+    el.querySelector('.css').textContent=`font-variation-settings: ${fvs(role,f.slug)};`;
+    save();restyle();});
+}
+function sync(){
+  const on=(id,v)=>document.querySelectorAll(`#${id} button`).forEach(b=>b.classList.toggle('on',b.dataset.v===String(v)));
+  on('caseSeg',st.case);on('colSeg',st.col);on('viewSeg',st.view);on('listSeg',st.list);
+}
+for(const [id,key] of [['listSeg','list'],['caseSeg','case'],['colSeg','col'],['viewSeg','view']]){
+  document.querySelectorAll(`#${id} button`).forEach(b=>b.onclick=()=>{st[key]=b.dataset.v;sync();render();});
+}
+// #shot&view=screen&state={json} renders the page at 1:1 for checks
+const hp=new URLSearchParams(location.hash.slice(1));
+if(hp.has('shot')){document.body.classList.add('shot');document.querySelector('.bar').style.display='none';document.getElementById('page').style.padding='0';
+  st.view=hp.get('view')||'screen';if(hp.get('state'))merge(st,JSON.parse(hp.get('state')));}
+window.addEventListener('resize',fit);
+sync();for(const r of ['title','text','chrome'])roleBar(r);render();
+</script>
+</body>
+</html>
