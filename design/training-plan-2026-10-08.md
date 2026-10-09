@@ -985,7 +985,14 @@ control and the reward accounting; display targets after seeing results.
        - one `layer()`: body constraints for every body, full reflexes for heuristics;
        - the heuristic world is unchanged (238 rows identical);
        - the combined suites pass.
-     - P6 places (Codex xhigh, brief `briefs/v3-places.md`) is running.
+     - P6 merged 5ea6603c (fauna schema 76):
+       - places come from the reflexes' own queries, within vision or contact;
+       - they refresh at 4 Hz, staggered;
+       - four remembered homes (roost, water, den, nest) fade over
+         `fauna.perception.place_memory_fade_s` (600 s);
+       - the heuristic world is unchanged;
+       - cost with every body encoded: 1.6 → 8.1 ms per tick, so PLACES-SPEED (Codex xhigh)
+         aims for at most +1 ms.
    - P5 (reward) waits on Wrysk's answers. Asked first: count the digestible stomach.
    - P7 (stage runs) needs P5 and P6.
 
