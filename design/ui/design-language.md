@@ -90,6 +90,29 @@ Gridlite's negative setting, `'wght' 1, 'BACK' 700, 'RECT' 700`, lights the dot 
 - **Chips:** a faint dot plate; selected chips get a brighter plate and white text.
 - **Keycaps:** negative labels.
 
+## Settings controls (round 4)
+
+Wrysk's picks, 2026-10-09: "Arrows, Dot Slider, Checkbox", and the dot row for progress ("dot row is honestly cleaner, and it matches the dot slider"). The mockup is `round4/index.html`.
+
+- **Choice from a list: arrows.**
+  - The value sits centred in an inner box (52–60 px tall), with 3×5 pixel chevrons at 4× on each side. They are labels-coloured, or cyan when focused.
+  - Left and right step through the options; a click on an arrow steps too.
+  - Under the value is a row of 6 px pips, one per option, with the current one in hot.
+- **Steps: dot slider.**
+  - A track of 6 px square dots on a 9 px pitch, lit cyan up to the handle and rgba(165,149,216,.25) beyond it.
+  - The handle is a 12 × 36 px plate of #FFD6F6 dots on a 3 px grid, inside a 3 px hot ring.
+  - Stop names sit under the track in chrome; the current one is in ink.
+  - Two-stop choices (Smooth / Stepped) use it too.
+- **On/off: checkbox.**
+  - A 33 px notched box. Off is the line colour, empty.
+  - On is a hot ring filled with the selected-chip dot plate, with a white pixel tick.
+  - Its text sits beside it in body text. Focus glows around the box and the text.
+- **Progress: dot row.**
+  - The same 6 px dots on a 9 px pitch as the slider track: done in cyan, the newest dot white, the rest unlit.
+  - The percentage sits to the right in chrome.
+  - The small version, for terrain cards, uses 3 px dots on a 6 px pitch.
+- **Disabled** is 40 %, as elsewhere.
+
 ## Focus: glow
 
 A 3 px notched cyan line sits 6 px outside the focused thing, with an 18 px cyan glow, rgba(66,197,248,.55).
@@ -118,7 +141,6 @@ These come from `round2/godot/specimen.gd`.
 
 ## Not designed yet
 
-- Settings controls: sliders, toggles, lists of options.
 - The populations / viewer metrics screen.
 - Long field-guide entries.
 - Palette review.
