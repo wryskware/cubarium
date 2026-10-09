@@ -367,7 +367,7 @@ class StudyKitTests(unittest.TestCase):
         path.write_text('[required]\nanimals=["browser"]\nplants=[]\n')
         with self.assertRaises(ValueError):
             read_required(path)
-    def test_loaded_start_manifest_hashes_and_memory_cap(self):
+    def test_loaded_start_manifest_hashes_and_parallel_cap(self):
         source = self.root / 's7'
         fixture(source, seed=7)
         start = source / 'run/ckpt/m000006'
@@ -379,14 +379,14 @@ class StudyKitTests(unittest.TestCase):
         binary.write_bytes(b'fake binary')
         policy.write_bytes(b'fake policy')
         out = self.root / 'batch'
-        with patch.object(batch, 'execute') as execute, patch.object(batch, 'topology', return_value=[list(range(16)), list(range(16, 32))]), patch.object(batch.os, 'sched_getaffinity', return_value=set(range(32))), patch.object(batch, 'mem_available', return_value=10 * 1024**3), redirect_stdout(io.StringIO()) as stream:
+        with patch.object(batch, 'execute') as execute, patch.object(batch, 'topology', return_value=[list(range(16)), list(range(16, 32))]), patch.object(batch.os, 'sched_getaffinity', return_value=set(range(32))), redirect_stdout(io.StringIO()) as stream:
             batch.main([str(out), '--bin', str(binary), '--starts', str(start), '--hours', '0.1',
                         '--arm', 'base=', '--arm', f'trial=policy=frondgrazer={policy}',
-                        '--max-parallel', '12', '--mem-per-run-gb', '3'])
+                        '--max-parallel', '2'])
         manifest = json.loads((out / 'batch.json').read_text())
-        self.assertEqual(manifest['max_parallel'], 2)  # floor(80% of authored 10 GiB / 3 GiB)
+        self.assertEqual(manifest['max_parallel'], 2)
         self.assertEqual(execute.call_args.args[2], 2)
-        self.assertIn('memory cap 2', stream.getvalue())
+        self.assertNotIn('memory', stream.getvalue())
         self.assertEqual(manifest['binary_sha256'], sha256(binary))
         for name in ('world.bin', 'flora.bin', 'fauna.bin'):
             self.assertEqual(manifest['identity']['starts']['7'][name], sha256(start / name))

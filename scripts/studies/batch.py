@@ -19,7 +19,6 @@ import math
 import os
 from pathlib import Path
 import re
-import resource
 import shlex
 import shutil
 import subprocess
@@ -120,15 +119,7 @@ def verify_threads(pid, cpus):
             pass
 
 
-def mem_available():
-    with Path("/proc/meminfo").open() as stream:
-        for line in stream:
-            if line.startswith("MemAvailable:"):
-                return int(line.split()[1]) * 1024
-    raise RuntimeError("cannot determine MemAvailable; refusing an unbounded memory envelope")
-
-
-def execute(out, jobs, parallel, groups, threads, mem_per_run_gb=3):
+def execute(out, jobs, parallel, groups, threads):
     active = {}
     pending = [job for job in jobs if job["state"] == "queued"]
     while active or pending:
@@ -149,11 +140,6 @@ def execute(out, jobs, parallel, groups, threads, mem_per_run_gb=3):
 
             def confine():
                 os.sched_setaffinity(0, cpus)
-                limit = min(64 * 1024**3, int(mem_per_run_gb * 1024**3))
-                old_hard = resource.getrlimit(resource.RLIMIT_AS)[1]
-                if old_hard != resource.RLIM_INFINITY:
-                    limit = min(limit, old_hard)
-                resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
 
             try:
                 with (root / "census.csv").open("w") as stdout, (root / "err.log").open("w") as stderr:
@@ -195,7 +181,7 @@ def detach(out):
     return True
 
 
-def resume(out, binary, wrapper, parallel, groups, threads, mem_per_run_gb):
+def resume(out, binary, wrapper, parallel, groups, threads):
     """Continue incomplete children; completed children and their telemetry stay intact."""
     manifest = json.loads((out / "batch.json").read_text())
     if sha256(binary) != manifest["binary_sha256"]:
@@ -247,7 +233,7 @@ def resume(out, binary, wrapper, parallel, groups, threads, mem_per_run_gb):
     for marker in ("DONE", "PAUSED", "STOP"):
         (out / marker).unlink(missing_ok=True)
     write_state(out, jobs)
-    execute(out, jobs, parallel, groups, threads, mem_per_run_gb)
+    execute(out, jobs, parallel, groups, threads)
 
 
 def main(argv=None):
@@ -267,17 +253,15 @@ def main(argv=None):
     parser.add_argument("--stage", default="check_min=3 segment_min=15 keep=3")
     parser.add_argument("--detach", action="store_true")
     parser.add_argument("--required", type=Path, help="TOML: [required] animals, plants; [required.N_ref] founding bodies + eggs")
-    parser.add_argument("--mem-per-run-gb", type=float, default=3)
 
     args = parser.parse_args(argv)
     try:
         if args.resume:
             if args.arm or args.starts or args.config or args.required or args.hours is not None or args.detach:
-                raise ValueError("resume uses saved inputs; pass only bin, threads, max-parallel and memory options")
+                raise ValueError("resume uses saved inputs; pass only bin, threads and max-parallel")
             manifest = json.loads((args.out / "batch.json").read_text())
             args.hours = manifest["args"]["hours"]
             args.threads = manifest["args"]["threads"]
-            args.mem_per_run_gb = manifest["args"]["mem_per_run_gb"]
         elif not args.arm or not (args.starts or args.config) or args.hours is None:
             raise ValueError("new batches need --arm, --hours and --config or --starts")
         if args.threads < 1 or args.slot_base < 0 or not math.isfinite(args.hours) or args.hours <= 0:
@@ -296,17 +280,9 @@ def main(argv=None):
         parallel = args.max_parallel if args.max_parallel is not None else max(1, min(ceiling, physical))
         if not 1 <= parallel <= ceiling:
             raise ValueError(f"--max-parallel must be between 1 and {ceiling} (CPU reserve)")
-        if not math.isfinite(args.mem_per_run_gb) or not 0 < args.mem_per_run_gb <= 64:
-            raise ValueError("--mem-per-run-gb must be positive, finite and <= 64")
-        available = mem_available()
-        memory_cap = math.floor(available * 0.8 / (args.mem_per_run_gb * 1024**3))
-        if memory_cap < 1:
-            raise ValueError("insufficient MemAvailable for one run under the 80% memory envelope")
-        parallel = min(parallel, memory_cap)
-        print(f"parallel cap: {parallel} (CPU ceiling {ceiling}, memory cap {memory_cap}; "
-              f"{args.mem_per_run_gb:g} GiB/run, 80% of {available / 1024**3:.2f} GiB MemAvailable)", flush=True)
+        print(f"parallel cap: {parallel} (CPU ceiling {ceiling})", flush=True)
         if args.resume:
-            resume(args.out.resolve(), binary, wrapper, parallel, groups, args.threads, args.mem_per_run_gb)
+            resume(args.out.resolve(), binary, wrapper, parallel, groups, args.threads)
             return
         starts = {}
         load_minutes = {}
@@ -399,13 +375,13 @@ def main(argv=None):
                                            "config": str(args.config.resolve()) if args.config else None,
                                            "required": str(args.required.resolve()) if args.required else None},
                         commit=commit, binary_sha256=sha256(binary), l3_groups=groups,
-                        max_parallel=parallel, memory_available_bytes=available, runs=jobs)
+                        max_parallel=parallel, runs=jobs)
         atomic(out / "batch.json", json.dumps(manifest, indent=2) + "\n")
         write_state(out, jobs)
         if args.detach and not detach(out):
             print(f"detached batch: {out}")
             return
-        execute(out, jobs, parallel, groups, args.threads, args.mem_per_run_gb)
+        execute(out, jobs, parallel, groups, args.threads)
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"batch: {error}\n")
 
