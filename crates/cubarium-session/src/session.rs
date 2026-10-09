@@ -1677,6 +1677,127 @@ mod founding_rejection_tests {
         assert_eq!(session.status().generation, 0);
         assert_eq!(session.workers(), 0);
     }
+
+    /// A flat open soil plane over the whole strip: a closed walking route, no shade.
+    fn open_plane(config: &cubarium_voxel::Config) -> World {
+        let mut world = World::empty(config.clone());
+        for z in 0..config.depth {
+            for x in 0..config.width as i64 {
+                for y in 1..=2 {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x, y, z, material: cubarium_voxel::Material::Soil,
+                    });
+                }
+            }
+        }
+        world
+    }
+
+    /// Promote `world` as the only ready candidate and join its founding: the founding's
+    /// status, the install channel, and the session (for its candidates and generation).
+    fn found_one(
+        world: World,
+        params: SimParams,
+        sets: Vec<String>,
+        options: SessionOptions,
+    ) -> (Session, FoundingInfo, mpsc::Receiver<ToSim>) {
+        let resolved = params.resolve_sets(&sets).unwrap();
+        let layers = LayerConfig::new(&resolved, params.world.voxel_m);
+        let (flora, fauna) = layers.layers();
+        let seed = world.config().seed;
+        let terrain = format!("{:016x}", world.terrain_hash());
+        let mut session = Session::new(options);
+        {
+            let mut candidates = session.candidates.lock().unwrap();
+            candidates.spec = Some(WorldSpec { seed: Some(seed), sets, ..Default::default() });
+            candidates.params = Some(params.clone());
+            candidates.list.push(Candidate {
+                slot: Slot::Ready(Arc::new(Prepared {
+                    world, flora, fauna, label: "fixture".into(), exec: params,
+                })),
+                info: CandidateInfo {
+                    index: 0,
+                    state: "ready".into(),
+                    seed: Some(seed),
+                    terrain: Some(terrain),
+                    label: None,
+                    error: None,
+                    summary: None,
+                    populations: None,
+                    feasible: None,
+                    notes: Vec::new(),
+                },
+            });
+        }
+        let (to_sim, installs) = mpsc::channel();
+        session.to_sim = to_sim;
+        session.promote(0).unwrap();
+        let worker = session.threads.workers.lock().unwrap().pop().unwrap();
+        worker.join().unwrap();
+        let info = session.founding();
+        (session, info, installs)
+    }
+
+    fn tiny_world() -> cubarium_voxel::Config {
+        let mut world = cubarium_voxel::Config {
+            width: 16,
+            height: 12,
+            depth: 4,
+            voxel_m: 0.25,
+            landform: cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
+            ..Default::default()
+        };
+        world.climate.opening_min_s = 1.0;
+        world
+    }
+
+    /// Contract 6 (FOUNDING-TESTS, 2026-10-09): a lineage-keyed hard reason (capgnawers
+    /// asked for, no face dark enough for their glowcaps) reaches the app as data — state
+    /// `rejected`, a `terrain_rejection` object with its `check`, plant and lineage —
+    /// before any pre-roll, with nothing installed and the terrain not redrawn.
+    #[test]
+    fn a_dark_habitat_rejection_reaches_the_app_as_keyed_data() {
+        let params = SimParams { world: tiny_world(), ..Default::default() };
+        let world = open_plane(&params.world);
+        let sets = vec![
+            "fauna.founders.capgnawer.founding_count=1".to_string(),
+            // Open sky everywhere: no face is fully dark.
+            "flora.glowcap.sun_shade_max=0".to_string(),
+        ];
+        let options = SessionOptions { placement_tries: 3, ..Default::default() };
+        let (session, info, installs) = found_one(world, params, sets, options);
+        assert_eq!(info.state, "rejected", "{info:?}");
+        assert!(
+            matches!(info.terrain_rejection, Some(TerrainRejection::NoDarkFoodHabitat { .. })),
+            "{info:?}"
+        );
+        assert_eq!((info.attempt, info.phase.as_str()), (0, ""), "no pre-roll or placement");
+        let status = serde_json::to_value(&info).unwrap();
+        let why = &status["terrain_rejection"];
+        assert_eq!(why["check"], "no_dark_food_habitat");
+        assert!(!why["plant"].is_null() && !why["lineage"].is_null(), "{why}");
+        assert!(matches!(installs.try_recv(), Err(mpsc::TryRecvError::Empty)), "nothing installed");
+        assert_eq!(session.candidates().len(), 1, "the picked terrain stays; nothing redrawn");
+        assert_eq!(session.status().generation, 0);
+    }
+
+    /// Contracts 3 and 6: a picked terrain short of its lake is a poor picture, not a
+    /// rejection — the app founds it (`done`, no `terrain_rejection`) and installs it.
+    #[test]
+    fn a_short_lake_never_rejects_a_picked_terrain_in_the_app() {
+        let mut params = SimParams { world: tiny_world(), ..Default::default() };
+        let ring_m2 = f64::from(params.world.width) * f64::from(params.world.depth) * params.world.cell_area();
+        let cubarium_voxel::Landform::Staged(recipe) = &mut params.world.landform else { unreachable!() };
+        recipe.water.min_lake_m2 = 2.0 * ring_m2;
+        let world = open_plane(&params.world);
+        // The verdict is not under test: the lake is.
+        let options = SessionOptions { placement_tries: 1, accept: Some(|_| true), ..Default::default() };
+        let (_session, info, installs) = found_one(world, params, Vec::new(), options);
+        assert_eq!(info.state, "done", "{info:?}");
+        assert_eq!(info.terrain_rejection, None);
+        assert!(info.attempt >= 1, "pre-rolled and placed: {info:?}");
+        assert!(matches!(installs.try_recv(), Ok(ToSim::Install(_))), "the founded world is installed");
+    }
 }
 
 #[cfg(test)]

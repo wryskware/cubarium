@@ -4672,4 +4672,100 @@ mod tests {
         let den = fauna.packs()[0].den;
         assert!(found.contains(&den), "the den {den:?} is off the route graph ({:?})", fauna.packs()[0].den_choice);
     }
+
+    /// Contract 5 (FOUNDING-TESTS, 2026-10-09): **founders stand where their food is
+    /// reachable**, on a world made by the founding loop itself (pre-roll, placement on
+    /// the settled world). Each walking founder stands in a component of the body-clear
+    /// walking graph's labelling ([`judged_route_map`]) whose mouth-reachable food is above
+    /// zero; each flyer perches within its cone range of nectar; each seedporter stands
+    /// within its roost reach of fruit. Ranges are read from the config, never pinned.
+    #[test]
+    fn founders_from_the_founding_loop_stand_where_their_food_is_reachable() {
+        // A short generated ring with a closed walking route, and a one-second shower.
+        let mut recipe = cubarium_voxel::Recipe::DEFAULT;
+        recipe.water.min_lake_m2 = 0.0;
+        recipe.water.min_tier_pools = 0;
+        let seed = 6;
+        let mut cfg = Config {
+            width: 64,
+            height: 24,
+            depth: 6,
+            voxel_m: 0.25,
+            seed,
+            landform: cubarium_voxel::Landform::Staged(recipe),
+            ..Config::default()
+        };
+        cfg.climate.opening_min_s = 1.0;
+        let terrain = World::new(cfg.clone());
+        let mut layers = crate::found::LayerConfig::new(&crate::params::Params::defaults(), cfg.voxel_m);
+        // Counts at full scale on a small ring: the table's counts, not shrunk to zero.
+        layers.fauna.founding.reference_land_m2 = 0.0;
+        let mut counts = [0; Founder::COUNT];
+        for (founder, n) in [
+            (Founder::Blind, 2),
+            (Founder::Browser, 2),
+            (Founder::Bellwing, 2),
+            (Founder::Seedporter, 2),
+        ] {
+            counts[founder.index()] = n;
+        }
+        // The placement rule is under test, not the acceptance bar: take the first try.
+        let crate::found::TerrainFounding::Founded(founded) =
+            crate::found::found_terrain_judged(terrain, seed, &layers, counts, 1, &(), |_| true)
+        else {
+            panic!("the ring is founded");
+        };
+        let (world, flora, fauna) = (&founded.world, &founded.flora, &founded.fauna);
+        let (view, fv) = (world.view(), flora.view());
+        let v = cfg.voxel_m;
+        let ring = f64::from(cfg.width) * v;
+        let within = |site: Site, sources: &[(f64, f64)], reach: f64| {
+            let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+            sources.iter().any(|&(sx, sz)| {
+                let dx = (x - sx).rem_euclid(ring);
+                let dx = dx.min(ring - dx);
+                (dx * dx + (z - sz).powi(2)).sqrt() <= reach + 1e-9
+            })
+        };
+        for founder in Founder::ALL.into_iter().filter(|f| counts[f.index()] > 0) {
+            let phys = *fauna.config().founder(founder);
+            let bodies: Vec<Site> = fauna
+                .view()
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(founder))
+                .map(|a| a.site)
+                .collect();
+            assert!(
+                !bodies.is_empty(),
+                "{founder:?}: placed none, so this proves nothing: {:?}",
+                founded.seeded
+            );
+            if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
+                let reach = founder.manifest().cone_range_m;
+                let nectar = nectar_sources(&view, &fv);
+                for s in &bodies {
+                    assert!(within(*s, &nectar, reach), "{founder:?} at {s:?} perches beyond {reach} m of nectar");
+                }
+            } else if let Some(glider) = phys.glider {
+                let fruit = fruit_sources(&view, &fv);
+                for s in &bodies {
+                    assert!(
+                        within(*s, &fruit, glider.roost_search_m),
+                        "{founder:?} at {s:?} stands beyond {} m of fruit",
+                        glider.roost_search_m
+                    );
+                }
+            } else {
+                let map = judged_route_map(&view, &phys, fauna.config().founding.clearance_margin_m);
+                let food = food_on(&map, &view, &fv, &phys);
+                for s in &bodies {
+                    let c = map.component_of(*s).filter(|&c| c != usize::MAX);
+                    let c = c.unwrap_or_else(|| panic!("{founder:?} at {s:?} is off the walking graph"));
+                    let stock = food.get(&c).map_or(0.0, |f| f.stock);
+                    assert!(stock > 0.0, "{founder:?} at {s:?}: component {c} holds no reachable food");
+                }
+            }
+        }
+    }
 }

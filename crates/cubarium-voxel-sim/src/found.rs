@@ -1387,6 +1387,236 @@ mod tests {
         assert!(matches!(draw_terrain(&cfg, None, 3, next, None, &stop), Err(NoTerrain::Cancelled)));
     }
 
+    // ---- Contract tests (FOUNDING-TESTS, 2026-10-09): written from the founding loop's
+    // contract, not its implementation. Each names the contract point it covers.
+
+    /// Layers in which no plant is founded at all, and a count asking for one browser at
+    /// full scale: no reachable food capacity, a hard terrain refusal on any terrain.
+    fn no_food(cfg: &cubarium_voxel::Config) -> (LayerConfig, [usize; Founder::COUNT]) {
+        let mut layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+        layers.fauna.founding.reference_land_m2 = 0.0;
+        for species in Species::ALL {
+            layers.flora.species_mut(species).founder_cap = 0;
+        }
+        let mut counts = [0; Founder::COUNT];
+        counts[Founder::Browser.index()] = 1;
+        (layers, counts)
+    }
+
+    /// The seeds a founding's warnings say were refused as a habitat, in order.
+    fn refused_seeds(warnings: &[String]) -> Vec<u64> {
+        warnings
+            .iter()
+            .filter_map(|w| {
+                let rest = w.strip_prefix("cubarium voxel: seed ")?;
+                let (seed, tail) = rest.split_once(' ')?;
+                tail.starts_with("refused as a habitat").then(|| seed.parse().ok())?
+            })
+            .collect()
+    }
+
+    /// Contract 2: **a hard rejection stops a kept terrain before any pre-roll** — an
+    /// asked-for seed gets the typed reason, the terrain untouched (no tick stepped) and no
+    /// founders — **and a redrawing caller draws another terrain** (counting and derived
+    /// seeds), never pre-rolling a refused one either.
+    #[test]
+    fn a_hard_rejection_stops_an_asked_seed_and_redraws_for_counting_and_derived_seeds() {
+        let cfg = short_ring();
+        let (layers, counts) = no_food(&cfg);
+        let hungry = TerrainRejection::NoReachableFoodCapacity { lineage: Founder::Browser, available: 0, wanted: 1 };
+
+        let asked = found(&cfg, &layers, counts, Seeds::Asked(6), false);
+        assert_eq!(asked.terrain_rejection, Some(hungry), "{:?}", asked.warnings);
+        assert_eq!(asked.seed, 6, "the asked seed, not another");
+        assert!(!asked.accepted);
+        assert_eq!(asked.world.tick(), 0, "no pre-roll ran on a rejected terrain");
+        assert_eq!(
+            asked.world.terrain_hash(),
+            World::new(cubarium_voxel::Config { seed: 6, ..cfg.clone() }).terrain_hash(),
+            "the terrain is the asked one, as generated"
+        );
+        assert_eq!(asked.fauna.view().animals.len(), 0, "no founders");
+        assert_eq!(asked.flora.view().stands.len(), 0, "nothing planted");
+        assert_eq!(asked.seeded, habitat::Seeded::default(), "nothing seeded");
+        assert_eq!(refused_seeds(&asked.warnings), vec![6], "refused once, never redrawn");
+
+        for (seeds, second) in [
+            (Seeds::Counting { base: 6, stride: 3 }, 9),
+            (Seeds::Derived { base: 6 }, derived_seed(6, 1)),
+        ] {
+            let made = found(&cfg, &layers, counts, seeds, false);
+            let refused = refused_seeds(&made.warnings);
+            assert!(refused.len() > 1, "{seeds:?}: it drew another terrain: {refused:?}");
+            assert_eq!(&refused[..2], &[6, second], "{seeds:?}: the base, then its next draw");
+            assert!(
+                made.terrain_rejection.as_ref().is_some_and(|r| !r.is_soft()),
+                "{seeds:?}: out of draws, the last terrain's hard reason is reported: {:?}",
+                made.terrain_rejection
+            );
+            assert_eq!(made.seed, *refused.last().unwrap(), "{seeds:?}: the last draw is returned");
+            assert_eq!(made.world.tick(), 0, "{seeds:?}: no refused terrain was pre-rolled");
+            assert_eq!(made.fauna.view().animals.len(), 0, "{seeds:?}: no founders");
+            assert_eq!(made.lake_rejected, 0, "{seeds:?}: a hard reason is not a lake refusal");
+        }
+    }
+
+    /// Contract 2, keep-terrain half, for a hard reason found **after** the placement
+    /// retries (no reachable food capacity for one lineage, read on the settled world): an
+    /// asked-for seed gets the typed reason **and no founders**. `found_terrain` returns
+    /// only the reason; `found(Seeds::Asked)` returns the best refused placement's world,
+    /// founders and all, beside the reason. Every caller today stops on
+    /// `terrain_rejection` before using the world, so nothing runs with them.
+    #[test]
+    #[ignore = "BUG: found(Seeds::Asked) returns the refused placement's founders beside a post-placement terrain_rejection (contract: the typed reason and no founders)"]
+    fn a_post_placement_hard_rejection_of_an_asked_seed_returns_no_founders() {
+        let cfg = short_ring();
+        let mut layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+        layers.fauna.founding.reference_land_m2 = 0.0;
+        let mut counts = [0; Founder::COUNT];
+        // Shredders find their litter on seed 6's ring; browsers find no foliage to cover them.
+        counts[Founder::Blind.index()] = 2;
+        counts[Founder::Browser.index()] = 2;
+        let made = found(&cfg, &layers, counts, Seeds::Asked(6), false);
+        let Some(why) = &made.terrain_rejection else {
+            panic!("the fixture needs a post-placement hard rejection: {:?}", made.warnings);
+        };
+        assert!(!why.is_soft(), "{why:?}");
+        assert!(made.world.tick() > 0, "the fixture's rejection came after the pre-roll");
+        assert_eq!(made.fauna.view().animals.len(), 0, "rejected ({why}), yet founders were returned");
+    }
+
+    /// `short_ring` with a soft bar no staged ring can meet: a lake far larger than the
+    /// ring (`lake`), or a hall the staged generator never makes (`halls`).
+    fn short_of(lake: bool, halls: bool) -> cubarium_voxel::Config {
+        let mut cfg = short_ring();
+        let ring_m2 = f64::from(cfg.width) * f64::from(cfg.depth) * cfg.cell_area();
+        let Landform::Staged(recipe) = &mut cfg.landform else { unreachable!() };
+        if lake {
+            recipe.water.min_lake_m2 = 2.0 * ring_m2;
+        }
+        if halls {
+            recipe.water.min_halls = 1;
+        }
+        cfg
+    }
+
+    /// Contract 3: **a soft reason never rejects a kept terrain.** An asked-for seed short
+    /// of its lake, or of the scenario's features, is pre-rolled and founded, with a
+    /// warning saying what it is short of.
+    #[test]
+    fn an_asked_seed_short_of_lake_or_features_is_founded_with_a_warning() {
+        for (lake, halls) in [(true, false), (false, true)] {
+            let cfg = short_of(lake, halls);
+            let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+            let made = found(&cfg, &layers, [0; Founder::COUNT], Seeds::Asked(6), false);
+            let case = if lake { "short lake" } else { "missing halls" };
+            assert_eq!(made.terrain_rejection, None, "{case}: {:?}", made.warnings);
+            assert_eq!(made.seed, 6, "{case}");
+            assert!(made.world.tick() > 0, "{case}: the pre-roll ran");
+            assert!(made.seeded.stands > 0, "{case}: founded: {:?}", made.seeded);
+            assert!(refused_seeds(&made.warnings).is_empty(), "{case}: {:?}", made.warnings);
+            assert!(
+                made.warnings.iter().any(|w| w.contains("seed 6 kept, though short")),
+                "{case}: a warning says so: {:?}",
+                made.warnings
+            );
+        }
+    }
+
+    /// Contract 3: **a redrawing caller redraws for a soft reason, and once out of tries
+    /// keeps the last terrain it drew, with a warning** — founded, not rejected.
+    #[test]
+    fn a_redrawing_founding_redraws_for_a_soft_reason_then_keeps_the_last_terrain() {
+        let cfg = short_of(false, true);
+        let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+        for seeds in [Seeds::Counting { base: 6, stride: 1 }, Seeds::Derived { base: 6 }] {
+            let made = found(&cfg, &layers, [0; Founder::COUNT], seeds, false);
+            let refused = refused_seeds(&made.warnings);
+            assert!(!refused.is_empty(), "{seeds:?}: the short terrain was redrawn");
+            assert_eq!(refused[0], 6, "{seeds:?}");
+            assert_eq!(made.lake_rejected, refused.len(), "{seeds:?}: every refusal was soft");
+            let k = refused.len() as u64;
+            let last = match seeds {
+                Seeds::Counting { base, stride } => base + k * stride,
+                _ => derived_seed(6, k),
+            };
+            assert_eq!(made.seed, last, "{seeds:?}: the next draw after the refusals is kept");
+            assert!(!refused.contains(&made.seed), "{seeds:?}: the kept terrain was not refused");
+            assert_eq!(made.terrain_rejection, None, "{seeds:?}: kept, not rejected");
+            assert!(
+                made.warnings.iter().any(|w| w.contains(&format!("seed {last} kept, though short"))),
+                "{seeds:?}: {:?}",
+                made.warnings
+            );
+            assert!(made.world.tick() > 0, "{seeds:?}: the kept terrain was pre-rolled");
+        }
+    }
+
+    /// Contract 4: **no placement retry rejects for a soft reason.** On a picked terrain
+    /// short of its lake every placement try runs, and the founding ends refused (an
+    /// unlucky placement), never rejected; an asked seed short of both lake and features
+    /// keeps every placement refusal and no terrain rejection.
+    #[test]
+    fn placement_retries_never_reject_for_a_soft_reason() {
+        let cfg = short_of(true, true);
+        let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+        let terrain = World::new(cubarium_voxel::Config { seed: 6, ..cfg.clone() });
+        let tries = 3;
+        let watch = Recorder::default();
+        let made = found_terrain_judged(terrain, 6, &layers, [0; Founder::COUNT], tries, &watch, |_| false);
+        let TerrainFounding::Refused(why) = made else {
+            panic!("a soft reason must not reject a picked terrain");
+        };
+        assert_eq!(why.len(), tries, "every try ran");
+        assert_eq!(watch.attempts.borrow().len(), tries);
+
+        let made = found_judged(&cfg, &layers, [0; Founder::COUNT], Seeds::Asked(6), false, |_| false);
+        assert_eq!(made.terrain_rejection, None, "{:?}", made.warnings);
+        assert_eq!(made.habitat_rejected, PLACEMENT_TRIES, "every placement try ran");
+        assert!(!made.accepted);
+    }
+
+    /// Contract 1: **one pre-roll per terrain** on a redrawing founding too: placement
+    /// retries run on the one settled world — one settling, one shower, one draw — and
+    /// the returned world has the drawn terrain's solid voxels, unchanged.
+    #[test]
+    fn a_redrawing_founding_pre_rolls_once_and_keeps_the_terrain_across_retries() {
+        let cfg = short_ring();
+        let layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
+        let generated = World::new(cubarium_voxel::Config { seed: 6, ..cfg.clone() });
+        let hash = generated.terrain_hash();
+        let draws = std::cell::Cell::new(0);
+        let judged = std::cell::Cell::new(0usize);
+        let third = |_: &habitat::Seeded| {
+            judged.set(judged.get() + 1);
+            judged.get() > 2
+        };
+        let watch = Recorder::default();
+        let made = founding_loop(
+            || {
+                draws.set(draws.get() + 1);
+                (generated.clone(), 6, None)
+            },
+            &layers, [0; Founder::COUNT], 3, &watch, &third, TerrainPolicy::Redraw, false, 1,
+        )
+        .unwrap();
+        assert!(made.accepted && made.rejection.is_none());
+        assert_eq!(draws.get(), 1, "a refused placement draws no terrain");
+        assert_eq!(made.batch.refused.len(), 2);
+        assert_eq!(watch.attempts.borrow().len(), 3, "three placements");
+        let phases = watch.phases.borrow();
+        for once in [habitat::FoundingPhase::Settling, habitat::FoundingPhase::Shower] {
+            assert_eq!(phases.iter().filter(|&&p| p == once).count(), 1, "{once:?} ran once: {phases:?}");
+        }
+        assert!(
+            phases.iter().rposition(|&p| p == habitat::FoundingPhase::Shower)
+                < phases.iter().position(|&p| p == habitat::FoundingPhase::Placing),
+            "every placement after the one pre-roll: {phases:?}"
+        );
+        assert_eq!(made.batch.world.terrain_hash(), hash, "the terrain is unchanged");
+        assert_eq!(made.batch.placement_seed, placement_seed(6, 2));
+    }
+
     /// Walking remains available as a terrain observation, including for landscapes with
     /// deliberately disconnected regions. It is not a seed-acceptance condition.
     #[test]
