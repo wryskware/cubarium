@@ -1648,7 +1648,11 @@ fn print_header() {
     for (_, n) in PATCH_SPECIES {
         header.push_str(&format!(",{n}_patch_max,{n}_patch_share,{n}_patches"));
     }
-    header.push_str(",dry_season,drained_root_water,seed");
+    header.push_str(",dry_season,drained_root_water");
+    // SCORE-V3: configured floor (not dry/support area), projected wooded floor,
+    // second-largest connected vaulttree grove, and direct leaf growth/offtake books.
+    header.push_str(",floor_area_m2,voxel_m,forest_floor_faces,forest_patch_second_max");
+    header.push_str(",glowcap_lit_share,leaf_produced,leaf_eaten,seed");
     println!("{header}");
 }
 
@@ -1909,6 +1913,36 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         // mean root water on the available-water scale.
         row.push(u8::from(sim.world().in_dry_season()).to_string());
         row.push(format!("{drained_water:.4}"));
+    }
+    {
+        use cubarium::voxel::patches;
+        let c = sim.world().config();
+        row.push(format!("{:.6}", f64::from(c.width) * f64::from(c.depth) * c.voxel_m.powi(2)));
+        row.push(c.voxel_m.to_string());
+        let mut held = patches::held_faces(f.stands, Plant::Vaulttree);
+        held.sort_unstable();
+        held.dedup();
+        let floor: std::collections::HashSet<_> = held.iter().map(|s| (s.x, s.z)).collect();
+        row.push(floor.len().to_string());
+        // Reuse the world's wrap-aware connectivity and the census patch stair rule.
+        let faces: Vec<_> = held.iter().map(|s| (s.x, s.y, s.z)).collect();
+        let groups = cubarium_voxel::walk::components(&faces, c.width, patches::STEP_MAX);
+        let mut sizes = vec![0usize; held.len()];
+        for group in groups {
+            sizes[group] += 1;
+        }
+        sizes.sort_unstable_by(|a, b| b.cmp(a));
+        row.push(sizes.get(1).copied().unwrap_or(0).to_string());
+        // Stand.light is canopy/terrain exposure, without the day/night multiplier:
+        // night cannot make an exposed colony qualify as dark habitat.
+        let caps: Vec<_> = f.stands.iter().filter(|s| s.species == Plant::Glowcap).collect();
+        let lit = caps.iter().filter(|s| s.light > f.config.glowcap.sun_shade_max).count();
+        row.push(format!("{:.6}", lit as f64 / caps.len().max(1) as f64));
+        let leaves = |book: &[f64; Plant::COUNT]| Plant::ALL.into_iter()
+            .filter(|&s| f.config.species(s).trophic == cubarium_voxel_flora::Trophic::Photo)
+            .map(|s| book[s.index()]).sum::<f64>();
+        row.push(format!("{:.6}", leaves(&f.ledger.foliage_built)));
+        row.push(format!("{:.6}", leaves(&f.ledger.foliage_taken)));
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());

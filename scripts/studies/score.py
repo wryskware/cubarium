@@ -22,7 +22,22 @@ from study_contract import validate_required
 
 
 COMPONENTS = ("L", "J", "Q", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S")
+V3_COMPONENTS = ("L", "J", "A", "K", "W", "G_v", "M", "G_b", "D", "O", "H", "F", "S")
+V3_LABELS = {'W': 'wooded floor share', 'G_v': 'second-largest vaulttree grove',
+             'M': 'largest meadow floor share', 'G_b': 'lanternberry grove count',
+             'D': 'glowcaps on lit faces', 'O': 'leaf offtake / leaf growth',
+             'F': 'mean lineage h(adult fullness_p10 / target)'}
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config/training/fitness-v2.toml"
+
+
+def component_ids(cfg):
+    return V3_COMPONENTS if cfg['version'] == 3 else COMPONENTS
+
+
+def population_band(name, population, floor_m2):
+    band = population['bands'][name]
+    scale = 1 if band.get('fixed', False) else floor_m2 / population['reference_floor_m2']
+    return band['lo'] * scale, band['hi'] * scale
 
 
 def clip(value):
@@ -73,27 +88,45 @@ def component(raw=None, penalty=None, weight=0.0, **details):
 
 
 def validate_config(cfg):
-    for term in COMPONENTS:
+    for term in component_ids(cfg):
         if cfg["weights"][term] < 0 or not math.isfinite(cfg["weights"][term]):
             raise ValueError(f"invalid weight: {term}")
-    targets = cfg["targets"]
-    for key in ("moving_share", "voxel_m", "meadow_m2", "grove_m2", "vaulttree_recruits", "fullness_p10"):
+    targets, pop = cfg['targets'], cfg['population']
+    if cfg['version'] == 3:
+        positives = ('vaulttree_family_m2', 'lanternberry_groves', 'fullness_p10')
+        bands = (('woods_share_lo', 'woods_share_hi'), ('meadow_share_lo', 'meadow_share_hi'),
+                 ('leaf_offtake_lo', 'leaf_offtake_hi'), ('hunts_per_hour_lo', 'hunts_per_hour_hi'))
+        if not 0 < pop['reference_floor_m2'] or not math.isfinite(pop['reference_floor_m2']):
+            raise ValueError('invalid reference floor area')
+        if not 1 <= pop['peak_ratio'] or not math.isfinite(pop['peak_ratio']):
+            raise ValueError('invalid population peak ratio')
+        for name, band in pop['bands'].items():
+            if not 0 <= band['lo'] <= band['hi'] or not math.isfinite(band['hi']) or band['hi'] <= 0:
+                raise ValueError(f'invalid population band: {name}')
+            if band.get('peak') is False and not str(band.get('peak_disabled_reason', '')).strip():
+                raise ValueError(f'population peak disabled without reason: {name}')
+        for key in ('woods_share_hi', 'meadow_share_hi', 'leaf_offtake_hi', 'glowcap_lit_share_hi'):
+            if not 0 <= targets[key] <= 1:
+                raise ValueError(f'invalid share target: {key}')
+    else:
+        positives = ('moving_share', 'voxel_m', 'meadow_m2', 'grove_m2', 'vaulttree_recruits', 'fullness_p10')
+        bands = (('predator_share_lo', 'predator_share_hi'), ('hunts_per_hour_lo', 'hunts_per_hour_hi'))
+        if not 1 <= pop['k_hi'] <= pop['k_peak'] or not math.isfinite(pop['k_peak']):
+            raise ValueError('require 1 <= k_hi <= k_peak, finite')
+        if any(v < 0 or not math.isfinite(v) for v in pop.get('references', {}).values()):
+            raise ValueError('population references must be finite and nonnegative')
+    for key in positives:
         if not math.isfinite(targets[key]) or targets[key] <= 0:
-            raise ValueError(f"target {key} must be positive and finite")
-    for lo, hi in (("predator_share_lo", "predator_share_hi"), ("hunts_per_hour_lo", "hunts_per_hour_hi")):
+            raise ValueError(f'target {key} must be positive and finite')
+    for lo, hi in bands:
         if not 0 <= targets[lo] <= targets[hi] or not math.isfinite(targets[hi]):
-            raise ValueError(f"invalid band: {lo}, {hi}")
-    pop = cfg["population"]
-    if not 1 <= pop["k_hi"] <= pop["k_peak"] or not math.isfinite(pop["k_peak"]):
-        raise ValueError("require 1 <= k_hi <= k_peak, finite")
-    if any(v < 0 or not math.isfinite(v) for v in pop.get("references", {}).values()):
-        raise ValueError("population references must be finite and nonnegative")
-    if any(not 0 <= v <= 1 for v in cfg["reproduction"].values()):
-        raise ValueError("reproductive deficits must be in [0,1]")
-    summary = cfg["summary"]
-    if (not all(math.isfinite(value) for value in summary.values()) or not 0 < summary["consistent_fraction"] <= 1
-            or summary["consistent_min_seeds"] < 1 or summary["sd_weight"] < 0):
-        raise ValueError("invalid summary settings")
+            raise ValueError(f'invalid band: {lo}, {hi}')
+    if any(not 0 <= v <= 1 for v in cfg['reproduction'].values()):
+        raise ValueError('reproductive deficits must be in [0,1]')
+    summary = cfg['summary']
+    if (not all(math.isfinite(value) for value in summary.values()) or not 0 < summary['consistent_fraction'] <= 1
+            or summary['consistent_min_seeds'] < 1 or summary['sd_weight'] < 0):
+        raise ValueError('invalid summary settings')
 
 
 LABELS = {'H': 'kill rate (kills per world-hour)',
@@ -115,8 +148,8 @@ def number(row, key, default=None):
 
 def profile_config(document, profile='screen-2h', text=None):
     cfg = copy.deepcopy(document)
-    if document.get('version') != 2 or profile not in document.get('profiles', {}):
-        raise ValueError(f'unknown v2 objective profile: {profile}')
+    if document.get('version') not in (2, 3) or profile not in document.get('profiles', {}):
+        raise ValueError(f'unknown objective profile: {profile}')
     cfg['profile'] = copy.deepcopy(document['profiles'][profile])
     cfg['profile_id'] = profile
     # Hash the exact supplied profile file, including all shared targets/weights.
@@ -126,9 +159,11 @@ def profile_config(document, profile='screen-2h', text=None):
     if (not isinstance(spec['from_minute'], int) or not isinstance(spec['to_minute'], int)
             or not 0 <= spec['from_minute'] < spec['to_minute']):
         raise ValueError('profile horizon must be whole minutes, 0 <= from < to')
-    if set(spec['active']) - set(COMPONENTS) or 'L' not in spec['active']:
+    if set(spec['active']) - set(component_ids(cfg)) or 'L' not in spec['active']:
         raise ValueError('profile active mask must name known components and L')
-    if set(COMPONENTS) != set(spec['active']) | set(spec['disabled']):
+    if set(component_ids(cfg)) != set(spec['active']) | set(spec['disabled']):
+        raise ValueError('every inactive component needs a named reason')
+    if any(not isinstance(reason, str) or not reason.strip() for reason in spec['disabled'].values()):
         raise ValueError('every inactive component needs a named reason')
     if set(spec['active']) & set(spec['disabled']):
         raise ValueError('a component cannot be active and disabled')
@@ -142,6 +177,9 @@ def profile_config(document, profile='screen-2h', text=None):
         raise ValueError('duplicate active component')
     if any(value != 0 for value in spec['trend_weights'].values()):
         raise ValueError('trend weights are diagnostic only until a trend penalty is specified')
+    if cfg['version'] == 3:
+        if any(not str(spec.get('slow_reasons', {}).get(name, '')).strip() for name in spec['slow']):
+            raise ValueError('every slow lineage needs a named breeding exemption reason')
     validate_config(cfg)
     return cfg
 
@@ -299,6 +337,11 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             raise ValueError('requested horizon differs from the objective profile')
         if not isinstance(load_minute, int) or load_minute < 0:
             raise ValueError('load minute must be a nonnegative whole number')
+        v3 = cfg['version'] == 3
+        if v3 and load_minute < spec.get('minimum_load_minute', 0):
+            raise ValueError('screen requires a year-old saved world')
+        if v3 and spec['start_kind'] == 'fresh founding' and load_minute != 0:
+            raise ValueError('year profile requires fresh founding')
         required = validate_required(required or {})
         rows = read_csv(root / 'census.csv', ['sim_min', 'seed'])
         vitals = read_optional(root / 'vitals/vitals.csv', result['warnings'])
@@ -373,14 +416,32 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             number(row, 'founders_' + name) + number(row, 'eggs_' + name) == 0 for row in (initial, closing))]
         lost += [f'plant:{name}' for name in sorted(required_plants)
                  if any(number(row, 'stands_' + name) == 0 for row in (initial, closing))]
+        if v3:
+            lost = [f'animal:{name}' for name in sorted(animals) if any(
+                number(row, 'founders_' + name) + number(row, 'eggs_' + name) == 0 for row in rows)]
+            lost += [f'plant:{name}' for name in sorted(required_plants) if any(
+                number(row, 'stands_' + name) == 0 for row in rows)]
         result['lost'] = lost
         weights, targets, pop = cfg['weights'], cfg['targets'], cfg['population']
         components = result['components']
+        area_scale = 1
+        if v3:
+            require_columns(rows, ['floor_area_m2', 'voxel_m'], 'census geometry')
+            floor_m2, voxel_m = number(initial, 'floor_area_m2'), number(initial, 'voxel_m')
+            if floor_m2 <= 0 or voxel_m <= 0 or any(number(row, 'floor_area_m2') != floor_m2
+                    or number(row, 'voxel_m') != voxel_m for row in rows):
+                raise ValueError('invalid or changing census geometry')
+            area_scale = floor_m2 / pop['reference_floor_m2']
+            result['geometry'] = dict(floor_area_m2=floor_m2, voxel_m=voxel_m,
+                                     source='census: world width * depth * voxel_m**2')
 
         def put(term, raw, penalty, **details):
+            if term not in component_ids(cfg):
+                return
             active = term in spec['active']
             components[term] = component(raw, penalty, weights[term] if active else 0,
-                active=active, label=LABELS.get(term, term), **details)
+                active=active, label=(V3_LABELS.get(term) if v3 else None) or LABELS.get(term, term),
+                disabled_reason=spec['disabled'].get(term), **details)
 
         put('L', len(lost), len(lost), lost=lost, required_animals=sorted(animals), required_plants=sorted(required_plants))
         active_names = sorted(animals | {name for name in lineages if any(number(row, 'founders_' + name) > 0 for row in window)})
@@ -402,13 +463,24 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             eligible_values = [number(r, 'breeding_eligible_n') for r in vr]
             eligible = any(value > 0 for value in eligible_values if value is not None) if all(value is not None for value in eligible_values) else None
             slow = name in spec['slow']
-            jp = reproductive_penalty(life['surviving_late_recruits'], eligible, cfg['reproduction'])
+            recruits_key = 'surviving_recruits' if v3 else 'surviving_late_recruits'
+            jp = 0.0 if v3 and slow else reproductive_penalty(life[recruits_key], eligible, cfg['reproduction'])
             per_j[name] = dict(**life, eligible=eligible, penalty=jp, weight=0 if slow else 1,
-                               flag='lifecycle untested in this profile' if slow else '')
+                               flag=spec.get('slow_reasons', {}).get(name, 'lifecycle untested in this profile') if slow else '')
             counts = [number(row, 'founders_' + name) for row in late]
             peaks = [number(row, 'founders_' + name) for row in window] + [number(closing, 'founders_' + name)]
-            per_a[name] = dict(N_ref=reference, raw=average(counts), penalty=band_penalty(counts, reference, pop['k_hi']))
-            per_k[name] = dict(N_ref=reference, raw=max(peaks), penalty=peak_penalty(peaks, reference, pop['k_peak']))
+            if v3:
+                low, high = population_band(name, pop, floor_m2)
+                band = pop['bands'][name]
+                per_a[name] = dict(N_ref=reference, low=low, high=high, raw=average(counts),
+                                   penalty=average([d(n, low, high) for n in counts]))
+                peak = band.get('peak', True)
+                per_k[name] = dict(N_ref=reference, ceiling=high * pop['peak_ratio'], raw=max(peaks),
+                    penalty=peak_penalty(peaks, high, pop['peak_ratio']) if peak else 0.0,
+                    active=peak, disabled_reason=band.get('peak_disabled_reason'))
+            else:
+                per_a[name] = dict(N_ref=reference, raw=average(counts), penalty=band_penalty(counts, reference, pop['k_hi']))
+                per_k[name] = dict(N_ref=reference, raw=max(peaks), penalty=peak_penalty(peaks, reference, pop['k_peak']))
             living = [r for r in vl if number(r, 'n', 0) > 0]
             if living:
                 body_exposed.add(name)
@@ -436,8 +508,10 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             # growth, so its reserve runs low by design even on a full gut (JUVENILE-FOOD
             # 2026-10-08: capgnawer and snail juveniles at full gut use sit near 0.02).
             adult = stage_penalties.get(name, {}).get('adult')
-            if adult is not None:
-                condition[name] = adult
+            if v3 and adult is None:
+                fullness[name] = None
+            if v3 or adult is not None:
+                condition[name] = adult if adult is not None else 0.0
                 adult_values = [number(r, 'fullness_p10_adult') for r in living if number(r, 'n_adult', 0) > 0]
                 if adult_values and all(v is not None for v in adult_values):
                     fullness[name] = average(adult_values)
@@ -478,8 +552,9 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                           stages={stage: number(vr[-1] if vr else {}, 'n_' + stage) for stage in ('adult', 'juvenile', 'pup', 'rider')},
                           stage_fullness_penalty=stage_penalties.get(name),
                           stage_fullness=stage_fullness,
-                          stage_note=('F remains pooled; low-p10 driver (lowest late-stage p10): ' + ', '.join(drivers))
-                                     if drivers else 'F pooled: stage counts alone cannot reconstruct per-stage quantiles',
+                          stage_note=('F uses adults only; other stages are diagnostic' if v3 else
+                                      ('F remains pooled; low-p10 driver (lowest late-stage p10): ' + ', '.join(drivers))
+                                      if drivers else 'F pooled: stage counts alone cannot reconstruct per-stage quantiles'),
                           flag=per_j[name]['flag'], **trend)
             result['health'][name] = health
         j_values = [v['penalty'] for v in per_j.values() if v['weight']]
@@ -489,37 +564,46 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             components['J']['contribution'] = 0
         put('Q', None, None, note=spec['disabled'].get('Q', 'cycle books unavailable'))
         put('A', per_a, average([v['penalty'] for v in per_a.values()]))
-        put('K', per_k, average([v['penalty'] for v in per_k.values()]))
-        moving = result['health'].get(targets['moving_lineage'], {}).get('moving_share')
-        put('V', moving, h(moving / targets['moving_share']) if moving is not None else None)
-        hunter = targets['predator_lineage']
-        shares = []
-        for row in late:
-            total = sum(number(row, 'founders_' + name) for name in lineages)
-            free = max(0, number(row, 'founders_' + hunter, 0) - number(row, 'riders_now', 0))
-            shares.append(free / total if total else 0)
-        put('Z', average(shares), average([d(value, targets['predator_share_lo'], targets['predator_share_hi']) for value in shares]),
-            note='free bodies exclude riders; mean per-minute band penalty')
-        meta_path = root / 'vitals/meta.json'
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-        voxel_m = meta.get('voxel_m', targets['voxel_m'])
-        if not isinstance(voxel_m, (int, float)) or not math.isfinite(voxel_m) or voxel_m <= 0:
-            raise ValueError('invalid meta voxel_m')
-        if 'voxel_m' not in meta:
-            result['warnings'].append('geometry fallback: voxel_m from scoring config')
-        if 'seed' in meta and meta['seed'] != seed and float(meta['seed']) != result.get('world_seed'):
-            raise ValueError('vitals metadata seed differs from batch seed')
-        for term, key, target in (('M', 'meadow_patch_max', 'meadow_m2'), ('G_b', 'grove_patch_max', 'grove_m2')):
-            values = [number(row, key) for row in late]
-            area = statistics.median(values) * voxel_m**2 if values and all(v is not None for v in values) else None
-            put(term, area, h(area / targets[target]) if area is not None else None, unit='m2', voxel_m=voxel_m)
-        recruits = (number(closing, 'recruits_vaulttree') - number(opening, 'recruits_vaulttree')) if opening and all(number(row, 'recruits_vaulttree') is not None for row in (opening, closing)) else None
-        put('G_v', recruits, h(recruits / targets['vaulttree_recruits']) if recruits is not None else None)
+        k_values = [v['penalty'] for v in per_k.values() if v.get('active', True)]
+        put('K', per_k, average(k_values) if k_values else 0.0)
+        if v3:
+            landscape_components(closing, targets, floor_m2, voxel_m, put, spec['active'])
+            leaf_offtake(opening, closing, targets, put, spec['active'])
+        else:
+            moving = result['health'].get(targets['moving_lineage'], {}).get('moving_share')
+            put('V', moving, h(moving / targets['moving_share']) if moving is not None else None)
+            hunter = targets['predator_lineage']
+            shares = []
+            for row in late:
+                total = sum(number(row, 'founders_' + name) for name in lineages)
+                free = max(0, number(row, 'founders_' + hunter, 0) - number(row, 'riders_now', 0))
+                shares.append(free / total if total else 0)
+            put('Z', average(shares), average([d(value, targets['predator_share_lo'], targets['predator_share_hi']) for value in shares]),
+                note='free bodies exclude riders; mean per-minute band penalty')
+            meta_path = root / 'vitals/meta.json'
+            meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            voxel_m = meta.get('voxel_m', targets['voxel_m'])
+            if not isinstance(voxel_m, (int, float)) or not math.isfinite(voxel_m) or voxel_m <= 0:
+                raise ValueError('invalid meta voxel_m')
+            if 'voxel_m' not in meta:
+                result['warnings'].append('geometry fallback: voxel_m from scoring config')
+            if 'seed' in meta and meta['seed'] != seed and float(meta['seed']) != result.get('world_seed'):
+                raise ValueError('vitals metadata seed differs from batch seed')
+            for term, key, target in (('M', 'meadow_patch_max', 'meadow_m2'), ('G_b', 'grove_patch_max', 'grove_m2')):
+                values = [number(row, key) for row in late]
+                area = statistics.median(values) * voxel_m**2 if values and all(v is not None for v in values) else None
+                put(term, area, h(area / targets[target]) if area is not None else None, unit='m2', voxel_m=voxel_m)
+            recruits = (number(closing, 'recruits_vaulttree') - number(opening, 'recruits_vaulttree')) if opening and all(number(row, 'recruits_vaulttree') is not None for row in (opening, closing)) else None
+            put('G_v', recruits, h(recruits / targets['vaulttree_recruits']) if recruits is not None else None)
         kill_keys = [key for key in initial if any(key.startswith('kills_' + hunter + '_') for hunter in targets['hunt_lineages'])]
         kills = sum(number(closing, key) - number(opening, key) for key in kill_keys) if kill_keys and opening else None
         rate = kills / ((end - begin) / 60) if kills is not None else None
-        put('H', rate, d(rate, targets['hunts_per_hour_lo'], targets['hunts_per_hour_hi']) if rate is not None else None, unit='kills/world-hour')
-        f_values = [condition[name] for name in sorted(body_exposed)]
+        low, high = targets['hunts_per_hour_lo'] * area_scale, targets['hunts_per_hour_hi'] * area_scale
+        put('H', rate, d(rate, low, high) if rate is not None else None, unit='kills/world-hour', low=low, high=high)
+        f_exposed = (set(name for name in body_exposed if any(
+            r['lineage'] == name and within(number(r, 'minute'), midpoint, end)
+            and number(r, 'n_adult', 0) > 0 for r in vitals)) if v3 else body_exposed)
+        f_values = [condition[name] for name in sorted(f_exposed)]
         # A lineage observed with no eligible stuck exposure (asleep, fed or voluntarily
         # resting through every trailing window) was not stuck: it counts 0 and is listed.
         # Missing vitals are caught by the required-data check, not here.
@@ -528,9 +612,14 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                                           'stuck_n', 'stuck_observed_n') is None)
         s_values = [0.0 if stuck[name] is None else stuck[name] for name in sorted(body_exposed)]
         structural_na = sorted(set(active_names) - body_exposed)
-        put('F', fullness, average(f_values) if all(v is not None for v in f_values) else None,
+        f_penalty = average(f_values) if all(v is not None for v in f_values) else None
+        if v3 and not f_exposed:
+            f_penalty = 0.0
+        put('F', fullness, f_penalty,
             per_lineage_penalty=condition, per_stage_penalty=stage_penalties,
-            structural_na_lineages=structural_na, note='No living bodies: structural NA; retained in the loss/egg-bank gate')
+            structural_na_lineages=sorted(set(active_names) - f_exposed),
+            note=('No adults: structural NA; retained in population/loss gate' if v3 else
+                  'No living bodies: structural NA; retained in the loss/egg-bank gate'))
         put('S', stuck, average(s_values) if s_values else None,
             structural_na_lineages=structural_na, unexposed_lineages=unexposed,
             note='No living bodies: structural NA; a living lineage with no stuck exposure counts 0 (listed as unexposed)')
@@ -571,6 +660,55 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
     return result
 
 
+def landscape_components(closing, targets, floor_m2, voxel_m, put, active):
+    # Landscape is an endpoint state at one year, not a mean of the founding ramp.
+    for term, key in (('W', 'forest_floor_faces'), ('M', 'meadow_patch_max'),
+                      ('G_v', 'forest_patch_second_max'), ('G_b', 'grove_patches'),
+                      ('D', 'glowcap_lit_share')):
+        value = number(closing, key)
+        if term not in active:
+            put(term, value, None)
+            continue
+        if value is None:
+            put(term, None, None)
+            continue
+        if term in ('W', 'M'):
+            value *= voxel_m**2 / floor_m2
+            stem = 'woods' if term == 'W' else 'meadow'
+            put(term, value, d(value, targets[stem + '_share_lo'], targets[stem + '_share_hi']), unit='floor share')
+        elif term == 'G_v':
+            value *= voxel_m**2
+            put(term, value, h(value / targets['vaulttree_family_m2']), unit='m2',
+                threshold_m2=targets['vaulttree_family_m2'], note='second-largest grove: at least two family-sized groves')
+        elif term == 'G_b':
+            put(term, value, h(value / targets['lanternberry_groves']), unit='groves')
+        else:
+            if not 0 <= value <= 1:
+                raise ValueError('glowcap exposed share outside [0,1]')
+            put(term, value, d(value, 0, targets['glowcap_lit_share_hi']), unit='share of glowcaps on lit faces')
+
+
+def leaf_offtake(opening, closing, targets, put, active):
+    if 'O' not in active:
+        put('O', None, None)
+        return
+    if not opening:
+        raise ValueError('leaf offtake requires opening counter boundary')
+    deltas = {}
+    for key in ('leaf_produced', 'leaf_eaten'):
+        a, b = number(opening, key), number(closing, key)
+        if a is None or b is None:
+            put('O', None, None)
+            return
+        if b < a:
+            raise ValueError(f'leaf counter decreased: {key}')
+        deltas[key] = b - a
+    produced, eaten = deltas['leaf_produced'], deltas['leaf_eaten']
+    share = eaten / produced if produced else None
+    put('O', share, d(share, targets['leaf_offtake_lo'], targets['leaf_offtake_hi']) if share is not None else 1.0,
+        produced=produced, eaten=eaten, note='direct photo foliage_built / foliage_taken window deltas; no growth costs 1')
+
+
 def check_required_data(spec, rows, vitals, lives, names, begin, end, targets):
     selected = [row for row in rows if begin <= number(row, 'sim_min') <= end]
     vr = [row for row in vitals if begin < number(row, 'minute') <= end and row['lineage'] in names]
@@ -604,9 +742,11 @@ def check_required_data(spec, rows, vitals, lives, names, begin, end, targets):
                     if not {'lineage', 'native', 'origin', 'born_minute', 'died_minute'} <= row.keys():
                         raise ValueError('incomplete life schema')
             elif source == 'vitals':
-                require_columns(vr, [key], 'vitals', allow_empty=key in ('fullness_p10', 'moving_share', 'stuck_n', 'stuck_observed_n'))
+                require_columns(vr, [key], 'vitals', allow_empty=key in ('fullness_p10', 'fullness_p10_adult', 'moving_share', 'stuck_n', 'stuck_observed_n'))
                 for row in vr:
                     exposed = number(row, 'n', 0) > 0
+                    if key == 'fullness_p10_adult':
+                        exposed = number(row, 'n_adult', 0) > 0
                     if key == 'moving_share':
                         exposed = number(row, 'awake_body_s', 0) > 0
                     if key in ('stuck_n', 'stuck_observed_n'):
@@ -649,7 +789,7 @@ def arm_summary(worlds, cfg, baseline_worlds=None):
                 components={term: dict(stats([world['components'].get(term, {}).get('penalty') for world in worlds]),
                                        raw=stats([world['components'].get(term, {}).get('raw') for world in worlds
                                                   if isinstance(world['components'].get(term, {}).get('raw'), (int, float))]))
-                            for term in COMPONENTS})
+                            for term in component_ids(cfg)})
 
 
 def pair_worlds(worlds, baseline, cfg):
@@ -671,7 +811,7 @@ def pair_worlds(worlds, baseline, cfg):
             if valid and a.get('world_seed') != b.get('world_seed'):
                 raise ValueError(f'seed {seed}: refused pair founded on different worlds ({a.get("world_seed")} vs {b.get("world_seed")})')
             deltas, contributions = {}, {}
-            for term in COMPONENTS:
+            for term in component_ids(cfg):
                 av = a['components'].get(term, {}) if a else {}
                 bv = b['components'].get(term, {}) if b else {}
                 deltas[term] = av['penalty'] - bv['penalty'] if valid and av.get('penalty') is not None and bv.get('penalty') is not None else None
@@ -753,7 +893,7 @@ def build_report(out, cfg, baseline=None, start=None, stop=None, allow_mixed_bin
     arms = {arm: arm_summary([world for world in worlds if world['arm'] == arm], cfg, baseline_worlds) for arm in arm_names}
     ranking = sorted(arms, key=lambda arm: (arms[arm]['rank_key'][0], arms[arm]['rank_key'][1],
                                          arms[arm]['rank'] if arms[arm]['rank'] is not None else math.inf, arm))
-    return dict(profile_id=cfg['profile_id'], profile_hash=cfg['profile_hash'],
+    return dict(version=cfg['version'], profile_id=cfg['profile_id'], profile_hash=cfg['profile_hash'],
                 profile=cfg['profile'], objective='external census promotion gate; Rust search objective is separate',
                 weights=cfg['weights'], binary_hashes=sorted(str(value) for value in hashes),
                 mixed_binaries=len(hashes) > 1, worlds=worlds, arms=arms, ranking=ranking,
@@ -846,7 +986,10 @@ def health_tables(worlds):
         notes = sorted({row['flag'] for row in rows if row['flag']} | {row['stage_note'] for row in rows})
         lines += ['', f'**{name}** lifecycle: {display(events)}; deaths: {display(deaths)}. ' + '; '.join(notes) + '.']
         if any(row['stage_fullness_penalty'] for row in rows):
-            lines += ['Stage condition penalties (diagnostic only; F remains pooled): ' + display([row['stage_fullness_penalty'] for row in rows])]
+            note = ('Stage condition penalties: adults contribute to F; other stages diagnostic'
+                    if any(row['stage_note'].startswith('F uses adults') for row in rows) else
+                    'Stage condition penalties (diagnostic only; F remains pooled)')
+            lines += [note + ': ' + display([row['stage_fullness_penalty'] for row in rows])]
     plants = []
     for name in sorted({name for world in worlds for name in world['plants']}):
         rows = [world['plants'][name] for world in worlds if name in world['plants']]
@@ -869,7 +1012,8 @@ def markdown(report):
              report['objective'] + '.',
              f"Horizon relative to load: [{report['profile']['from_minute']}, {report['profile']['to_minute']}) whole minutes.",
              'Rank: feasibility first; infeasible arms by total required losses, then mean + w × sample SD of soft P (L excluded).',
-             'Weights/targets are provisional. Trend weights are zero in this profile.',
+             ('Target directions: Wrysk 2026-10-09; weights/tolerances provisional. Trend weights are zero.'
+              if report.get('version') == 3 else 'Weights/targets are provisional. Trend weights are zero in this profile.'),
              'Active mask/weights: ' + display({term: report['weights'][term] for term in report['profile']['active']}),
              'Disabled: ' + display(report['profile']['disabled']), '']
     if report['mixed_binaries']:
@@ -885,7 +1029,7 @@ def markdown(report):
                   'New losses relative to baseline: ' + display(summary['new_losses']),
                   f"Worst seed: s{summary['worst_seed']}.", '']
         lines += table(['Component', 'Raw median', 'Median penalty', 'Min', 'Max', 'Seeds'],
-                       [[LABELS.get(term, term), item['raw']['median'], item['median'], item['min'], item['max'], item['n']]
+                       [[(V3_LABELS.get(term) if report.get('version') == 3 else None) or LABELS.get(term, term), item['raw']['median'], item['median'], item['min'], item['max'], item['n']]
                         for term, item in summary['components'].items()])
         paired = report['paired'].get(arm)
         if paired:
@@ -894,6 +1038,8 @@ def markdown(report):
         arm_worlds = [world for world in report['worlds'] if world['arm'] == arm]
         lines += [''] + health_tables(arm_worlds)
         for world in arm_worlds:
+            if world.get('geometry'):
+                lines += ['', f"s{world['seed']} geometry: {display(world['geometry'])}"]
             for warning in world['warnings']:
                 lines += ['', f"s{world['seed']}: {warning}"]
         if len(arm_worlds) > 1:

@@ -1,0 +1,20 @@
+# Wide terrarium's configured founding table, resolved from terrarium-wide.toml.
+# N_ref = bodies, pack adults (1 pack × 4), or clutch eggs (3 clutches × 3).
+# These are reference counts at fauna.founding.reference_land_m2 = 346, not survivors.
+# Actual founding scales these units by dry support area / 346 and rounds before
+# placement; accepted counts vary by seed. Use founding-derived by_seed references
+# when available. V3 uses N_ref only for diagnostic trends, never population bands.
+[required]
+animals = ["bellwing", "capgnawer", "chorister", "frondgrazer", "lanternjaw", "littershredder", "loftstrider", "ripple-snail", "seedporter"]
+plants = ["bloomcrown", "glowcap", "lanternberry", "siphonreed", "springturf", "stonecushion", "umbrellafrond", "vaulttree", "velvetpad"]
+
+[required.N_ref]
+"bellwing" = 6
+"capgnawer" = 6
+"chorister" = 4
+"frondgrazer" = 8
+"lanternjaw" = 9
+"littershredder" = 8
+"loftstrider" = 2
+"ripple-snail" = 8
+"seedporter" = 4
