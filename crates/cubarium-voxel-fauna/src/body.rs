@@ -410,6 +410,13 @@ pub struct FounderPhysiology {
     /// Switch: an opportunistic fruit eater also catches bellwings within reach.
     #[serde(default)]
     pub catch_bellwings: bool,
+    /// **Switch: its body carries pollen** (SEEDPORTER-POLLEN, Wrysk 2026-10-09:
+    /// "seedporters should also polinate by moving accross them or around them"): open
+    /// latticevine flowers its body touches as it moves pick pollen up and are visited by
+    /// pollen from another flower ([`crate::flight::brushed_flowers`]). On for the
+    /// seedporter; a sip visit (the bellwing's) is its own rule and needs no switch.
+    #[serde(default)]
+    pub pollen_by_contact: bool,
     /// Switch: its [`FounderPhysiology::hunter`] table is the **opportunistic catch's**
     /// (the seedporter's, MIMIC), so it exists only while [`FounderPhysiology::catch_bellwings`]
     /// is on, and carrion is food only then. A dedicated predator (lanternjaw, Veilhound)
@@ -1878,6 +1885,7 @@ impl FounderPhysiology {
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                pollen_by_contact: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -1965,6 +1973,7 @@ impl FounderPhysiology {
                 lure_daylight: false,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                pollen_by_contact: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -2073,6 +2082,7 @@ impl FounderPhysiology {
                 lure_daylight: true,
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
+                pollen_by_contact: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -2374,6 +2384,9 @@ impl FounderPhysiology {
                     catch_bellwings: true,
                     opportunist: true,
                     catch_foray_m: 5.0,
+                    // SEEDPORTER-POLLEN (Wrysk 2026-10-09): the vine flowers it climbs over or
+                    // brushes past are pollinated by the pollen it brings from others.
+                    pollen_by_contact: true,
                     hunter: Some(Hunter {
                         prey: [false, false, false, false, false, false, true, false, false],
                         strike_power: 4.0,

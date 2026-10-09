@@ -1233,3 +1233,178 @@ fn the_same_beads_over_the_same_wall_give_the_same_bite_at_two_voxel_sizes() {
     assert!((got[0].1 - got[1].1).abs() <= 1e-15, "the same stock read: {got:?}");
     assert!((got[0].2 - got[1].2).abs() <= 1e-15, "the same bite taken: {got:?}");
 }
+
+// ------------------------------------------------------------------ SEEDPORTER-POLLEN
+
+/// A plain 16 × 20 × 5 with the rock wall at `x = 6`, `y = 1..=12`, and one latticevine
+/// covering every west face of it at rows `y = 3..=10` across every `z` (a sheet of vine). The
+/// faces at the rows `flowering` keeps are set open in flower with a little nectar; the rest
+/// are bare. The covered faces.
+fn flower_sheet(flowering: impl Fn(Face) -> bool) -> (World, Flora, Vec<Face>) {
+    let mut world = plain(16, 20, 5);
+    rock(&mut world, 6..=6, 1..=12);
+    let mut flora = Flora::new(FloraConfig::default());
+    let first = Face::new(6, 3, 2, FaceDir::NegX);
+    let id = flora
+        .seed_vine(&world, VineSeed { root: Site { x: 5, y: 2, z: 2 }, first, reserve: 100.0, lineage: None })
+        .expect("fixture: the vine founder");
+    let mut faces = vec![first];
+    let mut zs: Vec<u32> = (0..world.config().depth).collect();
+    zs.sort_by_key(|&z| z.abs_diff(2));
+    for y in 3..=10 {
+        for &z in &zs {
+            let f = Face::new(6, y, z, FaceDir::NegX);
+            if f != first {
+                assert!(flora.cover_face(&world, id, f, 1.0), "fixture: cover {f:?}");
+                faces.push(f);
+            }
+        }
+    }
+    for &f in &faces {
+        if flowering(f) {
+            assert!(flora.set_spur(f, SpurPhase::Flower, 1.0e-4), "fixture: a flower on {f:?}");
+        }
+    }
+    (world, flora, faces)
+}
+
+fn visits(flora: &Flora, f: Face) -> u32 {
+    flora.view().cover.face(f).expect("covered").visits.into()
+}
+
+/// A seedporter at the foot of the flowering sheet walks east into it and climbs: full
+/// forward for up to 150 ticks, until it is a metre up the wall. `(its id, its fauna)`.
+fn climb_the_sheet(config: FaunaConfig, world: &World, flora: &mut Flora) -> (u64, Fauna) {
+    let mut fauna = Fauna::new(config);
+    let id = on_ground(&mut fauna, world, SP, 3, 2, HUNGRY_ADULT);
+    hold(&mut fauna, id, 1.0, 0.0);
+    until(&mut fauna, world, flora, 150, |f| {
+        let a = animal(f, id);
+        a.mobility.mode == MobilityMode::Climb && a.pose.y_m >= SURFACE + 1.0
+    });
+    assert_eq!(mode(&fauna, id), MobilityMode::Climb, "fixture: it climbs the sheet");
+    (id, fauna)
+}
+
+/// **SEEDPORTER-POLLEN (Wrysk 2026-10-09: "seedporters should also polinate by moving
+/// accross them or around them"): climbing across open vine flowers pollinates the ones it
+/// moves onto, and a lineage without the switch pollinates none.** Every face of the sheet is
+/// in flower. A seedporter walks into it and climbs a metre: the flowers it touched first
+/// give it pollen, and the ones it climbed onto after that are visited — more than one, every
+/// visit booked as a contact visit and as the plant layer's (there is no sip here), each
+/// visited face within its body's reach of the column it climbed. Both books close. The same
+/// climb with `pollen_by_contact` off visits nothing.
+#[test]
+fn climbing_over_open_vine_flowers_visits_the_ones_it_moves_onto_and_only_with_the_switch() {
+    for on in [true, false] {
+        let (world, mut flora, faces) = flower_sheet(|_| true);
+        let organic = flora.view().organic();
+        let mut config = FaunaConfig::default();
+        assert!(config.founder(SP).pollen_by_contact, "the seedporter's body carries pollen");
+        config.founders[SP.index()].pollen_by_contact = on;
+        let (id, fauna) = climb_the_sheet(config, &world, &mut flora);
+        let contact = fauna.view().ledger.contact_visits_by_founder[SP.index()];
+        let booked = flora.view().ledger.flower_visits[1];
+        let visited: Vec<Face> = faces.iter().copied().filter(|&f| visits(&flora, f) > 0).collect();
+        if on {
+            assert!(visited.len() >= 2, "it pollinated the flowers it climbed onto: {visited:?}");
+            assert_eq!(contact, booked, "every vine visit here is a contact visit");
+            assert_eq!(booked, visited.iter().map(|&f| u64::from(visits(&flora, f))).sum::<u64>(), "booked to the faces");
+            let a = animal(&fauna, id);
+            let r = fauna.config().founder(SP).body_at(a.body).footprint_radius();
+            for f in &visited {
+                let dz = (f64::from(f.z) * V - a.pose.z).max(a.pose.z - f64::from(f.z + 1) * V).max(0.0);
+                assert!(dz <= r + crate::flight::PRESSED_M + 1e-9, "{f:?} is beside the column it climbed (dz {dz})");
+            }
+            assert!(
+                matches!(a.last_bloom, Some(crate::Bloom::Vine(_))),
+                "it carries pollen on from the flowers it touched: {:?}",
+                a.last_bloom
+            );
+        } else {
+            assert_eq!((contact, booked, visited.len()), (0, 0, 0), "without the switch no flower is visited");
+        }
+        ledgers_close(&fauna, &flora, organic);
+    }
+}
+
+/// **The first flowers a body touches give it pollen; they are not visited.** Only the row
+/// its body meets as it walks into the wall (`y = 3`) is in flower. It walks in and climbs on
+/// past bare faces: no flower is visited, and it carries pollen from one of the flowers it
+/// touched.
+#[test]
+fn a_seedporter_carrying_no_pollen_from_elsewhere_visits_nothing() {
+    let (world, mut flora, _) = flower_sheet(|f| f.y == 3);
+    let (id, fauna) = climb_the_sheet(FaunaConfig::default(), &world, &mut flora);
+    assert_eq!(flora.view().ledger.flower_visits[1], 0, "nothing brought pollen from elsewhere");
+    assert_eq!(fauna.view().ledger.contact_visits_by_founder[SP.index()], 0);
+    match animal(&fauna, id).last_bloom {
+        Some(crate::Bloom::Vine(f)) => assert_eq!(f.y, 3, "the pollen is from a flower it touched: {f:?}"),
+        other => panic!("it picked pollen up from the flowers it touched: {other:?}"),
+    }
+}
+
+/// **A body at rest against flowers does not visit them tick after tick.** The seedporter
+/// climbs into the flowering sheet carrying pollen from elsewhere, then holds still for 200
+/// ticks against the same flowers: not one visit more.
+#[test]
+fn a_seedporter_resting_against_the_same_flowers_adds_no_visits() {
+    let (world, mut flora, _) = flower_sheet(|_| true);
+    let (id, mut fauna) = climb_the_sheet(FaunaConfig::default(), &world, &mut flora);
+    hold(&mut fauna, id, 0.0, 0.0);
+    steps(&mut fauna, &world, &mut flora, 2);
+    let (pose, booked) = (animal(&fauna, id).pose, flora.view().ledger.flower_visits[1]);
+    assert!(booked > 0, "fixture: its climb pollinated");
+    // It carries pollen from far along the wall, as if it came from another vine.
+    let k = fauna.animals.iter().position(|a| a.id == id).expect("the body");
+    fauna.animals[k].last_bloom = Some(crate::Bloom::Vine(Face::new(6, 10, 0, FaceDir::NegX)));
+    steps(&mut fauna, &world, &mut flora, 200);
+    assert_eq!(animal(&fauna, id).pose, pose, "fixture: it held still");
+    assert_eq!(flora.view().ledger.flower_visits[1], booked, "no visit while it rests");
+}
+
+/// **The rule's two refusals, read directly**: a body that carries no pollen, or only the
+/// pollen of the one flower it comes to, visits nothing as it moves onto it; the same move
+/// carrying another flower's pollen visits it.
+#[test]
+fn moving_onto_a_flower_visits_it_only_with_pollen_from_another() {
+    let (world, flora, _) = flower_sheet(|f| f.y == 4 && f.z == 2);
+    let body = FaunaConfig::default().founder(SP).adult_body();
+    let shape = crate::flight::Shape { r: body.footprint_radius(), h: body.height_m };
+    let at = |x: f64| Pose { x, z: centre(0, 2).1, heading_rad: EAST, y_m: 4.0 * V + 0.02 };
+    let (before, now) = (at(3.0 * V), at(6.0 * V - shape.r - 0.005));
+    let flower = Face::new(6, 4, 2, FaceDir::NegX);
+    let other = crate::Bloom::Vine(Face::new(6, 10, 0, FaceDir::NegX));
+    let read = |carried| crate::flight::brushed_flowers(&world.view(), &flora.view(), &before, &now, shape, crate::flight::PRESSED_M, carried);
+    assert_eq!(read(None), (vec![], Some(crate::Bloom::Vine(flower))), "no pollen: none visited, its pollen picked up");
+    assert_eq!(read(Some(crate::Bloom::Vine(flower))).0, vec![], "its own pollen back: none visited");
+    assert_eq!(read(Some(other)).0, vec![flower], "pollen from another flower: visited");
+    // Already touching it a tick ago: nothing new.
+    assert_eq!(crate::flight::brushed_flowers(&world.view(), &flora.view(), &now, &now, shape, crate::flight::PRESSED_M, Some(other)).0, vec![]);
+}
+
+/// **Contact is in metres.** The same body pressed against the same square of wall in
+/// flower — one 0.25 m face, or four 0.125 m faces — moving onto it with another flower's
+/// pollen visits the same area of flowers.
+#[test]
+fn the_same_body_against_the_same_square_pollinates_the_same_area_at_two_voxel_sizes() {
+    let body = FaunaConfig::default().founder(SP).adult_body();
+    let shape = crate::flight::Shape { r: body.footprint_radius(), h: body.height_m };
+    // Level with the square (y ∈ [0.75, 1.0), z ∈ [0.5, 0.75)) and pressed on its wall at
+    // x = 1.5, from a metre back.
+    let pose = |x: f64| Pose { x, z: 0.625, heading_rad: EAST, y_m: 0.875 - 0.5 * shape.h };
+    let (before, now) = (pose(0.5), pose(1.5 - shape.r - 0.005));
+    let carried = Some(crate::Bloom::Stand(Site { x: 0, y: 0, z: 0 }));
+    let mut got = Vec::new();
+    for v in [0.25, 0.125] {
+        let (w, mut flora, faces) = wall_at(v);
+        for &f in &faces {
+            assert!(flora.set_spur(f, SpurPhase::Flower, 1.0e-4));
+        }
+        let (visited, _) = crate::flight::brushed_flowers(&w.view(), &flora.view(), &before, &now, shape, crate::flight::PRESSED_M, carried);
+        got.push((faces.len(), visited.len(), visited.len() as f64 * v * v));
+    }
+    assert_eq!((got[0].0, got[1].0), (1, 4), "fixture: one face against four");
+    assert!(got[0].1 > 0, "fixture: the body reaches the square: {got:?}");
+    assert!((got[0].2 - got[1].2).abs() <= 1e-12, "the same area of flowers visited: {got:?}");
+}

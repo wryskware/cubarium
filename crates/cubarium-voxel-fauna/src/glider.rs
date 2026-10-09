@@ -47,13 +47,9 @@
 
 use super::*;
 
-use crate::flight::{self, EPS, Shape};
+use crate::flight::{self, EPS, PRESSED_M, Shape};
 use crate::{Bloom, Glider, GutSeedLot, MobilityMode, Perch, PerchAnchor, PerchKind, SeedPlant, SeedVoid};
 use cubarium_voxel_flora::{Face as VineFace, FaceDir, FloraView, StandLayer};
-
-/// How near the wall a pressed body's centre is beyond its radius, metres, for a vine
-/// climb to start: a sweep stops within float dust of it.
-const PRESSED_M: f64 = 0.02;
 
 /// A glider's collision body: its footprint disc (half its width) and its height.
 pub(crate) fn shape(phys: &crate::FounderPhysiology, body: f64) -> Shape {

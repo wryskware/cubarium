@@ -245,6 +245,7 @@ fn founder_rows() -> Vec<Row> {
             .grade("N"),
         r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),
         // `opportunist` (CATCH-SWITCH: the hunter table is the catch's, on with `catch_bellwings`) is a switch: no row.
+        // `pollen_by_contact` (SEEDPORTER-POLLEN: its body pollinates the vine flowers it touches) is a switch: no row.
         r("catch_ceiling_m", "m above hunter base", nonneg, "MIMIC: highest bellwing base a catch can reach"),
         r("catch_gain_min", "organic units", nonneg, "MIMIC: minimum yield less expected strike upkeep cost"),
         r("catch_foray_m", "m", nonneg, "MIMIC-2: sensed low bellwing cluster search radius; 0 disables forays"),
