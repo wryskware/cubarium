@@ -581,6 +581,11 @@ impl Cover {
         self.faces.len()
     }
 
+    /// Every covered face, in storage order (no copy, no sort).
+    pub fn iter(&self) -> impl Iterator<Item = &CoveredFace> + '_ {
+        self.faces.iter()
+    }
+
     /// Every covered face, sorted by face.
     pub fn faces(&self) -> Vec<CoveredFace> {
         let mut out = self.faces.clone();
@@ -2214,6 +2219,96 @@ impl Flora {
     /// left. Booked as `consumed_*_out`.
     pub fn take_fruit(&mut self, face: Face, want: f64) -> Option<Taken> {
         self.take_spur(face, want, SpurPhase::Fruit)
+    }
+
+    /// **A sip across a patch** (VINE-C, Wrysk 2026-10-09: option C): up to `want` of the
+    /// nectar of every face in `faces` that is in flower, drawn from each in proportion to
+    /// what it holds, so a mouth reaching several small faces drinks as from one face of their
+    /// total. `None` when none of them holds nectar.
+    pub fn take_nectar_patch(&mut self, faces: &[Face], want: f64) -> Option<Taken> {
+        self.take_spur_patch(faces, want, SpurPhase::Flower)
+    }
+
+    /// **A bite across a patch** (VINE-C): up to `want` of the beads of every face in
+    /// `faces` that is in fruit, drawn from each in proportion to what it holds. `None` when
+    /// none of them holds fruit.
+    pub fn take_fruit_patch(&mut self, faces: &[Face], want: f64) -> Option<Taken> {
+        self.take_spur_patch(faces, want, SpurPhase::Fruit)
+    }
+
+    /// What `face` holds of `phase`'s product (nectar in flower, beads in fruit); 0 in any
+    /// other phase or off the cover.
+    pub fn spur_stock(&self, face: Face, phase: SpurPhase) -> f64 {
+        self.cover.face(face).map_or(0.0, |f| match (f.spur, phase) {
+            (SpurPhase::Flower, SpurPhase::Flower) => f.nectar,
+            (SpurPhase::Fruit, SpurPhase::Fruit) => f.fruit,
+            _ => 0.0,
+        })
+    }
+
+    /// **A fixture's spur** (tests and studies, VINE-C): put covered `face` at the start of
+    /// `phase` (flower or fruit) holding `stock` of its product, nectar or beads — the face's
+    /// old product taken out and the new one booked as seeded (`seeded_*_in`), so the ledger
+    /// still closes. `false`, changing nothing, off the cover or for another phase.
+    #[doc(hidden)]
+    pub fn set_spur(&mut self, face: Face, phase: SpurPhase, stock: f64) -> bool {
+        if !matches!(phase, SpurPhase::Flower | SpurPhase::Fruit) || !(stock >= 0.0) || !stock.is_finite() {
+            return false;
+        }
+        let e = self.config.latticevine.energy_density;
+        let length = if phase == SpurPhase::Flower { self.config.latticevine.flower_s } else { self.config.latticevine.fruit_s };
+        let cover = &mut self.cover;
+        cover.ensure_built();
+        let Some(s) = cover.slot_of(face) else {
+            return false;
+        };
+        let f = &mut cover.faces[s];
+        let old = f.nectar + f.fruit;
+        f.spur = phase;
+        // The phase's whole length to run.
+        f.spur_timer_s = length;
+        f.visits = 0;
+        f.nectar = if phase == SpurPhase::Flower { stock } else { 0.0 };
+        f.fruit = if phase == SpurPhase::Fruit { stock } else { 0.0 };
+        let net = stock - old;
+        self.ledger.seeded_organic_in += net;
+        self.ledger.seeded_energy_in += e * net;
+        true
+    }
+
+    fn take_spur_patch(&mut self, faces: &[Face], want: f64, phase: SpurPhase) -> Option<Taken> {
+        if !(want > 0.0) || !want.is_finite() {
+            return None;
+        }
+        self.cover.ensure_built();
+        let mut seen: Vec<Face> = Vec::with_capacity(faces.len());
+        let mut held: Vec<(Face, f64)> = Vec::with_capacity(faces.len());
+        for &f in faces {
+            if seen.contains(&f) {
+                continue;
+            }
+            seen.push(f);
+            let s = self.spur_stock(f, phase);
+            if s > 0.0 {
+                held.push((f, s));
+            }
+        }
+        let total: f64 = held.iter().map(|h| h.1).sum();
+        if !(total > 0.0) {
+            return None;
+        }
+        let share = (want / total).min(1.0);
+        let mut sum = Taken::default();
+        for (f, s) in held {
+            // All of it at a share of 1, so a full draw empties every face exactly.
+            let ask = if share >= 1.0 { s } else { s * share };
+            if let Some(t) = self.take_spur(f, ask, phase) {
+                sum.organic += t.organic;
+                sum.mineral += t.mineral;
+                sum.energy += t.energy;
+            }
+        }
+        (sum.organic > 0.0).then_some(sum)
     }
 
     /// **A pollinator's visit** to `face`'s flower (FLOWER-FRUIT): counted on the face while

@@ -157,7 +157,9 @@ use crate::{Fauna, FaunaConfig};
 //     `FounderPhysiology::{rhythm, cadence}` (`Rhythm`, `Cadence`), `SenseTable::{still_gain,
 //     still_settle_s}`, `Vigilance::sleep_hearing`, and the ledger's `alive_day_ticks`,
 //     `awake_day_ticks`, `rest_bouts`, `alarm_wakes`, `paced_ticks`, `paused_ticks` by founder.
-pub const SCHEMA: u32 = 73;
+// 74: VINE-C — `Clutch::face` (a clutch in the vines: a state layout change). The new
+//     `EggSite::Vine` and `Flight::nest_search_m` are config, not bumps.
+pub const SCHEMA: u32 = 74;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

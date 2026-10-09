@@ -2524,6 +2524,10 @@ struct VineLog {
     height_sum: f64,
     cover_at_floor: u64,
     sp: [u64; 6],
+    /// VINE-C: bellwing-seconds perched, by [`cubarium_voxel_fauna::PerchKind::ALL`], and
+    /// bellwing-seconds in all.
+    bw_perch: [u64; 4],
+    bw_s: u64,
 }
 
 fn face_key(f: &cubarium_voxel_flora::Face) -> (u32, u32, u32, u8) {
@@ -2549,6 +2553,8 @@ impl VineLog {
             height_sum: 0.0,
             cover_at_floor: 0,
             sp: [0; 6],
+            bw_perch: [0; 4],
+            bw_s: 0,
         }
     }
 
@@ -2653,6 +2659,15 @@ impl VineLog {
             self.sp[4] += u64::from(on_vine);
         }
         self.sp[5] = fa.ledger.fruit_bites_by_source[1];
+        // VINE-C: where bellwings rest.
+        for a in fa.animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)) {
+            self.bw_s += 1;
+            if a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Perched {
+                if let Some(p) = a.mobility.perch {
+                    self.bw_perch[p.kind.index()] += 1;
+                }
+            }
+        }
     }
 
     fn summary(&self, sim: &Sim) {
@@ -2690,6 +2705,30 @@ impl VineLog {
             self.sp[3],
             self.sp[4],
             self.sp[5],
+        );
+        // VINE-C's nest readout: the bellwing's clutches and where, its hatchlings, the nest
+        // reflex's samples, where it perches, and how many live at the end.
+        let b = Founder::Bellwing.index();
+        let fa = sim.fauna().view();
+        let alive = fa.animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)).count();
+        let eggs_waiting: u64 = fa.clutches.iter().filter(|c| c.lineage == Founder::Bellwing).map(|c| u64::from(c.count)).sum();
+        let bs = self.bw_s.max(1) as f64;
+        eprintln!(
+            "nest: bellwing clutches={} on_vine={} eggs_laid={} eggs_waiting={} hatched={} eggs_lost={} \
+             nest_holds={} nest_searches={} alive_end={} perched_share face/crown_top/vine_face/underside={:.3}/{:.3}/{:.3}/{:.3}",
+            l.clutches_by_founder[b],
+            l.vine_clutches_by_founder[b],
+            l.eggs_laid_by_founder[b],
+            eggs_waiting,
+            l.eggs_hatched_by_founder[b],
+            l.eggs_lost_by_founder[b],
+            l.nest_holds_by_founder[b],
+            l.nest_searches_by_founder[b],
+            alive,
+            self.bw_perch[0] as f64 / bs,
+            self.bw_perch[1] as f64 / bs,
+            self.bw_perch[2] as f64 / bs,
+            self.bw_perch[3] as f64 / bs,
         );
     }
 }

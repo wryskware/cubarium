@@ -210,6 +210,7 @@ fn postcard_preserves_both_consecutive_clutch_clocks() {
         dormancy: None,
         wet_ticks: 2,
         dry_ticks: 7,
+        face: None,
     });
     f.ledger.eggs_drowned_by_founder[Founder::RippleSnail.index()] = 3;
     f.ledger.eggs_dried_by_founder[Founder::RippleSnail.index()] = 4;
