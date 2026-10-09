@@ -824,7 +824,31 @@ control and the reward accounting; display targets after seeing results.
        - Bellwings lay their clutches on latticevine faces, never at bloomcrowns.
        - Other per-face foods (litter, film, turf, vine foliage) are audited for the same
          scale problem; fixing them is a separate decision.
-       - VINE-C (opus-high, worktree `vine-c`, brief `briefs/vine-c.md`) is running.
+       - VINE-C merged (5b69616a, fauna schema 74):
+         - A bite or sip at a vine takes from every face within the mouth's reach (body
+           radius plus `mouth_reach_m`). The stock is their sum, drawn in proportion.
+         - A visit pollinates the open flowers within half the wingspan of where the mouth
+           meets the wall.
+         - `EggSite::Vine` is the bellwing's. It lays on a covered wall face within mouth
+           reach, given egg headroom and open air. The young hatch clinging there.
+         - With no vine, it holds its clutch: no bloomcrown fallback. A heuristic-only reflex
+           flies a ready bellwing to the nearest fitting face within `flight.nest_search_m`
+           (4 m, its near-IR sight range).
+         - Choices to revisit: underside faces aren't nest sites; eggs stay if the vine cover
+           goes; the daytime roost is unchanged (mostly ground faces and crown tops).
+         - Probe (d72 seeds 1/2, 1 h, before → after):
+           - vine share of seedporter fruit: 2.1/1.1 % → 5.2/5.0 %;
+           - vine flowers visited: 2.7/0.8 % → 2.9/2.5 %;
+           - all clutches now laid on vines;
+           - bellwings alive at end: 36/48 → 30/34, with fewer eggs, and on seed 2 more were
+             eaten by seedporters (4 → 10).
+           - Visits stay rare because bellwings sip mostly at bloomcrowns.
+         - Per-face audit (d72):
+           - glassfilm E/(E+K) is 0.69–0.82 against 0.90–0.95 at 0.25 m faces;
+           - litter is about 88 × the shredder's K, so it isn't limited;
+           - no animal eats vine foliage (`Flora::crop` has no caller);
+           - one stand per site gives stand foods 4 × the density per m² on d72.
+         - The webmodel's bellwing `egg_site` fit (1.0) needs a refit.
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
@@ -923,3 +947,4 @@ control and the reward accounting; display targets after seeing results.
 | Wide-world year baseline after waves 1–2: wide seeds 1–8 × 10 h, heuristic, hourly saves (keep 11); populations against the wide targets, herd size, and whether year-old saves can serve as screen starts | desktop | `runs/wideyear-2026-10-09`, binary 6b75f538 (one Veilhound pack and two loftstriders per world, founded per world rather than per area), running; all 8 founded and accepted in 41–51 s |
 | FOUNDING-TESTS: independent tests of the founding loop's contract; found one bug (an asked seed's post-placement rejection still returned founders), fixed | Opus + parent | 48d1482f |
 | `batch.py` no longer caps memory: no address-space limit, no MemAvailable cap (Wrysk: "why are you even managing the ram") | parent | c24d6241 |
+| VINE-C probe: d72 seeds 1–2 × 1 h, before and after; vine share of seedporter fruit 1–2 % → 5 %, all bellwing clutches on vines | desktop | 5b69616a |
