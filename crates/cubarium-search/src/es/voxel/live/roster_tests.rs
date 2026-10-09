@@ -592,8 +592,9 @@ fn roster_genes_are_the_agreed_set() {
     assert!(g.names().iter().any(|n| n == "rider_take"));
 }
 
-/// Shipped searches decode, and every searched lineage has yield and digestion genes
-/// for its current diet. Check expanded gene globs, including neutral and zero-base genes.
+/// Shipped searches decode over their declared bases, and searched diet maps cover
+/// the current foods. Eco keeps yields fixed; the other searches tune both maps.
+/// Check expanded gene globs, including neutral and zero-base genes.
 #[test]
 fn every_shipped_search_decodes_and_covers_current_diets() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -614,6 +615,13 @@ fn every_shipped_search_decodes_and_covers_current_diets() {
             .flat_map(|gene| gene.paths.iter().chain(&gene.inverse))
             .map(|path| path.split('.').collect::<Vec<_>>())
             .collect();
+        // Eco searches gut throughput while deliberately keeping food yields fixed.
+        // Keep the yield requirement for every other shipped search.
+        let diet_fields: &[&str] = if path.file_name().is_some_and(|name| name == "eco.toml") {
+            &["gut.digestion_s"]
+        } else {
+            &["yield_by_food", "gut.digestion_s"]
+        };
         for founder in Founder::ALL {
             // Search expansion omits unfounded founders (Params::expand_genome).
             // Shared clock paths can still mention them, but they are not searched.
@@ -626,7 +634,7 @@ fn every_shipped_search_decodes_and_covers_current_diets() {
                 continue; // A flora-only starting mean has no searched lineages.
             }
             for food in params.fauna.founder(founder).diet.foods() {
-                for field in ["yield_by_food", "gut.digestion_s"] {
+                for field in diet_fields {
                     let needed = format!("fauna.founders.{}.{field}.{}", founder.name(), food.name());
                     let parts: Vec<_> = needed.split('.').collect();
                     assert!(globs.iter().any(|glob| glob.len() == parts.len()

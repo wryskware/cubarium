@@ -33,6 +33,11 @@
 
 retrain = true
 
+# The search loader expands over this founding roster; voxel_census still uses
+# its explicit world config (or the loaded save), as eco_search.py supplies it.
+[base]
+file = "config/desktop/terrarium-wide.toml"
+
 # --- Body mass, per lineage group (x the shipped mass_scale 30) ---
 
 [[gene]]
