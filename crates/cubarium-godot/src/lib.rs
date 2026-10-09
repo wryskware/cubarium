@@ -20,6 +20,7 @@
 
 use std::path::PathBuf;
 
+pub mod autosave;
 pub mod mesher;
 pub mod models;
 pub mod palette;
@@ -84,7 +85,7 @@ mod teardown {
     }
 
     /// Stop and join the threads of every session, then every renderer, still alive, then
-    /// the signal saves' ([`crate::world_save`]). Sessions first: a session's loop runs its
+    /// the signal saves' ([`crate::world_save`]) and the autosave's. Sessions first: a session's loop runs its
     /// renderer's hook.
     pub(crate) fn stop_all() {
         crate::world_save::stopping();
@@ -93,6 +94,7 @@ mod teardown {
         let s = sessions.iter().filter(|s| s.shutdown()).count();
         let r = renderers.iter().filter(|h| h.shutdown()).count();
         crate::world_save::stop();
+        crate::autosave::stop();
         if s + r > 0 {
             eprintln!("cubarium: stopped {s} session(s) and {r} renderer(s) still running at unload");
         }
@@ -121,6 +123,7 @@ impl IRefCounted for CubariumSession {
             let user = godot::classes::Os::singleton().get_user_data_dir();
             PathBuf::from(user.to_string()).join("saves")
         });
+        autosave::start();
         CubariumSession { base, session }
     }
 }
