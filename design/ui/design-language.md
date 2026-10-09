@@ -1,5 +1,6 @@
 ---
-design_status: leaning
+design_status: decided
+decision_refs: [D-0006]
 last_reviewed: 2026-10-09
 ---
 

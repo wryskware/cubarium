@@ -73,3 +73,15 @@ Only decisions already authorized in the owner's request are accepted below.
 - **Consequences:** The Rust GPU presentation is no longer retired: it gains a frame bridge into Godot, panning, picking, and a model pass for moving organisms; the pixel-scale raster is kept; the pack moves off the simulation's critical path. Godot's WorldView meshes and built-in lighting become a fallback to remove. Packages, checks and names in the canonical source remain proposals.
 - **Supersedes:** D-0004
 - **Canonical sources:** [Hybrid renderer handoff](../handoffs/hybrid-renderer-2026-10-07.md), section "The split"
+
+## D-0006 — Game UI look: neon pixel diorama
+
+- **Date:** 2026-10-09
+- **Status:** Accepted
+- **Scope:** The look of the Godot app's menus (field guide, populations, world, settings); not the cube display
+- **Decided by:** Wrysk, over UI mockup rounds 1–3, 2026-10-08/09: "something around pixel neon diorama lands best for me"; Gridlite for title and chrome with his axis settings; "i kinda still want pixelify at 23px"; "notched lines, dithered bands, i really like lit dots with glow focus"; "brighter tabs only." On recording it: "dont get pedantic about it. design decisions like this can change at any time"
+- **Decision:** Pixel neon diorama, as written up in the canonical source: Gridlite PE for titles and chrome, Pixelify Sans for text, notched neon panels on dithered violet bands, lit-dot controls, glow focus, brighter tabs.
+- **Rationale:** Wrysk's picks from side-by-side mockups.
+- **Consequences:** Agents build UI to this look rather than inventing one. It's a living direction: Wrysk changes any part of it whenever he likes, and the canonical source is simply updated to match. Open parts (hover, settings controls, the palette as a whole, Pixelify's 5) stay open.
+- **Supersedes:** None
+- **Canonical sources:** [Game UI design language](../ui/design-language.md)
