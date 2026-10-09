@@ -419,10 +419,74 @@ fn sun_up_down_s(day: &DayClock) -> (f64, f64) {
 /// refined by bisection to machine precision: computed, not rounded. Empty with the clock
 /// off or for a lineage always awake.
 pub fn sleep_bouts_s(day: &DayClock, active: Activity, life: &LifeConfig) -> Vec<f64> {
+    bouts_where(day, |sun| active.awake(true, sun.daylight, life))
+}
+
+/// **A founder's sleep over one day**: its longest fast asleep and its total time asleep,
+/// seconds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SleepBudget {
+    pub longest_s: f64,
+    pub asleep_s: f64,
+}
+
+/// [`SleepBudget`] for a founder.
+/// - An on/off activity reads its own lines ([`sleep_bouts_s`]): the longest bout and their
+///   sum.
+/// - A [`Activity::Leaning`] lineage (RHYTHMS-CADENCE) sleeps `1 − chance` of each hour on
+///   average. Its longest fast is the longest stretch it leans asleep (chance under one half),
+///   or one mean rest bout when it never does (a flat leaning).
+pub fn founder_sleep(day: &DayClock, p: &FounderPhysiology, life: &LifeConfig) -> SleepBudget {
+    if p.active != Activity::Leaning {
+        let bouts = sleep_bouts_s(day, p.active, life);
+        return SleepBudget {
+            longest_s: bouts.iter().copied().fold(0.0, f64::max),
+            asleep_s: bouts.iter().sum(),
+        };
+    }
+    let Some((len, rise, set)) = day_of(day) else {
+        return SleepBudget { longest_s: 0.0, asleep_s: 0.0 };
+    };
+    let rhythm = p.rhythm;
+    const N: usize = 1_440;
+    let chance: Vec<f64> = (0..N)
+        .map(|i| {
+            let sun = Sun::at(day, (i as f64 + 0.5) / N as f64, rise, set);
+            rhythm.chance(cubarium_voxel_fauna::Horizon::of(&sun), false)
+        })
+        .collect();
+    let asleep_s = len * chance.iter().map(|c| 1.0 - c).sum::<f64>() / N as f64;
+    let low: Vec<bool> = chance.iter().map(|&c| c < 0.5).collect();
+    let longest = if low.iter().all(|&l| l) {
+        N
+    } else {
+        // The longest circular run of leaning-asleep cells.
+        let (mut best, mut run) = (0usize, 0usize);
+        for k in 0..2 * N {
+            if low[k % N] {
+                run += 1;
+                best = best.max(run.min(N));
+            } else {
+                run = 0;
+            }
+        }
+        best
+    };
+    let longest_s = if longest > 0 {
+        len * longest as f64 / N as f64
+    } else {
+        len * rhythm.rest_mean_h.max(rhythm.rest_min_h).max(0.0) / 24.0
+    };
+    SleepBudget { longest_s, asleep_s }
+}
+
+/// The sleeping bouts of a body awake while `awake(sun)` holds, seconds each (see
+/// [`sleep_bouts_s`]).
+fn bouts_where(day: &DayClock, awake_at: impl Fn(&Sun) -> bool) -> Vec<f64> {
     let Some((len, rise, set)) = day_of(day) else {
         return Vec::new();
     };
-    let awake = |p: f64| active.awake(true, Sun::at(day, p.rem_euclid(1.0), rise, set).daylight, life);
+    let awake = |p: f64| awake_at(&Sun::at(day, p.rem_euclid(1.0), rise, set));
     const N: usize = 14_400;
     let mut edges: Vec<(f64, bool)> = Vec::new(); // (phase, awake after it)
     for i in 0..N {
@@ -672,16 +736,14 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         .filter(|f| fauna.founder(*f).founding_count > 0)
         .collect();
     let len_s = day_of(&world.day).map_or(world.day.length_min * 60.0, |d| d.0);
-    let phases = |p: &FounderPhysiology| -> (Vec<f64>, f64, f64) {
-        let bouts = sleep_bouts_s(&world.day, p.active, &fauna.life);
-        let asleep: f64 = bouts.iter().sum();
-        (bouts, len_s - asleep, asleep)
+    let phases = |p: &FounderPhysiology| -> (f64, f64, f64) {
+        let sleep = founder_sleep(&world.day, p, &fauna.life);
+        (sleep.longest_s, len_s - sleep.asleep_s, sleep.asleep_s)
     };
     if let Some(night) = spec.night {
         for &f in &founded {
             let p = fauna.founder(f);
-            let (bouts, _, _) = phases(p);
-            let sleep = bouts.iter().copied().fold(0.0, f64::max);
+            let (sleep, _, _) = phases(p);
             let endurance = night_endurance_s(
                 p.core.reserve_cap,
                 p.core.maintenance_per_s,

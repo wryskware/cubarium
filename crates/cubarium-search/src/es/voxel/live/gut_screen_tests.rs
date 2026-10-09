@@ -139,6 +139,9 @@ fn food_demand_is_the_guts_daily_need() {
     c.founders[i].core.maintenance_per_s = 1e-5;
     c.founders[i].core.body_max = 1.5;
     c.founders[i].sleep_upkeep = 0.5;
+    // One night bout, so the night row's longest fast is also its whole sleep (a leaning
+    // rhythm sleeps in many bouts: `screen::founder_sleep`).
+    c.founders[i].active = cubarium_voxel_fauna::Activity::Diurnal;
     let g = c.founder(Founder::Browser);
     let f = daily_need(g, &c.life);
     assert!((f - 1e-5 * c.life.ecological_day_s).abs() < 1e-15);
