@@ -101,6 +101,8 @@ pub(crate) use cubarium_voxel::KeyedRng as Rng;
 
 #[path = "glider.rs"]
 mod glider;
+#[path = "places.rs"]
+pub(crate) mod places;
 #[cfg(test)]
 pub(crate) use glider::{better_roost, safe_crown, Roost};
 pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, off_graph_exit};
@@ -1248,6 +1250,7 @@ fn controllers(
     // SENSES-CORE: the live lineages' remote senses, staggered by id, before any controller
     // of the tick reads a record.
     crate::perception::sense_pass(fauna, view, sky.clock_on, sky.daylight, threads);
+    crate::places::refresh(fauna, view, &flora.view(), sky);
     let due: Vec<usize> = fauna
         .animals
         .iter()
@@ -2036,15 +2039,30 @@ fn to_water(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
     if !a.mobility.ashore || a.mobility.mode != crate::MobilityMode::Ground || a.attached.is_some() {
         return None;
     }
+    let target = water_target(fauna, i, view, am.water_search_m, |_| true)?;
+    Some(walk_to_place(a, view, target, 0.0))
+}
+
+pub(crate) fn walk_to_place(a: &Animal, view: &VoxelView<'_>, site: Site, feed: f64) -> Actions {
+    let v = view.config.voxel_m;
+    let (x, z) = crate::pack::centre(site, v);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, f64::from(view.config.width) * v);
+    glider::walk_toward(a, dx, dz, feed)
+}
+
+/// The water reflex's search, without its thirst/ashore trigger or any writes.
+pub(crate) fn water_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, reach: f64, keep: impl Fn(Site) -> bool) -> Option<Site> {
+    let a = &fauna.animals[i];
+    let phys = fauna.config.founder(a.founder?);
     let c = view.config;
     let v = c.voxel_m;
-    let reach = am.water_search_m.max(0.0);
+    let reach = reach.max(0.0);
     let k = (reach / v).ceil() as i64;
     let up = (phys.step_up_m / v).floor().max(0.0) as u32;
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
     let top = (a.site.y + up).min(c.height.saturating_sub(1));
-    let mut best: Option<(f64, f64, f64)> = None;
+    let mut best: Option<(f64, f64, f64, Site)> = None;
     for dz in -k..=k {
         let z = hz + dz;
         if z < 0 || z >= i64::from(c.depth) {
@@ -2058,16 +2076,17 @@ fn to_water(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
             if !(view.standing_depth_m(x, y, z as u32) > 0.0) {
                 continue;
             }
+            let site = Site { x: x as u32, y, z: z as u32 };
+            if !keep(site) { continue; }
             let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach && best.is_none_or(|(b, _, _)| d < b) {
-                best = Some((d, ddx, ddz));
+            if d <= reach && best.is_none_or(|(b, _, _, _)| d < b) {
+                best = Some((d, ddx, ddz, site));
             }
         }
     }
-    let (_, dx, dz) = best?;
-    Some(glider::walk_toward(a, dx, dz, 0.0))
+    best.map(|(_, _, _, site)| site)
 }
 
 /// **Ready for the trip ashore** (SNAIL-LAND-2): the laying's own test ([`lay`]) — an
@@ -2151,6 +2170,14 @@ pub(crate) fn graze_target<F: Fn(Site) -> f64>(
     film: &F,
     others: &[Site],
 ) -> Option<(f64, f64)> {
+    let site = film_target(view, am, a, roam, k_site, film, others, |_| true)?;
+    let v = view.config.voxel_m;
+    let (x, z) = crate::pack::centre(site, v);
+    Some(crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, f64::from(view.config.width) * v))
+}
+
+/// The film reflex's scored search, with an additional sensory eligibility test.
+pub(crate) fn film_target<F: Fn(Site) -> f64>(view: &VoxelView<'_>, am: &crate::Amphibious, a: &Animal, roam: bool, k_site: f64, film: &F, others: &[Site], keep: impl Fn(Site) -> bool) -> Option<Site> {
     let c = view.config;
     let v = c.voxel_m;
     let reach = am.graze_search_m;
@@ -2164,7 +2191,7 @@ pub(crate) fn graze_target<F: Fn(Site) -> f64>(
     let top = (a.site.y + rise).min(c.height.saturating_sub(1));
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
-    let mut best: Option<(f64, f64, f64)> = None;
+    let mut best: Option<(f64, f64, f64, Site)> = None;
     for dz in -k..=k {
         let z = hz + dz;
         if z < 0 || z >= i64::from(c.depth) {
@@ -2176,7 +2203,7 @@ pub(crate) fn graze_target<F: Fn(Site) -> f64>(
                 continue;
             };
             let s = Site { x: x as u32, y, z: z as u32 };
-            if s == a.site {
+            if s == a.site || !keep(s) {
                 continue;
             }
             let wet = view.standing_depth_m(x, y, s.z) > 0.0;
@@ -2195,12 +2222,12 @@ pub(crate) fn graze_target<F: Fn(Site) -> f64>(
                 continue;
             }
             let score = (per - here) / d;
-            if best.is_none_or(|(b, _, _)| score > b) {
-                best = Some((score, ddx, ddz));
+            if best.is_none_or(|(b, _, _, _)| score > b) {
+                best = Some((score, ddx, ddz, s));
             }
         }
     }
-    best.map(|(_, dx, dz)| (dx, dz))
+    best.map(|(_, _, _, site)| site)
 }
 
 /// **The trip ashore to lay** (SNAIL-LAND, [`crate::EggSite::Shore`]). For an amphibious
@@ -2244,6 +2271,18 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
     if shore_egg_site(view, &am, a.site) && !nest_crowded(fauna, i, view, &rule) {
         return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
     }
+    let target = shore_target(fauna, i, view, sky, am.egg_search_m, |_| true)?;
+    Some(walk_to_place(a, view, target, 0.0))
+}
+
+/// The shore-egg reflex's nearest affordable, uncrowded egg face.
+pub(crate) fn shore_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky, reach: f64, keep: impl Fn(Site) -> bool) -> Option<Site> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    let am = phys.amphibious?;
+    let m = &a.mobility;
+    let rule = body::effective_config(&fauna.config, a).reproduction;
     let c = view.config;
     let v = c.voxel_m;
     let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
@@ -2254,7 +2293,7 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
         return None;
     }
     // SNAIL-LAND-2: its own reach for the trip (it was `roam_search_m`).
-    let reach = am.egg_search_m.max(0.0);
+    let reach = reach.max(0.0);
     let k = (reach / v).ceil() as i64;
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
     let ring = f64::from(c.width) * v;
@@ -2282,13 +2321,13 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
             let (tx, tz) = ((x as f64 + 0.5) * v, (f64::from(z) + 0.5) * v);
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach {
+            if d <= reach && keep(Site { x: x as u32, y, z }) {
                 near.push((d, ddx, ddz, Site { x: x as u32, y, z }));
             }
         }
     }
     near.sort_by(|p, q| p.0.total_cmp(&q.0));
-    let mut best: Option<(f64, f64, f64)> = None;
+    let mut best: Option<(f64, f64, f64, Site)> = None;
     for (d, ddx, ddz, s) in near {
         // The clock's check: the round trip at the target's drying rate.
         let mut rate = am.drying_per_s(body::ground_moisture(view, i64::from(s.x), s.y, s.z));
@@ -2305,18 +2344,17 @@ fn shore_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &Sky) -> Opt
         if nest_crowded_at(fauna, a.id, founder, fx, fz, view, &rule) {
             continue;
         }
-        best = Some((d, ddx, ddz));
+        best = Some((d, ddx, ddz, s));
         break;
     }
-    let (_, dx, dz) = best?;
-    Some(glider::walk_toward(a, dx, dz, 0.0))
+    best.map(|(_, _, _, site)| site)
 }
 
 /// Whether `sky` and the rain record make this an amphibious body's **roam hours**
 /// (SNAIL-FIX): night (the clock on and daylight under the day line, or the clock off, as
 /// the drying clock reads it), rain falling, or within its `roam_after_rain_s` of the last
 /// rain.
-fn roam_hours(fauna: &Fauna, am: &crate::Amphibious, view: &VoxelView<'_>, sky: &Sky) -> bool {
+pub(crate) fn roam_hours(fauna: &Fauna, am: &crate::Amphibious, view: &VoxelView<'_>, sky: &Sky) -> bool {
     let day = sky.clock_on && sky.daylight >= fauna.config.life.day_line;
     if !day || view.is_raining() {
         return true;
@@ -4827,12 +4865,31 @@ fn nest_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora)
         fauna.ledger.nest_holds_by_founder[founder.index()] += 1;
         return Some((Actions { forward: 0.0, turn: 0.0, feed: 0.0 }, 0.0));
     }
+    let t = nest_target(fauna, i, view, &flora.view(), flight.nest_search_m.max(0.0), |_| true)?;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    fauna.ledger.nest_searches_by_founder[founder.index()] += 1;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+    let cfg = fauna.config.light;
+    let lift = (cfg.lift_per_m * (t.y_m - a.pose.y_m)).clamp(-1.0, 1.0);
+    let dh = (dx * dx + dz * dz).sqrt();
+    let forward = if dh <= cfg.near_m { cfg.near_forward } else { 1.0 };
+    let want = if dh > 0.0 { dx.atan2(dz) } else { t.heading_rad };
+    Some((crate::hunt::head(a.pose.heading_rad, want, forward, 1.0), lift))
+}
+
+/// The nest reflex's nearest fitting vine face (bounded by NEST_CANDIDATES).
+pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, reach: f64, keep: impl Fn(crate::Pose) -> bool) -> Option<crate::Pose> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let flight = phys.flight?;
+    let sc = body::effective_config(&fauna.config, &a);
+    let rule = sc.reproduction;
     let c = view.config;
     let v = c.voxel_m;
     let ring = f64::from(c.width) * v;
-    let reach = flight.nest_search_m.max(0.0);
     let (lo, hi) = (a.pose.y_m - flight.band_max_m, a.pose.y_m + flight.band_max_m);
-    let fv = flora.view();
     let mut near: Vec<(f64, cubarium_voxel_flora::Face)> = fv
         .cover
         .iter()
@@ -4859,21 +4916,14 @@ fn nest_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora)
         let Some((pose, _)) = crate::flight::vine_cling(view, &phys, &flight, a.body, face) else {
             continue;
         };
+        if !keep(pose) { continue; }
         if nest_crowded_at(fauna, a.id, founder, pose.x, pose.z, view, &rule) {
             continue;
         }
         target = Some(pose);
         break;
     }
-    let t = target?;
-    fauna.ledger.nest_searches_by_founder[founder.index()] += 1;
-    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
-    let cfg = fauna.config.light;
-    let lift = (cfg.lift_per_m * (t.y_m - a.pose.y_m)).clamp(-1.0, 1.0);
-    let dh = (dx * dx + dz * dz).sqrt();
-    let forward = if dh <= cfg.near_m { cfg.near_forward } else { 1.0 };
-    let want = if dh > 0.0 { dx.atan2(dz) } else { t.heading_rad };
-    Some((crate::hunt::head(a.pose.heading_rad, want, forward, 1.0), lift))
+    target
 }
 
 /// How many of the nearest covered wall faces [`nest_reflex`] tries as a nest.
@@ -5468,12 +5518,23 @@ fn shallows_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<
     if here <= wade {
         return None;
     }
+    let face = shallows_target(fauna, i, view, fauna.config.life.shallows_search_m, |_| true)?;
+    fauna.walking_to(a.id, Fauna::walk_key_face(face), crate::Steer::Shallows);
+    Some(walk_to_place(&a, view, face, 0.0))
+}
+
+/// The shallows reflex's own way-on/standable-face query, without steering writes.
+pub(crate) fn shallows_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, reach: f64, keep: impl Fn(Site) -> bool) -> Option<Site> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let geometry = phys.body_at(a.body);
+    let wade = phys.wade_depth_m(&geometry);
     let c = view.config;
     let v = c.voxel_m;
     let r = geometry.footprint_radius();
     let depth_m = f64::from(c.depth) * v;
     let limits = phys.step_limits(v);
-    let reach = fauna.config.life.shallows_search_m;
     let k = (reach / v).ceil() as i64;
     let up = (phys.step_up_m / v).floor().max(0.0) as u32;
     let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
@@ -5490,10 +5551,8 @@ fn shallows_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<
         if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_none() {
             let cols = if reach.is_finite() && reach > 0.0 { (reach / v).ceil() as u32 } else { 0 };
             let way = graph.way_on(view, a.site, r, geometry.headroom_voxels(v), limits, wade, own, cols);
-            if let Some(f) = way.filter(|f| !shunned.contains(&Fauna::walk_key_face(*f))) {
-                let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
-                fauna.walking_to(a.id, Fauna::walk_key_face(f), crate::Steer::Shallows);
-                return Some(glider::walk_toward(&a, dx, dz, 0.0));
+            if let Some(f) = way.filter(|f| !shunned.contains(&Fauna::walk_key_face(*f)) && keep(*f)) {
+                return Some(f);
             }
         }
     }
@@ -5519,7 +5578,7 @@ fn shallows_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<
                 continue;
             }
             let face = Site { x: x as u32, y, z: z as u32 };
-            if shunned.contains(&Fauna::walk_key_face(face)) || !body::disc_clear_on_face(view, &geometry, face, limits) {
+            if !keep(face) || shunned.contains(&Fauna::walk_key_face(face)) || !body::disc_clear_on_face(view, &geometry, face, limits) {
                 continue;
             }
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
@@ -5529,9 +5588,7 @@ fn shallows_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<
             }
         }
     }
-    let (_, dx, dz, face) = best?;
-    fauna.walking_to(a.id, Fauna::walk_key_face(face), crate::Steer::Shallows);
-    Some(glider::walk_toward(&a, dx, dz, 0.0))
+    best.map(|(_, _, _, face)| face)
 }
 
 /// **The drying clock** (AMPHIBIOUS-SNAIL, [`crate::Amphibious`]): every amphibious body's

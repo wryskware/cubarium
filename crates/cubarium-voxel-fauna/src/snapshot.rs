@@ -162,7 +162,9 @@ use crate::{Fauna, FaunaConfig};
 // 75: SEEDPORTER-POLLEN — `FaunaLedger::contact_visits_by_founder` (a state layout change);
 //     `Animal::last_bloom` now also holds the vine flower a contact pollinator last brushed.
 //     The `FounderPhysiology::pollen_by_contact` switch is config, not a bump.
-pub const SCHEMA: u32 = 75;
+// 76: V3-PLACES — saved per-body last-used home-place memory (state layout change).
+//     Sensed cache is skipped; PerceptionConfig::place_memory_fade_s is named config.
+pub const SCHEMA: u32 = 76;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

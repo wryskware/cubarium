@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2661 rows)
+**`fauna.*`** (2662 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -4123,6 +4123,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.perception.hearing_speed_exp` | 1.0 | exponent | [0, inf) | 0.5–3 | - | placeholder | hearing's emission is speed^this x length^size_exp |
 | `fauna.perception.hearing_size_exp` | 1.0 | exponent | [0, inf) | 0–3 | - | placeholder | the length exponent of hearing's emission |
 | `fauna.perception.hearing_near_m` | 0.5 | m | (0, inf) |  | - | placeholder | received loudness is emission over the distance, read as at least this |
+| `fauna.perception.place_memory_fade_s` | 600.0 | s | [0, inf) | 60–7200 log | - | placeholder | time for last-used home-place freshness to fall linearly to zero without a physical revisit; 0 disables recall |
 | `fauna.perception.give_up_s` | 10.0 | s | [0, inf) | 1–60 log | - | placeholder | a body not sensed again within this is given up; a pursuit walks to its last-known point until then |
 | `fauna.scent.cell_m` | 0.5 | m | (0, inf) | 0.25–2 | - | placeholder | the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node |
 | `fauna.scent.half_life_s` | 60.0 | s | (0, inf) | 5–1200 log | - | placeholder | scent's half-life |

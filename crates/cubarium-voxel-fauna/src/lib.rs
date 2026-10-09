@@ -60,6 +60,7 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+pub(crate) use step::places;
 #[cfg(test)]
 mod testpass3_support;
 #[cfg(test)]
@@ -3761,6 +3762,13 @@ pub struct Fauna {
     /// last-known positions a pursuit walks to); a dead body's is dropped.
     #[serde(default)]
     pub(crate) percepts: FxHashMap<u64, Percept>,
+    /// Last-used home places, per body. Saved; sensed places are derived.
+    pub(crate) place_memory: FxHashMap<u64, places::Memory>,
+    #[serde(skip)]
+    pub(crate) place_cache: FxHashMap<u64, places::Cache>,
+    /// Independent derived caches for observational place queries.
+    #[serde(skip)]
+    pub(crate) place_queries: places::QueryCaches,
     /// **The scent field** (SENSES-CORE, [`scent::ScentField`]). Not saved: it refills
     /// within a few half-lives of a load.
     #[serde(skip)]
@@ -4243,6 +4251,9 @@ impl Fauna {
             pack_paths: FxHashMap::default(),
             den_paths: FxHashMap::default(),
             percepts: FxHashMap::default(),
+            place_memory: FxHashMap::default(),
+            place_cache: FxHashMap::default(),
+            place_queries: places::QueryCaches::default(),
             scent: scent::ScentField::default(),
             beacons: light::Beacons::default(),
             hunt_paths: FxHashMap::default(),
