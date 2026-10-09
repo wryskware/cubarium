@@ -1,0 +1,13 @@
+[gd_resource type="StyleBox" script_class="StyleBoxNeonDots" format=3]
+
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_dots.gd" id="1_6khsj"]
+
+[resource]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = 12.0
+content_margin_top = 4.0
+content_margin_right = 12.0
+content_margin_bottom = 4.0
+script = ExtResource("1_6khsj")
+dot_color = Color(0.9490196, 0.35686275, 0.85882354, 0.65)

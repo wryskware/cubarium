@@ -1,0 +1,13 @@
+[gd_resource type="FontVariation" format=3]
+
+[ext_resource type="FontFile" path="res://fonts/GridlitePEVFTRIAL-All.ttf" id="1_rp2pt"]
+
+[resource]
+base_font = ExtResource("1_rp2pt")
+variation_opentype = {
+1111573323: 90.0,
+1162629960: 3.5,
+1380270932: 120.0,
+2003265652: 700.0
+}
+baseline_offset = -0.038

@@ -1,0 +1,17 @@
+[gd_resource type="StyleBox" script_class="StyleBoxNeonFocus" format=3]
+
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_focus.gd" id="1_t1uat"]
+
+[resource]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = -1.0
+content_margin_top = -1.0
+content_margin_right = -1.0
+content_margin_bottom = -1.0
+script = ExtResource("1_t1uat")
+ring_color = Color(0.25882354, 0.77254903, 0.972549, 1)
+outset = 6
+glow_color = Color(0.25882354, 0.77254903, 0.972549, 0.55)
+glow_blur = 18
+glow_spread = 2

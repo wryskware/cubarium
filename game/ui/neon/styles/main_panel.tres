@@ -1,0 +1,17 @@
+[gd_resource type="StyleBox" script_class="StyleBoxNeonFrame" format=3]
+
+[ext_resource type="StyleBox" path="res://ui/neon/styles/panel_bands.tres" id="1_e7w4k"]
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_frame.gd" id="2_p8ulk"]
+
+[resource]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = -1.0
+content_margin_top = -1.0
+content_margin_right = -1.0
+content_margin_bottom = -1.0
+script = ExtResource("2_p8ulk")
+fill_style = ExtResource("1_e7w4k")
+ring_color = Color(0.7607843, 0.24705882, 0.827451, 1)
+glow_color = Color(0.6901961, 0.21568628, 0.76862746, 0.3)
+glow_blur = 48
