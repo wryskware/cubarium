@@ -693,8 +693,11 @@ control and the reward accounting; display targets after seeing results.
     - Measured on d72, one core: today 12–14 ms per tick; plants every 2 s
       (`flora.step_every` 40) 7.4–8.9 ms; plus water every 1 s (`water_every` 20) 5.7 ms,
       2.3× faster.
-    - Fauna is the rest, about 3 ms. Remote senses already run at 4 Hz, so FAUNA-SPEED (Codex,
-      xhigh) is diagnosing what dominates.
+    - Fauna was the rest, about 3 ms; remote senses already ran at 4 Hz.
+    - FAUNA-SPEED merged, 026ea115: fauna 2.4 → 1.25 ms per tick, with census and vitals
+      identical.
+    - A d72 tick with the strides is now about 3.1 ms (from 12–14 ms), so a wide-world year is
+      estimated at about 2.5 h, not yet measured.
     - Adopt the strides only if a side-by-side matches: `runs/stride-2026-10-09`, 8 seeds × 2 h
       from starts3r m063, old against new strides, heuristic.
     - **Then protocol A:**
