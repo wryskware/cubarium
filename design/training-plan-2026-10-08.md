@@ -911,3 +911,5 @@ control and the reward accounting; display targets after seeing results.
 | Start library v3 and baseline v4 (TRAPS + HUNGRY-SEARCH) | desktop | chained after the end gate |
 | LORE-NIR: the flowers' and the lure's light channel is near-IR, not UV (red dwarf sun); saved configs read renamed knobs through a per-layer table | Codex + parent | 7ff82b35 |
 | Brain control p3-zero (curiosity 0, 20 generations) and its flat gate: curiosity caused the drift; no learning either way (§1c, Q14) | eidolon | `runs/pilot-zero-2026-10-08` |
+| Wide-world year baseline after waves 1–2: wide seeds 1–8 × 10 h, heuristic, hourly saves (keep 11); populations against the wide targets, herd size, and whether year-old saves can serve as screen starts | desktop | `runs/wideyear-2026-10-09`, binary 162bc2b8, running |
+| FOUNDING-TESTS: independent tests of the founding loop's contract | Opus | running, worktree `founding-tests` |
