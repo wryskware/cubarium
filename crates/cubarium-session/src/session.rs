@@ -294,6 +294,49 @@ struct Shared {
     feed_updates: AtomicU64,
     vitals_ns: AtomicU64,
     vitals_peak_ns: AtomicU64,
+    /// Where the running world was last loaded from or saved into through
+    /// [`Session::load`] / [`Session::save`], with the generation it holds for: a world
+    /// installed since (founded, loaded from elsewhere, closed) has none.
+    home: Mutex<Option<(u64, PathBuf)>>,
+}
+
+impl Shared {
+    fn status(&self) -> Status {
+        let (label, last_error) = self.text.lock().map(|t| t.clone()).unwrap_or_default();
+        let steps = self.steps.load(Ordering::Relaxed).max(1);
+        let feeds = self.feed_updates.load(Ordering::Relaxed);
+        Status {
+            running: self.running.load(Ordering::SeqCst),
+            paused: self.paused.load(Ordering::SeqCst),
+            speed: f64::from_bits(self.speed_bits.load(Ordering::SeqCst)),
+            tick: self.tick.load(Ordering::SeqCst),
+            stepped: self.stepped.load(Ordering::SeqCst),
+            generation: self.generation.load(Ordering::SeqCst),
+            loading: self.loading.load(Ordering::SeqCst),
+            saving: self.saving.load(Ordering::SeqCst),
+            label,
+            last_error,
+            step_ms: self.step_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
+            feed_ms: self.feed_ns.load(Ordering::Relaxed) as f64 / feeds.max(1) as f64 / 1e6,
+            feed_updates: feeds,
+            vitals_ms: self.vitals_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
+            vitals_peak_ms: self.vitals_peak_ns.load(Ordering::Relaxed) as f64 / 1e6,
+        }
+    }
+
+    /// The running world's home directory ([`Shared::home`]), if it still holds for it.
+    fn home(&self) -> Option<PathBuf> {
+        if !self.running.load(Ordering::SeqCst) {
+            return None;
+        }
+        let generation = self.generation.load(Ordering::SeqCst);
+        let home = self.home.lock().unwrap_or_else(|e| e.into_inner());
+        home.as_ref().filter(|(g, _)| *g == generation).map(|(_, dir)| dir.clone())
+    }
+
+    fn set_home(&self, generation: u64, dir: Option<PathBuf>) {
+        *self.home.lock().unwrap_or_else(|e| e.into_inner()) = dir.map(|d| (generation, d));
+    }
 }
 
 /// **A world and its loop on a thread of its own.** Every call returns at once: the slow
@@ -375,23 +418,49 @@ impl Threads {
     }
 }
 
-/// A handle that stops every thread of a [`Session`] without owning it ([`Threads::stop`]):
-/// for an owner whose drop may come too late (the Godot extension stops every session still
-/// alive when its library is being unloaded). Holds the session only weakly.
+/// A handle on a [`Session`] that does not own it, holding it only weakly: it stops every
+/// thread of the session ([`Threads::stop`]) for an owner whose drop may come too late (the
+/// Godot extension stops every session still alive when its library is being unloaded),
+/// and reads and saves its world from another thread (the extension's signal saves).
 #[derive(Clone)]
-pub struct SessionStop(std::sync::Weak<Threads>);
+pub struct SessionStop {
+    threads: std::sync::Weak<Threads>,
+    shared: std::sync::Weak<Shared>,
+}
 
 impl SessionStop {
     /// Cancel what is being made, stop the loop (and with it the running world) and join
     /// it and the ingest thread, as dropping the session would. Returns whether any thread
     /// was still running.
     pub fn shutdown(&self) -> bool {
-        self.0.upgrade().is_some_and(|t| t.stop())
+        self.threads.upgrade().is_some_and(|t| t.stop())
     }
 
     /// Whether the session has not been dropped yet.
     pub fn alive(&self) -> bool {
-        self.0.strong_count() > 0
+        self.threads.strong_count() > 0
+    }
+
+    /// [`Session::status`], or `None` once the session is dropped.
+    pub fn status(&self) -> Option<Status> {
+        self.shared.upgrade().map(|s| s.status())
+    }
+
+    /// [`Session::home`]; `None` also once the session is dropped.
+    pub fn home(&self) -> Option<PathBuf> {
+        self.shared.upgrade().and_then(|s| s.home())
+    }
+
+    /// [`Session::save_blocking`].
+    pub fn save_blocking(&self, dir: &Path, timeout: Duration) -> Result<SaveMeta, String> {
+        let threads = self.threads.upgrade().ok_or("the session is gone")?;
+        let (tx, rx) = mpsc::channel();
+        threads
+            .to_sim
+            .send(ToSim::Save(dir.to_path_buf(), Some(tx)))
+            .map_err(|_| "the session has stopped".to_string())?;
+        drop(threads);
+        rx.recv_timeout(timeout).map_err(|_| "the save did not finish in time".to_string())?
     }
 }
 
@@ -418,6 +487,7 @@ impl Session {
             feed_updates: AtomicU64::new(0),
             vitals_ns: AtomicU64::new(0),
             vitals_peak_ns: AtomicU64::new(0),
+            home: Mutex::new(None),
         });
         let (to_sim, sim_rx) = mpsc::channel();
         let (to_reader, reader_rx) = mpsc::channel();
@@ -460,7 +530,7 @@ impl Session {
 
     /// A handle that stops this session's threads from elsewhere ([`SessionStop`]).
     pub fn stopper(&self) -> SessionStop {
-        SessionStop(Arc::downgrade(&self.threads))
+        SessionStop { threads: Arc::downgrade(&self.threads), shared: Arc::downgrade(&self.shared) }
     }
 
     fn send(&self, m: ToSim) {
@@ -765,7 +835,8 @@ impl Session {
 
     /// Save the whole world into `dir` (made if missing), with its `meta.json`. Returns at
     /// once; the world is copied at the loop's next command point and written off it, and
-    /// the outcome is told as a `saved` or `save_failed` notice.
+    /// the outcome is told as a `saved` or `save_failed` notice. Once written, `dir` is the
+    /// world's [`Session::home`].
     pub fn save(&self, dir: &Path) {
         self.send(ToSim::Save(dir.to_path_buf(), None));
     }
@@ -775,6 +846,13 @@ impl Session {
         let (tx, rx) = mpsc::channel();
         self.send(ToSim::Save(dir.to_path_buf(), Some(tx)));
         rx.recv_timeout(timeout).map_err(|_| "the save did not finish in time".to_string())?
+    }
+
+    /// Where the running world was last loaded from or saved into by [`Session::load`] or
+    /// [`Session::save`] (and their blocking forms); `None` for a world founded here, or none
+    /// running. A console `save` does not count.
+    pub fn home(&self) -> Option<PathBuf> {
+        self.shared.home()
     }
 
     /// Stop and drop the running world; the session stays, empty.
@@ -811,27 +889,7 @@ impl Session {
 
     /// The run as it stands.
     pub fn status(&self) -> Status {
-        let s = &self.shared;
-        let (label, last_error) = s.text.lock().map(|t| t.clone()).unwrap_or_default();
-        let steps = s.steps.load(Ordering::Relaxed).max(1);
-        let feeds = s.feed_updates.load(Ordering::Relaxed);
-        Status {
-            running: s.running.load(Ordering::SeqCst),
-            paused: s.paused.load(Ordering::SeqCst),
-            speed: f64::from_bits(s.speed_bits.load(Ordering::SeqCst)),
-            tick: s.tick.load(Ordering::SeqCst),
-            stepped: s.stepped.load(Ordering::SeqCst),
-            generation: s.generation.load(Ordering::SeqCst),
-            loading: s.loading.load(Ordering::SeqCst),
-            saving: s.saving.load(Ordering::SeqCst),
-            label,
-            last_error,
-            step_ms: s.step_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
-            feed_ms: s.feed_ns.load(Ordering::Relaxed) as f64 / feeds.max(1) as f64 / 1e6,
-            feed_updates: feeds,
-            vitals_ms: s.vitals_ns.load(Ordering::Relaxed) as f64 / steps as f64 / 1e6,
-            vitals_peak_ms: s.vitals_peak_ns.load(Ordering::Relaxed) as f64 / 1e6,
-        }
+        self.shared.status()
     }
 
     /// The chunks that changed since the last take — every chunk on the first take after a
@@ -1323,6 +1381,7 @@ impl Loop {
                 let result = match made {
                     Ok(p) => {
                         self.install(p, 1);
+                        self.shared.set_home(self.generation, Some(dir.clone()));
                         self.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("loaded", "loaded") });
                         Ok(())
                     }
@@ -1336,7 +1395,7 @@ impl Loop {
                     let _ = tx.send(result);
                 }
             }
-            ToSim::Save(dir, reply) => self.save(dir, reply),
+            ToSim::Save(dir, reply) => self.save(dir, reply, true),
             ToSim::Hook(hook) => {
                 self.hook = hook;
                 self.hook_installed();
@@ -1371,7 +1430,7 @@ impl Loop {
                     self.notice(Notice::say("console", text));
                 }
                 if let Some(dir) = save {
-                    self.save(dir, None);
+                    self.save(dir, None, false);
                 }
                 if quit {
                     return self.handle(ToSim::Close);
@@ -1457,7 +1516,9 @@ impl Loop {
         self.next = Instant::now() + PERIOD;
     }
 
-    fn save(&mut self, dir: PathBuf, reply: Option<Sender<Result<SaveMeta, String>>>) {
+    /// Save the running world into `dir`; with `home`, a written save makes `dir` its home
+    /// ([`Session::home`]) unless another world was installed meanwhile.
+    fn save(&mut self, dir: PathBuf, reply: Option<Sender<Result<SaveMeta, String>>>, home: bool) {
         let refuse = |why: String, this: &Loop| {
             this.notice(Notice { path: Some(dir.display().to_string()), ..Notice::say("save_failed", why.clone()) });
             if let Some(tx) = &reply {
@@ -1478,8 +1539,15 @@ impl Loop {
         let (world, flora, fauna) = r.sim.layers();
         let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
         let out = self.out.clone();
+        let (shared, generation) = (self.shared.clone(), self.generation);
         self.writer = Some(std::thread::spawn(move || {
             let result = store::save_whole(&dir, &world, &flora, &fauna).map_err(|e| format!("{e:#}"));
+            if home && result.is_ok() {
+                let mut h = shared.home.lock().unwrap_or_else(|e| e.into_inner());
+                if shared.generation.load(Ordering::SeqCst) == generation {
+                    *h = Some((generation, dir.clone()));
+                }
+            }
             let path = Some(dir.display().to_string());
             let notice = match &result {
                 Ok(meta) => Notice { path, meta: Some(meta.clone()), ..Notice::say("saved", "saved") },
