@@ -1,5 +1,5 @@
 //! **TEST-PASS-2 (independent), BELLWING**: the lure's scent against S3b's failed-visit mark,
-//! the lure's UV switched off, the naive readout by the eye, the lure's scent by its lit
+//! the lure's near-IR switched off, the naive readout by the eye, the lure's scent by its lit
 //! fraction and its sleep, a lure kill through the ledgers, and a clutch from surplus waiting
 //! for its full count. A child of `step` sharing the predation fixture.
 //!
@@ -7,7 +7,7 @@
 //! ratio or verdict is asserted.
 
 use super::predation_fixture::*;
-use crate::light::{self, Beacon, BeaconKind, CYAN, UV};
+use crate::light::{self, Beacon, BeaconKind, CYAN, NIR};
 use crate::{Actions, Command, Fauna, FaunaConfig, Founder, MobilityMode, Pose, Reproduction, StartingStores, State};
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{Flora, FloraConfig};
@@ -17,7 +17,7 @@ const LJ: Founder = Founder::Lanternjaw;
 const NORTH: f64 = 0.0;
 
 /// Remote senses every tick, learning on with no forgetting, short inspections; the lure's
-/// UV and scent on (test values); marks of `mark_s`.
+/// near-IR and scent on (test values); marks of `mark_s`.
 fn config(mark_s: f64) -> FaunaConfig {
     let mut c = FaunaConfig::default();
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
@@ -26,7 +26,7 @@ fn config(mark_s: f64) -> FaunaConfig {
     c.light.forget_s = 1e9;
     c.light.visit_s = 1.0;
     c.light.mark_s = mark_s;
-    c.light.lure_uv = 1.0;
+    c.light.lure_nir = 1.0;
     c.light.lure_scent = 1.0;
     c
 }
@@ -121,32 +121,32 @@ fn a_failed_visit_mark_on_a_lure_holds_against_the_lures_scent() {
     assert!(!toward, "led back toward the marked lure ({led} scent-led samples): {got:?}");
 }
 
-// ------------------------------------------------------------------ the lure's UV switched off
+// ------------------------------------------------------------------ the lure's near-IR switched off
 
 fn lure_beacon(power: f64) -> Beacon {
     Beacon { kind: BeaconKind::Lure, x: 1.0, z: 1.0, y_m: 1.0, sky: 0.4, power, moving: false, body: 7 }
 }
 
-/// **With `lure_uv` 0 the lure is the cyan lure to every eye**: its brightness and contrast
-/// to a UV eye are a non-UV eye's, and its class is cyan; with it on, a UV eye reads the cyan
-/// plus `lure_uv` × `flower_reflectance`, all × the lit fraction, and the class UV, while a
-/// non-UV eye's reading is unchanged. A flower and a glowcap read the same to both eyes.
+/// **With `lure_nir` 0 the lure is the cyan lure to every eye**: its brightness and contrast
+/// to a near-IR eye are a non-near-IR eye's, and its class is cyan; with it on, a near-IR eye reads the cyan
+/// plus `lure_nir` × `flower_reflectance`, all × the lit fraction, and the class near-IR, while a
+/// non-near-IR eye's reading is unchanged. A flower and a glowcap read the same to both eyes.
 #[test]
-fn with_lure_uv_zero_the_lure_is_the_cyan_lure_to_every_eye() {
+fn with_lure_nir_zero_the_lure_is_the_cyan_lure_to_every_eye() {
     let mut cfg = config(1.0).light;
     for daylight in [0.0, 0.6] {
         for power in [0.3, 1.0] {
             let b = lure_beacon(power);
-            cfg.lure_uv = 0.0;
-            assert_eq!(b.brightness_seen(&cfg, daylight, true), b.brightness_seen(&cfg, daylight, false), "lure_uv 0: one brightness");
-            assert_eq!(b.contrast_seen(&cfg, daylight, true), b.contrast_seen(&cfg, daylight, false), "lure_uv 0: one contrast");
-            assert_eq!(BeaconKind::Lure.class_seen(&cfg, true), CYAN, "lure_uv 0: cyan to a UV eye");
+            cfg.lure_nir = 0.0;
+            assert_eq!(b.brightness_seen(&cfg, daylight, true), b.brightness_seen(&cfg, daylight, false), "lure_nir 0: one brightness");
+            assert_eq!(b.contrast_seen(&cfg, daylight, true), b.contrast_seen(&cfg, daylight, false), "lure_nir 0: one contrast");
+            assert_eq!(BeaconKind::Lure.class_seen(&cfg, true), CYAN, "lure_nir 0: cyan to a near-IR eye");
             let cyan = b.brightness_seen(&cfg, daylight, false);
-            cfg.lure_uv = 0.7;
-            assert_eq!(b.brightness_seen(&cfg, daylight, false), cyan, "a non-UV eye reads the cyan alone");
-            let expected = (cfg.lure_emission + cfg.lure_uv * cfg.flower_reflectance) * power;
-            assert!((b.brightness_seen(&cfg, daylight, true) - expected).abs() < 1e-12, "a UV eye: cyan plus the mimic's UV, by the lit fraction");
-            assert_eq!(BeaconKind::Lure.class_seen(&cfg, true), UV);
+            cfg.lure_nir = 0.7;
+            assert_eq!(b.brightness_seen(&cfg, daylight, false), cyan, "a non-near-IR eye reads the cyan alone");
+            let expected = (cfg.lure_emission + cfg.lure_nir * cfg.flower_reflectance) * power;
+            assert!((b.brightness_seen(&cfg, daylight, true) - expected).abs() < 1e-12, "a near-IR eye: cyan plus the mimic's near-IR, by the lit fraction");
+            assert_eq!(BeaconKind::Lure.class_seen(&cfg, true), NIR);
             assert_eq!(BeaconKind::Lure.class_seen(&cfg, false), CYAN);
             for kind in [BeaconKind::Flower, BeaconKind::Glowcap] {
                 let o = Beacon { kind, ..b };
@@ -156,21 +156,21 @@ fn with_lure_uv_zero_the_lure_is_the_cyan_lure_to_every_eye() {
     }
 }
 
-/// **The naive readout reads the lure's class to the eye**: with the lure's UV on, a UV-eyed
-/// bellwing that has learned UV down (under `NAIVE_FRACTION` of its innate value) is not naive
-/// though cyan is innate, and one that has learned cyan down is; with the lure's UV off, the
+/// **The naive readout reads the lure's class to the eye**: with the lure's near-IR on, a near-IR-eyed
+/// bellwing that has learned near-IR down (under `NAIVE_FRACTION` of its innate value) is not naive
+/// though cyan is innate, and one that has learned cyan down is; with the lure's near-IR off, the
 /// reverse.
 #[test]
 fn the_naive_readout_reads_the_lures_class_to_the_eye() {
     let world = clock_off(502);
-    let check = |lure_uv: f64, learned: usize| -> bool {
+    let check = |lure_nir: f64, learned: usize| -> bool {
         let mut c = config(1.0);
-        c.light.lure_uv = lure_uv;
+        c.light.lure_nir = lure_nir;
         let mut fauna = Fauna::new(c);
         let bw = bellwing(&mut fauna, &world, 3.0);
-        assert!(fauna.config.founder(BW).senses.uv, "fixture: a UV eye");
+        assert!(fauna.config.founder(BW).senses.nir, "fixture: a near-IR eye");
         let cfg = fauna.config.light;
-        let innate = if learned == UV { cfg.uv_innate } else { cfg.cyan_innate };
+        let innate = if learned == NIR { cfg.nir_innate } else { cfg.cyan_innate };
         let now = fauna.tick;
         let p = fauna.percepts.entry(bw).or_default();
         p.expect = [0.0; light::CLASSES];
@@ -178,9 +178,9 @@ fn the_naive_readout_reads_the_lures_class_to_the_eye() {
         p.expect_tick = now;
         light::naive(&fauna, bw, BW)
     };
-    assert!(!check(1.0, UV), "mimic on, UV learned down: not naive");
-    assert!(check(1.0, CYAN), "mimic on, cyan learned down: naive (UV innate)");
-    assert!(check(0.0, UV), "mimic off, UV learned down: naive (cyan innate)");
+    assert!(!check(1.0, NIR), "mimic on, near-IR learned down: not naive");
+    assert!(check(1.0, CYAN), "mimic on, cyan learned down: naive (near-IR innate)");
+    assert!(check(0.0, NIR), "mimic off, near-IR learned down: naive (cyan innate)");
     assert!(!check(0.0, CYAN), "mimic off, cyan learned down: not naive");
 }
 

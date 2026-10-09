@@ -170,7 +170,23 @@ fn overlay_in(base: Value, saved: Value, path: String, siblings: &[Value], ignor
             if b.len() == 1 && s.len() == 1 && b[0].0 != s[0].0 {
                 return Value::Map(s);
             }
-            for (k, sv) in s {
+            // Serde aliases alone cannot survive the unknown-key filter below. Resolve
+            // the renamed light channel only where the base has its current field;
+            // an explicit current key takes precedence over an old spelling.
+            let aliases = [("uv", "nir"), ("lure_uv", "lure_nir"), ("uv_innate", "nir_innate")];
+            let current_keys: Vec<Value> = s.iter().map(|(k, _)| k.clone()).collect();
+            for (mut k, sv) in s {
+                if let Value::Text(name) = &k {
+                    if let Some((_, new)) = aliases.iter().find(|(old, _)| name == old) {
+                        let current = Value::Text((*new).into());
+                        if b.iter().any(|(bk, _)| *bk == current) {
+                            if current_keys.contains(&current) {
+                                continue;
+                            }
+                            k = current;
+                        }
+                    }
+                }
                 let at = if path.is_empty() {
                     key_name(&k)
                 } else {

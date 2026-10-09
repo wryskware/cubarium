@@ -90,7 +90,7 @@ fn the_plume_does_not_pass_through_rock() {
 }
 
 /// **A hungry flyer at the old scent peak finds the bloom in the dark**: a bellwing on its
-/// own heuristic, awake at midnight (the flower a dark UV reflector: no light to approach),
+/// own heuristic, awake at midnight (the flower a dark near-IR reflector: no light to approach),
 /// hovering at its search height a metre and a quarter off a bloomcrown in flower and facing
 /// away from it — where the ground scent held bellwings circling. Led by the plume, it sips
 /// within half a minute.

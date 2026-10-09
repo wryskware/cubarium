@@ -96,7 +96,7 @@ scale a dark capture cleft and one cyan endpoint carry more than many fine claws
 - life_stages: optional attached rider → juvenile → adult; eggs are counted separately; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
 - lifespan: median 86400 s (12 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.lanternjaw.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
 - breeding: surplus-sized dormant egg clutches up to 3; each dusk hatches probabilistically (code default 1/3), with optional host-riding hatchlings (sources: `config/desktop/terrarium.toml` → `fauna.founders.lanternjaw.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:1930`)
-- senses: patrol prey tracks and substrate tremor; scent/food-patch search; UV/nectar-scent lure (sources: `crates/cubarium-voxel-fauna/src/body.rs:5987`; `crates/cubarium-voxel-fauna/src/knobs.rs:957`)
+- senses: patrol prey tracks and substrate tremor; scent/food-patch search; near-IR/nectar-scent lure (sources: `crates/cubarium-voxel-fauna/src/body.rs:5987`; `crates/cubarium-voxel-fauna/src/knobs.rs:957`)
 - movement_habitat: ground patrol, ambush, strike, handle and carcass feeding; daytime flower ambush; adult step 0.45 m (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
 - defence: armour 0, agility 0 (source: `crates/cubarium-voxel-fauna/src/body.rs:1930`)
 - predators: Veilhound; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)

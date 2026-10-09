@@ -3857,11 +3857,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
 | `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar_full nectar units gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar |
 | `fauna.scent.nectar_full` | 0.02 | nectar units held by a full flower | [0, inf) |  | - | placeholder | the reference nectar stock for a flower giving off nectar_per_s; when not positive, every flower gives the full rate |
-| `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (UV) per unit of the light falling on it |
+| `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (near-IR) per unit of the light falling on it |
 | `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
 | `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light (cyan) |
 | `fauna.light.lure_scent` | 1.0 | x nectar_per_s | [0, inf) | 0–2 | - | placeholder | BELLWING: a lit lure gives off this x a flower's nectar scent at its lure point (0: light alone) |
-| `fauna.light.lure_uv` | 1.0 | x flower_reflectance | [0, inf) | 0–2 | - | placeholder | BELLWING: a fully lit lure's UV, x a flower's; a UV eye reads the lure as a flower (UV class), 0: cyan only |
+| `fauna.light.lure_nir` | 1.0 | x flower_reflectance | [0, inf) | 0–2 | - | placeholder | BELLWING: a fully lit lure's near-IR, x a flower's; a near-IR eye reads the lure as a flower (near-IR class), 0: cyan only |
 | `fauna.light.background_floor` | 0.05 | light | (0, inf) | 0.01–0.5 log | - | placeholder | a beacon's contrast is its brightness over the light around it plus this (the darkest background) |
 | `fauna.light.half_m` | 1.0 | m | (0, inf) | 0.25–4 | - | placeholder | a beacon's received level halves at this distance |
 | `fauna.light.lure_height_fraction` | 0.4 | x body height | [0, inf) |  | - | placeholder | the lure hangs this far over the lanternjaw's standing surface, at its strike capsule's middle |
@@ -3874,7 +3874,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.near_m` | 1.0 | m | [0, inf) |  | - | placeholder | inside this of a beacon it slows to near_forward; walkers also start the no-reward inspection timer |
 | `fauna.light.near_forward` | 0.3 | fraction | [0, 1] |  | - | placeholder | a flyer's forward effort near a beacon |
 | `fauna.light.glow_scent_gate` | 0.05 | chem response | [0, 1] | 0–0.5 | - | placeholder | a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this |
-| `fauna.light.uv_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a UV reflector (flowers); learned ones relax back to it |
+| `fauna.light.nir_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a near-IR reflector (flowers); learned ones relax back to it |
 | `fauna.light.cyan_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures) |
 | `fauna.light.learn_rate` | 0.3 | fraction | [0, 1] | 0.05–1 | - | placeholder | S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way |
 | `fauna.light.forget_s` | 3600.0 | s | (0, inf) | 300–21600 log | - | placeholder | S3b: a learned expectation relaxes back to innate with this time constant |

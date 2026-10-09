@@ -7,7 +7,7 @@
 //! Every case sets the config it relies on; no shipped default, ratio or verdict is asserted.
 
 use super::predation_fixture::*;
-use crate::light::{self, Beacon, BeaconKind, CYAN, UV};
+use crate::light::{self, Beacon, BeaconKind, CYAN, NIR};
 use crate::perception::{self, Mark, Percept, class};
 use crate::{Actions, Command, Fauna, FaunaConfig, Founder, MobilityMode, Pose, SenseTable, StartingStores, State, Track};
 use cubarium_voxel::World;
@@ -76,12 +76,12 @@ fn expect(fauna: &Fauna, id: u64, kind: BeaconKind) -> f64 {
 
 // ------------------------------------------------------------------ S3b × the visit
 
-/// **A sip far from a stale visit teaches UV, not the stale visit's class**: a bellwing whose
+/// **A sip far from a stale visit teaches near-IR, not the stale visit's class**: a bellwing whose
 /// record still holds an inspection of a glowcap metres away (it left it fed, or was turned
-/// from it) and that sips at a flower its heuristic found raises its UV expectation; its cyan
+/// from it) and that sips at a flower its heuristic found raises its near-IR expectation; its cyan
 /// expectation does not move.
 #[test]
-fn a_sip_far_from_a_stale_glowcap_visit_teaches_uv_not_cyan() {
+fn a_sip_far_from_a_stale_glowcap_visit_teaches_nir_not_cyan() {
     let world = clock_off(301);
     let flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(config(0.5));
@@ -91,17 +91,17 @@ fn a_sip_far_from_a_stale_glowcap_visit_teaches_uv_not_cyan() {
     let since = fauna.tick;
     fauna.percepts.entry(bw).or_default().visit =
         perception::Visit { active: true, kind: BeaconKind::Glowcap.index() as u8, x: far, z: LANE_Z, since };
-    let (uv0, cyan0) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
+    let (nir0, cyan0) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
     assert!(steer_with(&mut fauna, &world, &flora, bw, SIP).is_none(), "the sip stands");
-    let (uv1, cyan1) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
-    assert!(uv1 > uv0, "the flower sip teaches UV: {uv0} -> {uv1}");
+    let (nir1, cyan1) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
+    assert!(nir1 > nir0, "the flower sip teaches near-IR: {nir0} -> {nir1}");
     assert_eq!(cyan1, cyan0, "and leaves cyan alone");
 }
 
 /// **A visit it flew away from closes as failed** (FINDINGS-FIX): a bellwing whose open
 /// glowcap inspection lies farther than `visit_m` + `visit_leave_m` closes it on its next
 /// non-sip sample (counted failed and left, marked, cyan taught toward 0); one just inside
-/// that distance stays open. A later sip then teaches UV and leaves cyan alone.
+/// that distance stays open. A later sip then teaches near-IR and leaves cyan alone.
 #[test]
 fn an_open_visit_it_flew_away_from_closes_as_failed() {
     let world = clock_off(311);
@@ -134,9 +134,9 @@ fn an_open_visit_it_flew_away_from_closes_as_failed() {
     let cyan1 = expect(&fauna, bw, BeaconKind::Glowcap);
     assert!(cyan1 < cyan0, "cyan taught toward 0: {cyan0} -> {cyan1}");
     // The next sip is a flower's.
-    let uv1 = expect(&fauna, bw, BeaconKind::Flower);
+    let nir1 = expect(&fauna, bw, BeaconKind::Flower);
     steer_with(&mut fauna, &world, &flora, bw, SIP);
-    assert!(expect(&fauna, bw, BeaconKind::Flower) > uv1, "the sip teaches UV");
+    assert!(expect(&fauna, bw, BeaconKind::Flower) > nir1, "the sip teaches near-IR");
     let cyan2 = expect(&fauna, bw, BeaconKind::Glowcap);
     assert!((cyan2 - cyan1).abs() < 1e-6, "and leaves cyan alone (bar the slow relaxation): {cyan1} -> {cyan2}");
 }
@@ -182,7 +182,7 @@ fn sips_within_visit_s_are_one_bout_and_teach_once() {
 }
 
 /// **A class under `expect_min` is passed by, and only while learning is on**: the only beacon
-/// in sight, a flower in full light, is not approached by a bellwing that has learned UV
+/// in sight, a flower in full light, is not approached by a bellwing that has learned near-IR
 /// under `expect_min`; with learning off the same record approaches it.
 #[test]
 fn a_class_learned_under_expect_min_is_not_approached_unless_learning_is_off() {
@@ -197,9 +197,9 @@ fn a_class_learned_under_expect_min_is_not_approached_unless_learning_is_off() {
         let y = eye_y(&fauna, bw);
         fauna.beacons.fixed(&world.view(), &flora.view(), vec![beacon(BeaconKind::Flower, 4.5, y, 1.0)]);
         let now = fauna.tick;
-        let uv_innate = fauna.config.light.uv_innate;
+        let nir_innate = fauna.config.light.nir_innate;
         let p = fauna.percepts.entry(bw).or_default();
-        p.expect[UV] = 0.5 * 0.2 - uv_innate;
+        p.expect[NIR] = 0.5 * 0.2 - nir_innate;
         p.expect_tick = now;
         let got = steer_with(&mut fauna, &world, &flora, bw, WANDER);
         let r = fauna.percept(bw).unwrap().light;
@@ -240,13 +240,13 @@ fn a_stalled_visit_marks_the_place_and_leaves_the_expectation_alone() {
     let y = eye_y(&fauna, bw);
     fauna.beacons.fixed(&world.view(), &flora.view(), vec![beacon(BeaconKind::Glowcap, 4.5, y, 0.0)]);
     animal_mut(&mut fauna, bw).still_ticks = cubarium_voxel::ticks_at_least_one(fauna.config.light.visit_s);
-    let (uv0, cyan0) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
+    let (nir0, cyan0) = (expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap));
     assert!(steer_with(&mut fauna, &world, &flora, bw, WANDER).is_none());
     assert_eq!(fauna.ledger.stalled_visits[BW.index()], 1, "the stall is counted");
     let p = *fauna.percept(bw).unwrap();
     let ring = 48.0 * VOXEL_M;
     assert!(p.marked(4.5, LANE_Z, fauna.tick, fauna.config.light.mark_radius_m, ring), "the place is marked");
-    assert_eq!((expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap)), (uv0, cyan0));
+    assert_eq!((expect(&fauna, bw, BeaconKind::Flower), expect(&fauna, bw, BeaconKind::Glowcap)), (nir0, cyan0));
 }
 
 // ------------------------------------------------------------------ S3: the mark
@@ -323,9 +323,9 @@ fn a_lure_kill_is_counted_naive_only_while_the_prey_is_naive_and_the_books_close
     let world = clock_off(308);
     for learned in [false, true] {
         let mut flora = Flora::new(FloraConfig::default());
-        // The cyan lure (BELLWING: one that mimics a flower is UV to a bellwing's eye).
+        // The cyan lure (BELLWING: one that mimics a flower is near-IR to a bellwing's eye).
         let mut c = config(0.5);
-        c.light.lure_uv = 0.0;
+        c.light.lure_nir = 0.0;
         let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let bw = bellwing(&mut fauna, &world, 3.0);

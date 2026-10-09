@@ -977,8 +977,10 @@ remain animation proposals, not rendered states.
 
 *Niche.* Nectar, carrying a little mineral, funds its small body and costly flight.
 It flies, hovers, perches and sips bloomcrown or latticevine flowers, following
-nectar scent and UV/blue beacons and learning unpaying visits. Its activity extends
-into dusk/dawn; heavy rain grounds it. Pollen as a separate nutrient food, carriage
+nectar scent and near-IR/cyan beacons and learning unpaying visits. Flowers reflect
+near-IR from the red dwarf sun, bright by day and dark at night; the lanternjaw
+emits near-IR alongside cyan to mimic that flower signal. The bellwing's
+photoreceptor sees near-IR plus cyan. Its activity extends into dusk/dawn; heavy rain grounds it. Pollen as a separate nutrient food, carriage
 and outcrossed seed are *not in the sim yet*. The last visited bloom is recorded
 as a future seam. Both ground hunters and seedporters can catch reachable bellwings.
 
@@ -996,7 +998,7 @@ as a future seam. Both ground hunters and seedporters can catch reachable bellwi
 - life_stages: juvenile → adult; eggs are counted separately; juvenile/adult boundary is core.birth_body, not full adult size (source: `crates/cubarium-observatory/src/query.rs:342`)
 - lifespan: median 43200 s (6 reference days at 7200 s/day); each body draws its lifespan (sources: `fauna.founders.bellwing.core.lifespan_median_s` in `design/parameters.md`; `crates/cubarium-voxel-fauna/src/body.rs:143`; history `3021eea9`)
 - breeding: surplus-sized litter-site clutches up to 6; checks hatchling wing clearance and open air; preset incubation ≈182.97 s, surplus hold ≈182.97 s (sources: `config/desktop/terrarium.toml` → `fauna.founders.bellwing.core.reproduction`; `crates/cubarium-voxel-fauna/src/body.rs:2167`)
-- senses: UV/blue beacon sense to 4 m, nectar smell, looming to 1 m and perch tremor; learns failed/unpaying beacons (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
+- senses: near-IR/cyan beacon sense to 4 m, nectar smell, looming to 1 m and perch tremor; learns failed/unpaying beacons (source: `crates/cubarium-voxel-fauna/src/body.rs:5987`)
 - movement_habitat: fly, hover, perch and ground rest; span 0.375 m, height band max 2.5 m; heavy rain grounds it (source: `crates/cubarium-voxel-fauna/src/body.rs:2167`)
 - defence: loom escape, flight and learned beacon avoidance (source: `crates/cubarium-voxel-fauna/src/body.rs:6064`; history `2a4579ff`)
 - predators: lanternjaw, Veilhound and seedporter when perched, grounded or hovering within strike reach; actual eligibility also reads size and mobility (source: `crates/cubarium-voxel-fauna/src/predation.rs:94`)

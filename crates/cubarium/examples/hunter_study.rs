@@ -767,7 +767,7 @@ fn hunk_line(a: &FaunaLedger, b: &FaunaLedger) -> String {
 /// **The bellwing's light line** (FINDINGS-FIX), `a` → `l`: bellwing-hours, nectar eaten
 /// (gross) per bellwing-hour, glowcap visits begun / failed / left (closed as failed when it
 /// flew away; 0 where the build has no such rule) / ended in a sip, flower visits begun /
-/// failed, and the living bellwings' mean UV and cyan expectations now.
+/// failed, and the living bellwings' mean near-IR and cyan expectations now.
 /// **BELLWING: lure encounters**, sampled once a sim second: seconds with a lit lure (an
 /// awake lanternjaw's lure lit), with an awake bellwing in flight, with both, and with the
 /// nearest pair (3D, bellwing to lure point) within 4, 10 and 20 m. LURE: bellwing-seconds
@@ -860,10 +860,10 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
     let fauna = sim.fauna();
     let cfg = fauna.view().config.light;
     let now = fauna.view().tick;
-    let (mut n, mut uv, mut cyan) = (0usize, 0.0, 0.0);
+    let (mut n, mut nir, mut cyan) = (0usize, 0.0, 0.0);
     for x in fauna.view().animals.iter().filter(|x| x.founder == Some(Founder::Bellwing)) {
         let p = fauna.percept(x.id).copied().unwrap_or_default();
-        uv += cubarium_voxel_fauna::light::expectation(&cfg, &p, cubarium_voxel_fauna::light::BeaconKind::Flower, now);
+        nir += cubarium_voxel_fauna::light::expectation(&cfg, &p, cubarium_voxel_fauna::light::BeaconKind::Flower, now);
         cyan += cubarium_voxel_fauna::light::expectation(&cfg, &p, cubarium_voxel_fauna::light::BeaconKind::Glowcap, now);
         n += 1;
     }
@@ -889,7 +889,7 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
         l.light_budget[b][m as usize] - a.light_budget[b][m as usize]};
     let eggs_now: u32 = fauna.view().clutches.iter().filter(|c| c.lineage == Founder::Bellwing).map(|c| c.count).sum();
     format!(
-        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},uv_expect={:.3},cyan_expect={:.3},lure_visits={},lure_failed={},lure_kills={},bw_laid={},bw_hatched={},bw_clutches={},bw_eggs_now={eggs_now},bw_nest_refusals={},bw_ceiling_refusals={},bw_killed_lj={},bw_killed_vh={},bw_killed_sp={},bw_starved={},bw_aged={},lj_hours={:.3},bw_killed_lj_per_ljh={:.4},approach_lure={},inspect_lure={},repel={},light_samples={},sp_hours={sp_hours:.6},sp_intake={sp_intake:.6},lj_intake={lj_intake:.6},bw_fell={bw_fell},bw_drowned={bw_drowned},bw_dry={bw_dry}",
+        "bw_hours={:.3},nectar_per_bwh={:.5},glowcap_visits={},glowcap_failed={},glowcap_left={},glowcap_sipped={},flower_visits={},flower_failed={},bellwings={n},nir_expect={:.3},cyan_expect={:.3},lure_visits={},lure_failed={},lure_kills={},bw_laid={},bw_hatched={},bw_clutches={},bw_eggs_now={eggs_now},bw_nest_refusals={},bw_ceiling_refusals={},bw_killed_lj={},bw_killed_vh={},bw_killed_sp={},bw_starved={},bw_aged={},lj_hours={:.3},bw_killed_lj_per_ljh={:.4},approach_lure={},inspect_lure={},repel={},light_samples={},sp_hours={sp_hours:.6},sp_intake={sp_intake:.6},lj_intake={lj_intake:.6},bw_fell={bw_fell},bw_drowned={bw_drowned},bw_dry={bw_dry}",
         hours,
         if hours > 0.0 { nectar / hours } else { f64::NAN },
         l.beacon_visits[b][1] - a.beacon_visits[b][1],
@@ -898,7 +898,7 @@ fn bwl_line(sim: &Sim, a: &FaunaLedger, l: &FaunaLedger) -> String {
         l.sipped_visits[b][1] - a.sipped_visits[b][1],
         l.beacon_visits[b][0] - a.beacon_visits[b][0],
         l.failed_visits[b][0] - a.failed_visits[b][0],
-        m(uv),
+        m(nir),
         m(cyan),
         l.beacon_visits[b][2] - a.beacon_visits[b][2],
         l.failed_visits[b][2] - a.failed_visits[b][2],

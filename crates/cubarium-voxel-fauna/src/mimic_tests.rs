@@ -3,7 +3,7 @@
 //! or population outcome is asserted. All world cases stay within 200 fauna ticks.
 
 use super::predation_fixture::*;
-use crate::light::{self, Beacon, BeaconKind, UV};
+use crate::light::{self, Beacon, BeaconKind, NIR};
 use crate::{
     Actions, Activity, Command, Diet, Fauna, FaunaConfig, Food, Founder, HuntMode, Hunter,
     MobilityMode, Pose, StartingStores,
@@ -34,10 +34,10 @@ fn config() -> FaunaConfig {
     c.hunt.strike_chosen_only = false;
     c.hunt.cue_scan_m = 8.0;
     c.hunt.patch_wait_s = 1e6;
-    c.light.lure_uv = 1.0;
+    c.light.lure_nir = 1.0;
     c.light.lure_scent = 1.0;
     c.light.learn = true;
-    c.light.uv_innate = 0.7;
+    c.light.nir_innate = 0.7;
     c.light.cyan_innate = 0.4;
     c.light.expect_min = 0.05;
     c.light.learn_rate = 0.4;
@@ -49,7 +49,7 @@ fn config() -> FaunaConfig {
     c.founders[LJ.index()].senses.light_m = 8.0;
     c.founders[BW.index()].active = Activity::Always;
     c.founders[BW.index()].senses.live = true;
-    c.founders[BW.index()].senses.uv = true;
+    c.founders[BW.index()].senses.nir = true;
     c.founders[BW.index()].senses.light_m = 8.0;
     c.founders[BW.index()].senses.light_min = 0.0001;
     // A complete explicit catch table; the test does not depend on its shipped values.
@@ -228,7 +228,7 @@ fn daytime_lure_is_approached_inspected_and_teaches_the_flower_class() {
     let p = fauna.percept(bw).unwrap();
     assert!(p.light.beacon && p.light.beacon_kind == BeaconKind::Lure.index() as u8);
     assert!(act.turn > 0.0, "turns toward the lure on its right");
-    assert_eq!(BeaconKind::Lure.class_seen(&fauna.config.light, true), UV);
+    assert_eq!(BeaconKind::Lure.class_seen(&fauna.config.light, true), NIR);
     let (x, z, y) = light::lure_point(&fauna.config, &animal(&fauna, lj), VOXEL_M).unwrap();
     let a = animal_mut(&mut fauna, bw);
     a.pose.x = x;
@@ -250,11 +250,11 @@ fn daytime_lure_is_approached_inspected_and_teaches_the_flower_class() {
     let learned = light::expectation_of(
         &fauna.config.light,
         fauna.percept(bw).unwrap(),
-        UV,
+        NIR,
         fauna.tick,
     );
     assert!(
-        learned < fauna.config.light.uv_innate,
+        learned < fauna.config.light.nir_innate,
         "no nectar lowers flower expectation"
     );
 }
@@ -901,7 +901,7 @@ fn a_capgnawer_circling_a_day_lure_gives_up_and_resumes_foraging() {
     c.light.visit_s = 0.5;
     c.light.mark_s = 6.0;
     c.founders[cap.index()].senses.live = true;
-    c.founders[cap.index()].senses.uv = false;
+    c.founders[cap.index()].senses.nir = false;
     c.founders[cap.index()].senses.light_m = 8.0;
     c.founders[cap.index()].senses.light_min = 0.00001;
     let mut fauna = Fauna::new(c);
@@ -927,7 +927,7 @@ fn a_capgnawer_circling_a_day_lure_gives_up_and_resumes_foraging() {
     let p = fauna.percept(id).unwrap();
     assert!(p.marked(lx, lz, fauna.tick, c.light.mark_radius_m, ring));
     assert_eq!(fauna.ledger.failed_visits[cap.index()][BeaconKind::Lure.index()], 1);
-    assert_eq!(p.expect, [0.0; light::CLASSES], "marking a place does not teach the UV/cyan expectation");
+    assert_eq!(p.expect, [0.0; light::CLASSES], "marking a place does not teach the near-IR/cyan expectation");
     for _ in 0..3 {
         assert!(steer(&mut fauna).is_none(), "the mark leaves the ordinary forager in control");
     }
@@ -1015,7 +1015,7 @@ fn a_capgnawer_circling_outside_the_near_band_marks_a_failed_approach() {
     c.light.visit_s = 0.5;
     c.light.mark_s = 6.0;
     c.founders[cap.index()].senses.live = true;
-    c.founders[cap.index()].senses.uv = false;
+    c.founders[cap.index()].senses.nir = false;
     c.founders[cap.index()].senses.light_m = 2.0;
     c.founders[cap.index()].senses.light_min = 0.00001;
     c.founders[cap.index()].cruise_body_lengths_per_s = 5.0;

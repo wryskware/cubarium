@@ -129,15 +129,15 @@ pub fn guarded_kill_share(
 }
 
 fn brightness(c: &LightConfig, p: &FounderPhysiology, day: f64) -> [f64; 3] {
-    let uv = if c.learn { c.uv_innate } else { 1.0 };
+    let nir = if c.learn { c.nir_innate } else { 1.0 };
     let cyan = if c.learn { c.cyan_innate } else { 1.0 };
-    let flower = if p.senses.uv {
-        c.flower_reflectance * day.max(0.0) * uv
+    let flower = if p.senses.nir {
+        c.flower_reflectance * day.max(0.0) * nir
     } else {
         0.0
     };
-    let lure_expect = if p.senses.uv && c.lure_uv > 0.0 {
-        uv
+    let lure_expect = if p.senses.nir && c.lure_nir > 0.0 {
+        nir
     } else {
         cyan
     };
@@ -145,8 +145,8 @@ fn brightness(c: &LightConfig, p: &FounderPhysiology, day: f64) -> [f64; 3] {
         flower.max(0.0),
         (c.glowcap_emission * cyan).max(0.0),
         ((c.lure_emission
-            + if p.senses.uv {
-                c.lure_uv * c.flower_reflectance
+            + if p.senses.nir {
+                c.lure_nir * c.flower_reflectance
             } else {
                 0.0
             })

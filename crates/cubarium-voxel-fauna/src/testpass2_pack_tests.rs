@@ -748,7 +748,7 @@ fn every_new_state_field_and_knob_round_trips_a_snapshot() {
         r.breeding_window = 0.2;
         r.gestation_upkeep_factor = 1.3;
     }
-    c.light.lure_uv = 0.6;
+    c.light.lure_nir = 0.6;
     c.light.lure_scent = 0.4;
     c.teachers.press_replan_s = 2.5;
     c.teachers.press_shun_s = 45.0;

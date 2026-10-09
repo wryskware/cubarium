@@ -1,15 +1,15 @@
 //! **BELLWING: the lure mimics a flower** (`light.rs` module note, "Lures"; Wrysk 2026-10-06:
-//! "make lure mimic flowers"): a lit lure also shows UV ([`crate::LightConfig::lure_uv`]), so an
-//! eye with the `uv` channel ranks it as a flower — the UV class — and a visit that finds no
-//! nectar there is a failed UV visit; an eye without UV sees its cyan alone. A child of
+//! "make lure mimic flowers"): a lit lure also shows near-IR ([`crate::LightConfig::lure_nir`]), so an
+//! eye with the `nir` channel ranks it as a flower — the near-IR class — and a visit that finds no
+//! nectar there is a failed near-IR visit; an eye without near-IR sees its cyan alone. A child of
 //! `step`, sharing the predation fixture.
 //!
 //! Every case builds its scene by hand and checks the mechanism against the config it sets,
-//! each against a control arm with the lure's UV off (`lure_uv` 0, the cyan lure); no default
+//! each against a control arm with the lure's near-IR off (`lure_nir` 0, the cyan lure); no default
 //! is asserted.
 
 use super::predation_fixture::*;
-use crate::light::{self, BeaconKind, CYAN, UV};
+use crate::light::{self, BeaconKind, CYAN, NIR};
 use crate::{Actions, Command, Fauna, FaunaConfig, Founder, MobilityMode, Pose, StartingStores, State};
 use cubarium_voxel::World;
 use cubarium_voxel_flora::{Flora, FloraConfig};
@@ -23,9 +23,9 @@ const BW_X: f64 = 3.0;
 const LJ_DX: f64 = 2.5;
 
 /// The default tables with remote senses read every tick, learning on, no forgetting, short
-/// inspections and marks; the lure's UV at `lure_uv` (a test value, not the default), its
+/// inspections and marks; the lure's near-IR at `lure_nir` (a test value, not the default), its
 /// scent off.
-fn config(lure_uv: f64) -> FaunaConfig {
+fn config(lure_nir: f64) -> FaunaConfig {
     let mut c = FaunaConfig::default();
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
     c.light.learn = true;
@@ -33,7 +33,7 @@ fn config(lure_uv: f64) -> FaunaConfig {
     c.light.forget_s = 1e9;
     c.light.visit_s = 1.0;
     c.light.mark_s = 1.0;
-    c.light.lure_uv = lure_uv;
+    c.light.lure_nir = lure_nir;
     // The light alone: since NECTAR-SCENT a lit lure's plume is smelled at once (no field to
     // settle); the lure's scent has its own case.
     c.light.lure_scent = 0.0;
@@ -86,7 +86,7 @@ fn reading(fauna: &Fauna, id: u64) -> crate::perception::LightReading {
 /// Set the body's learned expectation of class `c` to `value` (the other class innate).
 fn expect_class(fauna: &mut Fauna, id: u64, c: usize, value: f64) {
     let cfg = fauna.config.light;
-    let innate = if c == UV { cfg.uv_innate } else { cfg.cyan_innate };
+    let innate = if c == NIR { cfg.nir_innate } else { cfg.cyan_innate };
     let now = fauna.tick;
     let p = fauna.percepts.entry(id).or_default();
     p.expect = [0.0; light::CLASSES];
@@ -99,18 +99,18 @@ fn expectation(fauna: &Fauna, id: u64, c: usize) -> f64 {
     light::expectation_of(&fauna.config.light, &p, c, fauna.tick)
 }
 
-/// **A UV-sighted bellwing approaches a lure ranked as a UV beacon.** A bellwing that has
-/// learned cyan does not pay (under `expect_min`) and keeps UV at its innate value: with the
-/// lure's UV on, the still lit lure is its beacon and it turns toward it — the lure is ranked
-/// by the UV expectation; with the lure's UV off (control) the same bellwing passes the lure
+/// **A near-IR-sighted bellwing approaches a lure ranked as a near-IR beacon.** A bellwing that has
+/// learned cyan does not pay (under `expect_min`) and keeps near-IR at its innate value: with the
+/// lure's near-IR on, the still lit lure is its beacon and it turns toward it — the lure is ranked
+/// by the near-IR expectation; with the lure's near-IR off (control) the same bellwing passes the lure
 /// by.
 #[test]
-fn a_uv_sighted_bellwing_approaches_a_lure_ranked_as_a_uv_beacon() {
+fn a_nir_sighted_bellwing_approaches_a_lure_ranked_as_a_nir_beacon() {
     let world = clock_off(401);
     let flora = Flora::new(FloraConfig::default());
-    let arm = |lure_uv: f64, cyan: f64| {
-        let mut fauna = Fauna::new(config(lure_uv));
-        assert!(fauna.config.founder(BW).senses.uv, "fixture: the bellwing's eye has UV");
+    let arm = |lure_nir: f64, cyan: f64| {
+        let mut fauna = Fauna::new(config(lure_nir));
+        assert!(fauna.config.founder(BW).senses.nir, "fixture: the bellwing's eye has near-IR");
         let bw = bellwing(&mut fauna, &world, BW_X);
         fauna.beacons.fixed(&world.view(), &flora.view(), Vec::new());
         still_lure(&mut fauna, &world, BW_X + LJ_DX);
@@ -119,12 +119,12 @@ fn a_uv_sighted_bellwing_approaches_a_lure_ranked_as_a_uv_beacon() {
         (got, reading(&fauna, bw))
     };
     let low_cyan = 0.5 * config(1.0).light.expect_min;
-    assert!(config(1.0).light.uv_innate >= config(1.0).light.expect_min, "fixture: UV innate is approached");
-    assert_eq!(BeaconKind::Lure.class_seen(&config(1.0).light, true), UV, "the mimic is UV to a UV eye");
+    assert!(config(1.0).light.nir_innate >= config(1.0).light.expect_min, "fixture: near-IR innate is approached");
+    assert_eq!(BeaconKind::Lure.class_seen(&config(1.0).light, true), NIR, "the mimic is near-IR to a near-IR eye");
 
     let (got, l) = arm(1.0, low_cyan);
     assert!(l.beacon && l.beacon_kind == BeaconKind::Lure.index() as u8, "the mimic lure is its beacon though cyan does not pay: {l:?}");
-    let (act, _) = got.expect("a still UV light attracts");
+    let (act, _) = got.expect("a still near-IR light attracts");
     assert!(act.turn > 0.0, "toward it, on its right: {act:?}");
 
     let (got, l) = arm(0.0, low_cyan);
@@ -133,16 +133,16 @@ fn a_uv_sighted_bellwing_approaches_a_lure_ranked_as_a_uv_beacon() {
 
 }
 
-/// **A visit to a lure with no nectar marks a failed UV visit**: the bellwing inspects the
+/// **A visit to a lure with no nectar marks a failed near-IR visit**: the bellwing inspects the
 /// mimic lure for `visit_s` with nothing to sip; the inspection fails, the place is marked, the
-/// failure is booked to the lure, and its **UV** expectation falls while cyan stays innate.
-/// Control (the lure's UV off): the same failure teaches cyan, not UV.
+/// failure is booked to the lure, and its **near-IR** expectation falls while cyan stays innate.
+/// Control (the lure's near-IR off): the same failure teaches cyan, not near-IR.
 #[test]
-fn a_visit_to_a_lure_with_no_nectar_marks_a_failed_uv_visit() {
+fn a_visit_to_a_lure_with_no_nectar_marks_a_failed_nir_visit() {
     let world = clock_off(403);
     let flora = Flora::new(FloraConfig::default());
-    let arm = |lure_uv: f64| {
-        let mut fauna = Fauna::new(config(lure_uv));
+    let arm = |lure_nir: f64| {
+        let mut fauna = Fauna::new(config(lure_nir));
         fauna.set_births_enabled(false);
         let bw = bellwing(&mut fauna, &world, BW_X);
         fauna.beacons.fixed(&world.view(), &flora.view(), Vec::new());
@@ -161,31 +161,31 @@ fn a_visit_to_a_lure_with_no_nectar_marks_a_failed_uv_visit() {
         let ring = f64::from(world.view().config.width) * VOXEL_M;
         let marked = p.marked(lx, lz, fauna.tick, fauna.config.light.mark_radius_m, ring);
         let failed = fauna.ledger.failed_visits[BW.index()][BeaconKind::Lure.index()];
-        (marked, failed, expectation(&fauna, bw, UV), expectation(&fauna, bw, CYAN), fauna.config.light)
+        (marked, failed, expectation(&fauna, bw, NIR), expectation(&fauna, bw, CYAN), fauna.config.light)
     };
-    let (marked, failed, uv, cyan, cfg) = arm(1.0);
+    let (marked, failed, nir, cyan, cfg) = arm(1.0);
     assert!(marked, "the lure's place is marked 'no reward here'");
     assert_eq!(failed, 1, "one failed visit, booked to the lure");
-    assert!(uv < cfg.uv_innate, "a failed UV visit: UV falls ({uv} < {})", cfg.uv_innate);
+    assert!(nir < cfg.nir_innate, "a failed near-IR visit: near-IR falls ({nir} < {})", cfg.nir_innate);
     assert_eq!(cyan, cfg.cyan_innate, "cyan untaught");
 
-    let (marked, failed, uv, cyan, cfg) = arm(0.0);
+    let (marked, failed, nir, cyan, cfg) = arm(0.0);
     assert!(marked && failed == 1, "control: marked and booked the same");
-    assert_eq!(uv, cfg.uv_innate, "control: the cyan lure leaves UV untaught");
+    assert_eq!(nir, cfg.nir_innate, "control: the cyan lure leaves near-IR untaught");
     assert!(cyan < cfg.cyan_innate, "control: cyan falls");
 }
 
-/// **A body without UV sees the lure as cyan**: a bellwing whose table lacks the `uv` channel
-/// reads the mimic lure exactly as the cyan lure — the same level as with the lure's UV off,
-/// below what a UV eye reads — and ranks it by cyan: having learned cyan does not pay, it
-/// passes the lure by though UV is innate; a UV eye in the same state is drawn.
+/// **A body without near-IR sees the lure as cyan**: a bellwing whose table lacks the `nir` channel
+/// reads the mimic lure exactly as the cyan lure — the same level as with the lure's near-IR off,
+/// below what a near-IR eye reads — and ranks it by cyan: having learned cyan does not pay, it
+/// passes the lure by though near-IR is innate; a near-IR eye in the same state is drawn.
 #[test]
-fn a_body_without_uv_sees_the_lure_as_cyan() {
+fn a_body_without_nir_sees_the_lure_as_cyan() {
     let world = clock_off(405);
     let flora = Flora::new(FloraConfig::default());
-    let arm = |lure_uv: f64, uv_eye: bool, cyan: f64| {
-        let mut c = config(lure_uv);
-        c.founders[BW.index()].senses.uv = uv_eye;
+    let arm = |lure_nir: f64, nir_eye: bool, cyan: f64| {
+        let mut c = config(lure_nir);
+        c.founders[BW.index()].senses.nir = nir_eye;
         let mut fauna = Fauna::new(c);
         let bw = bellwing(&mut fauna, &world, BW_X);
         fauna.beacons.fixed(&world.view(), &flora.view(), Vec::new());
@@ -195,20 +195,20 @@ fn a_body_without_uv_sees_the_lure_as_cyan() {
         (got, reading(&fauna, bw))
     };
     let cfg = config(1.0).light;
-    assert_eq!(BeaconKind::Lure.class_seen(&cfg, false), CYAN, "cyan to an eye without UV");
+    assert_eq!(BeaconKind::Lure.class_seen(&cfg, false), CYAN, "cyan to an eye without near-IR");
     // Cyan innate: every eye takes the lure; the level shows what each eye reads.
-    let (_, no_uv) = arm(1.0, false, cfg.cyan_innate);
+    let (_, no_nir) = arm(1.0, false, cfg.cyan_innate);
     let (_, cyan_lure) = arm(0.0, false, cfg.cyan_innate);
-    let (_, uv_eye) = arm(1.0, true, cfg.cyan_innate);
-    assert!(no_uv.beacon && no_uv.beacon_kind == BeaconKind::Lure.index() as u8, "{no_uv:?}");
-    assert_eq!(no_uv.beacon_level, cyan_lure.beacon_level, "without UV: the cyan lure's level");
-    assert!(uv_eye.beacon_level > no_uv.beacon_level, "a UV eye sees more of the mimic");
-    // Cyan learned not to pay: ranked by cyan, it passes the lure by; a UV eye does not.
+    let (_, nir_eye) = arm(1.0, true, cfg.cyan_innate);
+    assert!(no_nir.beacon && no_nir.beacon_kind == BeaconKind::Lure.index() as u8, "{no_nir:?}");
+    assert_eq!(no_nir.beacon_level, cyan_lure.beacon_level, "without near-IR: the cyan lure's level");
+    assert!(nir_eye.beacon_level > no_nir.beacon_level, "a near-IR eye sees more of the mimic");
+    // Cyan learned not to pay: ranked by cyan, it passes the lure by; a near-IR eye does not.
     let low = 0.5 * cfg.expect_min;
     let (got, l) = arm(1.0, false, low);
-    assert!(!l.beacon && got.is_none(), "without UV: passed by on cyan: {l:?}");
+    assert!(!l.beacon && got.is_none(), "without near-IR: passed by on cyan: {l:?}");
     let (got, l) = arm(1.0, true, low);
-    assert!(l.beacon && got.is_some(), "control, a UV eye: drawn on UV: {l:?}");
+    assert!(l.beacon && got.is_some(), "control, a near-IR eye: drawn on near-IR: {l:?}");
 }
 
 /// **The lure's scent** (`lure_scent`): a still lanternjaw with its lure lit gives off nectar
