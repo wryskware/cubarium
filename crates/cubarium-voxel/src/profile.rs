@@ -96,10 +96,16 @@ pub enum Phase {
     FaunaWindowRead,
     /// Inside `FaunaWindows`: the grids laid in bands and their lists joined.
     FaunaWindowLay,
+    /// Remote perception, including its spatial bins, inside `FaunaWindows`.
+    FaunaRemote,
+    /// A light/loom receptor refresh inside the serial reflexes.
+    FaunaLight,
+    /// The flyer nectar plume read inside the serial reflexes.
+    FaunaNectar,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 52] = [
+    pub const ALL: [Phase; 55] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -152,6 +158,9 @@ impl Phase {
         Phase::FaunaReflex,
         Phase::FaunaWindowRead,
         Phase::FaunaWindowLay,
+        Phase::FaunaRemote,
+        Phase::FaunaLight,
+        Phase::FaunaNectar,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -226,6 +235,9 @@ impl Phase {
             Phase::FaunaWindowRead => "      stand discs and pool tops (part of the windows)",
             Phase::FaunaWindowLay => "      grids laid and joined (part of the windows)",
             Phase::FaunaReflex => "    reflexes and held actions (part of sense)",
+            Phase::FaunaRemote => "      remote perception (part of windows)",
+            Phase::FaunaLight => "      light and loom (part of reflexes)",
+            Phase::FaunaNectar => "      nectar plume (part of reflexes)",
         }
     }
 }

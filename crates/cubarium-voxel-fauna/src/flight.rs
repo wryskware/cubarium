@@ -637,11 +637,46 @@ fn bloom_layer(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand) -> Optio
 /// top foliage layer) holding nectar, or a latticevine face in flower holding nectar and
 /// facing `p`. `(the bloom, its nectar stock)`; a stand wins a tie.
 pub(crate) fn bloom_in_reach(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64) -> Option<(Bloom, f64)> {
+    match bloom_candidates(view, fv, p, reach) {
+        Some(near) => bloom_in_reach_among(view, fv, p, reach, near.into_iter().map(|i| &fv.stands[i as usize])),
+        None => bloom_in_reach_among(view, fv, p, reach, fv.stands.iter()),
+    }
+}
+
+/// Every crown touching a column the mouth could reach. Keep the original stand order
+/// so equal-distance flowers still resolve the same way. A hand-built/unindexed view
+/// falls back to the complete scan.
+fn bloom_candidates(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64) -> Option<Vec<u32>> {
+    let c = view.config;
+    let v = c.voxel_m;
+    // Include the cell just below an exact lower boundary: touching its upper face is
+    // within reach too. The upper boundary already includes its touching cell.
+    let x0 = ((p.0 - reach) / v).ceil() as i64 - 1;
+    let x1 = ((p.0 + reach) / v).floor() as i64;
+    let z0 = (((p.2 - reach) / v).ceil() as i64 - 1).max(0);
+    let z1 = ((p.2 + reach) / v).floor() as i64;
+    let mut near = Vec::new();
+    for z in z0..=z1.min(i64::from(c.depth) - 1) {
+        for x in x0..=x1.min(x0 + i64::from(c.width) - 1) {
+            near.extend_from_slice(fv.stands_near(wrap(x, c.width), z as u32, c.width, c.depth)?);
+        }
+    }
+    near.sort_unstable();
+    near.dedup();
+    Some(near)
+}
+
+#[cfg(test)]
+pub(crate) fn bloom_in_reach_scan(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64) -> Option<(Bloom, f64)> {
+    bloom_in_reach_among(view, fv, p, reach, fv.stands.iter())
+}
+
+fn bloom_in_reach_among<'a>(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64, stands: impl Iterator<Item = &'a cubarium_voxel_flora::Stand>) -> Option<(Bloom, f64)> {
     let c = view.config;
     let v = c.voxel_m;
     let ring = f64::from(c.width) * v;
     let mut best: Option<(f64, Bloom, f64)> = None;
-    for stand in fv.stands.iter().filter(|s| s.nectar > 0.0) {
+    for stand in stands.filter(|s| s.nectar > 0.0) {
         let sx = (f64::from(stand.site.x) + 0.5) * v;
         let sz = (f64::from(stand.site.z) + 0.5) * v;
         let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, sx, sz, ring);

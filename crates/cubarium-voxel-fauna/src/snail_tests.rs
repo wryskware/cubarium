@@ -104,6 +104,52 @@ fn dry(width: u32, depth: u32) -> World {
     pond(width, depth, |_| 0.0)
 }
 
+#[test]
+fn nearby_water_on_support_faces_matches_the_voxel_sphere() {
+    let mut world = pond(12, 3, |x| if x == 0 || x == 6 { 0.5 } else { 0.0 });
+    world.apply(WorldCommand::SetMaterial { x: 6, y: 5, z: 1, material: Material::Rock });
+    world.apply(WorldCommand::AddWater { x: 6, y: 6, z: 1, volume_m3: 0.5 * V.powi(3) });
+    for _ in 0..2 {
+        let view = world.view();
+        let c = view.config;
+        for x in [-1, 0, 5, 12] {
+            for y in [0, 2, 3, 5, 7] {
+                for z in [0, 1, 2] {
+                    for margin in [0.0, 0.5 * V, V, 2.0 * V, 3.0 * V] {
+                        let k = (margin / V + 1e-9).floor() as i64;
+                        let r2 = (margin / V).powi(2) + 1e-9;
+                        let mut expected = view.standing_depth_m(x, y, z) > 0.0;
+                        if margin > 0.0 {
+                            // Enumerate the entire small fixture, independently of the
+                            // column query, and test the sphere's actual wet faces.
+                            for zz in 0..c.depth {
+                                for yy in 0..c.height {
+                                    for xx in 0..c.width {
+                                        let w = i64::from(c.width);
+                                        let dx = (i64::from(xx) - x + w / 2).rem_euclid(w) - w / 2;
+                                        let dy = i64::from(yy) - i64::from(y);
+                                        let dz = i64::from(zz) - i64::from(z);
+                                        if dx.abs() <= k && dy.abs() <= k && dz.abs() <= k
+                                            && (dx * dx + dy * dy + dz * dz) as f64 <= r2
+                                            && view.is_support(i64::from(xx), yy, zz)
+                                            && view.standing_depth_m(i64::from(xx), yy, zz) > 0.0
+                                        {
+                                            expected = true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        assert_eq!(crate::body::water_within(&view, x, y, z, margin), expected,
+                            "face {x},{y},{z}, margin {margin}");
+                    }
+                }
+            }
+        }
+        world.step();
+    }
+}
+
 fn site(x: u32, z: u32) -> Site {
     Site { x, y: 2, z }
 }

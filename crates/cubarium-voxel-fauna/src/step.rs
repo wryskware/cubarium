@@ -1198,6 +1198,12 @@ fn controllers(
         }
     }
     let fv = flora.view();
+    let full_observation: Vec<bool> = fauna.animals.iter().map(|a| !fauna.controllers.taste_only(a.id)).collect();
+    let uses_cone = |i: usize| {
+        fauna.animals[i].founder.is_some_and(|f| {
+            fauna.config.founder(f).flight.is_none() || full_observation[i]
+        })
+    };
     // The occupancies every due body's rays read: one grid of stand classes and ground
     // pools held across stages and patched where something moved (SPEED-MATURE,
     // `senses::LiveGrid`), with the bodies laid in two flavours — the v2 cone's one cell
@@ -1210,7 +1216,12 @@ fn controllers(
         .map(|f| f.manifest().cone_range_m > 0.0 && fauna.config.founder(f).active_hunter().is_none());
     let observers = due
         .iter()
-        .any(|&i| fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]));
+        .any(|&i| uses_cone(i) && fauna.animals[i].founder.is_some_and(|f| v2_cone[f.index()]));
+    // Every flyer reads the same pre-action flowers. Build their heads once per stage,
+    // only while a controller consumes its fan, and lend them to the parallel readers.
+    let blooms = due.iter().any(|&i| full_observation[i] && fauna.animals[i].founder
+        .is_some_and(|f| fauna.config.founder(f).flight.is_some()))
+        .then(|| crate::flight::Blooms::of(&fv));
     let mut held = senses.as_deref_mut().and_then(|s| s.take_cone());
     // The predation occupancy is read only while a hunter is in the world.
     let hunters_here = fauna
@@ -1220,7 +1231,7 @@ fn controllers(
     let predators = hunters_here
         && due
             .iter()
-            .any(|&i| fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0));
+            .any(|&i| uses_cone(i) && fauna.animals[i].founder.is_some_and(|f| f.manifest().cone_range_m > 0.0));
     let mut live = std::mem::take(&mut fauna.grid_scratch);
     let flat = observers && held.is_none();
     if predators || flat {
@@ -1263,7 +1274,7 @@ fn controllers(
                 predation_occupancy
             };
             let (obs, writes) =
-                body::observation_read(fauna, i, view, fv, &manifest, senses, occupancy);
+                body::observation_read(fauna, i, view, fv, &manifest, senses, occupancy, full_observation[i], blooms.as_ref());
             // Reject rather than train through: an observation with a non-finite channel
             // holds rest instead of reaching the controller at all.
             let (actions, lure, lift, driven) = match slot.as_deref_mut() {

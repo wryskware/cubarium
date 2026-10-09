@@ -205,7 +205,10 @@ impl Founder {
 
     /// This founder's fixed manifest.
     pub fn manifest(self) -> Manifest {
-        match self {
+        // The interface is fixed; rebuilding its default physiology for every cadence
+        // check and observation costs more than copying the resulting manifest.
+        static FIXED: std::sync::OnceLock<[Manifest; Founder::COUNT]> = std::sync::OnceLock::new();
+        FIXED.get_or_init(|| Founder::ALL.map(|founder| match founder {
             Founder::Blind => Manifest::blind(),
             Founder::Browser => Manifest::browser(),
             Founder::Lanternjaw => Manifest::lanternjaw(),
@@ -215,7 +218,7 @@ impl Founder {
             Founder::Bellwing => Manifest::bellwing(),
             Founder::Seedporter => Manifest::seedporter(),
             Founder::Chorister => Manifest::chorister(),
-        }
+        }))[self.index()]
     }
 }
 

@@ -2893,25 +2893,33 @@ pub(crate) fn water_within(view: &VoxelView<'_>, x: i64, y: u32, z: u32, margin_
     }
     let k = (margin_m / v + 1e-9).floor() as i64;
     let reach2 = (margin_m / v) * (margin_m / v) + 1e-9;
-    for dy in -k..=k {
-        let yy = i64::from(y) + dy;
-        if yy < 0 || yy >= i64::from(c.height) {
+    let lo = (i64::from(y) - k).max(0) as u32;
+    let hi = (i64::from(y) + k).min(i64::from(c.height) - 1) as u32;
+    // Standing water can occur only on support faces. Enumerate those with the
+    // terrain's column bits instead of visiting every solid and air voxel in the sphere.
+    for dz in -k..=k {
+        let zz = i64::from(z) + dz;
+        if zz < 0 || zz >= i64::from(c.depth) {
             continue;
         }
-        for dz in -k..=k {
-            let zz = i64::from(z) + dz;
-            if zz < 0 || zz >= i64::from(c.depth) {
+        for dx in -k..=k {
+            let horizontal = dx * dx + dz * dz;
+            if horizontal as f64 > reach2 {
                 continue;
             }
-            for dx in -k..=k {
-                if (dx * dx + dy * dy + dz * dz) as f64 > reach2 || (dx, dy, dz) == (0, 0, 0) {
-                    continue;
-                }
-                let xx = (x + dx).rem_euclid(i64::from(c.width));
-                let (yy, zz) = (yy as u32, zz as u32);
-                if view.is_support(xx, yy, zz) && view.standing_depth_m(xx, yy, zz) > 0.0 {
+            let xx = (x + dx).rem_euclid(i64::from(c.width));
+            let mut from = lo;
+            while let Some(yy) = view.lowest_support_in(xx, zz as u32, from, hi) {
+                let dy = i64::from(yy) - i64::from(y);
+                if (horizontal + dy * dy) as f64 <= reach2 && (dx, dy, dz) != (0, 0, 0)
+                    && view.standing_depth_m(xx, yy, zz as u32) > 0.0
+                {
                     return true;
                 }
+                if yy == hi {
+                    break;
+                }
+                from = yy + 1;
             }
         }
     }
@@ -4243,7 +4251,7 @@ pub(crate) fn observation(
     senses: Option<&mut crate::Senses>,
     cone_occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Vec<f64> {
-    let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy);
+    let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy, true, None);
     if let Some(s) = senses {
         writes.apply(s, view);
     }
@@ -4262,6 +4270,8 @@ pub(crate) fn observation_read(
     manifest: &Manifest,
     senses: Option<&crate::Senses>,
     cone_occupancy: Option<crate::senses::Occ<'_>>,
+    full_observation: bool,
+    blooms: Option<&crate::flight::Blooms>,
 ) -> (Vec<f64>, crate::senses::SenseWrites) {
     let mut writes = crate::senses::SenseWrites::default();
     let a = &fauna.animals[i];
@@ -4270,7 +4280,7 @@ pub(crate) fn observation_read(
         .expect("an observation is built for a founder body");
     let phys = fauna.config.founder(founder);
     if let Some(flight) = phys.flight {
-        return (flyer_observation(fauna, i, view, fv, manifest, cone_occupancy, &flight), writes);
+        return (flyer_observation(fauna, i, view, fv, manifest, cone_occupancy, &flight, full_observation, blooms), writes);
     }
     // The body this animal actually has right now: the anchors below are fractions of
     // it, so a growing founder's eye, mouth and receptors rise with it (decisions §1).
@@ -4454,12 +4464,30 @@ fn flyer_observation(
     manifest: &Manifest,
     cone_occupancy: Option<crate::senses::Occ<'_>>,
     flight: &crate::Flight,
+    full_observation: bool,
+    blooms: Option<&crate::flight::Blooms>,
 ) -> Vec<f64> {
     let a = &fauna.animals[i];
     let phys = fauna.config.founder(a.founder.expect("a founder body"));
     let body = phys.body_at(a.body);
     let v = view.config.voxel_m;
     let mut obs = vec![0.0; manifest.inputs()];
+    let shape = crate::flight::Shape::of(phys, flight, a.body);
+    let tm = module(manifest, "Taste(1)");
+    let reach = shape.r + body.mouth_reach_m;
+    if let Some((_, stock)) =
+        crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(a, shape), reach)
+    {
+        let reference = phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config);
+        let c = if reference > 0.0 { (stock / reference).min(1.0) } else { 1.0 };
+        let sat = manifest.tunings.chem_saturation;
+        obs[tm.offset] = clamp01(c / (c + sat));
+        obs[tm.offset + 1] = resistance_of(manifest, "nectar");
+        obs[tm.offset + 2] = 1.0;
+    }
+    if !full_observation {
+        return obs;
+    }
     let fb = &a.founder_state.feedback;
     let k = phys.mass_scale;
     obs[0] = clamp01(a.energy / (manifest.adult_energy_reference * k));
@@ -4481,7 +4509,6 @@ fn flyer_observation(
     }
 
     let am = module(manifest, "Air");
-    let shape = crate::flight::Shape::of(phys, flight, a.body);
     obs[am.offset] = f64::from(a.mobility.mode == crate::MobilityMode::Perched);
     obs[am.offset + 1] = f64::from(
         a.mobility.mode == crate::MobilityMode::Perched
@@ -4501,19 +4528,6 @@ fn flyer_observation(
         view.weather.mode == cubarium_voxel::weather::RainMode::Downpour || a.mobility.rain_grounded,
     );
 
-    let tm = module(manifest, "Taste(1)");
-    let reach = shape.r + body.mouth_reach_m;
-    if let Some((_, stock)) =
-        crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(a, shape), reach)
-    {
-        let reference = phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config);
-        let c = if reference > 0.0 { (stock / reference).min(1.0) } else { 1.0 };
-        let sat = manifest.tunings.chem_saturation;
-        obs[tm.offset] = clamp01(c / (c + sat));
-        obs[tm.offset + 1] = resistance_of(manifest, "nectar");
-        obs[tm.offset + 2] = 1.0;
-    }
-
     if let Some(fm) = module_opt(manifest, "Fan(3, bloom/foliage/body)") {
         let owned;
         let occupancy = match cone_occupancy {
@@ -4532,7 +4546,14 @@ fn flyer_observation(
         let origin = crate::flight::eye(a, &body);
         let range = manifest.cone_range_m;
         let rays = (manifest.ray_yaw_offsets_deg.len() * manifest.ray_pitch_offsets_deg.len()) as f64;
-        let blooms = crate::flight::Blooms::of(fv);
+        let owned_blooms;
+        let blooms = match blooms {
+            Some(blooms) => blooms,
+            None => {
+                owned_blooms = crate::flight::Blooms::of(fv);
+                &owned_blooms
+            }
+        };
         for (si, &centre) in manifest.sector_centres_deg.iter().enumerate().take(3) {
             let (mut clear, mut hit, mut hit_prox) = (0u32, 0u32, 0.0f64);
             let mut count = [0u32; 3];
@@ -4540,7 +4561,7 @@ fn flyer_observation(
             for &oyaw in manifest.ray_yaw_offsets_deg {
                 for &opitch in manifest.ray_pitch_offsets_deg {
                     let dir = crate::senses::ray_direction(a.pose.heading_rad, centre, oyaw, opitch);
-                    match crate::flight::fan_first_hit(view, fv, &blooms, &occupancy, a.id, origin, dir, range) {
+                    match crate::flight::fan_first_hit(view, fv, blooms, &occupancy, a.id, origin, dir, range) {
                         None => clear += 1,
                         Some((d, h)) => {
                             let p = (1.0 - d / range).clamp(0.0, 1.0);
