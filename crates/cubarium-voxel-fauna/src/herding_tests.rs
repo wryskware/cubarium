@@ -148,7 +148,7 @@ fn walk_with(pull: f64, start_m: f64, secs: u32) -> (f64, u64) {
     drive(&mut f, k, 0.0, false);
     let teachers = f.config.teachers;
     f.controllers.set(g, crate::heuristic(GRAZER, teachers));
-    assert!(f.controllers.flees(g), "fixture: the subject runs its own heuristic");
+    assert!(f.controllers.layer(g) == crate::Layer::Heuristic, "fixture: the subject runs its own heuristic");
     let mut flora = Flora::new(FloraConfig::default());
     let ring = ring(&w);
     let (mut sum, ticks) = (0.0, secs * crate::TICK_HZ);

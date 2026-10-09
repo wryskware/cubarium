@@ -372,8 +372,8 @@ impl crate::Controller for StillReflexive {
         crate::Response::Bounded(Actions { forward: 0.0, turn: 0.0, feed: 0.0 })
     }
     fn reset(&mut self) {}
-    fn flees(&self) -> bool {
-        true
+    fn layer(&self) -> crate::Layer {
+        crate::Layer::Heuristic
     }
 }
 

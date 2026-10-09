@@ -93,7 +93,9 @@ fn in_unified_mode_the_centre_moves_after_each_window() {
         2,
         "two windows in a 100-tick horizon of 50-tick windows"
     );
+    let mut any_update = false;
     for f in crate::es::voxel::TRAINED_LINEAGES {
+        let mut all_zero = true;
         let keys: Vec<u64> = windows
             .iter()
             .map(|w| {
@@ -108,15 +110,20 @@ fn in_unified_mode_the_centre_moves_after_each_window() {
                     w.window,
                     l.bodies
                 );
-                assert!(l.update_rms > 0.0, "{f:?} window {} took no step", w.window);
+                all_zero &= l.update_rms == 0.0;
                 l.centre_key
             })
             .collect();
-        assert_ne!(
-            keys[0], keys[1],
-            "{f:?}: the second window runs a moved centre"
-        );
+        // Body actions can make both variants equally successful (a hunkered
+        // grazer holds still). Zero gradients correctly leave that centre fixed.
+        if all_zero {
+            assert_eq!(keys[0], keys[1], "{f:?}: zero gradients leave the centre fixed");
+        } else {
+            any_update = true;
+            assert_ne!(keys[0], keys[1], "{f:?}: the second window runs a moved centre");
+        }
     }
+    assert!(any_update, "the responsive lineage exercises the centre update");
     assert_eq!(windows[1].brain_step, windows[0].brain_step + 1);
 }
 

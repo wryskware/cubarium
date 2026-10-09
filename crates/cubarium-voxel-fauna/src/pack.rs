@@ -360,7 +360,7 @@ pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) 
     let (Some(m), Some(t)) = (a.pack, table(fauna, &a)) else {
         return false;
     };
-    if m.pup || !fauna.controllers.pack_tactic(a.id) {
+    if m.pup || fauna.controllers.layer(a.id) != crate::Layer::Heuristic {
         return false;
     }
     let Some(den) = fauna.pack(m.pack).map(|p| p.den) else {

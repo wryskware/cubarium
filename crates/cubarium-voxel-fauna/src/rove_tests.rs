@@ -279,3 +279,31 @@ fn a_zero_lead_budget_follows_a_lead_on() {
     }
     assert_eq!(c.fauna.lead_give_ups()[GRAZER.index()], 0);
 }
+
+/// LEADS-PAY is shared, while the heuristic's no-signal search never directs a brain.
+#[test]
+fn brain_leads_give_up_but_no_signal_movement_stays_its_own() {
+    let mut c = Case::new(lead_config(2.0), true);
+    let manifest = GRAZER.manifest();
+    let mut obs = vec![0.0; manifest.inputs()];
+    let answer = crate::Resolved { actions: WANDER, ..crate::Resolved::default() };
+    for _ in 0..c.samples(c.fauna.config.teachers.search_patience_s) {
+        let seek = crate::step::brain_seek(&manifest, &obs, answer, &c.fauna.config.teachers);
+        assert_eq!(seek, Seek::Unknown);
+        assert!(c.sample(seek).is_none(), "no heuristic search over a brain");
+    }
+    let cone = manifest.modules.iter().find(|m| m.name == "Cone(3, foliage/body)").expect("sight");
+    obs[cone.offset + 8] = 1.0;
+    let seek = crate::step::brain_seek(&manifest, &obs, answer, &c.fauna.config.teachers);
+    assert_eq!(seek, Seek::Lead, "a sensed food lead without feed held");
+    assert!(c.sample(seek).is_none());
+    assert!(c.sample(seek).is_some(), "the same body's configured lead budget applies");
+    assert_eq!(c.fauna.lead_give_ups()[GRAZER.index()], 1);
+    let taste = manifest.modules.iter().find(|m| m.name == "Taste(1)").expect("taste");
+    obs[taste.offset] = 1.0;
+    obs[taste.offset + 2] = 1.0;
+    let seek = crate::step::brain_seek(&manifest, &obs, answer, &c.fauna.config.teachers);
+    assert_eq!(seek, Seek::Taste);
+    assert!(c.sample(seek).is_none());
+    assert_eq!(c.fauna.lead_seconds(c.id), 0.0);
+}

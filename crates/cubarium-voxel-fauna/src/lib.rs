@@ -113,7 +113,7 @@ pub use den::{DenQuality, den_quality};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, Seek, heuristic, resolve_actions,
-    BodyActions, Resolved, resolve,
+    BodyActions, Layer, Resolved, resolve,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
@@ -3943,7 +3943,7 @@ pub struct Held {
 ///   adapter, before any reflex (the hybrid's option 0 clones this).
 /// - `executed` is what the write side **held** after every layer (B's clone fits this):
 ///   the actions, the lure and the lift as held, and the hunker and retraction the body is
-///   in. The sprint is P2's (the gait decides it after this stage) and reads 0.
+///   in. The gait finalizes the sprint and bounded forward label on the same tick.
 /// - `steer` is the layer that set it ([`Steer`]); [`Steer::Heuristic`] means no override,
 ///   and then `own == executed` but for the stop-and-go pace and the body's states.
 #[derive(Clone, Debug, PartialEq)]
@@ -3975,6 +3975,16 @@ impl ActionTap {
     /// A recording from per-body streams (tools and tests that read a saved one).
     pub fn from_streams(streams: impl IntoIterator<Item = (u64, Founder, Vec<TapSample>)>) -> ActionTap {
         ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect() }
+    }
+
+    /// Finalize only this tick's sample, after the motor's stamina gate runs.
+    pub(crate) fn gait(&mut self, id: u64, tick: u64, forward: f64, top: f64) {
+        if let Some((_, samples)) = self.streams.get_mut(&id)
+            && let Some(sample) = samples.last_mut().filter(|s| s.tick == tick)
+        {
+            sample.executed.body.sprint = if top > 1.0 { ((forward - 1.0) / (top - 1.0)).clamp(0.0, 1.0) } else { 0.0 };
+            sample.executed.actions.forward = forward.min(1.0);
+        }
     }
 
     pub(crate) fn push(&mut self, id: u64, founder: Founder, sample: TapSample) {

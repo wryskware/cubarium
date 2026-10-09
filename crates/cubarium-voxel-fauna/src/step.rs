@@ -783,7 +783,7 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
                 if phys.glider.is_some()
                     && !downpour
                     && fauna.animals[i].state != State::Asleep
-                    && fauna.controllers.flees(fauna.animals[i].id)
+                    && (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic)
                     && glider::better_roost(fauna, i, view, fv).is_some() =>
             {
                 None
@@ -1183,19 +1183,36 @@ pub(crate) fn hunger(a: &Animal, sc: &SpeciesConfig) -> f64 {
     (1.0 - fed / cap).clamp(0.0, 1.0)
 }
 
-/// One due body's read side of the controller stage: its manifest, what its observation
-/// would have written into the senses, and its controller's resolved answer (`driven`
-/// false — rest — without a controller or with a non-finite observation).
+/// LEADS-PAY also binds a brain following sensed food or attempting to feed while
+/// moving. It never classifies a brain's no-signal movement as heuristic search.
+fn brain_seek(manifest: &crate::Manifest, obs: &[f64], answer: crate::Resolved, teachers: &crate::TeacherConfig) -> crate::Seek {
+    let taste = manifest.modules.iter().find(|m| m.name == "Taste(1)");
+    if taste.is_some_and(|m| obs[m.offset + 2] > 0.5 && obs[m.offset] > teachers.feed_gate) {
+        return crate::Seek::Taste;
+    }
+    let moving = answer.actions.forward > 0.0 || answer.body.lift != 0.0;
+    let food = manifest.modules.iter().any(|m| match m.name {
+        name if name.starts_with("Chem(") || name == "Scent(nectar)" || name == "Scent(carrion)" => obs[m.offset] > 0.0,
+        "Cone(3, foliage/body)" => (0..3).any(|ray| obs[m.offset + ray * 6 + 2] > 0.0),
+        "Fan(3, bloom/foliage/body)" => (0..3).any(|ray| obs[m.offset + ray * 8 + 2] > 0.0),
+        _ => false,
+    });
+    if moving && (answer.actions.feed > 0.0 || food) { crate::Seek::Lead } else { crate::Seek::Unknown }
+}
+
+/// One due body's read side: its manifest, pending sense writes and resolved response.
 struct Sensed {
     manifest: crate::manifest::Manifest,
     writes: crate::senses::SenseWrites,
     actions: Actions,
     lure: f64,
     lift: f64,
+    seek: crate::Seek,
+    body_controlled: bool,
     driven: bool,
-    /// The executed-action tap's (P0): the observation sampled, and the body actions its
-    /// controller's answer resolved to. `None` and zero while the tap is off.
+    /// The tap's observation sampled; `None` while the tap is off.
     tapped: Option<Vec<f64>>,
+    /// Body actions are held even when no tap records.
     body: crate::controller::BodyActions,
 }
 
@@ -1403,15 +1420,28 @@ fn controllers(
                     .collect::<Vec<f64>>();
                 &masked
             };
-            let (resolved, lure, lift, driven) = match slot.as_deref_mut() {
+            let (resolved, seek, body_controlled, driven) = match slot.as_deref_mut() {
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
                     let response = c.drive(seen);
-                    (crate::controller::resolve(response, &manifest), c.lure(), c.lift(), true)
+                    {
+                        let body_controlled = match response {
+                            crate::Response::Body(_, _) => true,
+                            crate::Response::Logits(l) => l[3..manifest.actions.len()].iter().any(|&v| v != f64::MIN),
+                            crate::Response::Bounded(_) => false,
+                        };
+                        let resolved = crate::controller::resolve(response, &manifest);
+                        let seek = if c.layer() == crate::Layer::Heuristic {
+                            c.seek()
+                        } else {
+                            brain_seek(&manifest, &obs, resolved, &fauna.config.teachers)
+                        };
+                        (resolved, seek, body_controlled, true)
+                    }
                 }
-                _ => (crate::controller::Resolved::default(), 0.0, 0.0, false),
+                _ => (crate::controller::Resolved::default(), crate::Seek::Unknown, false, false),
             };
             let tapped = tap.then_some(obs);
-            Sensed { manifest, writes, actions: resolved.actions, lure, lift, driven, tapped, body: resolved.body }
+            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body }
         };
         // Several jobs per worker: one body's observation can cost many another's (a
         // flyer's fan), and the pool evens that out as workers come free.
@@ -1449,6 +1479,12 @@ fn controllers(
         let Sensed { ref manifest, actions, lure, lift, driven, .. } = sensed[k];
         let (mut actions, mut lure, mut lift) = (actions, lure, lift);
         let own = (actions, lure, lift);
+        let heuristic = fauna.controllers.layer(id) == crate::Layer::Heuristic;
+        let flyer = heuristic && fauna.config.founder(founder).flight.is_some();
+        let prey = heuristic && !flyer && !matches!(founder, crate::Founder::Lanternjaw | crate::Founder::Chorister);
+        let forager = prey || flyer;
+        let patrol = heuristic && founder == crate::Founder::Lanternjaw;
+        let pack = heuristic && founder == crate::Founder::Chorister;
         // EDGE's readout: which layer sets the held actions, the last override winning.
         let mut src = if driven { crate::Steer::Heuristic } else { crate::Steer::Rest };
         // EDGE: the interval just ended pressed (held forward, its motor refused), on the
@@ -1470,15 +1506,31 @@ fn controllers(
         // after its last taste of food, ranges on straight legs away from ground it has
         // covered wherever its own answer is its no-signal search. First, so every layer
         // below still wins; a layer that overrides a leg's steering ends it (below).
+        // Brains share only LEADS-PAY here: brain_seek never requests no-signal search.
         let mut searched = None;
-        if driven && (fauna.controllers.flees(id) || fauna.controllers.rests_when_fed(id)) {
-            let seek = fauna.controllers.seek(id);
+        if driven && (forager || !heuristic) {
+            let seek = sensed[k].seek;
             let ring = f64::from(view.config.width) * view.config.voxel_m;
             let period_s = manifest.cadence_ticks().max(1) as f64 * DT;
             if let Some(go) = rove::search(fauna, i, actions, seek, period_s, ring) {
                 actions = go;
                 src = crate::Steer::Search;
                 searched = Some(go);
+            }
+        }
+        if driven && !heuristic {
+            let body = sensed[k].body;
+            let top = crate::gait::sprint_forward(&fauna.config, founder);
+            if fauna.animals[i].mobility.mode == crate::MobilityMode::Ground && fauna.animals[i].mobility.climb.is_none() {
+                actions.forward *= 1.0 + body.sprint * (top - 1.0);
+            }
+            // A three-action diagnostic leaves a manually placed body pose alone.
+            // Explicit body responses (including zero) and full brain logits own it.
+            if sensed[k].body_controlled && crate::vigil::hunker_action(fauna, i, body.hunker) {
+                actions = Actions::REST;
+            }
+            if body.retract > 0.0 {
+                retract_action(fauna, i);
             }
         }
         // The prey heuristics' flee rule (predation §2.7): a body driven by its own
@@ -1489,7 +1541,7 @@ fn controllers(
         // A glider's fruit search (roster mechanics fix 4): hungry on the ground with no
         // fruit at its mouth, its heuristic gives way to a walk to the nearest fruiting
         // stand in reach. Flight from a threat and the roost come after it and win.
-        if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
+        if driven && prey && fauna.config.founder(founder).glider.is_some() {
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
             if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
@@ -1498,7 +1550,7 @@ fn controllers(
         }
         // FORAGE-LEAVE: a heuristic body holding still to feed on a patch that cannot end a
         // meal gives it up and walks on (`forage`). Flight and the reflexes below still win.
-        if driven && (fauna.controllers.flees(id) || fauna.controllers.rests_when_fed(id)) {
+        if driven && forager {
             let ring = f64::from(view.config.width) * view.config.voxel_m;
             if let Some(go) = forage::leave(fauna, i, actions, ring) {
                 actions = go;
@@ -1510,7 +1562,7 @@ fn controllers(
         // its comfort, leans its turn back toward them. Its pace and feeding stay its own;
         // flight and every reflex below still win. A bent search leg is still the leg.
         if driven
-            && fauna.controllers.flees(id)
+            && prey
             && matches!(src, crate::Steer::Heuristic | crate::Steer::Search | crate::Steer::Leave)
         {
             let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -1525,11 +1577,11 @@ fn controllers(
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
         // instead of fleeing: a threat it sees or feels stops and closes it.
         let retracts = fauna.config.founder(founder).amphibious.is_some_and(|am| am.retract_hold_s > 0.0);
-        if driven && hunters_here && retracts && fauna.controllers.flees(id) {
+        if driven && hunters_here && retracts && prey {
             retract(fauna, i);
         }
         let mut fled = false;
-        if driven && hunters_here && !retracts && fauna.controllers.flees(id) {
+        if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
                 lure = 0.0;
@@ -1540,7 +1592,7 @@ fn controllers(
         }
         // A glider's roost reflex (F3): at its rest hour or in a downpour, its own
         // heuristic gives way to a walk to the nearest crown it can climb.
-        if driven && fauna.controllers.flees(id) && fauna.config.founder(founder).glider.is_some() {
+        if driven && prey && fauna.config.founder(founder).glider.is_some() {
             if let Some(roost) = glider::roost_reflex(fauna, i, view, &fv, sky) {
                 actions = roost;
                 src = crate::Steer::Roost;
@@ -1549,7 +1601,7 @@ fn controllers(
         // Fed perching (the minimal gut's repair 3 item 8): a body whose controller rests
         // when fed (the bellwing's hover-sip teacher) and whose eating latch is off holds
         // still on its perch, or comes down onto what is below it, read from the latch.
-        if driven && fauna.controllers.rests_when_fed(id) && !fauna.animals[i].eating {
+        if driven && flyer && !fauna.animals[i].eating {
             actions = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
             lure = 0.0;
             src = crate::Steer::FedRest;
@@ -1561,7 +1613,7 @@ fn controllers(
         }
         // The shallows reflex (roster mechanics fix 2): a body in water deeper than it wades
         // heads for the nearest face it wades, over everything its heuristic asked.
-        if driven && fauna.controllers.flees(id) {
+        if driven && prey {
             if let Some(out) = shallows_reflex(fauna, i, view) {
                 actions = out;
                 lure = 0.0;
@@ -1572,7 +1624,7 @@ fn controllers(
         // SNAIL-FIX: the roam drive. At night and in or after rain, an amphibious body
         // that is not thirsty and not feeding where it stands walks out onto wet ground,
         // to land film where there is any.
-        if driven && fauna.controllers.flees(id) {
+        if driven && prey {
             if let Some(go) = roam_reflex(fauna, i, view, &fv, sky, actions) {
                 actions = go;
                 lure = 0.0;
@@ -1583,7 +1635,7 @@ fn controllers(
         // SNAIL-LAND-2: the giving-up density. A grazer wanting food on a grazed face (its
         // edible film under `graze_give_up` of a site's capacity) walks to a richer face in
         // reach.
-        if driven && fauna.controllers.flees(id) {
+        if driven && prey {
             if let Some(go) = graze_reflex(fauna, i, view, &fv, sky) {
                 actions = go;
                 lure = 0.0;
@@ -1593,7 +1645,7 @@ fn controllers(
         // SNAIL-LAND: a ready layer whose eggs go on the shore walks to a shore egg face
         // its drying clock can afford, and outside its roam hours one ashore that is not
         // ready goes back to the water. Thirst (below) still wins.
-        if driven && fauna.controllers.flees(id) {
+        if driven && prey {
             if let Some(go) = shore_reflex(fauna, i, view, sky) {
                 actions = go;
                 lure = 0.0;
@@ -1601,7 +1653,7 @@ fn controllers(
             }
         }
         // AMPHIBIOUS-SNAIL: a thirsty body out of water heads for the nearest water.
-        if driven && fauna.controllers.flees(id) {
+        if driven && prey {
             if let Some(go) = water_reflex(fauna, i, view) {
                 actions = go;
                 src = crate::Steer::Roam;
@@ -1619,7 +1671,7 @@ fn controllers(
         }
         if driven
             && !fled
-            && fauna.controllers.flees(id)
+            && prey
             && founder == crate::Founder::Seedporter
             && (!sky.clock_on || sky.daylight >= fauna.config.life.day_line)
         {
@@ -1630,7 +1682,7 @@ fn controllers(
         }
         // The detritus web D2: the lanternjaw's patrol (its heuristic only, while the
         // world's `hunt.patrol` is on). The carcass yield below still wins.
-        if driven && fauna.controllers.hunt_patrol(id) && !fauna.controllers.at_carcass(id) {
+        if driven && patrol && !fauna.controllers.at_carcass(id) {
             if let Some((go, lit)) =
                 crate::hunt::steer(fauna, i, view, &fv, predation_occupancy)
             {
@@ -1658,7 +1710,7 @@ fn controllers(
         }
         // R3: the lanternjaw's carcass yield (its heuristic only), and the chorister's
         // scripted pack tactic.
-        if driven && hunters_here {
+        if driven && heuristic && hunters_here {
             let at_carcass = fauna.controllers.at_carcass(id);
             if at_carcass || fauna.animals[i].yielding {
                 let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -1669,7 +1721,7 @@ fn controllers(
                 }
             }
         }
-        if driven && fauna.controllers.pack_tactic(id) {
+        if driven && pack {
             if let Some(tactic) =
                 crate::pack::steer(fauna, i, view, &fv, sky.clock_on, sky.daylight, actions, predation_occupancy)
             {
@@ -1681,7 +1733,7 @@ fn controllers(
         // VINE-C: a flyer nesting in the vines, ready to lay, holds at a vine nest site or flies
         // to one it can find (over its own heuristic only, the hover-sip teacher); the light
         // below still turns it from a looming shadow and a hungry one to food.
-        if driven && !fled && fauna.controllers.rests_when_fed(id) {
+        if driven && !fled && flyer {
             if let Some((go, up)) = nest_reflex(fauna, i, view, flora) {
                 actions = go;
                 lift = up;
@@ -1698,8 +1750,8 @@ fn controllers(
         if driven && !fled {
             let phys = *fauna.config.founder(founder);
             let table = phys.senses;
-            let heuristic = if phys.flight.is_some() { fauna.controllers.rests_when_fed(id) } else { fauna.controllers.flees(id) };
-            if heuristic && table.live && (table.light_m > 0.0 || table.loom_m > 0.0) {
+            let light_heuristic = if phys.flight.is_some() { flyer } else { prey };
+            if light_heuristic && table.live && (table.light_m > 0.0 || table.loom_m > 0.0) {
                 let daylight = if sky.clock_on { sky.daylight } else { 1.0 };
                 if phys.flight.is_some() {
                     if let Some((go, up)) = crate::light::steer_flyer(fauna, i, view, &fv, daylight, actions, lift) {
@@ -1727,7 +1779,7 @@ fn controllers(
             }
         }
         // The stay-on-food readout: a heuristic body holding still to feed.
-        if driven && fauna.controllers.flees(id) && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
+        if driven && prey && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
             fauna.ledger.feed_still_ticks_by_founder[founder.index()] += 1;
         }
         // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
@@ -1761,7 +1813,7 @@ fn controllers(
         // steering moves in bouts with pauses to look and listen; flight and every directed
         // reflex above keep their pace. After the search leg's check, so a pause does not end
         // the leg.
-        if driven && !fled && (fauna.controllers.flees(id) || fauna.controllers.pack_tactic(id)) {
+        if driven && !fled && (prey || pack) {
             let period = manifest.cadence_ticks().max(1);
             actions = pace(fauna, i, view.config.seed, src, actions, period);
         }
@@ -1934,8 +1986,6 @@ pub(crate) fn refuge_step(
 /// retracts.
 fn retract(fauna: &mut Fauna, i: usize) {
     let a = fauna.animals[i];
-    let Some(founder) = a.founder else { return };
-    let Some(am) = fauna.config.founder(founder).amphibious else { return };
     let window = fauna.config.perception.stagger_ticks();
     let now = fauna.tick;
     let Some(p) = crate::perception::percept(fauna, a.id) else { return };
@@ -1947,11 +1997,21 @@ fn retract(fauna: &mut Fauna, i: usize) {
     if !threat {
         return;
     }
+    retract_action(fauna, i);
+}
+
+/// Enter/renew retraction for its minimum hold, independently of the policy layer.
+fn retract_action(fauna: &mut Fauna, i: usize) {
+    let Some(founder) = fauna.animals[i].founder else { return };
+    let Some(am) = fauna.config.founder(founder).amphibious else { return };
+    if am.retract_hold_s <= 0.0 {
+        return;
+    }
     let m = &mut fauna.animals[i].mobility;
     if m.retract_ticks == 0 {
         fauna.ledger.retracts += 1;
     }
-    fauna.animals[i].mobility.retract_ticks = crate::Hunter::ticks(am.retract_hold_s);
+    m.retract_ticks = m.retract_ticks.max(crate::Hunter::ticks(am.retract_hold_s));
 }
 
 /// **The water reflex** (AMPHIBIOUS-SNAIL): a thirsty amphibious body out of water
@@ -2511,6 +2571,9 @@ fn founder_act(
     let manifest = fauna.config.manifest(founder);
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
+    if (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Brain && fauna.animals[i].hunkered) || fauna.animals[i].mobility.retract_ticks > 0 {
+        held = Actions::REST;
+    }
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
 
     // A carnivore's lit lure costs `lure_power` × its awake upkeep (predation §2.2). It
@@ -2527,6 +2590,9 @@ fn founder_act(
         match fauna.animals[i].strike {
             Some(s) if s.phase != StrikePhase::Recovery => {
                 strike_tick(fauna, i, view, &phys, h, seed, tick, hits);
+                if let Some(tap) = fauna.tap.as_mut() {
+                    tap.gait(fauna.animals[i].id, fauna.tick, 0.0, 1.0);
+                }
                 return;
             }
             Some(mut s) => {
@@ -3110,7 +3176,7 @@ fn prey_in_capsule(
     // The pack seam (R3): a pack member's window is its nearby adult packmates' body.
     let window = crate::pack::window_body(fauna, i, ring);
     // D2b: a patroller strikes only a prey its attack choice accepts this window.
-    let choosy = fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(a.id);
+    let choosy = fauna.config.hunt.patrol && (a.founder == Some(crate::Founder::Lanternjaw) && fauna.controllers.layer(a.id) == crate::Layer::Heuristic);
     let mut best: Option<(f64, u64)> = None;
     for o in &fauna.animals {
         if o.id == a.id
@@ -5735,6 +5801,10 @@ mod hunker_tests;
 #[cfg(test)]
 #[path = "gait_tests.rs"]
 mod gait_tests;
+
+#[cfg(test)]
+#[path = "body_actions_tests.rs"]
+mod body_actions_tests;
 #[cfg(test)]
 #[path = "testpass_vigil_tests.rs"]
 mod testpass_vigil_tests;
@@ -5806,7 +5876,7 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
             fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
             // D2b readout: a patroller's strike its choice did not accept.
             let choosy =
-                fauna.config.hunt.patrol && fauna.controllers.hunt_patrol(fauna.animals[i].id);
+                fauna.config.hunt.patrol && (founder == crate::Founder::Lanternjaw && fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic);
             if choosy
                 && !crate::hunt::accepts(
                     &fauna.config,

@@ -676,3 +676,31 @@ fn founding_faces_keep_the_disc_inside_the_strip() {
         assert!(z >= r - 1e-9 && z <= depth_m - r + 1e-9, "face {f:?}: centre {z} m, radius {r} m");
     }
 }
+
+/// Contract B leaves a brain's choice in deep water alone; the heuristic still
+/// takes its shallows reflex. Drowning and the motor's water limits remain physics.
+#[test]
+fn deep_water_steers_only_the_heuristic_layer() {
+    for layer in [crate::Layer::Brain, crate::Layer::Heuristic] {
+        let mut world = plain(64, 40, 24);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut cfg = FaunaConfig::default();
+        cfg.founders[LS.index()].active = crate::Activity::Always;
+        let mut fauna = Fauna::new(cfg);
+        fauna.set_births_enabled(false);
+        let id = on_ground(&mut fauna, &world, LS, 32, 12, 0.0, HUNGRY_ADULT);
+        if layer == crate::Layer::Heuristic {
+            heuristic(&mut fauna, id, LS);
+        } else {
+            fauna.set_controller(id, Box::new(crate::Scripted::new(vec![Actions::REST])));
+        }
+        water(&mut world, 20..=44, 6);
+        assert!(depth_at(&world, animal(&fauna, id).site) > wade(&fauna, id));
+        fauna.start_tap();
+        for _ in 0..LS.manifest().cadence_ticks() * 2 { fauna.step(&world, &mut flora); }
+        let tap = fauna.take_tap().expect("recording");
+        let sample = tap.stream(id).expect("sampled").last().expect("a sample");
+        assert_eq!(sample.steer == crate::Steer::Shallows, layer == crate::Layer::Heuristic);
+        if layer == crate::Layer::Brain { assert_eq!(sample.executed.actions, Actions::REST); }
+    }
+}

@@ -2,7 +2,7 @@
 //! drives it (`design/voxel-senses-phase1-plan.md`, "Phase-one body and action contract").
 //!
 //! A [`Controller`] receives **only the observation vector and its own private memory**
-//! and answers with the three local actions. It sees no world, no flora stock, no site,
+//! and answers with the local and body actions. It sees no world, no flora stock, no site,
 //! no heading and no clock: every world-derived quantity reaches it inside the vector, in
 //! the order the founder's [`Manifest`](crate::Manifest) declares, and nothing in the
 //! resolve path below can hand a policy a privileged target. That is the policy boundary
@@ -51,14 +51,18 @@ impl Actions {
 
 /// **The body's own actions** beyond forward, turn and feed (contract v3, proposal §2.3 B),
 /// each 0 for a lineage whose manifest does not declare it. Resolved by [`resolve`] from a
-/// network's logits; P2 wires each to the body (until then the step reads the lure and the
-/// lift through the interim seams, [`Controller::lure`] and [`Controller::lift`]).
+/// network's logits or a bounded response, then delivered through the body constraints.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BodyActions {
+    /// Fraction of the speed margin from cruise to the lineage's sprint, before stamina.
     pub sprint: f64,
+    /// Nonzero after deadband enters/holds the shield pose; zero releases it.
     pub hunker: f64,
+    /// Nonzero renews the body's minimum retraction hold.
     pub retract: f64,
+    /// Lure light, limited by daylight and the eating latch.
     pub lure: f64,
+    /// Signed vertical flight effort.
     pub lift: f64,
 }
 
@@ -78,6 +82,8 @@ pub struct Resolved {
 pub enum Response {
     /// Actions already inside the manifest's bounds, from a diagnostic controller.
     Bounded(Actions),
+    /// Bounded local and body actions, from a teacher or diagnostic controller.
+    Body(Actions, BodyActions),
     /// Unbounded logits from a network controller: the manifest's actions in its order,
     /// then its option head ([`Manifest::outputs`]); slots past those are not read. The
     /// adapter applies the manifest's transfer per action before the deadband.
@@ -85,6 +91,11 @@ pub enum Response {
 }
 
 impl Response {
+    /// Attach bounded body actions to a bounded local response.
+    pub fn with_body(actions: Actions, body: BodyActions) -> Response {
+        Response::Body(actions, body)
+    }
+
     /// A network's outputs as a response: `outputs` in manifest order, at most
     /// [`crate::manifest::MAX_OUTPUTS`] (more is a shape error in the caller).
     pub fn logits(outputs: &[f64]) -> Response {
@@ -94,7 +105,10 @@ impl Response {
             outputs.len(),
             crate::manifest::MAX_OUTPUTS
         );
-        let mut l = [0.0; crate::manifest::MAX_OUTPUTS];
+        // An absent action is refused by the adapter, rather than becoming a half
+        // effort through sigmoid(0). In particular, three-output diagnostic nets
+        // must not hunker or sprint while the nine-shape runtime is being wired.
+        let mut l = [f64::MIN; crate::manifest::MAX_OUTPUTS];
         l[..outputs.len()].copy_from_slice(outputs);
         Response::Logits(l)
     }
@@ -123,40 +137,10 @@ pub trait Controller: Send + Sync {
         false
     }
 
-    /// The **lure** effort (`[0, 1]`) this controller holds after its last [`drive`]: the
-    /// lanternjaw manifest's fourth action (predation §2.2). An interim seam — P2's
-    /// contract v3 carries it in the response — so every controller that is not a
-    /// lanternjaw's answers 0, and the body only reads it for a carnivore.
-    ///
-    /// [`drive`]: Controller::drive
-    fn lure(&self) -> f64 {
-        0.0
-    }
-
-    /// The **lift** effort (`[-1, 1]`, vertical) this controller holds after its last
-    /// [`drive`]: a flyer manifest's fourth action (F1, predation-and-flight §3.3), the
-    /// lure's seam until P2's contract v3 carries it in the response. Every controller
-    /// that is not a flyer's answers 0, and the body only reads it for a flyer.
-    ///
-    /// [`drive`]: Controller::drive
-    fn lift(&self) -> f64 {
-        0.0
-    }
-
-    /// Whether the tick applies the **prey flee rule** to this controller's body
-    /// (predation §2.7) while a hunter is in the world: the prey heuristics say yes, and
-    /// nothing else does — a trained policy's behaviour changes only through the world,
-    /// and a test's scripted control is left exactly as scripted.
-    fn flees(&self) -> bool {
-        false
-    }
-
-    /// Whether the tick applies the **scripted pack tactic** (roster R3) to this
-    /// controller's body: the chorister's heuristic says yes, and nothing else does. The
-    /// tactic reads the pack (den, target, packmates) and overrides the held actions as the
-    /// flee rule does; a trained policy or a test's scripted control is left as it is.
-    fn pack_tactic(&self) -> bool {
-        false
+    /// The declared reflex layer. Brains and diagnostic scripts receive only body
+    /// constraints; the live teachers opt into the complete heuristic layer.
+    fn layer(&self) -> Layer {
+        Layer::Brain
     }
 
     /// Whether this controller's body is **at a carcass** after its last [`drive`]: eating
@@ -165,23 +149,6 @@ pub trait Controller: Send + Sync {
     ///
     /// [`drive`]: Controller::drive
     fn at_carcass(&self) -> bool {
-        false
-    }
-
-    /// Whether the tick applies the **lanternjaw's patrol** (the detritus web D2,
-    /// `crate::hunt`) to this controller's body: the lanternjaw's heuristic says yes, and
-    /// nothing else does. The patrol reads the world (its prey's food, the bodies it sees
-    /// and the tremor it feels) and overrides the held actions as the pack tactic does,
-    /// while the world's [`crate::HuntConfig::patrol`] is on.
-    fn hunt_patrol(&self) -> bool {
-        false
-    }
-
-    /// Whether this controller's body **rests when fed** (the minimal gut's repair 3 item
-    /// 8): the bellwing's hover-sip teacher answers yes, and the tick's controller stage
-    /// then perches and rests the body while its eating latch is off — the satiety the
-    /// teacher cannot observe. Every other controller answers `false`.
-    fn rests_when_fed(&self) -> bool {
         false
     }
 
@@ -201,6 +168,19 @@ pub trait Controller: Send + Sync {
     fn reads_tail(&self) -> bool {
         true
     }
+}
+
+/// **The reflex contract** (v3 B, P4). Both layers retain sleep (gliders only
+/// perched), DROP, stamina, eating latch, pup strike refusal, sunlit lure refusal,
+/// TRAPS and LEADS-PAY, plus the body's motion, wounds and retraction physics.
+/// Only `Heuristic` adds flee/refuge/hunker choice, herding, search, fruit walks,
+/// roosts, shallows, snail trips, fed perching, nests, light steering, patrol,
+/// carcass yield, pack tactics and stop-and-go cadence. Hybrid options are P8.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layer {
+    Heuristic,
+    #[default]
+    Brain,
 }
 
 /// HUNGRY-SEARCH: what a foraging heuristic's last answer was for ([`Controller::seek`]).
@@ -232,8 +212,8 @@ pub fn resolve_actions(response: Response, manifest: &Manifest) -> Actions {
 /// transferred (logits), clamped into its bounds and deadbanded — the `[0, 1]` ones below
 /// the deadband to 0, the signed ones on their magnitude — and routed by its name; the
 /// option head's logits follow the actions, and the option is the largest (the first on a
-/// tie; a non-finite logit never wins). A bounded response carries only the three local
-/// actions, so its body actions are 0 and it chooses no option.
+/// tie; a non-finite logit never wins). Bounded responses choose no option; a plain
+/// `Bounded` response has zero body actions.
 pub fn resolve(response: Response, manifest: &Manifest) -> Resolved {
     let deadband = manifest.deadband;
     let mut out = Resolved::default();
@@ -253,9 +233,24 @@ pub fn resolve(response: Response, manifest: &Manifest) -> Resolved {
         Transfer::Tanh => deadband_sym(v, deadband),
     };
     match response {
-        Response::Bounded(a) => {
-            for (k, v) in [a.forward, a.turn, a.feed].into_iter().enumerate() {
-                let act = manifest.actions[k];
+        Response::Bounded(a) | Response::Body(a, _) => {
+            let b = match response {
+                Response::Body(_, b) => b,
+                _ => BodyActions::default(),
+            };
+            for act in manifest.actions {
+                let v = match act.name {
+                    "forward_effort" => a.forward,
+                    "turn_effort" => a.turn,
+                    "feed_effort" => a.feed,
+                    "sprint_effort" => b.sprint,
+                    "hunker_effort" => b.hunker,
+                    "retract_effort" => b.retract,
+                    "lure_effort" => b.lure,
+                    "lift_effort" => b.lift,
+                    other => panic!("manifest action {other} has no bounded response slot"),
+                };
+                // Plain bounded actions historically leave body slots entirely zero.
                 put(act.name, band(clean(v, act.low, act.high), act.transfer));
             }
         }
@@ -267,7 +262,7 @@ pub fn resolve(response: Response, manifest: &Manifest) -> Resolved {
             out.option = head
                 .iter()
                 .enumerate()
-                .filter(|(_, v)| v.is_finite())
+                .filter(|(_, v)| v.is_finite() && **v != f64::MIN)
                 .fold(None, |best: Option<(usize, f64)>, (k, &v)| match best {
                     Some((_, b)) if b >= v => best,
                     _ => Some((k, v)),
@@ -286,9 +281,9 @@ fn clean(v: f64, low: f64, high: f64) -> f64 {
     v.clamp(low, high)
 }
 
-/// One manifest transfer applied to a logit; non-finite in, zero out.
+/// One manifest transfer; non-finite or absent (`f64::MIN`) in, zero out.
 fn transfer(logit: f64, t: Transfer) -> f64 {
-    if !logit.is_finite() {
+    if !logit.is_finite() || logit == f64::MIN {
         return 0.0;
     }
     match t {
@@ -365,22 +360,6 @@ impl FounderControllers {
         slots
     }
 
-    /// The lure a body's controller holds after its last drive; 0 with no controller.
-    pub fn lure(&self, id: u64) -> f64 {
-        self.entries
-            .binary_search_by_key(&id, |e| e.0)
-            .ok()
-            .map_or(0.0, |at| self.entries[at].1.lure())
-    }
-
-    /// The lift a body's controller holds after its last drive; 0 with no controller.
-    pub fn lift(&self, id: u64) -> f64 {
-        self.entries
-            .binary_search_by_key(&id, |e| e.0)
-            .ok()
-            .map_or(0.0, |at| self.entries[at].1.lift())
-    }
-
     /// Whether a body's controller reads its v3 blocks ([`Controller::reads_tail`]); false
     /// with no controller.
     pub fn reads_tail(&self, id: u64) -> bool {
@@ -390,36 +369,12 @@ impl FounderControllers {
             .is_some_and(|at| self.entries[at].1.reads_tail())
     }
 
-    /// Whether a body's controller opts into the prey flee rule ([`Controller::flees`]).
-    pub fn flees(&self, id: u64) -> bool {
+    /// The body's declared layer; an absent controller has no heuristic reflexes.
+    pub fn layer(&self, id: u64) -> Layer {
         self.entries
             .binary_search_by_key(&id, |e| e.0)
             .ok()
-            .is_some_and(|at| self.entries[at].1.flees())
-    }
-
-    /// Whether a body's controller opts into the pack tactic ([`Controller::pack_tactic`]).
-    pub fn pack_tactic(&self, id: u64) -> bool {
-        self.entries
-            .binary_search_by_key(&id, |e| e.0)
-            .ok()
-            .is_some_and(|at| self.entries[at].1.pack_tactic())
-    }
-
-    /// Whether a body's controller opts into the patrol ([`Controller::hunt_patrol`]).
-    pub fn hunt_patrol(&self, id: u64) -> bool {
-        self.entries
-            .binary_search_by_key(&id, |e| e.0)
-            .ok()
-            .is_some_and(|at| self.entries[at].1.hunt_patrol())
-    }
-
-    /// Whether a body's controller rests when fed ([`Controller::rests_when_fed`]).
-    pub fn rests_when_fed(&self, id: u64) -> bool {
-        self.entries
-            .binary_search_by_key(&id, |e| e.0)
-            .ok()
-            .is_some_and(|at| self.entries[at].1.rests_when_fed())
+            .map_or(Layer::Brain, |at| self.entries[at].1.layer())
     }
 
     /// What a body's controller's last answer was for ([`Controller::seek`]).
@@ -576,19 +531,19 @@ impl Scripted {
 impl Controller for Scripted {
     fn drive(&mut self, _observation: &[f64]) -> Response {
         if self.script.is_empty() {
-            return Response::Bounded(Actions::REST);
+            return if self.lift == 0.0 { Response::Bounded(Actions::REST) } else {
+                Response::with_body(Actions::REST, BodyActions { lift: self.lift, ..BodyActions::default() })
+            };
         }
         let action = self.script[self.next % self.script.len()];
         self.next += 1;
-        Response::Bounded(action)
+        if self.lift == 0.0 { Response::Bounded(action) } else {
+            Response::with_body(action, BodyActions { lift: self.lift, ..BodyActions::default() })
+        }
     }
 
     fn reset(&mut self) {
         self.next = 0;
-    }
-
-    fn lift(&self) -> f64 {
-        self.lift
     }
 }
 
@@ -958,8 +913,8 @@ impl Controller for BlindForager {
         self.seek = Seek::Unknown;
     }
 
-    fn flees(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 
     fn seek(&self) -> Seek {
@@ -1196,8 +1151,8 @@ impl Controller for BrowserForager {
         self.seek = Seek::Unknown;
     }
 
-    fn flees(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 
     fn seek(&self) -> Seek {
@@ -1316,8 +1271,8 @@ impl Controller for FruitForager {
         self.seek = Seek::Unknown;
     }
 
-    fn flees(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 
     fn seek(&self) -> Seek {
@@ -1392,7 +1347,7 @@ impl HoverSip {
         self.lift = lift;
         self.since = 0;
         self.last = Actions { forward, turn, feed };
-        Response::Bounded(self.last)
+        Response::with_body(self.last, BodyActions { lift: self.lift, ..BodyActions::default() })
     }
 }
 
@@ -1428,7 +1383,7 @@ impl Controller for HoverSip {
         let sip_now = taste > cfg.feed_gate && !self.resting && self.last.feed <= 0.0;
         self.since += 1;
         if self.since < HOVER_SIP_REPLAN && !sip_now && self.since > 0 && self.last != Actions::REST {
-            return Response::Bounded(self.last);
+            return Response::with_body(self.last, BodyActions { lift: self.lift, ..BodyActions::default() });
         }
         // Under cover close overhead it holds the middle of the gap between the floor and
         // the cover instead (as far down as its search height): it never climbs into the
@@ -1538,12 +1493,8 @@ impl Controller for HoverSip {
         self.seek = Seek::Unknown;
     }
 
-    fn lift(&self) -> f64 {
-        self.lift
-    }
-
-    fn rests_when_fed(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 
     fn seek(&self) -> Seek {
@@ -1633,11 +1584,7 @@ impl LanternjawAmbush {
         self.mode = mode;
         self.lure = if mode == Ambush::Wait && self.lit { 1.0 } else { 0.0 };
         self.eating = mode == Ambush::Idle && feed > 0.0;
-        Response::Bounded(Actions {
-            forward,
-            turn,
-            feed,
-        })
+        Response::with_body(Actions { forward, turn, feed }, BodyActions { lure: self.lure, ..BodyActions::default() })
     }
 }
 
@@ -1648,6 +1595,10 @@ impl Default for LanternjawAmbush {
 }
 
 impl Controller for LanternjawAmbush {
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
+    }
+
     fn reads_tail(&self) -> bool {
         false
     }
@@ -1741,17 +1692,13 @@ impl Controller for LanternjawAmbush {
         self.lit = lit;
     }
 
-    fn lure(&self) -> f64 {
-        self.lure
-    }
-
     fn at_carcass(&self) -> bool {
         self.eating
     }
 }
 
 /// **The lanternjaw's heuristic** (the detritus web D2): the P1 ambush
-/// ([`LanternjawAmbush`]) under the step's **patrol** ([`Controller::hunt_patrol`],
+/// ([`LanternjawAmbush`]) under the step's **patrol** ([`Layer::Heuristic`],
 /// `crate::hunt`), which reads the world and overrides it — patch to patch along its prey's
 /// food, a short still wait with the lure lit, a fruitless patch left and remembered, a
 /// turn to prey tremor, and attacks by its search image. The ambush's own answer stands
@@ -1792,22 +1739,18 @@ impl Controller for LanternjawPatrol {
         self.meal = false;
     }
 
-    fn lure(&self) -> f64 {
-        self.ambush.lure()
-    }
-
     fn at_carcass(&self) -> bool {
         self.ambush.at_carcass() && self.meal
     }
 
-    fn hunt_patrol(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 }
 
 /// **The chorister's heuristic** (roster R3, Brief R3 "Heuristic"): the lanternjaw's
 /// ambush without a lure — alone it hunts like the lanternjaw — under the step's scripted
-/// **pack tactic** ([`Controller::pack_tactic`], `crate::pack`), which reads the pack and
+/// **pack tactic** ([`Layer::Heuristic`], `crate::pack`), which reads the pack and
 /// overrides it: drive and flank a pack target, give a chase up, eat the kill, walk home
 /// to rest, keep the pack together, never path into another pack's territory, and keep a
 /// pup at its den. Observation-only itself, as every heuristic is.
@@ -1838,13 +1781,23 @@ impl Controller for PackHunter {
         self.ambush.reset();
     }
 
-    fn pack_tactic(&self) -> bool {
-        true
+    fn layer(&self) -> Layer {
+        Layer::Heuristic
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn absent_body_logits_are_refused_instead_of_resolving_to_half_effort() {
+        use super::*;
+        for founder in Founder::ALL {
+            let got = resolve(Response::logits(&[0.0, 0.0, 0.0]), &founder.manifest());
+            assert_eq!(got.body, BodyActions::default(), "{founder:?}");
+            assert_eq!(got.option, None);
+        }
+    }
+
     #[test]
     fn a_held_hover_sip_answer_consumes_only_taste() {
         use super::*;
@@ -1878,7 +1831,6 @@ mod tests {
                 reduced[taste..taste + 3].copy_from_slice(&observation[taste..taste + 3]);
             }
             assert_eq!(full.drive(&observation), trimmed.drive(&reduced), "sample {sample}");
-            assert_eq!(full.lift(), trimmed.lift());
             assert_eq!(full.seek(), trimmed.seek());
         }
         assert!(skipped > 0 && tasted_while_skipped);
@@ -1903,7 +1855,7 @@ mod tests {
                 o[0] = salt;
                 (0..400)
                     .map(|_| match c.drive(&o) {
-                        Response::Bounded(a) => a.turn,
+                        Response::Bounded(a) | Response::Body(a, _) => a.turn,
                         Response::Logits(_) => unreachable!("teachers answer bounded"),
                     })
                     .collect()
@@ -1966,6 +1918,7 @@ mod tests {
             let mut v2 = heuristic(founder, cfg);
             let mut v3 = heuristic(founder, cfg);
             assert!(!v3.reads_tail(), "{founder:?}");
+            assert_eq!(v3.layer(), Layer::Heuristic, "every live teacher keeps the full layer");
             let mut observation = quiet(&manifest);
             observation[0] = 0.3;
             if founder == Founder::Bellwing {
@@ -1986,8 +1939,6 @@ mod tests {
                     v3.drive(&observation),
                     "{founder:?}, sample {sample}"
                 );
-                assert_eq!(v2.lift(), v3.lift());
-                assert_eq!(v2.lure(), v3.lure());
                 assert_eq!(v2.seek(), v3.seek());
                 assert_eq!(v2.taste_only(), v3.taste_only());
             }
@@ -2140,7 +2091,7 @@ mod tests {
         let turns = |browser: &mut BrowserForager, o: &[f64], n: u32| -> Vec<f64> {
             (0..n)
                 .map(|_| match browser.drive(o) {
-                    Response::Bounded(a) => a.turn,
+                    Response::Bounded(a) | Response::Body(a, _) => a.turn,
                     _ => panic!("bounded"),
                 })
                 .collect()

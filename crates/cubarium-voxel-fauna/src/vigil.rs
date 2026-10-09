@@ -1394,6 +1394,35 @@ pub enum Guard {
     Bared,
 }
 
+/// A brain's hunker action enters or holds the physical pose; releasing it ends
+/// the pose. Holding never clears pry progress or an existing opening.
+pub(crate) fn hunker_action(fauna: &mut Fauna, i: usize, effort: f64) -> bool {
+    let a = fauna.animals[i];
+    let Some(founder) = a.founder else { return false };
+    let requested = fauna.config.founder(founder).hunker.enabled && effort > 0.0;
+    let v = &mut fauna.percepts.entry(a.id).or_default().vigil;
+    if requested && !v.hunkered {
+        v.pry = 0.0;
+        v.opened_until = 0;
+        v.fleeing = false;
+        v.bolt_until = fauna.tick;
+        fauna.ledger.vigil.hunkers[founder.index()] += 1;
+    } else if !requested && v.hunkered {
+        if fauna.tick < v.opened_until {
+            fauna.ledger.vigil.open_exits[founder.index()] += 1;
+        }
+        v.pry = 0.0;
+        v.opened_until = 0;
+    }
+    v.hunkered = requested;
+    if requested {
+        v.hunker_close = fauna.tick;
+        v.cropping = false;
+    }
+    fauna.animals[i].hunkered = requested;
+    requested
+}
+
 /// **The guard** a strike on `prey` meets at `now` (HUNKER, module note).
 pub fn guard(config: &FaunaConfig, prey: &Animal, record: Option<&Percept>, now: u64) -> Guard {
     let Some(f) = prey.founder else { return Guard::Open };

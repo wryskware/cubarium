@@ -138,10 +138,17 @@ pub(crate) fn gate(fauna: &mut Fauna, i: usize, founder: Founder, may: bool, hel
         fauna.ledger.winded_by_founder[founder.index()] += 1;
     }
     held.forward = forward;
+    if let Some(tap) = fauna.tap.as_mut() {
+        tap.gait(fauna.animals[i].id, fauna.tick, forward, p.sprint.effort(p.cruise_body_lengths_per_s));
+    }
 }
 
 /// A tick off its feet (a glider climbing, perched or gliding): stamina rests.
 pub(crate) fn rest(fauna: &mut Fauna, i: usize, founder: Founder) {
     let sp = fauna.config.founder(founder).sprint;
     sp.rest(&mut fauna.animals[i].founder_state, cubarium_voxel::DT);
+    if let Some(tap) = fauna.tap.as_mut() {
+        let a = &fauna.animals[i];
+        tap.gait(a.id, fauna.tick, a.founder_state.held.forward.min(1.0), 1.0);
+    }
 }
