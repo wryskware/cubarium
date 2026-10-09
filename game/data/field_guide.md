@@ -1,26 +1,32 @@
 # Cubarium field guide
 Draft field notes for the app's species pages, which Wrysk edits freely; size, diet lists and live counts come from the sim, not from this file.
+The guide lists species in this file's order. `swatch` is the list colour; `habit_label` names the habit row (default Habit for animals, Grows for plants).
 
 ## Lanternjaw
 id: lanternjaw
+swatch: #9168A1
 kind: Animal
 kicker: Predator
 role: Ambush mesopredator
 habit: Long stillness, then a brief strike
+habit_label: Hunts
 
 A low violet scorpid that hunts by waiting. Its forked tail arches over its back and holds two cyan lures before its face, dead still, until prey comes within reach of its mantis striking arms. By day the lures copy a flower's near-infrared shine. The glow is costly to keep. It takes small ground animals, bellwings at rest and seedporters caught on the ground. At the edge of another hunter's kill, it takes what it can.
 
 ## Veilhound
 id: chorister
+swatch: #6C55D5
 kind: Animal
 kicker: Predator
 role: Pack hunter
 habit: Stalk together, then a long rush
+habit_label: Hunts
 
 A long violet runner on six legs, dark along the back and pale at the belly and head, its flanks marked with soft dark rosettes. Its jaw plates part sideways around a cyan muzzle; a stiff tail streams behind. Veilhounds hunt by day in packs that share one target. They stalk, then rush, and pick the prey that is alone, wounded or slow to notice. Nothing in the terrarium hunts them. Between hunts the pack rests at its den.
 
 ## Frondgrazer
 id: frondgrazer
+swatch: #FB8162
 kind: Animal
 kicker: Grazer
 role: Ground browser
@@ -30,6 +36,7 @@ A low coral grazer under one long saddle shield, marked with wine-dark saddles a
 
 ## Littershredder
 id: littershredder
+swatch: #FED24E
 kind: Animal
 kicker: Scavenger
 role: Eyeless detritivore
@@ -39,6 +46,7 @@ A long, tapering crawler of overlapping gold plates banded in dark brown, with a
 
 ## Bellwing
 id: bellwing
+swatch: #C19BFC
 kind: Animal
 kicker: Nectar feeder
 role: Flower visitor
@@ -48,6 +56,7 @@ A small flyer shaped like a hanging plum bell, its open rim bright magenta, held
 
 ## Loftstrider
 id: loftstrider
+swatch: #22B4D2
 kind: Animal
 kicker: Browser
 role: Canopy browser
@@ -57,6 +66,7 @@ The terrarium's tallest animal, built in sixes around one upright axis. An onion
 
 ## Capgnawer
 id: capgnawer
+swatch: #A76982
 kind: Animal
 kicker: Fungus eater
 role: Fungivore
@@ -66,6 +76,7 @@ A small, rounded rose-mauve animal under a two-lobed mantle, its bark-like back 
 
 ## Ripple-snail
 id: ripple-snail
+swatch: #5081F2
 kind: Animal
 kicker: Grazer
 role: Shoreline film grazer
@@ -75,6 +86,7 @@ A small snail under a low azure dome with shallow growth ridges, a pale mantle e
 
 ## Seedporter
 id: seedporter
+swatch: #889335
 kind: Animal
 kicker: Fruit eater
 role: Grove glider
