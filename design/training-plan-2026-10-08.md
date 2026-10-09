@@ -626,7 +626,16 @@ control and the reward accounting; display targets after seeing results.
     - glowcaps only in the dark.
 
     These replace the old never-binding targets (meadow 2 m², grove 0.5 m², one vaulttree
-    recruit). Soak2 at 9 h (d72, pre-fix) had no woods, glowcaps 31 → 10,000 and the largest
+    recruit).
+    - Soak2 finished: d72, built-in behaviour, pre-fix binary, seeds 9–16, 14 h from fresh
+      founding. Medians at 14 h:
+      - frondgrazer 536 (383–593) and littershredder 225, against targets of 8–24;
+      - bellwing 162, ripple-snail 26, capgnawer 23, seedporter 10;
+      - Veilhound 10 (the pack bred), loftstrider 4, lanternjaw 3;
+      - largest wooded patch 4 tiles, vaulttrees 57 stands, glowcaps about 9,800.
+
+      Free food lets grazers reach 20–70× the target, which supports the food decision
+      (item 10). Soak2 at 9 h (d72, pre-fix) had no woods, glowcaps 31 → 10,000 and the largest
     meadow 10 m².
 18. **World and behaviour direction (Wrysk, 2026-10-09), to build:**
     - **Vaulttrees taller.** Today the crown is 2.25–3.5 m, all inside the loftstrider's 3.5 m
