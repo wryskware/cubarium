@@ -125,6 +125,9 @@ A 3 px notched cyan line sits 6 px outside the focused thing, with an 18 px cyan
   - The pause menu stays as its own hub. Wrysk, 2026-10-09: "i think hybrid is probably better. the pause menu should be different. it has shortcuts and 'quit'. probably add other stuff there eventually too.."
   - The pause menu holds Resume, Save, Load, New world and Quit, plus shortcuts to the tabs (Field guide, Settings) and Dev metrics.
   - The tabbed page holds Field guide, Populations and Settings. G or Y opens it on Field guide.
+  - The tabbed page never pauses the world; only the pause menu does. Wrysk: "field guide doesnt pause the world".
+    - From a pause-menu shortcut, the world runs while the page is open, unless the player paused it with Select or P.
+    - Back in the pause menu, it's paused again.
 
 - At 23 px the Lanternjaw entry is taller than the panel. The entry scrolls and fades out at the bottom, and the buttons stay fixed below it.
 - Prey chips wrap to four rows. The real screen needs a decision on long entries.
