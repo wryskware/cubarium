@@ -499,6 +499,13 @@ pub struct FounderPhysiology {
     /// preset turns it on (`[fauna.founders.<lineage>] founding_count = N`). Shredder 8,
     /// browser 8, lanternjaw 3 clutches.
     pub founding_count: usize,
+    /// **Founded per world, not per land area**: the founding never scales
+    /// [`FounderPhysiology::founding_count`] by the world's dry support area. `true` for
+    /// the megafauna that live as one group per world (Wrysk, 2026-10-09: "one veilhound
+    /// pack and one loftstrider family per wide d96 world … all those numbers scale
+    /// proportionally to wide except for vh/ls"). Not a number, so it has no registry row.
+    #[serde(default)]
+    pub founding_per_world: bool,
     /// **A water-bound body** (roster R2b, the ripple-snail): it never drowns, pays no
     /// wade refusal, and refuses a step whose destination support face has no standing
     /// water within [`FounderPhysiology::water_margin_m`]. `false` for every other
@@ -1876,6 +1883,7 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::LitterBed,
                 founding_count: 8,
+                founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
                 amphibious: None,
@@ -1960,6 +1968,7 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 8,
+                founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
                 amphibious: None,
@@ -2067,6 +2076,7 @@ impl FounderPhysiology {
                 founding: Founding::Clutches,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
+                founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
                 amphibious: None,
@@ -2200,6 +2210,7 @@ impl FounderPhysiology {
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    founding_per_world: true,
                     motor_respiration_per_s: DAILY_LOFTSTRIDER / DAY_S,
                     // Foliage: k 0.05, τ 120 s (one or two long browses a day).
                     gut: Gut::of(0.05, 120.0),
@@ -2435,6 +2446,7 @@ impl FounderPhysiology {
                     founding: Founding::Pack,
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
+                    founding_per_world: true,
                     pack: Some(Pack::CHORISTER),
                     // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,

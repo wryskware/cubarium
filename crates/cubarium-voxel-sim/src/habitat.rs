@@ -297,6 +297,20 @@ pub fn scaled_count(count: usize, scale: f64) -> usize {
     ((count as f64 * scale).round() as usize).max(1)
 }
 
+/// The founding table's counts at a world's `scale`: each lineage's count scaled
+/// ([`scaled_count`]), except a lineage founded per world
+/// ([`FounderPhysiology::founding_per_world`]), which keeps its count as written.
+pub fn scaled_founder_counts(
+    cfg: &cubarium_voxel_fauna::FaunaConfig,
+    counts: [usize; Founder::COUNT],
+    scale: f64,
+) -> [usize; Founder::COUNT] {
+    Founder::ALL.map(|f| {
+        let n = counts[f.index()];
+        if cfg.founder(f).founding_per_world { n } else { scaled_count(n, scale) }
+    })
+}
+
 impl Seeded {
     /// Every animal the seeder introduced.
     pub fn animals(&self) -> usize {
@@ -740,7 +754,7 @@ pub(crate) fn seed_pre_rolled_watched(
     // (`FoundingConfig::reference_land_m2`; 1 when it is zero).
     let land = land_m2(world, &pre.sites);
     let scale = land_scale(&fauna.config().founding, land);
-    let founder_counts = founder_counts.map(|n| scaled_count(n, scale));
+    let founder_counts = scaled_founder_counts(fauna.config(), founder_counts, scale);
     let scaled_cap = |cap: u32| scaled_count(cap as usize, scale);
     let mut seeded = Seeded {
         settle: pre.settle,
@@ -1149,7 +1163,7 @@ pub(crate) fn terrain_food_refusal(
     // Awkward terrain falls back to the same mouth-column scan as live feeding.
     let mut potential: Vec<Vec<Option<bool>>> = vec![vec![None; sites.len()]; Species::COUNT];
     for lineage in Founder::ALL {
-        let wanted = scaled_count(counts[lineage.index()], scale);
+        let wanted = scaled_founder_counts(&layers.fauna, counts, scale)[lineage.index()];
         let phys = layers.fauna.founder(lineage);
         if wanted == 0 || phys.founding != Founding::Bodies { continue; }
         let body = phys.adult_body();
@@ -2946,6 +2960,20 @@ fn colonies(
 mod tests {
     use super::*;
     use cubarium_voxel::Config;
+
+    /// A lineage founded per world keeps its count on a bigger world; every other
+    /// lineage's count grows with the land.
+    #[test]
+    fn a_per_world_lineage_keeps_its_count_as_the_land_grows() {
+        let mut cfg = cubarium_voxel_fauna::FaunaConfig::default();
+        let counts = [4; Founder::COUNT];
+        cfg.founders[Founder::Chorister.index()].founding_per_world = true;
+        cfg.founders[Founder::Browser.index()].founding_per_world = false;
+        let at_reference = scaled_founder_counts(&cfg, counts, 1.0);
+        let wider = scaled_founder_counts(&cfg, counts, 3.0);
+        assert_eq!(wider[Founder::Chorister.index()], at_reference[Founder::Chorister.index()]);
+        assert!(wider[Founder::Browser.index()] > at_reference[Founder::Browser.index()]);
+    }
 
     /// A colony grows over the connected suitable faces around its own anchor, wrapping
     /// the seam, and a second anchor keeps its distance.
