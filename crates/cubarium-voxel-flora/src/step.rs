@@ -852,6 +852,10 @@ pub(crate) fn settle_places(config: &FloraConfig, stands: &mut [Stand], ledger: 
 /// band top is the crown top the old model compared, its radius is the crown radius, its
 /// stock is the whole of `P`, its weight is one, and its area is the crown's. The
 /// authored porosity is the only new factor (`tests/layers.rs`).
+pub(crate) fn founder_light(config: &FloraConfig, stands: &[Stand], world: &World) -> Vec<f64> {
+    light_per_stand(config, stands, &mut Vec::new(), world, &[], 1).0
+}
+
 fn light_per_stand(
     config: &FloraConfig,
     stands: &[Stand],
@@ -3371,8 +3375,12 @@ pub(crate) fn grow_stand_cause(
         Trophic::Saprotroph => 1.0,
     };
     let m = sc.maintenance * upkeep * night * w0 * dt;
-    let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * dt);
-    let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * dt);
+    // Exposed surface mycelium cannot rebuild while it is drying. Substrate uptake
+    // still pays upkeep, and unspent income follows the ordinary respiration book.
+    let growing = !(sc.trophic == Trophic::Saprotroph && sc.sun_mycelium_loss_per_s > 0.0
+        && l_eff > sc.sun_shade_max && daylight > 0.0);
+    let d_p = if growing { (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * dt) } else { 0.0 };
+    let d_w = if growing { (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * dt) } else { 0.0 };
     let d_q = (q_max - q0).max(0.0);
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
@@ -3669,7 +3677,9 @@ pub(crate) fn grow_stand_cause(
         let sun = sun_share(sc, l_eff) * daylight.max(0.0) * shelter;
         if sun > 0.0 {
             let cap = (sc.sun_cap_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.foliage.max(0.0);
-            let myc = (sc.sun_mycelium_loss_per_s * sun * dt).clamp(0.0, 1.0) * stand.wood.max(0.0);
+            // The exposed footprint persists as tissue retreats: drying draws against
+            // its full mycelial capacity, capped by stock, rather than slowing to zero.
+            let myc = (sc.sun_mycelium_loss_per_s * sun * dt * sc.wood_max).max(0.0).min(stand.wood.max(0.0));
             let wood_was = stand.wood;
             let organic_before = stand.material();
             stand.foliage -= cap;
@@ -4108,6 +4118,10 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
         if i == pre.len() || pre[i].site != g.site {
             continue;
         }
+        let fragmentation = if config.litter_fragment_duration_s > 0.0 {
+            (g.fragmented_s / config.litter_fragment_duration_s).clamp(0.0, 1.0)
+        } else { 0.0 };
+        g.fragmented_s = (g.fragmented_s - dt).max(0.0);
         let (litter0, wood0, carrion0) = (pre[i].litter, pre[i].dead_wood, pre[i].carrion);
         let before = g.litter;
         decompose_pool(
@@ -4115,7 +4129,7 @@ fn decompose(flora: &mut Flora, pre: &[Pre], dt: f64) {
             &mut g.litter_mineral,
             &mut g.litter_energy,
             &mut g.mineral,
-            config.decomposition,
+            config.decomposition * (1.0 + config.litter_fragment_boost * fragmentation),
             dt,
             litter0,
             ledger,

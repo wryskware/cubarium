@@ -3597,7 +3597,11 @@ fn founder_feed(
         },
         body::Meal::Mycelium { root } => flora.take_mycelium(root, bite).inspect(|t| { mycelium = t.organic; }),
         body::Meal::Pool { site, food } => match food {
-            Food::Litter => flora.take_litter(site, bite),
+            Food::Litter => {
+                let taken = flora.take_litter(site, bite);
+                if taken.is_some() && founder == Founder::Blind { flora.fragment_litter_world(view, site); }
+                taken
+            },
             Food::Carrion => flora.take_carrion(site, bite),
             Food::Film => flora.take_film(site, bite),
             Food::CapTissue | Food::Foliage | Food::Nectar | Food::Fruit => {

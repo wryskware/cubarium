@@ -768,12 +768,22 @@ pub fn seed_pre_rolled(
     // the faces another glowcap took, and goes under a plant founder's crown.
     let mut taken_fungus: Vec<Site> = Vec::new();
     let sc = flora.config().species(Species::Glowcap).clone();
+    // Check the cap's actual exposure at every possible founder size, through the
+    // same layer-weighted shade law the living stand reads. The terrain darkness
+    // gate alone admits log-fed mushrooms in open sun.
+    let mut exposure = vec![0.0f64; sites.len()];
+    for fraction in fractions {
+        let candidates: Vec<_> = sites.iter().map(|&site| (site, fraction * sc.wood_max)).collect();
+        for (bound, light) in exposure.iter_mut().zip(flora.glowcap_founder_light(world, &candidates)) {
+            *bound = bound.max(light);
+        }
+    }
     let mut pool: Vec<Site> = Vec::new();
     let mut dark_pool: Vec<(Site, f64)> = Vec::new();
     {
         let view = world.view();
         for (i, site) in sites.iter().enumerate() {
-            if wettest[i] > sc.drown_depth_m {
+            if wettest[i] > sc.drown_depth_m || exposure[i] > sc.sun_shade_max {
                 continue;
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
@@ -874,6 +884,9 @@ pub fn seed_pre_rolled(
             seeded.stands_by_species[Species::Glowcap.index()] += 1;
         }
     }
+
+    flora.stagger_founder_crops(world);
+    flora.refresh_founder_light(world);
 
     // Latticevine founders (D15 Revision 2): soil at the foot of a wall or on a ledge's
     // lip, as many as `FloraConfig::latticevine.founders` asks for.
@@ -3128,7 +3141,8 @@ mod tests {
         let b = seeded(crate::scene::authored(config())).3;
         assert_eq!(a, b, "the same world seeds the same habitat");
         assert!(a.stands >= 10, "a populated picture, not a specimen: {a:?}");
-        assert!(a.logs > 0, "the glowcap grove has its wood: {a:?}");
+        assert!(a.logs >= a.stands_by_species[Species::Glowcap.index()].saturating_sub(a.dark_glowcaps),
+            "every log-fed glowcap has its wood: {a:?}");
         assert!(a.animals() > 0, "something moves: {a:?}");
         // The two grazing lineages are placed as bodies; the lanternjaw arrives as a
         // founding egg bank.
@@ -3224,8 +3238,14 @@ mod tests {
         assert_eq!(counts[Founder::Capgnawer.index()], 6, "the preset's count is honoured");
         assert_eq!(counts[Founder::Loftstrider.index()], 0, "an unnamed lineage keeps its 0");
         let mut world = crate::scene::authored(config());
-        let mut flora = Flora::new(Default::default());
+        // This checks capgnawer placement, with food held through the pre-roll;
+        // sun survival is tested independently on lit and roofed fixtures.
+        let mut flora_config = cubarium_voxel_flora::FloraConfig::default();
+        flora_config.glowcap.sun_cap_loss_per_s = 0.0;
+        flora_config.glowcap.sun_mycelium_loss_per_s = 0.0;
+        let mut flora = Flora::new(flora_config);
         let mut fauna = Fauna::new(params.fauna.clone());
+        let pre = pre_roll(&mut world, true);
         // The authored scene's own glowcaps all sit in a 13-face pocket the capgnawer's
         // founding faces (crag fix 2: the largest walkable component) exclude. Stock two
         // glowcaps on logs in that component first, so there is food a founder can reach.
@@ -3268,7 +3288,7 @@ mod tests {
             }
             assert_eq!(stocked.len(), 2, "two glowcaps stocked where a capgnawer walks");
         }
-        let got = seed(&mut world, &mut flora, &mut fauna);
+        let got = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, counts);
         let placed = got.founders[Founder::Capgnawer.index()];
         assert!((1..=6).contains(&placed), "up to the preset's six: {got:?}");
         assert_eq!(

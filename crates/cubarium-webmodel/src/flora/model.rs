@@ -77,6 +77,8 @@ pub struct ZoneState {
     /// Site mineral on the faces each plant occupant holds (`VACANT` last), totals.
     pub pool: [f64; NS + 1],
     pub litter: f64,
+    /// Seconds left of feeding-induced local fragmentation (zone aggregate).
+    pub fragmented_s: f64,
     pub dead_wood: f64,
     /// Woody crown cover over the ground layer (share of the zone) and its transmission.
     pub cover: f64,
@@ -564,6 +566,7 @@ impl Model {
                 bank: [0.0; NS],
                 pool: [0.0; NS + 1],
                 litter: 0.0,
+                fragmented_s: 0.0,
                 dead_wood: 0.0,
                 cover: 0.0,
                 transmit: 1.0,
@@ -1626,7 +1629,7 @@ impl Model {
                 for &(ci, d) in dead.iter().rev() {
                     let c = self.z[zi].cohorts[s].remove(ci);
                     match d {
-                        Death::Starved => {
+                        Death::Starved | Death::Desiccated => {
                             self.c.starved[s] += c.n;
                             self.c.zdiag[zi].starved[s] += c.n;
                         }
@@ -1825,7 +1828,11 @@ impl Model {
             }
             // ---- decomposition (step.rs:3659).
             let zs = &mut self.z[zi];
-            let dl = zs.litter * (1.0 - (-config.decomposition * dt).exp());
+            let fragmentation = if config.litter_fragment_duration_s > 0.0 {
+                (zs.fragmented_s / config.litter_fragment_duration_s).clamp(0.0, 1.0)
+            } else { 0.0 };
+            let dl = zs.litter * (1.0 - (-config.decomposition * (1.0 + config.litter_fragment_boost * fragmentation) * dt).exp());
+            zs.fragmented_s = (zs.fragmented_s - dt).max(0.0);
             let dw = zs.dead_wood * (1.0 - (-config.wood_decomposition * dt).exp());
             zs.litter -= dl;
             zs.dead_wood -= dw;
@@ -2071,7 +2078,11 @@ impl Model {
         let lt = take.litter.min(total_litter).max(0.0);
         if total_litter > 0.0 {
             for zs in &mut self.z {
-                zs.litter -= lt * zs.litter / total_litter;
+                let local_take = lt * zs.litter / total_litter;
+                zs.litter -= local_take;
+                // The aggregate has no individual feeding positions: a nonzero local
+                // shredder intake refreshes that zone's fragmentation clock.
+                if local_take > 0.0 { zs.fragmented_s = self.config.litter_fragment_duration_s; }
             }
         }
         let za: f64 = self.zones.zones.iter().map(|z| z.area).sum();

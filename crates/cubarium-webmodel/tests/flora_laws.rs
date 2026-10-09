@@ -344,7 +344,10 @@ fn the_overtop_chance_is_the_takeover_switch() {
 /// come back, in the law's direction.
 #[test]
 fn cap_regrowth_follows_the_foliage_rate() {
-    let (p, base) = resolved();
+    let (p, mut base) = resolved();
+    // Isolate cap regrowth; the sun law has its own lit-versus-shade fixture.
+    base.glowcap.sun_cap_loss_per_s = 0.0;
+    base.glowcap.sun_mycelium_loss_per_s = 0.0;
     let caps = |fc: &FloraConfig| {
         let (zones, faces) = one_zone(fc, 50, 0.3, 1.0, &[(Species::Glowcap, 1.0, 50)]);
         let mut m = build(fc, &p, zones, &faces, params());

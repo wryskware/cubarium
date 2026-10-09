@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1071 rows)
+**`flora.*`** (1113 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -399,7 +399,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.bloomcrown.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.bloomcrown.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.bloomcrown.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.bloomcrown.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.bloomcrown.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -461,7 +461,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.bloomcrown.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.bloomcrown.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.bloomcrown.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.bloomcrown.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.bloomcrown.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.bloomcrown.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.bloomcrown.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.bloomcrown.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.bloomcrown.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.bloomcrown.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.bloomcrown.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -509,7 +513,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.umbrellafrond.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.umbrellafrond.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.umbrellafrond.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.umbrellafrond.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.umbrellafrond.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -571,7 +575,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.umbrellafrond.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.umbrellafrond.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.umbrellafrond.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.umbrellafrond.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.umbrellafrond.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.umbrellafrond.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.umbrellafrond.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.umbrellafrond.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.umbrellafrond.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.umbrellafrond.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.umbrellafrond.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -619,7 +627,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.springturf.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.springturf.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.springturf.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.springturf.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.springturf.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -681,7 +689,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.springturf.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.springturf.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.springturf.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.springturf.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.springturf.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.springturf.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.springturf.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.springturf.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.springturf.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.springturf.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.springturf.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -729,7 +741,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.stonecushion.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.stonecushion.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.stonecushion.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.stonecushion.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.stonecushion.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -791,7 +803,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.stonecushion.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.stonecushion.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.stonecushion.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.stonecushion.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.stonecushion.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.stonecushion.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.stonecushion.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.stonecushion.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.stonecushion.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.stonecushion.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.stonecushion.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -839,7 +855,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.velvetpad.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.velvetpad.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.velvetpad.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.velvetpad.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.velvetpad.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -901,7 +917,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.velvetpad.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.velvetpad.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.velvetpad.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.velvetpad.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.velvetpad.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.velvetpad.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.velvetpad.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.velvetpad.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.velvetpad.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.velvetpad.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.velvetpad.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -949,7 +969,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.mycelium_graze_fraction` | 0.5 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.glowcap.sun_shade_max` | 0.2 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.glowcap.sun_cap_loss_per_s` | 0.0006 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.glowcap.sun_mycelium_loss_per_s` | 0.01 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.glowcap.sun_mycelium_loss_per_s` | 0.01 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.glowcap.sun_dark_shelter` | 1.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1011,7 +1031,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.glowcap.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.glowcap.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.glowcap.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.glowcap.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.glowcap.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.glowcap.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.glowcap.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.glowcap.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.glowcap.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.glowcap.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.glowcap.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1059,7 +1083,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.vaulttree.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.vaulttree.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.vaulttree.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.vaulttree.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.vaulttree.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1121,7 +1145,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.vaulttree.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.vaulttree.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.vaulttree.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.vaulttree.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.vaulttree.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.vaulttree.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.vaulttree.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.vaulttree.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.vaulttree.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.vaulttree.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.vaulttree.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1169,7 +1197,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.lanternberry.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.lanternberry.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.lanternberry.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.lanternberry.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.lanternberry.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1225,13 +1253,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.lanternberry.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.lanternberry.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
-| `flora.lanternberry.nectar_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into nectar per second, in daylight |
-| `flora.lanternberry.nectar_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most nectar an adult stand holds |
-| `flora.lanternberry.nectar_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of nectar carries (pollen lumped in) |
+| `flora.lanternberry.nectar_per_s` | 0.0001 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into nectar per second, in daylight |
+| `flora.lanternberry.nectar_cap` | 0.005 | org-units per stand | [0, inf) |  | N | decision | the most nectar an adult stand holds |
+| `flora.lanternberry.nectar_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of nectar carries (pollen lumped in) |
 | `flora.lanternberry.fruit_per_s` | 0.0001 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.lanternberry.fruit_cap` | 0.02 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.lanternberry.fruit_drop_s` | 1800.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.lanternberry.fruit_rest_s` | 900.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.lanternberry.fruit_rest_s` | 900.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.lanternberry.flower_s` | 900.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.lanternberry.fruit_cost` | 2.5 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.lanternberry.pollination_floor` | 0.1 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.lanternberry.pollination_visits` | 3.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.lanternberry.fruit_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.lanternberry.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.lanternberry.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1279,7 +1311,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.siphonreed.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.siphonreed.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.siphonreed.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.siphonreed.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.siphonreed.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1341,7 +1373,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
 | `flora.siphonreed.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
 | `flora.siphonreed.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.siphonreed.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none |
+| `flora.siphonreed.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.siphonreed.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
+| `flora.siphonreed.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.siphonreed.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
+| `flora.siphonreed.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.siphonreed.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
 | `flora.siphonreed.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.siphonreed.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
@@ -1414,7 +1450,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.fruit_s` | 240.0 | s | [0, inf) | yes | C | placeholder | fruit phase |
 | `flora.latticevine.spent_s` | 60.0 | s | [0, inf) | yes | C | placeholder | spent phase |
 | `flora.latticevine.nectar_per_face_s` | 0.0000005555555555555555 | org-units/s per reference face | [0, inf) | yes | C | placeholder | long-run nectar a covered face offers: production per unit of vine area (a flower holds this times the mean cycle) |
-| `flora.latticevine.fruit_per_face_s` | 0.000001388888888888889 | org-units/s per reference face | [0, inf) | yes | C | placeholder | long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle) |
+| `flora.latticevine.fruit_per_face_s` | 0.000001388888888888889 | org-units/s per reference face | [0, inf) | yes | C | placeholder | long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle) when every flower is pollinated |
+| `flora.latticevine.fruit_cost` | 2.5 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of bead fruit costs; the overhead beyond the fruit is respired |
+| `flora.latticevine.pollination_floor` | 0.1 | fraction of a full bunch | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full bunch a flower no pollinator visited sets |
+| `flora.latticevine.pollination_visits` | 1.0 | visits | [0, inf) | 0–4 | - | decision | FLOWER-FRUIT: pollinator visits to a flower that set a full bunch; 0 any visit |
 | `flora.latticevine.energy_density` | 1.0 | energy per org-unit | [0, inf) |  | D | placeholder | vine tissue energy |
 | `flora.latticevine.mineral_fraction` | 0.01 | mineral per org-unit | [0, 1] |  | - | decision | vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry |
 | `flora.latticevine.founders` | 6 | vines | [0, inf) | yes | C | placeholder | founder vines rooted on a fresh world: the floor under the area count |
@@ -1425,12 +1464,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | C | placeholder | a banked latticevine seed (voided from a gut) older than this at its check falls to litter |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
+| `flora.litter_fragment_boost` | 0.25 | fraction | [0, inf) |  | - | placeholder | extra local microbial decay after shredder feeding |
+| `flora.litter_fragment_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | radius of shredder fragmentation |
+| `flora.litter_fragment_duration_s` | 600.0 | s | [0, inf) |  | - | placeholder | time for fragmentation to fade linearly |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
 | `flora.carrion_decomposition` | 0.00028 | /s | [0, inf) | yes | A | placeholder | k_c: carrion decomposition |
 | `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
 | `flora.initial_mineral` | 1.0 | mineral per site | [0, inf) | yes | D | placeholder | mineral a site is provisioned with |
 | `flora.seed_check_s` | 30.0 | s | [0, inf) |  | N | numerics | how often a banked site is tested |
-| `flora.step_every` | 4 | ticks | [1, inf) |  | N | numerics | the plant clock: one plant step per this many world ticks |
+| `flora.step_every` | 40 | ticks | [1, inf) |  | N | numerics | the plant clock: one plant step per this many world ticks |
 | `flora.upkeep_q10` | 2.0 | x per 10 C | (0, inf) | 1–4 | - | placeholder | Q10 of plant upkeep around the climate's mean |
 | `flora.wind_tries` | 4 | tries | [1, inf) | 1–16 | - | placeholder | a wind seed's draws before the donor keeps its package |
 | `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |
@@ -1465,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2426 rows)
+**`fauna.*`** (2517 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1613,6 +1655,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.littershredder.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.littershredder.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.littershredder.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.littershredder.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.littershredder.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.littershredder.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -1623,6 +1666,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.littershredder.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.littershredder.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.littershredder.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.littershredder.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.littershredder.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.littershredder.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.littershredder.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -1634,6 +1680,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.littershredder.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.littershredder.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.littershredder.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.littershredder.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.littershredder.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.littershredder.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -1742,6 +1792,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.littershredder.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.littershredder.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.littershredder.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.littershredder.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.littershredder.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -1859,9 +1911,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.senses.smell_min` | 0.42 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.frondgrazer.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.frondgrazer.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.frondgrazer.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.frondgrazer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.frondgrazer.senses.feeding_sight_fraction` | 0.25 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
-| `fauna.founders.frondgrazer.senses.kin_tracks` | 3 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.frondgrazer.senses.kin_tracks` | 6 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
@@ -1869,6 +1922,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.frondgrazer.vigilance.scan_s` | 1.5 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.frondgrazer.vigilance.scan_kin_m` | 4.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.frondgrazer.vigilance.scan_kin_gain` | 0.25 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.frondgrazer.vigilance.scan_kin_max` | 4 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.frondgrazer.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.frondgrazer.vigilance.alarm_emission_factor` | 2.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.frondgrazer.vigilance.alarm_bolt_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -1880,6 +1936,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.frondgrazer.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.frondgrazer.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.frondgrazer.herding.comfort_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.frondgrazer.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.frondgrazer.herding.herd_max` | 4 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.frondgrazer.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -1988,6 +2048,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.frondgrazer.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.frondgrazer.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.frondgrazer.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.frondgrazer.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.frondgrazer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -2105,6 +2167,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.lanternjaw.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.lanternjaw.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.lanternjaw.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.lanternjaw.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.lanternjaw.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.lanternjaw.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -2115,6 +2178,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.lanternjaw.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.lanternjaw.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.lanternjaw.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.lanternjaw.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.lanternjaw.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.lanternjaw.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.lanternjaw.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -2126,6 +2192,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.lanternjaw.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.lanternjaw.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.lanternjaw.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.lanternjaw.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.lanternjaw.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.lanternjaw.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2234,6 +2304,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.lanternjaw.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.lanternjaw.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.lanternjaw.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.lanternjaw.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.lanternjaw.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -2351,6 +2423,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.capgnawer.senses.light_m` | 1.5 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.capgnawer.senses.light_min` | 0.05 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.capgnawer.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.capgnawer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.capgnawer.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.capgnawer.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -2361,6 +2434,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.capgnawer.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.capgnawer.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.capgnawer.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.capgnawer.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.capgnawer.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.capgnawer.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.capgnawer.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -2372,6 +2448,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.capgnawer.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.capgnawer.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.capgnawer.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.capgnawer.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.capgnawer.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.capgnawer.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2480,6 +2560,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.capgnawer.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.capgnawer.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.capgnawer.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.capgnawer.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.capgnawer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -2597,6 +2679,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.smell_min` | 0.69 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.loftstrider.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.loftstrider.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.loftstrider.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.loftstrider.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -2607,6 +2690,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.loftstrider.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.loftstrider.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.loftstrider.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.loftstrider.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.loftstrider.vigilance.orient_s` | 3.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.loftstrider.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.loftstrider.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -2618,6 +2704,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.loftstrider.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.loftstrider.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.loftstrider.herding.comfort_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.loftstrider.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.loftstrider.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.loftstrider.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2726,6 +2816,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.loftstrider.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.loftstrider.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.loftstrider.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.loftstrider.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.loftstrider.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -2843,6 +2935,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.senses.smell_min` | 0.0 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.ripple-snail.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.ripple-snail.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.ripple-snail.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.ripple-snail.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.ripple-snail.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.ripple-snail.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -2853,6 +2946,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.ripple-snail.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.ripple-snail.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.ripple-snail.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.ripple-snail.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.ripple-snail.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.ripple-snail.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.ripple-snail.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -2864,6 +2960,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.ripple-snail.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.ripple-snail.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.ripple-snail.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.ripple-snail.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.ripple-snail.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.ripple-snail.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2972,6 +3072,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.ripple-snail.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.ripple-snail.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.ripple-snail.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.ripple-snail.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.ripple-snail.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -3089,6 +3191,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.bellwing.senses.light_m` | 4.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.bellwing.senses.light_min` | 0.05 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.bellwing.senses.cyan_m` | 1.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.bellwing.senses.loom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.bellwing.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.bellwing.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -3099,6 +3202,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.bellwing.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.bellwing.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.bellwing.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.bellwing.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.bellwing.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.bellwing.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.bellwing.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -3110,6 +3216,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.bellwing.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.bellwing.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.bellwing.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.bellwing.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.bellwing.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.bellwing.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3218,6 +3328,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.bellwing.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.bellwing.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.bellwing.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.bellwing.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.bellwing.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -3335,6 +3447,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.senses.smell_min` | 0.9 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.seedporter.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.seedporter.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.seedporter.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.seedporter.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.seedporter.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.seedporter.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -3345,6 +3458,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.seedporter.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.seedporter.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.seedporter.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.seedporter.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.seedporter.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.seedporter.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.seedporter.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -3356,6 +3472,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.calm_margin_m` | 3.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.seedporter.vigilance.calm_facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.seedporter.vigilance.lost_calm_s` | 30.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.seedporter.herding.comfort_m` | 4.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.seedporter.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.seedporter.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.seedporter.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3464,6 +3584,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.select_airborne_factor` | (absent) | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.seedporter.pack.select_body_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.seedporter.pack.select_judge_m` | (absent) | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.seedporter.pack.select_straggler_m` | (absent) | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.seedporter.pack.select_straggler_gain` | (absent) | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.seedporter.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -3581,6 +3703,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.smell_min` | 0.13 | scent units | [0, inf) |  | - | placeholder | the faintest scent level smelled on the scent field (0: no smell) |
 | `fauna.founders.chorister.senses.light_m` | 0.0 | m | [0, inf) |  | - | placeholder | the photoreceptor's range for a beacon (3D; 0: no light sense) |
 | `fauna.founders.chorister.senses.light_min` | 0.0 | contrast | [0, inf) |  | - | placeholder | the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2) |
+| `fauna.founders.chorister.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.chorister.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
@@ -3591,6 +3714,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.chorister.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
+| `fauna.founders.chorister.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
+| `fauna.founders.chorister.vigilance.scan_kin_gain` | 0.0 | x scan_every_s | [0, inf) |  | - | placeholder | HERD-PULL many eyes: each such kin lengthens the cropping between scans by this x scan_every_s |
+| `fauna.founders.chorister.vigilance.scan_kin_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL many eyes: ...counting at most this many (a big herd still scans) |
 | `fauna.founders.chorister.vigilance.orient_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: it faces a newly sensed approaching threat this long (0: never orients) |
 | `fauna.founders.chorister.vigilance.alarm_emission_factor` | 0.0 | x walking emission | [0, inf) |  | - | placeholder | S2: a kin heard this loud (x its walking emission) is bolting, and it bolts too (0: no alarm) |
 | `fauna.founders.chorister.vigilance.alarm_bolt_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: an alarm bolt lasts this long |
@@ -3602,6 +3728,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.calm_margin_m` | 0.0 | m | [0, inf) |  | - | placeholder | FEAR: it walks off a hunter it watches (asleep, or resting and not facing it) closer than this (3D; 0 never) |
 | `fauna.founders.chorister.vigilance.calm_facing_deg` | 0.0 | deg | [0, inf) |  | - | placeholder | FEAR: a still hunter heading within this of the bearing to it faces it (a threat) |
 | `fauna.founders.chorister.vigilance.lost_calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | FEAR-2: a flight or refuge watch whose hunter it has not known within the stop distance for this long ends (0 never) |
+| `fauna.founders.chorister.herding.comfort_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: a heuristic body whose nearest known kin is beyond this drifts back toward the kin it knows (0: off) |
+| `fauna.founders.chorister.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
+| `fauna.founders.chorister.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
+| `fauna.founders.chorister.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3710,6 +3840,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.select_airborne_factor` | 0.25 | factor | [0, 1] |  | - | placeholder | PACK-TUNE: a target in flight (in reach): prospect x this |
 | `fauna.founders.chorister.pack.select_body_exp` | 0.5 | exponent | [0, inf) |  | - | placeholder | PACK-TUNE: score = prospect x body^this / (1 + distance / select_judge_m) |
 | `fauna.founders.chorister.pack.select_judge_m` | 6.0 | m | [0, inf) |  | - | placeholder | PACK-TUNE: ...the distance that halves the score |
+| `fauna.founders.chorister.pack.select_straggler_m` | 6.0 | m | [0, inf) |  | - | placeholder | HERD-PULL: score x (1 + select_straggler_gain x min(d, this) / this), d the prey's nearest awake kin (0: off) |
+| `fauna.founders.chorister.pack.select_straggler_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | HERD-PULL: ...the gain for a prey with no kin within select_straggler_m (0: off) |
 | `fauna.founders.chorister.pack.select_min_prospect` | 0.1 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
@@ -3857,7 +3989,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
 | `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar_full nectar units gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar |
 | `fauna.scent.nectar_full` | 0.02 | nectar units held by a full flower | [0, inf) |  | - | placeholder | the reference nectar stock for a flower giving off nectar_per_s; when not positive, every flower gives the full rate |
-| `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (near-IR) per unit of the light falling on it |
+| `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a full nectar flower's brightness (near-IR) per unit of the light falling on it |
+| `fauna.light.nectar_nir_share` | 0.5 | fraction of a full flower's reflectance | [0, 1] |  | - | placeholder | FLOWER-FRUIT: nectar reflects near-IR; reflectance x (1 - share + share x fill), a drained flower dimmer |
 | `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
 | `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light (cyan) |
 | `fauna.light.lure_scent` | 1.0 | x nectar_per_s | [0, inf) | 0–2 | - | placeholder | BELLWING: a lit lure gives off this x a flower's nectar scent at its lure point (0: light alone) |
@@ -3875,7 +4008,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.light.near_forward` | 0.3 | fraction | [0, 1] |  | - | placeholder | a flyer's forward effort near a beacon |
 | `fauna.light.glow_scent_gate` | 0.05 | chem response | [0, 1] | 0–0.5 | - | placeholder | a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this |
 | `fauna.light.nir_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a near-IR reflector (flowers); learned ones relax back to it |
-| `fauna.light.cyan_innate` | 0.5 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures) |
+| `fauna.light.cyan_innate` | 0.12 | probability | [0, 1] |  | - | placeholder | S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures) |
 | `fauna.light.learn_rate` | 0.3 | fraction | [0, 1] | 0.05–1 | - | placeholder | S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way |
 | `fauna.light.forget_s` | 3600.0 | s | (0, inf) | 300–21600 log | - | placeholder | S3b: a learned expectation relaxes back to innate with this time constant |
 | `fauna.light.expect_min` | 0.1 | probability | [0, 1] | 0–0.5 | - | placeholder | S3b: a still beacon whose class is expected to pay less than this is not approached |

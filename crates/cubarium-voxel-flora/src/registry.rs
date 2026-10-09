@@ -116,7 +116,7 @@ fn species_rows() -> Vec<Row> {
         r("mycelium_graze_fraction", "fraction of living mycelium", fraction, "fungal tissue exposed to grazers after edible caps are cropped"),
         r("sun_shade_max", "fraction of open sun", fraction, "saprotroph: exposure at and below which the sun costs nothing (shade)").optional(),
         r("sun_cap_loss_per_s", "/s of cap tissue at full exposure", nonneg, "saprotroph: caps dried to litter in full sun and daylight").optional(),
-        r("sun_mycelium_loss_per_s", "/s of mycelium at full exposure", nonneg, "saprotroph: surface mycelium dried to litter in full sun and daylight").optional(),
+        r("sun_mycelium_loss_per_s", "/s of mycelial capacity at full exposure", nonneg, "saprotroph: exposed footprint dried to litter, capped by remaining mycelium").optional(),
         r("sun_dark_shelter", "fraction of the drying", fraction, "saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness))").optional(),
         r("substrate_yield", "fraction", fraction, "saprotroph: share of the substrate taken that becomes tissue")
             .search(0.2, 0.7).grade("A"),
@@ -378,6 +378,9 @@ fn rows() -> Vec<Row> {
     rows.extend([
         r("flora.shade_k_per_m2", "m2 per org-unit", nonneg, "canopy attenuation per square metre").evolve().log().grade("D").prov("derived"),
         r("flora.decomposition", "/s", nonneg, "k_d: litter decomposition").evolve().log().grade("B"),
+        r("flora.litter_fragment_boost", "fraction", nonneg, "extra local microbial decay after shredder feeding"),
+        r("flora.litter_fragment_radius_m", "m", nonneg, "radius of shredder fragmentation"),
+        r("flora.litter_fragment_duration_s", "s", nonneg, "time for fragmentation to fade linearly"),
         r("flora.wood_decomposition", "/s", nonneg, "k_w: dead-wood decomposition").evolve().log().grade("C"),
         r("flora.carrion_decomposition", "/s", nonneg, "k_c: carrion decomposition").evolve().log().grade("A"),
         r("flora.litter_energy_cap", "energy per org-unit", nonneg, "retained energy cap per unit of litter").grade("C"),
