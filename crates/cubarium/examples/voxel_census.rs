@@ -712,6 +712,7 @@ fn run(
     let mut deaths = DeathLog::new(sim);
     let mut spells = SpellLog::new(sim);
     let mut lj = LjChain::new(sim);
+    let mut vine = VineLog::new();
     let mut vitals = timing.vitals.as_ref().map(|(dir, options)| {
         VitalsLog::new(dir, *options, sim, minute0, total_ticks / TICKS_PER_MIN, timing.segment_kind)
             .unwrap_or_else(|e| panic!("vitals readouts in {dir}: {e}"))
@@ -734,6 +735,7 @@ fn run(
         }
         weather.poll(sim);
         deaths.poll(sim, tick);
+        vine.poll(sim, tick);
         if let Some(r) = runner.as_mut() {
             r.tick(sim);
         }
@@ -793,6 +795,7 @@ fn run(
     weather.summary(sim);
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
+    vine.summary(sim);
     forage_summary(sim);
     herd.summary(sim);
     rhythm_summary(sim);
@@ -2490,6 +2493,203 @@ impl LjChain {
             eggs_laid,
             l.eggs_died - s.eggs_died,
             first,
+        );
+    }
+}
+
+/// **VINE-FRUIT's readout** (2026-10-09; a diagnostic, never scored): the latticevine's
+/// flower-to-fruit chain and the seedporter's reach to it, sampled once a second. One
+/// `vine:` line at the end of the run:
+///
+/// - flowers opened, their mean nectar, and how many visits each had when it closed;
+/// - bunches set (visited / not) and the fruit set per bunch;
+/// - the fruit seen standing (mean), what of it was eaten and what fell uneaten;
+/// - where the bunches hang: underside faces, the mean height above the floor in front, and
+///   the share whose wall carries cover at that floor (what a seedporter climbs from);
+/// - per seedporter-second: awake and hungry (its eating latch on), a vine bunch within
+///   its still-object sight range, a vine bunch as its food track, on a vine (perched or
+///   climbing), and vine fruit bites.
+struct VineLog {
+    open: std::collections::HashMap<(u32, u32, u32, u8), (u16, f64)>,
+    fruiting: std::collections::HashMap<(u32, u32, u32, u8), f64>,
+    flowers: u64,
+    nectar_sum: f64,
+    visits_hist: [u64; 3],
+    bunches: [u64; 2],
+    bunch_fruit: [f64; 2],
+    fell: f64,
+    standing: f64,
+    samples: u64,
+    under: u64,
+    height_sum: f64,
+    cover_at_floor: u64,
+    sp: [u64; 6],
+}
+
+fn face_key(f: &cubarium_voxel_flora::Face) -> (u32, u32, u32, u8) {
+    use cubarium_voxel_flora::FaceDir as D;
+    let d = match f.dir { D::PosX => 0, D::NegX => 1, D::PosZ => 2, D::NegZ => 3, D::Down => 4 };
+    (f.x, f.y, f.z, d)
+}
+
+impl VineLog {
+    fn new() -> VineLog {
+        VineLog {
+            open: Default::default(),
+            fruiting: Default::default(),
+            flowers: 0,
+            nectar_sum: 0.0,
+            visits_hist: [0; 3],
+            bunches: [0; 2],
+            bunch_fruit: [0.0; 2],
+            fell: 0.0,
+            standing: 0.0,
+            samples: 0,
+            under: 0,
+            height_sum: 0.0,
+            cover_at_floor: 0,
+            sp: [0; 6],
+        }
+    }
+
+    fn poll(&mut self, sim: &Sim, tick: u64) {
+        use cubarium_voxel_flora::SpurPhase;
+        if tick % u64::from(TICK_HZ) != 0 {
+            return;
+        }
+        let fv = sim.flora().view();
+        let world = sim.world().view();
+        let faces = fv.cover.faces();
+        let mut now_open = std::collections::HashMap::new();
+        let mut now_fruit = std::collections::HashMap::new();
+        for c in &faces {
+            let k = face_key(&c.face);
+            match c.spur {
+                SpurPhase::Flower => {
+                    let max_nectar = self.open.get(&k).map_or(c.nectar, |o| o.1.max(c.nectar));
+                    if !self.open.contains_key(&k) {
+                        self.flowers += 1;
+                    }
+                    now_open.insert(k, (c.visits, max_nectar));
+                }
+                SpurPhase::Fruit => {
+                    if !self.fruiting.contains_key(&k) {
+                        let visited = self.open.get(&k).is_some_and(|o| o.0 > 0) || c.visits > 0;
+                        self.bunches[usize::from(visited)] += 1;
+                        self.bunch_fruit[usize::from(visited)] += c.fruit;
+                        if c.face.dir.is_underside() {
+                            self.under += 1;
+                        } else if let Some((x, y, z)) = c.face.front(&world) {
+                            let mut fy = y as i64 - 1;
+                            while fy >= 0 && !world.is_solid(i64::from(x), fy as u32, z) {
+                                fy -= 1;
+                            }
+                            let rows = y as i64 - fy - 1;
+                            self.height_sum += rows as f64 * world.config.voxel_m;
+                            let base = (fy + 1) as u32;
+                            let covered = (base..=base + 1).any(|r| {
+                                fv.cover
+                                    .face(cubarium_voxel_flora::Face::new(c.face.x, r, c.face.z, c.face.dir))
+                                    .is_some()
+                            });
+                            self.cover_at_floor += u64::from(covered);
+                        }
+                    }
+                    now_fruit.insert(k, c.fruit);
+                }
+                _ => {}
+            }
+        }
+        for (k, o) in &self.open {
+            if !now_open.contains_key(k) {
+                self.visits_hist[usize::from(o.0.min(2))] += 1;
+                self.nectar_sum += o.1;
+            }
+        }
+        for (k, last) in &self.fruiting {
+            if !now_fruit.contains_key(k) {
+                // Eaten to nothing drops the face out of fruit with 0 left; a spent bunch
+                // falls with what it still held at the last sample.
+                self.fell += *last;
+            }
+        }
+        self.open = now_open;
+        self.fruiting = now_fruit;
+        self.standing += faces.iter().map(|c| c.fruit).sum::<f64>();
+        self.samples += 1;
+
+        // Seedporters.
+        let fauna = sim.fauna();
+        let fa = fauna.view();
+        let phys = fauna.config().founder(Founder::Seedporter);
+        let day = sim.world().life_daylight() >= fa.config.life.day_line;
+        let range = phys.senses.sight_range_m(day) * phys.senses.sight_still_fraction.max(0.0);
+        let v = world.config.voxel_m;
+        let ring = f64::from(world.config.width) * v;
+        let bunches: Vec<(f64, f64, f64)> = faces
+            .iter()
+            .filter(|c| c.fruit > 0.0 && !c.face.dir.is_underside())
+            .filter_map(|c| c.face.front(&world))
+            .map(|(x, y, z)| ((f64::from(x) + 0.5) * v, (f64::from(y) + 0.5) * v, (f64::from(z) + 0.5) * v))
+            .collect();
+        let food = cubarium_voxel_fauna::perception::class::FOOD as usize;
+        for a in fa.animals.iter().filter(|a| a.founder == Some(Founder::Seedporter)) {
+            self.sp[0] += 1;
+            if a.eating {
+                self.sp[1] += 1;
+            }
+            let near = bunches.iter().any(|&(x, y, z)| {
+                let dx = (x - a.pose.x).rem_euclid(ring);
+                let dx = dx.min(ring - dx);
+                (dx * dx + (z - a.pose.z).powi(2) + (y - a.pose.y_m).powi(2)).sqrt() <= range
+            });
+            self.sp[2] += u64::from(near);
+            let tracked = fauna.percept(a.id).is_some_and(|p| {
+                let t = p.best[food];
+                t.known && t.id >> 62 == 3 && fa.tick.saturating_sub(t.tick) <= u64::from(TICK_HZ)
+            });
+            self.sp[3] += u64::from(tracked);
+            let on_vine = a.mobility.perch.is_some_and(|p| matches!(p.anchor, cubarium_voxel_fauna::PerchAnchor::Vine(_)));
+            self.sp[4] += u64::from(on_vine);
+        }
+        self.sp[5] = fa.ledger.fruit_bites_by_source[1];
+    }
+
+    fn summary(&self, sim: &Sim) {
+        let l = &sim.fauna().view().ledger;
+        let fl = &sim.flora().view().ledger;
+        let closed = self.visits_hist.iter().sum::<u64>().max(1) as f64;
+        let wall = (self.bunches[0] + self.bunches[1]).saturating_sub(self.under).max(1) as f64;
+        eprintln!(
+            "vine: flowers={} nectar_per_flower={:.6} visits_0/1/2+={}/{}/{} visit_events={} \
+             bunches_floor/visited={}/{} fruit_per_bunch_floor/visited={:.6}/{:.6} \
+             fruit_set={:.6} standing_mean={:.6} fell={:.6} eaten_vine={:.6} eaten_stand={:.6} \
+             under_bunches={} wall_bunch_height_m={:.2} wall_bunches_cover_at_floor={:.2} \
+             sp_s={} hungry_s={} vine_bunch_in_sight_s={} tracking_vine_s={} on_vine_s={} vine_bites={}",
+            self.flowers,
+            self.nectar_sum / closed,
+            self.visits_hist[0],
+            self.visits_hist[1],
+            self.visits_hist[2],
+            fl.flower_visits[1],
+            self.bunches[0],
+            self.bunches[1],
+            self.bunch_fruit[0] / self.bunches[0].max(1) as f64,
+            self.bunch_fruit[1] / self.bunches[1].max(1) as f64,
+            self.bunch_fruit[0] + self.bunch_fruit[1],
+            self.standing / self.samples.max(1) as f64,
+            self.fell,
+            l.fruit_eaten_by_source[1],
+            l.fruit_eaten_by_source[0],
+            self.under,
+            self.height_sum / wall,
+            self.cover_at_floor as f64 / wall,
+            self.sp[0],
+            self.sp[1],
+            self.sp[2],
+            self.sp[3],
+            self.sp[4],
+            self.sp[5],
         );
     }
 }
