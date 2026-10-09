@@ -756,6 +756,10 @@ control and the reward accounting; display targets after seeing results.
         once a second, feeding a fast "steering" layer every tick, close to hierarchical
         reinforcement learning (options, feudal networks).
 
+25. **Decided (Wrysk, 2026-10-09): throw away C1.** "C1 doesnt work … theres no such thing as
+    'prod'". DROP-C1 (Codex) makes every lineage run its heuristic by default; v3 brains
+    replace heuristics species by species.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
