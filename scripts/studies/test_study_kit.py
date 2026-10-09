@@ -556,5 +556,180 @@ sys.exit(2 if state == 'FAILED' else 0)
         self.assertIn("parallel cap:", completed.stdout)
 
 
+class WideScoreTests(unittest.TestCase):
+    """Small authored worlds: exercise mechanics independently of tuned targets."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.document = tomllib.loads((score.DEFAULT_CONFIG.parent / 'fitness-v3.toml').read_text())
+        self.names = ('frondgrazer', 'lanternjaw', 'chorister', 'loftstrider', 'bellwing')
+        self.required = dict(animals=list(self.names), plants=['turf'], N_ref={name: 1 for name in self.names})
+        self.document['population'].update(reference_floor_m2=100, peak_ratio=2)
+        for band in self.document['population']['bands'].values():
+            band.update(lo=2, hi=6)
+        self.document['population']['bands']['bellwing'].update(lo=0, hi=100)
+        self.document['targets'].update(woods_share_lo=0.2, woods_share_hi=0.3,
+            meadow_share_lo=0.1, meadow_share_hi=0.2, vaulttree_family_m2=4,
+            lanternberry_groves=2, glowcap_lit_share_hi=0.1,
+            leaf_offtake_lo=0.2, leaf_offtake_hi=0.4, fullness_p10=0.5,
+            hunts_per_hour_lo=0, hunts_per_hour_hi=100)
+        for spec in self.document['profiles'].values():
+            spec['to_minute'] = 6
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def fixture(self, load=600):
+        (self.root / 'run').mkdir(exist_ok=True)
+        (self.root / 'run/DONE').write_text(str(load + 6))
+        census, vitals, lives = [], [], []
+        for minute in range(7):
+            row = dict(sim_min=load + minute, seed=1, stands_turf=1, floor_area_m2=100,
+                voxel_m=1, forest_floor_faces=25, forest_patch_second_max=8,
+                meadow_patch_max=15, grove_patches=2, glowcap_lit_share=0,
+                leaf_produced=100 + minute * 20, leaf_eaten=50 + minute * 6,
+                kills_chorister_frondgrazer=minute)
+            for name in self.names:
+                row.update({f'founders_{name}': 4, f'eggs_{name}': 0, f'births_{name}': 0})
+                if minute:
+                    vitals.append(dict(minute=load + minute, lineage=name, n=4,
+                        n_adult=4, breeding_eligible_n=1, fullness_p10=0,
+                        fullness_p10_adult=1, fullness_p50=1, awake_body_s=240,
+                        stuck_n=0, stuck_observed_n=4))
+            census.append(row)
+        for index, name in enumerate(self.names):
+            lives.append(dict(id=index, lineage=name, native='true', origin='observed',
+                born_minute=load - 1, died_minute='', matured_minute='', cause='', last_seen_minute=load + 6))
+        write_csv(self.root / 'census.csv', census)
+        write_csv(self.root / 'vitals/vitals.csv', vitals)
+        write_csv(self.root / 'vitals/life.csv', lives)
+
+    def mutate(self, file, function):
+        path = self.root / file
+        rows = score.read_csv(path, [])
+        write_csv(path, function(rows))
+
+    def world(self, year=False):
+        cfg = score.profile_config(self.document, 'wide-year' if year else 'wide-screen-2h')
+        world = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=0 if year else 600)
+        self.assertTrue(world['rankable'], world['warnings'])
+        return world
+
+    def test_per_area_band_and_founder_independence(self):
+        self.fixture()
+        inside = self.world()['components']['A']['raw']['frondgrazer']
+        self.assertEqual(inside['penalty'], 0)
+        self.required['N_ref']['frondgrazer'] *= 20
+        self.assertEqual(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
+        self.mutate('census.csv', lambda rows: [dict(r, founders_frondgrazer=inside['high'] * 2) for r in rows])
+        self.assertGreater(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
+
+    def test_floor_doubles_bands_except_fixed_megafauna(self):
+        pop = self.document['population']
+        for name, band in pop['bands'].items():
+            first = score.population_band(name, pop, 100)
+            doubled = score.population_band(name, pop, 200)
+            factor = 1 if band.get('fixed') else 2
+            self.assertEqual(doubled, tuple(factor * value for value in first))
+
+    def test_slow_screen_exemption_and_whole_year_breeding(self):
+        self.fixture()
+        screen = self.world()['components']['J']['raw']
+        for name in self.document['profiles']['wide-screen-2h']['slow']:
+            self.assertEqual(screen[name]['penalty'], 0)
+            self.assertEqual(screen[name]['weight'], 0)
+            self.assertTrue(screen[name]['flag'])
+        self.fixture(load=0)
+        year = self.world(year=True)['components']['J']['raw']
+        for name in self.document['profiles']['wide-screen-2h']['slow']:
+            self.assertGreater(year[name]['penalty'], 0)
+        # A surviving recruit early in the year counts, even before the late half.
+        self.mutate('vitals/life.csv', lambda rows: rows + [dict(rows[0], id=100,
+            lineage='chorister', origin='born', born_minute=1)])
+        self.assertEqual(self.world(year=True)['components']['J']['raw']['chorister']['penalty'], 0)
+
+    def test_inactive_component_needs_nonempty_named_reason(self):
+        spec = self.document['profiles']['wide-screen-2h']
+        term = next(iter(spec['disabled']))
+        for reason in ('', '  ', None):
+            spec['disabled'][term] = reason
+            with self.assertRaisesRegex(ValueError, 'named reason'):
+                score.profile_config(self.document, 'wide-screen-2h')
+        del spec['disabled'][term]
+        with self.assertRaisesRegex(ValueError, 'named reason'):
+            score.profile_config(self.document, 'wide-screen-2h')
+
+    def test_leaf_offtake_uses_counter_deltas_and_requires_books(self):
+        self.fixture()
+        result = self.world()['components']['O']
+        self.assertAlmostEqual(result['raw'], (6 * 6) / (6 * 20))
+        self.assertEqual(result['penalty'], 0)
+        self.mutate('census.csv', lambda rows: [dict(r, leaf_produced=float(r['leaf_produced']) + 500,
+            leaf_eaten=float(r['leaf_eaten']) + 300) for r in rows])
+        self.assertAlmostEqual(self.world()['components']['O']['raw'], result['raw'])
+        self.mutate('census.csv', lambda rows: [{k: v for k, v in r.items() if k != 'leaf_produced'} for r in rows])
+        cfg = score.profile_config(self.document, 'wide-screen-2h')
+        world = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=600)
+        self.assertFalse(world['rankable'])
+
+    def test_year_landscape_is_endpoint_floor_share_and_second_grove(self):
+        self.fixture(load=0)
+        self.mutate('census.csv', lambda rows: [dict(r, forest_floor_faces=0, meadow_patch_max=0,
+            forest_patch_second_max=0, grove_patches=0) if float(r['sim_min']) < 6 else r for r in rows])
+        result = self.world(year=True)['components']
+        for term in ('W', 'M', 'G_v', 'G_b', 'D'):
+            self.assertEqual(result[term]['penalty'], 0)
+        self.assertEqual(result['W']['raw'], 25 / 100)
+        self.assertEqual(result['M']['raw'], 15 / 100)
+        self.mutate('census.csv', lambda rows: [dict(r, forest_patch_second_max=0, grove_patches=0,
+            glowcap_lit_share=1) for r in rows])
+        result = self.world(year=True)['components']
+        for term in ('G_v', 'G_b', 'D'):
+            self.assertGreater(result[term]['penalty'], 0)
+
+    def test_screen_needs_no_landscape_or_movement_and_scores_adults(self):
+        self.fixture()
+        landscape = ('forest_floor_faces', 'forest_patch_second_max', 'meadow_patch_max', 'grove_patches', 'glowcap_lit_share')
+        self.mutate('census.csv', lambda rows: [{k: v for k, v in r.items() if k not in landscape} for r in rows])
+        world = self.world()
+        self.assertNotIn('V', world['components'])
+        self.assertEqual(world['components']['F']['penalty'], 0)
+        self.assertEqual(world['geometry']['floor_area_m2'], 100)
+        for term in self.document['profiles']['wide-screen-2h']['disabled']:
+            self.assertTrue(world['components'][term]['disabled_reason'])
+        self.mutate('census.csv', lambda rows: [dict(r, founders_bellwing=50) for r in rows])
+        world = self.world()
+        self.assertEqual(world['components']['K']['raw']['bellwing']['penalty'], 0)
+        self.assertEqual(world['components']['A']['raw']['bellwing']['penalty'], 0)
+
+    def test_hunt_band_scales_and_screen_requires_year_old_start(self):
+        self.fixture()
+        first = self.world()['components']['H']['high']
+        self.mutate('census.csv', lambda rows: [dict(r, floor_area_m2=200) for r in rows])
+        self.assertEqual(self.world()['components']['H']['high'], first * 2)
+        cfg = score.profile_config(self.document, 'wide-screen-2h')
+        young = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=1)
+        self.assertFalse(young['rankable'])
+        self.assertIn('year-old', young['warnings'][0])
+
+    def test_v3_report_and_pairing_use_v3_components(self):
+        self.fixture(load=0)
+        out = self.root / 'batch'
+        out.mkdir()
+        manifest = dict(arms={'base': [], 'trial': []}, seeds=[1], required=self.required,
+            load_minutes={'1': 0}, binary_sha256='fixture', start_kind='fresh founding')
+        (out / 'batch.json').write_text(json.dumps(manifest))
+        for arm in manifest['arms']:
+            shutil.copytree(self.root / 'run', out / arm / 's1/run')
+            shutil.copytree(self.root / 'vitals', out / arm / 's1/vitals')
+            shutil.copy(self.root / 'census.csv', out / arm / 's1/census.csv')
+        cfg = score.profile_config(self.document, 'wide-year')
+        report = score.build_report(out, cfg, baseline='base')
+        self.assertEqual(set(report['arms']['base']['components']), set(score.V3_COMPONENTS))
+        self.assertEqual(report['paired']['trial']['median_delta'], 0)
+        self.assertIn('wide-year', score.markdown(report))
+
+
 if __name__ == '__main__':
     unittest.main()

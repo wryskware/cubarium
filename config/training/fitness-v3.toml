@@ -1,0 +1,161 @@
+# Wrysk's 2026-10-09 targets: training-plan-2026-10-08 §6 items 10,14,16,17,22.
+# Shape the situation: outcomes only. Movement/herding/curiosity never enter P.
+# Targets are the decided directions; tolerances, ceilings and weights are provisional.
+# Stock windows [from,to); end-stamped intervals (from,to]; landscape at the endpoint.
+version = 3
+
+[weights]
+L = 100.0
+J = 10.0
+A = 2.0
+K = 2.0
+W = 3.0 # Wooded floor share.
+G_v = 1.0 # Second vaulttree grove's minimum family footprint.
+M = 3.0 # Largest meadow share of floor.
+G_b = 1.0 # Several lanternberry groves.
+D = 1.0 # Glowcaps on exposed faces.
+O = 3.0 # Leaf offtake / leaf growth, not fixation or total food intake.
+H = 1.0
+F = 3.0
+S = 5.0
+
+[population]
+reference_floor_m2 = 288.0 # d72: 32 m × 9 m. N_ref is diagnostic only.
+peak_ratio = 1.6666666666666667 # Provisional: retain v2's 5:3 peak-to-band ratio.
+
+[population.bands.chorister]
+lo = 2.0
+hi = 6.0
+fixed = true # One Veilhound pack per world.
+[population.bands.loftstrider]
+lo = 2.0
+hi = 6.0
+fixed = true # One family per world.
+[population.bands.frondgrazer]
+lo = 8.0
+hi = 24.0
+[population.bands.littershredder]
+lo = 8.0
+hi = 24.0
+[population.bands."ripple-snail"]
+lo = 8.0
+hi = 24.0
+[population.bands.seedporter]
+lo = 4.0
+hi = 12.0
+[population.bands.capgnawer]
+lo = 6.0
+hi = 18.0
+[population.bands.lanternjaw]
+lo = 6.0
+hi = 8.0
+[population.bands.bellwing]
+lo = 0.0 # Only extinction (L) below the ceiling: seasonal swings are allowed.
+nominal_hi = 90.0 # Approximate abundance per d72 area, a readout, not a band edge.
+hi = 900.0 # Provisional very high ceiling: 10× nominal abundance.
+peak = false
+peak_disabled_reason = "Bellwing seasonal swings: no peak penalty; L and the very high A ceiling only."
+
+[targets]
+woods_share_lo = 0.20 # Provisional tolerance around the decided quarter of floor.
+woods_share_hi = 0.30
+meadow_share_lo = 0.10
+meadow_share_hi = 0.20
+vaulttree_family_m2 = 29.04 # Geometric proxy: 6 adult footprints × 2.2 m × 2.2 m.
+# The second-largest grove must meet this threshold, hence at least two qualify.
+# This is minimum space, not a measured food carrying capacity; provisional.
+lanternberry_groves = 3.0 # Existing grove_patches counts connected patches >= census patch_min.
+# Census default patch_min = 25 faces (0.390625 m² at the wide world's voxel size).
+glowcap_lit_share_hi = 0.01 # Provisional near-zero tolerance: <=1% of caps exposed.
+leaf_offtake_lo = 0.10
+leaf_offtake_hi = 0.30
+hunt_lineages = ["chorister", "lanternjaw"]
+hunts_per_hour_lo = 0.5 # Provisional hunts/world-hour per d72 floor area.
+hunts_per_hour_hi = 2.0 # Provisional: scales with configured floor, not founders.
+fullness_p10 = 0.30 # Adults only; no adult exposure is structural NA.
+
+[reproduction]
+eligible_deficit = 0.5
+ineligible_deficit = 1.0
+
+[summary]
+sd_weight = 0.5
+consistent_fraction = 0.75
+consistent_min_seeds = 8
+
+[profiles.wide-screen-2h]
+from_minute = 0
+to_minute = 120
+active = ['L', 'J', 'A', 'K', 'O', 'H', 'F', 'S']
+
+aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
+slow = ["chorister", "loftstrider", "lanternjaw"]
+start_kind = "mature saved start"
+minimum_load_minute = 600
+
+[profiles.wide-screen-2h.slow_reasons]
+chorister = "Slow lifecycle: breeding is judged over the year, not this two-hour screen."
+loftstrider = "Slow lifecycle: breeding is judged over the year, not this two-hour screen."
+lanternjaw = "Slow lifecycle: breeding is judged over the year, not this two-hour screen."
+
+[profiles.wide-screen-2h.disabled]
+W = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
+G_v = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
+M = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
+G_b = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
+D = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
+
+[profiles.wide-screen-2h.required_data]
+L = ['census:stocks']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+A = ['census:stocks']
+K = ['census:stocks']
+W = ['census:forest_floor_faces']
+G_v = ['census:forest_patch_second_max']
+M = ['census:meadow_patch_max']
+G_b = ['census:grove_patches']
+D = ['census:glowcap_lit_share']
+O = ['census:leaf_produced', 'census:leaf_eaten']
+H = ['census:kills']
+F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
+S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
+
+[profiles.wide-screen-2h.trend_weights]
+count_slope = 0.0
+count_drawdown = 0.0
+energy_trend = 0.0
+plant_stand_slope = 0.0
+plant_vigour_trend = 0.0
+
+[profiles.wide-year]
+from_minute = 0
+to_minute = 600
+active = ['L', 'J', 'A', 'K', 'W', 'G_v', 'M', 'G_b', 'D', 'O', 'H', 'F', 'S']
+
+aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
+slow = []
+start_kind = "fresh founding"
+
+[profiles.wide-year.disabled]
+
+[profiles.wide-year.required_data]
+L = ['census:stocks']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+A = ['census:stocks']
+K = ['census:stocks']
+W = ['census:forest_floor_faces']
+G_v = ['census:forest_patch_second_max']
+M = ['census:meadow_patch_max']
+G_b = ['census:grove_patches']
+D = ['census:glowcap_lit_share']
+O = ['census:leaf_produced', 'census:leaf_eaten']
+H = ['census:kills']
+F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
+S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
+
+[profiles.wide-year.trend_weights]
+count_slope = 0.0
+count_drawdown = 0.0
+energy_trend = 0.0
+plant_stand_slope = 0.0
+plant_vigour_trend = 0.0
