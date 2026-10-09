@@ -116,16 +116,13 @@ fn stand_and_feed() -> Box<dyn Controller> {
 struct Lurer;
 impl Controller for Lurer {
     fn drive(&mut self, _o: &[f64]) -> Response {
-        Response::Bounded(Actions {
+        Response::with_body(Actions {
             forward: 0.0,
             turn: 0.0,
             feed: 1.0,
-        })
+        }, crate::BodyActions { lure: 1.0, ..crate::BodyActions::default() })
     }
     fn reset(&mut self) {}
-    fn lure(&self) -> f64 {
-        1.0
-    }
 }
 
 /// Body `id`'s stomach capacity `K = k · body`.

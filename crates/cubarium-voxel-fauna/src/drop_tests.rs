@@ -321,3 +321,28 @@ fn the_route_planner_never_uses_a_drop() {
     assert!(g.path(on_top, on_floor, 10_000).is_none(), "no route down the drop");
 }
 
+
+#[test]
+fn drop_is_a_constraint_for_both_layers() {
+    for layer in [crate::Layer::Brain, crate::Layer::Heuristic] {
+        let mut world = plain(48, 16, 24);
+        let mut c = config();
+        let down = c.founder(SP).step_limits(V).down;
+        let (h, w) = (down + 2, down + 1);
+        the_glide_is_out_of_reach(&c, h);
+        let top = ledge(&mut world, h, w);
+        c.founders[SP.index()].drop = DropRule { after_s: 0.1, max_m: 1e3, wound_per_m: 0.0 };
+        let bound = drop_bound_s(&c);
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut fauna = Fauna::new(c);
+        fauna.set_births_enabled(false);
+        let id = on_ledge(&mut fauna, &world, top);
+        if layer == crate::Layer::Brain {
+            fauna.set_controller(id, Box::new(crate::Scripted::new(vec![crate::Actions::REST])));
+        }
+        assert_off_graph(&mut fauna, &world, id, false);
+        let (landed, _) = run(&mut fauna, &world, &mut flora, id, top, bound);
+        assert!(landed.is_some(), "{layer:?} is freed by DROP");
+        assert_eq!(fauna.view().ledger.drops_by_founder[SP.index()], 1);
+    }
+}

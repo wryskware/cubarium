@@ -18,7 +18,7 @@ fn tasting(founder: Founder, cue: f64) -> Vec<f64> {
 
 fn feeds(c: &mut dyn Controller, founder: Founder, cue: f64) -> bool {
     match c.drive(&tasting(founder, cue)) {
-        Response::Bounded(a) => a.feed > 0.5,
+        Response::Bounded(a) | Response::Body(a, _) => a.feed > 0.5,
         Response::Logits(_) => unreachable!(),
     }
 }

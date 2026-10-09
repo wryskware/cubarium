@@ -351,7 +351,7 @@ fn live_off_restores_s1() {
         let bw = bellwing(&mut fauna, &world, 2.0, LANE_Z, 0.3, NORTH);
         let teachers = fauna.config.teachers;
         fauna.controllers.set(bw, crate::controller::heuristic(BW, teachers));
-        assert!(fauna.controllers.rests_when_fed(bw), "fixture: driven by its own heuristic");
+        assert!(fauna.controllers.layer(bw) == crate::Layer::Heuristic, "fixture: driven by its own heuristic");
         let lj = lanternjaw(&mut fauna, &world, 5.0, LANE_Z, WEST, lure, false);
         let mut out = Vec::new();
         for _ in 0..40 {

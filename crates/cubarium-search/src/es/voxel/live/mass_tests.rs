@@ -191,7 +191,7 @@ fn tasting(founder: Founder, cue: f64) -> Vec<f64> {
 
 fn act(c: &mut Box<dyn Controller>, o: &[f64]) -> Actions {
     match c.drive(o) {
-        Response::Bounded(a) => a,
+        Response::Bounded(a) | Response::Body(a, _) => a,
         Response::Logits(_) => unreachable!("a heuristic answers bounded"),
     }
 }

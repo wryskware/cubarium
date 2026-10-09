@@ -35,8 +35,8 @@ impl Spy {
 impl Controller for Spy {
     fn drive(&mut self, observation: &[f64]) -> Response {
         let r = self.inner.drive(observation);
-        let a = crate::resolve_actions(r, &self.manifest);
-        self.answers.lock().expect("answers").push((a, self.inner.lure(), self.inner.lift()));
+        let a = crate::resolve(r, &self.manifest);
+        self.answers.lock().expect("answers").push((a.actions, a.body.lure, a.body.lift));
         r
     }
     fn reset(&mut self) {
@@ -45,26 +45,11 @@ impl Controller for Spy {
     fn taste_only(&self) -> bool {
         self.inner.taste_only()
     }
-    fn lure(&self) -> f64 {
-        self.inner.lure()
-    }
-    fn lift(&self) -> f64 {
-        self.inner.lift()
-    }
-    fn flees(&self) -> bool {
-        self.inner.flees()
-    }
-    fn pack_tactic(&self) -> bool {
-        self.inner.pack_tactic()
+    fn layer(&self) -> crate::Layer {
+        self.inner.layer()
     }
     fn at_carcass(&self) -> bool {
         self.inner.at_carcass()
-    }
-    fn hunt_patrol(&self) -> bool {
-        self.inner.hunt_patrol()
-    }
-    fn rests_when_fed(&self) -> bool {
-        self.inner.rests_when_fed()
     }
     fn seek(&self) -> Seek {
         self.inner.seek()

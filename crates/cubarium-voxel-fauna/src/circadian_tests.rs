@@ -298,3 +298,39 @@ fn a_browser_sleeps_and_wakes_over_a_day_and_the_ledgers_stay_closed() {
     );
     assert_closes(&fauna, "end");
 }
+
+#[test]
+fn both_layers_sleep_without_sampling_and_gliders_sleep_only_perched() {
+    struct LayerCounter(Counting, crate::Layer);
+    impl Controller for LayerCounter {
+        fn drive(&mut self, o: &[f64]) -> Response { self.0.drive(o) }
+        fn reset(&mut self) { self.0.reset(); }
+        fn layer(&self) -> crate::Layer { self.1 }
+    }
+    let world = at_hour(0.0);
+    for layer in [crate::Layer::Brain, crate::Layer::Heuristic] {
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut cfg = FaunaConfig::default();
+        cfg.founders[Founder::Browser.index()].active = Activity::Diurnal;
+        cfg.founders[Founder::Seedporter.index()].active = Activity::Diurnal;
+        let mut fauna = Fauna::new(cfg);
+        fauna.set_births_enabled(false);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let i = founder(&mut fauna, &world, Founder::Browser, 1.0);
+        let id = fauna.animals[i].id;
+        fauna.animals[i].age_ticks = Founder::Browser.manifest().cadence_ticks() - 1;
+        fauna.set_controller(id, Box::new(LayerCounter(Counting(Arc::clone(&calls)), layer)));
+        fauna.step_with(&world, &mut flora, 1);
+        assert_eq!(fauna.animals[i].state, State::Asleep, "{layer:?}");
+        assert_eq!(calls.load(Ordering::Relaxed), 0, "no sleeping controller is sampled");
+        let j = founder(&mut fauna, &world, Founder::Seedporter, 1.0);
+        let id = fauna.animals[j].id;
+        fauna.set_controller(id, Box::new(LayerCounter(Counting(Arc::clone(&calls)), layer)));
+        for mode in [crate::MobilityMode::Ground, crate::MobilityMode::Perched] {
+            fauna.animals[j].mobility.mode = mode;
+            fauna.animals[j].state = State::Resting;
+            super::circadian(&mut fauna, &world.view(), &flora.view(), true, 0.0);
+            assert_eq!(fauna.animals[j].state == State::Asleep, mode == crate::MobilityMode::Perched, "{layer:?} {mode:?}");
+        }
+    }
+}

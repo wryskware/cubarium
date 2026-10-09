@@ -164,10 +164,7 @@ fn nonpatrol_lure_obeys_the_same_daylight_switch() {
     struct Lit;
     impl crate::controller::Controller for Lit {
         fn drive(&mut self, _: &[f64]) -> crate::controller::Response {
-            crate::controller::Response::Bounded(Actions::REST)
-        }
-        fn lure(&self) -> f64 {
-            1.0
+            crate::controller::Response::with_body(Actions::REST, crate::BodyActions { lure: 1.0, ..crate::BodyActions::default() })
         }
         fn reset(&mut self) {}
     }

@@ -46,7 +46,7 @@ impl Controller for Recorder {
         let r = self.inner.drive(o);
         let (fwd, feed) = match r {
             Response::Logits(l) => (l[0].tanh(), 1.0 / (1.0 + (-l[2]).exp())),
-            Response::Bounded(a) => (a.forward, a.feed),
+            Response::Bounded(a) | Response::Body(a, _) => (a.forward, a.feed),
         };
         {
             let mut all = ALL.lock().unwrap();
