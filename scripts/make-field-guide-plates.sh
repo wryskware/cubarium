@@ -14,9 +14,20 @@ box=176x163
 mkdir -p "$out"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# Some artbook images still carry a painted backdrop (the artbook README's cleanup list):
+# capgnawer and littershredder a part-transparent one, cut by alpha; frondgrazer an opaque
+# one, flooded out from its four corners (the image is 1536x1024), with the bottom 70 px
+# cut to drop stray shadow specks under its feet. Everything else goes in as it is.
+prep() {
+  case "$1" in
+    capgnawer) echo "-channel A -threshold 80% +channel" ;;
+    littershredder) echo "-channel A -threshold 97% +channel" ;;
+    frondgrazer) echo "-alpha set -fuzz 10% -fill none -draw 'color 0,0 floodfill' -draw 'color 1535,0 floodfill' -draw 'color 0,1023 floodfill' -draw 'color 1535,1023 floodfill' -gravity south -chop 0x70 +gravity" ;;
+  esac
+}
 # guide id (game/data/field_guide.md) and its artbook image
 while read -r id img; do
-  magick "$src/$img" -trim +repage -filter box -resize "$box" -colors 40 -dither None "$tmp/small.png"
+  eval "magick \"\$src/\$img\" $(prep "$id") -trim +repage -filter box -resize \"\$box\" -colors 40 -dither None \"\$tmp/small.png\""
   magick "$tmp/small.png" -filter point -resize 400% "$out/$id-px.png"
   echo "$out/$id-px.png $(magick identify -format '%wx%h' "$out/$id-px.png")"
 done <<'LIST'

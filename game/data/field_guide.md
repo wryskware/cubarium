@@ -96,6 +96,7 @@ A moss-green climber with a pale belly, a dark back stripe, large dark eyes and 
 
 ## Bloomcrown
 id: bloomcrown
+swatch: #FD4DD3
 kind: Plant
 kicker: Flower
 role: Sun-loving flower
@@ -105,6 +106,7 @@ A slim violet stem holds up a ring of hot-pink vanes around a pale, glowing cent
 
 ## Umbrellafrond
 id: umbrellafrond
+swatch: #0EA99D
 kind: Plant
 kicker: Frond
 role: Shade-maker of wet hollows
@@ -114,6 +116,7 @@ A violet stem raises three neat tiers of lacy teal fronds, each frond ribbed in 
 
 ## Springturf
 id: springturf
+swatch: #48F4BE
 kind: Plant
 kicker: Grass
 role: Wild grass of open hills
@@ -123,6 +126,7 @@ A low, spreading clump of ribbon leaves, deep teal at the base and bright mint a
 
 ## Stonecushion
 id: stonecushion
+swatch: #A678F1
 kind: Plant
 kicker: Cushion plant
 role: Bare-rock pioneer
@@ -132,6 +136,7 @@ A compact mound of plump lilac lobes, pricked with tiny cyan pores, sitting on b
 
 ## Velvetpad
 id: velvetpad
+swatch: #3357C9
 kind: Plant
 kicker: Moss
 role: Mossy early colonizer
@@ -141,6 +146,7 @@ A soft violet carpet with a raised purple rim, tufted with cobalt moss and threa
 
 ## Glowcap
 id: glowcap
+swatch: #37F6F9
 kind: Fungus
 kicker: Decomposer
 role: Wood fungus
@@ -150,6 +156,7 @@ A broad, tilted purple cap with dark spots and a vivid cyan brim, rising on a vi
 
 ## Vaulttree
 id: vaulttree
+swatch: #7A46CA
 kind: Plant
 kicker: Tree
 role: Canopy builder
@@ -159,6 +166,7 @@ An uneven trunk of violet bark plates opens into arching limbs that hold dark-te
 
 ## Lanternberry
 id: lanternberry
+swatch: #19ADFA
 kind: Plant
 kicker: Shrub
 role: Fruiting shrub
@@ -168,6 +176,7 @@ A fan of violet stems with small blue leaflets, hung at the tips with closed dee
 
 ## Siphonreed
 id: siphonreed
+swatch: #FC4FB4
 kind: Plant
 kicker: Reed
 role: Shallow-water reed
@@ -177,6 +186,7 @@ Slim celadon stems rise from the water, swelling near the top into broad, rounde
 
 ## Latticevine
 id: latticevine
+swatch: #6F7DF5
 kind: Plant
 kicker: Vine
 role: Rock-face cover

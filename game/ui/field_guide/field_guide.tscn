@@ -450,7 +450,7 @@ mouse_filter = 2
 theme_override_constants/margin_left = 14
 theme_override_constants/margin_top = 0
 theme_override_constants/margin_right = 14
-theme_override_constants/margin_bottom = 0
+theme_override_constants/margin_bottom = 28
 
 [node name="PlantsList" type="VBoxContainer" parent="Center/Page/Body/Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll/IndexList/PlantsListMargin"]
 layout_mode = 2
