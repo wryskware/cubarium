@@ -1,6 +1,7 @@
 //! The live-training package's tests (`design/handoffs/voxel-live-world-training-2026-09-24.md`,
 //! "Tests"): each at most 200 ticks, no pinned hashes.
 
+use crate::es::voxel::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use cubarium_voxel::{Config, Landform, Preset, Recipe, World};
 use cubarium_voxel_fauna::{Command as FaunaCommand, Founder, Response, StartingStores};
 use cubarium_voxel_sim::{ScheduleMode, Sim, SimConfig};
@@ -16,15 +17,15 @@ use crate::es::voxel::task::{PreparedArena, Stage, TRAINING_LAYOUT_SEEDS};
 
 fn centre(founder: Founder) -> Vec<f64> {
     match founder {
-        Founder::Blind => initial_center_shape::<23, 3>(5),
-        Founder::Browser => initial_center_shape::<37, 3>(5),
+        Founder::Blind => initial_center_shape::<BLIND_I, BLIND_O>(5),
+        Founder::Browser => initial_center_shape::<BROWSER_I, BROWSER_O>(5),
         _ => unreachable!("this lineage trains from P2"),
     }
 }
 
 fn logits(r: Response) -> [f64; 3] {
     match r {
-        Response::Logits(l) => l,
+        Response::Logits(l) => [l[0], l[1], l[2]],
         other => panic!("a GRU answers logits, not {other:?}"),
     }
 }

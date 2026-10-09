@@ -398,9 +398,9 @@ fn the_bellwing_table_is_a_diurnal_nectar_flyer() {
     assert_eq!(m.actions[3].name, "lift_effort");
     assert_eq!((m.actions[3].low, m.actions[3].high), (-1.0, 1.0));
     assert_eq!(m.actions[3].transfer, crate::Transfer::Tanh);
+    // Contract v3: no other lineage has a lift.
     for other in Founder::ALL.into_iter().filter(|&o| o != BW) {
-        let want = if other == Founder::Lanternjaw { 4 } else { 3 };
-        assert_eq!(other.manifest().actions.len(), want, "{other:?}'s actions do not move");
+        assert!(other.manifest().actions.iter().all(|a| a.name != "lift_effort"), "{other:?} lifts");
     }
 }
 
@@ -1763,6 +1763,40 @@ fn nesting(incubation_ticks: f64) -> FaunaConfig {
     };
     assert_eq!(config.founders[BW.index()].egg_site, crate::EggSite::Vine, "the bellwing nests in the vines");
     config
+}
+
+/// **P0, the executed-action tap: a bellwing flying to a vine nest records `Steer::Nest`.** A
+/// ready bellwing on its own hover-sip heuristic, watched by a [`crate::tap_tests::Spy`],
+/// a metre off a vine-covered wall (out of its mouth's reach, within its nest search): its
+/// samples while it flies there are the nest reflex's, the executed label is what it held,
+/// and the pre-override label is its heuristic's own answer.
+#[test]
+fn a_bellwing_flying_to_a_vine_nest_records_the_nest() {
+    let (world, mut flora, _) = vine_wall(true, FloraConfig::default());
+    let mut fauna = Fauna::new(nesting(4000.0));
+    let (_, z) = centre(0, WALL_Z);
+    let id = aloft(&mut fauna, &world, WALL_FACE_M - 1.0, z, 6.0 * V + 0.05, EAST, StartingStores::FULL);
+    let (spy, answers) = crate::tap_tests::Spy::new(crate::heuristic(BW, fauna.config().teachers), BW);
+    assert!(fauna.set_controller(id, Box::new(spy)));
+    fauna.start_tap();
+    let mut nest = 0;
+    for _ in 0..200 {
+        let before = fauna.tap().and_then(|t| t.stream(id)).map_or(0, <[_]>::len);
+        fauna.step(&world, &mut flora);
+        let Some(s) = fauna.tap().and_then(|t| t.stream(id)).filter(|s| s.len() > before).and_then(|s| s.last()) else {
+            continue;
+        };
+        let a = animal(&fauna, id);
+        let (own, _, _) = *answers.lock().expect("answers").last().expect("its answer");
+        assert_eq!(s.own.actions, own, "the pre-override label is its heuristic's own answer");
+        assert_eq!(s.executed.actions, a.founder_state.held, "the executed label is what it held");
+        assert_eq!(s.executed.body.lift, a.founder_state.lift, "and the lift it held");
+        nest += usize::from(s.steer == crate::Steer::Nest);
+        if fauna.view().ledger.clutches_by_founder[BW.index()] >= 1 {
+            break;
+        }
+    }
+    assert!(nest > 0, "the nest reflex flew it to the vines and the tap saw it");
 }
 
 /// **VINE-C (Wrysk 2026-10-09: "bellwings can also nest in the vines"): a bellwing ready to

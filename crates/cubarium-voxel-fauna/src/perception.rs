@@ -841,7 +841,7 @@ pub(crate) fn refresh(
 /// The live tremor reading: footfall `mass × speed / d²` of every moving body on the ground
 /// within its `tremor_m`, split left and right of its heading (no ray: the reading runs at
 /// tick rate).
-fn tremor_reading(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, table: &SenseTable) -> [f64; 2] {
+pub(crate) fn tremor_reading(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, table: &SenseTable) -> [f64; 2] {
     let mut out = [0.0, 0.0];
     if !(table.tremor_m > 0.0) {
         return out;

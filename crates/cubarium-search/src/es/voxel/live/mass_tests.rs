@@ -339,13 +339,8 @@ fn a_centre_is_refused_at_another_mass() {
         other.mass_scale *= 2.0;
         assert_ne!(other.digest(), m.digest(), "the mass is in the digest");
     }
-    let dir =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
-    let r2 = format!(
-        "transfer:{}",
-        dir.join("r2-frondgrazer-upd160.json").display()
-    );
-    let gru = brain_driver(Founder::Browser, &r2).expect("a transferred centre");
+    let centre = crate::es::voxel::store::test_centre_path(Founder::Browser, "mass");
+    let gru = brain_driver(Founder::Browser, &centre.display().to_string()).expect("a centre");
     let heur = brain_driver(Founder::Browser, "heuristic").expect("h");
     let shipped = EcologyParams::defaults();
     let heavy = with("founder.mass_scale@frondgrazer", 2.0);
@@ -354,10 +349,10 @@ fn a_centre_is_refused_at_another_mass() {
     assert!(super::search::check_mass(&[(Founder::Browser, heur)], &heavy).is_ok());
 }
 
-/// Round 2's centres were written against the old digest: they load only as a transfer
-/// (`transfer:<file>`, same vector length, restamped to this build's digest).
+/// Round 2's centres are contract v2: refused by name, strict and as a transfer, for
+/// their own lineage and the other.
 #[test]
-fn round_two_centres_load_only_as_a_transfer() {
+fn round_two_centres_are_refused_under_contract_v3() {
     let dir =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
     for (file, f) in [
@@ -365,19 +360,11 @@ fn round_two_centres_load_only_as_a_transfer() {
         ("r2-littershredder-upd512.json", Founder::Blind),
     ] {
         let path = dir.join(file);
-        assert!(
-            brain_driver(f, &path.display().to_string()).is_err(),
-            "{file}: strict load refused"
-        );
-        let d = brain_driver(f, &format!("transfer:{}", path.display())).expect("transfer");
-        assert!(d.name().contains("gru"), "{file}");
-        assert!(
-            brain_driver(
-                Founder::ALL[1 - f.index()],
-                &format!("transfer:{}", path.display())
-            )
-            .is_err()
-        );
+        for spec in [path.display().to_string(), format!("transfer:{}", path.display())] {
+            let err = brain_driver(f, &spec).expect_err("refused");
+            assert!(err.contains("contract-v2"), "{file}: {err}");
+            assert!(brain_driver(Founder::ALL[1 - f.index()], &spec).is_err());
+        }
     }
 }
 

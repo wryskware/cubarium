@@ -241,9 +241,9 @@ fn the_r1_physiology_tables_have_the_briefs_shape() {
         .expect("the lanternjaw hunts");
     assert!(lj.hunts(Founder::Capgnawer) && !lj.hunts(Founder::Loftstrider));
 
-    // Each is its own manifest, at its template's width.
-    assert_eq!(Founder::Capgnawer.manifest().inputs(), Founder::Blind.manifest().inputs());
-    assert_eq!(Founder::Loftstrider.manifest().inputs(), Founder::Browser.manifest().inputs());
+    // Each is its own manifest, its template's v2 layout first.
+    assert_eq!(Founder::Capgnawer.manifest().tail_offset(), Founder::Blind.manifest().tail_offset());
+    assert_eq!(Founder::Loftstrider.manifest().tail_offset(), Founder::Browser.manifest().tail_offset());
     assert_ne!(Founder::Capgnawer.manifest().digest(), Founder::Blind.manifest().digest());
     assert_ne!(
         Founder::Loftstrider.manifest().digest(),

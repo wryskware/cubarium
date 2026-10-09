@@ -2,6 +2,7 @@
 //! persist, breed, bounded): the penalty's new parts, and unified mode with an untrained
 //! lineage. Each at most 200 ticks; no pinned hashes.
 
+use crate::es::voxel::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use cubarium_voxel_fauna::Founder;
 
 use super::ecology::EcologyParams;
@@ -123,8 +124,8 @@ fn each_part_is_zero_inside_its_band_and_monotonic_outside() {
 
 fn centre(founder: Founder) -> Vec<f64> {
     match founder {
-        Founder::Blind => initial_center_shape::<23, 3>(5),
-        Founder::Browser => initial_center_shape::<37, 3>(5),
+        Founder::Blind => initial_center_shape::<BLIND_I, BLIND_O>(5),
+        Founder::Browser => initial_center_shape::<BROWSER_I, BROWSER_O>(5),
         _ => unreachable!("no centre exists for this lineage"),
     }
 }

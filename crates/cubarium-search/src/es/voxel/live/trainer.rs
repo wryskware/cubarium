@@ -668,7 +668,7 @@ mod recovery_tests {
         let out = std::env::temp_dir().join(format!("cub-live-recovery-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         std::fs::create_dir_all(&out).unwrap();
-        let path = PathBuf::from(format!("transfer:{}/../../config/training/centres/r2-littershredder-upd512.json", env!("CARGO_MANIFEST_DIR")));
+        let path = crate::es::voxel::store::test_centre_path(Founder::Blind, name);
         let template = VoxelPolicyFile::load_or_transfer(&path).unwrap();
         let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template }];
         let cfg = cubarium_voxel::Config { width: 64, height: 24, depth: 6, ..Default::default() };

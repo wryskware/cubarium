@@ -31,6 +31,20 @@
 //! contract and the body it describes are one set of numbers. Every centre trained
 //! against schema 1 is refused.
 //!
+//! # Contract v3 (2026-10-09)
+//!
+//! Schema 3 (`design/brain-contract-v3-proposal-2026-10-08.md` §2.1, §2.3 B, §4 P1, with
+//! Wrysk's answers in `design/training-plan-2026-10-08.md` §6 items 12, 14, 23–25). Every
+//! lineage keeps its v2 layout **in place** and appends its v3 blocks ([`Module::tail`]):
+//! the body state the v2 `Self` lacks, the threat, kin and prey slots read off the percept
+//! record, carcass, scents, tremor, the photoreceptor, the lineage's own state (hunker,
+//! water, mode, pack) and its `Place(…)` blocks, encoded by [`V3_ENCODING_RULE`]
+//! (`crate::observe_v3`). A lineage's actions are the three local ones and then its body's
+//! own (`sprint`, `hunker`, `retract`, `lure`, `lift`), declared here and wired in P2; an
+//! option head ([`Manifest::option_head`], 0 until P8) may follow them. The hidden width is
+//! per lineage ([`Manifest::hidden`]). All of it is in the canonical text, so every v2
+//! centre is refused.
+//!
 //! # Digest
 //!
 //! [`Manifest::digest`] is FNV-1a 64 over [`Manifest::canonical_text`], mirroring
@@ -42,20 +56,39 @@
 //!
 //! # Parameter count
 //!
-//! [`Manifest::parameter_count`] is the `Gru32`-compatible count for the manifest's shapes:
-//! `3·H·(I + H + 2) + O·(H + 1)` with `H = 32`, which is `cubarium-core`'s
-//! `neural::gru::parameter_count`: the number the runtime must accept (5,571 and 6,915).
+//! [`Manifest::parameter_count`] is the GRU count for the manifest's shapes:
+//! `3·H·(I + H + 2) + O·(H + 1)` with `H` its hidden width and `O` its outputs (actions
+//! plus option head), which at `H = 32` is `cubarium-core`'s `neural::gru::parameter_count`:
+//! the number the runtime must accept.
 
 use std::fmt::Write;
 
 use serde::{Deserialize, Serialize};
 
-/// The fixed hidden width every phase-one founder's GRU uses.
+/// The default hidden width of a lineage's GRU ([`Manifest::hidden`]). Contract v3 makes
+/// it a per-lineage manifest field folded into the digest, so a bigger brain for one
+/// lineage (the proposal's Q5) is a manifest change, not a runtime one.
 pub const HIDDEN: usize = 32;
 
 /// The schema-version token folded into every manifest's canonical text. A change to the
-/// meaning of an existing slot bumps this and invalidates old digests.
-pub const SCHEMA_VERSION: u32 = 2;
+/// meaning of an existing slot bumps this and invalidates old digests. **3**: contract v3
+/// (the v3 blocks, per-lineage hidden width, the body actions and the option head).
+pub const SCHEMA_VERSION: u32 = 3;
+
+/// The most network outputs one response carries ([`crate::Response::Logits`]): a
+/// lineage's actions plus its option head ([`Manifest::outputs`]). A capacity, not a shape:
+/// a manifest's own count says how many are read.
+pub const MAX_OUTPUTS: usize = 16;
+
+/// How the v3 blocks are encoded, as the canonical text records it. **Bearing**: the body
+/// frame, positive to the right, as `sin` and `cos`, recomputed at encoding from the body's
+/// pose to the item's last-known point (no coordinate reaches the vector). **Proximity**:
+/// `1 − d / range`, `d` horizontal, clamped. **Fresh**: `1 − age / fresh_s`; a slot older
+/// than `fresh_s` is empty. **Still**: the item's FEAR posture is REST or ASLEEP. **Count**:
+/// `min(n, 4) / 4`. **Level** responses: `x / (x + reference)`. **Gradient**: `tanh(g · 1 m
+/// / reference)` along the body's forward and right. Every block carries its validity, and
+/// an empty one reads all zero.
+pub const V3_ENCODING_RULE: &str = "bearing=body_right_pos:sin,cos@now;proximity=1-d_h/range;fresh=1-age/fresh_s;still=rest|asleep;count=min(n,4)/4;level=x/(x+ref);gradient=tanh(g*1m/ref);empty=0";
 
 /// The occlusion rule a cone ray and a contact probe are marched under, as the canonical
 /// text records it (D3, D4): terrain stops a ray; free water only below its surface
@@ -250,6 +283,12 @@ pub struct Module {
     pub offset: usize,
     pub width: usize,
     pub channels: &'static [&'static str],
+    /// **A contract-v3 block** (`design/brain-contract-v3-proposal-2026-10-08.md` §2.1),
+    /// appended after the lineage's v2 layout. The v2 modules keep their slots, so the
+    /// observation-only heuristics read exactly what they read under v2; the v3 blocks are
+    /// encoded only for a body whose controller reads them (a brain) or while the
+    /// executed-action tap records it ([`crate::body`]'s tail encoder).
+    pub tail: bool,
 }
 
 impl Module {
@@ -408,6 +447,23 @@ pub struct Manifest {
     /// per site. `None` for every lineage on the rule, whose canonical text does not
     /// change.
     pub taste_reference: Option<f64>,
+    /// **The hidden width** of this lineage's GRU (contract v3): [`HIDDEN`] for every lineage
+    /// today. Folded into the digest and the parameter count, so a bigger brain for one
+    /// lineage is a manifest change.
+    pub hidden: usize,
+    /// **The option head's width** (the B/C hybrid, training plan item 23): option logits the
+    /// network emits after its actions, option 0 being its own steering. 0 for every lineage
+    /// until P8 writes the skills; the response, the adapter and the parameter count already
+    /// admit it ([`Manifest::outputs`]).
+    pub option_head: usize,
+    /// The v3 slots' proximity range, metres: the lineage's longest remote sense (sight,
+    /// hearing or tremor) in its frozen table.
+    pub slot_range_m: f64,
+    /// A v3 slot's freshness horizon, seconds: the perception's `give_up_s` as shipped. A
+    /// slot older than this reads empty.
+    pub fresh_s: f64,
+    /// The `Carcass` block's range, metres: the hunt's carcass scan as shipped.
+    pub carcass_range_m: f64,
 }
 
 /// The `Self` energy, reserve, structural-loss and intake references are the manifest's
@@ -440,6 +496,7 @@ const MODULE_SELF: Module = Module {
     offset: 0,
     width: 8,
     channels: &SELF_CHANNELS,
+    tail: false,
 };
 
 const CONTACT4_CHANNELS: [&str; 5] = ["front", "left", "right", "underside", "valid"];
@@ -449,6 +506,7 @@ const MODULE_CONTACT4: Module = Module {
     offset: 8,
     width: 5,
     channels: &CONTACT4_CHANNELS,
+    tail: false,
 };
 
 const WET_CHANNELS: [&str; 2] = ["response", "valid"];
@@ -458,6 +516,7 @@ const MODULE_WET: Module = Module {
     offset: 13,
     width: 2,
     channels: &WET_CHANNELS,
+    tail: false,
 };
 
 const TASTE1_CHANNELS: [&str; 3] = ["cue", "resistance", "valid"];
@@ -467,6 +526,7 @@ const MODULE_TASTE1: Module = Module {
     offset: 15,
     width: 3,
     channels: &TASTE1_CHANNELS,
+    tail: false,
 };
 
 const CHEM_DETRITUS_CHANNELS: [&str; 3] = ["response", "trend", "valid"];
@@ -481,6 +541,7 @@ const MODULE_CHEM_DETRITUS: Module = Module {
     offset: 18,
     width: 3,
     channels: &CHEM_DETRITUS_CHANNELS,
+    tail: false,
 };
 
 /// The capgnawer's diffused cue channel (roster R1): the **fungal** field, whose sources
@@ -491,6 +552,7 @@ const MODULE_CHEM_FUNGAL: Module = Module {
     offset: 18,
     width: 3,
     channels: &CHEM_DETRITUS_CHANNELS,
+    tail: false,
 };
 
 // Roster R2b: the ripple-snail's `Chem(film)`, the film field in the `Chem(detritus)` slot.
@@ -499,6 +561,7 @@ const MODULE_CHEM_FILM: Module = Module {
     offset: 18,
     width: 3,
     channels: &CHEM_DETRITUS_CHANNELS,
+    tail: false,
 };
 
 const LIGHT_CHANNELS: [&str; 2] = ["response", "valid"];
@@ -508,6 +571,7 @@ const MODULE_LIGHT: Module = Module {
     offset: 21,
     width: 2,
     channels: &LIGHT_CHANNELS,
+    tail: false,
 };
 
 const CONE3_CHANNELS: [&str; 19] = [
@@ -537,9 +601,11 @@ const MODULE_CONE3: Module = Module {
     offset: 18,
     width: 19,
     channels: &CONE3_CHANNELS,
+    tail: false,
 };
 
-const BLIND_MODULES: [Module; 6] = [
+#[cfg(test)]
+const BLIND_MODULES_V2: [Module; 6] = [
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -547,7 +613,8 @@ const BLIND_MODULES: [Module; 6] = [
     MODULE_CHEM_DETRITUS,
     MODULE_LIGHT,
 ];
-const CAPGNAWER_MODULES: [Module; 6] = [
+#[cfg(test)]
+const CAPGNAWER_MODULES_V2: [Module; 6] = [
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -555,7 +622,8 @@ const CAPGNAWER_MODULES: [Module; 6] = [
     MODULE_CHEM_FUNGAL,
     MODULE_LIGHT,
 ];
-const RIPPLE_SNAIL_MODULES: [Module; 6] = [
+#[cfg(test)]
+const RIPPLE_SNAIL_MODULES_V2: [Module; 6] = [
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -584,6 +652,7 @@ const MODULE_FLYER_SELF: Module = Module {
     offset: 0,
     width: 10,
     channels: &FLYER_SELF_CHANNELS,
+    tail: false,
 };
 
 /// A flyer's state in the air: perched (1) or aloft (0); hanging (perched under an
@@ -598,6 +667,7 @@ const MODULE_AIR: Module = Module {
     offset: 10,
     width: 5,
     channels: &AIR_CHANNELS,
+    tail: false,
 };
 
 /// A flyer's mouth: the nearest bloom's nectar in reach.
@@ -606,6 +676,7 @@ const MODULE_FLYER_TASTE: Module = Module {
     offset: 15,
     width: 3,
     channels: &TASTE1_CHANNELS,
+    tail: false,
 };
 
 const FAN3_CHANNELS: [&str; 25] = [
@@ -643,9 +714,11 @@ const MODULE_FAN3: Module = Module {
     offset: 18,
     width: 25,
     channels: &FAN3_CHANNELS,
+    tail: false,
 };
 
-const BELLWING_MODULES: [Module; 4] = [MODULE_FLYER_SELF, MODULE_AIR, MODULE_FLYER_TASTE, MODULE_FAN3];
+#[cfg(test)]
+const BELLWING_MODULES_V2: [Module; 4] = [MODULE_FLYER_SELF, MODULE_AIR, MODULE_FLYER_TASTE, MODULE_FAN3];
 
 /// The flyer fan's pitch offsets, degrees (§3.6): it looks down.
 pub const FLYER_RAY_PITCH_OFFSETS_DEG: [f64; 5] = [-80.0, -50.0, -20.0, 10.0, 40.0];
@@ -658,13 +731,308 @@ const BELLWING_TASTE_RESISTANCES: [(&str, f64); 1] = [("nectar", 0.1)];
 /// The seedporter's mouth mapping (F3): soft fruit, firm ground.
 const SEEDPORTER_TASTE_RESISTANCES: [(&str, f64); 2] = [("fruit", 0.1), ("ground", 0.5)];
 
-const BROWSER_MODULES: [Module; 5] = [
+#[cfg(test)]
+const BROWSER_MODULES_V2: [Module; 5] = [
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
     MODULE_TASTE1,
     MODULE_CONE3,
 ];
+
+// ---------------------------------------------------------------- contract v3 blocks
+//
+// `design/brain-contract-v3-proposal-2026-10-08.md` §2.1, reconciled with the code of
+// 2026-10-09 (`design/training-plan-2026-10-08.md` §6 items 12, 14, 23–25). Each lineage's v3
+// layout is its v2 layout, unchanged and in place, followed by its v3 blocks: the order is
+// not meaning to a network, and keeping the v2 slots lets the observation-only heuristics
+// read exactly what they read under v2.
+
+/// Lays a module list out contiguously from slot 0, in order.
+const fn layout<const N: usize>(mut mods: [Module; N]) -> [Module; N] {
+    let mut next = 0;
+    let mut k = 0;
+    while k < N {
+        mods[k].offset = next;
+        next += mods[k].width;
+        k += 1;
+    }
+    mods
+}
+
+/// A v3 block: its slot is set by [`layout`].
+const fn tail(name: &'static str, channels: &'static [&'static str]) -> Module {
+    Module { name, offset: 0, width: channels.len(), channels, tail: true }
+}
+
+/// `SelfV3`: the body state the v2 `Self` lacks — the stomach's fill over its capacity
+/// `K`, the eating latch, the wound stock, stamina (`1 − sprint_spent`; 1 for a lineage
+/// with no sprint), the daylight at the sky (1 with the clock off) and the day's phase as
+/// `sin`/`cos` (0 midnight).
+const SELF_V3_CHANNELS: [&str; 7] = ["stomach_fill", "eating", "wound", "stamina", "daylight", "day_sin", "day_cos"];
+/// A sensed body's slot ([`V3_ENCODING_RULE`]), read off the record's per-class best
+/// track (`Percept::best`).
+const PREY_CHANNELS: [&str; 7] = ["valid", "sin", "cos", "proximity", "moving", "still", "fresh"];
+/// The threat slot and the number of threats in the latest sensing (the loftstrider's
+/// group rule reads it).
+const THREAT_CHANNELS: [&str; 8] = ["valid", "sin", "cos", "proximity", "moving", "still", "fresh", "count"];
+/// The kin slot, the herd alarm (a kin heard running, the vigil's own test) and the number
+/// of kin in the latest sensing (the herding pull and the many eyes read it).
+const KIN_CHANNELS: [&str; 9] = ["valid", "sin", "cos", "proximity", "moving", "still", "fresh", "alarm", "count"];
+/// The nearest usable carcass within the manifest's carcass range.
+const CARCASS_CHANNELS: [&str; 4] = ["valid", "sin", "cos", "proximity"];
+/// One scent channel where the body stands: the level and its gradient along the body.
+const SCENT_CHANNELS: [&str; 3] = ["level", "forward", "right"];
+/// The footfall felt on its left and right.
+const TREMOR_CHANNELS: [&str; 2] = ["left", "right"];
+/// The flyer's photoreceptor (S3): ambient light, the looming shadow, the brightest still
+/// beacon (its kind as `cyan`: 1 a cyan emitter, 0 a near-IR reflector, as its eye sees
+/// it) and the brightest moving light.
+const LIGHT_V3_CHANNELS: [&str; 12] = [
+    "ambient",
+    "loom",
+    "loom_sin",
+    "loom_cos",
+    "beacon",
+    "beacon_level",
+    "beacon_sin",
+    "beacon_cos",
+    "beacon_cyan",
+    "moving_level",
+    "moving_sin",
+    "moving_cos",
+];
+/// The capgnawer's cyan sense (S3): the brightest still glow it sees, and whether it stands
+/// under one of its own failed-visit marks.
+const GLOW_CHANNELS: [&str; 5] = ["beacon", "beacon_level", "beacon_sin", "beacon_cos", "marked_here"];
+/// The frondgrazer's hunker state.
+const HUNKER_CHANNELS: [&str; 1] = ["hunkered"];
+/// The ripple-snail's water state: its drying clock, thirst, ashore, retracted.
+const AMPHIBIOUS_CHANNELS: [&str; 4] = ["dry", "thirst", "ashore", "retracted"];
+/// The seedporter's mode (on the ground or a wall, climbing, perched, gliding) and its base
+/// over the support below it.
+const MODE_CHANNELS: [&str; 5] = ["ground", "climb", "perched", "glide", "height"];
+/// The lanternjaw's light at its face (`sky × daylight`): the lure pays only in the dark.
+const FACE_LIGHT_CHANNELS: [&str; 1] = ["level"];
+/// The Veilhound's pack: breeder, pup, the pack target (known to every member by call) and
+/// the pack's feast.
+const SOCIAL_CHANNELS: [&str; 10] = [
+    "breeder",
+    "pup",
+    "target.valid",
+    "target.sin",
+    "target.cos",
+    "target.proximity",
+    "feast.valid",
+    "feast.sin",
+    "feast.cos",
+    "feast.proximity",
+];
+/// **One place** (item 24): the nearest such place the body could perceive, else the one it
+/// remembers using, which fades if not revisited — `fresh` is 1 for a place perceived now
+/// and falls as a memory ages. P6 fills them; until then every place reads empty but the
+/// den, which a pack member always knows.
+const PLACE_CHANNELS: [&str; 5] = ["valid", "sin", "cos", "proximity", "fresh"];
+
+const MODULE_SELF_V3: Module = tail("SelfV3", &SELF_V3_CHANNELS);
+const MODULE_THREAT: Module = tail("Threat", &THREAT_CHANNELS);
+const MODULE_KIN: Module = tail("Kin", &KIN_CHANNELS);
+const MODULE_PREY: Module = tail("Prey", &PREY_CHANNELS);
+const MODULE_CARCASS: Module = tail("Carcass", &CARCASS_CHANNELS);
+const MODULE_SCENT_HUNTER: Module = tail("Scent(hunter)", &SCENT_CHANNELS);
+const MODULE_SCENT_GRAZER: Module = tail("Scent(grazer)", &SCENT_CHANNELS);
+const MODULE_SCENT_SMALL_PREY: Module = tail("Scent(small-prey)", &SCENT_CHANNELS);
+const MODULE_SCENT_CARRION: Module = tail("Scent(carrion)", &SCENT_CHANNELS);
+const MODULE_SCENT_NECTAR: Module = tail("Scent(nectar)", &SCENT_CHANNELS);
+const MODULE_TREMOR: Module = tail("Tremor", &TREMOR_CHANNELS);
+const MODULE_LIGHT_V3: Module = tail("LightV3", &LIGHT_V3_CHANNELS);
+const MODULE_GLOW: Module = tail("Glow", &GLOW_CHANNELS);
+const MODULE_HUNKER: Module = tail("Hunker", &HUNKER_CHANNELS);
+const MODULE_AMPHIBIOUS: Module = tail("Amphibious", &AMPHIBIOUS_CHANNELS);
+const MODULE_MODE: Module = tail("Mode", &MODE_CHANNELS);
+const MODULE_FACE_LIGHT: Module = tail("FaceLight", &FACE_LIGHT_CHANNELS);
+const MODULE_SOCIAL: Module = tail("Social", &SOCIAL_CHANNELS);
+const MODULE_PLACE_SHORE: Module = tail("Place(shore)", &PLACE_CHANNELS);
+const MODULE_PLACE_WATER: Module = tail("Place(water)", &PLACE_CHANNELS);
+const MODULE_PLACE_SHORE_EGG: Module = tail("Place(shore_egg)", &PLACE_CHANNELS);
+const MODULE_PLACE_FILM: Module = tail("Place(film)", &PLACE_CHANNELS);
+const MODULE_PLACE_ROOST: Module = tail("Place(roost)", &PLACE_CHANNELS);
+const MODULE_PLACE_FRUIT: Module = tail("Place(fruit)", &PLACE_CHANNELS);
+const MODULE_PLACE_NEST: Module = tail("Place(nest)", &PLACE_CHANNELS);
+const MODULE_PLACE_DEN: Module = tail("Place(den)", &PLACE_CHANNELS);
+
+/// The littershredder: v2's 23, then its body state, the tremor it freezes on, the threat
+/// it flees, and the shore its shallows reflex walks to.
+const BLIND_MODULES: [Module; 10] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CHEM_DETRITUS,
+    MODULE_LIGHT,
+    MODULE_SELF_V3,
+    MODULE_TREMOR,
+    MODULE_THREAT,
+    MODULE_PLACE_SHORE,
+]);
+/// The capgnawer: as the shredder, plus the cyan glow its light steering follows.
+const CAPGNAWER_MODULES: [Module; 11] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CHEM_FUNGAL,
+    MODULE_LIGHT,
+    MODULE_SELF_V3,
+    MODULE_TREMOR,
+    MODULE_THREAT,
+    MODULE_GLOW,
+    MODULE_PLACE_SHORE,
+]);
+/// The ripple-snail: as the shredder, plus its water state and the three places its
+/// reflexes walk to (water when thirsty, a shore egg face when ready to lay, a richer film
+/// face when its own is grazed down).
+const RIPPLE_SNAIL_MODULES: [Module; 13] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CHEM_FILM,
+    MODULE_LIGHT,
+    MODULE_SELF_V3,
+    MODULE_TREMOR,
+    MODULE_THREAT,
+    MODULE_AMPHIBIOUS,
+    MODULE_PLACE_WATER,
+    MODULE_PLACE_SHORE_EGG,
+    MODULE_PLACE_FILM,
+]);
+/// The frondgrazer: v2's 37, then its body state, threat and kin (flight, the herd alarm,
+/// herding, many eyes), hunter scent, tremor, its hunker state and the shore.
+const BROWSER_MODULES: [Module; 12] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CONE3,
+    MODULE_SELF_V3,
+    MODULE_THREAT,
+    MODULE_KIN,
+    MODULE_SCENT_HUNTER,
+    MODULE_TREMOR,
+    MODULE_HUNKER,
+    MODULE_PLACE_SHORE,
+]);
+/// The loftstrider: as the frondgrazer without the hunker (its calves' following pull reads
+/// the kin slot).
+const LOFTSTRIDER_MODULES: [Module; 11] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CONE3,
+    MODULE_SELF_V3,
+    MODULE_THREAT,
+    MODULE_KIN,
+    MODULE_SCENT_HUNTER,
+    MODULE_TREMOR,
+    MODULE_PLACE_SHORE,
+]);
+/// The bellwing: v2's 43, then its body state (the latch fed rest reads), the
+/// photoreceptor its light steering follows, the nectar plume, perch tremor and the vine
+/// nest site its nest reflex flies to (VINE-C).
+const BELLWING_MODULES: [Module; 9] = layout([
+    MODULE_FLYER_SELF,
+    MODULE_AIR,
+    MODULE_FLYER_TASTE,
+    MODULE_FAN3,
+    MODULE_SELF_V3,
+    MODULE_LIGHT_V3,
+    MODULE_SCENT_NECTAR,
+    MODULE_TREMOR,
+    MODULE_PLACE_NEST,
+]);
+/// The seedporter: v2's 37, then its body state, threat, kin (the troop pull), prey (the
+/// insect catch), carcass, hunter and carrion scent, tremor, its mode and height, and the
+/// roost, fruiting stand and shore its reflexes walk to.
+const SEEDPORTER_MODULES: [Module; 17] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CONE3,
+    MODULE_SELF_V3,
+    MODULE_THREAT,
+    MODULE_KIN,
+    MODULE_PREY,
+    MODULE_CARCASS,
+    MODULE_SCENT_HUNTER,
+    MODULE_SCENT_CARRION,
+    MODULE_TREMOR,
+    MODULE_MODE,
+    MODULE_PLACE_ROOST,
+    MODULE_PLACE_FRUIT,
+    MODULE_PLACE_SHORE,
+]);
+/// The lanternjaw: v2's 37, then its body state, prey, threat, carcass, the scents of its
+/// prey and of carrion, tremor, the light at its face (the lure pays only in the dark) and
+/// the shore. Its senses table is not live yet: its record holds only what its patrol's
+/// interim rules put there (a gap until its table turns on).
+const LANTERNJAW_MODULES: [Module; 15] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CONE3,
+    MODULE_SELF_V3,
+    MODULE_PREY,
+    MODULE_THREAT,
+    MODULE_CARCASS,
+    MODULE_SCENT_SMALL_PREY,
+    MODULE_SCENT_GRAZER,
+    MODULE_SCENT_CARRION,
+    MODULE_TREMOR,
+    MODULE_FACE_LIGHT,
+    MODULE_PLACE_SHORE,
+]);
+/// The Veilhound: v2's 37, then its body state, prey, kin (packmates), carcass, four
+/// scents, tremor, its pack (breeder, pup, target by call, feast), its den (always known)
+/// and the shore.
+const CHORISTER_MODULES: [Module; 17] = layout([
+    MODULE_SELF,
+    MODULE_CONTACT4,
+    MODULE_WET,
+    MODULE_TASTE1,
+    MODULE_CONE3,
+    MODULE_SELF_V3,
+    MODULE_PREY,
+    MODULE_KIN,
+    MODULE_CARCASS,
+    MODULE_SCENT_GRAZER,
+    MODULE_SCENT_SMALL_PREY,
+    MODULE_SCENT_HUNTER,
+    MODULE_SCENT_CARRION,
+    MODULE_TREMOR,
+    MODULE_SOCIAL,
+    MODULE_PLACE_DEN,
+    MODULE_PLACE_SHORE,
+]);
+
+/// The two shapes the search runtime is compiled for until P3 makes it generic: the
+/// littershredder's and the frondgrazer's inputs and outputs. A test holds them to the
+/// manifests.
+pub const BLIND_INPUTS: usize = 45;
+pub const BLIND_OUTPUTS: usize = 3;
+pub const BROWSER_INPUTS: usize = 72;
+pub const BROWSER_OUTPUTS: usize = 4;
+
+/// The fixed references the v3 levels are written against ([`V3_ENCODING_RULE`]): a scent
+/// level (the grazer channel's steady level 3.5 m from a still adult frondgrazer,
+/// [`crate::scent`]'s calibration), a footfall (the shared tremor floor), and a height over
+/// the support below, metres.
+pub const SCENT_REFERENCE: f64 = crate::scent::SMELL_AT_3_5_M;
+pub const TREMOR_REFERENCE: f64 = 0.003;
+pub const HEIGHT_REFERENCE_M: f64 = 8.0;
 
 /// The three local actions, identical for both founders (`design/voxel-senses-phase1-plan.md`,
 /// "Phase-one body and action contract"). Indices are the array order: 0 forward, 1 turn,
@@ -721,6 +1089,22 @@ const BELLWING_ACTIONS: [Action; 4] = [
         transfer: Transfer::Tanh,
     },
 ];
+
+/// A `[0, 1]` body action (contract v3, proposal §2.3 B). Declared here; P2 wires each to
+/// the body (until then the step reads only forward, turn and feed, and the lure and lift
+/// through the interim seams).
+const fn body_action(name: &'static str) -> Action {
+    Action { name, low: 0.0, high: 1.0, transfer: Transfer::Sigmoid }
+}
+
+/// The frondgrazer's four: the three and `hunker_effort` (enter or hold the vigil hunker).
+const HUNKER_ACTIONS: [Action; 4] = [ACTIONS[0], ACTIONS[1], ACTIONS[2], body_action("hunker_effort")];
+/// The ripple-snail's four: the three and `retract_effort` (close, held at least
+/// `retract_hold_s`).
+const RETRACT_ACTIONS: [Action; 4] = [ACTIONS[0], ACTIONS[1], ACTIONS[2], body_action("retract_effort")];
+/// The seedporter's and the Veilhound's four: the three and `sprint_effort` (forward scaled
+/// up to the lineage's top speed through the stamina gate).
+const SPRINT_ACTIONS: [Action; 4] = [ACTIONS[0], ACTIONS[1], ACTIONS[2], body_action("sprint_effort")];
 
 /// Fixed action deadband. `abs(turn)` is compared, so it is symmetric.
 pub const ACTION_DEADBAND: f64 = 0.05;
@@ -796,6 +1180,7 @@ struct Anchors {
     yaw: f64,
     mass: f64,
     taste_ref: Option<f64>,
+    slot_range: f64,
 }
 
 fn anchors(founder: Founder) -> Anchors {
@@ -819,6 +1204,7 @@ fn anchors(founder: Founder) -> Anchors {
         yaw: p.yaw_cap_rad_per_s,
         mass: p.mass_scale,
         taste_ref: p.taste_reference,
+        slot_range: p.senses.sight_m.max(p.senses.hearing_m).max(p.senses.tremor_m).max(0.0),
     }
 }
 
@@ -909,6 +1295,11 @@ impl Manifest {
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
             taste_reference: None,
+            hidden: HIDDEN,
+            option_head: 0,
+            slot_range_m: a.slot_range,
+            fresh_s: crate::PerceptionConfig::default().give_up_s,
+            carcass_range_m: crate::HuntConfig::default().carcass_scan_m,
         }
     }
 
@@ -920,7 +1311,7 @@ impl Manifest {
             schema_version: SCHEMA_VERSION,
             founder: Founder::Browser,
             modules: &BROWSER_MODULES,
-            actions: &ACTIONS,
+            actions: &HUNKER_ACTIONS,
             deadband: ACTION_DEADBAND,
             controller_period_s: CONTROLLER_PERIOD_S,
             body_length_m: a.length,
@@ -963,6 +1354,11 @@ impl Manifest {
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
             taste_reference: None,
+            hidden: HIDDEN,
+            option_head: 0,
+            slot_range_m: a.slot_range,
+            fresh_s: crate::PerceptionConfig::default().give_up_s,
+            carcass_range_m: crate::HuntConfig::default().carcass_scan_m,
         }
     }
 
@@ -974,7 +1370,7 @@ impl Manifest {
         Manifest {
             schema_version: SCHEMA_VERSION,
             founder: Founder::Lanternjaw,
-            modules: &BROWSER_MODULES,
+            modules: &LANTERNJAW_MODULES,
             actions: &LANTERNJAW_ACTIONS,
             deadband: ACTION_DEADBAND,
             controller_period_s: CONTROLLER_PERIOD_S,
@@ -1020,6 +1416,11 @@ impl Manifest {
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
             taste_reference: None,
+            hidden: HIDDEN,
+            option_head: 0,
+            slot_range_m: a.slot_range,
+            fresh_s: crate::PerceptionConfig::default().give_up_s,
+            carcass_range_m: crate::HuntConfig::default().carcass_scan_m,
         }
     }
 
@@ -1054,6 +1455,7 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            slot_range_m: a.slot_range,
             ..Manifest::blind()
         }
     }
@@ -1089,6 +1491,9 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            slot_range_m: a.slot_range,
+            modules: &LOFTSTRIDER_MODULES,
+            actions: &ACTIONS,
             cone_banded_to_mouth: true,
             ..Manifest::browser()
         }
@@ -1125,6 +1530,8 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            slot_range_m: a.slot_range,
+            actions: &RETRACT_ACTIONS,
             taste_reference: a.taste_ref,
             // Its taste reads film against one site's film capacity on the world's own
             // cell (`FounderPhysiology::taste_reference_on`), not `M_EMIT × mass`.
@@ -1164,6 +1571,7 @@ impl Manifest {
             yaw_cap_rad_per_s: a.yaw,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            slot_range_m: a.slot_range,
             taste_reference: a.taste_ref,
             modules: &BELLWING_MODULES,
             // A flyer's controller is sampled every tick: at the walkers' 0.25 s a 1 m/s
@@ -1211,6 +1619,9 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
+            slot_range_m: a.slot_range,
+            modules: &SEEDPORTER_MODULES,
+            actions: &SPRINT_ACTIONS,
             taste_reference: a.taste_ref,
             taste_cue: "fruit",
             taste_resistances: &SEEDPORTER_TASTE_RESISTANCES,
@@ -1251,7 +1662,9 @@ impl Manifest {
             forward_reference_m: a.cruise * CONTROLLER_PERIOD_S,
             mouth_reach_body_lengths: a.reach,
             mass_scale: a.mass,
-            actions: &ACTIONS,
+            slot_range_m: a.slot_range,
+            modules: &CHORISTER_MODULES,
+            actions: &SPRINT_ACTIONS,
             ..Manifest::lanternjaw()
         }
     }
@@ -1282,10 +1695,22 @@ impl Manifest {
             * self.ray_pitch_offsets_deg.len()
     }
 
-    /// The `Gru32`-compatible parameter count this manifest's shapes need:
-    /// `3·H·(I + H + 2) + O·(H + 1)`.
+    /// The GRU parameter count this manifest's shapes need: `3·H·(I + H + 2) + O·(H + 1)`,
+    /// with `H` its [`Manifest::hidden`] and `O` its [`Manifest::outputs`].
     pub fn parameter_count(&self) -> usize {
-        gru32_parameter_count(self.inputs(), self.actions.len())
+        gru_parameter_count(self.inputs(), self.hidden, self.outputs())
+    }
+
+    /// The network outputs a response carries for this manifest: its actions, then its
+    /// option head's logits.
+    pub fn outputs(&self) -> usize {
+        self.actions.len() + self.option_head
+    }
+
+    /// The first v3 slot: everything before it is the lineage's v2 layout, which the
+    /// observation-only heuristics read.
+    pub fn tail_offset(&self) -> usize {
+        self.modules.iter().find(|m| m.tail).map_or_else(|| self.inputs(), |m| m.offset)
     }
 
     /// The deterministic canonical text the digest is taken over. Every declared quantity
@@ -1417,6 +1842,20 @@ impl Manifest {
         } else {
             let _ = write!(s, "|sectors:none");
         }
+        // Contract v3: the network's shape and the blocks' encoding and references.
+        let _ = write!(
+            s,
+            "|hidden:{}|options:{}|v3:{}|v3_ref:slot={},fresh={},carcass={},scent={},tremor={},height={}",
+            self.hidden,
+            self.option_head,
+            V3_ENCODING_RULE,
+            self.slot_range_m,
+            self.fresh_s,
+            self.carcass_range_m,
+            SCENT_REFERENCE,
+            TREMOR_REFERENCE,
+            HEIGHT_REFERENCE_M
+        );
         s
     }
 
@@ -1447,143 +1886,152 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 /// `cubarium_core::neural::gru::parameter_count`, written here so the manifest does not
 /// depend on the neural crate.
 pub const fn gru32_parameter_count(inputs: usize, actions: usize) -> usize {
-    3 * HIDDEN * (inputs + HIDDEN + 2) + actions * (HIDDEN + 1)
+    gru_parameter_count(inputs, HIDDEN, actions)
+}
+
+/// The GRU parameter count for `I` inputs, hidden width `H` and `O` outputs:
+/// `3·H·(I + H + 2) + O·(H + 1)`.
+pub const fn gru_parameter_count(inputs: usize, hidden: usize, outputs: usize) -> usize {
+    3 * hidden * (inputs + hidden + 2) + outputs * (hidden + 1)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The two exact scalar layouts the plan fixes. A wrong offset or width fails here
-    /// before any runtime does.
-    #[test]
-    fn the_two_manifests_have_the_plans_exact_shapes() {
-        let blind = Manifest::blind();
-        assert_eq!(blind.inputs(), 23, "blind manifest width");
-        assert_eq!(blind.modules.len(), 6);
-        assert_eq!((MODULE_SELF.offset, MODULE_SELF.end()), (0, 7));
-        assert_eq!((MODULE_CONTACT4.offset, MODULE_CONTACT4.end()), (8, 12));
-        assert_eq!((MODULE_WET.offset, MODULE_WET.end()), (13, 14));
-        assert_eq!((MODULE_TASTE1.offset, MODULE_TASTE1.end()), (15, 17));
-        assert_eq!(
-            (MODULE_CHEM_DETRITUS.offset, MODULE_CHEM_DETRITUS.end()),
-            (18, 20)
-        );
-        assert_eq!((MODULE_LIGHT.offset, MODULE_LIGHT.end()), (21, 22));
-
-        let browser = Manifest::browser();
-        assert_eq!(browser.inputs(), 37, "browser manifest width");
-        assert_eq!(browser.modules.len(), 5);
-        assert_eq!((MODULE_CONE3.offset, MODULE_CONE3.end()), (18, 36));
-        assert_eq!(browser.ray_count(), 45, "3 sectors x 3 yaws x 5 pitches");
-        assert_eq!(blind.ray_count(), 0);
-        // The plan's named taste cue per founder and its fixed resistance mapping.
-        assert_eq!(blind.taste_cue, "litter");
-        assert_eq!(browser.taste_cue, "foliage");
-        assert!(blind.taste_resistances.iter().any(|(c, _)| *c == "litter"));
-        assert!(
-            browser
-                .taste_resistances
-                .iter()
-                .any(|(c, _)| *c == "foliage")
-        );
-    }
-
-    /// The actions are the plan's three, in order, with its transfer pair and the fixed
-    /// 0.05 deadband.
-    #[test]
-    fn the_actions_are_the_plans_three() {
-        let lj = Manifest::lanternjaw();
-        assert_eq!(lj.actions.len(), 4, "the lanternjaw adds `lure`");
-        assert_eq!(&lj.actions[..3], &ACTIONS[..]);
-        assert_eq!(lj.actions[3].name, "lure_effort");
-        for m in [Founder::Blind, Founder::Browser].into_iter().map(Founder::manifest) {
-            assert_eq!(m.actions.len(), 3);
-            assert_eq!(m.deadband, 0.05);
-            assert_eq!(m.actions[0].name, "forward_effort");
-            assert_eq!(m.actions[0].transfer, Transfer::Sigmoid);
-            assert_eq!(
-                (m.actions[1].name, m.actions[1].transfer),
-                ("turn_effort", Transfer::Tanh)
-            );
-            assert_eq!(
-                (m.actions[2].name, m.actions[2].transfer),
-                ("feed_effort", Transfer::Sigmoid)
-            );
-            assert_eq!(m.cadence_ticks(), 5, "0.25 s at 20 Hz");
+    /// The v2 layouts the heuristics read, and which every v3 manifest keeps in place.
+    fn v2_prefix(founder: Founder) -> &'static [Module] {
+        match founder {
+            Founder::Blind => &BLIND_MODULES_V2,
+            Founder::Capgnawer => &CAPGNAWER_MODULES_V2,
+            Founder::RippleSnail => &RIPPLE_SNAIL_MODULES_V2,
+            Founder::Bellwing => &BELLWING_MODULES_V2,
+            _ => &BROWSER_MODULES_V2,
         }
     }
 
-    /// The counts the GRU runtime must accept: 5,571 and 6,915.
+    /// Contract v3 keeps every lineage's v2 slots where they were and appends its v3 blocks
+    /// after them, contiguously: a heuristic reading a v2 slot by name reads the same index.
     #[test]
-    fn the_parameter_counts_are_the_contracts() {
-        assert_eq!(Manifest::blind().parameter_count(), 5_571);
-        assert_eq!(Manifest::browser().parameter_count(), 6_915);
-        assert_eq!(gru32_parameter_count(23, 3), 5_571);
-        assert_eq!(gru32_parameter_count(37, 3), 6_915);
+    fn every_v3_layout_keeps_its_v2_prefix_in_place() {
+        for founder in Founder::ALL {
+            let m = founder.manifest();
+            let prefix = v2_prefix(founder);
+            let n = prefix.len();
+            assert_eq!(&m.modules[..n], prefix, "{}: the v2 prefix moved", founder.name());
+            assert!(m.modules[..n].iter().all(|x| !x.tail));
+            assert!(m.modules[n..].iter().all(|x| x.tail), "{}: a v2 module after the tail", founder.name());
+            assert_eq!(m.tail_offset(), prefix.last().map_or(0, |x| x.end() + 1));
+            assert!(m.inputs() > m.tail_offset(), "{}: no v3 block", founder.name());
+            assert!(m.modules.iter().any(|x| x.name == "SelfV3"), "{}", founder.name());
+        }
     }
 
-    /// The digest is stable across calls, is exactly FNV-1a over the canonical text, and
-    /// separates two founders that differ in a single module. The schema-significant
-    /// constants — Self references, the movement references, the taste cue and
-    /// its resistance mapping — are all part of the canonical text.
+    /// The two shapes the search runtime is compiled for are the manifests' own.
+    #[test]
+    fn the_search_shapes_are_the_manifests() {
+        assert_eq!(Manifest::blind().inputs(), BLIND_INPUTS);
+        assert_eq!(Manifest::blind().outputs(), BLIND_OUTPUTS);
+        assert_eq!(Manifest::browser().inputs(), BROWSER_INPUTS);
+        assert_eq!(Manifest::browser().outputs(), BROWSER_OUTPUTS);
+    }
+
+    /// Every lineage's actions start with forward, turn and feed in the manifest's transfer
+    /// pair and deadband; the body actions follow, each a lineage's own.
+    #[test]
+    fn the_actions_are_the_three_then_the_bodys_own() {
+        let body = |f: Founder| f.manifest().actions.get(3).map(|a| a.name);
+        assert_eq!(body(Founder::Lanternjaw), Some("lure_effort"));
+        assert_eq!(body(Founder::Bellwing), Some("lift_effort"));
+        assert_eq!(body(Founder::Browser), Some("hunker_effort"));
+        assert_eq!(body(Founder::RippleSnail), Some("retract_effort"));
+        assert_eq!(body(Founder::Seedporter), Some("sprint_effort"));
+        assert_eq!(body(Founder::Chorister), Some("sprint_effort"));
+        for f in [Founder::Blind, Founder::Capgnawer, Founder::Loftstrider] {
+            assert_eq!(f.manifest().actions.len(), 3, "{}", f.name());
+        }
+        for m in Founder::ALL.into_iter().map(Founder::manifest) {
+            assert!(m.outputs() <= MAX_OUTPUTS);
+            assert_eq!(&m.actions[..3], &ACTIONS[..]);
+            assert_eq!(m.deadband, ACTION_DEADBAND);
+            assert_eq!(m.hidden, HIDDEN);
+            assert_eq!(m.option_head, 0);
+        }
+        assert_eq!(Manifest::blind().cadence_ticks(), 5, "0.25 s at 20 Hz");
+    }
+
+    /// The parameter count is `3H(I + H + 2) + O(H + 1)` for every founder's manifest, at its
+    /// own hidden width and output count.
+    #[test]
+    fn the_parameter_count_is_the_gru_formula_for_every_founder() {
+        for m in Founder::ALL.into_iter().map(Founder::manifest) {
+            let (i, h, o) = (m.inputs(), m.hidden, m.outputs());
+            assert_eq!(m.parameter_count(), 3 * h * (i + h + 2) + o * (h + 1), "{}", m.founder.name());
+        }
+        // The formula reproduces v2's two shapes.
+        assert_eq!(gru32_parameter_count(23, 3), 5_571);
+        assert_eq!(gru32_parameter_count(37, 3), 6_915);
+        let mut wide = Manifest::browser();
+        wide.hidden = 64;
+        wide.option_head = 5;
+        assert_eq!(wide.parameter_count(), 3 * 64 * (72 + 64 + 2) + (4 + 5) * 65);
+    }
+
+    /// The digest is FNV-1a over the canonical text, stable, and distinct per founder; the
+    /// text names schema 3.
     #[test]
     fn the_digest_is_stable_and_separates_the_founders() {
         let blind = Manifest::blind();
         let browser = Manifest::browser();
         assert_eq!(blind.digest(), blind.digest());
-        assert_eq!(browser.digest(), browser.digest());
         assert_eq!(blind.digest(), fnv1a(blind.canonical_text().as_bytes()));
+        assert!(blind.canonical_text().starts_with("voxel-senses|v3|"));
+        let mut seen = std::collections::BTreeSet::new();
+        for m in Founder::ALL.into_iter().map(Founder::manifest) {
+            assert!(seen.insert(m.digest()), "{} shares a digest", m.founder.name());
+        }
         assert_ne!(blind.digest(), browser.digest());
-        assert!(blind.canonical_text().contains("Chem(detritus)"));
-        assert!(browser.canonical_text().contains("Cone(3, foliage/body)"));
-        assert!(
-            blind
-                .canonical_text()
-                .contains("|taste:litter:litter=0.2:ground=0.5")
-        );
-        assert!(browser.canonical_text().contains("|taste:foliage"));
-        assert!(blind.canonical_text().contains("|self_ref:energy="));
-        assert!(blind.canonical_text().contains("|move_ref:forward="));
+        assert!(blind.canonical_text().contains("|taste:litter:litter=0.2:ground=0.5"));
+        assert!(blind.canonical_text().contains(V3_ENCODING_RULE));
     }
 
-    /// A single changed manifest property moves the digest: the schema text is what
-    /// protects meaning, so no constant can be invented that the digest does not cover.
+    /// A single changed module, action, hidden width, option head or encoding reference
+    /// moves the digest.
     #[test]
     fn a_single_changed_manifest_property_moves_the_digest() {
-        let baseline = Manifest::blind();
+        let baseline = Manifest::browser();
         let before = baseline.digest();
+        let moved = |m: Manifest, what: &str| assert_ne!(m.digest(), before, "{what} did not move the digest");
 
-        let mut tau = baseline;
-        tau.tunings.chem_tau_s = 2.0;
-        assert_ne!(
-            tau.digest(),
-            before,
-            "a chem tuning move did not move the digest"
-        );
-
-        let mut energy = baseline;
-        energy.adult_energy_reference = 0.1;
-        assert_ne!(
-            energy.digest(),
-            before,
-            "a Self energy reference move did not move the digest"
-        );
-
-        let mut resistance = baseline;
-        resistance.taste_resistances = &[("litter", 0.9), ("ground", 0.5)];
-        assert_ne!(
-            resistance.digest(),
-            before,
-            "a taste resistance move did not move the digest"
-        );
-
-        let mut reference = baseline;
-        reference.forward_reference_m = 0.01;
-        assert_ne!(
-            reference.digest(),
-            before,
-            "a movement reference move did not move the digest"
-        );
+        let mut m = baseline;
+        m.modules = &LOFTSTRIDER_MODULES;
+        moved(m, "a dropped module");
+        let mut m = baseline;
+        m.actions = &ACTIONS;
+        moved(m, "a dropped action");
+        let mut m = baseline;
+        m.actions = &SPRINT_ACTIONS;
+        moved(m, "a renamed action");
+        let mut m = baseline;
+        m.hidden = 64;
+        moved(m, "the hidden width");
+        let mut m = baseline;
+        m.option_head = 3;
+        moved(m, "the option head");
+        let mut m = baseline;
+        m.slot_range_m += 1.0;
+        moved(m, "the slot range");
+        let mut m = baseline;
+        m.fresh_s += 1.0;
+        moved(m, "the freshness horizon");
+        let mut m = baseline;
+        m.tunings.chem_tau_s = 2.0;
+        moved(m, "a chem tuning");
+        let mut m = baseline;
+        m.adult_energy_reference = 0.1;
+        moved(m, "a Self reference");
+        let mut m = baseline;
+        m.forward_reference_m = 0.01;
+        moved(m, "a movement reference");
     }
 }

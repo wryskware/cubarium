@@ -454,8 +454,9 @@ fn the_ledgers_conserve_across_a_bite_under_the_band() {
 fn the_input_widths_are_unchanged_and_the_contract_carries_the_body() {
     let blind = Founder::Blind.manifest();
     let browser = Founder::Browser.manifest();
-    assert_eq!(browser.inputs(), 37, "the browser's observation width");
-    assert_eq!(blind.inputs(), 23, "the shredder's observation width");
+    // Contract v3 appends its blocks after the v2 layouts, which keep their widths.
+    assert_eq!(browser.tail_offset(), 37, "the browser's v2 observation width");
+    assert_eq!(blind.tail_offset(), 23, "the shredder's v2 observation width");
     let adult = FounderPhysiology::placeholder(Founder::Browser);
     assert_eq!(
         (

@@ -284,7 +284,12 @@ fn every_arena_sampling_hands_the_controller_exactly_its_manifest_width() {
                 m.channels
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| **c == "resolved_turn" || **c == "trend")
+                    // Contract v3's bearings, gradients and day phase are signed too.
+                    .filter(|(_, c)| {
+                        matches!(**c, "resolved_turn" | "trend" | "forward" | "right")
+                            || c.ends_with("sin")
+                            || c.ends_with("cos")
+                    })
                     .map(move |(k, _)| m.offset + k)
             })
             .collect();
@@ -314,8 +319,9 @@ fn every_arena_sampling_hands_the_controller_exactly_its_manifest_width() {
             }
         }
     }
-    assert_eq!(Founder::Blind.manifest().inputs(), 23);
-    assert_eq!(Founder::Browser.manifest().inputs(), 37);
+    // The v2 widths, which contract v3 keeps in place before its blocks.
+    assert_eq!(Founder::Blind.manifest().tail_offset(), 23);
+    assert_eq!(Founder::Browser.manifest().tail_offset(), 37);
 }
 
 /// Plan, "Frozen arena contract": *"Resource depletion stops emission and updates sensory

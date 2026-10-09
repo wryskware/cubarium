@@ -3315,6 +3315,7 @@ width = 64
     #[test]
     fn a_policy_driven_lineage_under_a_different_centre_is_refused_on_load() {
         use cubarium_search::es::tensor::initial_center_shape;
+        use cubarium_search::es::voxel::{BLIND_I, BLIND_O};
         use cubarium_voxel_fauna::StartingStores;
 
         let world = crate::voxel::scene::authored(cubarium_voxel::Config {
@@ -3339,7 +3340,7 @@ width = 64
         });
         assert!(placed, "a founder body stands somewhere on the strip");
 
-        let theta_a = initial_center_shape::<23, 3>(11);
+        let theta_a = initial_center_shape::<BLIND_I, BLIND_O>(11);
         let driver_a = EpisodeDriver::gru(&theta_a, Founder::Blind).expect("a valid centre");
         install_founder_controllers(&mut fauna, &[(Founder::Blind, driver_a)])
             .expect("the first centre installs");
@@ -3348,7 +3349,7 @@ width = 64
         let mut loaded = Fauna::load(&fauna.save()).expect("the layer round-trips");
         crate::voxel::habitat::install_heuristics(&mut loaded);
 
-        let theta_b = initial_center_shape::<23, 3>(29);
+        let theta_b = initial_center_shape::<BLIND_I, BLIND_O>(29);
         assert_ne!(theta_a, theta_b, "the two seeds give two different centres");
         let driver_b = EpisodeDriver::gru(&theta_b, Founder::Blind).expect("a valid centre");
         let err = format!(
@@ -3390,7 +3391,7 @@ width = 64
         });
         assert!(placed, "a founder body stands somewhere on the strip");
 
-        let theta = initial_center_shape::<23, 3>(7);
+        let theta = initial_center_shape::<{ cubarium_search::es::voxel::BLIND_I }, { cubarium_search::es::voxel::BLIND_O }>(7);
         let driver = EpisodeDriver::gru(&theta, Founder::Blind).expect("a valid centre");
         install_founder_controllers(&mut fauna, &[(Founder::Blind, driver)])
             .expect("the centre installs");
@@ -3483,7 +3484,7 @@ width = 64
             protocol_hash: None,
             imitation: None,
             stage: task::Stage::A.as_str().into(),
-            theta: cubarium_search::es::tensor::initial_center_shape::<23, 3>(5),
+            theta: cubarium_search::es::tensor::initial_center_shape::<{ cubarium_search::es::voxel::BLIND_I }, { cubarium_search::es::voxel::BLIND_O }>(5),
         };
         let path =
             std::env::temp_dir().join(format!("cubarium-explicit-policy-{}.json", random_seed()));

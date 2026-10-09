@@ -45,6 +45,8 @@
 //! differentiates `transfer(y)` (a straight-through deadband), and the finite-difference
 //! test checks exactly that function. The two differ only inside a 0.05 band.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -246,6 +248,86 @@ impl TeacherStream {
     pub fn action(&self, step: usize) -> &[f64] {
         &self.actions[step * 3..step * 3 + 3]
     }
+}
+
+/// **Which label a clone fits** from the executed-action tap (contract v3, P0;
+/// `cubarium_voxel_fauna::TapSample`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapLabel {
+    /// The controller's own answer before any reflex: the B/C hybrid's option 0 clones it.
+    Own,
+    /// What the body held after every layer: B's clone fits it.
+    Executed,
+}
+
+/// **One body's tap recording as fitting pairs**: its v3 observations and the chosen label
+/// in its manifest's action order (forward, turn, feed, then its body action), with the
+/// layer that set each sample ([`cubarium_voxel_fauna::Steer`], the option label P8 clones).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapStream {
+    pub body: u64,
+    pub founder: Founder,
+    pub inputs: usize,
+    /// The manifest's action count (the option head is not a recorded action).
+    pub actions_per_step: usize,
+    pub steps: usize,
+    /// `steps × inputs`, row-major by step.
+    pub observations: Vec<f64>,
+    /// `steps × actions_per_step`, in manifest action order.
+    pub actions: Vec<f64>,
+    pub steer: Vec<cubarium_voxel_fauna::Steer>,
+}
+
+/// One held label as the manifest's action vector.
+fn held_actions(manifest: &Manifest, held: &cubarium_voxel_fauna::Held) -> Vec<f64> {
+    manifest
+        .actions
+        .iter()
+        .map(|a| match a.name {
+            "forward_effort" => held.actions.forward,
+            "turn_effort" => held.actions.turn,
+            "feed_effort" => held.actions.feed,
+            "sprint_effort" => held.body.sprint,
+            "hunker_effort" => held.body.hunker,
+            "retract_effort" => held.body.retract,
+            "lure_effort" => held.body.lure,
+            "lift_effort" => held.body.lift,
+            other => panic!("manifest action {other} has no recorded label"),
+        })
+        .collect()
+}
+
+/// **The tap's streams for `founder`, under `label`**: one per body of that lineage, in id
+/// order, never interleaved.
+pub fn tap_streams(tap: &cubarium_voxel_fauna::ActionTap, founder: Founder, label: TapLabel) -> Vec<TapStream> {
+    let manifest = founder.manifest();
+    let inputs = manifest.inputs();
+    tap.streams()
+        .filter(|&(_, f, s)| f == founder && !s.is_empty())
+        .map(|(body, _, samples)| {
+            let mut observations = Vec::with_capacity(samples.len() * inputs);
+            let mut actions = Vec::with_capacity(samples.len() * manifest.actions.len());
+            for s in samples {
+                assert_eq!(s.observation.len(), inputs, "a {} sample of another width", founder.name());
+                observations.extend_from_slice(&s.observation);
+                let held = match label {
+                    TapLabel::Own => &s.own,
+                    TapLabel::Executed => &s.executed,
+                };
+                actions.extend(held_actions(&manifest, held));
+            }
+            TapStream {
+                body,
+                founder,
+                inputs,
+                actions_per_step: manifest.actions.len(),
+                steps: samples.len(),
+                observations,
+                actions,
+                steer: samples.iter().map(|s| s.steer).collect(),
+            }
+        })
+        .collect()
 }
 
 /// A digest over a set of streams, for the clone's provenance: FNV-1a 64 over each
@@ -472,11 +554,11 @@ pub struct FitReport {
 pub fn fit(founder: Founder, streams: &[TeacherStream], spec: &FitSpec) -> (Vec<f64>, FitReport) {
     let manifest = founder.manifest();
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, 3);
+    let offs = shape_offsets(inputs, manifest.outputs());
     let mut theta = if founder == Founder::Blind {
-        tensor::initial_center_shape::<23, 3>(spec.seed)
+        tensor::initial_center_shape::<BLIND_I, BLIND_O>(spec.seed)
     } else {
-        tensor::initial_center_shape::<37, 3>(spec.seed)
+        tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(spec.seed)
     };
     let mut adam = Adam::new(theta.len());
     adam.learning_rate = spec.learning_rate;
@@ -764,7 +846,7 @@ pub fn gradient_of_chunk(
 pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> ([f64; 3], f64) {
     let manifest = founder.manifest();
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, 3);
+    let offs = shape_offsets(inputs, manifest.outputs());
     let mut sums = [0.0f64; 3];
     let mut steps = 0usize;
     let mut turn_matches = 0usize;
@@ -772,7 +854,7 @@ pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> ([
         let mut hidden = vec![0.0; HIDDEN];
         for t in 0..stream.steps {
             let y = forward_step(inputs, &offs, theta, stream.observation(t), &mut hidden);
-            let response = cubarium_voxel_fauna::Response::Logits(y);
+            let response = cubarium_voxel_fauna::Response::logits(&y);
             let a = cubarium_voxel_fauna::resolve_actions(response, &manifest);
             let mine = [a.forward, a.turn, a.feed];
             let teacher = stream.action(t);
@@ -880,16 +962,50 @@ mod tests {
     use super::*;
     use cubarium_core::neural::gru::Gru;
 
+    /// The tap's recorder offers both labels per body: the pre-override label is the
+    /// controller's own answer, the executed one what was held, in manifest action order
+    /// with the body action last; bodies of other lineages and streams never mix.
+    #[test]
+    fn the_tap_streams_offer_both_labels_per_body() {
+        use cubarium_voxel_fauna::{Actions, ActionTap, BodyActions, Held, Steer, TapSample};
+        let width = Founder::Browser.manifest().inputs();
+        let sample = |tick: u64, own: f64, held: f64, hunker: f64, steer: Steer| TapSample {
+            tick,
+            observation: vec![tick as f64 * 0.01; width],
+            own: Held { actions: Actions { forward: own, turn: 0.5, feed: 1.0 }, body: BodyActions::default() },
+            executed: Held {
+                actions: Actions { forward: held, turn: 0.5, feed: 1.0 },
+                body: BodyActions { hunker, ..BodyActions::default() },
+            },
+            steer,
+        };
+        let tap = ActionTap::from_streams([
+            (3, Founder::Browser, vec![sample(5, 0.9, 0.0, 1.0, Steer::Flee), sample(10, 0.4, 0.4, 0.0, Steer::Heuristic)]),
+            (7, Founder::Browser, vec![sample(5, 0.2, 0.2, 0.0, Steer::Heuristic)]),
+            (9, Founder::Blind, vec![]),
+        ]);
+        let own = tap_streams(&tap, Founder::Browser, TapLabel::Own);
+        let done = tap_streams(&tap, Founder::Browser, TapLabel::Executed);
+        assert_eq!(own.iter().map(|s| s.body).collect::<Vec<_>>(), vec![3, 7], "per body, its lineage only");
+        let a = &done[0];
+        assert_eq!((a.steps, a.inputs, a.actions_per_step), (2, width, 4));
+        assert_eq!(&a.actions[..4], &[0.0, 0.5, 1.0, 1.0], "executed: forward, turn, feed, hunker");
+        assert_eq!(&own[0].actions[..4], &[0.9, 0.5, 1.0, 0.0], "own: the controller's answer");
+        assert_eq!(a.steer, vec![Steer::Flee, Steer::Heuristic]);
+        assert_eq!(&a.observations[width..], &vec![0.1; width][..], "the second sample's observation");
+        assert_eq!(done[1].actions, own[1].actions, "no override: the two labels agree");
+    }
+
     /// The flat-theta forward step is the core GRU's, value for value, on both shapes.
     #[test]
     fn the_flat_forward_step_is_the_core_gru() {
-        for (inputs, founder) in [(23usize, Founder::Blind), (37, Founder::Browser)] {
+        for (inputs, founder) in [(BLIND_I, Founder::Blind), (BROWSER_I, Founder::Browser)] {
             let theta = if founder == Founder::Blind {
-                tensor::initial_center_shape::<23, 3>(3)
+                tensor::initial_center_shape::<BLIND_I, BLIND_O>(3)
             } else {
-                tensor::initial_center_shape::<37, 3>(3)
+                tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(3)
             };
-            let offs = shape_offsets(inputs, 3);
+            let offs = shape_offsets(inputs, founder.manifest().outputs());
             let mut mine = vec![0.0; HIDDEN];
             let mut theirs = [0.0; HIDDEN];
             for step in 0..5 {
@@ -898,17 +1014,18 @@ mod tests {
                     .collect();
                 let a = forward_step(inputs, &offs, &theta, &x, &mut mine);
                 let b = if founder == Founder::Blind {
-                    let w: Gru<23, 3> = tensor::unflatten_shape(&theta).expect("shape");
-                    let mut xa = [0.0; 23];
+                    let w: Gru<BLIND_I, BLIND_O> = tensor::unflatten_shape(&theta).expect("shape");
+                    let mut xa = [0.0; BLIND_I];
                     xa.copy_from_slice(&x);
-                    w.forward(&xa, &mut theirs)
+                    w.forward(&xa, &mut theirs).to_vec()
                 } else {
-                    let w: Gru<37, 3> = tensor::unflatten_shape(&theta).expect("shape");
-                    let mut xa = [0.0; 37];
+                    let w: Gru<BROWSER_I, BROWSER_O> = tensor::unflatten_shape(&theta).expect("shape");
+                    let mut xa = [0.0; BROWSER_I];
                     xa.copy_from_slice(&x);
-                    w.forward(&xa, &mut theirs)
+                    w.forward(&xa, &mut theirs).to_vec()
                 };
-                assert_eq!(a, b, "step {step} of {}", founder.name());
+                // The fit drives the three local actions; a body action's output is P3's.
+                assert_eq!(a[..], b[..3], "step {step} of {}", founder.name());
                 assert_eq!(mine.as_slice(), theirs.as_slice());
             }
         }
@@ -919,10 +1036,10 @@ mod tests {
     #[test]
     fn the_analytic_gradient_matches_finite_differences_on_a_tiny_shape() {
         let inputs = 2usize;
-        let offs = shape_offsets(inputs, 3);
         let manifest = Founder::Blind.manifest();
+        let offs = shape_offsets(inputs, manifest.outputs());
         let steps = 3usize;
-        let mut theta = tensor::initial_center_shape::<23, 3>(5)[..offs.params].to_vec();
+        let mut theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(5)[..offs.params].to_vec();
         for (i, v) in theta.iter_mut().enumerate() {
             *v += 0.1 * ((i as f64) * 0.37).sin();
         }

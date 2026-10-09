@@ -192,6 +192,8 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
     fauna.night = if clock_on { crate::NightClock::of(&world.weather().sun()) } else { crate::NightClock::DAY };
     // RHYTHMS-CADENCE: where in the day it is, for the leanings.
     fauna.horizon = if clock_on { crate::Horizon::of(&world.weather().sun()) } else { crate::Horizon::NOON };
+    // Contract v3: the day's phase, for the v3 observation's clock.
+    fauna.day_phase = if clock_on { world.weather().sun().phase } else { 0.5 };
     let sky = Sky {
         downpour: view.weather.mode == cubarium_voxel::weather::RainMode::Downpour,
         rain_m_per_s: f64::from(view.weather.rain_m_per_s).max(0.0),
@@ -1191,6 +1193,10 @@ struct Sensed {
     lure: f64,
     lift: f64,
     driven: bool,
+    /// The executed-action tap's (P0): the observation sampled, and the body actions its
+    /// controller's answer resolved to. `None` and zero while the tap is off.
+    tapped: Option<Vec<f64>>,
+    body: crate::controller::BodyActions,
 }
 
 /// The fewest due bodies one observation job takes.
@@ -1267,6 +1273,33 @@ fn controllers(
     }
     let fv = flora.view();
     let full_observation: Vec<bool> = fauna.animals.iter().map(|a| !fauna.controllers.taste_only(a.id)).collect();
+    // Contract v3: which due bodies' v3 blocks are encoded — a controller that reads them
+    // (a brain), or every body while the executed-action tap records. Encoding reads only;
+    // the two caches its read side borrows (the beacons, the carcass faces) are keyed by
+    // the plants' tick and the world's, so filling them here first changes nothing.
+    let wants_tail: Vec<bool> = {
+        let tap = fauna.tap.is_some();
+        let mut w = vec![false; fauna.animals.len()];
+        for &i in &due {
+            w[i] = tap || fauna.controllers.reads_tail(fauna.animals[i].id);
+        }
+        w
+    };
+    let clock = crate::observe_v3::Clock { clock_on: sky.clock_on, daylight: sky.daylight, day_phase: fauna.day_phase };
+    {
+        let tailed = || due.iter().filter(|&&i| wants_tail[i]).filter_map(|&i| fauna.animals[i].founder);
+        let light = tailed().any(|f| {
+            let m = fauna.config.manifest(f);
+            fauna.config.founder(f).senses.light_m > 0.0 || m.modules.iter().any(|m| m.name == "Scent(nectar)")
+        });
+        let carcass = tailed().any(|f| fauna.config.manifest(f).modules.iter().any(|m| m.name == "Carcass"));
+        if light {
+            fauna.beacons.refresh(view, &fv, fauna.config.scent.nectar_full);
+        }
+        if carcass {
+            let _ = fauna.carcass_sites(&fv);
+        }
+    }
     let uses_cone = |i: usize| {
         fauna.animals[i].founder.is_some_and(|f| {
             fauna.config.founder(f).flight.is_none() || full_observation[i]
@@ -1327,6 +1360,7 @@ fn controllers(
         s.index_light(view);
     }
     let ids: Vec<u64> = due.iter().map(|&i| fauna.animals[i].id).collect();
+    let tap = fauna.tap.is_some();
     let mut table = std::mem::take(&mut fauna.controllers);
     let sensed: Vec<Sensed> = {
         let mut slots = table.slots_mut(&ids);
@@ -1341,18 +1375,43 @@ fn controllers(
             } else {
                 predation_occupancy
             };
-            let (obs, writes) =
-                body::observation_read(fauna, i, view, fv, &manifest, senses, occupancy, full_observation[i], blooms.as_ref());
+            let (obs, writes) = body::observation_read(
+                fauna,
+                i,
+                view,
+                fv,
+                &manifest,
+                senses,
+                occupancy,
+                full_observation[i] || wants_tail[i],
+                blooms.as_ref(),
+                wants_tail[i].then_some(clock),
+            );
             // Reject rather than train through: an observation with a non-finite channel
             // holds rest instead of reaching the controller at all.
-            let (actions, lure, lift, driven) = match slot.as_deref_mut() {
-                Some(c) if obs.iter().all(|v| v.is_finite()) => {
-                    let response = c.drive(&obs);
-                    (crate::controller::resolve_actions(response, &manifest), c.lure(), c.lift(), true)
-                }
-                _ => (Actions::REST, 0.0, 0.0, false),
+            // A taste-only controller encoded in full for the tap sees what it sees untapped:
+            // its taste, everything else zero.
+            let masked;
+            let seen: &[f64] = if full_observation[i] || !wants_tail[i] {
+                &obs
+            } else {
+                let tm = manifest.modules.iter().find(|m| m.name == "Taste(1)");
+                masked = obs
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &v)| if tm.is_some_and(|m| k >= m.offset && k <= m.end()) { v } else { 0.0 })
+                    .collect::<Vec<f64>>();
+                &masked
             };
-            Sensed { manifest, writes, actions, lure, lift, driven }
+            let (resolved, lure, lift, driven) = match slot.as_deref_mut() {
+                Some(c) if obs.iter().all(|v| v.is_finite()) => {
+                    let response = c.drive(seen);
+                    (crate::controller::resolve(response, &manifest), c.lure(), c.lift(), true)
+                }
+                _ => (crate::controller::Resolved::default(), 0.0, 0.0, false),
+            };
+            let tapped = tap.then_some(obs);
+            Sensed { manifest, writes, actions: resolved.actions, lure, lift, driven, tapped, body: resolved.body }
         };
         // Several jobs per worker: one body's observation can cost many another's (a
         // flyer's fan), and the pool evens that out as workers come free.
@@ -1389,6 +1448,7 @@ fn controllers(
         let founder = fauna.animals[i].founder.expect("a due founder");
         let Sensed { ref manifest, actions, lure, lift, driven, .. } = sensed[k];
         let (mut actions, mut lure, mut lift) = (actions, lure, lift);
+        let own = (actions, lure, lift);
         // EDGE's readout: which layer sets the held actions, the last override winning.
         let mut src = if driven { crate::Steer::Heuristic } else { crate::Steer::Rest };
         // EDGE: the interval just ended pressed (held forward, its motor refused), on the
@@ -1718,6 +1778,31 @@ fn controllers(
             0.0
         };
         a.founder_state.feedback = IntervalFeedback::default();
+        // P0, the executed-action tap: the observation, its controller's own answer and
+        // what was held, after every layer above.
+        if let Some(obs) = sensed[k].tapped.clone() {
+            let a = &fauna.animals[i];
+            let clean_lure = |l: f64| if l.is_finite() { l.clamp(0.0, 1.0) } else { 0.0 };
+            let clean_lift = |l: f64| if l.is_finite() && l.abs() >= manifest.deadband { l.clamp(-1.0, 1.0) } else { 0.0 };
+            let own = crate::Held {
+                actions: own.0,
+                body: crate::controller::BodyActions { lure: clean_lure(own.1), lift: clean_lift(own.2), ..sensed[k].body },
+            };
+            let executed = crate::Held {
+                actions: a.founder_state.held,
+                body: crate::controller::BodyActions {
+                    sprint: 0.0,
+                    hunker: f64::from(a.hunkered),
+                    retract: f64::from(a.mobility.retract_ticks > 0),
+                    lure: a.founder_state.lure,
+                    lift: a.founder_state.lift,
+                },
+            };
+            let sample = crate::TapSample { tick: fauna.tick, observation: obs, own, executed, steer: src };
+            if let Some(t) = fauna.tap.as_mut() {
+                t.push(id, founder, sample);
+            }
+        }
     }
     if let Some(s) = senses {
         s.return_cone(held);

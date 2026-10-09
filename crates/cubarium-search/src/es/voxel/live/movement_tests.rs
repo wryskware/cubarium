@@ -63,17 +63,9 @@ fn the_mean_nearest_neighbour_distance_wraps_the_ring() {
 /// The check's brain options: a centre file, or `heuristic` (the fauna's own forager).
 #[test]
 fn the_brain_options_parse() {
-    let dir =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
-    // Round 2's centre predates the mass-scaled references: it loads as a transfer.
-    let file = brain_driver(
-        Founder::Browser,
-        &format!(
-            "transfer:{}",
-            dir.join("r2-frondgrazer-upd160.json").display()
-        ),
-    )
-    .expect("a centre");
+    // A contract-v3 centre file.
+    let path = crate::es::voxel::store::test_centre_path(Founder::Browser, "options");
+    let file = brain_driver(Founder::Browser, &path.display().to_string()).expect("a centre");
     assert!(matches!(file.kind(), EpisodeKind::Gru(_)));
     let h = brain_driver(Founder::Browser, "heuristic").expect("the heuristic");
     assert!(matches!(

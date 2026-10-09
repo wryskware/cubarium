@@ -9,6 +9,7 @@
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
+use cubarium_search::es::voxel::{BLIND_I, BLIND_O};
 use cubarium_search::es::optimizer::Adam;
 use cubarium_search::es::tensor::initial_center_shape;
 use cubarium_search::es::voxel::remote::{FixtureSpec, RemoteOptions, RemotePool, RemoteSpec};
@@ -71,7 +72,7 @@ fn generation(pool: Option<&RemotePool>) -> (Vec<f64>, Adam, GenerationReport) {
     let layouts = fixtures().build(1).expect("the arenas build");
     let ids: Vec<usize> = (0..layouts.len()).collect();
     let cancel = AtomicBool::new(false);
-    let mut theta = initial_center_shape::<23, 3>(protocol.train_seed);
+    let mut theta = initial_center_shape::<BLIND_I, BLIND_O>(protocol.train_seed);
     let mut adam = Adam::new(theta.len());
     let plan = GenerationPlan {
         layouts: &layouts,

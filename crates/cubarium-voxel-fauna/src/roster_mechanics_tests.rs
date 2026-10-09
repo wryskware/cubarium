@@ -391,6 +391,49 @@ fn a_loftstrider_in_deep_water_heads_for_the_shallows() {
     assert!(out.is_some(), "it reached the shallows within 60 s");
 }
 
+/// **P0, the executed-action tap: a body forced into deep water records the shallows.** The
+/// loftstrider of test 4 on its own heuristic, watched by a [`crate::tap_tests::Spy`]: while
+/// it is out of its depth, its samples are the shallows reflex's (`Steer::Shallows`), the
+/// executed label is what the body held after that sample, and the pre-override label is
+/// its heuristic's own answer, which the reflex replaced.
+#[test]
+fn a_body_forced_into_deep_water_records_the_shallows_as_executed() {
+    let mut world = plain(64, 40, 24);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, LS, 32, 12, 0.0, HUNGRY_ADULT);
+    let (spy, answers) = crate::tap_tests::Spy::new(crate::heuristic(LS, fauna.config().teachers), LS);
+    assert!(fauna.set_controller(id, Box::new(spy)));
+    water(&mut world, 20..=44, 6);
+    let wade_m = wade(&fauna, id);
+    assert!(depth_at(&world, animal(&fauna, id).site) > wade_m, "fixture: in deep water");
+    fauna.start_tap();
+    let mut shallows = 0;
+    for _ in 0..(20.0 / DT) as usize {
+        let before = fauna.tap().map_or(0, |t| t.stream(id).map_or(0, <[_]>::len));
+        fauna.step(&world, &mut flora);
+        let tap = fauna.tap().expect("running");
+        let stream = tap.stream(id).unwrap_or(&[]);
+        if stream.len() == before {
+            continue;
+        }
+        let s = stream.last().expect("a new sample");
+        let a = animal(&fauna, id);
+        let (own, lure, lift) = *answers.lock().expect("answers").last().expect("its answer");
+        assert_eq!(s.own.actions, own, "the pre-override label is its heuristic's own answer");
+        assert_eq!((s.own.body.lure, s.own.body.lift), (lure, lift));
+        assert_eq!(s.executed.actions, a.founder_state.held, "the executed label is what it held");
+        if s.steer == crate::Steer::Shallows {
+            shallows += 1;
+            assert_ne!(s.own.actions, s.executed.actions, "the reflex replaced its answer");
+        }
+        if depth_at(&world, a.site) <= wade_m {
+            break;
+        }
+    }
+    assert!(shallows > 0, "the shallows reflex steered it out and the tap saw it");
+}
+
 // ------------------------------------------------------------------ 5. vine seeds
 
 /// **Test 5. A gut-carried latticevine seed voided on a valid vine site enters the seed

@@ -294,21 +294,6 @@ impl<'a> F64s<'a> {
     fn store(&self, i: usize, v: f64) {
         self.0[i].store(v.to_bits(), Relaxed)
     }
-    /// `f64` addition on the cell: what a proposal into another column's cell is. Order
-    /// across threads is whatever the adds land in.
-    #[inline(always)]
-    #[cfg(feature = "par")]
-    fn add(&self, i: usize, q: f64) {
-        let cell = &self.0[i];
-        let mut cur = cell.load(Relaxed);
-        loop {
-            let new = (f64::from_bits(cur) + q).to_bits();
-            match cell.compare_exchange_weak(cur, new, Relaxed, Relaxed) {
-                Ok(_) => return,
-                Err(seen) => cur = seen,
-            }
-        }
-    }
 }
 
 impl Store for F64s<'_> {
@@ -319,28 +304,6 @@ impl Store for F64s<'_> {
     #[inline(always)]
     fn set(&mut self, i: usize, v: f64) {
         self.store(i, v)
-    }
-}
-
-/// The exchange's per-column `touched` row masks as the tasks share them: each word as
-/// its two `u64` halves in `AtomicU64`s, the same way as [`F64s`], so a task can mark a
-/// row of another column's word.
-#[cfg(feature = "par")]
-#[derive(Clone, Copy)]
-struct Words128<'a>(&'a [AtomicU64]);
-
-#[cfg(feature = "par")]
-impl<'a> Words128<'a> {
-    fn new(v: &'a mut [u128]) -> Words128<'a> {
-        Words128(AtomicU64::from_mut_slice(bytemuck::cast_slice_mut(v)))
-    }
-    /// Set row `y` of column `col`'s word, from any thread: the `u64` holding bits
-    /// `64·h .. 64·h + 64` of a word is its `h`-th in memory on a little-endian host.
-    #[inline(always)]
-    fn set_row(&self, col: usize, y: usize) {
-        let h = y >> 6;
-        let k = if cfg!(target_endian = "little") { h } else { 1 - h };
-        self.0[2 * col + k].fetch_or(1u64 << (y & 63), Relaxed);
     }
 }
 
@@ -762,7 +725,7 @@ mod par {
     use rayon::prelude::*;
 
     use super::{
-        ExchangeBackend, F64s, Field, Grid, HEAD_PASSES, Params, Scratch, Words128, column_credits, column_drive_pass,
+        ExchangeBackend, F64s, Field, Grid, HEAD_PASSES, Params, Scratch, column_credits, column_drive_pass,
         column_edges, column_heads, commit, flip_wet, moved,
     };
 
@@ -891,24 +854,27 @@ mod par {
                 }
                 let field = Field { grid, free, void, wet: &*wet, full, head, drive: &drive[cur] };
 
-                // B: the proposals, added atomically into whichever column they land in,
-                // and kept per chunk of giver columns.
+                // B: keep proposals per chunk of giver columns, then sum them in giver
+                // order, exactly as Serial does. Atomic floating-point adds depended on
+                // worker arrival order: rounding changed the pre-roll's water and plant
+                // establishment, so even identical seeds could found different worlds.
                 {
-                    let prop = F64s::new(proposed);
-                    let tw = Words128::new(touched);
                     edges.par_iter_mut().enumerate().for_each(|(c, list)| {
                         list.clear();
                         for col in c * grain..((c + 1) * grain).min(plane) {
                             if field.wet[col] != 0 {
                                 column_edges(&field, p, col, |from, to_col, to_row, q| {
                                     let t = to_row * plane + to_col;
-                                    prop.add(t, q);
-                                    tw.set_row(to_col, to_row);
                                     list.push(((from * plane + col) as u32, t as u32, q));
                                 });
                             }
                         }
                     });
+                    for &(_, to, q) in edges.iter().flatten() {
+                        let to = to as usize;
+                        proposed[to] += q;
+                        touched[to % plane] |= 1u128 << (to / plane);
+                    }
                 }
                 // C: every cell's net change, into its own chunk's cells: the credits of
                 // its columns, the debits of its kept proposals.

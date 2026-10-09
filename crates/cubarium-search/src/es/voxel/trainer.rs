@@ -30,6 +30,8 @@
 //! not complete every job updates nothing, but the episodes it attempted and the ticks it
 //! simulated are carried in [`Discarded`] — budget on *work*, not on optimizer progress.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -1127,9 +1129,9 @@ impl VoxelCheckpoint {
             .expect("the protocol names a founder");
         let train_seed = protocol.train_seed;
         let theta = if founder == Founder::Blind {
-            super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed)
+            super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(protocol.train_seed)
         } else {
-            super::super::tensor::initial_center_shape::<37, 3>(protocol.train_seed)
+            super::super::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(protocol.train_seed)
         };
         let hash = protocol.hash();
         VoxelCheckpoint {
@@ -2029,7 +2031,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cubarium-voxel-init-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir");
 
-        let theta = super::super::super::tensor::initial_center_shape::<23, 3>(77);
+        let theta = super::super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(77);
         let source = crate::es::voxel::store::VoxelPolicyFile {
             schema: crate::es::voxel::store::POLICY_SCHEMA.into(),
             build: "test".into(),
@@ -2144,7 +2146,7 @@ mod tests {
         );
         let layouts = task::training_layouts(founder, Stage::A, task::Band::Landed);
         let mut theta =
-            super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
+            super::super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(protocol.train_seed);
         let before = theta.clone();
         let mut adam = Adam::new(theta.len());
         let plan = GenerationPlan {
@@ -2172,7 +2174,7 @@ mod tests {
         let founder = Founder::Blind;
         let digest = voxel_schema_digest(founder);
         let params = founder.manifest().parameter_count();
-        let theta = super::super::super::tensor::initial_center_shape::<23, 3>(9);
+        let theta = super::super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(9);
         let mut eps = vec![0.0; params];
         perturbation(20_260_918, 0, 0, &mut eps);
         let sigma = optimizer::SIGMA;
@@ -2191,15 +2193,15 @@ mod tests {
         // held actions.
         let d_plus = EpisodeDriver::gru(&plus, founder).expect("a finite perturbation is a policy");
         let d_minus = EpisodeDriver::gru(&minus, founder).expect("and its antithesis");
-        let obs = [0.0; 23];
+        let obs = [0.0; BLIND_I];
         let (EpisodeKind::Gru(_), EpisodeKind::Gru(_)) = (d_plus.kind(), d_minus.kind()) else {
             panic!("gru drivers");
         };
         use cubarium_voxel_fauna::Controller as _;
-        let mut c_plus = GruPolicy::<23>::new(&plus, voxel_schema_digest(founder))
+        let mut c_plus = GruPolicy::<BLIND_I, BLIND_O>::new(&plus, voxel_schema_digest(founder))
             .expect("the perturbed centre is a policy");
         let mut c_minus =
-            GruPolicy::<23>::new(&minus, voxel_schema_digest(founder)).expect("and its antithesis");
+            GruPolicy::<BLIND_I, BLIND_O>::new(&minus, voxel_schema_digest(founder)).expect("and its antithesis");
         assert_ne!(
             c_plus.drive(&obs),
             c_minus.drive(&obs),
@@ -2226,7 +2228,7 @@ mod tests {
         let run = |workers: usize| {
             let cancel = AtomicBool::new(false);
             let mut theta =
-                super::super::super::tensor::initial_center_shape::<23, 3>(protocol.train_seed);
+                super::super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(protocol.train_seed);
             let mut adam = Adam::new(theta.len());
             let plan = GenerationPlan {
                 layouts: &layouts[..1],
@@ -2313,7 +2315,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let digest = voxel_schema_digest(Founder::Blind);
         let other = digest ^ 0x5a5a;
-        let theta = super::super::super::tensor::initial_center_shape::<23, 3>(77);
+        let theta = super::super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(77);
         let moved = centre_file(&dir, "moved.json", other, &theta);
 
         // `--init-center` refuses the digest mismatch, as it always did.
