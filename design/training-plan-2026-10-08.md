@@ -723,8 +723,14 @@ control and the reward accounting; display targets after seeing results.
       - Two small consistent shifts:
         - the lake is 1–7 % lower in 8/8 seeds, with more water in the air in 6/8;
         - standing foliage is about 2 % lower in 7/8, umbrellafrond and stonecushion 7/8.
-      - `runs/stride2-2026-10-09` splits the cause: plants 2 s with water as today, and
-        plants 2 s with water every 0.5 s.
+      - `runs/stride2-2026-10-09` splits the cause, as median paired change against old:
+        - plants every 2 s with water as before: lake −0.1 %, foliage −0.1 %, so the plant
+          clock is clean;
+        - water every 0.5 s: lake −1.4 %, foliage −1.1 %;
+        - water every 1 s: lake −3.1 %, foliage −2.6 %.
+
+        The shift comes from the water step and scales with it. Adopted anyway (441f553f),
+        since the ledger closes and Wrysk is "not that worried".
     - **Then protocol A:**
       - screen every candidate on 8 wide worlds × 2 h from a year-old saved world;
       - year-check the best on 8 freshly founded wide worlds × 10 h;
