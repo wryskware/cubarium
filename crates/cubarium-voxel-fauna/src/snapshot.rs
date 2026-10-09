@@ -169,6 +169,11 @@ struct EnvelopeIn {
     fauna: Fauna,
 }
 
+/// Knobs renamed since saves began carrying named configs, `(old, new)`
+/// ([`cubarium_voxel::savedoc::from_doc_renamed`]). 2026-10-08: the flowers' and the lure's
+/// light channel is near-IR, not UV (Wrysk: "its a red dwarf sun").
+const RENAMED_KNOBS: &[(&str, &str)] = &[("uv", "nir"), ("lure_uv", "lure_nir"), ("uv_innate", "nir_innate")];
+
 pub fn encode(fauna: &Fauna) -> Vec<u8> {
     postcard::to_stdvec(&EnvelopeOut {
         schema: SCHEMA,
@@ -190,7 +195,7 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
                 )
             })?;
             let (config, ignored) =
-                cubarium_voxel::savedoc::from_doc(&env.config, &FaunaConfig::default())
+                cubarium_voxel::savedoc::from_doc_renamed(&env.config, &FaunaConfig::default(), RENAMED_KNOBS)
                     .context("the voxel fauna snapshot's config")?;
             cubarium_voxel::savedoc::note_ignored("voxel fauna", &ignored);
             let mut fauna = env.fauna;
@@ -467,7 +472,10 @@ mod tests {
 
     #[test]
     fn old_light_channel_keys_load_and_round_trip_the_saved_values() {
-        use cubarium_voxel::savedoc::{from_doc, to_doc};
+        use cubarium_voxel::savedoc::to_doc;
+        let from_doc = |doc: &[u8], base: &FaunaConfig| {
+            cubarium_voxel::savedoc::from_doc_renamed(doc, base, RENAMED_KNOBS)
+        };
         let mut saved = FaunaConfig::default();
         saved.light.lure_nir = 0.37;
         saved.light.nir_innate = 0.23;
@@ -497,7 +505,8 @@ mod tests {
         let mut old = ciborium::Value::serialized(&saved).unwrap();
         old_keys(&mut old);
         let doc = to_doc(&old);
-        // Both serde aliases and the named-field overlay accept the old keys.
+        // Both serde aliases and the named-field overlay (with the layer's renames) accept the
+        // old keys.
         let direct: FaunaConfig = ciborium::from_reader(doc.as_slice()).unwrap();
         assert_eq!(to_doc(&direct), to_doc(&saved));
         let (loaded, ignored) = from_doc(&doc, &FaunaConfig::default()).unwrap();
