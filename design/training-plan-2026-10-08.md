@@ -476,8 +476,9 @@ control and the reward accounting; display targets after seeing results.
    from 6 to 70 within 3 h and lose about 5 per seed to starvation. Leave it to the ecology
    search, or have founders earn their surplus first?
 9. **Saved starts and new knobs:** Wrysk 2026-10-08: "we need to do a better job about
-   changing save formats, or making them extensible, or migrations". SAVE-EXTENSIBLE is
-   running (option b below, plus a one-time reader so starts3 survives).
+   changing save formats, or making them extensible, or migrations". **Done:** SAVE-EXTENSIBLE
+   (aa6c4c2b) is option (b) below, and a renamed knob keeps its saved value through a per-layer
+   rename table (7ff82b35). Nothing to decide.
    Background: today every new serialised knob made every saved start
    unloadable. For example, after DEN-FLOOD, loads failed with "corrupt snapshot", not even a
    clean refusal.
@@ -518,6 +519,9 @@ control and the reward accounting; display targets after seeing results.
     - a body caught in solid may step along it at no greater depth (before: only out);
     - a stem climber with a carcass at its foot climbs down to it.
 
+    - (JUVENILE-FOOD, 5a05d327) a bellwing's takeoff is paid from its reserve, then from
+      its body above `body_min`, so a perched bellwing at zero reserve can still fly to food
+      (before: stuck perched).
     These are motor fixes for deadlocks. Revert any you disagree with.
 13. **Leads that never pay** (merged c92ce6e7, LEADS-PAY; revert if you disagree).
     - Hungry bellwings awake in the dark followed nectar scent to its peak at a bloomcrown's
