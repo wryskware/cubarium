@@ -32,7 +32,7 @@ fn flower_scene(hour: f64, seed: u64) -> (World, Flora, (f64, f64, f64)) {
     }
     assert!(flora.view().stands.iter().any(|s| s.nectar > 0.0), "fixture: the flower holds nectar");
     let mut fauna = Fauna::new(FaunaConfig::default());
-    fauna.beacons.refresh(&world.view(), &flora.view());
+    fauna.beacons.refresh(&world.view(), &flora.view(), fauna.config.scent.nectar_full);
     let b = *fauna.beacons.list().iter().find(|b| b.kind == BeaconKind::Flower).expect("fixture: the flower is a beacon");
     assert!(b.y_m > SURFACE_M + 0.5, "fixture: the flower head stands over the ground: {} vs {SURFACE_M}", b.y_m);
     (world, flora, (b.x, b.y_m, b.z))
@@ -42,7 +42,7 @@ fn flower_scene(hour: f64, seed: u64) -> (World, Flora, (f64, f64, f64)) {
 fn smell_at(world: &World, flora: &Flora, p: (f64, f64, f64)) -> Plume {
     let mut fauna = Fauna::new(FaunaConfig::default());
     let (view, fv) = (world.view(), flora.view());
-    fauna.beacons.refresh(&view, &fv);
+    fauna.beacons.refresh(&view, &fv, fauna.config.scent.nectar_full);
     let sources = nectar_sources(&fauna, &view, None);
     nectar_plume(&view, &fauna.config, &sources, p, 0, 0.0)
 }
@@ -99,6 +99,7 @@ fn a_hungry_flyer_at_the_scent_peak_finds_the_bloom_in_the_dark() {
     let (world, mut flora, (bx, _, bz)) = flower_scene(0.0, 803);
     let mut c = FaunaConfig::default();
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
+    c.scent.nectar_full = flora.config().bloomcrown.nectar_cap;
     for f in Founder::ALL {
         c.founders[f.index()].active = Activity::Always;
     }
@@ -144,4 +145,20 @@ fn a_flower_smells_by_the_nectar_it_holds() {
     assert!(both.gx < 0.0 && both.source == Some((4.5, SURFACE_M + 0.5, LANE_Z)), "led to the full flower: {both:?}");
     let (full, tenth) = (smell(vec![(flower(4.5), 1.0)]).level, smell(vec![(flower(4.5), 0.1)]).level);
     assert!(full > 0.0 && (tenth / full - 0.1).abs() < 1e-9, "in proportion to its nectar: {tenth} of {full}");
+}
+
+/// The fauna reference controls emission independently of the plant's capacity.
+#[test]
+fn nectar_full_scales_flower_scent_and_nonpositive_uses_the_full_rate() {
+    let (world, flora, _) = flower_scene(12.0, 805);
+    let (view, fv) = (world.view(), flora.view());
+    let held = fv.stands.iter().find(|s| s.nectar > 0.0).unwrap().nectar;
+    let share = |full| {
+        let (_, shares) = crate::light::Beacons::build(&view, &fv, full);
+        shares[0]
+    };
+    assert!((share(held) - 1.0).abs() < 1e-9);
+    assert!((share(held * 4.0) - 0.25).abs() < 1e-9);
+    assert_eq!(share(0.0), 1.0);
+    assert_eq!(share(-held), 1.0);
 }

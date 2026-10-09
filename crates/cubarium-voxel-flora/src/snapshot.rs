@@ -69,14 +69,6 @@ use crate::{Flora, FloraConfig};
 //     document beside it.
 pub const SCHEMA: u32 = 39;
 
-/// **The one-version legacy reader's tag** ([`decode_legacy`]): schema 38, the last whose
-/// config sat positionally inside the state, kept so the 2026-10-08 training starts load.
-/// Retire it (delete this, [`decode_legacy`] and its arm in [`decode`]) once those saves are
-/// rewritten in the current format (`voxel_resave`) or no longer wanted; it can read them only
-/// while `FloraConfig`'s positional layout is still schema 38's, so the first plant knob added
-/// after SAVE-EXTENSIBLE retires it in practice.
-pub const LEGACY_SCHEMA: u32 = 38;
-
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
     schema: u32,
@@ -103,7 +95,7 @@ pub fn encode(flora: &Flora) -> Vec<u8> {
 /// Read a plant layer back. A payload tagged with another state schema is refused with the
 /// tag it carries: start a fresh world.
 pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
-    let (tag, rest): (u32, &[u8]) =
+    let (tag, _): (u32, &[u8]) =
         postcard::take_from_bytes(bytes).context("reading the flora snapshot's schema tag")?;
     let mut flora = match tag {
         SCHEMA => {
@@ -125,7 +117,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
             flora.config = config;
             flora
         }
-        LEGACY_SCHEMA => decode_legacy(rest)?,
         found => bail!(
             "this flora snapshot is schema {found} and this build reads schema {SCHEMA}: made by \
              another version of Cubarium whose plant state has another layout; start a fresh world"
@@ -136,20 +127,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Flora> {
     })?;
     // The crowns are derived and not saved.
     flora.refresh_crowns(None);
-    Ok(flora)
-}
-
-/// **One-version legacy reader** ([`LEGACY_SCHEMA`]): a schema-38 plant layer, whose config
-/// sat positionally at the head of the state. Postcard frames nothing, so it is the config's
-/// bytes followed by exactly the state the current envelope carries.
-fn decode_legacy(rest: &[u8]) -> anyhow::Result<Flora> {
-    let (config, state): (FloraConfig, &[u8]) = postcard::take_from_bytes(rest).context(
-        "a schema-38 (legacy) flora layer whose config this build no longer reads positionally; \
-         rewrite it with voxel_resave from a build before the plant config changed",
-    )?;
-    let mut flora: Flora = postcard::from_bytes(state)
-        .context("the state of a schema-38 (legacy) flora layer does not read")?;
-    flora.config = config;
     Ok(flora)
 }
 
@@ -226,17 +203,5 @@ mod tests {
         });
         let back = decode(&with_doc(&flora, doc)).expect("an unknown knob is dropped");
         assert_eq!(back.config(), flora.config());
-    }
-
-    /// The one-version legacy reader: a schema-38 layer, its config positional at the head
-    /// of the state.
-    #[test]
-    fn the_legacy_reader_loads_a_positional_config_layer() {
-        let config = FloraConfig::default().rescaled_to(0.125);
-        let flora = Flora::new(config.clone());
-        let legacy = postcard::to_stdvec(&(LEGACY_SCHEMA, &config, &flora)).unwrap();
-        let back = decode(&legacy).expect("a schema-38 layer");
-        assert_eq!(back.config(), &config);
-        assert_eq!(back.view().ground.len(), flora.view().ground.len());
     }
 }

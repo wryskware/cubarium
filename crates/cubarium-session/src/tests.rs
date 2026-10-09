@@ -260,38 +260,6 @@ fn a_save_from_another_version_is_refused_with_a_plain_error() {
     }
 }
 
-/// **The one-version legacy reader through a session** (SAVE-EXTENSIBLE): a save whose
-/// metadata and layers are of the legacy schemas — the configs positional inside the state —
-/// is listed as loadable and loads.
-#[test]
-fn a_save_of_the_legacy_schemas_loads() {
-    let (session, dir) = running("legacy");
-    pause(&session);
-    let save = dir.0.join("slot");
-    session.save_blocking(&save, Duration::from_secs(30)).expect("saves");
-    let loaded = store::load_save(&save).expect("its own save loads");
-    let legacy = store::LEGACY;
-    let write = |p: &Path, bytes: Vec<u8>| std::fs::write(p, bytes).unwrap();
-    write(
-        &loaded.world_file,
-        postcard::to_stdvec(&(legacy.world, loaded.world.config(), &loaded.world)).unwrap(),
-    );
-    let (flora_file, fauna_file) = store::layer_files(&save, loaded.world.tick());
-    write(&flora_file, postcard::to_stdvec(&(legacy.flora, loaded.flora.config(), &loaded.flora)).unwrap());
-    write(&fauna_file, postcard::to_stdvec(&(legacy.fauna, loaded.fauna.config(), &loaded.fauna)).unwrap());
-    let meta_path = save.join(store::META_FILE);
-    let mut meta: Value = serde_json::from_slice(&std::fs::read(&meta_path).unwrap()).unwrap();
-    meta["schema"] = serde_json::to_value(legacy).unwrap();
-    std::fs::write(&meta_path, serde_json::to_vec(&meta).unwrap()).unwrap();
-
-    assert!(store::read_meta(&save).unwrap().loadable());
-    let back = store::load_save(&save).expect("a legacy save loads");
-    assert_eq!(back.fauna.config(), loaded.fauna.config());
-    assert_eq!(back.fauna.view().animals, loaded.fauna.view().animals);
-    assert!(back.world == loaded.world);
-    session.load_blocking(&save, Duration::from_secs(30)).expect("the session loads it");
-}
-
 #[test]
 fn the_metadata_is_read_without_loading_the_world() {
     let (session, dir) = running("meta");

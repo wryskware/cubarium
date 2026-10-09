@@ -123,7 +123,7 @@ pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, att
 pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
-pub use snapshot::{LEGACY_SCHEMA, SCHEMA};
+pub use snapshot::SCHEMA;
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
 /// This is a read-only diagnostic projection of the same ray result the founder

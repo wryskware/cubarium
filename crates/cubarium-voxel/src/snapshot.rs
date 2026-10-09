@@ -46,14 +46,6 @@ use crate::{Config, World};
 /// carries names, so an older save takes the new knob's default.
 pub const SCHEMA: u32 = 23;
 
-/// **The one-version legacy reader's tag** ([`decode_legacy`]): schema 22, the last whose
-/// config sat positionally inside the state, kept so the 2026-10-08 training starts load.
-/// Retire it (delete this, [`decode_legacy`] and its arm in [`decode`]) once those saves are
-/// rewritten in the current format (`voxel_resave`) or no longer wanted; it can read them only
-/// while `Config`'s positional layout is still schema 22's, so the first knob added to the
-/// world config after SAVE-EXTENSIBLE retires it in practice.
-pub const LEGACY_SCHEMA: u32 = 22;
-
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
     schema: u32,
@@ -110,7 +102,7 @@ pub fn schema_tag(bytes: &[u8]) -> Option<u32> {
 }
 
 pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
-    let (tag, rest): (u32, &[u8]) =
+    let (tag, _): (u32, &[u8]) =
         postcard::take_from_bytes(bytes).context("not a voxel world snapshot")?;
     let mut world = match tag {
         SCHEMA => {
@@ -127,7 +119,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
             world.config = config;
             world
         }
-        LEGACY_SCHEMA => decode_legacy(rest)?,
         found => {
             return Err(SchemaMismatch {
                 found,
@@ -142,20 +133,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<World> {
     // The water active sets are not serialized — they are a cache of the arrays — so a
     // decoded world builds them before anything can iterate them.
     world.rebuild_active_sets();
-    Ok(world)
-}
-
-/// **One-version legacy reader** ([`LEGACY_SCHEMA`]): a schema-22 world, whose config sat
-/// positionally at the head of the state. Postcard frames nothing, so it is the config's
-/// bytes followed by exactly the state the current envelope carries.
-fn decode_legacy(rest: &[u8]) -> anyhow::Result<World> {
-    let (config, state): (Config, &[u8]) = postcard::take_from_bytes(rest).context(
-        "a schema-22 (legacy) world whose config this build no longer reads positionally; \
-         rewrite it with voxel_resave from a build before the world config changed",
-    )?;
-    let mut world: World = postcard::from_bytes(state)
-        .context("the state of a schema-22 (legacy) world does not read")?;
-    world.config = config;
     Ok(world)
 }
 
@@ -255,17 +232,6 @@ mod tests {
         short.truncate(bytes.len() / 2);
         let err = format!("{:#}", World::load(&short).expect_err("half a state"));
         assert!(err.contains("does not read as schema"), "{err}");
-    }
-
-    /// The one-version legacy reader: a schema-22 world (its config positional at the head
-    /// of the state) loads whole.
-    #[test]
-    fn the_legacy_reader_loads_a_positional_config_world() {
-        let mut world = fixture();
-        world.config.seed = 99;
-        let legacy = postcard::to_stdvec(&(super::LEGACY_SCHEMA, &world.config, &world)).unwrap();
-        let back = World::load(&legacy).expect("a schema-22 world");
-        assert_eq!(back, world);
     }
 
     #[test]

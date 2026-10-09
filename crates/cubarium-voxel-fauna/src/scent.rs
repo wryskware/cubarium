@@ -501,7 +501,7 @@ pub(crate) fn plume_kernel(config: &FaunaConfig, voxel_m: f64) -> Option<(f64, f
 /// The point sources of nectar scent and their rates, scent units a second: every flower
 /// holding nectar at its bloom — a bloomcrown's flower head (the top of its top foliage
 /// layer, over its site), a latticevine face in flower (the voxel in front of it) — by the
-/// nectar it holds (`nectar_per_s` × its nectar over a full bloomcrown head's), and every
+/// nectar it holds (`nectar_per_s` × its nectar over `nectar_full`), and every
 /// lit lure but `except`'s (a lanternjaw does not smell its own) at its lure point, by
 /// `lure_scent` × its lit fraction × a full flower's (the mimic holds none). The light
 /// layer's beacons and lures: the same flowers the eye sees.

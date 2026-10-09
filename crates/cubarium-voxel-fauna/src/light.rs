@@ -319,8 +319,8 @@ pub struct Beacons {
     /// The plant layer's tick and the terrain version it was built at.
     stamp: Option<(u64, u64)>,
     list: Vec<Beacon>,
-    /// NECTAR-SCENT: per entry of `list`, the nectar a flower holds over a full bloomcrown
-    /// head's (`flora.bloomcrown.nectar_cap`): the share of a full flower's scent it gives
+    /// NECTAR-SCENT: per entry of `list`, the nectar a flower holds over
+    /// `fauna.scent.nectar_full`: the share of a full flower's scent it gives
     /// off. 0 for a glowcap; 1 for a hand-placed (test) beacon.
     scent: Vec<f64>,
 }
@@ -332,13 +332,13 @@ fn top_layer(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand) -> Option<
 
 impl Beacons {
     /// Rebuild when the plant layer stepped or the terrain changed since the last build.
-    pub(crate) fn refresh(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>) {
+    pub(crate) fn refresh(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, nectar_full: f64) {
         let stamp = (fv.tick, view.terrain_version);
         if self.stamp == Some(stamp) {
             return;
         }
         self.stamp = Some(stamp);
-        (self.list, self.scent) = Beacons::build(view, fv);
+        (self.list, self.scent) = Beacons::build(view, fv, nectar_full);
     }
 
     /// The flowers as smell sources: each with its scent share ([`Beacons::scent_shares`]).
@@ -347,14 +347,14 @@ impl Beacons {
     }
 
     /// Every flower holding nectar and every glowcap with a cap (module note).
-    /// With each its scent share (NECTAR-SCENT): a flower's nectar over a full bloomcrown
-    /// head's (`flora.bloomcrown.nectar_cap`; 1 when that is not positive), 0 for a glowcap.
-    pub(crate) fn build(view: &VoxelView<'_>, fv: &FloraView<'_>) -> (Vec<Beacon>, Vec<f64>) {
+    /// With each its scent share (NECTAR-SCENT): a flower's nectar over
+    /// `nectar_full` (1 when that is not positive), 0 for a glowcap.
+    pub(crate) fn build(view: &VoxelView<'_>, fv: &FloraView<'_>, nectar_full: f64) -> (Vec<Beacon>, Vec<f64>) {
         let c = view.config;
         let v = c.voxel_m;
         let mut out = Vec::new();
         let mut scent = Vec::new();
-        let full = fv.config.species(Species::Bloomcrown).nectar_cap;
+        let full = nectar_full;
         let share = |n: f64| if full > 0.0 { (n / full).max(0.0) } else { 1.0 };
         for st in fv.stands {
             let kind = if st.nectar > 0.0 {
@@ -534,7 +534,7 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
     reading.looming = loom.map_or(0.0, |(d, _)| (1.0 - d / table.loom_m).clamp(0.0, 1.0).max(1e-9));
     reading.loom_bearing = loom.map_or(0.0, |(_, b)| b);
     if due && table.light_m > 0.0 {
-        fauna.beacons.refresh(view, fv);
+        fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);
         let cfg = fauna.config.light;
         let record = fauna.percepts.get(&a.id).copied().unwrap_or_default();
         let lures = lures(fauna, view);
@@ -860,7 +860,7 @@ fn scent_from_marked(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, source: Op
 pub(crate) fn smell_nectar(fauna: &mut Fauna, a: &Animal, view: &VoxelView<'_>, fv: &FloraView<'_>, floor: f64) -> crate::scent::Plume {
     let v = view.config.voxel_m;
     let Some(eye) = eye_of(&fauna.config, a, v) else { return crate::scent::Plume::default() };
-    fauna.beacons.refresh(view, fv);
+    fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);
     let sources = crate::scent::nectar_sources(fauna, view, Some(a.id));
     crate::scent::nectar_plume(view, &fauna.config, &sources, eye, a.id, floor)
 }
