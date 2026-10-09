@@ -569,6 +569,18 @@ control and the reward accounting; display targets after seeing results.
       newborn's exploration prior.
     - The next brain pilot waits for the ecology genes either way: in today's world, behaviour
       barely changes intake.
+15. **Decided (Wrysk, 2026-10-09): grazers herd ("C").** Wrysk: "grazers are super spread out
+    today. they should be clustered more in groups for social / protection."
+    - Today they group only under threat (alarm wave, bunching, hunker, calves sheltered,
+      the pack's 3 m shun). Calm foragers spread out, and scanning ignores group size.
+    - **Both:**
+      - an innate herding pull in the heuristic, as calves follow the herd from birth; the
+        heuristic is the brains' teacher;
+      - the world makes herding pay:
+        - many eyes: scanning shared with nearby kin, so more time to eat;
+        - Veilhound packs single out the most isolated grazer;
+        - predators present in training worlds.
+    - Herding is never scored or rewarded.
 
 ## 7. Work log (2026-10-08)
 
