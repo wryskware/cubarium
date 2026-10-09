@@ -790,6 +790,15 @@ control and the reward accounting; display targets after seeing results.
      - `still_gain` 1.25 sensing after 0.5 s still.
      - The search screens read leanings (`screen::founder_sleep`).
      - Open: Veilhound pack members rest independently, where lions rest together.
+   - REACH-HEIGHTS merged:
+     - vaulttrees 6.5 m, so loftstriders browse 15 % of a mature crown (was 100 %);
+     - `chorister.hunter.vertical_reach_m` 2.25;
+     - seedporters roost above it;
+     - vine flower cues sit at the face, so bellwings can sip;
+     - seedporters climb to vine fruit.
+     - **Open:** seedporters still barely eat vine fruit (0.0002 against 0.34 lanternberry in
+       0.5 h; 14 vine visits), so vine crops stay at the pollination floor. Needs a
+       diagnosis: too few visits, too little fruit, or access.
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
