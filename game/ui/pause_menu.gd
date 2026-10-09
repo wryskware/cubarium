@@ -16,7 +16,7 @@ var shell: Node
 var buttons := {}
 
 @onready var _world: Control = $World
-@onready var _title: Label = $Center/Page/Body/Margin/Stack/Title
+@onready var _title: NeonTitle = $Center/Page/Body/Margin/Stack/Title
 @onready var _items: Control = $Center/Page/Body/Margin/Stack/Items
 
 
@@ -38,7 +38,7 @@ func open(has_world: bool) -> void:
 	buttons["save"].disabled = not has_world
 	buttons["metrics"].disabled = not has_world
 	buttons["guide"].disabled = not has_world
-	_title.text = "Paused" if has_world else "Cubarium"
+	_title.title = "Paused" if has_world else "Cubarium"
 	visible = true
 	focus_first()
 

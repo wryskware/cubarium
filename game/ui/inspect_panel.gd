@@ -26,7 +26,7 @@ var _note_line: Label
 
 @onready var _stack: Control = $Margin/Stack
 @onready var _kicker: Label = _stack.get_node("Kicker")
-@onready var _title: Label = _stack.get_node("Name")
+@onready var _title: NeonTitle = _stack.get_node("Name")
 @onready var _state: Label = _stack.get_node("State")
 @onready var _stats: GridContainer = _stack.get_node("Facts")
 @onready var _life: VBoxContainer = _stack.get_node("LifeFade/LifeScroll/Life")
@@ -90,7 +90,7 @@ func refresh() -> void:
 	var q = shell.session.query("animal", {"id": animal_id})
 	if not (q is Dictionary) or q.has("error"):
 		dead = true
-		_title.text = "#%d" % animal_id
+		_title.title = "#%d" % animal_id
 		_state.text = "Gone: nothing is remembered of it any more."
 		_fill_stats(null)
 		return
@@ -103,7 +103,7 @@ func refresh() -> void:
 	elif life is Dictionary:
 		label = life.get("label", "")
 	# The species as the field guide names it ("Ripple-snail"): the sim's label, capitalised.
-	_title.text = label.left(1).to_upper() + label.substr(1) if label != "" else "#%d" % animal_id
+	_title.title = label.left(1).to_upper() + label.substr(1) if label != "" else "#%d" % animal_id
 	var death = life.get("death") if life is Dictionary else null
 	dead = body == null
 	if dead:

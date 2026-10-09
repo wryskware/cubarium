@@ -9,6 +9,7 @@
 [ext_resource type="FontVariation" path="res://ui/neon/fonts/text.tres" id="7_text"]
 [ext_resource type="PackedScene" path="res://ui/save_slot_row.tscn" id="8_row"]
 [ext_resource type="Script" path="res://ui/save_slots.gd" id="9_slots"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_field"]
 
@@ -71,7 +72,9 @@ theme_override_constants/separation = 0
 [node name="Title" type="Label" parent="Center/Page/Body/Margin/Stack"]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
-text = "Save"
+text = " Save "
+script = ExtResource("nt_title")
+title = "Save"
 vertical_alignment = 1
 
 [node name="Gap1" type="Control" parent="Center/Page/Body/Margin/Stack"]

@@ -21,7 +21,7 @@ var _mode := "save"
 
 @onready var _world: Control = $World
 @onready var _stack: Control = $Center/Page/Body/Margin/Stack
-@onready var _title: Label = _stack.get_node("Title")
+@onready var _title: NeonTitle = _stack.get_node("Title")
 @onready var _new_row: Control = _stack.get_node("NewMargin")
 @onready var _name_box: Control = _stack.get_node("NewMargin/NewRow/NameBox")
 @onready var _name: LineEdit = _stack.get_node("NewMargin/NewRow/NameBox/Name")
@@ -87,7 +87,7 @@ func _on_focus_changed(c: Control) -> void:
 ## Show the slots: `mode` "save" (from the menu's Save) or "load".
 func open(mode: String) -> void:
 	_mode = mode
-	_title.text = "Save" if mode == "save" else "Load"
+	_title.title = "Save" if mode == "save" else "Load"
 	_status.text = ""
 	visible = true
 	_scroll.scroll_vertical = 0

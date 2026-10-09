@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_button"]
 [ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_label"]
 [ext_resource type="Script" path="res://ui/pause_menu.gd" id="6_menu"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
 
 [node name="PauseMenu" type="Control"]
 anchor_right = 1.0
@@ -73,7 +74,9 @@ theme_override_constants/separation = 0
 [node name="Title" type="Label" parent="Center/Page/Body/Margin/Stack"]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
-text = "Paused"
+text = " Paused "
+script = ExtResource("nt_title")
+title = "Paused"
 vertical_alignment = 1
 
 [node name="Gap1" type="Control" parent="Center/Page/Body/Margin/Stack"]
