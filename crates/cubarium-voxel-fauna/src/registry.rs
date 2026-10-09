@@ -286,6 +286,7 @@ fn founder_rows() -> Vec<Row> {
         // `senses.nir` is a switch: no row.
         r("senses.light_m", "m", nonneg, "the photoreceptor's range for a beacon (3D; 0: no light sense)"),
         r("senses.light_min", "contrast", nonneg, "the faintest beacon level read: contrast x 1 / (1 + (d / half_m)^2)").log(),
+        r("senses.cyan_m", "m", nonneg, "FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone"),
         r("senses.loom_m", "m", nonneg, "a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none)"),
         r("senses.feeding_sight_fraction", "fraction", nonneg, "S2: head down cropping between scans, sight reaches this fraction of its range (1: no change)"),
         r("senses.kin_tracks", "bodies", nonneg, "S2: at most this many of its own lineage weighed per remote sensing, nearest first"),
@@ -679,7 +680,8 @@ fn knob_rows() -> Vec<Row> {
         r(&format!("fauna.light.{path}"), unit, range, what)
     };
     rows.extend([
-        lk("flower_reflectance", "brightness per unit light", nonneg, "a nectar flower's brightness (near-IR) per unit of the light falling on it").search(0.1, 4.0),
+        lk("flower_reflectance", "brightness per unit light", nonneg, "a full nectar flower's brightness (near-IR) per unit of the light falling on it").search(0.1, 4.0),
+        lk("nectar_nir_share", "fraction of a full flower's reflectance", fraction, "FLOWER-FRUIT: nectar reflects near-IR; reflectance x (1 - share + share x fill), a drained flower dimmer"),
         lk("glowcap_emission", "brightness", nonneg, "a glowcap's own light").search(0.0, 2.0),
         lk("lure_emission", "brightness", nonneg, "a fully lit lure's own light (cyan)").search(0.0, 4.0),
         lk("lure_scent", "x nectar_per_s", nonneg, "BELLWING: a lit lure gives off this x a flower's nectar scent at its lure point (0: light alone)").search(0.0, 2.0),

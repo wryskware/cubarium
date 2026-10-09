@@ -526,8 +526,12 @@ pub fn merge(a: &mut Cohort, b: &Cohort) {
     s.fruit = m(s.fruit, t.fruit);
     s.fruit_age_s = m(s.fruit_age_s, t.fruit_age_s);
     s.fruit_rest_s = m(s.fruit_rest_s, t.fruit_rest_s);
+    s.flower_left_s = m(s.flower_left_s, t.flower_left_s);
+    s.visits = m(s.visits, t.visits);
+    s.to_make = m(s.to_make, t.to_make);
     s.support_s = m(s.support_s, t.support_s);
     s.cured = if wa >= wb { s.cured } else { t.cured };
+    s.crop_phase = if wa >= wb { s.crop_phase } else { t.crop_phase };
     let (p, q) = (&mut a.site, &b.site);
     p.l_base = m(p.l_base, q.l_base);
     p.tau_fixed = m(p.tau_fixed, q.tau_fixed);
@@ -604,6 +608,9 @@ impl Model {
                     fruit: r.fruit,
                     fruit_age_s: r.fruit_age_s,
                     fruit_rest_s: r.fruit_rest_s,
+                    // The census carries no crop (FLOWER-FRUIT): fruit hanging is a crop in
+                    // fruit, its set made; otherwise idle.
+                    crop_phase: if r.fruit > 0.0 { cubarium_voxel_flora::CropPhase::Fruit } else { cubarium_voxel_flora::CropPhase::Idle },
                     ..StandState::default()
                 };
                 let sc = config.species(sp);
@@ -2141,6 +2148,9 @@ impl Model {
                         let d = *x * f;
                         *x -= d;
                         self.c.taken_mineral += nts[s] * c.n * d;
+                        if nectar && s != GLOW {
+                            c.st.book_nectar_taken(self.config.species(Species::ALL[s]), d);
+                        }
                     }
                 }
             }

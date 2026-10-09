@@ -203,8 +203,16 @@ fn species_rows() -> Vec<Row> {
             .grade("N").prov("decision"),
         r("fruit_cap", "org-units per stand", nonneg, "the most fruit an adult stand holds").grade("N").prov("decision"),
         r("fruit_drop_s", "s", nonneg, "ripe fruit left uneaten this long falls to the litter at the stand's site").grade("N").prov("decision"),
-        r("fruit_rest_s", "s", nonneg, "mean rest (exponential, per stand) after an uneaten crop falls before fruit hangs again; 0 none")
+        r("fruit_rest_s", "s", nonneg, "mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none")
             .search(0.0, 3600.0),
+        r("flower_s", "s", nonneg, "FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full")
+            .search(0.0, 3600.0).prov("decision"),
+        r("fruit_cost", "reserve per unit of fruit", Range::at_least(1.0), "FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired")
+            .search(1.0, 4.0).prov("decision"),
+        r("pollination_floor", "fraction of a full crop", fraction, "FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets")
+            .search(0.0, 0.5).prov("decision"),
+        r("pollination_visits", "visits", nonneg, "FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit")
+            .search(0.0, 10.0).prov("decision"),
         r("fruit_mineral_fraction", "fraction of organic", fraction, "mineral a unit of fruit carries (small, not zero)").grade("N").prov("decision"),
         r("night_bloom_scale", "fraction of the day rate", fraction, "nectar and fruit made at night out of the night budget")
             .search(0.0, 1.0).grade("N").prov("decision"),
@@ -332,8 +340,14 @@ fn vine_rows() -> Vec<Row> {
         r("spent_s", "s", nonneg, "spent phase").evolve().grade("C"),
         r("nectar_per_face_s", "org-units/s per reference face", nonneg, "long-run nectar a covered face offers: production per unit of vine area (a flower holds this times the mean cycle)")
             .scale(area).evolve().log().grade("C"),
-        r("fruit_per_face_s", "org-units/s per reference face", nonneg, "long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle)")
+        r("fruit_per_face_s", "org-units/s per reference face", nonneg, "long-run bead fruit a covered face sets: production per unit of vine area (a bunch holds this times the mean cycle) when every flower is pollinated")
             .scale(area).evolve().log().grade("C"),
+        r("fruit_cost", "reserve per unit of fruit", Range::at_least(1.0), "FLOWER-FRUIT: reserve a unit of bead fruit costs; the overhead beyond the fruit is respired")
+            .search(1.0, 4.0).prov("decision"),
+        r("pollination_floor", "fraction of a full bunch", Range::fraction(), "FLOWER-FRUIT: the share of a full bunch a flower no pollinator visited sets")
+            .search(0.0, 0.5).prov("decision"),
+        r("pollination_visits", "visits", nonneg, "FLOWER-FRUIT: pollinator visits to a flower that set a full bunch; 0 any visit")
+            .search(0.0, 4.0).prov("decision"),
         r("energy_density", "energy per org-unit", nonneg, "vine tissue energy").grade("D"),
         r("mineral_fraction", "mineral per org-unit", Range::fraction(), "vine tissue mineral: the store it draws from its root, and what its leaf, nectar and fruit carry")
             .prov("decision"),

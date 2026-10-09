@@ -95,6 +95,7 @@ pub use layers::{
     Layer, LayerKind, MAX_FOLIAGE_LAYERS, Profile, StandLayer, disc_offset, trunk_offsets,
 };
 pub use step::upkeep_factor;
+pub use step::pollinated_share;
 /// The germination predicate the model itself uses, gate by gate, for a caller outside a
 /// tick (a harness picking founder columns, a diagnosis of which gate is shut):
 /// `Gates::passes()` is the predicate. `establishment_gates_with_sky` is the one function
@@ -407,15 +408,20 @@ pub struct Stand {
     /// the stand dies.
     #[serde(default)]
     pub fruit: f64,
-    /// Seconds the current crop has hung: counted from the tick the stock goes from empty
-    /// to holding fruit, back to zero when it is eaten out or falls. When it reaches the
+    /// Seconds the current crop has hung: counted from the tick its fruit set
+    /// ([`CropPhase::Fruit`]), back to zero when the crop ends. When it reaches the
     /// species' `fruit_drop_s` the whole hanging crop falls to the litter (F3).
     #[serde(default)]
     pub fruit_age_s: f64,
-    /// Seconds left of the stand's rest after an uneaten crop fell: no fruit is made while
-    /// it is positive ([`SpeciesConfig::fruit_rest_s`]).
+    /// Seconds left of the stand's rest after a crop ended (fell uneaten or was eaten
+    /// out): no flowers and no fruit are made while it is positive
+    /// ([`SpeciesConfig::fruit_rest_s`]).
     #[serde(default)]
     pub fruit_rest_s: f64,
+    /// **The crop's cycle** (FLOWER-FRUIT): flowering, the fruit set from the visits, the
+    /// fruit hanging. Idle for a species that makes no fruit.
+    #[serde(default)]
+    pub crop: Crop,
     /// **Cured** (drought dormancy, [`SpeciesConfig::cure_after_s`]): its foliage dropped
     /// to the litter, it fixes nothing, pays a fraction of its maintenance out of its
     /// reserve and waits for water. The presenter draws it in the species' cured colour.
@@ -436,6 +442,33 @@ pub struct Stand {
     /// face's own settling (`step::settle_places`); [`FloraView::stands`] is sorted by
     /// `(site, place)`.
     pub place: FaceLayer,
+}
+
+/// Where a stand's crop is in its cycle (FLOWER-FRUIT, Wrysk 2026-10-09): idle (resting,
+/// or ready to flower) → flowering → fruit set and hanging → eaten out or fallen → idle
+/// with a rest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CropPhase {
+    #[default]
+    Idle,
+    /// Flowers open: nectar made and visits counted.
+    Flower,
+    /// The fruit set: made up to the set size, hanging until eaten out or fallen.
+    Fruit,
+}
+
+/// **A stand's crop** ([`Stand::crop`]): its phase, the flowering's time left and its
+/// pollinator visits, and the fruit the set still has to make.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Crop {
+    pub phase: CropPhase,
+    /// Seconds the flowers stay open ([`CropPhase::Flower`]).
+    pub flower_left_s: f64,
+    /// Pollinator visits booked to this flowering ([`Flora::visit_stand`]).
+    pub visits: u32,
+    /// Organic fruit the set still has to make ([`CropPhase::Fruit`]): the set's size less
+    /// what is made. A crop is over when this and the hanging fruit are both gone.
+    pub to_make: f64,
 }
 
 /// A runner daughter's tie to the parent that feeds it ([`Stand::support`]): the parent's
@@ -910,6 +943,21 @@ fn default_night_bloom_scale() -> f64 {
     0.3
 }
 
+/// [`SpeciesConfig::fruit_cost`]'s default: fruit at par (a species with fruit sets its own).
+fn default_fruit_cost() -> f64 {
+    1.0
+}
+
+/// [`SpeciesConfig::pollination_floor`]'s default: visits change nothing.
+fn default_pollination_floor() -> f64 {
+    1.0
+}
+
+/// [`SpeciesConfig::pollination_visits`]'s default: one visit sets a full crop.
+fn default_pollination_visits() -> f64 {
+    1.0
+}
+
 /// [`SpeciesConfig::night_floor`]'s default: a fifth of the reserve cap kept for dawn.
 fn default_night_floor() -> f64 {
     0.2
@@ -1309,7 +1357,8 @@ pub struct SpeciesConfig {
     /// **Nectar** (F1, predation-and-flight §3.7, decision 6): organic matter an adult
     /// stand moves from its reserve into its [`Stand::nectar`] stock per second, in
     /// daylight only, until the stock reaches [`SpeciesConfig::nectar_cap`]. Zero makes
-    /// none: every species but bloomcrown. "Adult" is past the seedling profile
+    /// none: every species but bloomcrown and lanternberry (whose flowers make it only
+    /// while open, [`SpeciesConfig::flower_s`]). "Adult" is past the seedling profile
     /// (`profile_stage >= 1`); "daylight" is the world's `life_daylight` above zero.
     pub nectar_per_s: f64,
     /// The most nectar an adult stand holds, organic units. Unvisited nectar stays.
@@ -1334,13 +1383,38 @@ pub struct SpeciesConfig {
     /// Ripe fruit left uneaten this long, seconds, falls to the litter at the stand's site.
     #[serde(default)]
     pub fruit_drop_s: f64,
-    /// **The mean rest after an uneaten crop falls**, seconds (plants-flowering-vines
-    /// 2026-10-03): the stand hangs no fruit for a random time, exponential with this
-    /// mean, keyed by the stand and the tick, so the bushes of a grove fruit out of step
-    /// and some stand bare. A crop eaten out refills at once, so what a feeder can take is
-    /// unchanged. 0: fruits again at once.
+    /// **The mean rest after a crop ends**, seconds (plants-flowering-vines 2026-10-03;
+    /// a picked-clean crop rests, Wrysk 2026-10-09): after an uneaten crop falls, and
+    /// after a crop is eaten out, the stand makes no flowers and no fruit for a random
+    /// time, exponential with this mean, keyed by the stand and the tick, so the bushes of
+    /// a grove fruit out of step and some stand bare. 0: flowers again at once.
     #[serde(default)]
     pub fruit_rest_s: f64,
+    /// **Flowering before fruit** (Wrysk 2026-10-09, training plan §6 item 19): seconds a
+    /// crop's flowers stand open before the fruit sets ([`Crop`]). While open they make
+    /// nectar ([`SpeciesConfig::nectar_per_s`] up to [`SpeciesConfig::nectar_cap`]: the
+    /// nectar of the bush's flowers), reflect near-IR like any flower, and count the
+    /// pollinators' visits; what nectar is left when they close goes back to the reserve.
+    /// 0: no flowering stage — every crop sets in full at once, unpollinated (a species
+    /// that makes nectar with no flowering stage, bloomcrown, makes it all the time).
+    #[serde(default)]
+    pub flower_s: f64,
+    /// **What a unit of edible fruit costs the stand**, units of reserve (Wrysk
+    /// 2026-10-09: the bush pays for the whole flower–fruit cycle, about 2–3): each unit of
+    /// fruit made takes this much reserve; the unit beyond the fruit itself (flowers,
+    /// stalk, building) is respired, its energy as heat. 1: fruit at par.
+    #[serde(default = "default_fruit_cost")]
+    pub fruit_cost: f64,
+    /// **The pollination floor** (Wrysk 2026-10-09): the share of a full crop
+    /// ([`SpeciesConfig::fruit_cap`]) a flowering no pollinator visited sets, so a
+    /// pollinator crash slows the fruit without ending it. 1: visits change nothing.
+    #[serde(default = "default_pollination_floor")]
+    pub pollination_floor: f64,
+    /// **The visit-to-fruit rule**: pollinator visits to a flowering that set a full crop.
+    /// A flowering with `v` visits sets `fruit_cap · (floor + (1 − floor) · min(1, v /
+    /// pollination_visits))`. 0: one visit or none, the floor rules alone.
+    #[serde(default = "default_pollination_visits")]
+    pub pollination_visits: f64,
     /// The **mineral** a unit of fruit carries, a fraction of its organic matter: small
     /// but not zero (energy-rich fruit). Drawn from the stand's own mineral when taken.
     #[serde(default)]
@@ -1886,6 +1960,10 @@ impl SpeciesConfig {
             fruit_cap: 0.0,
             fruit_drop_s: 0.0,
             fruit_rest_s: 0.0,
+            flower_s: 0.0,
+            fruit_cost: default_fruit_cost(),
+            pollination_floor: default_pollination_floor(),
+            pollination_visits: default_pollination_visits(),
             fruit_mineral_fraction: 0.0,
             // 1b: the night budget's knobs, plausible defaults (not tuned).
             night_bloom_scale: default_night_bloom_scale(),
@@ -2860,10 +2938,22 @@ impl SpeciesConfig {
             fruit_cap: 0.02,
             fruit_drop_s: 1800.0,
             // Plants-flowering-vines 2026-10-03: after an uneaten crop falls, a rest of 15
-            // minutes on average (exponential), so an unvisited bush hangs fruit about
-            // two thirds of the time (200 s to fill, 1,800 s hanging, 900 s resting) and
-            // a grove's bushes fruit out of step. Eaten out, it refills at once.
+            // minutes on average (exponential), so a grove's bushes fruit out of step.
+            // Wrysk 2026-10-09: a crop eaten out rests the same way.
             fruit_rest_s: 900.0,
+            // FLOWER-FRUIT (Wrysk 2026-10-09, training plan §6 items 19–20), plausible
+            // starts, untuned: each crop flowers for a quarter of an hour first. The
+            // flowers hold a little nectar, a quarter of a bloomcrown's (bloomcrown's
+            // rate, 50 s to fill), and a full crop sets only after three pollinator
+            // visits; with none a tenth of it sets. A unit of fruit costs 2.5 of reserve
+            // (Wrysk: "about 2–3"), so a full crop (0.02) is 0.05, a tenth of the reserve cap.
+            flower_s: 900.0,
+            nectar_per_s: 1e-4,
+            nectar_cap: 0.005,
+            nectar_mineral_fraction: 0.01,
+            fruit_cost: 2.5,
+            pollination_floor: 0.1,
+            pollination_visits: 3.0,
             fruit_mineral_fraction: 0.01,
             wood_max: 1.0,
             alive_min: 0.02,
@@ -3682,6 +3772,24 @@ pub struct FloraLedger {
     /// `respired_out`), so in none of the `expected_*` totals.
     #[serde(default)]
     pub night_spend: [[f64; 3]; Species::COUNT],
+    /// **Pollinator visits** booked (FLOWER-FRUIT), `[stands in flower, latticevine faces
+    /// in flower]`, cumulative: a diagnostic count ([`Flora::visit_stand`],
+    /// [`Flora::visit_face`]).
+    #[serde(default)]
+    pub flower_visits: [u64; 2],
+    /// **Crops set**, `[unvisited (the pollination floor alone), visited]`, cumulative,
+    /// stands' crops and vine bunches together: diagnostic counts.
+    #[serde(default)]
+    pub crops_set: [u64; 2],
+    /// **Fruit set**, organic units, `[unvisited, visited]`, cumulative: the sizes the
+    /// crops set at (what they were to make, before anyone ate). Diagnostic.
+    #[serde(default)]
+    pub fruit_set: [f64; 2],
+    /// **The fruit's overhead**, organic units, cumulative: reserve paid for fruit beyond
+    /// the fruit itself ([`SpeciesConfig::fruit_cost`], [`cover::VineConfig::fruit_cost`]),
+    /// a diagnostic subset of `respired_out`.
+    #[serde(default)]
+    pub fruit_overhead: f64,
     /// Organic matter the saprotrophs have withdrawn from dead wood and litter, per
     /// species, indexed by [`Species::index`]: a **diagnostic flux and not a boundary flow**, exactly like
     /// the three `propagule_*` arrays, and therefore in none of the three
@@ -5655,6 +5763,7 @@ impl Flora {
             fruit: 0.0,
             fruit_age_s: 0.0,
             fruit_rest_s: 0.0,
+            crop: crate::Crop::default(),
             cured: false,
             dry_s: 0.0,
             support: None,
@@ -5910,8 +6019,9 @@ impl Flora {
         if !(stand.fruit > 0.0) {
             return None;
         }
+        // Eaten out, the crop is over at the plant's next tick and the stand rests
+        // ([`SpeciesConfig::fruit_rest_s`]); its clock is the crop's, not the stock's.
         let took = if want >= stand.fruit {
-            stand.fruit_age_s = 0.0;
             std::mem::replace(&mut stand.fruit, 0.0)
         } else {
             stand.fruit -= want;
@@ -5924,6 +6034,24 @@ impl Flora {
             mineral,
             energy: e_v * took,
         }))
+    }
+
+    /// **A pollinator's visit** to the flowers of the stand on `site` (FLOWER-FRUIT, Wrysk
+    /// 2026-10-09): booked to its crop when the crop is in flower ([`CropPhase::Flower`]),
+    /// where it counts toward the fruit the flowering sets
+    /// ([`SpeciesConfig::pollination_visits`]), and to `FloraLedger::flower_visits`.
+    /// `false`, booking nothing, when there is no stand or it is not in flower.
+    pub fn visit_stand(&mut self, site: Site) -> bool {
+        let Ok(i) = find_stand(&self.config, &self.stands, site, FaceLayer::Plant) else {
+            return false;
+        };
+        let crop = &mut self.stands[i].crop;
+        if crop.phase != CropPhase::Flower {
+            return false;
+        }
+        crop.visits = crop.visits.saturating_add(1);
+        self.ledger.flower_visits[0] += 1;
+        true
     }
 
     /// **Seeds voided by an animal** (F3, the seedporter's gut): `organic` and `mineral` of

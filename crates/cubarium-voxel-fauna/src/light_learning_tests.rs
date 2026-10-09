@@ -34,6 +34,9 @@ fn config(learn_rate: f64, forget_s: f64) -> FaunaConfig {
     c.light.forget_s = forget_s;
     c.light.visit_s = 1.0;
     c.light.mark_s = 1.0;
+    // The cyan range off (FLOWER-FRUIT): these cases are about learning, with beacons
+    // placed farther than the bellwing's `cyan_m` (`flower_fruit_light_tests`).
+    c.founders[BW.index()].senses.cyan_m = 0.0;
     c
 }
 

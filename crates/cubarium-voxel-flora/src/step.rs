@@ -130,7 +130,7 @@ use cubarium_voxel::{DT, Material, Materials, VoxelView, World};
 #[cfg(test)]
 use cubarium_voxel::Command as WorldCommand;
 
-use crate::{DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, Species, SpeciesConfig, Stand, Taken, Trophic};
+use crate::{Crop, CropPhase, DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, Species, SpeciesConfig, Stand, Taken, Trophic};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
 /// draws; the seed bank's and dispersal's are drawn in `seeds.rs`.
@@ -3102,6 +3102,11 @@ fn grow(
         ledger.stand_respired[s.species.index()] += b.respired[..b.respired_n as usize].iter().sum::<f64>();
         ledger.shed_organic[s.species.index()] += b.shed;
         ledger.sun_dried[s.species.index()] += b.sun;
+        if let Some((visited, organic)) = b.crop_set {
+            ledger.crops_set[usize::from(visited)] += 1;
+            ledger.fruit_set[usize::from(visited)] += organic;
+        }
+        ledger.fruit_overhead += b.overhead;
     }
     for (b, s) in books.iter().zip(stands.iter()) {
         let k = s.species.index();
@@ -3130,9 +3135,9 @@ pub(crate) struct Booked {
     light: f64,
     /// The seep's organic matter, mineral and energy ([`SpeciesConfig::dark_uptake_per_s`]).
     seep: [f64; 3],
-    respired: [f64; 2],
+    respired: [f64; 3],
     respired_n: u8,
-    heat: [f64; 5],
+    heat: [f64; 6],
     heat_n: u8,
     /// The night budget's spend on `[reflush, nectar, fruit]` (1b), the reflush with its
     /// construction respiration: `FloraLedger::night_spend`'s line for this stand.
@@ -3147,6 +3152,10 @@ pub(crate) struct Booked {
     cure_shed: f64,
     /// Cap tissue and mycelium the sun dried to the litter (`FloraLedger::sun_dried`).
     sun: f64,
+    /// FLOWER-FRUIT: a crop set this tick, `(visited, organic)` (`FloraLedger::crops_set`,
+    /// `fruit_set`), and the fruit's overhead respired (`FloraLedger::fruit_overhead`).
+    crop_set: Option<(bool, f64)>,
+    overhead: f64,
 }
 
 impl Booked {
@@ -3494,14 +3503,30 @@ pub(crate) fn grow_stand_cause(
     book.respired(respired);
     book.heat(e_v * respired);
 
-    // ---- 4.4b nectar (F1, predation-and-flight §3.7): an adult stand of a species that
+    // ---- 4.4b the crop opens (FLOWER-FRUIT, Wrysk 2026-10-09): a stand of a species that
+    // hangs fruit, adult, its rest over, opens its flowers for `flower_s` — or, with no
+    // flowering stage, sets a full crop at once.
+    if stand.fruit_rest_s > 0.0 {
+        stand.fruit_rest_s = (stand.fruit_rest_s - dt).max(0.0);
+    } else if stand.crop.phase == CropPhase::Idle && sc.fruit_per_s > 0.0 && stand.profile_stage >= 1 {
+        if sc.flower_s > 0.0 {
+            stand.crop = Crop { phase: CropPhase::Flower, flower_left_s: sc.flower_s, visits: 0, to_make: 0.0 };
+        } else {
+            set_crop(stand, sc, false, sc.fruit_cap.max(0.0), book);
+        }
+    }
+
+    // ---- 4.4c nectar (F1, predation-and-flight §3.7): an adult stand of a species that
     // makes it moves `nectar_per_s` of its reserve into its flowers in daylight, up to
-    // `nectar_cap`. A move inside the stand's material: no ledger line, and the mineral
-    // stays in `stand.mineral` until a consumer takes the nectar.
+    // `nectar_cap` — all the time for a species with no flowering stage (bloomcrown), only
+    // while its crop's flowers are open for one with one (lanternberry). A move inside the
+    // stand's material: no ledger line, and the mineral stays in `stand.mineral` until a
+    // consumer takes the nectar.
     //
     // At night (1b) it is made at `night_bloom_scale` of the rate out of what the reflush
     // left of the night budget.
-    if sc.nectar_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
+    let open = sc.flower_s <= 0.0 || stand.crop.phase == CropPhase::Flower;
+    if open && sc.nectar_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
         let room = (sc.nectar_cap - stand.nectar).max(0.0);
         let rate = if night_left.is_some() { sc.nectar_per_s * sc.night_bloom_scale } else { sc.nectar_per_s };
         let make = (rate * dt).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
@@ -3515,48 +3540,74 @@ pub(crate) fn grow_stand_cause(
         }
     }
 
-    // ---- 4.4c fruit (F3, predation-and-flight §3.7): the same move for a species that
-    // hangs fruit, up to `fruit_cap`. The crop's clock runs while any fruit hangs; at
-    // `fruit_drop_s` the whole uneaten crop falls to this site's litter (with senescence,
-    // below), carrying `fruit_mineral_fraction` of itself out of the stand's mineral.
-    // At night, as nectar: the night scale, out of what is left of the budget.
-    //
-    // After an uneaten crop falls the stand rests (plants-flowering-vines 2026-10-03): a
-    // random time, exponential with mean `fruit_rest_s`, keyed by the stand and the tick,
-    // so the bushes of a grove fruit out of step. A crop eaten out refills at once.
-    let resting = stand.fruit_rest_s > 0.0;
-    if resting {
-        stand.fruit_rest_s = (stand.fruit_rest_s - dt).max(0.0);
-    }
-    if !resting && sc.fruit_per_s > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
-        let room = (sc.fruit_cap - stand.fruit).max(0.0);
-        let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
-        let make = (rate * dt).min(room).min(stand.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
-        if make > 0.0 {
-            stand.reserve -= make;
-            stand.fruit += make;
-            if let Some(left) = night_left.as_mut() {
-                *left = (*left - make).max(0.0);
-                book.night[2] += make;
-            }
+    // ---- 4.4d the fruit sets (pollination): when the flowers close, what nectar they
+    // still hold goes back to the reserve (a move inside the stand), and the crop sets
+    // `fruit_cap · (floor + (1 − floor) · min(1, visits / pollination_visits))`.
+    if stand.crop.phase == CropPhase::Flower {
+        stand.crop.flower_left_s -= dt;
+        if stand.crop.flower_left_s <= 0.0 {
+            stand.reserve += std::mem::replace(&mut stand.nectar, 0.0);
+            let visits = stand.crop.visits;
+            let share = pollinated_share(sc.pollination_floor, sc.pollination_visits, f64::from(visits));
+            set_crop(stand, sc, visits > 0, share * sc.fruit_cap.max(0.0), book);
         }
     }
+
+    // ---- 4.4e fruit (F3, predation-and-flight §3.7): a crop that has set makes its fruit
+    // from the reserve in daylight (at night as nectar: the night scale, out of what is
+    // left of the budget) at `fruit_per_s` until the set is made. Each unit of fruit costs
+    // `fruit_cost` of reserve; the overhead beyond the fruit (flowers, stalk, building) is
+    // respired, its energy as heat.
+    //
+    // The crop's clock runs from the set; at `fruit_drop_s` the whole uneaten crop falls to
+    // this site's litter (with senescence, below), carrying `fruit_mineral_fraction` of
+    // itself out of the stand's mineral. A crop ends when it falls or when it is eaten out
+    // (its set made and nothing left hanging), and the stand then rests
+    // (plants-flowering-vines 2026-10-03; Wrysk 2026-10-09 for the eaten-out crop): a
+    // random time, exponential with mean `fruit_rest_s`, keyed by the stand and the tick,
+    // so the bushes of a grove fruit out of step.
     let mut fell = (0.0, 0.0);
-    if stand.fruit > 0.0 {
+    if stand.crop.phase == CropPhase::Fruit {
+        let cost = sc.fruit_cost.max(1.0);
+        if stand.crop.to_make > 0.0 && (daylight > 0.0 || night_left.is_some()) && stand.profile_stage >= 1 {
+            let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
+            let make = (rate * dt)
+                .min(stand.crop.to_make)
+                .min(stand.reserve.max(0.0) / cost)
+                .min(night_left.unwrap_or(f64::INFINITY) / cost)
+                .max(0.0);
+            if make > 0.0 {
+                stand.reserve -= cost * make;
+                stand.fruit += make;
+                stand.crop.to_make -= make;
+                if stand.crop.to_make <= 1e-15 {
+                    stand.crop.to_make = 0.0;
+                }
+                let overhead = (cost - 1.0) * make;
+                if overhead > 0.0 {
+                    book.respired(overhead);
+                    book.heat(e_v * overhead);
+                    book.overhead += overhead;
+                }
+                if let Some(left) = night_left.as_mut() {
+                    *left = (*left - cost * make).max(0.0);
+                    book.night[2] += cost * make;
+                }
+            }
+        }
         stand.fruit_age_s += dt;
-        if stand.fruit_age_s >= sc.fruit_drop_s {
+        let ended = if stand.fruit_age_s >= sc.fruit_drop_s {
             let o = std::mem::replace(&mut stand.fruit, 0.0);
             let m = (sc.fruit_mineral_fraction.max(0.0) * o).min(stand.mineral.max(0.0));
             stand.mineral -= m;
-            stand.fruit_age_s = 0.0;
             fell = (o, m);
-            if sc.fruit_rest_s > 0.0 {
-                let u = 1.0 - Rng::keyed(DOMAIN_FRUIT_REST, draw_key, stand.id, 0).unit();
-                stand.fruit_rest_s = -u.ln() * sc.fruit_rest_s;
-            }
+            true
+        } else {
+            !(stand.fruit > 0.0) && !(stand.crop.to_make > 0.0)
+        };
+        if ended {
+            end_crop(stand, sc, draw_key);
         }
-    } else {
-        stand.fruit_age_s = 0.0;
     }
 
     // The tissue built out of this tick's income settles its mineral: `n_tissue` per
@@ -3655,6 +3706,37 @@ pub(crate) fn grow_stand_cause(
     } else {
         DeathCause::Starved
     })
+}
+
+/// **The share of a full crop a flowering sets** (FLOWER-FRUIT): `floor + (1 − floor) ·
+/// min(1, visits / visits_full)`, the floor clamped to `0..=1`; with `visits_full` not
+/// positive any visit sets in full. `visits` is a count here and a mean in the web model.
+pub fn pollinated_share(floor: f64, visits_full: f64, visits: f64) -> f64 {
+    let floor = floor.clamp(0.0, 1.0);
+    let v = visits.max(0.0);
+    let got = if visits_full > 0.0 { (v / visits_full).min(1.0) } else if v > 0.0 { 1.0 } else { 0.0 };
+    floor + (1.0 - floor) * got
+}
+
+/// The crop sets at `size` organic (nothing made yet): the fruit phase, its clock at zero,
+/// and the set booked.
+fn set_crop(stand: &mut Stand, _sc: &SpeciesConfig, visited: bool, size: f64, book: &mut Booked) {
+    stand.crop.phase = CropPhase::Fruit;
+    stand.crop.flower_left_s = 0.0;
+    stand.crop.to_make = size.max(0.0);
+    stand.fruit_age_s = 0.0;
+    book.crop_set = Some((visited, size.max(0.0)));
+}
+
+/// The crop is over (fallen or eaten out): idle, its clock at zero, and a rest drawn.
+fn end_crop(stand: &mut Stand, sc: &SpeciesConfig, draw_key: u64) {
+    stand.crop.phase = CropPhase::Idle;
+    stand.crop.to_make = 0.0;
+    stand.fruit_age_s = 0.0;
+    if sc.fruit_rest_s > 0.0 {
+        let u = 1.0 - Rng::keyed(DOMAIN_FRUIT_REST, draw_key, stand.id, 0).unit();
+        stand.fruit_rest_s = -u.ln() * sc.fruit_rest_s;
+    }
 }
 
 /// How far a saprotroph's `exposure` ([`Stand::light`]) is from shade toward full sun, for

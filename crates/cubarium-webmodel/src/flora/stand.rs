@@ -11,7 +11,7 @@
 //! the sim's own `grow_stand` on a one-stand fixture.
 
 use cubarium_voxel::organism::{Budget, settle_mineral, tissue_funded};
-use cubarium_voxel_flora::{CureRead, CureStep, SpeciesConfig, Trophic, cure_step};
+use cubarium_voxel_flora::{CropPhase, CureRead, CureStep, SpeciesConfig, Trophic, cure_step, pollinated_share};
 
 use super::climate::Clock;
 
@@ -29,6 +29,13 @@ pub struct StandState {
     pub fruit: f64,
     pub fruit_age_s: f64,
     pub fruit_rest_s: f64,
+    /// The crop's cycle (`Stand::crop`, FLOWER-FRUIT): its phase, the flowering's time left,
+    /// the pollinator visits (here a mean over the cohort, booked from the nectar taken,
+    /// [`StandState::book_nectar_taken`]) and the fruit the set still has to make.
+    pub crop_phase: CropPhase,
+    pub flower_left_s: f64,
+    pub visits: f64,
+    pub to_make: f64,
     /// Runner support left, seconds (`Stand::support`, `step.rs:2525`); 0 is none.
     pub support_s: f64,
 }
@@ -45,6 +52,17 @@ impl StandState {
             foliage,
             reserve: left - foliage,
             ..StandState::default()
+        }
+    }
+
+    /// **Visits from the nectar taken** (FLOWER-FRUIT): the web model has no bodies to count,
+    /// so a flowering stand drunk of `taken` nectar is booked `pollination_visits · taken /
+    /// nectar_cap` visits: a flowering's whole nectar drunk is a fully pollinated crop. A
+    /// stand not in flower books none.
+    pub fn book_nectar_taken(&mut self, sc: &SpeciesConfig, taken: f64) {
+        if self.crop_phase == CropPhase::Flower && sc.nectar_cap > 0.0 && taken > 0.0 {
+            let per = if sc.pollination_visits > 0.0 { sc.pollination_visits } else { 1.0 };
+            self.visits += per * taken / sc.nectar_cap;
         }
     }
 
@@ -140,6 +158,14 @@ pub fn monod(sc: &SpeciesConfig, n: f64) -> f64 {
 /// sub-steps a longer step at this length, the clock's light, upkeep and night held over it
 /// and its time to dawn counted down.
 pub const SUB_STEP_S: f64 = 0.25;
+
+/// The crop sets at `size`: the fruit phase, its clock at zero (`step::set_crop`).
+fn set_crop(st: &mut StandState, size: f64) {
+    st.crop_phase = CropPhase::Fruit;
+    st.flower_left_s = 0.0;
+    st.to_make = size.max(0.0);
+    st.fruit_age_s = 0.0;
+}
 
 /// **One step** of one stand: the growth law (`step::grow_stand_cause`, `step.rs:2924–3260`),
 /// then the donor's saving into its parcel (`seeds::propagate`, `seeds.rs:880–905`, [`save`]),
@@ -306,9 +332,21 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
     let dq_r = budget.store((d_q - dq_s).max(0.0));
     st.reserve += dq_r;
     out.respired += budget.close();
-    // 4.4b nectar, 4.4c fruit (step.rs:3152)
+    // 4.4b the crop opens, 4.4c nectar, 4.4d the set, 4.4e fruit (step.rs, FLOWER-FRUIT)
     let adult = sc.profile_index(st.wood) >= 1;
-    if sc.nectar_per_s > 0.0 && (c.daylight > 0.0 || night_left.is_some()) && adult {
+    if st.fruit_rest_s > 0.0 {
+        st.fruit_rest_s = (st.fruit_rest_s - dt).max(0.0);
+    } else if st.crop_phase == CropPhase::Idle && sc.fruit_per_s > 0.0 && adult {
+        if sc.flower_s > 0.0 {
+            st.crop_phase = CropPhase::Flower;
+            st.flower_left_s = sc.flower_s;
+            st.visits = 0.0;
+        } else {
+            set_crop(st, sc.fruit_cap.max(0.0));
+        }
+    }
+    let open = sc.flower_s <= 0.0 || st.crop_phase == CropPhase::Flower;
+    if open && sc.nectar_per_s > 0.0 && (c.daylight > 0.0 || night_left.is_some()) && adult {
         let room = (sc.nectar_cap - st.nectar).max(0.0);
         let rate = if night_left.is_some() { sc.nectar_per_s * sc.night_bloom_scale } else { sc.nectar_per_s };
         let make = (rate * dt).min(room).min(st.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
@@ -320,28 +358,42 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
             }
         }
     }
-    let resting = st.fruit_rest_s > 0.0;
-    if resting {
-        st.fruit_rest_s = (st.fruit_rest_s - dt).max(0.0);
-    }
-    if !resting && sc.fruit_per_s > 0.0 && (c.daylight > 0.0 || night_left.is_some()) && adult {
-        let room = (sc.fruit_cap - st.fruit).max(0.0);
-        let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
-        let make = (rate * dt).min(room).min(st.reserve.max(0.0)).min(night_left.unwrap_or(f64::INFINITY));
-        if make > 0.0 {
-            st.reserve -= make;
-            st.fruit += make;
+    if st.crop_phase == CropPhase::Flower {
+        st.flower_left_s -= dt;
+        if st.flower_left_s <= 0.0 {
+            st.reserve += std::mem::replace(&mut st.nectar, 0.0);
+            let share = pollinated_share(sc.pollination_floor, sc.pollination_visits, st.visits);
+            set_crop(st, share * sc.fruit_cap.max(0.0));
         }
     }
-    if st.fruit > 0.0 {
+    if st.crop_phase == CropPhase::Fruit {
+        let cost = sc.fruit_cost.max(1.0);
+        if st.to_make > 0.0 && (c.daylight > 0.0 || night_left.is_some()) && adult {
+            let rate = if night_left.is_some() { sc.fruit_per_s * sc.night_bloom_scale } else { sc.fruit_per_s };
+            let make = (rate * dt).min(st.to_make).min(st.reserve.max(0.0) / cost).min(night_left.unwrap_or(f64::INFINITY) / cost).max(0.0);
+            if make > 0.0 {
+                st.reserve -= cost * make;
+                st.fruit += make;
+                st.to_make -= make;
+                if st.to_make <= 1e-15 {
+                    st.to_make = 0.0;
+                }
+                out.respired += (cost - 1.0) * make;
+            }
+        }
         st.fruit_age_s += dt;
-        if st.fruit_age_s >= sc.fruit_drop_s {
+        let ended = if st.fruit_age_s >= sc.fruit_drop_s {
             out.litter += std::mem::replace(&mut st.fruit, 0.0);
+            true
+        } else {
+            !(st.fruit > 0.0) && !(st.to_make > 0.0)
+        };
+        if ended {
+            st.crop_phase = CropPhase::Idle;
+            st.to_make = 0.0;
             st.fruit_age_s = 0.0;
             st.fruit_rest_s = sc.fruit_rest_s.max(0.0);
         }
-    } else {
-        st.fruit_age_s = 0.0;
     }
     // mineral settling changes no organic stock here (step.rs:3213); the site pool is held.
     let _ = settle_mineral(arrived_mineral, sc.n_tissue * (dq_s + dp_a + dw + dq_r), n0);

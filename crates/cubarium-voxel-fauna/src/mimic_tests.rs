@@ -828,6 +828,9 @@ fn catching_enabled_seedporter_still_eats_lanternberry_fruit() {
     fc.lanternberry.fruit_cap = 0.02;
     fc.lanternberry.fruit_drop_s = 1e9;
     fc.lanternberry.propagule_rate = 0.0;
+    // F3's fruit alone (FLOWER-FRUIT): no flowering stage, no rest.
+    fc.lanternberry.flower_s = 0.0;
+    fc.lanternberry.fruit_rest_s = 0.0;
     let wood = fc.lanternberry.wood_max;
     let mut flora = Flora::new(fc);
     assert!(flora.apply(

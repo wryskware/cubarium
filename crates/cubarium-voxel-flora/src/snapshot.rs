@@ -67,7 +67,10 @@ use crate::{Flora, FloraConfig};
 //     (presentation knobs carried with the species).
 // 39: SAVE-EXTENSIBLE — the config moved out of the positional state into a named-field
 //     document beside it.
-pub const SCHEMA: u32 = 39;
+// 40: FLOWER-FRUIT — `Stand::crop` (the crop's flowering, visits and set), `CoveredFace::visits`,
+//     `FloraLedger::{flower_visits, crops_set, fruit_set, fruit_overhead}`; a crop eaten out
+//     rests like a fallen one.
+pub const SCHEMA: u32 = 40;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

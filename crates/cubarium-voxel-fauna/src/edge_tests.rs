@@ -88,6 +88,10 @@ fn fruit_flora() -> FloraConfig {
     c.lanternberry.fruit_cap = 2e-3;
     c.lanternberry.fruit_drop_s = 1e9;
     c.lanternberry.propagule_rate = 0.0;
+    // F3's fruit alone (FLOWER-FRUIT): no flowering stage, and no rest after a crop is
+    // eaten out, so the fixture's supply refills as it did.
+    c.lanternberry.flower_s = 0.0;
+    c.lanternberry.fruit_rest_s = 0.0;
     c
 }
 

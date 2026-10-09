@@ -1622,6 +1622,12 @@ fn print_header() {
     // fruit, and the organic matter in each.
     header.push_str(",vines,vine_faces,vine_wall_faces,vine_under_faces,vine_buds,vine_flowers,vine_fruits");
     header.push_str(",vine_nectar,vine_fruit,bloom_in_nectar,bloom_nectar,lantern_in_fruit,lantern_fruit");
+    // FLOWER-FRUIT (2026-10-09): lanternberries in flower now; pollinator visits booked to
+    // stands and to vine faces, crops set unvisited (the floor) and visited, the fruit they
+    // set at, the fruit's overhead respired (all cumulative); the seedporters' fruit eaten,
+    // stands and vines (cumulative, organic).
+    header.push_str(",lantern_in_flower,flower_visits_stand,flower_visits_vine,crops_set_floor,crops_set_visited");
+    header.push_str(",fruit_set_floor,fruit_set_visited,fruit_overhead,fruit_eaten_seedporter");
     // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
     // standing (above every layer's grazing floor), then plant deaths by cause for the
     // turf, the pad and the two woody species, cumulative.
@@ -1870,6 +1876,17 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", of(Plant::Bloomcrown).map(|s| s.nectar).sum::<f64>()));
         row.push(of(Plant::Lanternberry).filter(|s| s.fruit > 0.0).count().to_string());
         row.push(format!("{:.6}", of(Plant::Lanternberry).map(|s| s.fruit).sum::<f64>()));
+        row.push(of(Plant::Lanternberry).filter(|s| s.crop.phase == cubarium_voxel_flora::CropPhase::Flower).count().to_string());
+        let l = &f.ledger;
+        row.push(l.flower_visits[0].to_string());
+        row.push(l.flower_visits[1].to_string());
+        row.push(l.crops_set[0].to_string());
+        row.push(l.crops_set[1].to_string());
+        row.push(format!("{:.6}", l.fruit_set[0]));
+        row.push(format!("{:.6}", l.fruit_set[1]));
+        row.push(format!("{:.6}", l.fruit_overhead));
+        // The seedporter is the only fruit eater; its glide-and-perch bites book here.
+        row.push(format!("{:.6}", a.ledger.fruit_eaten_by_source.iter().sum::<f64>()));
     }
     let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
     row.push(format!("{edible:.6}"));

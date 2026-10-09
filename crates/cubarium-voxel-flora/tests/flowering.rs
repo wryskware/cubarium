@@ -16,7 +16,8 @@
 //! - A bloomcrown's nectar never touches zero through a day and a night with no consumer,
 //!   and at night a drained stock refills.
 //! - A grove of lanternberries hangs fruit out of step: neither all nor none, and a bush
-//!   eaten out refills at once.
+//!   eaten out rests before it fruits again (FLOWER-FRUIT, Wrysk 2026-10-09; it used to
+//!   refill at once).
 //! - A founder takes a big sheer lit wall over a taller staircase.
 
 use std::collections::BTreeSet;
@@ -235,7 +236,8 @@ fn a_big_colony_flowers_a_scattered_few_at_a_time_through_a_world_day() {
 /// nectar the colony's flowers opened with and the fruit its bunches set with are
 /// `faces · rate · 7,200 s` within 10 %, on the config's knobs and again with the share
 /// doubled and the production rates doubled (the same production per face as the rates,
-/// whatever the share).
+/// whatever the share). The fruit rate is a pollinated colony's (FLOWER-FRUIT): no
+/// pollinator visits here, so the floor is set to a full bunch.
 #[test]
 fn the_long_run_nectar_and_fruit_per_face_are_the_production_knobs() {
     for (share, k) in [(None, 1.0), (Some(0.2), 2.0)] {
@@ -245,6 +247,7 @@ fn the_long_run_nectar_and_fruit_per_face_are_the_production_knobs() {
             }
             c.latticevine.nectar_per_face_s *= k;
             c.latticevine.fruit_per_face_s *= k;
+            c.latticevine.pollination_floor = 1.0;
         });
         let vc = flora.config().latticevine.clone();
         for _ in 0..ticks(vc.spur_cycle_s()) {
@@ -357,9 +360,10 @@ fn a_bloomcrown_holds_nectar_through_day_and_night_and_refills_at_night() {
 /// voxels apart, held at noon, nobody eating, the shipped fruit numbers: after two hours to
 /// settle, sampled every minute for four hours, the share hanging fruit is never all and
 /// never none, and its mean is between 0.5 and 0.85 (sparser than always). A bush eaten
-/// out refills at once: it hangs fruit again within a fill's time.
+/// out rests (FLOWER-FRUIT, Wrysk 2026-10-09): at its next plant tick its crop is over and
+/// a rest is drawn, with no fruit.
 #[test]
-fn a_lanternberry_grove_fruits_out_of_step_and_an_eaten_bush_refills_at_once() {
+fn a_lanternberry_grove_fruits_out_of_step_and_an_eaten_bush_rests() {
     let mut w = world(20, 12, 20, &[], noon());
     // The plain is never stepped (no rain), so the bushes drink nothing and it never dries.
     let mut c = FloraConfig::default();
@@ -396,13 +400,15 @@ fn a_lanternberry_grove_fruits_out_of_step_and_an_eaten_bush_refills_at_once() {
     assert!(some_bare as f64 >= 0.9 * f64::from(n), "some bush stands bare almost always: {some_bare} of {n}");
     assert_eq!(some_hung, n as usize);
 
-    // Eaten out: hanging again within the fill time and a margin.
-    let s = sites.iter().copied().find(|&s| flora.view().stand_at(s).is_some_and(|st| st.fruit > 0.0)).expect("one hangs");
+    // Eaten out, once its set is made: it rests, bare.
+    let made = |st: &cubarium_voxel_flora::Stand| st.fruit > 0.0 && st.crop.to_make == 0.0;
+    let s = sites.iter().copied().find(|&s| flora.view().stand_at(s).is_some_and(made)).expect("one hangs");
     assert!(flora.take_stand_fruit(s, 1e9).is_some());
-    let fill = sc.fruit_cap / sc.fruit_per_s;
-    flora.step(&mut w);
-    assert!(flora.view().stand_at(s).expect("alive").fruit > 0.0, "it sets fruit again at once");
-    assert!(flora.view().stand_at(s).expect("alive").fruit_rest_s == 0.0, "no rest after a crop is eaten ({fill} s to fill)");
+    for _ in 0..ticks(60.0) {
+        flora.step(&mut w);
+        let st = flora.view().stand_at(s).expect("alive");
+        assert!(st.fruit == 0.0 && st.fruit_rest_s > 0.0, "it rests, bare: {st:?} (mean rest {} s)", sc.fruit_rest_s);
+    }
     closes_within(&flora, "the grove", 1e-8);
 }
 
