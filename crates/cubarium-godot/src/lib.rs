@@ -20,10 +20,12 @@
 
 use std::path::PathBuf;
 
+pub mod autosave;
 pub mod mesher;
 pub mod models;
 pub mod palette;
 pub mod renderer;
+pub mod world_save;
 
 use cubarium_observatory::Command;
 use cubarium_session::{Session, SessionOptions, View, WorldSpec};
@@ -69,6 +71,12 @@ mod teardown {
         all.push(s);
     }
 
+    /// The sessions still alive, oldest first.
+    pub(crate) fn sessions() -> Vec<SessionStop> {
+        let all = SESSIONS.lock().unwrap_or_else(|e| e.into_inner());
+        all.iter().filter(|s| s.alive()).cloned().collect()
+    }
+
     /// Remember a renderer to stop at teardown (only weakly).
     pub(crate) fn renderer(h: HostedStop) {
         let mut all = RENDERERS.lock().unwrap_or_else(|e| e.into_inner());
@@ -76,13 +84,17 @@ mod teardown {
         all.push(h);
     }
 
-    /// Stop and join the threads of every session, then every renderer, still alive.
-    /// Sessions first: a session's loop runs its renderer's hook.
+    /// Stop and join the threads of every session, then every renderer, still alive, then
+    /// the signal saves' ([`crate::world_save`]) and the autosave's. Sessions first: a session's loop runs its
+    /// renderer's hook.
     pub(crate) fn stop_all() {
+        crate::world_save::stopping();
         let sessions = std::mem::take(&mut *SESSIONS.lock().unwrap_or_else(|e| e.into_inner()));
         let renderers = std::mem::take(&mut *RENDERERS.lock().unwrap_or_else(|e| e.into_inner()));
         let s = sessions.iter().filter(|s| s.shutdown()).count();
         let r = renderers.iter().filter(|h| h.shutdown()).count();
+        crate::world_save::stop();
+        crate::autosave::stop();
         if s + r > 0 {
             eprintln!("cubarium: stopped {s} session(s) and {r} renderer(s) still running at unload");
         }
@@ -106,6 +118,12 @@ impl IRefCounted for CubariumSession {
             ..SessionOptions::default()
         });
         teardown::session(session.stopper());
+        world_save::init(|| {
+            // `user://saves` globalized, as the shell's default root.
+            let user = godot::classes::Os::singleton().get_user_data_dir();
+            PathBuf::from(user.to_string()).join("saves")
+        });
+        autosave::start();
         CubariumSession { base, session }
     }
 }

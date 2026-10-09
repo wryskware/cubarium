@@ -260,6 +260,49 @@ fn a_save_from_another_version_is_refused_with_a_plain_error() {
     }
 }
 
+/// A world's home is where it was last loaded from or saved into through the session: a
+/// founded world has none, a refused load or a console save does not move it, and
+/// another world installed, or the world closed, drops it.
+#[test]
+fn the_home_follows_the_worlds_own_loads_and_saves() {
+    let (session, dir) = running("home");
+    pause(&session);
+    assert_eq!(session.home(), None, "a founded world has no home");
+    let (a, b) = (dir.0.join("a"), dir.0.join("b"));
+    session.save_blocking(&a, Duration::from_secs(30)).expect("saves");
+    assert_eq!(session.home(), Some(a.clone()), "saved into a");
+    session.save_blocking(&b, Duration::from_secs(30)).expect("saves");
+    assert_eq!(session.stopper().home(), Some(b.clone()), "saved into b, read through the stopper");
+
+    session.console(&format!("save {}", dir.0.join("console").display()));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !dir.0.join("console").join(store::META_FILE).exists() || session.status().saving {
+        assert!(Instant::now() < deadline, "the console save is written");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(session.home(), Some(b.clone()), "a console save is not a home");
+
+    let missing = dir.0.join("missing");
+    session.load_blocking(&missing, Duration::from_secs(30)).expect_err("nothing to load");
+    assert_eq!(session.home(), Some(b.clone()), "a refused load keeps the home");
+
+    let generation = session.status().generation;
+    session.load_blocking(&a, Duration::from_secs(30)).expect("loads");
+    wait(&session, "the load is installed", |st| st.generation > generation);
+    assert_eq!(session.home(), Some(a.clone()), "loaded from a");
+
+    let s = spec(&dir.0, 6);
+    session.install(prepare_new(&s.sim_params().unwrap(), &s).expect("founds"));
+    wait(&session, "the new world is installed", |st| st.generation > generation + 1);
+    assert_eq!(session.home(), None, "a newly founded world has no home");
+
+    session.load_blocking(&a, Duration::from_secs(30)).expect("loads");
+    assert_eq!(session.home(), Some(a.clone()));
+    session.close();
+    wait(&session, "closed", |st| !st.running);
+    assert_eq!(session.home(), None, "no world, no home");
+}
+
 #[test]
 fn the_metadata_is_read_without_loading_the_world() {
     let (session, dir) = running("meta");
