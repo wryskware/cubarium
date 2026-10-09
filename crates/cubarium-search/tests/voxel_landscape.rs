@@ -295,6 +295,76 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
     let _ = std::fs::remove_dir_all(&out);
 }
 
+/// Contract 7 (FOUNDING-TESTS, 2026-10-09): **the trainer's start faces are the faces of
+/// the verdict's components**, by the body-clear walking graph's labels — the labelling
+/// the acceptance judged by — on a world where the plain route map labels the same
+/// components differently, so reading the verdict's indices against the plain route map
+/// would pick other faces. The expected set is derived here from
+/// [`cubarium_voxel_fauna::RouteGraph`] directly, not through `judged_route_map`.
+#[test]
+fn start_faces_follow_the_verdicts_walk_graph_labels_not_the_plain_route_map() {
+    use cubarium_voxel_fauna::{RouteGraph, RouteMap};
+    let founded = found::found(
+        &tiny(),
+        &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
+        [3, 3, 0, 0, 0, 0, 0, 0, 0],
+        found::Seeds::Asked(TINY_SEED),
+        false,
+    );
+    let cfg = FaunaConfig::default();
+    let view = founded.world.view();
+    let mut labels_differ = false;
+    for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
+        let phys = cfg.founder(founder);
+        let graph = RouteGraph::for_founder(&view, phys, cfg.founding.clearance_margin_m);
+        let plain = RouteMap::for_founder(&view, phys);
+        let verdict = &founded.seeded.acceptance.lineages[founder.index()];
+        let habitable: Vec<usize> = verdict
+            .components
+            .iter()
+            .filter(|c| c.habitable)
+            .map(|c| c.component)
+            .collect();
+        let judged: Vec<usize> = if habitable.is_empty() {
+            verdict.components.iter().map(|c| c.component).collect()
+        } else {
+            habitable
+        };
+        assert!(!judged.is_empty(), "{founder:?}: the seeder judged a component");
+        // The standable faces whose component, under each labelling, the verdict judged.
+        let select = |labels: Vec<Option<usize>>| {
+            let mut faces: Vec<_> = plain
+                .faces
+                .iter()
+                .zip(labels)
+                .filter(|(_, c)| c.is_some_and(|c| judged.contains(&c)))
+                .map(|(f, _)| *f)
+                .collect();
+            faces.sort_unstable_by_key(|s| (s.x, s.y, s.z));
+            faces
+        };
+        let by_graph = select(plain.faces.iter().map(|&f| graph.component_of(f)).collect());
+        let by_plain = select(plain.faces.iter().map(|&f| plain.component_of(f)).collect());
+        labels_differ |= by_graph != by_plain;
+        assert!(!by_graph.is_empty(), "{founder:?}: a pool to draw from");
+        let start = cubarium_search::es::voxel::landscape::start_faces_of(&founded, &cfg, founder);
+        assert_eq!(
+            start, by_graph,
+            "{founder:?}: the start faces are the judged components' faces on the walking graph"
+        );
+        // Every founder the verdict placed in a judged component stands in the pool.
+        for a in founded.fauna.view().animals.iter().filter(|a| a.founder == Some(founder)) {
+            if graph.component_of(a.site).is_some_and(|c| judged.contains(&c)) {
+                assert!(start.contains(&a.site), "{founder:?}: founder at {:?} is in the pool", a.site);
+            }
+        }
+    }
+    assert!(
+        labels_differ,
+        "the fixture must label components differently in the two maps, or this proves nothing"
+    );
+}
+
 /// P5-C (coordinator's decision): a landscape's acting bodies start on faces drawn from
 /// the standable faces of the lineage's judged components, not on the seeder's founder
 /// faces — deterministic per episode seed, each start standable and in one of those
