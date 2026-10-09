@@ -559,7 +559,14 @@ control and the reward accounting; display targets after seeing results.
       - starving juveniles 27.9 → 9.9, and give-ups fell from 293 to 6.
 
       The give-up rule stays as "abandon food you can't reach".
-14. **Curiosity in the brain reward.** `p3-zero` (§1c) shows the curiosity term bought
+14. **Decided (Wrysk, 2026-10-09): A — stop paying for movement.**
+    - Curiosity is 0 for training. The per-species knob stays in the code at 0.
+    - The movement term V is a readout only: it's in no active profile
+      (`config/training/fitness-v2.toml`), so a world is never ranked on movement.
+    - Wrysk: "once ecology is balanced, we can revisit with a list of fine-tuning 'cosmetic'
+      objective functions."
+
+    As first posed — **Curiosity in the brain reward.** `p3-zero` (§1c) shows the curiosity term bought
     motion at the cost of food: intake −19 % midway and −32 % at the end, against −4 %
     without it.
     - It rewards moving itself, which "Shape the situation" rules out.

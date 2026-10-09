@@ -12,7 +12,7 @@ J = 10.0 # Mean reproductive deficit; provisional pending Wrysk.
 Q = 5.0 # Cycle replenishment deficit (NA without books); provisional pending Wrysk.
 A = 2.0 # Late population band deficit; provisional pending Wrysk.
 K = 2.0 # Population peak excess; provisional pending Wrysk.
-V = 10.0 # Browser movement deficit; provisional pending Wrysk.
+V = 10.0 # Browser movement deficit. Readout only, in no active list: Wrysk 2026-10-09 (plan Q5/Q14) — movement must come from the world, never the score.
 Z = 2.0 # Free lanternjaw population share; provisional pending Wrysk.
 M = 3.0 # Largest meadow area deficit; provisional pending Wrysk.
 G_b = 1.0 # Largest lanternberry grove deficit; provisional pending Wrysk.
@@ -54,13 +54,14 @@ consistent_min_seeds = 8 # Minimum paired seeds before claiming consistency; pro
 [profiles.screen-2h]
 from_minute = 0
 to_minute = 120
-active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+active = ["L", "J", "A", "K", "Z", "M", "G_b", "G_v", "H", "F", "S"]
 aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
 slow = ["chorister", "lanternjaw"] # lifecycle untested in this profile
 start_kind = "mature saved start"
 
 [profiles.screen-2h.disabled]
 Q = "Off: conserved full-cycle inflow/stock books are not yet available in this paired two-hour screen."
+V = "Off: readout only. Movement must come from the world, never the score (Wrysk 2026-10-09, plan Q5/Q14)."
 
 # Required columns are checked on every row, never averaged over whichever log exists.
 [profiles.screen-2h.required_data]
@@ -90,13 +91,14 @@ plant_vigour_trend = 0.0
 [profiles.screen-2h-legacy]
 from_minute = 1
 to_minute = 120
-active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+active = ["L", "J", "A", "K", "Z", "M", "G_b", "G_v", "H", "F", "S"]
 aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
 slow = ["chorister", "lanternjaw"] # lifecycle untested in this profile
 start_kind = "mature saved start"
 
 [profiles.screen-2h-legacy.disabled]
 Q = "Off: conserved full-cycle inflow/stock books are not yet available in this paired two-hour screen."
+V = "Off: readout only. Movement must come from the world, never the score (Wrysk 2026-10-09, plan Q5/Q14)."
 
 # Required columns are checked on every row, never averaged over whichever log exists.
 [profiles.screen-2h-legacy.required_data]
@@ -125,13 +127,14 @@ plant_vigour_trend = 0.0
 [profiles.smoke-6m]
 from_minute = 0
 to_minute = 6
-active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+active = ["L", "J", "A", "K", "Z", "M", "G_b", "G_v", "H", "F", "S"]
 aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
 slow = ["chorister", "lanternjaw"]
 start_kind = "fresh founding"
 
 [profiles.smoke-6m.disabled]
 Q = "Off: no cycle books in a six-minute plumbing smoke."
+V = "Off: readout only. Movement must come from the world, never the score (Wrysk 2026-10-09, plan Q5/Q14)."
 
 [profiles.smoke-6m.required_data]
 L = ["census:stocks"]
@@ -161,13 +164,14 @@ plant_vigour_trend = 0.0
 [profiles.gate-1h]
 from_minute = 0
 to_minute = 60
-active = ["L", "J", "A", "K", "V", "Z", "M", "G_b", "G_v", "H", "F", "S"]
+active = ["L", "J", "A", "K", "Z", "M", "G_b", "G_v", "H", "F", "S"]
 aggregation = "mean + sd_weight * sample_sd of soft P (L excluded); feasibility first"
 slow = ["chorister", "lanternjaw"]
 start_kind = "fresh founding"
 
 [profiles.gate-1h.disabled]
 Q = "Off: no cycle books in a one-hour gate."
+V = "Off: readout only. Movement must come from the world, never the score (Wrysk 2026-10-09, plan Q5/Q14)."
 
 [profiles.gate-1h.required_data]
 L = ["census:stocks"]
