@@ -921,18 +921,11 @@ struct Readout {
     juveniles: f64,
     matured: f64,
     maturation_min: f64,
-    first_clutches: f64,
     first_clutch_min: f64,
     clutch_mean: f64,
-    laid: f64,
     hatched: f64,
     refusals: f64,
-    killed: f64,
-    fullness: f64,
     assim: f64,
-    alive_s: f64,
-    awake_s: f64,
-    body_s: f64,
 }
 
 fn readout(m: &FaunaModel, f: Founder) -> Readout {
@@ -944,18 +937,11 @@ fn readout(m: &FaunaModel, f: Founder) -> Readout {
         juveniles: c.juveniles,
         matured: l.matured,
         maturation_min: if l.matured > 0.0 { l.maturation_age_s / l.matured / 60.0 } else { f64::NAN },
-        first_clutches: l.first_clutches,
         first_clutch_min: if l.first_clutches > 0.0 { l.first_clutch_age_s / l.first_clutches / 60.0 } else { f64::NAN },
         clutch_mean: if l.clutches > 0.0 { l.laid / l.clutches } else { f64::NAN },
-        laid: l.laid,
         hatched: l.hatched,
         refusals: l.nest_refusals,
-        killed: l.killed_by.iter().sum(),
-        fullness: c.mean_fullness,
         assim: l.flows.assimilated,
-        alive_s: l.alive_s,
-        awake_s: l.awake_s,
-        body_s: l.body_s,
     }
 }
 

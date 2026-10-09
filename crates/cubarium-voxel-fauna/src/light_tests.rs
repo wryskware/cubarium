@@ -479,7 +479,7 @@ fn a_moving_approach_to_a_still_light_is_given_up_at_its_budget() {
     let (lx, lz, _) = light::lure_point(&fauna.config, &animal(&fauna, lj), VOXEL_M).expect("a lure");
     let ring = f64::from(world.view().config.width) * VOXEL_M;
     let r = fauna.config.light.mark_radius_m;
-    let mut sample = |fauna: &mut Fauna| {
+    let sample = |fauna: &mut Fauna| {
         animal_mut(fauna, bw).still_ticks = 0;
         steer(fauna, &world, &flora, bw, 0.0)
     };

@@ -110,8 +110,7 @@ fn main() {
             let closes = (v.organic() - l.expected_organic()).abs() <= 1e-9 * v.organic().abs().max(1e-6);
             let bw_awake = l.awake_ticks_by_founder[BW.index()] > 0;
             let bw_ate = !bw_awake || l.bites_by_founder[BW.index()] > 0 || count(f, BW) == 0;
-            let mut light_fired = true;
-            light_fired = !bw_awake || count(f, BW) == 0 || l.beacon_samples[BW.index()] + l.scent_led_samples[BW.index()] + l.loom_samples[BW.index()] > 0; // S3-ONLY
+            let light_fired = !bw_awake || count(f, BW) == 0 || l.beacon_samples[BW.index()] + l.scent_led_samples[BW.index()] + l.loom_samples[BW.index()] > 0; // S3-ONLY
             let ok = moved > 0 && l.bites > 0 && bw_ate && closes && light_fired;
             println!(
                 "LIVENESS,{},moved,{moved},bites,{},bw_awake,{bw_awake},bw_bites,{},closes,{closes},light_fired,{light_fired}",

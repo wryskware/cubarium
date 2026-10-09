@@ -493,7 +493,7 @@ fn a_policy_from_before_the_motor_field_existed_still_seeds() {
 
     let theta = cubarium_search::es::tensor::initial_center(13);
     let hash = cubarium_search::calibrate::config_hash(&cubarium_core::WorldConfig::default());
-    let mut file = cubarium_search::es::export::PolicyFile::new(
+    let file = cubarium_search::es::export::PolicyFile::new(
         &theta,
         "test",
         0,

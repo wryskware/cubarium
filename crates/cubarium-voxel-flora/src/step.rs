@@ -5063,7 +5063,6 @@ mod tests {
         assert_eq!(g.sky_visibility, 1.0, "open sky");
         let a = available_water(&Materials::DEFAULT, Material::Soil, 0.6);
         assert!((g.mean_water.expect("soil") - a).abs() < 1e-12);
-        drop(view);
 
         // A site with no soil under it at all: the pore gate shuts, and the saturated
         // fraction of an empty box is zero rather than waterlogged.
@@ -5084,7 +5083,6 @@ mod tests {
         assert_eq!(g.mean_water, None);
         assert!(!g.pore_ok && g.aeration_ok, "{g:?}");
         assert!(!g.passes());
-        drop(view);
 
         // A wholly saturated root box: the aeration gate shuts and the pore gate does not.
         let wet = slab(4, 0.98);
@@ -5093,7 +5091,6 @@ mod tests {
         assert!(g.pore_ok && !g.aeration_ok, "{g:?}");
         assert_eq!(g.saturated_fraction, 1.0);
         assert!(!g.passes());
-        drop(view);
 
         // Standing water deeper than the species tolerates: the depth gate shuts.
         world.apply(WorldCommand::AddWater {

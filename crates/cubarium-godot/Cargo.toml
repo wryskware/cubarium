@@ -25,3 +25,4 @@ rustc-hash = { workspace = true }
 
 [lints.rust]
 unsafe_code = "deny"
+warnings = "deny"

@@ -30,7 +30,6 @@ const V: f64 = 0.25;
 const SP: Founder = Founder::Seedporter;
 const LS: Founder = Founder::Loftstrider;
 const SNAIL: Founder = Founder::RippleSnail;
-const SURFACE: f64 = 0.75;
 /// Facing `+x`: `Pose::forward` is `(sin h, cos h)`.
 const EAST: f64 = std::f64::consts::FRAC_PI_2;
 const HUNGRY_ADULT: StartingStores = StartingStores {

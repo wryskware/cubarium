@@ -2135,7 +2135,7 @@ mod tests {
         // same walk from the same senses.
         cue.fill(0.0);
         cue[7] = 1.0;
-        let mut walk = |c: &mut BlindForager| -> Vec<f64> {
+        let walk = |c: &mut BlindForager| -> Vec<f64> {
             (0..60)
                 .map(|_| {
                     let Response::Bounded(actions) = c.drive(&cue) else {

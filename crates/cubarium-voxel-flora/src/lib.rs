@@ -64,6 +64,7 @@ mod shared_face_tests;
 mod glowcap_budget_tests;
 #[cfg(test)]
 mod testpass4_glowcap_tests;
+#[cfg(test)]
 mod glowcap_sun_tests;
 #[cfg(test)]
 mod contest_tests;

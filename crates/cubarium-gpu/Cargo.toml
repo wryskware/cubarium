@@ -29,3 +29,6 @@ scanout = ["dep:drm", "dep:rustix"]
 
 [[example]]
 name = "synthetic"
+
+[lints.rust]
+warnings = "deny"

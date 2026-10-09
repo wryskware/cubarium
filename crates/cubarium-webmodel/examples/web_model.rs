@@ -1075,10 +1075,6 @@ fn open_seed(d: &Path, p: &cubarium_voxel_sim::params::Params, seed: u32) -> Ope
     OpenSeed { seed, log, w0, areas, end }
 }
 
-fn open_run(o: &OpenSeed, fits: &Fits) -> OpenOut {
-    open_run_clamped(o, fits, &[])
-}
-
 /// The logged count of lineage `f` at `minute`: the m370 census, then the `bodies` lines at
 /// m970 and m1570, linear between.
 fn logged_count(o: &OpenSeed, f: Founder, minute: f64) -> f64 {

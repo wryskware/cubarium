@@ -65,7 +65,7 @@ fn export(a: &[String]) {
 /// One stand under held conditions, by the sim's own probe and by the model's law.
 fn physio(a: &[String]) {
     use cubarium_voxel_flora::Species;
-    use cubarium_voxel_flora::study::{ClimateSample, Held, Start, probe, start_stand};
+    use cubarium_voxel_flora::study::{ClimateSample, Held, Start, start_stand};
     use cubarium_webmodel::flora::{climate::DayModel, stand};
     let sp = Species::parse(&a[0]).unwrap();
     let f = |i: usize| a[i].parse::<f64>().unwrap();

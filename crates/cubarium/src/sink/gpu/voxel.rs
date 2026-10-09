@@ -3622,7 +3622,7 @@ mod tests {
             let mut o = oracle(&c, false);
             let mut world = world(&c);
             let plants = flora(&world, &[(14, 2, Species::Bloomcrown, 1.0)]);
-            let mut tick = |o: &mut PackOracle, world: &mut World, x: i64| {
+            let tick = |o: &mut PackOracle, world: &mut World, x: i64| {
                 world.apply(Command::AddWater { x, y: 10, z: 2, volume_m3: v * 0.5 });
                 world.step_with(1);
                 let beast = grazer(world, x, 1);

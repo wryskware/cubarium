@@ -108,9 +108,6 @@ impl ZoneState {
     pub fn count(&self, s: usize) -> f64 {
         self.cohorts[s].iter().map(|c| c.n).sum()
     }
-    fn plants(&self) -> f64 {
-        (0..NS).filter(|&s| s != GLOW).map(|s| self.count(s)).sum()
-    }
 }
 
 /// Which sampled faces an establishment reads ([`super::zones::Zone`]).
@@ -1533,7 +1530,7 @@ impl Model {
             // ---- growth of every cohort.
             let counts: Vec<f64> = (0..NS).map(|s| self.z[zi].count(s)).collect();
             let vacant_n = (zone.area - (0..NS).filter(|&s| s != GLOW).map(|s| counts[s]).sum::<f64>()).max(0.0);
-            let (cover, transmit) = (self.z[zi].cover, self.z[zi].transmit);
+            let cover = self.z[zi].cover;
             let mut packages = [0.0; NS];
             // Meadow lever c: the topsoil water the turf around a woody juvenile leaves it.
             let draw = (1.0 - mw.sward_draw * counts[turf] / zone.area.max(1.0)).clamp(0.0, 1.0);
@@ -1884,7 +1881,7 @@ impl Model {
         let a = self.zones.zones[zi].area.max(1.0);
         let counts: Vec<f64> = (0..NS).map(|s| self.z[zi].count(s)).collect();
         let vacant = (a - (0..NS).filter(|&s| s != GLOW).map(|s| counts[s]).sum::<f64>()).max(0.0);
-        let (cover, transmit) = (self.z[zi].cover, self.z[zi].transmit);
+        let cover = self.z[zi].cover;
         // Meadow lever e: the share of the open faces with soil enough for each species.
         let deep: [f64; NS] = std::array::from_fn(|s| self.p.meadow.deep_share(zi, s, a, &counts));
         // Meadow lever c: thatch, the turf's foliage over its cap in the zone.

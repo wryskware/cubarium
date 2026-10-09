@@ -148,13 +148,6 @@ fn asleep(fauna: &Fauna, id: u64) -> bool {
     animal(fauna, id).state == crate::State::Asleep
 }
 
-/// Horizontal metres from body `id` to the centre of column `site`.
-fn distance(fauna: &Fauna, id: u64, site: Site) -> f64 {
-    let a = animal(fauna, id);
-    let (x, z) = ((f64::from(site.x) + 0.5) * V, (f64::from(site.z) + 0.5) * V);
-    ((a.pose.x - x).powi(2) + (a.pose.z - z).powi(2)).sqrt()
-}
-
 /// The seedporter's night on a plain 32 × 24 × 9: on the ground at `(5, 4)` with a full
 /// lanternberry (today's roost) at `(9, 4)` and, with `vault`, a small vaulttree at
 /// `(16, 4)`; `tweak` edits its glider table. Where it sleeps, and the stands.

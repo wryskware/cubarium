@@ -210,7 +210,7 @@ fn litter_size_falls_with_the_breeders_condition() {
     assert_eq!(*sizes.last().unwrap(), hi, "the most at a full reserve");
     assert!(sizes.windows(2).all(|w| w[0] <= w[1]), "never more young in poorer condition: {sizes:?}");
     // In the world: two breeders, one just over the reserve and one nearly full.
-    let mut litter = |fraction: f64| -> u32 {
+    let litter = |fraction: f64| -> u32 {
         let mut world = year_world(23, 1.0);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(veilhound_config(0, 0.0, 0.0, threshold));

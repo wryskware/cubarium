@@ -64,19 +64,18 @@ pub struct RunnerBox {
     pub same_zone: f64,
 }
 
-struct Geo<'a> {
+struct Geo {
     width: i64,
     depth: i64,
     /// Column → its faces (indices into `faces`), highest first.
     columns: HashMap<(i64, i64), Vec<usize>>,
-    faces: &'a [Face],
     zone: Vec<usize>,
     /// Per face, per species ([`Species::ALL`] order): the share of snapshots its ground
     /// gates passed (every gate but light), what a spore's landing reads.
     ground_pass: Vec<[f64; Species::COUNT]>,
 }
 
-impl Geo<'_> {
+impl Geo {
     fn highest(&self, x: i64, z: i64) -> Option<usize> {
         let x = x.rem_euclid(self.width);
         self.columns.get(&(x, z)).and_then(|v| v.first().copied())
@@ -128,7 +127,6 @@ pub fn build(config: &FloraConfig, width: u32, depth: u32, zones: &Zones, snapsh
         width: i64::from(width),
         depth: i64::from(depth),
         columns,
-        faces,
         zone: faces.iter().map(|f| zones.of_face[&(f.x, f.y, f.z)]).collect(),
         ground_pass,
     };

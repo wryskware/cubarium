@@ -444,12 +444,6 @@ impl PlantTracker {
             self.cache_valid = false;
         }
     }
-
-    /// Cells arriving or leaving now.
-    #[cfg(test)]
-    pub(super) fn changing(&self) -> usize {
-        self.changes.len()
-    }
 }
 
 fn release_key(palette: &mut Palette, key: &StyleKey) {

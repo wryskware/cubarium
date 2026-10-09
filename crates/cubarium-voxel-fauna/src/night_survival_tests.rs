@@ -8,7 +8,7 @@ use std::sync::atomic::Ordering;
 
 use super::predation_fixture::*;
 use crate::{
-    Activity, DT, Fauna, FaunaConfig, Founder, LifeConfig, Rest, StartingStores, State, dodge_chance,
+    Activity, DT, Fauna, Founder, LifeConfig, Rest, StartingStores, State, dodge_chance,
 };
 use cubarium_voxel::weather::DayClock;
 use cubarium_voxel_flora::{Command as FloraCommand, Flora, FloraConfig, Species as Plant};

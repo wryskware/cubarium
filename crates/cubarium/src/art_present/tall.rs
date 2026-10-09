@@ -446,37 +446,9 @@ pub fn tall_grown_px(height: f64) -> f64 {
 /// height coordinate: no tile join opens, the cap stays on the stem's curve even where its
 /// pixels are owned by Top, and a vine cannot slide against its trunk. An amplitude of 0 is
 /// [`Bend::NONE`] and the column is drawn exactly as it was before the wind existed.
-#[allow(clippy::too_many_arguments)]
-#[cfg(test)]
-pub(super) fn draw_column(
-    canvas: &mut Canvas,
-    column: &TallColumn,
-    height: f64,
-    plant: &TallPlant,
-    vine: Option<&TallPlant>,
-    seconds: f64,
-    amplitude: f64,
-    cap_opacity: f32,
-    tone: Option<Tone>,
-    scratch: &mut Vec<PixelImage>,
-) {
-    draw_column_in(
-        canvas,
-        ArtGeometry::CUBE,
-        column,
-        height,
-        plant,
-        vine,
-        seconds,
-        amplitude,
-        cap_opacity,
-        tone,
-        scratch,
-    )
-}
-
-/// [`draw_column`] on a named raster: the same column, with its segment cap, its anchors,
-/// its heading and its corner handoff read from `geom`.
+///
+/// On a named raster: the same column, with its segment cap, its anchors, its heading and
+/// its corner handoff read from `geom`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_column_in(
     canvas: &mut Canvas,

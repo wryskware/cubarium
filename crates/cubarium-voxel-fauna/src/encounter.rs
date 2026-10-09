@@ -1049,7 +1049,7 @@ pub fn founding_faces(
         }
         i
     }
-    let mut join = |parent: &mut Vec<usize>, a: usize, b: usize| {
+    let join = |parent: &mut Vec<usize>, a: usize, b: usize| {
         let (ra, rb) = (root(parent, a), root(parent, b));
         if ra != rb {
             parent[ra.max(rb)] = ra.min(rb);

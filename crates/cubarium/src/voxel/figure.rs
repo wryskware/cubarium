@@ -1699,10 +1699,6 @@ mod tests {
         assert!((f.weight_b - 0.5).abs() < 1e-6, "{f:?}");
     }
 
-    fn stepped(steps: u32) -> FigureConfig {
-        FigureConfig { movement: Movement::Stepped, turn_steps: steps, ..FigureConfig::default() }
-    }
-
     /// Whether `x` is a whole number of voxels plus `phase`.
     fn on(x: f32, phase: f32) -> bool {
         let d = x - phase;

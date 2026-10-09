@@ -478,7 +478,7 @@ fn a_small_finite_log_empties_and_then_the_reserve_falls() {
 /// on light alone once they are shaded.
 #[test]
 fn germination_needs_a_log_and_never_needs_light() {
-    let mut world = pillars(6, &[1, 4], 0.5);
+    let world = pillars(6, &[1, 4], 0.5);
     let mut flora = Flora::new(config());
     // A log on one face only. `deposit` provisions the `Ground` itself, so nothing else
     // about the two faces differs.

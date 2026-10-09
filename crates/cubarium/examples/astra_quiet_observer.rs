@@ -1,4 +1,6 @@
 //! Independent observer boundary fixtures. No production writes or cohort experiment.
+// The observer is shared with `quiet_compare`, which uses all of it; this binary uses a subset.
+#[allow(dead_code)]
 #[path = "quiet_compare/bouts.rs"]
 mod bouts;
 

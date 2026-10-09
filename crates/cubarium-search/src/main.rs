@@ -1454,17 +1454,9 @@ fn parse_centres(
         .collect()
 }
 
-/// The founding table: the live world's (each lineage's `founding_count`) with the named
-/// lineages set over it, `--founders frondgrazer=4,lanternjaw=0`; or one count per lineage
-/// in `Founder::ALL` order, `--founders 8,8,3` (the lanternjaw's are clutches).
-fn parse_founders(
-    s: Option<&str>,
-) -> Result<[usize; cubarium_voxel_fauna::Founder::COUNT], String> {
-    parse_founders_over(s, cubarium_voxel_fauna::FaunaConfig::default().founder_counts())
-}
-
-/// [`parse_founders`] over `base`: a search file's own founding (its `[base]`'s), the
-/// named lineages set over it.
+/// The founding table over `base`: a search file's own founding (its `[base]`'s), with the
+/// named lineages set over it, `--founders frondgrazer=4,lanternjaw=0`; or one count per
+/// lineage in `Founder::ALL` order, `--founders 8,8,3` (the lanternjaw's are clutches).
 fn parse_founders_over(
     s: Option<&str>,
     base: [usize; cubarium_voxel_fauna::Founder::COUNT],

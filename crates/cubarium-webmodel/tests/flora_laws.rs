@@ -406,12 +406,12 @@ fn the_seed_shadow_fit_returns_the_census_share() {
     }
     let (_, fc) = resolved();
     // 400 bare faces; 30 of them hold 10 lanternberry seeds each (a bank of 300 on 30 faces).
-    let (mut zones, mut faces) = one_zone(&fc, 400, 0.85, 1.0, &[]);
+    let (_, mut faces) = one_zone(&fc, 400, 0.85, 1.0, &[]);
     let k = Species::Lanternberry.index();
     for f in faces.iter_mut().take(30) {
         f.seeds[k] = 10;
     }
-    zones = cubarium_webmodel::flora::zones::build(&fc, &[faces.clone()]);
+    let zones = cubarium_webmodel::flora::zones::build(&fc, &[faces.clone()]);
     let observed = 30.0 / 400.0;
     let g = clumping(&zones);
     let z = clumping_by_zone(&zones, &g);
