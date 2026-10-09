@@ -158,6 +158,9 @@ impl Landscape {
             },
             true,
         );
+        if let Some(why) = &founded.terrain_rejection {
+            return Err(format!("{preset} seed base {seed_base}: every redrawn terrain was rejected, last: {why}"));
+        }
         Ok(Landscape::from_founded(preset, seed_base, founded))
     }
 
