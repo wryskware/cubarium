@@ -976,6 +976,18 @@ control and the reward accounting; display targets after seeing results.
      - Codex found that the apparent drift was water nondeterminism already on main: parallel
        proposals were summed in thread-arrival order. They're now summed in a fixed order, and
        base, tap off and tap on are identical row for row.
+   - All by Codex:
+     - P3 merged 71b5d8ef: a GRU per manifest (I/H/O plus an option head) for all nine, every
+       output fitted by imitation, and refusals that name the wrong shape or H.
+     - P2 and P4 merged 0839bc77:
+       - sprint, hunker and retract are wired; lure and lift are in the response;
+       - the executed sprint is recorded;
+       - one `layer()`: body constraints for every body, full reflexes for heuristics;
+       - the heuristic world is unchanged (238 rows identical);
+       - the combined suites pass.
+     - P6 places (Codex xhigh, brief `briefs/v3-places.md`) is running.
+   - P5 (reward) waits on Wrysk's answers. Asked first: count the digestible stomach.
+   - P7 (stage runs) needs P5 and P6.
 
 ## 7. Work log (2026-10-08)
 
