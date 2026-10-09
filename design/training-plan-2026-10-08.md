@@ -670,6 +670,13 @@ control and the reward accounting; display targets after seeing results.
       hasn't made that mistake recently (the learned expectation per class already
       relaxes back over `forget_s`).
 
+21. **Decided (Wrysk, 2026-10-09): shredders speed up decay (A).**
+    - Litter near littershredders rots faster, so its nutrients return sooner to nearby
+      plants (real detritivores speed decomposition by about a quarter on average).
+    - Shredders also get a modest appetite gene.
+    - Glowcaps stay the visible decomposer, in the dark only.
+    - Microbes still do most of the work, as in real ecosystems.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
