@@ -489,7 +489,27 @@ control and the reward accounting; display targets after seeing results.
        and world-state layout changes still refuse.
    - Recommended (b). It isn't migration: a loaded world already runs new code.
    - At least, a config change should bump the schema, so the loader refuses cleanly.
-10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
+10. **Decided (Wrysk, 2026-10-09): the food budget.**
+    - **Keep the plant pace.** The world takes about 10 h (a year) to establish fully. Wrysk:
+      "you dont really see changes in a 5 minute window watching it, but you do see changes as
+      you glance at it throughout the day"; "i dont want to watch it like its a house plant".
+    - **Animals must affect the plants.** Leaf-only fixes (defence, poorer food) were rejected
+      because animals would still eat about 1–2 %: "the animals basically dont affect the
+      plants in the world rather than being a real interconnected system".
+    - **Route:**
+      - raise each lineage's `mass_scale`, which scales body, reserves, gut and upkeep together
+        so starvation time is unchanged (frondgrazer about ×25–75, loftstrider ×4–12,
+        fruit/nectar/cap eaters ×2–6);
+      - bring the gut ceiling from 18–45× upkeep to the real 3–7×;
+      - keep foliage yield 0.5 (half to dung).
+    - **Target:** animals eat a real share of their food (leaf eaters 10–30 % of leaf growth),
+      with every lineage persisting as the hard requirement.
+    - Plant defence per bite stays as a secondary search gene.
+    - The extra food eaten returns as dung (litter where the herd moves) and respiration, so
+      herds move nutrients ("grazing lawns").
+    - Next: herding (grazers clustered for protection), raised the same day.
+
+    Background, as first posed — **the real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
     related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
     FOOD-BUDGET (`design/7_Research/food-budget-2026-10-08.md`) measured the supply:
     - Animals eat 0.17 % of what plants fix. Browsers eat 0.33 % of the foliage made,
