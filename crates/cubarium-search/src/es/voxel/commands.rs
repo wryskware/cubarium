@@ -23,8 +23,6 @@
 //! stops at the measured sixteen-worker saturation point everywhere. The score-counter
 //! state is named in every run's output.
 
-#[allow(unused_imports)]
-use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -116,11 +114,8 @@ pub fn check(
         let prepared = task::Prepared::build_stage(*f, task::TRAINING_LAYOUT_SEEDS[0], stage);
         let start = prepared.fixture_arena().animal_pose().expect("placed");
         let cancel = AtomicBool::new(false);
-        let theta = if *f == Founder::Blind {
-            crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
-        } else {
-            crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
-        };
+        let m = f.manifest();
+        let theta = crate::es::tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, task::TRAINING_SEED);
         let mut drivers: Vec<(String, EpisodeDriver)> = vec![(
             "gru-centre".into(),
             EpisodeDriver::gru(&theta, *f)
@@ -209,11 +204,10 @@ pub fn bench(
     let founder = parse_founder(&founder)?;
     let fixture = task::PreparedArena::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
     let prepared = task::Prepared::from(fixture.clone());
-    let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
-    } else {
-        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
-    };
+    let manifest = founder.manifest();
+    let theta = crate::es::tensor::initial_center_runtime(
+        manifest.inputs(), manifest.outputs(), manifest.hidden, task::TRAINING_SEED,
+    );
     let gru = EpisodeDriver::gru(&theta, founder)?;
 
     println!(
@@ -1177,14 +1171,16 @@ pub fn imitate(
     );
     let t = Instant::now();
     let (theta, report) = imitate::fit(founder, &all, &spec);
-    println!(
-        "initial MSE  forward {:.5}  turn {:.5}  feed {:.5}",
-        report.initial_mse[0], report.initial_mse[1], report.initial_mse[2]
-    );
-    println!(
-        "final   MSE  forward {:.5}  turn {:.5}  feed {:.5}  (mean {:.5})",
-        report.mse[0], report.mse[1], report.mse[2], report.mse_mean
-    );
+    for (k, action) in founder.manifest().actions.iter().enumerate() {
+        println!(
+            "MSE {} initial {:.5} final {:.5}",
+            action.name, report.initial_mse[k], report.mse[k]
+        );
+    }
+    println!("final MSE mean {:.5}", report.mse_mean);
+    if let (Some(initial), Some(final_loss)) = (report.initial_option_ce, report.option_ce) {
+        println!("option cross-entropy initial {initial:.5} final {final_loss:.5}");
+    }
     println!(
         "turn-sign agreement {:.1}% of {} teacher steps   {:.1} s",
         100.0 * report.turn_sign_agreement,
@@ -1227,8 +1223,9 @@ pub fn imitate(
             streams: all.len(),
             steps: report.steps,
             updates: report.updates,
-            mse: report.mse,
+            mse: report.mse.clone(),
             mse_mean: report.mse_mean,
+            option_ce: report.option_ce,
             turn_sign_agreement: report.turn_sign_agreement,
         }),
         stage: clone_stage.as_str().into(),
@@ -1343,11 +1340,10 @@ pub fn landscapes(
         );
     }
 
-    let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
-    } else {
-        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
-    };
+    let manifest = founder.manifest();
+    let theta = crate::es::tensor::initial_center_runtime(
+        manifest.inputs(), manifest.outputs(), manifest.hidden, task::TRAINING_SEED,
+    );
     let gru = EpisodeDriver::gru(&theta, founder)?;
     let cancel = AtomicBool::new(false);
     let limits = super::driver::Limits::new(&cancel);
@@ -1574,11 +1570,10 @@ pub fn landscape_arms(
         draw,
         pin::format_cpu_list(&mask),
     );
-    let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
-    } else {
-        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
-    };
+    let manifest = founder.manifest();
+    let theta = crate::es::tensor::initial_center_runtime(
+        manifest.inputs(), manifest.outputs(), manifest.hidden, task::TRAINING_SEED,
+    );
     let gru = EpisodeDriver::gru(&theta, founder)?;
     let cancel = AtomicBool::new(false);
     let limits = super::driver::Limits::new(&cancel);
