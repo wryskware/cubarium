@@ -782,6 +782,14 @@ control and the reward accounting; display targets after seeing results.
    - RHYTHMS-CADENCE (Opus): item 18, rhythms and cadence;
    - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
    - DECAY (Codex): item 21.
+   - RHYTHMS-CADENCE merged, ff5f91a0 (fauna schema 73).
+     - `Activity::Leaning` with a per-lineage `rhythm` table (day / night / twilight chance,
+       random rests).
+     - Alarm wakes sleepers.
+     - Stop-and-go pace for heuristic walkers.
+     - `still_gain` 1.25 sensing after 0.5 s still.
+     - The search screens read leanings (`screen::founder_sleep`).
+     - Open: Veilhound pack members rest independently, where lions rest together.
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
