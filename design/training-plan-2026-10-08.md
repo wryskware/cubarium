@@ -991,8 +991,11 @@ control and the reward accounting; display targets after seeing results.
        - four remembered homes (roost, water, den, nest) fade over
          `fauna.perception.place_memory_fade_s` (600 s);
        - the heuristic world is unchanged;
-       - cost with every body encoded: 1.6 → 8.1 ms per tick, so PLACES-SPEED (Codex xhigh)
-         aims for at most +1 ms.
+       - cost with every body encoded: 1.6 → 8.1 ms per tick.
+     - PLACES-SPEED merged (Codex): the added cost fell from 6.3 to 0.39 ms per tick.
+       - Shore searches had taken 92.5 % of it. They now start near the body, rescan within a
+         bound and reject cheaply first.
+       - Exact: 13,928 place records are identical, and so are the heuristic rows.
    - P5 (reward) waits on Wrysk's answers. Asked first: count the digestible stomach.
    - P7 (stage runs) needs P5 and P6.
 
