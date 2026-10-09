@@ -8,7 +8,7 @@ last_reviewed: 2026-10-09
 
 Wrysk's picks from UI rounds 1–3 (2026-10-08/09), for the Godot app's menus: the field guide, populations, world and settings. The normal cube display stays free of UI.
 
-These are his choices, but they aren't in the decision ledger. The mockups are `round1/`, `round2/` and `round3/index.html`. `round2/godot/` draws the type in Godot.
+Recorded as D-0006, a living direction: when Wrysk changes something, update this page. The mockups are `round1/`, `round2/` and `round3/index.html`. `round2/godot/` draws the type in Godot.
 
 ## Direction
 
