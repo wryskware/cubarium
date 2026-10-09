@@ -849,6 +849,12 @@ control and the reward accounting; display targets after seeing results.
            - no animal eats vine foliage (`Flora::crop` has no caller);
            - one stand per site gives stand foods 4 × the density per m² on d72.
          - The webmodel's bellwing `egg_site` fit (1.0) needs a refit.
+       - **Decided (Wrysk, 2026-10-09):** "seedporters should also polinate by moving accross
+         them or around them. but we can leave the numbers to ecology."
+         - SEEDPORTER-POLLEN (opus-high, brief `briefs/seedporter-pollen.md`) is running.
+           Seedporters pollinate by contact: pollen carried from another flower, measured in
+           metres, vines only.
+         - The vine's `spur_share` becomes a supply gene in the ecology genome (ECO-GENOME).
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
@@ -899,8 +905,23 @@ control and the reward accounting; display targets after seeing results.
      founded only in shade.
 4. The ecology search: per-lineage `mass_scale`, the gut ratio and supply genes. Screens on the
    wide world for 2 h, year checks for the best.
+   - ECO-GENOME (opus-medium, brief `briefs/eco-genome.md`) is running.
+     - It writes `config/training/search/eco.toml`, a budget prediction from the web model,
+       and a launch-ready protocol A screen from the wide baseline's hour-10 saves.
+     - It also runs a smoke check.
+     - The real search starts after the baseline finishes.
 5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
    and Veilhound. Sensed places plus home memory.
+   - **Bellwing nest (from VINE-C):** a bellwing now lays only on vines. Only the heuristic's
+     nest reflex flies it there (`step::nest_reflex`), so the v3 bellwing brain needs three
+     things:
+     - its sensed and remembered places (item 24) include a vine nest site;
+     - its starting clone copies the controller's final steering, nest flight included;
+     - the score keeps counting energy given to young as kept (`NetEnergy::given`; it does
+       today).
+
+     A full bellwing can then bank energy only by laying, so nesting pays without a nest
+     term.
 
 ## 7. Work log (2026-10-08)
 
