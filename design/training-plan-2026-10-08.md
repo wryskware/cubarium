@@ -934,6 +934,15 @@ control and the reward accounting; display targets after seeing results.
          and launch the screen.
      - Stopping the old baseline was refused by the permission check, so it runs on at idle
        priority.
+     - ECO-RESCALE merged 774bd98c.
+       - End to end: a fresh d72 save loaded at frondgrazer mass ×40 kept 8 of 8 alive.
+     - Chained detached at 11:30 (`scratchpad/wideyear2-chain.sh`, log
+       `runs/wideyear2-chain.log`):
+       1. build main and save the binary as `runs/bins/voxel_census.774bd98c`;
+       2. run the fauna and sim tests;
+       3. run the wide year baseline `runs/wideyear2-2026-10-09` (8 × 10 h, keep 11);
+       4. launch `eco-wide-screen.sh` from its m000600 saves into
+          `runs/eco-screen-2026-10-09`.
 5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
    and Veilhound. Sensed places plus home memory.
    - **Bellwing nest (from VINE-C):** a bellwing now lays only on vines. Only the heuristic's
