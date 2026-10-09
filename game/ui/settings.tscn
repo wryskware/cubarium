@@ -1,0 +1,222 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="2_world"]
+[ext_resource type="Material" path="res://ui/neon/neon_scrim.tres" id="3_scrim"]
+[ext_resource type="Script" path="res://ui/settings.gd" id="4_page"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_slider.gd" id="5_slider"]
+[ext_resource type="Script" path="res://ui/neon/neon_checkbox.gd" id="6_check"]
+
+[node name="Settings" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("1_theme")
+script = ExtResource("4_page")
+
+[node name="World" type="TextureRect" parent="."]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_world")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="."]
+material = ExtResource("3_scrim")
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="Control" parent="Center"]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Body" type="PanelContainer" parent="Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 96.0
+offset_right = 1824.0
+offset_bottom = 976.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="Margin" type="MarginContainer" parent="Center/Page/Body"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 56
+theme_override_constants/margin_top = 48
+theme_override_constants/margin_right = 56
+theme_override_constants/margin_bottom = 28
+
+[node name="Stack" type="VBoxContainer" parent="Center/Page/Body/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="Head" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Kicker" type="Label" parent="Center/Page/Body/Margin/Stack/Head"]
+layout_mode = 2
+theme_type_variation = &"Kicker"
+text = "Settings"
+uppercase = true
+
+[node name="Title" type="Label" parent="Center/Page/Body/Margin/Stack/Head"]
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"TitleLabel"
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 4
+theme_override_font_sizes/font_size = 52
+text = "Animals"
+
+[node name="HeadGap" type="Control" parent="Center/Page/Body/Margin/Stack"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Form" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 28
+
+[node name="MovementField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Form/MovementField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Form/MovementField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Movement"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Movement" type="Control" parent="Center/Page/Body/Margin/Stack/Form/MovementField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+focus_neighbor_bottom = NodePath("../../../SubpixelField/Row/Subpixel")
+script = ExtResource("5_slider")
+stops = PackedStringArray("Smooth", "Stepped")
+index = 0
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Form/MovementField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="MovementNote" type="Label" parent="Center/Page/Body/Margin/Stack/Form/MovementField/Note"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "Smooth: they glide between ticks. Stepped: they hop a voxel at a time and turn in steps, like the old stamped animals."
+autowrap_mode = 3
+
+[node name="SubpixelField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Subpixel"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Subpixel" type="BaseButton" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+focus_neighbor_top = NodePath("../../../MovementField/Row/Movement")
+toggle_mode = true
+button_pressed = true
+script = ExtResource("6_check")
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="SubpixelNote" type="Label" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField/Note"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "Smooth movement only. On, they glide between pixels; off, they land on whole pixels."
+autowrap_mode = 3
+
+[node name="Hints" type="HBoxContainer" parent="Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 1008.0
+offset_right = 1824.0
+offset_bottom = 1046.0
+mouse_filter = 2
+theme_type_variation = &"KeyHints"
+alignment = 2
+
+[node name="ChangeHint" type="HBoxContainer" parent="Center/Page/Hints"]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/ChangeHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/ChangeHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Change"
+vertical_alignment = 1
+uppercase = true
+
+[node name="BackHint" type="HBoxContainer" parent="Center/Page/Hints"]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/BackHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/BackHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Back"
+vertical_alignment = 1
+uppercase = true

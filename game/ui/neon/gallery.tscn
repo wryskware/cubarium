@@ -6,6 +6,10 @@
 [ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_enivu"]
 [ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_nuvlg"]
 [ext_resource type="Script" path="res://ui/neon/neon_pixels.gd" id="6_on0va"]
+[ext_resource type="Script" path="res://ui/neon/neon_arrows.gd" id="7_arrows"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_slider.gd" id="8_slider"]
+[ext_resource type="Script" path="res://ui/neon/neon_checkbox.gd" id="9_check"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_progress.gd" id="10_progress"]
 
 [sub_resource type="ButtonGroup" id="ButtonGroup_1bi8p"]
 
@@ -20,7 +24,7 @@ theme = ExtResource("1_uv0ua")
 texture_filter = 1
 layout_mode = 0
 anchor_right = 1.0
-anchor_bottom = 1.0
+offset_bottom = 1656.0
 mouse_filter = 2
 texture = ExtResource("2_ceiqu")
 expand_mode = 1
@@ -30,17 +34,17 @@ stretch_mode = 6
 material = ExtResource("3_7qtda")
 layout_mode = 0
 anchor_right = 1.0
-anchor_bottom = 1.0
+offset_bottom = 1656.0
 mouse_filter = 2
 
 [node name="Center" type="CenterContainer" parent="." unique_id=153735247]
 layout_mode = 0
 anchor_right = 1.0
-anchor_bottom = 1.0
+offset_bottom = 1656.0
 mouse_filter = 2
 
 [node name="Page" type="Control" parent="Center" unique_id=1766169439]
-custom_minimum_size = Vector2(1920, 1080)
+custom_minimum_size = Vector2(1920, 1656)
 layout_mode = 2
 mouse_filter = 2
 
@@ -900,3 +904,199 @@ theme_override_constants/separation = 0
 layout_mode = 2
 mouse_filter = 2
 theme_type_variation = &"HotRule"
+
+[node name="ControlsPanel" type="PanelContainer" parent="Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 1088.0
+offset_right = 1824.0
+offset_bottom = 1600.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="PanelMargin" type="MarginContainer" parent="Center/Page/ControlsPanel"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 34
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 34
+theme_override_constants/margin_bottom = 30
+
+[node name="Sections" type="VBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Arrows" type="HBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin/Sections"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Arrows"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Arrows: normal, focus, disabled"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Normal" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Arrows"]
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("7_arrows")
+options = PackedStringArray("Terrarium", "Small terrarium", "Staged ring, small", "Staged ring, terraced", "Staged ring, wide")
+index = 3
+
+[node name="Focus" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Arrows"]
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("7_arrows")
+options = PackedStringArray("Terrarium", "Small terrarium", "Staged ring, small", "Staged ring, terraced", "Staged ring, wide")
+index = 3
+preview_focus = true
+
+[node name="Disabled" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Arrows"]
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("7_arrows")
+options = PackedStringArray("Terrarium", "Small terrarium", "Staged ring, small", "Staged ring, terraced", "Staged ring, wide")
+index = 3
+disabled = true
+
+[node name="Slider" type="HBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin/Sections"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Slider"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Dot slider: normal, focus, disabled"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Normal" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Slider"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("8_slider")
+
+[node name="Focus" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Slider"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("8_slider")
+index = 2
+preview_focus = true
+
+[node name="Disabled" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Slider"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("8_slider")
+index = 0
+disabled = true
+
+[node name="Checkbox" type="HBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin/Sections"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Checkbox"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Checkbox: off, on, on with focus, disabled"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Off" type="BaseButton" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Checkbox"]
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+script = ExtResource("9_check")
+
+[node name="On" type="BaseButton" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Checkbox"]
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+button_pressed = true
+script = ExtResource("9_check")
+
+[node name="OnFocus" type="BaseButton" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Checkbox"]
+layout_mode = 2
+size_flags_vertical = 4
+toggle_mode = true
+button_pressed = true
+script = ExtResource("9_check")
+preview_focus = true
+
+[node name="Disabled" type="BaseButton" parent="Center/Page/ControlsPanel/PanelMargin/Sections/Checkbox"]
+layout_mode = 2
+size_flags_vertical = 4
+disabled = true
+toggle_mode = true
+button_pressed = true
+script = ExtResource("9_check")
+
+[node name="TwoStops" type="HBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin/Sections"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/ControlsPanel/PanelMargin/Sections/TwoStops"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Two stops; progress"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Movement" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/TwoStops"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("8_slider")
+stops = PackedStringArray("Smooth", "Stepped")
+index = 0
+
+[node name="Progress" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/TwoStops"]
+custom_minimum_size = Vector2(516, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("10_progress")
+
+[node name="SmallProgress" type="HBoxContainer" parent="Center/Page/ControlsPanel/PanelMargin/Sections"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/ControlsPanel/PanelMargin/Sections/SmallProgress"]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Small progress; no end yet"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Small" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/SmallProgress"]
+custom_minimum_size = Vector2(312, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("10_progress")
+value = 0.55
+show_percent = false
+small = true
+
+[node name="Sweep" type="Control" parent="Center/Page/ControlsPanel/PanelMargin/Sections/SmallProgress"]
+custom_minimum_size = Vector2(312, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("10_progress")
+show_percent = false
+small = true
+indeterminate = true

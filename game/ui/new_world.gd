@@ -6,15 +6,27 @@ extends Control
 ## terrains, checked for room for the founders, nothing founded. Each shows its thumbnail
 ## (a WorldView in its own SubViewport); open one large to pan across it, reroll, or move
 ## the water slider to see the same terrains wetter or drier. Only the picked one is
-## founded, on its own terrain, with a real progress bar; a founding that can't place the
+## founded, on its own terrain, with a real progress row; a founding that can't place the
 ## founders comes back here with the reason. Drawing and founding can be cancelled, and
 ## leaving the picker cancels them.
+##
+## The look is new_world.tscn (round 4's New world and Founding views), laid out in the
+## editor from ui/neon/; each terrain is a terrain_card.tscn. Size, terrain and climate are
+## NeonArrows, water a NeonDotSlider, progress NeonDotProgress rows. This script only fills
+## and drives them. Without a shell (opened in the editor, or by itself in a test) it leaves
+## the scene's sample page alone.
+##
+## Keys and pad, as round 4's hints say: on a terrain card, A (Enter, or the Found button)
+## founds it, Y (G) opens it large (a double click too), X rerolls; B (Esc) goes back. A
+## click selects a card; Found this world founds the selected one.
 
 signal back
 
 const WorldViews := preload("res://ui/world_views.gd")
+const CARD := preload("res://ui/terrain_card.tscn")
 const CATALOG := "res://data/catalog.json"
-const CARD_VIEW := Vector2(320, 160)
+## The thumbnail's height when its width isn't known yet.
+const CARD_VIEW := Vector2(336, 168)
 
 var shell  # main.gd
 var catalog := {}
@@ -22,245 +34,104 @@ var sizes := []
 var terrains := []
 var climates := []
 
-var _size: OptionButton
-var _terrain: OptionButton
-var _climate: OptionButton
-var _size_note: Label
-var _terrain_note: Label
-var _climate_note: Label
-var _seed: LineEdit
-var _water: HSlider
-var _water_note: Label
-var _water_box: Control
 ## The water steps the session offers (`query("spec")`): name and water_level_m.
 var water_levels := [{"name": "low", "water_level_m": 0.375}, {"name": "medium", "water_level_m": 0.75},
 	{"name": "high", "water_level_m": 1.125}]
 var _water_ok := false  # the chosen landform has a water table
-var _generate: Button
-var _cancel: Button
-var _back: Button
-var _status: Label
-var _grid: GridContainer
 var _cards := []
 var _views := {}  # candidate index -> what its WorldView was shown, kept for opening large
+var _selected := -1  # the card Found this world founds: the last one focused
 var _started_ms := 0
 var _batch_key := ""
 var _ready_ms := {}
 var _generating := false
-var _large: Control
-var _large_holder: Control
-var _large_title: Label
-var _large_pick: Button
-var _large_back: Button
 var _large_index := -1
 var _founding := false
 var _found_index := -1
-var _found_box: PanelContainer
-var _found_title: Label
-var _found_phase: Label
-var _found_bar: ProgressBar
-var _found_detail: Label
-var _found_cancel: Button
+
+@onready var _world_picture: Control = $World
+@onready var _page: Control = $Center
+@onready var _form: Control = %Form
+@onready var _size: NeonArrows = %Size
+@onready var _terrain: NeonArrows = %Terrain
+@onready var _climate: NeonArrows = %Climate
+@onready var _size_note: Label = %SizeNote
+@onready var _terrain_note: Label = %TerrainNote
+@onready var _climate_note: Label = %ClimateNote
+@onready var _water_box: Control = %WaterField
+@onready var _water: NeonDotSlider = %Water
+@onready var _water_note: Label = %WaterNote
+@onready var _seed_box: Control = %SeedBox
+@onready var _seed: LineEdit = %Seed
+@onready var _header: Label = %Header
+@onready var _cards_scroll: Control = %Cards
+@onready var _grid: GridContainer = %Grid
+@onready var _status: Label = %Status
+@onready var _found: BaseButton = %Found
+@onready var _generate: BaseButton = %Generate
+@onready var _generate_label: Label = %GenerateLabel
+@onready var _cancel: BaseButton = %Cancel
+@onready var _found_box: Control = %Founding
+@onready var _found_phase: Label = %Phase
+@onready var _found_bar: NeonDotProgress = %FoundBar
+@onready var _found_detail: Label = %FoundDetail
+@onready var _found_cancel: BaseButton = %FoundCancel
+@onready var _hints := {"open": %OpenHint, "found": %FoundHint, "reroll": %RerollHint,
+	"back": %BackHint, "cancel": %CancelHint}
+@onready var _reroll_hint: Label = %RerollHintLabel
+@onready var _large: Control = %Large
+@onready var _large_holder: Control = %LargeHolder
+@onready var _large_title: Label = %LargeTitle
+@onready var _large_pick: BaseButton = %LargePick
+@onready var _large_back: BaseButton = %LargeBack
 
 
-func _init() -> void:
-	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+func _ready() -> void:
+	_seed.focus_entered.connect(_seed_box.queue_redraw)
+	_seed.focus_exited.connect(_seed_box.queue_redraw)
+	_seed_box.draw.connect(_draw_seed_focus)
+	if shell == null:
+		return
 	visible = false
-	var dim := Panel.new()
-	dim.theme_type_variation = &"Dim"
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(dim)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 40)
-	add_child(margin)
-	var panel := PanelContainer.new()
-	margin.add_child(panel)
-	var h := HBoxContainer.new()
-	h.add_theme_constant_override("separation", 24)
-	panel.add_child(h)
-
-	var left := VBoxContainer.new()
-	left.custom_minimum_size = Vector2(340, 0)
-	h.add_child(left)
-	var title := Label.new()
-	title.text = "New world"
-	title.theme_type_variation = &"Title"
-	left.add_child(title)
-	_size = _option(left, "Size")
-	_size_note = _note(left)
-	_terrain = _option(left, "Terrain")
-	_terrain_note = _note(left)
-	_climate = _option(left, "Climate")
-	_climate_note = _note(left)
-	var seed_label := Label.new()
-	seed_label.text = "Seed"
-	left.add_child(seed_label)
-	_seed = LineEdit.new()
-	_seed.placeholder_text = "blank: drawn for each candidate"
-	left.add_child(_seed)
-	_water_box = VBoxContainer.new()
-	left.add_child(_water_box)
-	var water_label := Label.new()
-	water_label.text = "Water"
-	_water_box.add_child(water_label)
-	_water = HSlider.new()
-	_water.min_value = 0
-	_water.max_value = 2
-	_water.step = 1
-	_water.tick_count = 3
-	_water.ticks_on_borders = true
-	_water.value = 1
-	_water.custom_minimum_size = Vector2(0, 32)
-	_water.value_changed.connect(func(_v): _water_changed())
-	_water_box.add_child(_water)
-	var steps := HBoxContainer.new()
-	_water_box.add_child(steps)
-	for i in 3:
-		var l := Label.new()
-		l.text = ["Low", "Medium", "High"][i]
-		l.theme_type_variation = &"Small"
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		l.horizontal_alignment = [HORIZONTAL_ALIGNMENT_LEFT, HORIZONTAL_ALIGNMENT_CENTER,
-			HORIZONTAL_ALIGNMENT_RIGHT][i]
-		steps.add_child(l)
-	_water_note = _note(_water_box)
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	left.add_child(spacer)
-	_status = Label.new()
-	_status.theme_type_variation = &"Small"
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	left.add_child(_status)
-	_generate = Button.new()
-	_generate.text = "Generate"
-	_generate.custom_minimum_size = Vector2(0, 44)
+	# The live world shows through the scrim; the picture is the editor's stand-in.
+	_world_picture.visible = false
+	for c in _grid.get_children():
+		_grid.remove_child(c)
+		c.queue_free()
+	_status.text = ""
+	_water.changed.connect(func(_i): _water_changed())
+	_size.changed.connect(func(_i): _notes(); _sync_water())
+	_terrain.changed.connect(func(_i): _notes(); _sync_water())
+	_climate.changed.connect(func(_i): _notes())
+	_found.pressed.connect(func(): _pick(_selected))
 	_generate.pressed.connect(func(): generate())
-	left.add_child(_generate)
-	_cancel = Button.new()
-	_cancel.text = "Cancel"
-	_cancel.custom_minimum_size = Vector2(0, 40)
-	_cancel.visible = false
 	_cancel.pressed.connect(func(): cancel())
-	left.add_child(_cancel)
-	_back = Button.new()
-	_back.text = "Back"
-	_back.custom_minimum_size = Vector2(0, 40)
-	_back.pressed.connect(back.emit)
-	left.add_child(_back)
-
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	h.add_child(column)
-	_build_founding(column)
-	var right := ScrollContainer.new()
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	right.follow_focus = true
-	column.add_child(right)
-	_grid = GridContainer.new()
-	_grid.columns = 2
-	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.add_child(_grid)
-
-	_size.item_selected.connect(func(_i): _notes(); _sync_water())
-	_terrain.item_selected.connect(func(_i): _notes(); _sync_water())
-	_climate.item_selected.connect(func(_i): _notes())
-	_build_large()
-
-
-func _option(parent: Control, label: String) -> OptionButton:
-	var l := Label.new()
-	l.text = label
-	parent.add_child(l)
-	var o := OptionButton.new()
-	o.custom_minimum_size = Vector2(0, 40)
-	parent.add_child(o)
-	return o
-
-
-func _note(parent: Control) -> Label:
-	var l := Label.new()
-	l.theme_type_variation = &"Small"
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	parent.add_child(l)
-	return l
-
-
-## The founding panel over the candidates: what is being founded, its stage, a progress
-## bar driven by the session's own progress, the try, and Cancel.
-func _build_founding(parent: Control) -> void:
-	_found_box = PanelContainer.new()
-	_found_box.theme_type_variation = &"Row"
-	_found_box.visible = false
-	parent.add_child(_found_box)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	_found_box.add_child(box)
-	_found_title = Label.new()
-	_found_title.theme_type_variation = &"Title"
-	box.add_child(_found_title)
-	_found_phase = Label.new()
-	box.add_child(_found_phase)
-	_found_bar = ProgressBar.new()
-	_found_bar.custom_minimum_size = Vector2(0, 16)
-	_found_bar.show_percentage = false
-	box.add_child(_found_bar)
-	_found_detail = Label.new()
-	_found_detail.theme_type_variation = &"Small"
-	box.add_child(_found_detail)
-	_found_cancel = Button.new()
-	_found_cancel.text = "Cancel founding"
-	_found_cancel.custom_minimum_size = Vector2(200, 40)
-	_found_cancel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_found_cancel.pressed.connect(func(): cancel())
-	box.add_child(_found_cancel)
-
-
-func _build_large() -> void:
-	_large = Control.new()
-	_large.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_large.visible = false
-	add_child(_large)
-	var dim := Panel.new()
-	dim.theme_type_variation = &"Dim"
-	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_large.add_child(dim)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 24)
-	_large.add_child(margin)
-	var panel := PanelContainer.new()
-	margin.add_child(panel)
-	var box := VBoxContainer.new()
-	panel.add_child(box)
-	_large_title = Label.new()
-	_large_title.theme_type_variation = &"Title"
-	box.add_child(_large_title)
-	_large_holder = Control.new()
-	_large_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_large_holder.clip_contents = true
-	box.add_child(_large_holder)
-	var row := HBoxContainer.new()
-	box.add_child(row)
-	_large_back = Button.new()
-	_large_back.text = "Back"
-	_large_back.custom_minimum_size = Vector2(120, 44)
 	_large_back.pressed.connect(close_large)
-	row.add_child(_large_back)
-	_large_pick = Button.new()
-	_large_pick.text = "Pick this world"
-	_large_pick.custom_minimum_size = Vector2(200, 44)
 	_large_pick.pressed.connect(func(): _pick(_large_index))
-	row.add_child(_large_pick)
-	var hint := Label.new()
-	hint.theme_type_variation = &"Small"
-	hint.text = ("Pan: drag, arrows, WASD or the left stick." if WorldViews.is_real()
+	%PanHint.text = ("Pan: drag, arrows, WASD or the left stick." if WorldViews.is_real()
 		else "Pan: drag, WASD or the right stick. Zoom: wheel.")
-	row.add_child(hint)
+	_refresh_controls()
+
+
+func _draw_seed_focus() -> void:
+	if _seed.has_focus():
+		_seed_box.draw_style_box(preload("res://ui/neon/styles/glow_focus.tres"), Rect2(Vector2.ZERO, _seed_box.size))
+
+
+## Y (or G) opens the focused card large; the pad's X rerolls.
+func _unhandled_input(event: InputEvent) -> void:
+	if shell == null or not visible or _large.visible or _founding or event.is_echo():
+		return
+	if InputMap.has_action("shell_guide") and event.is_action_pressed("shell_guide"):
+		var i := _card_index(get_viewport().gui_get_focus_owner())
+		if i >= 0 and _views.has(i):
+			get_viewport().set_input_as_handled()
+			open_large(i)
+	elif event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_X:
+		get_viewport().set_input_as_handled()
+		if not _generate.disabled:
+			generate()
 
 
 # --- Opening ----------------------------------------------------------------------------
@@ -276,15 +147,12 @@ func setup() -> void:
 		listed = {"terrain": [], "climate": []}
 	terrains = _offered(catalog.get("terrain", []), listed.get("terrain", []))
 	climates = _offered(catalog.get("climate", []), listed.get("climate", []))
-	_size.clear()
-	for s in sizes:
-		_size.add_item(s["label"])
-	_terrain.clear()
-	for t in terrains:
-		_terrain.add_item(t["label"])
-	_climate.clear()
-	for c in climates:
-		_climate.add_item(c["label"])
+	_size.options = PackedStringArray(sizes.map(func(s): return s["label"]))
+	_size.index = 0
+	_terrain.options = PackedStringArray(terrains.map(func(t): return t["label"]))
+	_terrain.index = 0
+	_climate.options = PackedStringArray(climates.map(func(c): return c["label"]))
+	_climate.index = 0
 	_notes()
 	_sync_water()
 
@@ -329,8 +197,8 @@ func cancel() -> void:
 
 func focus_first() -> void:
 	for card in _cards:
-		if not card["open"].disabled:
-			card["open"].grab_focus()
+		if card.get("ready", false):
+			card["root"].grab_focus()
 			return
 	_generate.grab_focus()
 
@@ -344,29 +212,31 @@ func back_one() -> bool:
 
 
 func _notes() -> void:
-	var s = _selected(sizes, _size)
+	var s = _selected_entry(sizes, _size)
 	_size_note.text = s.get("description", "") if s else ""
-	var t = _selected(terrains, _terrain)
+	var t = _selected_entry(terrains, _terrain)
 	_terrain_note.text = t.get("description", "") if t else ""
-	var c = _selected(climates, _climate)
+	var c = _selected_entry(climates, _climate)
 	_climate_note.text = c.get("description", "") if c else ""
+	for note in [_size_note, _terrain_note, _climate_note]:
+		note.visible = note.text != ""
 
 
-func _selected(list: Array, option: OptionButton):
-	var i := option.selected
+func _selected_entry(list: Array, choice: NeonArrows):
+	var i := choice.index
 	return list[i] if i >= 0 and i < list.size() else null
 
 
 func select(size_id: String, terrain := "", climate := "") -> void:
 	for i in sizes.size():
 		if sizes[i]["id"] == size_id:
-			_size.select(i)
+			_size.index = i
 	for i in terrains.size():
 		if terrains[i]["name"] == terrain:
-			_terrain.select(i)
+			_terrain.index = i
 	for i in climates.size():
 		if climates[i]["name"] == climate:
-			_climate.select(i)
+			_climate.index = i
 	_notes()
 	_sync_water()
 
@@ -391,12 +261,12 @@ func _sync_water() -> void:
 	for i in water_levels.size():
 		if own != null and absf(float(water_levels[i]["water_level_m"]) - float(own)) < 1e-6:
 			step = i
-	_water.set_value_no_signal(step)
+	_water.index = step
 	_water_text()
 
 
 func water_level_m() -> float:
-	return float(water_levels[int(_water.value)]["water_level_m"])
+	return float(water_levels[_water.index]["water_level_m"])
 
 
 func _water_text() -> void:
@@ -419,7 +289,7 @@ func _water_changed() -> void:
 		_status.text = "Can't make these: " + refused
 		return
 	_start_batch(seeds.size(), "Drawing the same %d terrains with %s water…" % [seeds.size(),
-		["low", "medium", "high"][int(_water.value)]])
+		["low", "medium", "high"][_water.index]])
 
 
 # --- Generating -------------------------------------------------------------------------
@@ -427,14 +297,14 @@ func _water_changed() -> void:
 ## The spec for the chosen size, terrain, climate and seed. A preset the size's config
 ## already uses is not sent, so the file's own landform and climate tables stand.
 func spec(with_water := true) -> Dictionary:
-	var s = _selected(sizes, _size)
+	var s = _selected_entry(sizes, _size)
 	var root := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 	var dims: Array = s["size"].map(func(v): return int(v))  # JSON numbers are floats
 	var out := {"config": root.path_join(s["config"]), "size": dims}
-	var t = _selected(terrains, _terrain)
+	var t = _selected_entry(terrains, _terrain)
 	if t and t["name"] != s.get("terrain", ""):
 		out["terrain"] = t["name"]
-	var c = _selected(climates, _climate)
+	var c = _selected_entry(climates, _climate)
 	if c and c["name"] != s.get("climate", ""):
 		out["climate"] = c["name"]
 	if with_water and _water_ok:
@@ -462,7 +332,7 @@ static func seed_problem(text: String) -> String:
 
 ## Found the size's number of candidates (the catalog's), or `count` when given.
 func generate(count := 0) -> String:
-	var s = _selected(sizes, _size)
+	var s = _selected_entry(sizes, _size)
 	if s == null:
 		return "no size to make"
 	if count <= 0:
@@ -484,7 +354,7 @@ func generate(count := 0) -> String:
 
 ## Cards for a batch the session has just started.
 func _start_batch(count: int, says: String) -> void:
-	var s = _selected(sizes, _size)
+	var s = _selected_entry(sizes, _size)
 	_clear_cards()
 	_batch_key = "terrain/%s/%s" % [s["id"], count]
 	_started_ms = Time.get_ticks_msec()
@@ -493,7 +363,6 @@ func _start_batch(count: int, says: String) -> void:
 	_grid.columns = 2 if aspect <= 3.0 else 1
 	for i in count:
 		_cards.append(_card(i, aspect))
-	_generate.text = "Reroll"
 	_status.text = says
 	_refresh_controls()
 
@@ -505,73 +374,103 @@ func _clear_cards() -> void:
 	_cards.clear()
 	_views.clear()
 	_ready_ms.clear()
+	_selected = -1
 
 
-## A candidate's card: its view (as wide as the column, at the world's own aspect),
-## its progress, a population line, and Open and Pick.
+## A candidate's card (terrain_card.tscn): its view (as wide as the card, at the world's
+## own aspect), its name and state, a small progress row while it is drawn, and a line for
+## anything worth saying. A or Enter founds it, a click selects it, a double click opens it.
 func _card(i: int, aspect: float) -> Dictionary:
-	var root := PanelContainer.new()
-	root.theme_type_variation = &"Row"
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var root: BaseButton = CARD.instantiate()
 	_grid.add_child(root)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	root.add_child(box)
-	var holder := Control.new()
-	holder.custom_minimum_size = CARD_VIEW
-	holder.clip_contents = true
+	var holder: Control = root.get_node("%Holder")
+	root.get_node("%Sample").free()
+	holder.custom_minimum_size = Vector2(0, CARD_VIEW.y)
 	holder.resized.connect(func():
 		var h := maxf(holder.size.x / aspect, 120.0)
 		if absf(holder.custom_minimum_size.y - h) > 1.0:
-			holder.custom_minimum_size = Vector2(CARD_VIEW.x, h))
-	box.add_child(holder)
-	var bg := ColorRect.new()
-	bg.color = Color(0.05, 0.06, 0.085)
-	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	holder.add_child(bg)
-	var state := Label.new()
-	box.add_child(state)
-	var bar := ProgressBar.new()
-	bar.custom_minimum_size = Vector2(0, 10)
-	bar.show_percentage = false
-	box.add_child(bar)
-	var summary := Label.new()
-	summary.theme_type_variation = &"Small"
-	summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(summary)
-	var row := HBoxContainer.new()
-	box.add_child(row)
-	var open_b := Button.new()
-	open_b.text = "Open"
-	open_b.disabled = true
-	open_b.custom_minimum_size = Vector2(110, 0)
-	open_b.pressed.connect(func(): open_large(i))
-	row.add_child(open_b)
-	var pick_b := Button.new()
-	pick_b.text = "Pick"
-	pick_b.disabled = true
-	pick_b.custom_minimum_size = Vector2(110, 0)
-	pick_b.pressed.connect(func(): _pick(i))
-	row.add_child(pick_b)
-	return {"root": root, "holder": holder, "state": state, "bar": bar, "summary": summary,
-		"open": open_b, "pick": pick_b, "shown": false}
+			holder.custom_minimum_size = Vector2(0, h))
+	(root.get_node("%Name") as Label).text = "Terrain %d" % (i + 1)
+	root.pressed.connect(func(): _pick(i))
+	root.focus_entered.connect(func():
+		_selected = i
+		_refresh_controls())
+	root.gui_input.connect(func(e: InputEvent):
+		if e is InputEventMouseButton and e.double_click and e.button_index == MOUSE_BUTTON_LEFT:
+			open_large(i))
+	var card := {"root": root, "holder": holder, "state": root.get_node("%State"),
+		"bar": root.get_node("%Bar"), "summary": root.get_node("%Info"), "shown": false}
+	_set_card_state(card, "Drawing", true)
+	return card
 
 
-## Buttons as the work in hand allows: nothing new while a world is founded, Cancel while
-## anything is in flight.
+func _set_card_state(card: Dictionary, state: String, drawing: bool) -> void:
+	card["state"].text = state
+	card["bar"].visible = drawing
+	card["holder"].modulate.a = 0.35 if drawing else 1.0
+
+
+func _set_card_note(card: Dictionary, text: String) -> void:
+	card["summary"].text = text
+	card["summary"].visible = text != ""
+
+
+## Whether card `i` can be founded now.
+func _pickable(i: int) -> bool:
+	return not _founding and i >= 0 and i < _cards.size() and _cards[i].get("ready", false) \
+		and _cards[i].get("feasible", true)
+
+
+## Whether card `i` has a picture to open large.
+func can_open(i: int) -> bool:
+	return _views.has(i)
+
+
+func _card_index(node: Node) -> int:
+	for i in _cards.size():
+		if _cards[i]["root"] == node:
+			return i
+	return -1
+
+
+## Buttons and hints as the work in hand allows: nothing new while a world is founded,
+## Cancel while anything is in flight.
 func _refresh_controls() -> void:
+	var has_cards := not _cards.is_empty()
 	_generate.disabled = _founding
-	_water.editable = not _founding
+	_generate.visible = not _founding
+	_generate_label.text = " Reroll " if has_cards else " Generate "
+	_reroll_hint.text = "Reroll" if has_cards else "Generate"
+	_found.visible = has_cards and not _founding
+	_found.disabled = not _pickable(_selected)
 	_cancel.visible = _generating and not _founding
-	for card in _cards:
-		var ready: bool = card.get("ready", false)
-		card["pick"].disabled = _founding or not ready or not card.get("feasible", true)
-		card["open"].disabled = not ready
-	_large_pick.disabled = _founding or (_large_index >= 0 and _large_index < _cards.size()
-		and _cards[_large_index]["pick"].disabled)
+	_found_cancel.visible = _founding
+	_found_box.visible = _founding
+	_cards_scroll.visible = not _founding
+	_header.text = ("Founding terrain %d" % (_found_index + 1)) if _founding else "Terrains"
+	_lock_form(_founding)
+	_hints["open"].visible = has_cards and not _founding
+	_hints["found"].visible = has_cards and not _founding
+	_hints["reroll"].visible = not _founding
+	_hints["back"].visible = not _founding
+	_hints["cancel"].visible = _founding
+	_large_pick.disabled = _founding or not _pickable(_large_index)
+
+
+## While a world is founded the form dims (round 4's Founding view) and takes no input.
+func _lock_form(locked: bool) -> void:
+	_form.modulate.a = 0.4 if locked else 1.0
+	for c: Control in [_size, _terrain, _climate, _water]:
+		c.focus_mode = Control.FOCUS_NONE if locked else Control.FOCUS_ALL
+		c.mouse_filter = Control.MOUSE_FILTER_IGNORE if locked else Control.MOUSE_FILTER_STOP
+	_seed.editable = not locked
+	_seed.focus_mode = Control.FOCUS_NONE if locked else Control.FOCUS_ALL
+	_seed.mouse_filter = Control.MOUSE_FILTER_IGNORE if locked else Control.MOUSE_FILTER_STOP
 
 
 func _process(_delta: float) -> void:
+	if shell == null:
+		return
 	if _founding:
 		_follow_founding()
 	if _cards.is_empty():
@@ -586,37 +485,38 @@ func _process(_delta: float) -> void:
 		if i >= _cards.size():
 			continue
 		var card: Dictionary = _cards[i]
-		var seed_text := "seed %s" % str(c["seed"]) if c.get("seed") != null else ""
 		match c["state"]:
 			"generating":
 				waiting += 1
-				card["state"].text = "Drawing the terrain…  %d s" % int(elapsed)
-				var bar: ProgressBar = card["bar"]
+				_set_card_state(card, "Drawing", true)
+				var bar: NeonDotProgress = card["bar"]
 				if estimate > 0.0:
 					bar.indeterminate = false
-					bar.value = minf(elapsed / estimate, 0.97) * 100.0
+					bar.value = minf(elapsed / estimate, 0.97)
 				else:
 					bar.indeterminate = true
+				_set_card_note(card, "%d s" % int(elapsed))
 			"ready":
 				if not _ready_ms.has(i):
 					_ready_ms[i] = now
-				var took: float = (_ready_ms[i] - _started_ms) / 1000.0
-				card["state"].text = "Ready (%s), %d s" % [seed_text, int(took)]
+				_set_card_state(card, "Ready", false)
 				card["bar"].indeterminate = false
-				card["bar"].value = 100.0
+				card["bar"].value = 1.0
 				if not card["shown"]:
+					_set_card_note(card, "")
 					_show_candidate(i, c)
 				elif not card.get("framed", false):
 					_follow_thumbnail(card)
 			"failed":
-				card["state"].text = "No terrain"
+				_set_card_state(card, "No terrain", false)
 				card["bar"].indeterminate = false
 				card["bar"].value = 0.0
-				card["summary"].text = str(c.get("error", ""))
+				_set_card_note(card, str(c.get("error", "")))
 			"cancelled":
-				card["state"].text = "Cancelled"
+				_set_card_state(card, "Cancelled", false)
 				card["bar"].indeterminate = false
 				card["bar"].value = 0.0
+				_set_card_note(card, "")
 	if _generating and waiting == 0 and list.size() > 0:
 		_generating = false
 		shell.record_founding_s(_batch_key, elapsed)
@@ -642,7 +542,8 @@ func _show_candidate(i: int, c: Dictionary) -> void:
 	card["ready"] = true
 	card["feasible"] = c.get("feasible") != false
 	card["terrain"] = c.get("terrain", "")
-	card["summary"].text = _terrain_line(c)
+	card["seed"] = str(c.get("seed", "")) if c.get("seed") != null else ""
+	_set_card_note(card, _terrain_line(c))
 	_refresh_controls()
 
 
@@ -659,18 +560,18 @@ func _follow_thumbnail(card: Dictionary) -> void:
 	var problem: String = wv.problem()
 	if problem != "":
 		card["framed"] = true
-		card["summary"].text = "No picture: " + problem
+		_set_card_note(card, "No picture: " + problem)
 
 
-## What a terrain card says under its picture: bare until picked, and what the
-## feasibility check found.
+## What a terrain card says under its name: nothing for a plain bare terrain (Found this
+## world founds it), else what the feasibility check found.
 static func _terrain_line(c: Dictionary) -> String:
-	var line := "Bare terrain: the plants and animals are founded when you pick it."
+	var lines: PackedStringArray = []
 	if c.get("feasible") == false:
-		line = "The founders can't all be placed on this terrain."
+		lines.append("The founders can't all be placed on this terrain.")
 	for n in c.get("notes", []):
-		line += "\n" + str(n)
-	return line
+		lines.append(str(n))
+	return "\n".join(lines)
 
 
 func open_large(i: int) -> void:
@@ -679,8 +580,10 @@ func open_large(i: int) -> void:
 	close_large()
 	_large_index = i
 	WorldViews.make_framed(_views[i], _large_holder, true)
-	_large_title.text = "Candidate %d  ·  %s" % [i + 1, _cards[i]["state"].text]
+	var seed: String = _cards[i].get("seed", "")
+	_large_title.text = "Terrain %d" % (i + 1) + ("  ·  seed %s" % seed if seed != "" else "")
 	_large.visible = true
+	_page.visible = false
 	_refresh_controls()
 	_large_pick.grab_focus()
 
@@ -689,10 +592,11 @@ func close_large() -> void:
 	if not _large.visible:
 		return
 	_large.visible = false
+	_page.visible = true
 	for c in _large_holder.get_children():
 		c.queue_free()
 	if _large_index >= 0 and _large_index < _cards.size():
-		_cards[_large_index]["open"].grab_focus()
+		_cards[_large_index]["root"].grab_focus()
 	_large_index = -1
 
 
@@ -712,8 +616,11 @@ func ready_count() -> int:
 
 
 ## Found candidate `i` on its own terrain; the panel follows it until it runs, fails or
-## is cancelled.
+## is cancelled. Nothing happens for a card that can't be founded (still drawing, or the
+## founders don't fit; its card says which).
 func _pick(i: int) -> void:
+	if not _pickable(i):
+		return
 	var problem: String = shell.found_candidate(i)
 	if problem != "":
 		_status.text = "Can't pick it: " + problem
@@ -721,11 +628,9 @@ func _pick(i: int) -> void:
 	close_large()
 	_founding = true
 	_found_index = i
-	_found_title.text = "Founding candidate %d" % (i + 1)
 	_found_phase.text = "Starting…"
 	_found_bar.value = 0.0
 	_found_detail.text = ""
-	_found_box.visible = true
 	_status.text = ""
 	_refresh_controls()
 	_found_cancel.grab_focus()
@@ -742,7 +647,7 @@ func _follow_founding() -> void:
 		"founding":
 			var label: String = f.get("phase_label", "")
 			_found_phase.text = (label if label != "" else "Starting") + "…"
-			_found_bar.value = clampf(float(f.get("progress", 0.0)), 0.0, 1.0) * 100.0
+			_found_bar.value = clampf(float(f.get("progress", 0.0)), 0.0, 1.0)
 			var detail := "seed %s  ·  %d s" % [str(f.get("seed", "")), int(f.get("elapsed_s", 0.0))]
 			if int(f.get("attempt", 0)) > 1:
 				detail += "  ·  placing the founders again, try %d of %d" % [f["attempt"], f["attempts"]]
@@ -750,8 +655,8 @@ func _follow_founding() -> void:
 		"done":
 			_end_founding()
 			_clear_cards()
-			_generate.text = "Generate"
 			_status.text = ""
+			_refresh_controls()
 			shell.on_founded(f)
 		"failed":
 			_end_founding()
@@ -762,8 +667,9 @@ func _follow_founding() -> void:
 
 
 func _end_founding() -> void:
+	var had_focus := _found_cancel.has_focus()
 	_founding = false
 	_found_index = -1
-	_found_box.visible = false
 	_refresh_controls()
-
+	if had_focus and visible:
+		focus_first()

@@ -1,0 +1,811 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="2_world"]
+[ext_resource type="Material" path="res://ui/neon/neon_scrim.tres" id="3_scrim"]
+[ext_resource type="Script" path="res://ui/new_world.gd" id="4_picker"]
+[ext_resource type="Script" path="res://ui/neon/neon_arrows.gd" id="5_arrows"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_slider.gd" id="6_slider"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_progress.gd" id="7_progress"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="8_button"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="9_label"]
+[ext_resource type="FontVariation" path="res://ui/neon/fonts/text.tres" id="10_text"]
+[ext_resource type="PackedScene" path="res://ui/terrain_card.tscn" id="11_card"]
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_dashes.gd" id="12_dashes"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_seed"]
+
+[sub_resource type="StyleBox" id="StyleBox_rule"]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = 56.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+script = ExtResource("12_dashes")
+top = false
+left = true
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_t3"]
+atlas = ExtResource("2_world")
+region = Rect2(900, 610, 336, 168)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_t5"]
+atlas = ExtResource("2_world")
+region = Rect2(1300, 520, 336, 168)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_t7"]
+atlas = ExtResource("2_world")
+region = Rect2(500, 700, 336, 168)
+
+[node name="NewWorld" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("1_theme")
+script = ExtResource("4_picker")
+
+[node name="World" type="TextureRect" parent="."]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_world")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="."]
+material = ExtResource("3_scrim")
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="Control" parent="Center"]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Body" type="PanelContainer" parent="Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 96.0
+offset_right = 1824.0
+offset_bottom = 976.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="Margin" type="MarginContainer" parent="Center/Page/Body"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 56
+theme_override_constants/margin_top = 48
+theme_override_constants/margin_right = 56
+theme_override_constants/margin_bottom = 28
+
+[node name="Stack" type="VBoxContainer" parent="Center/Page/Body/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="Head" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Kicker" type="Label" parent="Center/Page/Body/Margin/Stack/Head"]
+layout_mode = 2
+theme_type_variation = &"Kicker"
+text = "World"
+uppercase = true
+
+[node name="Title" type="Label" parent="Center/Page/Body/Margin/Stack/Head"]
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"TitleLabel"
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 4
+theme_override_font_sizes/font_size = 52
+text = "New world"
+
+[node name="HeadGap" type="Control" parent="Center/Page/Body/Margin/Stack"]
+custom_minimum_size = Vector2(0, 34)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Columns" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_constants/separation = 64
+
+[node name="Form" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(760, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 28
+
+[node name="SizeField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Size"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Size" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("5_arrows")
+options = PackedStringArray("Terrarium", "Deep 1.5×", "Deep 2×", "Wide")
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="SizeNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Note"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "256 × 128 × 48 cells, the standard terrarium."
+autowrap_mode = 3
+
+[node name="TerrainField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Terrain"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Terrain" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("5_arrows")
+options = PackedStringArray("Terrarium", "Small terrarium", "Staged ring, small", "Staged ring, terraced", "Staged ring, wide")
+index = 3
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="TerrainNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField/Note"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "A ring of terraces stepping down to a central lake."
+autowrap_mode = 3
+
+[node name="ClimateField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Climate"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Climate" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 60)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("5_arrows")
+options = PackedStringArray("Tropical jungle")
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="ClimateNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField/Note"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+autowrap_mode = 3
+
+[node name="WaterField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Water"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Water" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+size_flags_vertical = 4
+script = ExtResource("6_slider")
+
+[node name="Note" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+
+[node name="WaterNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField/Note"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "The water table 0.750 m over the yard's ground."
+autowrap_mode = 3
+
+[node name="SeedField" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/SeedField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/SeedField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Seed"
+vertical_alignment = 1
+uppercase = true
+
+[node name="SeedBox" type="PanelContainer" parent="Center/Page/Body/Margin/Stack/Columns/Form/SeedField/Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(420, 52)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"SearchBox"
+
+[node name="Seed" type="LineEdit" parent="Center/Page/Body/Margin/Stack/Columns/Form/SeedField/Row/SeedBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_colors/font_color = Color(0.8627451, 0.81960785, 0.96862745, 1)
+theme_override_colors/font_placeholder_color = Color(0.64705884, 0.58431375, 0.84705883, 1)
+theme_override_colors/caret_color = Color(0.25882354, 0.77254903, 0.972549, 1)
+theme_override_colors/selection_color = Color(0.7607843, 0.24705882, 0.827451, 0.45)
+theme_override_fonts/font = ExtResource("10_text")
+theme_override_font_sizes/font_size = 21
+theme_override_styles/normal = SubResource("StyleBoxEmpty_seed")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_seed")
+theme_override_styles/read_only = SubResource("StyleBoxEmpty_seed")
+placeholder_text = "Random"
+flat = true
+caret_blink = true
+
+[node name="Right" type="PanelContainer" parent="Center/Page/Body/Margin/Stack/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBox_rule")
+
+[node name="RightStack" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 18
+
+[node name="Header" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Terrains"
+uppercase = true
+
+[node name="Cards" type="ScrollContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 3
+follow_focus = true
+horizontal_scroll_mode = 0
+
+[node name="CardsMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/margin_left = 9
+theme_override_constants/margin_top = 9
+theme_override_constants/margin_right = 9
+theme_override_constants/margin_bottom = 9
+
+[node name="Grid" type="GridContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/h_separation = 30
+theme_override_constants/v_separation = 28
+columns = 2
+
+[node name="Card1" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+layout_mode = 2
+
+[node name="Card3" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+layout_mode = 2
+preview_focus = true
+
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3/Margin/Stack/Holder" index="1"]
+texture = SubResource("AtlasTexture_t3")
+
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3/Margin/Stack/TitleRow" index="0"]
+text = "Terrain 3"
+
+[node name="Card5" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+layout_mode = 2
+
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5/Margin/Stack/Holder" index="1"]
+texture = SubResource("AtlasTexture_t5")
+
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5/Margin/Stack/TitleRow" index="0"]
+text = "Terrain 5"
+
+[node name="Card7" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+layout_mode = 2
+
+[node name="Holder" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack" index="0"]
+modulate = Color(1, 1, 1, 0.35)
+
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/Holder" index="1"]
+texture = SubResource("AtlasTexture_t7")
+
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="0"]
+text = "Terrain 7"
+
+[node name="State" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="1"]
+text = "Drawing"
+
+[node name="Bar" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack" index="2"]
+visible = true
+
+[node name="Founding" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+theme_override_constants/separation = 18
+
+[node name="Phase" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Founding"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"BodyText"
+theme_override_colors/font_color = Color(0.96862745, 0.9411765, 1, 1)
+text = "Placing animals…"
+
+[node name="FoundBar" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Founding"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(516, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+mouse_filter = 2
+script = ExtResource("7_progress")
+
+[node name="FoundDetail" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Founding"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "seed 5  ·  12 s"
+autowrap_mode = 3
+
+[node name="Status" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "3 of 4 terrains drawn. Pick one to found it."
+autowrap_mode = 3
+
+[node name="Actions" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="ActionRow" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 20
+
+[node name="Found" type="BaseButton" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Found"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Found/Content"]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Found/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Found this world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="Generate" type="BaseButton" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Generate"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Generate/Content"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="GenerateLabel" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Generate/Content"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Reroll "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Cancel" type="BaseButton" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Cancel"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/Cancel/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Cancel "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelSecondary"
+
+[node name="FoundCancel" type="BaseButton" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/FoundCancel"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/FoundCancel/Content"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions/ActionRow/FoundCancel/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Cancel "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelSecondary"
+
+[node name="Hints" type="HBoxContainer" parent="Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 1008.0
+offset_right = 1824.0
+offset_bottom = 1046.0
+mouse_filter = 2
+theme_type_variation = &"KeyHints"
+alignment = 2
+
+[node name="OpenHint" type="HBoxContainer" parent="Center/Page/Hints"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/OpenHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " Y "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/OpenHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Open large"
+vertical_alignment = 1
+uppercase = true
+
+[node name="FoundHint" type="HBoxContainer" parent="Center/Page/Hints"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/FoundHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/FoundHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Found"
+vertical_alignment = 1
+uppercase = true
+
+[node name="RerollHint" type="HBoxContainer" parent="Center/Page/Hints"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/RerollHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="RerollHintLabel" type="Label" parent="Center/Page/Hints/RerollHint"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Reroll"
+vertical_alignment = 1
+uppercase = true
+
+[node name="BackHint" type="HBoxContainer" parent="Center/Page/Hints"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/BackHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/BackHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Back"
+vertical_alignment = 1
+uppercase = true
+
+[node name="CancelHint" type="HBoxContainer" parent="Center/Page/Hints"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"KeyHint"
+
+[node name="Keycap" type="Label" parent="Center/Page/Hints/CancelHint"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Hints/CancelHint"]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Cancel"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Large" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="Large"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="Control" parent="Large/Center"]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Body" type="PanelContainer" parent="Large/Center/Page"]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 96.0
+offset_right = 1824.0
+offset_bottom = 976.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="Margin" type="MarginContainer" parent="Large/Center/Page/Body"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 56
+theme_override_constants/margin_top = 48
+theme_override_constants/margin_right = 56
+theme_override_constants/margin_bottom = 28
+
+[node name="Stack" type="VBoxContainer" parent="Large/Center/Page/Body/Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 18
+
+[node name="LargeTitle" type="Label" parent="Large/Center/Page/Body/Margin/Stack"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Terrain 3  ·  seed 5"
+uppercase = true
+
+[node name="LargeHolder" type="Control" parent="Large/Center/Page/Body/Margin/Stack"]
+unique_name_in_owner = true
+clip_contents = true
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Bottom" type="HBoxContainer" parent="Large/Center/Page/Body/Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 20
+
+[node name="LargePick" type="BaseButton" parent="Large/Center/Page/Body/Margin/Stack/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargePick"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargePick/Content"]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " A "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargePick/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Found this world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="LargeBack" type="BaseButton" parent="Large/Center/Page/Body/Margin/Stack/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("8_button")
+
+[node name="Content" type="HBoxContainer" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargeBack"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargeBack/Content"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Large/Center/Page/Body/Margin/Stack/Bottom/LargeBack/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Back "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("9_label")
+look = &"ButtonLabelSecondary"
+
+[node name="PanHint" type="Label" parent="Large/Center/Page/Body/Margin/Stack/Bottom"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallTextLabel"
+text = "Pan: drag, arrows, WASD or the left stick."
+horizontal_alignment = 2
+vertical_alignment = 1
+
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3"]
+
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5"]
+
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7"]
