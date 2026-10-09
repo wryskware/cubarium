@@ -37,6 +37,7 @@ use cubarium_voxel_flora::Site;
 use cubarium_voxel_flora::{Deposit, DepositKind, Flora};
 use cubarium_voxel_sim::Placement;
 use cubarium_voxel_sim::found::{self, Founded};
+use cubarium_voxel_sim::habitat;
 
 
 /// The landscape episode protocol: whole frozen worlds, two water states, as many acting
@@ -437,13 +438,17 @@ impl std::fmt::Debug for PreparedLandscape {
 const START_SALT: u64 = 0x_57A2_7F0C_E5D1_0000;
 
 /// The standable faces of `founder`'s walkable components that the seeder's acceptance
-/// judged **habitable**, on the founded (drained) world, sorted. The route map is the
-/// acceptance's own ([`RouteMap::for_founder`] on the same world and physiology), so its
-/// component indices are the verdict's. A world whose verdict holds no habitable
-/// component for the lineage (a test ring accepted unconditionally) falls back to the
-/// components the lineage's founders were placed in.
+/// judged **habitable**, on the founded (drained) world, sorted. The route map is
+/// labelled as the acceptance labels it ([`habitat::judged_route_map`]: the body-clear
+/// walking graph's components), so its component indices are the verdict's. A world whose
+/// verdict holds no habitable component for the lineage (a test ring accepted
+/// unconditionally) falls back to the components the lineage's founders were placed in.
 pub fn start_faces_of(founded: &Founded, cfg: &FaunaConfig, founder: Founder) -> Vec<Site> {
-    let map = RouteMap::for_founder(&founded.world.view(), cfg.founder(founder));
+    let map = habitat::judged_route_map(
+        &founded.world.view(),
+        cfg.founder(founder),
+        cfg.founding.clearance_margin_m,
+    );
     let verdict = &founded.seeded.acceptance.lineages[founder.index()];
     let mut keep: Vec<usize> = verdict
         .components

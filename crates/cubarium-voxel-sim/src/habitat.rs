@@ -1636,14 +1636,25 @@ fn food_on_graph(
     phys: &FounderPhysiology,
     graph: &RouteGraph,
 ) -> (RouteMap, BTreeMap<usize, ComponentFood>) {
+    let map = route_map_on_graph(view, phys, graph);
+    let food = food_on(&map, view, fv, phys);
+    (map, food)
+}
+
+/// The founder's route map labelled by the body-clear walking graph's components: the
+/// labelling the acceptance verdict's component indices refer to. Faces outside the
+/// walking graph get a sentinel component that no founder can occupy.
+pub fn judged_route_map(view: &VoxelView<'_>, phys: &FounderPhysiology, clearance_margin_m: f64) -> RouteMap {
+    route_map_on_graph(view, phys, &RouteGraph::for_founder(view, phys, clearance_margin_m))
+}
+
+fn route_map_on_graph(view: &VoxelView<'_>, phys: &FounderPhysiology, graph: &RouteGraph) -> RouteMap {
     let mut map = RouteMap::for_founder(view, phys);
-    // Mouth reach and body-clear walking must refer to the same components. Faces
-    // outside the walking graph get a sentinel component that no founder can occupy.
+    // Mouth reach and body-clear walking must refer to the same components.
     for (site, component) in map.faces.iter().zip(&mut map.components) {
         *component = graph.component_of(*site).unwrap_or(usize::MAX);
     }
-    let food = food_on(&map, view, fv, phys);
-    (map, food)
+    map
 }
 
 fn placement_rank(seed: u64, s: Site) -> u64 {

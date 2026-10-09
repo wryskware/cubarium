@@ -301,8 +301,6 @@ fn a_mixed_run_draws_landscapes_and_writes_held_out_checkpoints() {
 /// components, distinct, and (mid-shower) still standable in that water.
 #[test]
 fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
-    use cubarium_voxel_fauna::RouteMap;
-
     let founded = found::found(
         &tiny(),
         &LayerConfig::new(&Params::defaults(), tiny().voxel_m),
@@ -312,7 +310,12 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
     );
     let cfg = FaunaConfig::default();
     for founder in cubarium_search::es::voxel::TRAINED_LINEAGES {
-        let map = RouteMap::for_founder(&founded.world.view(), cfg.founder(founder));
+        // The acceptance's labelling: its verdict's component indices are this map's.
+        let map = cubarium_voxel_sim::habitat::judged_route_map(
+            &founded.world.view(),
+            cfg.founder(founder),
+            cfg.founding.clearance_margin_m,
+        );
         let verdict = &founded.seeded.acceptance.lineages[founder.index()];
         let habitable: Vec<usize> = verdict
             .components
@@ -367,8 +370,10 @@ fn acting_bodies_start_on_drawn_faces_of_the_judged_components() {
                 "{founder:?}: the starts are drawn, not the seeder's faces"
             );
             if water == WaterState::MidShower {
-                let standable =
-                    RouteMap::for_founder(&prepared.world().view(), cfg.founder(founder));
+                let standable = cubarium_voxel_fauna::RouteMap::for_founder(
+                    &prepared.world().view(),
+                    cfg.founder(founder),
+                );
                 for p in &a {
                     assert!(
                         standable.face(p.site).is_some(),
