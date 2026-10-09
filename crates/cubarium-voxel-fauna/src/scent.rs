@@ -464,7 +464,7 @@ pub struct Plume {
 
 /// The modified Bessel function `K₀(x)`, `x > 0` (Abramowitz and Stegun 9.8.1, 9.8.5,
 /// 9.8.6; error under 1e-7): the field's steady state around one source in the plane.
-fn bessel_k0(x: f64) -> f64 {
+pub(crate) fn bessel_k0(x: f64) -> f64 {
     if x <= 2.0 {
         let t = (x / 3.75) * (x / 3.75);
         let i0 = 1.0 + t * (3.5156229 + t * (3.0899424 + t * (1.2067492 + t * (0.2659732 + t * (0.0360768 + t * 0.0045813)))));
@@ -505,6 +505,7 @@ pub(crate) fn plume_kernel(config: &FaunaConfig, voxel_m: f64) -> Option<(f64, f
 /// lit lure but `except`'s (a lanternjaw does not smell its own) at its lure point, by
 /// `lure_scent` × its lit fraction × a full flower's (the mimic holds none). The light
 /// layer's beacons and lures: the same flowers the eye sees.
+#[cfg(test)]
 pub(crate) fn nectar_sources(fauna: &crate::Fauna, view: &VoxelView<'_>, except: Option<u64>) -> Vec<((f64, f64, f64), f64)> {
     let s = fauna.config.scent;
     if !(s.nectar_per_s > 0.0) {
@@ -517,6 +518,75 @@ pub(crate) fn nectar_sources(fauna: &crate::Fauna, view: &VoxelView<'_>, except:
         .filter(|b| Some(b.body) != except && ls > 0.0 && b.power > 0.0)
         .map(|b| ((b.x, b.y_m, b.z), s.nectar_per_s * ls * b.power.clamp(0.0, 1.0)));
     flowers.chain(lures).collect()
+}
+
+/// Read the shared static flower tree, while lures retain their current poses.
+/// Keeping the strongest flowers is exact: at most MAX_PLUME_RAYS sources can
+/// affect the reading. If their sum misses the floor, refine the tree's aggregate
+/// emission bounds (many individually weak flowers can collectively clear it).
+pub(crate) fn nectar_plume_indexed(
+    fauna: &crate::Fauna,
+    view: &VoxelView<'_>,
+    p: (f64, f64, f64),
+    observer: u64,
+    floor: f64,
+) -> Plume {
+    let c = &fauna.config;
+    let v = view.config.voxel_m;
+    let Some((amp, spread)) = plume_kernel(c, v) else {
+        return Plume::default();
+    };
+    if !(c.scent.nectar_per_s > 0.0) {
+        return Plume::default();
+    }
+    let ring = f64::from(view.config.width) * v;
+    let indices = fauna.beacons.strongest_flowers(
+        p,
+        ring,
+        v,
+        amp,
+        spread,
+        c.scent.nectar_per_s,
+        c.scent.threshold.max(0.0),
+        MAX_PLUME_RAYS,
+    );
+    let lures: Vec<_> = crate::light::lures(fauna, view)
+        .into_iter()
+        .filter(|b| b.body != observer && c.light.lure_scent > 0.0 && b.power > 0.0)
+        .map(|b| {
+            (
+                (b.x, b.y_m, b.z),
+                c.scent.nectar_per_s * c.light.lure_scent * b.power.clamp(0.0, 1.0),
+            )
+        })
+        .collect();
+    let selected: Vec<_> = indices
+        .into_iter()
+        .map(|i| fauna.beacons.flower_source(i, c.scent.nectar_per_s))
+        .chain(lures.iter().copied())
+        .collect();
+    let level = |(src, q): ((f64, f64, f64), f64)| {
+        let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, src.0, src.2, ring);
+        let dy = src.1 - p.1;
+        q * amp * bessel_k0((dx * dx + dy * dy + dz * dz).sqrt().max(v) / spread)
+    };
+    let selected_total: f64 = selected
+        .iter()
+        .copied()
+        .map(level)
+        .filter(|&s| s > c.scent.threshold.max(0.0))
+        .sum();
+    if selected_total < floor {
+        let lure_total: f64 = lures.iter().copied().map(level)
+            .filter(|&s| s > c.scent.threshold.max(0.0)).sum();
+        if !fauna.beacons.flowers_reach_floor(p, ring, v, amp, spread,
+            c.scent.nectar_per_s, c.scent.threshold.max(0.0), floor - lure_total) {
+            return Plume::default();
+        }
+    }
+    // The complete pre-ray sum meets the floor; the retained strongest sources
+    // now undergo exactly the same ranking, ray tests and gradient calculation.
+    nectar_plume_from(view, c, selected, p, observer, 0.0)
 }
 
 /// At most this many sources, strongest first, are tested for a clear line and summed per
@@ -532,10 +602,22 @@ const MAX_PLUME_RAYS: usize = 6;
 /// dropped, and when the sum before the line tests is under `floor` nothing is smelled (a
 /// cost bound: occlusion only lowers it); of the rest, the [`MAX_PLUME_RAYS`] strongest are
 /// read.
+#[cfg(test)]
 pub(crate) fn nectar_plume(
     view: &VoxelView<'_>,
     config: &FaunaConfig,
     sources: &[((f64, f64, f64), f64)],
+    p: (f64, f64, f64),
+    observer: u64,
+    floor: f64,
+) -> Plume {
+    nectar_plume_from(view, config, sources.iter().copied(), p, observer, floor)
+}
+
+fn nectar_plume_from(
+    view: &VoxelView<'_>,
+    config: &FaunaConfig,
+    sources: impl IntoIterator<Item = ((f64, f64, f64), f64)>,
     p: (f64, f64, f64),
     observer: u64,
     floor: f64,
@@ -546,7 +628,7 @@ pub(crate) fn nectar_plume(
     let threshold = config.scent.threshold.max(0.0);
     let mut near: Vec<(f64, f64, (f64, f64, f64), (f64, f64, f64))> = Vec::new();
     let mut total = 0.0;
-    for &(src, q) in sources {
+    for (src, q) in sources {
         let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, src.0, src.2, ring);
         let dy = src.1 - p.1;
         let r = (dx * dx + dy * dy + dz * dz).sqrt();

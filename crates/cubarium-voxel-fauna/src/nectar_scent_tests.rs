@@ -162,3 +162,193 @@ fn nectar_full_scales_flower_scent_and_nonpositive_uses_the_full_rate() {
     assert_eq!(share(0.0), 1.0);
     assert_eq!(share(-held), 1.0);
 }
+
+/// The shared tree gives the complete reader's result with different bloom heights,
+/// rates, wrap distances, and floor cuts, including a floor above the top-six sum.
+#[test]
+fn indexed_plume_matches_complete_sources() {
+    let mut world = plain_of_height(DayClock::default(), 806, 24);
+    let flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    fauna.config.scent.threshold = 0.0;
+    let ring = f64::from(world.config().width) * world.config().voxel_m;
+    let flowers: Vec<_> = (0..96)
+        .map(|i| {
+            (
+                crate::light::Beacon {
+                    kind: if i % 11 == 0 {
+                        BeaconKind::Glowcap
+                    } else {
+                        BeaconKind::Flower
+                    },
+                    x: ((i * 37 % 96) as f64 + 0.5) / 96.0 * ring,
+                    y_m: SURFACE_M + 0.5 + (i % 4) as f64 * 0.25,
+                    z: LANE_Z + (i % 5) as f64 * 0.15,
+                    sky: 1.0,
+                    power: 1.0,
+                    moving: false,
+                    body: 0,
+                },
+                if i % 7 == 0 {
+                    100.0
+                } else {
+                    0.1 + (i % 3) as f64
+                },
+            )
+        })
+        .collect();
+    for wall in [false, true] {
+        if wall {
+            for y in SURFACE_Y + 1..world.config().height {
+                for z in 0..world.config().depth {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x: 1,
+                        y,
+                        z,
+                        material: cubarium_voxel::Material::Soil,
+                    });
+                }
+            }
+        }
+        let (view, fv) = (world.view(), flora.view());
+        fauna.beacons.fixed_with_scent(&view, &fv, flowers.clone());
+        let sources = nectar_sources(&fauna, &view, None);
+        for x in [0.01, ring - 0.01, ring * 0.4] {
+            for y in [SURFACE_M + 0.5, SURFACE_M + 1.5] {
+                let p = (x, y, LANE_Z);
+                let full = nectar_plume(&view, &fauna.config, &sources, p, 0, 0.0);
+                for floor in [0.0, full.level * 1.5, full.level * 100.0] {
+                    let expected = nectar_plume(&view, &fauna.config, &sources, p, 0, floor);
+                    let actual = crate::scent::nectar_plume_indexed(&fauna, &view, p, 0, floor);
+                    assert_eq!(actual.source, expected.source);
+                    for (a, e) in [
+                        (actual.level, expected.level),
+                        (actual.gx, expected.gx),
+                        (actual.gy, expected.gy),
+                        (actual.gz, expected.gz),
+                    ] {
+                        assert!(
+                            (a - e).abs() <= 1e-10 * e.abs().max(1.0),
+                            "indexed {actual:?}, complete {expected:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Contact candidates include the crown extent, wrap across the seam, and retain
+/// the complete geometry query's answer in an unindexed hand-built view.
+#[test]
+fn indexed_bloom_contact_matches_uncached_geometry() {
+    let world = plain_of_height(DayClock::default(), 807, 24);
+    let mut fc = FloraConfig::default();
+    fc.bloomcrown.nectar_per_s = 1e-3;
+    fc.bloomcrown.nectar_cap = 2e-3;
+    let mut flora = Flora::new(fc);
+    let wood = flora.config().species(Species::Bloomcrown).wood_max;
+    for x in [0, 8, world.config().width - 1] {
+        assert!(flora.apply(
+            &world,
+            FloraCommand::Seed {
+                x: i64::from(x),
+                z: 6,
+                species: Species::Bloomcrown,
+                wood
+            }
+        ));
+    }
+    let mut world = world;
+    for _ in 0..60 {
+        flora.step(&mut world);
+    }
+    let (view, fv) = (world.view(), flora.view());
+    let empty = cubarium_voxel_flora::CrownCache::none();
+    let uncached = cubarium_voxel_flora::FloraView {
+        crowns: &empty,
+        ..flora.view()
+    };
+    assert!(
+        fv.stands_near(0, 6, view.config.width, view.config.depth)
+            .is_some()
+    );
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (beacons, _) = crate::light::Beacons::build(&view, &fv, 1.0);
+    let height = beacons.iter().find(|b| b.kind == BeaconKind::Flower).unwrap().y_m;
+    let mut contacts = 0;
+    for x in [0.01, ring - 0.01, 8.5 * v, 10.1 * v, 20.5 * v] {
+        for y in [SURFACE_M, height - 0.05, height, height + v] {
+            for reach in [0.0, 0.05, 0.4] {
+                let p = (x, y, 6.5 * v);
+                contacts += usize::from(crate::flight::bloom_in_reach(&view, &fv, p, reach).is_some());
+                assert_eq!(
+                    crate::flight::bloom_in_reach(&view, &fv, p, reach),
+                    crate::flight::bloom_in_reach(&view, &uncached, p, reach)
+                );
+            }
+        }
+    }
+    assert!(contacts > 0, "fixture: some tested points touch blooms");
+}
+
+/// Isolate query cost on one fixed set of flower positions/rates; this is an
+/// explicitly requested performance probe, never a threshold on tuned ecology.
+#[test]
+#[ignore = "study: run by name"]
+fn nectar_query_throughput() {
+    use std::time::Instant;
+    let world = World::new(cubarium_voxel::Config {
+        width: 640, depth: 128, height: 32, voxel_m: 0.25,
+        ..cubarium_voxel::Config::default()
+    });
+    let flora = Flora::new(FloraConfig::default());
+    let (view, fv) = (world.view(), flora.view());
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let depth = f64::from(view.config.depth) * view.config.voxel_m;
+    let positions: Vec<_> = (0..32).map(|i| (
+        (i as f64 * 29.731).rem_euclid(ring),
+        2.0 + (i % 5) as f64 * 0.6,
+        (i as f64 * 5.37).rem_euclid(depth),
+    )).collect();
+    for count in [4096, 32768] {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let flowers: Vec<_> = (0..count).map(|i| (crate::light::Beacon {
+            kind: BeaconKind::Flower,
+            x: (i as f64 * 31.731).rem_euclid(ring),
+            z: (i as f64 * 7.171).rem_euclid(depth),
+            y_m: 2.0 + (i % 5) as f64 * 0.5,
+            sky: 1.0, power: 1.0, moving: false, body: 0,
+        }, (1 + i % 7) as f64 / 7.0)).collect();
+        for (label, share, floor) in [("normal", 1.0, 0.0), ("under-floor", 1.0, 1e8), ("weak", 1e-9, 1.0)] {
+            let started = Instant::now();
+            fauna.beacons.fixed_with_scent(&view, &fv, flowers.iter().map(|&(b, q)| (b, q * share)).collect());
+            let build = started.elapsed();
+            let sources = nectar_sources(&fauna, &view, None);
+            for &p in &positions {
+                let old = nectar_plume(&view, &fauna.config, &sources, p, 0, floor);
+                let new = crate::scent::nectar_plume_indexed(&fauna, &view, p, 0, floor);
+                assert_eq!(new.source, old.source);
+                assert!((new.level - old.level).abs() < 1e-10 * old.level.max(1.0));
+            }
+            let started = Instant::now();
+            for _ in 0..4 {
+                for &p in &positions {
+                    std::hint::black_box(nectar_plume(&view, &fauna.config, &sources, p, 0, floor));
+                }
+            }
+            let complete = started.elapsed();
+            let started = Instant::now();
+            for _ in 0..4 {
+                for &p in &positions {
+                    std::hint::black_box(crate::scent::nectar_plume_indexed(&fauna, &view, p, 0, floor));
+                }
+            }
+            let indexed = started.elapsed();
+            eprintln!("nectar {count} {label}: build {:.3}ms; complete {:.3}ms; indexed {:.3}ms; {:.2}x (128 queries)",
+                build.as_secs_f64() * 1000.0, complete.as_secs_f64() * 1000.0,
+                indexed.as_secs_f64() * 1000.0, complete.as_secs_f64() / indexed.as_secs_f64());
+        }
+    }
+}

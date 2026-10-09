@@ -323,6 +323,154 @@ pub struct Beacons {
     /// `fauna.scent.nectar_full`: the share of a full flower's scent it gives
     /// off. 0 for a glowcap; 1 for a hand-placed (test) beacon.
     scent: Vec<f64>,
+    index: Option<BeaconNode>,
+}
+
+/// A shared spatial tree of the static beacons. Bounds are in metres, at the
+/// flower's height; max_share bounds emission for exact strongest-source queries.
+#[derive(Clone, Debug)]
+struct BeaconNode {
+    lo: [f64; 3],
+    hi: [f64; 3],
+    max_share: f64,
+    sum_share: f64,
+    children: Option<Box<[BeaconNode; 2]>>,
+    entries: Vec<usize>,
+}
+
+impl BeaconNode {
+    fn build(list: &[Beacon], scent: &[f64], mut entries: Vec<usize>) -> Option<Self> {
+        if entries.is_empty() {
+            return None;
+        }
+        let point = |i: usize| [list[i].x, list[i].y_m, list[i].z];
+        let mut lo = [f64::INFINITY; 3];
+        let mut hi = [f64::NEG_INFINITY; 3];
+        let mut max_share: f64 = 0.0;
+        let mut sum_share = 0.0;
+        for &i in &entries {
+            let p = point(i);
+            for axis in 0..3 {
+                lo[axis] = lo[axis].min(p[axis]);
+                hi[axis] = hi[axis].max(p[axis]);
+            }
+            if list[i].kind == BeaconKind::Flower {
+                let share = scent.get(i).copied().unwrap_or(1.0).max(0.0);
+                max_share = max_share.max(share);
+                sum_share += share;
+            }
+        }
+        let children = if entries.len() > 8 {
+            let axis = (0..3)
+                .max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b])))
+                .unwrap();
+            entries.sort_unstable_by(|&a, &b| {
+                point(a)[axis].total_cmp(&point(b)[axis]).then(a.cmp(&b))
+            });
+            let right = entries.split_off(entries.len() / 2);
+            let left = std::mem::take(&mut entries);
+            Some(Box::new([
+                Self::build(list, scent, left).unwrap(),
+                Self::build(list, scent, right).unwrap(),
+            ]))
+        } else {
+            None
+        };
+        Some(Self {
+            lo,
+            hi,
+            max_share,
+            sum_share,
+            children,
+            entries,
+        })
+    }
+
+    fn distance(&self, p: (f64, f64, f64), ring: f64) -> f64 {
+        let gap = |v: f64, axis: usize| (self.lo[axis] - v).max(0.0).max(v - self.hi[axis]);
+        let x = p.0.rem_euclid(ring);
+        let dx = gap(x, 0).min(gap(x - ring, 0)).min(gap(x + ring, 0));
+        let dy = gap(p.1, 1);
+        let dz = gap(p.2, 2);
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+
+    fn within(&self, p: (f64, f64, f64), ring: f64, radius: f64, out: &mut Vec<usize>) {
+        if self.distance(p, ring) > radius {
+            return;
+        }
+        if let Some(children) = &self.children {
+            for child in children.iter() {
+                child.within(p, ring, radius, out);
+            }
+        } else {
+            out.extend_from_slice(&self.entries);
+        }
+    }
+
+    /// Refine bounds only until the pre-occlusion sum is known to cross the
+    /// sensory floor. Aggregate emission gives a conservative upper bound, so
+    /// whole distant regions can be rejected without reading their flowers.
+    fn reaches(&self, upper: &impl Fn(&Self) -> f64, score: &impl Fn(usize) -> f64,
+        threshold: f64, floor: f64) -> bool {
+        let root_bound = upper(self);
+        let mut pending = vec![(self, root_bound)];
+        let mut remaining = root_bound;
+        let mut total = 0.0;
+        // Floating point cancellation in the running bound must not exclude a
+        // source region at a floor boundary. This is numerical slack, not scent.
+        let slack = 1e-12 * root_bound.abs().max(1.0);
+        while total < floor {
+            if total + remaining + slack < floor { return false; }
+            let Some((node, bound)) = pending.pop() else { return false; };
+            remaining -= bound;
+            if let Some(children) = &node.children {
+                let bounds = [upper(&children[0]), upper(&children[1])];
+                let first = usize::from(bounds[1] > bounds[0]);
+                for i in [1 - first, first] {
+                    if bounds[i] > 0.0 {
+                        remaining += bounds[i];
+                        pending.push((&children[i], bounds[i]));
+                    }
+                }
+            } else {
+                for &i in &node.entries {
+                    let level = score(i);
+                    if level > threshold { total += level; }
+                }
+            }
+        }
+        true
+    }
+
+    fn strongest(
+        &self,
+        upper: &impl Fn(&Self) -> f64,
+        score: &impl Fn(usize) -> f64,
+        threshold: f64,
+        limit: usize,
+        out: &mut Vec<(f64, usize)>,
+    ) {
+        let bound = upper(self);
+        if !(bound > threshold) || (out.len() == limit && bound < out.last().unwrap().0) {
+            return;
+        }
+        if let Some(children) = &self.children {
+            let first = usize::from(upper(&children[1]) > upper(&children[0]));
+            children[first].strongest(upper, score, threshold, limit, out);
+            children[1 - first].strongest(upper, score, threshold, limit, out);
+        } else {
+            for &i in &self.entries {
+                let level = score(i);
+                if !(level > threshold) {
+                    continue;
+                }
+                out.push((level, i));
+                out.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+                out.truncate(limit);
+            }
+        }
+    }
 }
 
 /// The top foliage-bearing layer of a stand (its flower head, a cap's top).
@@ -339,9 +487,93 @@ impl Beacons {
         }
         self.stamp = Some(stamp);
         (self.list, self.scent) = Beacons::build(view, fv, nectar_full);
+        self.reindex();
+    }
+
+    fn reindex(&mut self) {
+        self.index = BeaconNode::build(&self.list, &self.scent, (0..self.list.len()).collect());
+    }
+
+    /// Local candidates for a finite light radius, in the original beacon order.
+    fn nearby(&self, p: (f64, f64, f64), ring: f64, radius: f64) -> Vec<usize> {
+        let mut out = Vec::new();
+        if let Some(index) = &self.index {
+            index.within(p, ring, radius, &mut out);
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// The strongest flower emissions, exactly ranked by the existing plume kernel.
+    /// Tree bounds skip regions that cannot displace any of the retained sources.
+    pub(crate) fn strongest_flowers(
+        &self,
+        p: (f64, f64, f64),
+        ring: f64,
+        voxel_m: f64,
+        amp: f64,
+        spread: f64,
+        rate: f64,
+        threshold: f64,
+        limit: usize,
+    ) -> Vec<usize> {
+        let mut out = Vec::new();
+        let level = |share: f64, r: f64| {
+            rate * share * amp * crate::scent::bessel_k0(r.max(voxel_m) / spread)
+        };
+        if let Some(index) = &self.index {
+            index.strongest(
+                &|node| level(node.max_share, node.distance(p, ring)),
+                &|i| {
+                    let b = &self.list[i];
+                    if b.kind != BeaconKind::Flower {
+                        return 0.0;
+                    }
+                    let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, b.x, b.z, ring);
+                    let dy = b.y_m - p.1;
+                    level(
+                        self.scent.get(i).copied().unwrap_or(1.0),
+                        (dx * dx + dy * dy + dz * dz).sqrt(),
+                    )
+                },
+                threshold,
+                limit,
+                &mut out,
+            );
+        }
+        let mut indices: Vec<_> = out.into_iter().map(|(_, i)| i).collect();
+        indices.sort_unstable();
+        indices
+    }
+
+    pub(crate) fn flowers_reach_floor(&self, p: (f64, f64, f64), ring: f64,
+        voxel_m: f64, amp: f64, spread: f64, rate: f64, threshold: f64, floor: f64) -> bool {
+        if floor <= 0.0 { return true; }
+        let Some(index) = &self.index else { return false; };
+        let level = |share: f64, r: f64| rate * share * amp * crate::scent::bessel_k0(r.max(voxel_m) / spread);
+        index.reaches(&|node| {
+            let distance = node.distance(p, ring);
+            if level(node.max_share, distance) <= threshold { 0.0 }
+            else { level(node.sum_share, distance) }
+        }, &|i| {
+            let b = &self.list[i];
+            if b.kind != BeaconKind::Flower { return 0.0; }
+            let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, b.x, b.z, ring);
+            let dy = b.y_m - p.1;
+            level(self.scent.get(i).copied().unwrap_or(1.0), (dx * dx + dy * dy + dz * dz).sqrt())
+        }, threshold, floor)
+    }
+
+    pub(crate) fn flower_source(&self, i: usize, rate: f64) -> ((f64, f64, f64), f64) {
+        let b = &self.list[i];
+        (
+            (b.x, b.y_m, b.z),
+            rate * self.scent.get(i).copied().unwrap_or(1.0),
+        )
     }
 
     /// The flowers as smell sources: each with its scent share ([`Beacons::scent_shares`]).
+    #[cfg(test)]
     pub(crate) fn flowers_by_scent(&self) -> impl Iterator<Item = (&Beacon, f64)> + '_ {
         self.list.iter().zip(self.scent.iter().copied().chain(std::iter::repeat(1.0))).filter(|(b, _)| b.kind == BeaconKind::Flower)
     }
@@ -409,6 +641,7 @@ impl Beacons {
         self.stamp = Some((fv.tick, view.terrain_version));
         self.scent = vec![1.0; list.len()];
         self.list = list;
+        self.reindex();
     }
 
     /// [`Beacons::fixed`] with each beacon's scent share given.
@@ -416,6 +649,7 @@ impl Beacons {
     pub(crate) fn fixed_with_scent(&mut self, view: &VoxelView<'_>, fv: &FloraView<'_>, list: Vec<(Beacon, f64)>) {
         self.stamp = Some((fv.tick, view.terrain_version));
         (self.list, self.scent) = list.into_iter().unzip();
+        self.reindex();
     }
 }
 
@@ -546,7 +780,8 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
         // near-IR eye when it mimics one).
         let weight = |k: BeaconKind| if cfg.learn { expectation_of(&cfg, &record, k.class_seen(&cfg, table.nir), tick) } else { 1.0 };
         let mut seen: Vec<(f64, f64, f64, Beacon)> = Vec::new();
-        for b in fauna.beacons.list().iter().chain(lures.iter()) {
+        let nearby = fauna.beacons.nearby(eye, ring, table.light_m);
+        for b in nearby.into_iter().map(|i| &fauna.beacons.list[i]).chain(lures.iter()) {
             if (b.kind == BeaconKind::Lure && b.body == a.id) || (!table.nir && b.kind == BeaconKind::Flower) {
                 continue;
             }
@@ -865,8 +1100,7 @@ pub(crate) fn smell_nectar(fauna: &mut Fauna, a: &Animal, view: &VoxelView<'_>, 
     let v = view.config.voxel_m;
     let Some(eye) = eye_of(&fauna.config, a, v) else { return crate::scent::Plume::default() };
     fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);
-    let sources = crate::scent::nectar_sources(fauna, view, Some(a.id));
-    crate::scent::nectar_plume(view, &fauna.config, &sources, eye, a.id, floor)
+    crate::scent::nectar_plume_indexed(fauna, view, eye, a.id, floor)
 }
 
 /// **The capgnawer's cyan** (D2, module note) over its forager: `asked` is its forager's

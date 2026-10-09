@@ -4550,7 +4550,7 @@ fn flyer_observation(
         let blooms = match blooms {
             Some(blooms) => blooms,
             None => {
-                owned_blooms = crate::flight::Blooms::of(fv);
+                owned_blooms = crate::flight::Blooms::near(view, fv, origin, range);
                 &owned_blooms
             }
         };

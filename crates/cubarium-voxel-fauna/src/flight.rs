@@ -680,9 +680,6 @@ fn bloom_in_reach_among<'a>(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f
         let sx = (f64::from(stand.site.x) + 0.5) * v;
         let sz = (f64::from(stand.site.z) + 0.5) * v;
         let (dx, dz) = crate::pose::wrapped_delta(p.0, p.2, sx, sz, ring);
-        if (dx * dx + dz * dz).sqrt() > reach + 3.0 * v + 1.0 {
-            continue;
-        }
         let Some(layer) = bloom_layer(fv, stand) else {
             continue;
         };
@@ -756,6 +753,34 @@ fn bloom_in_reach_among<'a>(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f
 pub(crate) struct Blooms(Vec<(i64, i64, i64, f64)>);
 
 impl Blooms {
+    pub(crate) fn near(
+        view: &VoxelView<'_>,
+        fv: &FloraView<'_>,
+        p: (f64, f64, f64),
+        range: f64,
+    ) -> Blooms {
+        Blooms(
+            bloom_candidates(view, fv, p, range)
+                .unwrap_or_else(|| (0..fv.stands.len() as u32).collect())
+                .into_iter()
+                .filter_map(|i| {
+                    let s = &fv.stands[i as usize];
+                    (s.nectar > 0.0)
+                        .then(|| bloom_layer(fv, s))
+                        .flatten()
+                        .map(|l| {
+                            (
+                                i64::from(s.site.x),
+                                i64::from(s.site.z),
+                                l.cell,
+                                l.radius_v * l.radius_v,
+                            )
+                        })
+                })
+                .collect(),
+        )
+    }
+
     pub(crate) fn of(fv: &FloraView<'_>) -> Blooms {
         Blooms(
             fv.stands
