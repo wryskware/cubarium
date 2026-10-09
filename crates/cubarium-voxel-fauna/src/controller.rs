@@ -77,6 +77,13 @@ pub trait Controller: Send + Sync {
     /// episode-private and never carried across one.
     fn reset(&mut self);
 
+    /// Whether only the next flyer observation's Taste channels can affect the answer.
+    /// Returning true promises to ignore every other channel. Policies and diagnostic
+    /// controllers receive the complete observation by default.
+    fn taste_only(&self) -> bool {
+        false
+    }
+
     /// The **lure** effort (`[0, 1]`) this controller holds after its last [`drive`]: the
     /// lanternjaw manifest's fourth action (predation §2.2). An interim seam — P2's
     /// contract v3 carries it in the response — so every controller that is not a
@@ -252,6 +259,11 @@ impl FounderControllers {
     pub fn drive(&mut self, id: u64, observation: &[f64]) -> Option<Response> {
         let at = self.entries.binary_search_by_key(&id, |e| e.0).ok()?;
         Some(self.entries[at].1.drive(observation))
+    }
+
+    pub(crate) fn taste_only(&self, id: u64) -> bool {
+        self.entries.binary_search_by_key(&id, |e| e.0)
+            .is_ok_and(|at| self.entries[at].1.taste_only())
     }
 
     /// Each of `ids`' controllers, mutably and at once (`None` for a body without one),
@@ -1277,6 +1289,12 @@ impl HoverSip {
 }
 
 impl Controller for HoverSip {
+    fn taste_only(&self) -> bool {
+        // Between replans, drive either holds its answer or stops for a fresh taste.
+        // Neither branch consumes Self, Air or Fan. The mouth still samples each tick.
+        self.since + 1 < HOVER_SIP_REPLAN && self.last != Actions::REST
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let cfg = self.cfg;
         let s = self.selfm.offset;
@@ -1703,6 +1721,45 @@ impl Controller for PackHunter {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_held_hover_sip_answer_consumes_only_taste() {
+        use super::*;
+        let cfg = TeacherConfig { feed_gate: 0.2, ..TeacherConfig::default() };
+        let mut full = HoverSip::with_config(cfg);
+        let mut trimmed = HoverSip::with_config(cfg);
+        let manifest = Founder::Bellwing.manifest();
+        let air = module_slot(&manifest, "Air").offset;
+        let taste = module_slot(&manifest, "Taste(1)").offset;
+        let fan = module_slot(&manifest, "Fan(3, bloom/foliage/body)");
+        let mut skipped = 0;
+        let mut tasted_while_skipped = false;
+        for sample in 0..24 {
+            let mut observation = vec![0.0; manifest.inputs()];
+            observation[7] = 1.0;
+            observation[8] = 0.5;
+            observation[9] = 1.0;
+            observation[air + 2] = 1.0;
+            // A new mouthful interrupts a held flight; losing it still holds the sip
+            // until the ordinary replan. Alternate a lead and a rain-grounding sample.
+            observation[taste] = if sample % 7 == 2 { 1.0 } else { 0.0 };
+            observation[taste + 2] = 1.0;
+            observation[air + 4] = f64::from(sample % 3 == 0);
+            observation[fan.offset + 2] = 1.0;
+            observation[fan.offset + 4] = 1.0;
+            let mut reduced = observation.clone();
+            if trimmed.taste_only() {
+                skipped += 1;
+                tasted_while_skipped |= observation[taste] > cfg.feed_gate;
+                reduced.fill(0.0);
+                reduced[taste..taste + 3].copy_from_slice(&observation[taste..taste + 3]);
+            }
+            assert_eq!(full.drive(&observation), trimmed.drive(&reduced), "sample {sample}");
+            assert_eq!(full.lift(), trimmed.lift());
+            assert_eq!(full.seek(), trimmed.seek());
+        }
+        assert!(skipped > 0 && tasted_while_skipped);
+    }
+
     use super::*;
     use crate::manifest::Founder;
 

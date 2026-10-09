@@ -485,6 +485,8 @@ const MAX_LIGHT_RAYS: usize = 4;
 /// senses' rate (staggered by id) or when it has none yet. `daylight` is the sky's (1 with
 /// the clock off).
 pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, daylight: f64) {
+    #[cfg(feature = "profile")]
+    let _timer = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaLight);
     let a = fauna.animals[i];
     let Some(founder) = a.founder else { return };
     let table = fauna.config.founder(founder).senses;
@@ -858,6 +860,8 @@ fn scent_from_marked(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, source: Op
 /// at its eye: every flower holding nectar and every lit lure but its own, by 3D distance
 /// from the bloom; nothing under `floor`.
 pub(crate) fn smell_nectar(fauna: &mut Fauna, a: &Animal, view: &VoxelView<'_>, fv: &FloraView<'_>, floor: f64) -> crate::scent::Plume {
+    #[cfg(feature = "profile")]
+    let _timer = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaNectar);
     let v = view.config.voxel_m;
     let Some(eye) = eye_of(&fauna.config, a, v) else { return crate::scent::Plume::default() };
     fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);

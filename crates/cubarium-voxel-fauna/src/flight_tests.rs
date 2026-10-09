@@ -328,6 +328,37 @@ fn stand_nectar(flora: &Flora, site: Site) -> f64 {
     flora.view().stand_at(site).expect("the stand").nectar
 }
 
+#[test]
+fn indexed_mouth_reach_selects_the_same_flower_as_a_full_scan() {
+    let mut world = plain_with(config(24, 24, 9, clock_at(12.0)));
+    let mut flora = Flora::new(nectar_flora());
+    let a = blooming(&mut flora, &mut world, 0, 4, 60);
+    let b = blooming(&mut flora, &mut world, 22, 4, 60);
+    let fv = flora.view();
+    let view = world.view();
+    assert!(stand_nectar(&flora, a) > 0.0 && stand_nectar(&flora, b) > 0.0);
+    assert!(fv.stands_near(0, 4, view.config.width, view.config.depth).is_some());
+    let ring = f64::from(view.config.width) * V;
+    let top = crown_top(&flora, a);
+    let mut found = false;
+    // Crown edges, exact cell boundaries, the strip's edges, and both sides of the
+    // wrapping seam. Several reach sizes include overlapping/equidistant flowers.
+    for x in [-V, 0.0, V, 2.0 * V, ring - V, ring, ring + V] {
+        for z in [0.0, 3.0 * V, 4.0 * V, 5.0 * V, 9.0 * V] {
+            for y in [top - V, top, top + V] {
+                for reach in [0.0, V, 2.0 * V] {
+                    let p = (x, y, z);
+                    let indexed = crate::flight::bloom_in_reach(&view, &fv, p, reach);
+                    let scanned = crate::flight::bloom_in_reach_scan(&view, &fv, p, reach);
+                    assert_eq!(indexed, scanned, "mouth {p:?}, reach {reach}");
+                    found |= indexed.is_some();
+                }
+            }
+        }
+    }
+    assert!(found);
+}
+
 // ------------------------------------------------------------------ the table
 
 /// **The bellwing's table** (§3.9, the roster overrides): the specimen's name, a nectar
