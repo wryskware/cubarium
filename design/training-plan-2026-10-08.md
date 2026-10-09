@@ -700,6 +700,12 @@ control and the reward accounting; display targets after seeing results.
       estimated at about 2.5 h, not yet measured.
     - Adopt the strides only if a side-by-side matches: `runs/stride-2026-10-09`, 8 seeds × 2 h
       from starts3r m063, old against new strides, heuristic.
+      - Populations and fullness match, and P differs only 3/8.
+      - Two small consistent shifts:
+        - the lake is 1–7 % lower in 8/8 seeds, with more water in the air in 6/8;
+        - standing foliage is about 2 % lower in 7/8, umbrellafrond and stonecushion 7/8.
+      - `runs/stride2-2026-10-09` splits the cause: plants 2 s with water as today, and
+        plants 2 s with water every 0.5 s.
     - **Then protocol A:**
       - screen every candidate on 8 wide worlds × 2 h from a year-old saved world;
       - year-check the best on 8 freshly founded wide worlds × 10 h;
