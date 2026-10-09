@@ -1,0 +1,29 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+
+[node name="BusyPanel" type="PanelContainer"]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+theme = ExtResource("1_theme")
+theme_type_variation = &"MainPanel"
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 44
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 44
+theme_override_constants/margin_bottom = 30
+
+[node name="Text" type="Label" parent="Margin"]
+layout_mode = 2
+theme_type_variation = &"BodyText"
+text = "Opening \"World 1\"…"
+vertical_alignment = 1

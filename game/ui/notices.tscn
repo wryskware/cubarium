@@ -1,0 +1,32 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/notices.gd" id="2_notices"]
+[ext_resource type="PackedScene" path="res://ui/notice.tscn" id="3_notice"]
+
+[node name="Notices" type="VBoxContainer"]
+anchors_preset = 2
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_left = 40.0
+offset_top = -40.0
+offset_right = 760.0
+offset_bottom = -40.0
+grow_vertical = 0
+mouse_filter = 2
+theme = ExtResource("1_theme")
+theme_override_constants/separation = 10
+alignment = 2
+script = ExtResource("2_notices")
+
+[node name="Saved" parent="." instance=ExtResource("3_notice")]
+layout_mode = 2
+
+[node name="Warning" parent="." instance=ExtResource("3_notice")]
+layout_mode = 2
+
+[node name="Text" parent="Warning/Margin" index="0"]
+theme_type_variation = &"WarningText"
+text = "Couldn't load \"Old\": it was made by an older version of Cubarium."
+
+[editable path="Warning"]

@@ -1,0 +1,539 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="2_button"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="3_label"]
+[ext_resource type="Script" path="res://ui/neon/neon_fade_mask.gd" id="4_fade"]
+[ext_resource type="Script" path="res://ui/inspect_panel.gd" id="5_inspect"]
+
+[node name="InspectPanel" type="PanelContainer"]
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -560.0
+offset_top = 40.0
+offset_right = -40.0
+offset_bottom = -40.0
+grow_horizontal = 0
+theme = ExtResource("1_theme")
+theme_type_variation = &"MainPanel"
+script = ExtResource("5_inspect")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 36
+theme_override_constants/margin_top = 32
+theme_override_constants/margin_right = 36
+theme_override_constants/margin_bottom = 32
+
+[node name="Stack" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="Kicker" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+theme_type_variation = &"Kicker"
+text = "Animal · #1184"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Gap1" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Name" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+theme_override_constants/shadow_offset_x = 4
+theme_override_constants/shadow_offset_y = 4
+theme_override_font_sizes/font_size = 52
+text = "Lanternjaw"
+vertical_alignment = 1
+clip_text = true
+
+[node name="Gap2" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Rule" type="HSeparator" parent="Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"HotRule"
+
+[node name="Gap3" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 18)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="State" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+theme_type_variation = &"BodyText"
+text = "adult, hunting"
+autowrap_mode = 3
+
+[node name="Gap4" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 12)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Facts" type="GridContainer" parent="Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
+columns = 2
+
+[node name="AgeLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/AgeLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Age"
+uppercase = true
+
+[node name="AgeCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/AgeCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "38 min of 6.0 h"
+autowrap_mode = 3
+
+[node name="EnergyLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/EnergyLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Energy"
+uppercase = true
+
+[node name="EnergyCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/EnergyCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "0.734"
+autowrap_mode = 3
+
+[node name="ReserveLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/ReserveLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Reserve"
+uppercase = true
+
+[node name="ReserveCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/ReserveCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "0.418"
+autowrap_mode = 3
+
+[node name="FullnessLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/FullnessLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Fullness"
+uppercase = true
+
+[node name="FullnessCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/FullnessCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "64 %"
+autowrap_mode = 3
+
+[node name="WoundLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/WoundLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Wound"
+uppercase = true
+
+[node name="WoundCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/WoundCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "0.00"
+autowrap_mode = 3
+
+[node name="SizeLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/SizeLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Size"
+uppercase = true
+
+[node name="SizeCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/SizeCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "0.93"
+autowrap_mode = 3
+
+[node name="WhereLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/WhereLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Where"
+uppercase = true
+
+[node name="WhereCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/WhereCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "41.3, 18.0, 6.5 m"
+autowrap_mode = 3
+
+[node name="GestatingLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/GestatingLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Gestating"
+uppercase = true
+
+[node name="GestatingCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/GestatingCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "yes"
+autowrap_mode = 3
+
+[node name="PackLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/PackLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Pack"
+uppercase = true
+
+[node name="PackCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/PackCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "3"
+autowrap_mode = 3
+
+[node name="RidingLabelCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+custom_minimum_size = Vector2(156, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"FactLabelCell"
+
+[node name="Label" type="Label" parent="Margin/Stack/Facts/RidingLabelCell"]
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"FactLabel"
+text = "Riding"
+uppercase = true
+
+[node name="RidingCell" type="PanelContainer" parent="Margin/Stack/Facts"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Margin/Stack/Facts/RidingCell"]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "#1180"
+autowrap_mode = 3
+
+[node name="Gap5" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 26)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="LifeLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Life"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Gap6" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 10)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="LifeFade" type="Control" parent="Margin/Stack"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+script = ExtResource("4_fade")
+fade_top = 24
+follow_scroll = true
+
+[node name="LifeScroll" type="ScrollContainer" parent="Margin/Stack/LifeFade"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+horizontal_scroll_mode = 0
+vertical_scroll_mode = 3
+
+[node name="Life" type="VBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Event0" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event0"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t52310"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event0"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "ate littershredder (hunt bout, 40 s)"
+autowrap_mode = 3
+
+[node name="Event1" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event1"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t51874"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event1"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "killed #1201 (littershredder)"
+autowrap_mode = 3
+
+[node name="Event2" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event2"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t51870"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event2"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "struck at #1201"
+autowrap_mode = 3
+
+[node name="Note3" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Parent: #1102"
+autowrap_mode = 3
+
+[node name="Event4" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event4"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t40112"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event4"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "ate carrion (scavenge bout, 2 min)"
+autowrap_mode = 3
+
+[node name="Event5" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event5"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t36004"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event5"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "injured, wound 0.12 by #1150"
+autowrap_mode = 3
+
+[node name="Event6" type="HBoxContainer" parent="Margin/Stack/LifeFade/LifeScroll/Life"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 14
+
+[node name="When" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event6"]
+custom_minimum_size = Vector2(76, 0)
+layout_mode = 2
+size_flags_vertical = 0
+theme_type_variation = &"SmallTextLabel"
+text = "t30218"
+
+[node name="What" type="Label" parent="Margin/Stack/LifeFade/LifeScroll/Life/Event6"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "first seen, juvenile, aged 12 min"
+autowrap_mode = 3
+
+[node name="Gap7" type="Control" parent="Margin/Stack"]
+custom_minimum_size = Vector2(0, 20)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Actions" type="HBoxContainer" parent="Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 20
+
+[node name="Close" type="BaseButton" parent="Margin/Stack/Actions"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("2_button")
+
+[node name="Content" type="HBoxContainer" parent="Margin/Stack/Actions/Close"]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Margin/Stack/Actions/Close/Content"]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Margin/Stack/Actions/Close/Content"]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Close "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("3_label")
+look = &"ButtonLabelSecondary"
