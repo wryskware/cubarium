@@ -782,6 +782,17 @@ control and the reward accounting; display targets after seeing results.
    - RHYTHMS-CADENCE (Opus): item 18, rhythms and cadence;
    - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
    - DECAY (Codex): item 21.
+2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
+    "short-circuit bailing for cases like 'no possible place to put this' in which case the
+    terrain gets rejected, which is somethign the UI should provide feedback for rather than
+    silently failing and letting you retry."
+    - FOUNDING-SPEED (Codex xhigh, running on `decay-glowcap`): phase timings, founders placed
+      at their food, placement retries on the settled world.
+    - Then FOUNDING-ONE-PATH (brief `briefs/founding-one-path.md`):
+      - one loop instead of `found`/`found_judged` plus `found_terrain`/`found_terrain_judged`;
+      - typed rejection reasons, checked before the pre-roll;
+      - the session status carries the reason. The Godot founding screen shows it; placing it
+        is for the UI thread.
 3. A wide-world start library of year-old saves.
    - SCORE-V3 merged, 97ce0994. DROP-C1 merged, bdbeb508.
    - HERD merged, 8d782d9b:
