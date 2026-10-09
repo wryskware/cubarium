@@ -1,0 +1,12 @@
+[gd_resource type="StyleBox" script_class="StyleBoxNeonFrame" format=3]
+
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_frame.gd" id="1_vlhql"]
+
+[resource]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = -1.0
+content_margin_top = -1.0
+content_margin_right = -1.0
+content_margin_bottom = -1.0
+script = ExtResource("1_vlhql")

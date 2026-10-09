@@ -1,0 +1,10 @@
+[gd_resource type="ShaderMaterial" format=3]
+
+[ext_resource type="Shader" path="res://ui/neon/neon_scrim.gdshader" id="1_dnqkk"]
+
+[resource]
+shader = ExtResource("1_dnqkk")
+shader_parameter/tint = null
+shader_parameter/dark_alpha = null
+shader_parameter/light_alpha = null
+shader_parameter/square_px = null

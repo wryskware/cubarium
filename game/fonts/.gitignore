@@ -1,0 +1,6 @@
+# Font files never go into git (Wrysk: "dont commit any fonts"). Fetch them with
+# scripts/fetch-ui-fonts.sh. The .import files are committed so the import settings travel.
+*.ttf
+*.otf
+*.woff
+*.woff2

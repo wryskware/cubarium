@@ -1,0 +1,902 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_uv0ua"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="2_ceiqu"]
+[ext_resource type="Material" path="res://ui/neon/neon_scrim.tres" id="3_7qtda"]
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="4_enivu"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="5_nuvlg"]
+[ext_resource type="Script" path="res://ui/neon/neon_pixels.gd" id="6_on0va"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_1bi8p"]
+
+[sub_resource type="ButtonGroup" id="ButtonGroup_tax3p"]
+
+[node name="Gallery" type="Control" unique_id=994222188]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("1_uv0ua")
+
+[node name="World" type="TextureRect" parent="." unique_id=591702670]
+texture_filter = 1
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+texture = ExtResource("2_ceiqu")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Scrim" type="ColorRect" parent="." unique_id=617098052]
+material = ExtResource("3_7qtda")
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Center" type="CenterContainer" parent="." unique_id=153735247]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+
+[node name="Page" type="Control" parent="Center" unique_id=1766169439]
+custom_minimum_size = Vector2(1920, 1080)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Panel" type="PanelContainer" parent="Center/Page" unique_id=922332783]
+layout_mode = 0
+offset_left = 96.0
+offset_top = 64.0
+offset_right = 1824.0
+offset_bottom = 1016.0
+mouse_filter = 2
+theme_type_variation = &"MainPanel"
+
+[node name="PanelMargin" type="MarginContainer" parent="Center/Page/Panel" unique_id=1819363405]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 34
+theme_override_constants/margin_top = 30
+theme_override_constants/margin_right = 34
+theme_override_constants/margin_bottom = 30
+
+[node name="Sections" type="VBoxContainer" parent="Center/Page/Panel/PanelMargin" unique_id=95422892]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="TabsRow" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=1611092864]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow" unique_id=1696363650]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Tabs (World has focus)"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Tabs" type="PanelContainer" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow" unique_id=749887214]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"TabBarBox"
+
+[node name="TabStrip" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs" unique_id=1027703787]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"TabStrip"
+
+[node name="FieldguideTab" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip" unique_id=1683690652]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("ButtonGroup_1bi8p")
+script = ExtResource("4_enivu")
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip/FieldguideTab" unique_id=740486694]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Field guide"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="PopulationsTab" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip" unique_id=2042229755]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_1bi8p")
+script = ExtResource("4_enivu")
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip/PopulationsTab" unique_id=1325205397]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Populations"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="WorldTab" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip" unique_id=1957321266]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_1bi8p")
+script = ExtResource("4_enivu")
+preview_focus = true
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip/WorldTab" unique_id=73584120]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "World"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="SettingsTab" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip" unique_id=1322457152]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Tab"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_1bi8p")
+script = ExtResource("4_enivu")
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/TabsRow/Tabs/TabStrip/SettingsTab" unique_id=669492494]
+layout_mode = 0
+theme_type_variation = &"TabLabel"
+text = "Settings"
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"TabLabel"
+pressed_look = &"TabLabelSelected"
+pressed_pad = " "
+
+[node name="MainButtons" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=266141248]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons" unique_id=650905452]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Main button: normal, focus, pressed, disabled"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Normal" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons" unique_id=1060345597]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Normal" unique_id=628224852]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Normal/Content" unique_id=2022155398]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " Y "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Normal/Content" unique_id=65071723]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Show in world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="Focus" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons" unique_id=2128625726]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+script = ExtResource("4_enivu")
+preview_focus = true
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Focus" unique_id=403902678]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Focus/Content" unique_id=628859688]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " Y "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Focus/Content" unique_id=622586531]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Show in world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="Pressed" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons" unique_id=1660922320]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+toggle_mode = true
+button_pressed = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Pressed" unique_id=40653182]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Pressed/Content" unique_id=1815319052]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " Y "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Pressed/Content" unique_id=605628585]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Show in world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="Disabled" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons" unique_id=1832410962]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"MainButton"
+disabled = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Disabled" unique_id=38769214]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Disabled/Content" unique_id=1781254873]
+layout_mode = 2
+theme_type_variation = &"KeycapMain"
+text = " Y "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/MainButtons/Disabled/Content" unique_id=931152892]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelMain"
+text = " Show in world "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelMain"
+pressed_look = &"ButtonLabelMainPressed"
+
+[node name="SecondaryButtons" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=1695210871]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons" unique_id=2084403354]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Second button"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Normal" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons" unique_id=1823855718]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Normal" unique_id=2118329944]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Normal/Content" unique_id=1258842424]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Normal/Content" unique_id=1933648899]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Populations "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelSecondary"
+
+[node name="Focus" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons" unique_id=2032339066]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+script = ExtResource("4_enivu")
+preview_focus = true
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Focus" unique_id=390908339]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Focus/Content" unique_id=1454642234]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Focus/Content" unique_id=765515155]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Populations "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelSecondary"
+
+[node name="Pressed" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons" unique_id=274372488]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+toggle_mode = true
+button_pressed = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Pressed" unique_id=187506306]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Pressed/Content" unique_id=791751602]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Pressed/Content" unique_id=924075975]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Populations "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelSecondary"
+
+[node name="Disabled" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons" unique_id=1454419507]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"SecondaryButton"
+disabled = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Disabled" unique_id=422521686]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ButtonContent"
+
+[node name="Keycap" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Disabled/Content" unique_id=312045246]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " X "
+vertical_alignment = 1
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/SecondaryButtons/Disabled/Content" unique_id=1472774018]
+layout_mode = 2
+theme_type_variation = &"ButtonLabelSecondary"
+text = " Populations "
+vertical_alignment = 1
+uppercase = true
+script = ExtResource("5_nuvlg")
+look = &"ButtonLabelSecondary"
+
+[node name="RowsAndChips" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=2594520]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips" unique_id=814806524]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "List rows: normal, selected, focus"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Rows" type="VBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips" unique_id=1784484836]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 16
+
+[node name="Frondgrazer" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows" unique_id=1302065917]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"ListRow"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_tax3p")
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Frondgrazer" unique_id=1745686604]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"RowContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Frondgrazer/Content" unique_id=643779075]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.9843137, 0.5058824, 0.38431373, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Frondgrazer/Content" unique_id=190458821]
+layout_mode = 2
+theme_type_variation = &"ListText"
+text = "Frondgrazer"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ListText"
+pressed_look = &"ListTextSelected"
+
+[node name="Spacer" type="Control" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Frondgrazer/Content" unique_id=290569544]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Count" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Frondgrazer/Content" unique_id=505216929]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "42"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Lanternjaw" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows" unique_id=708310046]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"ListRow"
+toggle_mode = true
+button_pressed = true
+button_group = SubResource("ButtonGroup_tax3p")
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Lanternjaw" unique_id=366734468]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"RowContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Lanternjaw/Content" unique_id=328921431]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.5686275, 0.40784314, 0.6313726, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Lanternjaw/Content" unique_id=1951170212]
+layout_mode = 2
+theme_type_variation = &"ListText"
+text = "Lanternjaw"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ListText"
+pressed_look = &"ListTextSelected"
+
+[node name="Spacer" type="Control" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Lanternjaw/Content" unique_id=142672961]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Count" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Lanternjaw/Content" unique_id=1199474441]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "7"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Veilhound" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows" unique_id=2075506821]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"ListRow"
+toggle_mode = true
+button_group = SubResource("ButtonGroup_tax3p")
+script = ExtResource("4_enivu")
+preview_focus = true
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Veilhound" unique_id=171883526]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"RowContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Veilhound/Content" unique_id=504731376]
+custom_minimum_size = Vector2(10, 10)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.42352942, 0.33333334, 0.8352941, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Veilhound/Content" unique_id=179307667]
+layout_mode = 2
+theme_type_variation = &"ListText"
+text = "Veilhound"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ListText"
+pressed_look = &"ListTextSelected"
+
+[node name="Spacer" type="Control" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Veilhound/Content" unique_id=1490249100]
+layout_mode = 2
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Count" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Rows/Veilhound/Content" unique_id=114599013]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "4"
+vertical_alignment = 1
+uppercase = true
+
+[node name="@Label@6" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips" unique_id=1245273363]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Chips: normal, selected, focus"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Chips" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips" unique_id=662275397]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Littershredders" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips" unique_id=1158752437]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Chip"
+toggle_mode = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Littershredders" unique_id=1692769878]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ChipContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Littershredders/Content" unique_id=115447605]
+custom_minimum_size = Vector2(8, 8)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.99607843, 0.8235294, 0.30588236, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Littershredders/Content" unique_id=1900415369]
+layout_mode = 2
+theme_type_variation = &"ChipText"
+text = "Littershredders"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ChipText"
+pressed_look = &"ChipTextSelected"
+
+[node name="Restingbellwings" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips" unique_id=502570001]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Chip"
+toggle_mode = true
+button_pressed = true
+script = ExtResource("4_enivu")
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Restingbellwings" unique_id=1512123165]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ChipContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Restingbellwings/Content" unique_id=31284693]
+custom_minimum_size = Vector2(8, 8)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.75686276, 0.60784316, 0.9882353, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Restingbellwings/Content" unique_id=521397759]
+layout_mode = 2
+theme_type_variation = &"ChipText"
+text = "Resting bellwings"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ChipText"
+pressed_look = &"ChipTextSelected"
+
+[node name="Frondgrazers" type="BaseButton" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips" unique_id=1321135497]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Chip"
+toggle_mode = true
+script = ExtResource("4_enivu")
+preview_focus = true
+
+[node name="Content" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Frondgrazers" unique_id=1632253847]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ChipContent"
+
+[node name="Swatch" type="ColorRect" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Frondgrazers/Content" unique_id=1116076488]
+custom_minimum_size = Vector2(8, 8)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.9843137, 0.5058824, 0.38431373, 1)
+
+[node name="Name" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/RowsAndChips/Chips/Frondgrazers/Content" unique_id=1745075525]
+layout_mode = 2
+theme_type_variation = &"ChipText"
+text = "Frondgrazers"
+vertical_alignment = 1
+script = ExtResource("5_nuvlg")
+look = &"ChipText"
+pressed_look = &"ChipTextSelected"
+
+[node name="Keycaps" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=643882551]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps" unique_id=1678862399]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Keycaps"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Keys" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps" unique_id=1689355500]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="A" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=1292726641]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " A "
+vertical_alignment = 1
+
+[node name="Select" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=1572334489]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Select"
+vertical_alignment = 1
+uppercase = true
+
+[node name="B" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=110588279]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " B "
+vertical_alignment = 1
+
+[node name="Back" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=596400380]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Back"
+vertical_alignment = 1
+uppercase = true
+
+[node name="LB" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=1099748876]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " LB "
+vertical_alignment = 1
+
+[node name="RB" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=1467949577]
+layout_mode = 2
+theme_type_variation = &"Keycap"
+text = " RB "
+vertical_alignment = 1
+
+[node name="SwitchTab" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Keycaps/Keys" unique_id=78516183]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Switch tab"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Type" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=1043928679]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=591853601]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Type: title, big number, kicker, fact label, chrome label, warning"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Title" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=143160018]
+layout_mode = 2
+theme_type_variation = &"TitleLabel"
+text = "Lanternjaw"
+vertical_alignment = 1
+
+[node name="BigNumber" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=813116693]
+layout_mode = 2
+theme_type_variation = &"BigNumber"
+text = "7"
+vertical_alignment = 1
+
+[node name="Kicker" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=712643967]
+layout_mode = 2
+theme_type_variation = &"Kicker"
+text = "Animal · Predator"
+vertical_alignment = 1
+uppercase = true
+
+[node name="FactLabel" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=1440188283]
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Role"
+vertical_alignment = 1
+uppercase = true
+
+[node name="ChromeLabel" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=1987712882]
+layout_mode = 2
+theme_type_variation = &"ChromeLabel"
+text = "Plate 04"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Warning" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=1300310485]
+layout_mode = 2
+theme_type_variation = &"WarningLabel"
+text = "Paused"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Text" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=332865674]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=424734970]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Text: body, list, fact value, small, small label"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="Body" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=1930175386]
+layout_mode = 2
+theme_type_variation = &"BodyText"
+text = "A low violet scorpid that hunts by waiting."
+vertical_alignment = 1
+
+[node name="List" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=760061967]
+layout_mode = 2
+theme_type_variation = &"ListText"
+text = "Littershredder"
+vertical_alignment = 1
+
+[node name="FactValue" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=412752262]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "Ambush mesopredator"
+vertical_alignment = 1
+
+[node name="Small" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=1448690045]
+layout_mode = 2
+theme_type_variation = &"SmallText"
+text = "5 adults · 2 juveniles"
+vertical_alignment = 1
+
+[node name="SmallLabel" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Text" unique_id=382577464]
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "[binomial]"
+vertical_alignment = 1
+
+[node name="Boxes" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections" unique_id=872086886]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 30
+
+[node name="Caption" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Boxes" unique_id=1706506314]
+custom_minimum_size = Vector2(150, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Inner box, search, fact rule, hot rule"
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="InnerBox" type="PanelContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes" unique_id=329283540]
+custom_minimum_size = Vector2(300, 80)
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"InnerBox"
+
+[node name="Margin" type="MarginContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/InnerBox" unique_id=773926583]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 20
+
+[node name="Label" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/InnerBox/Margin" unique_id=1079127036]
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "In this world"
+uppercase = true
+
+[node name="Search" type="PanelContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes" unique_id=454658098]
+custom_minimum_size = Vector2(340, 46)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"SearchBox"
+
+[node name="Row" type="HBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/Search" unique_id=997109270]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Icon" type="Control" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/Search/Row" unique_id=9252831]
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+script = ExtResource("6_on0va")
+pixels = PackedVector2Array(2, 0, 3, 0, 4, 0, 1, 1, 5, 1, 0, 2, 6, 2, 0, 3, 6, 3, 0, 4, 6, 4, 1, 5, 5, 5, 2, 6, 3, 6, 4, 6, 6, 6, 7, 7, 8, 8)
+
+[node name="Hint" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/Search/Row" unique_id=2002133857]
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+text = "Search species"
+vertical_alignment = 1
+
+[node name="FactCell" type="PanelContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes" unique_id=1661251829]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_type_variation = &"FactCell"
+
+[node name="Value" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/FactCell" unique_id=1406607847]
+layout_mode = 2
+theme_type_variation = &"FactValue"
+text = "Long stillness"
+vertical_alignment = 1
+
+[node name="HotRule" type="VBoxContainer" parent="Center/Page/Panel/PanelMargin/Sections/Boxes" unique_id=618733845]
+custom_minimum_size = Vector2(300, 0)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+theme_override_constants/separation = 0
+
+[node name="Rule" type="HSeparator" parent="Center/Page/Panel/PanelMargin/Sections/Boxes/HotRule" unique_id=2045282660]
+layout_mode = 2
+mouse_filter = 2
+theme_type_variation = &"HotRule"

@@ -1,0 +1,13 @@
+[gd_resource type="StyleBox" script_class="StyleBoxNeonDots" format=3]
+
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_dots.gd" id="1_1qu8g"]
+
+[resource]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = 16.0
+content_margin_top = 0.0
+content_margin_right = 16.0
+content_margin_bottom = 0.0
+script = ExtResource("1_1qu8g")
+bar_width = 6
