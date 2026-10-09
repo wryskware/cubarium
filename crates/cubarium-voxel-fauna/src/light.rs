@@ -632,12 +632,16 @@ impl Beacons {
         }
         for f in fv.cover.flowers() {
             let Some((x, y, z)) = f.face.front(view) else { continue };
+            // The flower is on the rock face, not at the centre of the air voxel
+            // in front. Keep the point just outside the plane for terrain sight rays.
+            let (nx, ny, nz) = f.face.dir.offset();
+            let inset = 0.5 * v - crate::flight::EPS;
             scent.push(share(f.nectar));
             out.push(Beacon {
                 kind: BeaconKind::Flower,
-                x: (f64::from(x) + 0.5) * v,
-                z: (f64::from(z) + 0.5) * v,
-                y_m: (f64::from(y) + 0.5) * v,
+                x: ((f64::from(x) + 0.5) * v - nx as f64 * inset).rem_euclid(f64::from(c.width) * v),
+                z: (f64::from(z) + 0.5) * v - nz as f64 * inset,
+                y_m: (f64::from(y) + 0.5) * v - ny as f64 * inset,
                 sky: view.sky_visibility(i64::from(x), y, z),
                 power: share(f.nectar).min(1.0),
                 moving: false,
@@ -1033,7 +1037,14 @@ pub(crate) fn steer_flyer(
         let h = phys.body_at(a.body).height_m;
         let lift = (cfg.lift_per_m * (p.light.beacon_y - 0.5 * h - a.pose.y_m)).clamp(-1.0, 1.0);
         let want = dx.atan2(dz);
-        if dh <= cfg.visit_m {
+        // A nearby flower is inspected only once the mouth can actually sip it.
+        // Stopping at visit_m left wall flowers outside the smaller sip radius.
+        let can_sip = || {
+            let s = crate::flight::Shape::of(&phys, &phys.flight.expect("a flyer"), a.body);
+            crate::flight::bloom_in_reach(view, fv, crate::flight::mouth_point(&a, s),
+                s.r + phys.body_at(a.body).mouth_reach_m).is_some()
+        };
+        if dh <= cfg.visit_m && (p.light.beacon_kind != BeaconKind::Flower as u8 || can_sip()) {
             let kind = p.light.beacon_kind;
             if let Inspection::Failed = inspect(fauna, i, ring) {
                 learn(fauna, a.id, founder, BeaconKind::from_index(kind), 0.0);

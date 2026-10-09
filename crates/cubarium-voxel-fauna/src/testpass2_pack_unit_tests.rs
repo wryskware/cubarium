@@ -181,7 +181,7 @@ fn the_jaw_band_meets_a_body_strictly_inside_it() {
     let phys = *c.founder(CH);
     let (g, h) = (phys.adult_body(), phys.hunter.unwrap());
     let s0 = 1.0;
-    let top = s0 + h.jaw_band_height_fraction * g.height_m;
+    let top = s0 + h.strike_height_m(&g);
     let height = 0.3;
     assert!(!band_meets(&g, &h, s0, top, height), "base at the band's top");
     assert!(band_meets(&g, &h, s0, top - 1e-9, height), "base a hair under the band's top");

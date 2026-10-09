@@ -308,9 +308,14 @@ fn a_fleeing_seedporter_climbs_a_stand_it_can_walk_to_not_the_nearest_on_a_ledge
     let top = FLOOR + 4 * up.max(1);
     rock(&mut world, 26..=30, 5..=11, FLOOR + 1..=top);
     let mut flora = Flora::new(fruit_flora());
-    let ledge = stand(&mut flora, &world, 27, 8);
+    let safe_tree = |flora: &mut Flora, x, z| {
+        let wood = flora.config().vaulttree.wood_max;
+        assert!(flora.apply(&world, FloraCommand::Seed { x, z, species: Plant::Vaulttree, wood }));
+        flora.view().stands.iter().find(|s| i64::from(s.site.x) == x && s.site.z == z).unwrap().site
+    };
+    let ledge = safe_tree(&mut flora, 27, 8);
     assert_eq!(ledge.y, top, "fixture: the near stand is on the block");
-    let ground = stand(&mut flora, &world, 24, 14);
+    let ground = safe_tree(&mut flora, 24, 14);
     assert_eq!(ground.y, FLOOR, "fixture: the far stand is on the ground");
     let me = centre(24, 8);
     let d = |s: Site| {

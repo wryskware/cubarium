@@ -199,11 +199,12 @@ fn the_awareness_factor_reads_a_grown_member_not_a_pup() {
 fn bellwing(fauna: &mut Fauna, world: &World, x: f64, lift: f64, mode: MobilityMode) -> u64 {
     assert!(fauna.apply(
         world,
-        Command::IntroduceAloft { pose: Pose { x, z: LANE_Z, heading_rad: WEST, y_m: SURFACE_M + lift }, founder: BW, stores: StartingStores::FULL },
+        Command::IntroduceAloft { pose: Pose { x, z: LANE_Z, heading_rad: WEST, y_m: SURFACE_M }, founder: BW, stores: StartingStores::FULL },
     ));
     let id = fauna.view().ledger.births - 1;
     drive(fauna, id, 0.0, false);
     let a = animal_mut(fauna, id);
+    a.pose.y_m = SURFACE_M + lift;
     a.mobility.mode = mode;
     a.mobility.falling = false;
     id
@@ -212,7 +213,7 @@ fn bellwing(fauna: &mut Fauna, world: &World, x: f64, lift: f64, mode: MobilityM
 fn jaw_band(fauna: &Fauna, member: u64) -> f64 {
     let h = fauna.config.founder(CH).hunter.expect("a hunter");
     let g = crate::body_of(&fauna.config, &animal(fauna, member)).expect("a body");
-    h.jaw_band_height_fraction * g.height_m
+    h.strike_height_m(&g)
 }
 
 /// **The prospect and the strike agree on a flyer**: a bellwing flying with its base above the

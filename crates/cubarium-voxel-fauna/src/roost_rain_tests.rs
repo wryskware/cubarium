@@ -97,7 +97,7 @@ fn seed(flora: &mut Flora, world: &World, species: Plant, x: i64, z: u32, wood: 
 /// A vaulttree small enough to climb in a test: the most wood whose crown is at most a
 /// metre over the glider's shortest climbable stand.
 fn small_vaulttree(flora: &mut Flora, world: &World, fauna: &Fauna, x: i64, z: u32) -> Site {
-    let min = glider(fauna).climb_min_stand_m;
+    let min = glider(fauna).climb_min_stand_m.max(crate::step::refuge_height_m(fauna.config()));
     let sc = flora.config().species(Plant::Vaulttree).clone();
     let mut wood = sc.wood_max;
     while sc.crown_height_m_at(wood) > min + 1.0 && wood > 1e-9 {
@@ -188,31 +188,46 @@ fn a_seedporter_at_night_with_a_reachable_vaulttree_roosts_in_its_crown() {
     assert_eq!(on, Some(vt), "in the vaulttree's crown, not the lanternberry at {lantern:?}");
 }
 
-/// **With neither a vaulttree nor a vine ledge it rests as today**: the nearest climbable
-/// stand's crown, asleep there.
+/// With no safe crown available the roost chooser does not nominate a low bush.
 #[test]
-fn with_no_vaulttree_or_ledge_it_roosts_on_the_nearest_stand_as_before() {
-    let (on, lantern, _, slept) = seedporter_night(false, |_, _| {});
-    assert!(slept, "it fell asleep");
-    assert_eq!(on, Some(lantern));
+fn with_no_safe_vaulttree_or_ledge_it_does_not_roost_in_a_low_bush() {
+    let world = night_plain(32, 24, 9);
+    let mut flora = Flora::new(FloraConfig::default());
+    let wood = flora.config().lanternberry.wood_max;
+    seed(&mut flora, &world, Plant::Lanternberry, 9, 4, wood);
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, SP, 5, 4);
+    let i = fauna.animals.iter().position(|a| a.id == id).unwrap();
+    assert!(crate::step::better_roost(&mut fauna, i, &world.view(), &flora.view()).is_none(),
+        "no unsafe bush is nominated as a roost");
 }
 
-/// **An out-of-budget site is skipped**: the vaulttree just past `roost_budget_m`, or a
-/// trip the reserve guard refuses (`roost_reserve_share` 0), leaves it on today's roost.
+/// A safe crown is still subject to the travel budget and reserve guard.
 #[test]
 fn a_vaulttree_out_of_budget_or_past_the_reserve_guard_is_skipped() {
-    let (on, lantern, _, slept) = seedporter_night(true, |g, d| g.roost_budget_m = 0.5 * d);
-    assert!(slept);
-    assert_eq!(on, Some(lantern), "past its budget the vaulttree is skipped");
-    let (on, lantern, _, slept) = seedporter_night(true, |g, _| g.roost_reserve_share = 0.0);
-    assert!(slept);
-    assert_eq!(on, Some(lantern), "a trip its reserve guard refuses is skipped");
+    for reserve_blocked in [false, true] {
+        let world = night_plain(32, 24, 9);
+        let mut cfg = FaunaConfig::default();
+        let g = cfg.founders[SP.index()].glider.as_mut().unwrap();
+        if reserve_blocked { g.roost_reserve_share = 0.0; } else { g.roost_budget_m = V; }
+        let mut fauna = Fauna::new(cfg);
+        let mut flora = Flora::new(FloraConfig::default());
+        small_vaulttree(&mut flora, &world, &fauna, 16, 4);
+        let id = on_ground(&mut fauna, &world, SP, 5, 4);
+        let i = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        assert!(crate::step::better_roost(&mut fauna, i, &world.view(), &flora.view()).is_none(),
+            "the safe crown is skipped when travel cannot be afforded");
+    }
 }
 
 /// A rock mesa over columns `x = 12..=15` up to `y = 8` (its top 1.5 m over the plain), on
 /// a plain 32 × 24 × 5 at night (or with the clock off), a latticevine covering its west face on slab `z = 2` from
 /// the foot (`y = 3`) to the lip row (`y = 8`); the flora.
 fn vine_mesa(night: bool) -> (World, Flora) {
+    vine_mesa_at(night, 8)
+}
+
+fn vine_mesa_at(night: bool, top: u32) -> (World, Flora) {
     let mut world = if night {
         night_plain(32, 24, 5)
     } else {
@@ -221,13 +236,13 @@ fn vine_mesa(night: bool) -> (World, Flora) {
         soil(&mut w);
         w
     };
-    rock(&mut world, 12..=15, 1..=8);
+    rock(&mut world, 12..=15, 1..=top);
     let mut flora = Flora::new(FloraConfig::default());
     let first = Face::new(12, 3, 2, FaceDir::NegX);
     let id = flora
         .seed_vine(&world, VineSeed { root: Site { x: 11, y: 2, z: 2 }, first, reserve: 100.0, lineage: None })
         .expect("fixture: the vine");
-    for y in 4..=8 {
+    for y in 4..=top {
         assert!(flora.cover_face(&world, id, Face::new(12, y, 2, FaceDir::NegX), 1.0));
     }
     (world, flora)
@@ -238,7 +253,9 @@ fn vine_mesa(night: bool) -> (World, Flora) {
 #[test]
 fn with_only_a_vine_mesa_in_reach_it_climbs_up_and_roosts_on_top() {
     let (world, mut flora) = vine_mesa(true);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut cfg = FaunaConfig::default();
+    cfg.founders[Founder::Chorister.index()].hunter.as_mut().unwrap().vertical_reach_m = 1.0;
+    let mut fauna = Fauna::new(cfg);
     assert!(glider(&fauna).roost_ledge_min_m <= 6.0 * V, "fixture: the mesa is a ledge worth roosting on");
     let id = on_ground(&mut fauna, &world, SP, 6, 2);
     let n = until(&mut fauna, &world, &mut flora, 600, |f| asleep(f, id));
@@ -401,4 +418,72 @@ fn a_rain_grounded_perched_bellwing_pays_its_sleep_upkeep() {
     assert!(!dry_latched && wet_latched);
     assert!(dry > 0.0);
     assert!((wet / dry - sleep).abs() < 1e-6, "rain upkeep {wet} = {sleep} x dry {dry}");
+}
+
+/// A nearer low vaulttree is skipped for a crown above the configured hunter reach.
+#[test]
+fn night_roost_selection_rejects_a_low_vaulttree_and_chooses_the_high_one() {
+    let world = night_plain(40, 40, 9);
+    let mut cfg = FaunaConfig::default();
+    cfg.founders[Founder::Chorister.index()]
+        .hunter
+        .as_mut()
+        .unwrap()
+        .vertical_reach_m = 2.0;
+    cfg.founders[SP.index()]
+        .glider
+        .as_mut()
+        .unwrap()
+        .roost_reserve_share = 1.0;
+    let reach = crate::step::refuge_height_m(&cfg);
+    let mut fc = FloraConfig::default();
+    fc.vaulttree.crown_height_m = [0.25 * reach, 2.0 * reach];
+    let max = fc.vaulttree.wood_max;
+    let mut flora = Flora::new(fc);
+    let low = seed(&mut flora, &world, Plant::Vaulttree, 9, 4, 0.1 * max);
+    let high = seed(&mut flora, &world, Plant::Vaulttree, 16, 4, max);
+    assert!(
+        !crate::step::safe_crown(&flora.view(), low, V, reach),
+        "fixture: lower crown is unsafe"
+    );
+    assert!(
+        crate::step::safe_crown(&flora.view(), high, V, reach),
+        "fixture: higher crown is safe"
+    );
+    let mut fauna = Fauna::new(cfg);
+    let id = on_ground(&mut fauna, &world, SP, 5, 4);
+    let i = fauna.animals.iter().position(|a| a.id == id).unwrap();
+    let choice = crate::step::better_roost(&mut fauna, i, &world.view(), &flora.view());
+    assert!(
+        matches!(choice, Some(crate::step::Roost::Crown(_, site)) if site == high),
+        "chooses the safe crown: {choice:?}"
+    );
+}
+
+/// The ledge minimum is an extra requirement; satisfying it alone grants no safety.
+#[test]
+fn night_roost_selection_rejects_a_low_vine_ledge_and_accepts_a_high_one() {
+    for top in [8, 12] {
+        let (world, flora) = vine_mesa_at(true, top);
+        let mut cfg = FaunaConfig::default();
+        cfg.founders[Founder::Chorister.index()]
+            .hunter
+            .as_mut()
+            .unwrap()
+            .vertical_reach_m = 2.0;
+        let g = cfg.founders[SP.index()].glider.as_mut().unwrap();
+        g.roost_ledge_min_m = 0.0;
+        g.roost_reserve_share = 1.0;
+        let reach = crate::step::refuge_height_m(&cfg);
+        let safe = (f64::from(top) + 1.0) * V - SURFACE > reach;
+        let mut fauna = Fauna::new(cfg);
+        let id = on_ground(&mut fauna, &world, SP, 6, 2);
+        let i = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        let choice = crate::step::better_roost(&mut fauna, i, &world.view(), &flora.view());
+        assert_eq!(
+            matches!(choice, Some(crate::step::Roost::Ledge(..))),
+            safe,
+            "ledge top {top} must clear the configured reach: {choice:?}"
+        );
+    }
 }

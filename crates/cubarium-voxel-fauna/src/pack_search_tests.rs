@@ -392,7 +392,7 @@ fn a_perched_bellwing_in_reach_is_takeable_and_one_out_of_reach_is_not() {
     let band = {
         let h = fauna.config.founder(CH).hunter.expect("a hunter");
         let g = crate::body_of(&fauna.config, &animal(&fauna, me)).expect("a body");
-        h.jaw_band_height_fraction * g.height_m
+        h.strike_height_m(&g)
     };
     let mut takeable = Vec::new();
     for lift in [0.5 * band, band + 1.0] {
@@ -571,7 +571,7 @@ fn a_hovering_bellwing_above_reach_is_never_committed_to() {
     let band = {
         let h = fauna.config.founder(CH).hunter.expect("a hunter");
         let g = crate::body_of(&fauna.config, &animal(&fauna, members[0])).expect("a body");
-        h.jaw_band_height_fraction * g.height_m
+        h.strike_height_m(&g)
     };
     let bw = introduce(&mut fauna, &world, crate::Founder::Bellwing, StartingStores::FULL);
     drive(&mut fauna, bw, 0.0, false);

@@ -44,6 +44,7 @@ fn config() -> FaunaConfig {
         prey_max_ratio: 4.0,
         strike_reach_length_fraction: 0.8,
         jaw_band_height_fraction: 2.0,
+        vertical_reach_m: 0.0,
         jaw_forward_length_fraction: 0.5,
         windup_s: 0.1,
         lunge_s: 0.15,

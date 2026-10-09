@@ -1659,7 +1659,7 @@ fn print_header() {
     // set at, the fruit's overhead respired (all cumulative); the seedporters' fruit eaten,
     // stands and vines (cumulative, organic).
     header.push_str(",lantern_in_flower,flower_visits_stand,flower_visits_vine,crops_set_floor,crops_set_visited");
-    header.push_str(",fruit_set_floor,fruit_set_visited,fruit_overhead,fruit_eaten_seedporter");
+    header.push_str(",fruit_set_floor,fruit_set_visited,fruit_overhead,fruit_eaten_seedporter,fruit_eaten_seedporter_stand,fruit_eaten_seedporter_vine");
     // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
     // standing (above every layer's grazing floor), then plant deaths by cause for the
     // turf, the pad and the two woody species, cumulative.
@@ -1923,6 +1923,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", l.fruit_overhead));
         // The seedporter is the only fruit eater; its glide-and-perch bites book here.
         row.push(format!("{:.6}", a.ledger.fruit_eaten_by_source.iter().sum::<f64>()));
+        row.extend(a.ledger.fruit_eaten_by_source.iter().map(|q| format!("{q:.6}")));
     }
     let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
     row.push(format!("{edible:.6}"));

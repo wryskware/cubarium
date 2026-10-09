@@ -109,13 +109,12 @@ fn sees(fauna: &Fauna, who: u64, of: u64) -> bool {
 
 /// `id` perched in a crown `PERCH_M` over the surface.
 fn perch(fauna: &mut Fauna, id: u64) {
+    let reach = crate::step::refuge_height_m(&fauna.config);
     let a = animal_mut(fauna, id);
     a.mobility.mode = MobilityMode::Perched;
-    a.pose.y_m = SURFACE_M + PERCH_M;
+    a.pose.y_m = SURFACE_M + reach + VOXEL_M;
 }
 
-/// A crown perch's height over the surface, metres.
-const PERCH_M: f64 = 1.5;
 
 /// The hunter gone from every sense: out of the world.
 fn vanish(fauna: &mut Fauna, id: u64) {

@@ -250,7 +250,8 @@ fn strikes_on_bellwing(hunter_lineage: Founder, lift_m: f64, ahead_m: f64) -> (u
     let world = clock_off(44);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(patrol_config(HuntConfig::default()));
-    let bw = bellwing_at(&mut fauna, &world, STRIKER_X + ahead_m, LANE_Z, SURFACE_M + lift_m);
+    let bw = bellwing_at(&mut fauna, &world, STRIKER_X + ahead_m, LANE_Z, SURFACE_M + lift_m.min(1.0));
+    animal_mut(&mut fauna, bw).pose.y_m = SURFACE_M + lift_m;
     let mode = animal(&fauna, bw).mobility.mode;
     let striker = introduce(&mut fauna, &world, hunter_lineage, HUNTING);
     place(&mut fauna, striker, STRIKER_X, LANE_Z, EAST);
@@ -278,7 +279,7 @@ fn a_grounded_perched_or_low_hovering_bellwing_in_reach_is_struck_and_a_higher_o
         let (n, mode) = strikes_on_bellwing(hunter_lineage, 0.0, ahead);
         assert_eq!(mode, MobilityMode::Perched, "the fixture perches it on the ground");
         assert!(n > 0, "{}: a perched bellwing in reach is struck", hunter_lineage.name());
-        let band = h.jaw_band_height_fraction * geometry.height_m;
+        let band = h.strike_height_m(&geometry);
         // Hovering inside the jaw band: a quarter of the band's height up.
         let (n, mode) = strikes_on_bellwing(hunter_lineage, 0.25 * band, ahead);
         assert_eq!(mode, MobilityMode::Fly, "the fixture has it flying, {} m up", 0.25 * band);
@@ -509,4 +510,110 @@ fn a_well_fed_adult_can_afford_a_clutch_and_a_hungry_one_cannot() {
     let moderate = r.surplus_floor + 1.5 * r.egg_organic;
     assert!(moderate >= r.surplus_reserve(&core), "one affordable egg makes it eligible");
     assert_eq!(r.clutch_for(moderate), 1, "and it lays what its surplus pays for");
+}
+
+/// Reach applies to clinging and perched seedporters as well as grounded prey.
+/// The same height gate controls prey sensing and the physical strike capsule.
+#[test]
+fn a_seedporter_below_the_veilhounds_reach_is_struck_and_one_above_is_safe() {
+    for mode in [MobilityMode::Perched, MobilityMode::Climb] {
+        for high in [false, true] {
+            let world = plain_of_height(
+                cubarium_voxel::weather::DayClock {
+                    mode: cubarium_voxel::weather::DayMode::Off,
+                    ..Default::default()
+                },
+                54,
+                40,
+            );
+            let mut cfg = patrol_config(HuntConfig::default());
+            cfg.founders[Founder::Chorister.index()]
+                .hunter
+                .as_mut()
+                .unwrap()
+                .vertical_reach_m = 2.0;
+            let phys = *cfg.founder(Founder::Chorister);
+            let body = phys.adult_body();
+            let h = phys.hunter.unwrap();
+            let reach = h.strike_height_m(&body);
+            let lift = if high {
+                reach + 2.0 * VOXEL_M
+            } else {
+                0.75 * reach
+            };
+            let mut fc = FloraConfig::default();
+            fc.vaulttree.crown_height_m = [lift, lift];
+            let wood = fc.vaulttree.wood_max;
+            let mut flora = Flora::new(fc);
+            let ahead = (h.jaw_forward_length_fraction + 0.5 * h.strike_reach_length_fraction)
+                * body.length_m;
+            let x = STRIKER_X + ahead;
+            let site = Site {
+                x: (x / VOXEL_M).floor() as u32,
+                y: SURFACE_Y,
+                z: (LANE_Z / VOXEL_M).floor() as u32,
+            };
+            assert!(flora.apply(
+                &world,
+                cubarium_voxel_flora::Command::Seed {
+                    x: i64::from(site.x),
+                    z: site.z,
+                    species: cubarium_voxel_flora::Species::Vaulttree,
+                    wood,
+                }
+            ));
+            let top = flora
+                .view()
+                .layers_at(site)
+                .filter(|l| l.foliage_index.is_some())
+                .max_by_key(|l| l.cell)
+                .unwrap();
+            let mut fauna = Fauna::new(cfg);
+            let prey = introduce(
+                &mut fauna,
+                &world,
+                Founder::Seedporter,
+                StartingStores::FULL,
+            );
+            place(&mut fauna, prey, x, LANE_Z, WEST);
+            drive(&mut fauna, prey, 0.0, false);
+            let a = animal_mut(&mut fauna, prey);
+            a.pose.y_m = if mode == MobilityMode::Perched {
+                (top.cell + 1) as f64 * VOXEL_M
+            } else {
+                SURFACE_M + lift
+            };
+            a.mobility.mode = mode;
+            a.mobility.perch = Some(crate::Perch {
+                kind: crate::PerchKind::CrownTop,
+                anchor: crate::PerchAnchor::Stand {
+                    site,
+                    layer: top.foliage_index.unwrap() as u8,
+                },
+            });
+            let hunter = introduce(&mut fauna, &world, Founder::Chorister, HUNTING);
+            place(&mut fauna, hunter, STRIKER_X, LANE_Z, EAST);
+            animal_mut(&mut fauna, hunter).pose.y_m = SURFACE_M;
+            let feed = drive(&mut fauna, hunter, 0.0, false);
+            feed.store(true, Ordering::Relaxed);
+            assert_eq!(
+                crate::is_prey_of(
+                    &fauna.config,
+                    &animal(&fauna, hunter),
+                    &animal(&fauna, prey)
+                ),
+                !high,
+                "{mode:?}: sensing agrees with the configured strike height"
+            );
+            for _ in 0..60 {
+                fauna.step_with(&world, &mut flora, 1);
+            }
+            assert_eq!(
+                fauna.ledger.strikes_on_by_founder[Founder::Seedporter.index()] > 0,
+                !high,
+                "{mode:?}: the strike agrees with sensing"
+            );
+            assert_closes(&fauna, "after the seedporter reach case");
+        }
+    }
 }

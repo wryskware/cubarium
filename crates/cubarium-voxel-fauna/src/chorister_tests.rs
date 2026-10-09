@@ -240,6 +240,7 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
         Hunter {
             prey: h.prey,
             lure_power: h.lure_power,
+            vertical_reach_m: h.vertical_reach_m,
             ..Hunter::LANTERNJAW
         },
         h,
@@ -299,7 +300,7 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
         .validate()
         .expect("the shipped table validates");
 
-    // A grounded seedporter is its prey; a perched or gliding one is not.
+    // A grounded seedporter is prey; a perched or climbing one above its reach is safe.
     let world = lane(48, 1);
     let mut fauna = Fauna::new(FaunaConfig::default());
     let hunter = introduce(&mut fauna, &world, C, StartingStores::FULL);
@@ -318,6 +319,9 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     ] {
         let mut p = porter;
         p.mobility.mode = mode;
+        if mode != MobilityMode::Ground {
+            p.pose.y_m = hunter.pose.y_m + h.strike_height_m(&ch.adult_body()) + VOXEL_M;
+        }
         assert_eq!(
             is_prey_of(&fauna.config, &hunter, &p),
             want,

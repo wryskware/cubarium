@@ -358,6 +358,7 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
         r("hunter.prey_max_ratio", "x own body", nonneg, "the size window: prey at most this x its own").optional(),
         r("hunter.strike_reach_length_fraction", "x body length", nonneg, "the strike capsule's reach").optional(),
+        r("hunter.vertical_reach_m", "m", nonneg, "rearing and jumping reach above the standing surface; 0 uses only the jaw band").optional(),
         r("hunter.jaw_band_height_fraction", "x body height", nonneg, "the jaw band's top").optional(),
         r("hunter.jaw_forward_length_fraction", "x body length", nonneg, "the jaw's point ahead of the body's centre").search(0.2, 0.8).optional(),
         r("hunter.windup_s", "s", nonneg, "the crouch").optional(),

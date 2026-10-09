@@ -119,10 +119,14 @@ pub(crate) fn is_prey_in_window(
     if prey.attached.is_some() || hunter.attached.is_some() {
         return false;
     }
-    // A glider (F3, the seedporter) is prey only while grounded: climbing, perched or
-    // gliding it is out of a walker's reach.
+    // A rearing hunter can pull a perched or climbing glider down within its band.
     if config.founder(pf).glider.is_some() && prey.mobility.mode != crate::MobilityMode::Ground {
-        return false;
+        if h.vertical_reach_m <= 0.0
+            || !matches!(prey.mobility.mode, crate::MobilityMode::Perched | crate::MobilityMode::Climb)
+            || !hovers_in_reach(config, hunter, &h, prey)
+        {
+            return false;
+        }
     }
     if !flyer_takeable(config, hunter, &h, pf, prey) {
         return false;
@@ -163,7 +167,7 @@ fn hovers_in_reach(config: &FaunaConfig, hunter: &Animal, h: &crate::Hunter, pre
         return false;
     }
     let s0 = hunter.pose.y_m;
-    let band = (s0, s0 + h.jaw_band_height_fraction * hg.height_m);
+    let band = (s0, s0 + h.strike_height_m(&hg));
     let body = (prey.pose.y_m, prey.pose.y_m + pg.height_m);
     body.0 < band.1 && band.0 < body.1
 }

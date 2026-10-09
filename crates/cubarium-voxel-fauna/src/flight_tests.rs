@@ -877,6 +877,8 @@ fn a_sip_takes_vine_and_bloomcrown_nectar_the_books_close_and_an_empty_flower_gi
         let nectar = flora.view().cover.face(face).expect("the face").nectar;
         let organic = flora.view().organic();
         let consumed = flora.view().ledger.consumed_organic_out;
+        let visits_before = flora.view().cover.face(face).expect("the face").visits;
+        let flower_visits_before = flora.view().ledger.flower_visits[1];
 
         let mut fauna = Fauna::new(FaunaConfig::default());
         let r = bellwing_flight(&fauna).span_m / 2.0;
@@ -900,6 +902,10 @@ fn a_sip_takes_vine_and_bloomcrown_nectar_the_books_close_and_an_empty_flower_gi
         let booked = flora.view().ledger.consumed_organic_out - consumed;
         assert!((booked - eaten).abs() <= 1e-12, "take_nectar booked {booked}, the sip {eaten}");
         assert_eq!(animal(&fauna, id).last_bloom, Some(Bloom::Vine(face)), "the pollen seam");
+        assert_eq!(flora.view().cover.face(face).unwrap().visits, visits_before + 1,
+            "repeated sips book one arrival at this flowering face");
+        assert_eq!(flora.view().ledger.flower_visits[1], flower_visits_before + 1,
+            "the vine visit is booked in the flora ledger");
         ledgers_close(&fauna, &flora, organic);
     }
 
@@ -1522,4 +1528,124 @@ fn a_clutch_from_surplus_lays_more_eggs_the_more_surplus_up_to_clutch_max() {
     assert_eq!(eggs[2], max, "capped at clutch_max: {eggs:?}");
     let fixed = lay(0);
     assert_eq!(fixed, vec![1, 1, 1], "control: the fixed clutch_size whatever the surplus");
+}
+
+/// A mature tree exposes lower leaves, while a mouth cannot strip its high canopy.
+#[test]
+fn a_mature_vaulttrees_lower_foliage_is_browsed_while_its_upper_foliage_stays() {
+    let world = plain(40, 64, 16);
+    let mut cfg = FaunaConfig::default();
+    cfg.founders[Founder::Loftstrider.index()]
+        .core
+        .bite_half_stock = 0.0;
+    let body = cfg.founder(Founder::Loftstrider).adult_body();
+    let fc = FloraConfig::default();
+    let mut flora = Flora::new(fc);
+    let site = full_stand(&mut flora, &world, Plant::Vaulttree, 20, 8);
+    let before = foliage_layers(&flora, site);
+    let band = body.mouth_layers(site.y, V);
+    assert!(
+        before
+            .iter()
+            .any(|l| band.contains(&l.cell) && l.edible() > 0.0),
+        "fixture: stocked lower canopy within reach"
+    );
+    assert!(
+        before
+            .iter()
+            .any(|l| !band.contains(&l.cell) && l.stock > 0.0),
+        "fixture: stocked upper canopy above reach"
+    );
+    let mut fauna = Fauna::new(cfg);
+    let id = on_ground(
+        &mut fauna,
+        &world,
+        Founder::Loftstrider,
+        16,
+        8,
+        StartingStores {
+            body: 1.0,
+            reserve: 0.0,
+        },
+    );
+    fly(&mut fauna, id, 0.0, 1.0, 0.0);
+    steps(&mut fauna, &world, &mut flora, 12);
+    assert!(fauna.view().ledger.bites > 0, "it actually browsed");
+    let after = foliage_layers(&flora, site);
+    assert!(
+        before
+            .iter()
+            .zip(&after)
+            .any(|(a, b)| band.contains(&a.cell) && b.stock < a.stock),
+        "reachable leaves were taken"
+    );
+    for (a, b) in before.iter().zip(&after) {
+        if !band.contains(&a.cell) {
+            assert!((a.stock - b.stock).abs() <= 1e-12, "upper layer {} stays untouched", a.cell);
+        }
+    }
+}
+
+/// A hungry bellwing follows the flower cue all the way into sipping range.
+#[test]
+fn a_bellwing_approaches_a_flowering_vine_and_books_a_visit() {
+    let (mut sky, mut flora, faces) = vine_wall(true, flowering_vines());
+    let mut rain = {
+        let mut c = sky.config().clone();
+        c.rain_m_per_s = 1e-6;
+        let mut wet = World::empty(c);
+        soil(&mut wet);
+        rock(&mut wet, 6..=6, 1..=12);
+        wet
+    };
+    flora.step(&mut rain);
+    let mut face = None;
+    for _ in 0..160 {
+        flora.step(&mut sky);
+        face = faces.iter().copied().find(|&f| {
+            flora
+                .view()
+                .cover
+                .face(f)
+                .is_some_and(|c| c.spur == SpurPhase::Flower && c.nectar > 0.0)
+        });
+        if face.is_some() {
+            break;
+        }
+    }
+    let face = face.expect("fixture: a face flowers after rain");
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (_, z) = centre(0, WALL_Z);
+    let y = (f64::from(face.y) + 0.5) * V;
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let id = aloft(
+        &mut fauna,
+        &sky,
+        WALL_FACE_M - r - 2.0 * V,
+        z,
+        y,
+        EAST,
+        StartingStores::HUNGRY,
+    );
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(BW, teachers)));
+    let n = until(&mut fauna, &sky, &mut flora, 200, |f| {
+        f.view().ledger.bites_by_founder_food[BW.index()][Food::Nectar.index()] > 0
+    });
+    assert!(
+        fauna.view().ledger.bites_by_founder_food[BW.index()][Food::Nectar.index()] > 0,
+        "it reaches a flower and sips within {n} ticks: {:?}",
+        animal(&fauna, id).pose
+    );
+    assert!(
+        flora.view().ledger.flower_visits[1] > 0,
+        "arrival is booked to the vine"
+    );
+    let Bloom::Vine(visited) = animal(&fauna, id).last_bloom.expect("the bloom it sipped") else {
+        panic!("this fixture contains only vine flowers");
+    };
+    assert!(
+        flora.view().cover.face(visited).unwrap().visits > 0,
+        "the particular face receives the visit"
+    );
 }
