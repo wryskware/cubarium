@@ -1,0 +1,105 @@
+# The ecology search's real genome (training plan 2026-10-08 §6 item 10, build order step 4):
+# per-lineage body mass, the gut ceiling, and two supply genes. Nine genes.
+#
+# Wrysk's route (item 10, 2026-10-09): raise each lineage's `mass_scale` (body, reserves, gut
+# and upkeep scale together, so starvation time is unchanged), bring the gut ceiling from
+# 18-45x upkeep to the real 3-7x, keep foliage yield 0.5, plant defence per bite as a
+# secondary gene, never slow the plants. Target: leaf eaters eat 10-30 % of leaf growth and
+# every lineage persists. Vine flowers and fruit are left to ecology (`spur_share`).
+#
+# Genes are world numbers only: no behaviour, no score terms. x1 is the world the genome is
+# decoded over (the wide terrarium preset, or a save's own configs beside `load=`). Each
+# gene's `value` is the CMA start; `eco_search.py` reads it as the starting mean.
+#
+# Ties (one gene moving several lineages):
+# - mass_grazer moves the frondgrazer AND the Veilhound (`chorister`): its prey, adult
+#   frondgrazers, must stay within the pack's `hunter.prey_max_ratio` (1.5x own body), and
+#   its kills per hour scale with its mass over its prey's. vh_ratio then moves the
+#   Veilhound alone, so the Veilhound's factor is mass_grazer x vh_ratio.
+# - mass_small moves the fruit, nectar and cap eaters (seedporter, bellwing, capgnawer;
+#   Wrysk's one range x2-6) AND the lanternjaw, whose prey are those small bodies (prey
+#   at most 1.5x its body) so the hunter keeps its prey-to-hunter ratio.
+# - mass_scale carries its seven absolute quantities (registry tie "mass"; the browser's
+#   placeholder species follows the frondgrazer).
+# - gut: every lineage's bite_per_body_s x S and every digestion time / S (the webmodel's
+#   own gut-throughput knob, `web_model gut=`), so the gut ceiling y.k/tau falls by S and
+#   the bite keeps asking twice the gut's throughput.
+#
+# mass_scale is a digest row (a trained brain's senses read it), so the file says
+# retrain = true. No trained brain runs in the world now (DROP-C1); a brain trained later
+# is trained at the masses this search picks.
+#
+# Launch: scripts/studies/eco-wide-screen.sh (protocol A screen, from year-old wide saves).
+
+retrain = true
+
+# --- Body mass, per lineage group (x the shipped mass_scale 30) ---
+
+[[gene]]
+name = "mass_grazer"
+path = ["fauna.founders.frondgrazer.mass_scale", "fauna.founders.chorister.mass_scale"]
+range = [25.0, 75.0]
+value = 43.3
+what = "frondgrazer body mass (and the Veilhound with it); Wrysk's x25-75, start at the box's log centre"
+
+[[gene]]
+name = "vh_ratio"
+path = "fauna.founders.chorister.mass_scale"
+range = [0.4, 1.0]
+value = 0.63
+what = "Veilhound mass over the frondgrazer's factor: 1 keeps today's ratio (about 2 kills per world-hour); 0.4 is the lightest pack that can still take an adult frondgrazer (1.5x prey cap) and gives about 0.8 kills/h"
+
+[[gene]]
+name = "mass_loftstrider"
+path = "fauna.founders.loftstrider.mass_scale"
+range = [4.0, 12.0]
+value = 6.9
+what = "loftstrider body mass; Wrysk's x4-12, start at the log centre"
+
+[[gene]]
+name = "mass_small"
+path = ["fauna.founders.seedporter.mass_scale", "fauna.founders.bellwing.mass_scale",
+        "fauna.founders.capgnawer.mass_scale", "fauna.founders.lanternjaw.mass_scale"]
+range = [2.0, 6.0]
+value = 3.46
+what = "fruit, nectar and cap eaters' body mass (Wrysk's x2-6) and the lanternjaw, which hunts them"
+
+[[gene]]
+name = "mass_shredder"
+path = "fauna.founders.littershredder.mass_scale"
+range = [2.0, 30.0]
+value = 7.7
+what = "littershredder body mass: x2 as the small eaters, to x30 where it would eat about 1 % of litter at target numbers (FOOD-BUDGET: 0.03 % today); litter supply covers need >= 20x even at soak numbers, so it persists across the box"
+
+[[gene]]
+name = "mass_snail"
+path = "fauna.founders.ripple-snail.mass_scale"
+range = [1.0, 4.0]
+value = 2.0
+what = "ripple-snail body mass: already film-limited (R_o 0.6), so N falls about as 1/k; 32 (bl4) or 26 (soak2) per d72 need k 1.1-4 for the 8-24 band; start where 32 lands mid-band"
+
+# --- The gut ceiling (y . stomach_k / digestion_s over maintenance_per_s) ---
+
+[[gene]]
+name = "gut"
+path = "fauna.founders.*.gut.bite_per_body_s"
+inverse = "fauna.founders.*.gut.digestion_s.*"
+range = [0.1, 0.4]
+value = 0.1667
+what = "gut throughput S: digestion times / S, bite x S, so every gut ceiling x S. Today 18-45x upkeep (FG 20, LS 38, SP 45, BW 24, shredder 19, CG 20, snail 18, LJ 24, VH 30); x1/6 gives 3.0-7.5x; the box gives 1.8-4.5x (snail) to 4.5-18x (seedporter): below 0.1 the small eaters fall under 2x, which cannot pay a night asleep plus growth"
+
+# --- Supply ---
+
+[[gene]]
+name = "defence"
+path = "flora.*.defence_per_bite"
+range = [1.0, 30.0]
+value = 5.5
+what = "induced plant defence per bite, every plant (glowcap caps included); secondary (Wrysk); FOOD-BUDGET's x1-30, start at the log centre"
+
+[[gene]]
+name = "spur_share"
+path = "flora.latticevine.spur_share"
+range = [0.25, 4.0]
+value = 1.0
+what = "share of latticevine growth into flowers and fruit (0.1 -> 0.025-0.4); Wrysk 2026-10-09: left to ecology"
