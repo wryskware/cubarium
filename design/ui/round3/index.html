@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cubarium UI round 3: panels and controls</title>
+<link rel="stylesheet" href="https://use.typekit.net/ctc3iah.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&display=block">
+<style>
+/* ---------- page chrome: not part of the proposal ---------- */
+html,body{margin:0;background:#101014;color:#d8d8e0;font:14px/1.4 system-ui,sans-serif}
+body{display:flex;align-items:flex-start}
+.bar{position:sticky;top:0;flex:none;width:340px;height:100vh;overflow:auto;box-sizing:border-box;display:flex;flex-direction:column;gap:16px;padding:16px 18px 28px;background:#16161c;border-right:1px solid #2a2a34}
+.bar h1{font-size:15px;margin:0;font-weight:600;color:#fff}
+.ctl{display:flex;flex-direction:column;gap:6px;color:#8a8a99}
+.seg{display:flex;flex-wrap:wrap;gap:2px;background:#22222b;border-radius:8px;padding:2px}
+.seg button{all:unset;cursor:pointer;padding:5px 10px;border-radius:6px;color:#b8b8c6}
+.seg button.on{background:#3a3a48;color:#fff}
+.legend{color:#8a8a99;font-size:12px}
+main.page{flex:1;min-width:0;padding:24px 28px 60px;display:flex;flex-direction:column;gap:40px}
+h2{margin:0;color:#fff;font-size:17px;font-weight:600}
+.sub{color:#8a8a99;margin-top:2px;max-width:1100px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(460px,1fr));gap:30px 34px;margin-top:18px}
+.opt{display:flex;flex-direction:column;gap:12px;cursor:pointer}
+.opt .hd{display:flex;gap:10px;align-items:baseline}
+.opt .hd b{color:#fff;font-size:14px}
+.opt .hd span{color:#8a8a99;font-size:12px}
+.opt.chosen .hd b::after{content:'  ✓ chosen';color:#9a9aff;font-weight:400}
+.opt .stage{padding:14px;border-radius:6px;box-shadow:0 0 0 1px #2a2a34}
+.opt.chosen .stage{box-shadow:0 0 0 2px #9a9aff}
+.cap{color:#8a8a99;font:12px system-ui,sans-serif;width:96px;flex:none;letter-spacing:0;text-transform:none}
+.frame{position:relative;overflow:hidden;border-radius:6px;box-shadow:0 0 0 1px #2a2a34;background:#0B0525}
+.frame>.screen{transform-origin:0 0;position:absolute;left:0;top:0}
+
+/* ---------- proposal: fonts as decided in round 2 ---------- */
+.neon{--ink:#F7F0FF;--ink2:#DCD1F7;--accent:#42C5F8;--hot:#F25BDB;--warm:#FDA243;--line:rgba(176,55,196,.32);--panel:#C23FD3;
+  --lab:#A595D8;--tab:#A595D8;--kick:#F25BDB;--tabs-bg:rgba(11,5,37,.70);
+  /* chrome: Gridlite, Wrysk's chrome setting; --neg is its lit-plate ("negative") setting */
+  --lf:'gridlite-pe-variable',monospace;--lfv:'wght' 691,'BACK' 135,'RECT' 71,'ELSH' 2.65;--neg:'wght' 1,'BACK' 700,'RECT' 700,'ELSH' 2.65;
+  /* title: Gridlite, Wrysk's title setting; text: Pixelify Sans 23 px, weight 400 */
+  --hf:'gridlite-pe-variable',sans-serif;--hfv:'wght' 700,'BACK' 90,'RECT' 120,'ELSH' 3.5;
+  --tf:'Pixelify Sans',sans-serif;--t1:23px;--t2:21px;--t3:18px;
+  color:var(--ink);font-family:var(--tf);font-variation-settings:'wght' 400;font-synthesis:none}
+.neon.bright{--lab:#D9CEF7;--tab:#E6DEFF;--kick:#FF9BEA;--tabs-bg:rgba(11,5,37,.88)}
+.lt{font-family:var(--lf);font-variation-settings:var(--lfv);font-size:26px;letter-spacing:2px;text-transform:uppercase;line-height:1.15;font-weight:400}
+.lbl{color:var(--lab)}
+.kick{color:var(--kick)}
+.pl{display:none}
+.dot{display:inline-block;width:10px;height:10px;flex:none;background:var(--c)}
+
+/* fills: a class on the panel itself */
+.fill-bands{background:linear-gradient(180deg,#2A1470 0 18%,#24115F 18% 36%,#1D0D50 36% 56%,#160A41 56% 76%,#100632 76%)}
+.fill-dither{background-color:#1D0D50;background-size:100% 100%;image-rendering:pixelated}
+.fill-scan{background:repeating-linear-gradient(180deg,rgba(4,1,18,.38) 0 3px,transparent 3px 6px),linear-gradient(180deg,#28135F,#0F0630)}
+.fill-dots{background:conic-gradient(from 270deg at 2px 2px,rgba(194,63,211,.26) 0 25%,transparent 0) 0 0/6px 6px,linear-gradient(180deg,#22105A,#0F0630)}
+
+/* controls */
+.tabs{position:relative;display:flex;align-items:center;gap:6px;padding:6px;background:var(--tabs-bg)}
+.tab{position:relative;display:flex;align-items:center;padding:0 18px;height:52px;color:var(--tab);white-space:nowrap}
+.btn{position:relative;top:0;display:inline-flex;align-items:center;gap:12px;height:54px;padding:0 26px 0 14px;border:none;background:transparent;color:var(--ink2);cursor:pointer}
+.btn.primary{color:#fff}
+.btn.disabled{opacity:.4;cursor:default}
+.row{position:relative;display:flex;align-items:center;gap:14px;height:46px;padding:0 16px;font-size:var(--t2);color:var(--ink2);white-space:nowrap}
+.row .n{margin-left:auto;color:var(--ink2)}
+.chip{position:relative;display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:4px 12px;font-size:var(--t3);color:var(--ink2)}
+.chip .dot{width:8px;height:8px}
+.key{position:relative;display:inline-flex;align-items:center;justify-content:center;min-width:38px;height:38px;padding:0 6px;letter-spacing:0;text-transform:none}
+
+/* ---------- sheet samples ---------- */
+.mini{position:relative;height:300px;padding:26px 28px;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;margin:6px}
+.mini .mname{font-family:var(--hf);font-variation-settings:var(--hfv);font-size:52px;line-height:1;color:var(--ink);text-shadow:4px 4px 0 #5A1D9D}
+.mini .mtext{font-size:var(--t2);color:var(--ink2)}
+.mini .msub{position:relative;margin-top:auto;display:flex;align-items:flex-end;justify-content:space-between;padding:14px 18px}
+.mini .msub .bign{font-family:var(--hf);font-variation-settings:var(--hfv);font-size:52px;line-height:1;color:var(--accent)}
+.ctlpanel{position:relative;padding:30px 34px;display:flex;flex-direction:column;gap:30px;margin:6px}
+.srow{display:flex;flex-wrap:wrap;align-items:center;gap:22px 30px}
+.rows{display:flex;flex-direction:column;gap:16px;width:420px}
+
+/* ---------- full screen (round 2's page with round 3's pieces) ---------- */
+.screen,.screen *{box-sizing:border-box}
+.screen{position:relative;width:1920px;height:1080px;overflow:hidden;background:#0B0525}
+.world{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;image-rendering:pixelated}
+.scrim{position:absolute;inset:0;background:repeating-conic-gradient(rgba(7,4,26,.88) 0 25%,rgba(7,4,26,.62) 0 50%) 0 0/6px 6px}
+.top{position:absolute;left:96px;right:96px;top:40px;height:64px;display:flex;align-items:center;justify-content:space-between}
+.clock{display:flex;align-items:center;gap:12px;color:var(--ink2)}
+.clock .l{color:var(--lab)}
+.paused{color:var(--warm);padding:6px 10px;background:rgba(253,162,67,.12)}
+.body{position:absolute;left:96px;top:128px;width:1728px;height:848px;display:flex}
+.body>.clip{position:absolute;inset:0;overflow:hidden;display:flex}
+.index{position:relative;width:400px;flex:none;display:flex;flex-direction:column;padding:28px 0;border-right:1px solid var(--line)}
+.search{position:relative;display:flex;align-items:center;gap:12px;margin:0 28px 18px;height:46px;padding:0 14px;background:rgba(11,5,37,.5);color:var(--lab);font-size:var(--t3)}
+.grp{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:16px 28px 10px}
+.grp .n{color:var(--ink2)}
+.grp.closed{margin-top:auto;padding-top:20px;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.grp .g{display:inline-flex;align-items:center;gap:10px}
+.list{list-style:none;margin:0 14px;padding:0;display:flex;flex-direction:column;gap:0}
+.entry{flex:1;display:flex;gap:56px;padding:48px 56px;min-width:0}
+.platecol{width:540px;flex:none;display:flex;flex-direction:column;gap:24px}
+.plate{position:relative;margin:0;height:500px;flex:none;display:flex;align-items:center;justify-content:center}
+.plate>.inner{position:absolute;inset:0;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.sun{position:absolute;left:50%;top:70px;width:300px;height:300px;margin-left:-150px;border-radius:50%;opacity:.55;
+  background:linear-gradient(180deg,#FDA243 0 22%,#F98C78 22% 38%,#F25BDB 38% 58%,#B037C4 58% 78%,#5A1D9D 78%);
+  -webkit-mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%);
+          mask:linear-gradient(180deg,#000 0 52%,transparent 52% 56%,#000 56% 64%,transparent 64% 69%,#000 69% 76%,transparent 76% 82%,#000 82% 88%,transparent 88%)}
+.horizon{position:absolute;left:0;right:0;bottom:0;height:130px;background:repeating-linear-gradient(180deg,rgba(242,91,219,.45) 0 3px,transparent 3px 24px);-webkit-mask:linear-gradient(180deg,transparent,#000);mask:linear-gradient(180deg,transparent,#000)}
+.art{position:relative;z-index:2;width:528px;image-rendering:pixelated}
+.platecap{position:absolute;left:12px;top:10px;z-index:3;color:var(--ink2)}
+.live{position:relative;flex:1;display:flex;flex-direction:column;justify-content:space-between;padding:20px 24px}
+.livebody{display:flex;align-items:flex-end;gap:28px}
+.big{font-family:var(--hf);font-variation-settings:var(--hfv);font-size:52px;line-height:1;color:var(--accent)}
+.stages{margin-top:10px;font-size:var(--t3);color:var(--ink2);white-space:nowrap}
+.chart{flex:1;min-width:0}
+.bars{display:flex;align-items:flex-end;justify-content:flex-end;gap:3px;height:64px}
+.bars i{display:block;flex:1 1 0;min-width:3px;max-width:6px;background:var(--accent);opacity:.55}
+.bars i:last-child{opacity:1}
+.axis{display:flex;justify-content:space-between;margin-top:8px;color:var(--lab)}
+.textcol{flex:1;display:flex;flex-direction:column;min-width:0;padding-top:6px}
+.scroll{flex:1;min-height:0;overflow:hidden;-webkit-mask:linear-gradient(180deg,#000 calc(100% - 36px),transparent);mask:linear-gradient(180deg,#000 calc(100% - 36px),transparent)}
+.name{margin:14px 0 6px;font-family:var(--hf);font-variation-settings:var(--hfv);font-size:91px;line-height:1;color:var(--ink);text-shadow:7px 7px 0 #5A1D9D;white-space:nowrap}
+.binom{font-size:var(--t3);color:var(--lab)}
+.rule{height:3px;margin:22px 0;background:repeating-linear-gradient(90deg,#F25BDB 0 3px,transparent 3px 6px)}
+.field{margin:0;font-size:var(--t1);line-height:1.5;color:var(--ink2)}
+.facts{display:grid;grid-template-columns:130px 1fr;margin:24px 0 0}
+.facts dt,.facts dd{margin:0;padding:12px 0;background:repeating-linear-gradient(90deg,var(--line) 0 3px,transparent 3px 6px) top/100% 3px no-repeat}
+.facts dt{color:var(--lab);padding-top:15px}
+.facts dd{font-size:var(--t2);color:var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:10px}
+.actions{flex:none;display:flex;gap:20px;padding:18px 0 4px 12px}
+.hints{position:absolute;left:96px;right:96px;bottom:34px;display:flex;justify-content:flex-end;gap:36px;color:var(--ink2)}
+.hints>span{display:inline-flex;align-items:center;gap:10px}
+</style>
+</head>
+<body>
+<aside class="bar">
+  <h1>Cubarium UI · round 3 · panels and controls</h1>
+  <div class="ctl">Show <div class="seg" data-k="view"><button data-v="sheet">All options</button><button data-v="screen">Full screen</button></div></div>
+  <div class="ctl">Panel border <div class="seg" data-k="border"></div></div>
+  <div class="ctl">Panel fill <div class="seg" data-k="fill"></div></div>
+  <div class="ctl">Controls <div class="seg" data-k="ctl"></div></div>
+  <div class="ctl">Focus <div class="seg" data-k="focus"></div></div>
+  <div class="ctl">Chrome colour <div class="seg" data-k="col"><button data-v="r1">As round 1</button><button data-v="bright">Brighter</button></div></div>
+  <div class="legend">Type is fixed at round 2's picks: Gridlite PE for titles and chrome (your settings), Pixelify Sans 23 px for text. Each section shows every option for one piece, using your current choices for the rest; click an option to choose it. "Full screen" puts the chosen mix on the Lanternjaw page. The palette is unchanged from round 2. Numbers are sample data. Choices stay in this browser.</div>
+</aside>
+<main class="page" id="page"></main>
+<script>
+const OPTS={
+  border:[['notch','Notched line','Round 1 and 2: a 3 px neon line with the corners cut off.'],
+    ['double','Double line','The notched line plus a thinner line inside it, cyan on the main panel.'],
+    ['dots','Dot border','A dashed line of 3 px squares, echoing Gridlite\'s dots.'],
+    ['brackets','Corner brackets','Bright corners joined by a faint 1 px line; more like an instrument.']],
+  fill:[['bands','Bands','Round 1 and 2: five violet steps, darker towards the bottom.'],
+    ['dither','Dithered bands','The same steps, blended at each edge with a 3 px pixel-art dither.'],
+    ['scan','Scanlines','A smooth violet fade with a dark line every 6 px.'],
+    ['dots','Dot grid','Near-flat dark violet with a faint 2 px dot every 6 px.']],
+  ctl:[['solid','Solid','Round 1 and 2: the selected tab and the main button are filled violet; the button has a bevel.'],
+    ['outline','Outline','No fills: a neon line marks what is selected, and pressing fills it.'],
+    ['lit','Lit dots','The selected tab, the main button and keycaps light up Gridlite\'s own dot plate with the letters cut out (its "negative" setting).']],
+  focus:[['outline','Cyan outline','Round 1 and 2: a cyan frame a few pixels outside.'],
+    ['brackets','Corner brackets','Four cyan corners around whatever has focus.'],
+    ['glow','Glow','A cyan line hugging it, with a soft glow.'],
+    ['pointer','Pointer','A pixel arrow beside it, like classic game menus.']]};
+const ANIMALS=[['Frondgrazer','#FB8162',42],['Littershredder','#FED24E',118],['Bellwing','#C19BFC',23],['Lanternjaw','#9168A1',7],['Veilhound','#6C55D5',4],['Loftstrider','#22B4D2',3],['Capgnawer','#A76982',31],['Ripple-snail','#5081F2',56],['Seedporter','#889335',19]];
+const PREY=[['Littershredders','#FED24E'],['Frondgrazers','#FB8162'],['Capgnawers','#A76982'],['Ripple-snails','#5081F2'],['Resting bellwings','#C19BFC'],['Grounded seedporters','#889335'],['Carrion','#A595D8']];
+const SERIES=[4,4,5,5,5,6,6,6,5,5,6,7,7,7,8,8,7,7,7,6,6,7,7,8,8,8,7,7,7,7,8,7,7,7,7,7];
+const D='·',M='-'; // the Adobe kit's Gridlite has no minus sign
+
+let st={view:'sheet',border:'notch',fill:'bands',ctl:'solid',focus:'outline',col:'r1'};
+const KEY='cub-ui-r3';
+try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
+
+// ---------- style rules that are easier to write with helpers ----------
+const R=c=>`0 -3px 0 0 ${c},0 3px 0 0 ${c},-3px 0 0 0 ${c},3px 0 0 0 ${c}`;
+const NONE='0 0 0 0 transparent';
+const DOTS=(c,p)=>`conic-gradient(from 270deg at 2px 2px,${c} 0 25%,transparent 0) 0 0/${p}px ${p}px`;
+const BR=(c,a)=>['0 0','100% 0','0 100%','100% 100%'].flatMap(p=>[`linear-gradient(${c},${c}) ${p}/${a} 3px no-repeat`,`linear-gradient(${c},${c}) ${p}/3px ${a} no-repeat`]).join(',');
+const DB=c=>[`linear-gradient(90deg,${c} 3px,transparent 3px) 0 0/6px 3px repeat-x`,`linear-gradient(90deg,${c} 3px,transparent 3px) 0 100%/6px 3px repeat-x`,
+  `linear-gradient(180deg,${c} 3px,transparent 3px) 0 0/3px 6px repeat-y`,`linear-gradient(180deg,${c} 3px,transparent 3px) 100% 0/3px 6px repeat-y`].join(',');
+const arrow='<svg xmlns="http://www.w3.org/2000/svg" width="10" height="20" viewBox="0 0 5 10" shape-rendering="crispEdges" fill="#42C5F8">'+[[0,0,10],[1,1,8],[2,2,6],[3,3,4],[4,4,2]].map(([x,y,h])=>`<rect x="${x}" y="${y}" width="1" height="${h}"/>`).join('')+'</svg>';
+const ARROW=`url("data:image/svg+xml,${encodeURIComponent(arrow)}")`;
+const RULES=`
+/* panel frames: .fr, with .main for the big panel */
+.fr{--bc:var(--line);--bc2:rgba(176,55,196,.22);--bcf:rgba(176,55,196,.22);--arm:18px;--glow:${NONE}}
+.fr.main{--bc:var(--panel);--bc2:rgba(66,197,248,.6);--bcf:rgba(194,63,211,.42);--arm:40px;--glow:0 0 48px rgba(176,55,196,.30)}
+.b-notch .fr{box-shadow:${R('var(--bc)')},var(--glow)}
+.b-double .fr{box-shadow:${R('var(--bc)')},var(--glow)}
+.b-double .fr::before{content:'';position:absolute;inset:6px;pointer-events:none;box-shadow:${R('var(--bc2)')}}
+.b-dots .fr{box-shadow:var(--glow)}
+.b-dots .fr::before{content:'';position:absolute;inset:-3px;pointer-events:none;background:${DB('var(--bc)')}}
+.b-brackets .fr{--bc:rgba(194,63,211,.75);box-shadow:0 0 0 1px var(--bcf),var(--glow)}
+.b-brackets .fr.main{--bc:var(--panel)}
+.b-brackets .fr::before{content:'';position:absolute;inset:-3px;pointer-events:none;background:${BR('var(--bc)','var(--arm)')}}
+
+/* solid */
+.c-solid .tab.on{background:#8A2BA6;color:#fff;box-shadow:${R('#F25BDB')}}
+.c-solid .btn.primary{background:#8A2BA6;box-shadow:inset 0 3px 0 0 #C95BE0,inset 0 -3px 0 0 #5A1D9D,${R('#F25BDB')},0 0 26px rgba(176,55,196,.55)}
+.c-solid .btn.primary.pressed{top:3px;background:#76219A;box-shadow:inset 0 3px 0 0 #4A1785,inset 0 -3px 0 0 #A645C2,${R('#F25BDB')}}
+.c-solid .btn.secondary{box-shadow:${R('rgba(165,149,216,.45)')}}
+.c-solid .btn.secondary.pressed{top:3px;background:rgba(165,149,216,.16)}
+.c-solid .row.sel{background:rgba(176,55,196,.35);color:#fff;box-shadow:${R('rgba(242,91,219,.6)')}}
+.c-solid .chip{background:rgba(90,29,157,.25);box-shadow:${R('rgba(242,91,219,.4)')}}
+.c-solid .chip.on{background:#8A2BA6;color:#fff;box-shadow:${R('#F25BDB')}}
+.c-solid .key{box-shadow:${R('currentColor')}}
+
+/* outline */
+.c-outline .tab.on{background:rgba(242,91,219,.10);color:#fff;box-shadow:${R('#F25BDB')}}
+.c-outline .btn.primary{background:rgba(242,91,219,.12);color:#FFE3F9;box-shadow:${R('#F25BDB')}}
+.c-outline .btn.primary.pressed{top:3px;background:#F25BDB;color:#1B0740}
+.c-outline .btn.secondary{box-shadow:${R('rgba(165,149,216,.45)')}}
+.c-outline .btn.secondary.pressed{top:3px;background:rgba(165,149,216,.85);color:#1B0740}
+.c-outline .row.sel{color:#fff;box-shadow:${R('#F25BDB')}}
+.c-outline .chip{box-shadow:${R('rgba(242,91,219,.35)')}}
+.c-outline .chip.on{background:rgba(242,91,219,.12);color:#fff;box-shadow:${R('#F25BDB')}}
+.c-outline .key{box-shadow:${R('currentColor')}}
+
+/* lit dots: Gridlite's negative setting makes a lit dot plate with the letters cut out */
+.c-lit .pl{display:inline}
+.c-lit .tab.on{padding:0 12px;color:var(--hot);font-variation-settings:var(--neg);letter-spacing:0}
+.c-lit .btn.primary{color:#FFD6F6}
+.c-lit .btn.primary .bl{font-variation-settings:var(--neg);letter-spacing:0}
+.c-lit .btn.primary.pressed{top:3px}
+.c-lit .btn.primary.pressed .bl{font-variation-settings:'wght' 900,'BACK' 240,'RECT' 240,'ELSH' 2.65}
+.c-lit .btn.secondary{box-shadow:${R('rgba(165,149,216,.35)')}}
+.c-lit .btn.secondary .bl{font-variation-settings:'wght' 691,'BACK' 320,'RECT' 220,'ELSH' 2.65;letter-spacing:0}
+.c-lit .btn.secondary.pressed{top:3px}
+.c-lit .row.sel{color:#fff;background:${DOTS('rgba(242,91,219,.32)',4)};box-shadow:inset 6px 0 0 0 #F25BDB}
+.c-lit .chip{background:${DOTS('rgba(194,63,211,.30)',4)}}
+.c-lit .chip.on{color:#fff;background:${DOTS('rgba(242,91,219,.65)',4)}}
+.c-lit .key{min-width:0;padding:0;font-variation-settings:var(--neg)}
+
+/* focus */
+.fo-outline .focus{outline:3px solid var(--accent);outline-offset:7px}
+.fo-brackets .focus::after{content:'';position:absolute;inset:-12px;pointer-events:none;background:${BR('var(--accent)','14px')}}
+.fo-glow .focus::after{content:'';position:absolute;inset:-6px;pointer-events:none;box-shadow:${R('var(--accent)')},0 0 18px 2px rgba(66,197,248,.55)}
+.fo-pointer .focus::after{content:'';position:absolute;left:-26px;top:50%;width:10px;height:20px;margin-top:-10px;pointer-events:none;background:${ARROW} no-repeat}
+.fo-pointer .row.focus::after{left:-13px}
+.fo-outline .row.focus{outline-offset:3px}
+.fo-brackets .row.focus::after{inset:-8px}
+`;
+const ruleTag=document.createElement('style');ruleTag.textContent=RULES;document.head.appendChild(ruleTag);
+
+// ---------- dithered bands, painted per panel size ----------
+const BANDS=[['#2A1470',.18],['#24115F',.36],['#1D0D50',.56],['#160A41',.76],['#100632',1]];
+const BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5].map(v=>(v+.5)/16);
+const ditherCache={};
+function ditherURL(w,h){
+  const cw=Math.max(1,Math.round(w/3)),ch=Math.max(1,Math.round(h/3)),k=cw+'x'+ch;
+  if(ditherCache[k])return ditherCache[k];
+  const c=document.createElement('canvas');c.width=cw;c.height=ch;const g=c.getContext('2d');
+  const rgb=BANDS.map(([hex])=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
+  const img=g.createImageData(cw,ch);const z=5; // blend over 5 cells (15 px) each side of an edge
+  for(let y=0;y<ch;y++){
+    let b=BANDS.findIndex(([,e])=>(y+.5)/ch<e);if(b<0)b=BANDS.length-1;
+    for(let x=0;x<cw;x++){
+      let col=b;
+      // nearest edge above or below: switch to the neighbour band where the ramp beats the Bayer threshold
+      const eb=Math.round(BANDS[b][1]*ch),ea=b>0?Math.round(BANDS[b-1][1]*ch):-1e9;
+      const th=BAYER[(y%4)*4+(x%4)];
+      if(b<BANDS.length-1&&eb-y<=z){const t=(z-(eb-y)+.5)/(2*z);if(t>th)col=b+1;}
+      if(b>0&&y-ea<z){const t=(z-(y-ea)-.5)/(2*z);if(t>th)col=b-1;}
+      const o=(y*cw+x)*4;img.data[o]=rgb[col][0];img.data[o+1]=rgb[col][1];img.data[o+2]=rgb[col][2];img.data[o+3]=255;
+    }
+  }
+  g.putImageData(img,0,0);
+  return ditherCache[k]=`url(${c.toDataURL()})`;
+}
+function paintDither(){document.querySelectorAll('.fill-dither').forEach(el=>{el.style.backgroundImage=ditherURL(el.offsetWidth,el.offsetHeight);});}
+
+// ---------- markup pieces ----------
+const pl='<span class="pl"> </span>';
+const lit=t=>`${pl}${t}${pl}`;
+const key=t=>`<span class="key lt">${lit(t)}</span>`;
+const tabs=(focusIdx=-1)=>`<nav class="tabs fr">${['Field guide','Populations','World','Settings'].map((t,i)=>`<span class="tab lt${i===0?' on':''}${i===focusIdx?' focus':''}">${i===0?lit(t):t}</span>`).join('')}</nav>`;
+const btn=(kind,label,k,state='')=>`<button class="btn ${kind} lt ${state}" type="button">${key(k)}<span class="bl">${lit(label)}</span></button>`;
+const row=([n,c,k],cls='')=>`<div class="row ${cls}"><span class="dot" style="--c:${c}"></span><span>${n}</span><span class="n lt">${k}</span></div>`;
+const chip=([n,c],cls='')=>`<span class="chip ${cls}"><span class="dot" style="--c:${c}"></span>${n}</span>`;
+function cls(o){const s=Object.assign({},st,o);return `neon b-${s.border} c-${s.ctl} fo-${s.focus}${s.col==='bright'?' bright':''}`;}
+
+function mini(o){
+  const s=Object.assign({},st,o);
+  return `<div class="${cls(o)}"><div class="mini fr main fill-${s.fill}">
+    <div class="kick lt">Animal ${D} Predator</div>
+    <div class="mname">Lanternjaw</div>
+    <div class="mtext">Ambush mesopredator</div>
+    <div class="msub fr"><div><div class="lbl lt">In this world</div></div><div class="bign">7</div></div>
+  </div></div>`;
+}
+function optBlock(k,[v,name,desc],inner){
+  return `<div class="opt${st[k]===v?' chosen':''}" data-k="${k}" data-v="${v}"><div class="hd"><b>${name}</b><span>${desc}</span></div><div class="stage">${inner}</div></div>`;
+}
+function controlsPanel(o){
+  const s=Object.assign({},st,o);
+  return `<div class="${cls(o)}"><div class="ctlpanel fr main fill-${s.fill}">
+    <div class="srow"><span class="cap">Tabs (World has focus)</span>${tabs(2)}</div>
+    <div class="srow"><span class="cap">Main button: normal, focus, pressed, disabled</span>${btn('primary','Show in world','Y')}${btn('primary','Show in world','Y','focus')}${btn('primary','Show in world','Y','pressed')}${btn('primary','Show in world','Y','disabled')}</div>
+    <div class="srow"><span class="cap">Second button</span>${btn('secondary','Populations','X')}${btn('secondary','Populations','X','focus')}${btn('secondary','Populations','X','pressed')}${btn('secondary','Populations','X','disabled')}</div>
+    <div class="srow"><span class="cap">List rows: normal, selected, focus</span><div class="rows">${row(ANIMALS[0])}${row(ANIMALS[3],'sel')}${row(ANIMALS[4],'focus')}</div>
+      <span class="cap">Chips: normal, selected, focus</span>${chip(PREY[0])}${chip(PREY[4],'on')}${chip(PREY[1],'focus')}</div>
+    <div class="srow"><span class="cap">Keycaps</span><span class="lt" style="display:inline-flex;gap:12px;align-items:center;color:var(--ink2)">${key('A')}Select ${key('B')}Back ${key('LB')}${key('RB')}Switch tab</span></div>
+  </div></div>`;
+}
+function focusPanel(o){
+  const s=Object.assign({},st,o);
+  return `<div class="${cls(o)}"><div class="ctlpanel fr main fill-${s.fill}">
+    <div class="srow">${btn('primary','Show in world','Y','focus')}${btn('secondary','Populations','X')}</div>
+    <div class="srow"><div class="rows" style="width:360px">${row(ANIMALS[3],'sel')}${row(ANIMALS[4],'focus')}</div>${chip(PREY[2],'focus')}</div>
+  </div></div>`;
+}
+
+function sheet(){
+  const sec=(k,title,sub,fn)=>`<section><h2>${title}</h2><div class="sub">${sub}</div><div class="grid">${OPTS[k].map(o=>optBlock(k,o,fn({[k]:o[0]}))).join('')}</div></section>`;
+  return sec('border','Panel border','The main panel\'s edge and the smaller boxes inside it (the plate, the live count, the search field, the tab bar).',mini)+
+    sec('fill','Panel fill','What sits behind everything on the main panel.',mini)+
+    `<section><h2>Controls</h2><div class="sub">Tabs, buttons, list rows, chips and keycaps in each style, with every state the game needs.</div><div class="grid" style="grid-template-columns:1fr">${OPTS.ctl.map(o=>optBlock('ctl',o,controlsPanel({ctl:o[0]}))).join('')}</div></section>`+
+    sec('focus','Focus','What shows where the gamepad or keyboard is: on a button, a list row and a chip.',focusPanel);
+}
+
+function screen(){
+  const rows=ANIMALS.map(a=>`<li>${row(a,a[0]==='Lanternjaw'?'sel':'')}</li>`).join('');
+  const chips=PREY.map(p=>chip(p)).join('');
+  const bars=SERIES.map(v=>`<i style="height:${(v-2)*8}px"></i>`).join('');
+  const chev='<svg width="6" height="10" viewBox="0 0 3 5" shape-rendering="crispEdges" fill="currentColor"><rect x="0" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg>';
+  const search='<svg width="18" height="18" viewBox="0 0 9 9" shape-rendering="crispEdges" fill="currentColor">'+[[2,0],[3,0],[4,0],[1,1],[5,1],[0,2],[6,2],[0,3],[6,3],[0,4],[6,4],[1,5],[5,5],[2,6],[3,6],[4,6],[6,6],[7,7],[8,8]].map(([x,y])=>`<rect x="${x}" y="${y}" width="1" height="1"/>`).join('')+'</svg>';
+  return `<div class="screen ${cls({})}">
+  <img class="world" src="../round1/assets/world.png" alt="">
+  <div class="scrim"></div>
+  <header class="top">${tabs()}
+    <div class="clock lt"><span class="l">Day</span><span>3</span><span>14:20</span><span class="paused">Paused</span></div>
+  </header>
+  <main class="body fr main fill-${st.fill}"><div class="clip">
+    <aside class="index">
+      <label class="search fr">${search}<span>Search species</span></label>
+      <div class="grp lt"><span class="lbl">Animals</span><span class="n">9</span></div>
+      <ul class="list">${rows}</ul>
+      <div class="grp closed lt"><span class="g lbl">${chev}Plants</span><span class="n">10</span></div>
+    </aside>
+    <section class="entry">
+      <div class="platecol">
+        <figure class="plate fr"><div class="inner"><div class="sun"></div><div class="horizon"></div>
+          <img class="art" src="../round1/assets/lanternjaw-px.png" alt="Lanternjaw"></div>
+          <figcaption class="platecap lt">Plate 04 ${D} Adult</figcaption></figure>
+        <div class="live fr">
+          <div class="lbl lt">In this world</div>
+          <div class="livebody">
+            <div><div class="big">7</div><div class="stages">5 adults ${D} 2 juveniles</div></div>
+            <div class="chart"><div class="bars">${bars}</div><div class="axis lt"><span>${M}6 h</span><span>now</span></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="textcol"><div class="scroll">
+        <div class="kick lt">Animal ${D} Predator</div>
+        <h1 class="name">Lanternjaw</h1>
+        <div class="binom">[binomial]</div>
+        <div class="rule"></div>
+        <p class="field">A low violet scorpid that hunts by waiting. Its forked tail arches over its back and holds two cyan lures before its face, dead still, until prey comes within reach of its mantis striking arms. Keeping the lures costs it reserve. At the edge of another hunter's kill, it takes what it can.</p>
+        <dl class="facts">
+          <dt class="lt">Role</dt><dd>Ambush mesopredator</dd>
+          <dt class="lt">Body</dt><dd>1.0 m long ${D} 0.45 m tall</dd>
+          <dt class="lt">Hunts</dt><dd>Long stillness, then a brief strike</dd>
+          <dt class="lt">Eats</dt><dd><div class="chips">${chips}</div></dd>
+        </dl></div>
+        <div class="actions">${btn('primary','Show in world','Y','focus')}${btn('secondary','Populations','X')}</div>
+      </div>
+    </section>
+  </div></main>
+  <footer class="hints lt"><span>${key('A')}Select</span><span>${key('B')}Back</span><span>${key('LB')}${key('RB')}Switch tab</span></footer>
+</div>`;
+}
+
+function fit(){
+  document.querySelectorAll('.frame').forEach(fr=>{
+    const w=document.body.classList.contains('shot')?1920:Math.min(1920,fr.parentElement.clientWidth);
+    fr.style.width=w+'px';const s=w/1920;fr.style.height=(1080*s)+'px';
+    fr.firstElementChild.style.transform=`scale(${s})`;
+  });
+}
+function render(){
+  save();
+  const page=document.getElementById('page');
+  if(st.view==='sheet'){
+    page.innerHTML=sheet();
+    page.querySelectorAll('.opt').forEach(el=>el.onclick=()=>{st[el.dataset.k]=el.dataset.v;sync();render();});
+  }else{
+    const name=k=>OPTS[k].find(o=>o[0]===st[k])[1];
+    const head=document.body.classList.contains('shot')?'':`<div><h2>${name('border')} · ${name('fill')} · ${name('ctl')} controls · ${name('focus')} focus</h2><div class="sub">The main button has focus.</div></div>`;
+    page.innerHTML=head+`<div><div class="frame">${screen()}</div></div>`;
+  }
+  fit();paintDither();
+}
+function sync(){
+  document.querySelectorAll('.seg[data-k]').forEach(s=>s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.v===st[s.dataset.k])));
+}
+for(const k of ['border','fill','ctl','focus'])document.querySelector(`.seg[data-k="${k}"]`).innerHTML=OPTS[k].map(([v,n])=>`<button data-v="${v}">${n}</button>`).join('');
+document.querySelectorAll('.seg[data-k] button').forEach(b=>b.onclick=()=>{st[b.parentElement.dataset.k]=b.dataset.v;sync();render();});
+// #shot&view=screen&state={json} renders at 1:1 for checks
+const hp=new URLSearchParams(location.hash.slice(1));
+if(hp.has('shot')){document.body.classList.add('shot');document.querySelector('.bar').style.display='none';document.getElementById('page').style.padding='0';
+  st.view=hp.get('view')||'screen';if(hp.get('state'))Object.assign(st,JSON.parse(hp.get('state')));}
+window.addEventListener('resize',()=>{fit();});
+sync();
+document.fonts.ready.then(()=>{render();});
+render();
+</script>
+</body>
+</html>
