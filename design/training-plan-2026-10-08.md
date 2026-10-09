@@ -799,13 +799,43 @@ control and the reward accounting; display targets after seeing results.
      - **Open:** seedporters still barely eat vine fruit (0.0002 against 0.34 lanternberry in
        0.5 h; 14 vine visits), so vine crops stay at the pollination floor. Needs a
        diagnosis: too few visits, too little fruit, or access.
+   - VINE-FRUIT diagnosis (24cf970f, census `vine:` readout only; d72 seeds 1–2, 1 h):
+     - **Supply is fine:** about 4,500 vine flowers open per hour, and a hungry seedporter sees a
+       bunch 90 %+ of the time.
+     - **Bunches are crumbs.** 97 % set at the floor: 0.000076 organic, 1.5 % of the
+       seedporter's bite half-stock. Climbs return almost nothing, and 85 % of vine fruit falls
+       uneaten. Vines are 1–2 % of seedporter fruit.
+     - **Per-face amounts follow face area.** A d72 face (0.125 m) gets a quarter of the
+       0.25 m reference, while the eater's bite half-stock doesn't scale.
+     - **Pollination is pollinator-limited.** 1 % of vine flowers are visited; bellwings drink
+       only about 0.45 per hour, mostly at bloomcrowns.
+     - Arms, as the vine share of seedporter fruit:
+       - `spur_share` 0.01: 10–14 %;
+       - plus vine floor 0.5: 37–42 %.
+     - Options for Wrysk:
+       - A: `spur_share` 0.01;
+       - B: A plus a high floor;
+       - C: bites and pollination act over a body-sized patch, not one face.
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
     terrain gets rejected, which is somethign the UI should provide feedback for rather than
     silently failing and letting you retry."
-    - FOUNDING-SPEED (Codex xhigh, running on `decay-glowcap`): phase timings, founders placed
-      at their food, placement retries on the settled world.
-    - Then FOUNDING-ONE-PATH (brief `briefs/founding-one-path.md`):
+    - FOUNDING-SPEED merged with DECAY-GLOWCAP, 23fd145f:
+      - founders are placed by BFS from reachable food;
+      - the pre-roll runs once, and placement retries clone the settled world;
+      - experiments found with `water_every=20`.
+      - **d72 founds in 17–20 s (seeds 1–4) and wide in 62 s, all on the first terrain and
+        first placement.** Before, both hit the 270 s timeout.
+      - Water was the cost: shower 26.8 → 3.4 s and lake rest 26.1 → 2.1 s on d72.
+    - DECAY-GLOWCAP, in the same merge:
+      - a shredder bite speeds local litter decay (+0.25 within 0.5 m, fading over 600 s);
+      - glowcaps are founded only in shade;
+      - fruit crops start at mixed phases;
+      - flora schema 41.
+      - Probe, d72 seed 1, 0.5 h: glowcap lit share 0 → 0. Litter still rises 1.06 → 332
+        organic, with shredder intake 0.165. Shredder appetite is for the eco search.
+    - FOUNDING-ONE-PATH (Codex xhigh, running on `founding-one-path`, brief
+      `briefs/founding-one-path.md`):
       - one loop instead of `found`/`found_judged` plus `found_terrain`/`found_terrain_judged`;
       - typed rejection reasons, checked before the pre-roll;
       - the session status carries the reason. The Godot founding screen shows it; placing it
@@ -823,8 +853,8 @@ control and the reward accounting; display targets after seeing results.
        known kin (`herd_max`).
    - The wide founding probe took 472 s, including one refused-seed redraw (seed 1: bellwing
      placed 9 of 15).
-   - At founding, 40 % of glowcaps stand on lit faces. The year target is ≤ 1 %, so founding
-     placement or glowcap survival in light needs a look.
+   - At founding, 40 % of glowcaps stood on lit faces. Fixed by DECAY-GLOWCAP: glowcaps are
+     founded only in shade.
 4. The ecology search: per-lineage `mass_scale`, the gut ratio and supply genes. Screens on the
    wide world for 2 h, year checks for the best.
 5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
