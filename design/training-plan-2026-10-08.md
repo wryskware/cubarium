@@ -834,12 +834,21 @@ control and the reward accounting; display targets after seeing results.
       - flora schema 41.
       - Probe, d72 seed 1, 0.5 h: glowcap lit share 0 → 0. Litter still rises 1.06 → 332
         organic, with shredder intake 0.165. Shredder appetite is for the eco search.
-    - FOUNDING-ONE-PATH (Codex xhigh, running on `founding-one-path`, brief
-      `briefs/founding-one-path.md`):
-      - one loop instead of `found`/`found_judged` plus `found_terrain`/`found_terrain_judged`;
-      - typed rejection reasons, checked before the pre-roll;
-      - the session status carries the reason. The Godot founding screen shows it; placing it
-        is for the UI thread.
+    - FOUNDING-ONE-PATH merged, c356cd11:
+      - **One loop.** Every caller goes through `found::founding_loop`: the app, the census,
+        the CLI and the trainers. The app stops on a terrain rejection; batch callers may
+        redraw.
+      - **Typed reasons** (`found::TerrainRejection`): no closed walk route, no lake, no dark
+        glowcap habitat (capgnawer food), no reachable food capacity, no food perches, missing
+        scenario features. Each is checked before the pre-roll.
+      - **The session reports it:** `founding()` gives `state: "rejected"` plus
+        `terrain_rejection` (a dictionary with a `check` key). Nothing is installed.
+      - **For the UI thread:** the founding screen should read those two fields. Placing and
+        styling it is theirs.
+      - Callers that can't use an empty world now stop loudly. World creation, E0/E1 and
+        landscapes return an error, the live trainer panics, and the census exits with
+        code 3 (c5fd275a).
+      - Timings, one thread: d72 seeds 1–4 in 12–13 s, wide in 44 s.
 3. A wide-world start library of year-old saves.
    - SCORE-V3 merged, 97ce0994. DROP-C1 merged, bdbeb508.
    - HERD merged, 8d782d9b:
