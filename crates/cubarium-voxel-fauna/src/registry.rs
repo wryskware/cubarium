@@ -670,7 +670,8 @@ fn knob_rows() -> Vec<Row> {
         sk("deposit_per_s", "scent units per organic unit per s", nonneg, "what a standing body lays, by its organic matter").search(0.1, 10.0).log(),
         sk("carrion_per_s", "scent units per organic unit per s", nonneg, "what carrion lays, by its stock").search(0.1, 10.0).log(),
         sk("step_m", "m", nonneg, "neighbouring surface faces connect within this height difference, with open air over the lower one").search(0.0, 2.0),
-        sk("nectar_per_s", "scent units per s", nonneg, "what a flower holding a full bloomcrown head of nectar gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar").search(0.1, 10.0).log(),
+        sk("nectar_per_s", "scent units per s", nonneg, "what a flower holding nectar_full nectar units gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar").search(0.1, 10.0).log(),
+        sk("nectar_full", "nectar units held by a full flower", nonneg, "the reference nectar stock for a flower giving off nectar_per_s; when not positive, every flower gives the full rate"),
     ]);
 
     // `fauna.light.*`: light and flight (S3).

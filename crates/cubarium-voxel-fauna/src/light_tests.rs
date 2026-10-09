@@ -137,6 +137,7 @@ fn smell_leads_and_brightness_steers() {
     let run = |nectar_per_s: f64, x: f64| {
         let mut c = config();
         c.scent.nectar_per_s = nectar_per_s;
+        c.scent.nectar_full = flora.config().bloomcrown.nectar_cap;
         let mut fauna = Fauna::new(c);
         let bw = bellwing(&mut fauna, &world, x, (f64::from(fz) + 0.5) * VOXEL_M, 0.5, NORTH);
         let got = steer(&mut fauna, &world, &flora, bw, daylight);
@@ -404,6 +405,7 @@ fn scent_scene(c: FaunaConfig) -> (World, Flora, Fauna, u64, (f64, f64)) {
     let light_m = c.founder(BW).senses.light_m;
     let mut c = c;
     c.scent.nectar_per_s = 2.25;
+    c.scent.nectar_full = flora.config().bloomcrown.nectar_cap;
     let mut fauna = Fauna::new(c);
     let bw = bellwing(&mut fauna, &world, flower.0 - light_m - 0.5, flower.1, 0.5, NORTH);
     (world, flora, fauna, bw, flower)

@@ -953,13 +953,17 @@ pub struct ScentConfig {
     /// metres, with open air over the lower face up to the higher (a ledge connects, a
     /// wall does not). 0.5 m.
     pub step_m: f64,
-    /// **The nectar plume** (S3, NECTAR-SCENT): a flower holding a full bloomcrown head's
-    /// nectar (`flora.bloomcrown.nectar_cap`) gives off this much a second at its bloom, and
+    /// **The nectar plume** (S3, NECTAR-SCENT): a flower holding [`ScentConfig::nectar_full`]
+    /// nectar units gives off this much a second at its bloom, and
     /// any flower (a bloomcrown's head, a latticevine face in flower) in proportion to the
     /// nectar it holds, in the air around it ([`crate::scent::nectar_plume`]). 2.25 (an adult
     /// frondgrazer's organic matter at `deposit_per_s`, so the smell floors' calibration
     /// reads in metres).
     pub nectar_per_s: f64,
+    /// Nectar units held by a full flower: its scent rate is `nectar_per_s` times
+    /// its nectar divided by this reference. When not positive, every flower gives
+    /// the full rate. Defaults to the bloomcrown's default nectar capacity.
+    pub nectar_full: f64,
 }
 
 impl Default for ScentConfig {
@@ -973,6 +977,7 @@ impl Default for ScentConfig {
             carrion_per_s: 1.0,
             step_m: 0.5,
             nectar_per_s: 2.25,
+            nectar_full: cubarium_voxel_flora::FloraConfig::default().bloomcrown.nectar_cap,
         }
     }
 }

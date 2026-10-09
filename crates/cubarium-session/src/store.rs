@@ -213,28 +213,13 @@ impl SaveMeta {
         }
     }
 
-    /// Whether this build can load the save it describes: this build's schemas, or the
-    /// one-version legacy reader's ([`readable`]).
+    /// Whether this build can load the save it describes: this build's schemas.
     pub fn loadable(&self) -> bool {
         let now = Schemas::current();
-        readable(self.schema.world, now.world, LEGACY.world)
-            && readable(self.schema.flora, now.flora, LEGACY.flora)
-            && readable(self.schema.fauna, now.fauna, LEGACY.fauna)
+        self.schema.world == now.world
+            && self.schema.flora == now.flora
+            && self.schema.fauna == now.fauna
     }
-}
-
-/// **The one-version legacy reader's schemas** (SAVE-EXTENSIBLE, 2026-10-08): the last
-/// layers whose configs sat positionally inside the state. Each layer's snapshot module
-/// reads them; retire them there and this goes with them.
-pub const LEGACY: Schemas = Schemas {
-    world: cubarium_voxel::snapshot::LEGACY_SCHEMA,
-    flora: cubarium_voxel_flora::snapshot::LEGACY_SCHEMA,
-    fauna: cubarium_voxel_fauna::LEGACY_SCHEMA,
-};
-
-/// Whether a layer saved under schema `found` loads in a build of `now`.
-fn readable(found: u32, now: u32, legacy: u32) -> bool {
-    found == now || found == legacy
 }
 
 /// The `meta.json` of the save in `dir`, read alone.
@@ -358,12 +343,12 @@ pub fn load_save(dir: &Path) -> std::result::Result<LoadedSave, LoadError> {
     }
     let now = Schemas::current();
     if let Ok(meta) = read_meta(dir) {
-        for (layer, found, expected, legacy) in [
-            ("world", meta.schema.world, now.world, LEGACY.world),
-            ("flora", meta.schema.flora, now.flora, LEGACY.flora),
-            ("fauna", meta.schema.fauna, now.fauna, LEGACY.fauna),
+        for (layer, found, expected) in [
+            ("world", meta.schema.world, now.world),
+            ("flora", meta.schema.flora, now.flora),
+            ("fauna", meta.schema.fauna, now.fauna),
         ] {
-            if !readable(found, expected, legacy) {
+            if found != expected {
                 return Err(LoadError::OtherVersion { layer, found, expected });
             }
         }
@@ -389,11 +374,11 @@ pub fn load_save(dir: &Path) -> std::result::Result<LoadedSave, LoadError> {
         )));
     }
     let flora_bytes = read(&flora_file)?;
-    if let Some(t) = schema_tag(&flora_bytes).filter(|t| !readable(*t, now.flora, LEGACY.flora)) {
+    if let Some(t) = schema_tag(&flora_bytes).filter(|t| *t != now.flora) {
         return Err(LoadError::OtherVersion { layer: "flora", found: t, expected: now.flora });
     }
     let fauna_bytes = read(&fauna_file)?;
-    if let Some(t) = schema_tag(&fauna_bytes).filter(|t| !readable(*t, now.fauna, LEGACY.fauna)) {
+    if let Some(t) = schema_tag(&fauna_bytes).filter(|t| *t != now.fauna) {
         return Err(LoadError::OtherVersion { layer: "fauna", found: t, expected: now.fauna });
     }
     let flora = cubarium_voxel_flora::snapshot::decode(&flora_bytes)

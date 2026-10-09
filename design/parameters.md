@@ -1465,7 +1465,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2425 rows)
+**`fauna.*`** (2426 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -3855,7 +3855,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.scent.deposit_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what a standing body lays, by its organic matter |
 | `fauna.scent.carrion_per_s` | 1.0 | scent units per organic unit per s | [0, inf) | 0.1–10 log | - | placeholder | what carrion lays, by its stock |
 | `fauna.scent.step_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | neighbouring surface faces connect within this height difference, with open air over the lower one |
-| `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding a full bloomcrown head of nectar gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar |
+| `fauna.scent.nectar_per_s` | 2.25 | scent units per s | [0, inf) | 0.1–10 log | - | placeholder | what a flower holding nectar_full nectar units gives off at its bloom (the nectar plume in the air); any flower in proportion to its nectar |
+| `fauna.scent.nectar_full` | 0.02 | nectar units held by a full flower | [0, inf) |  | - | placeholder | the reference nectar stock for a flower giving off nectar_per_s; when not positive, every flower gives the full rate |
 | `fauna.light.flower_reflectance` | 1.0 | brightness per unit light | [0, inf) | 0.1–4 | - | placeholder | a nectar flower's brightness (UV) per unit of the light falling on it |
 | `fauna.light.glowcap_emission` | 0.3 | brightness | [0, inf) | 0–2 | - | placeholder | a glowcap's own light |
 | `fauna.light.lure_emission` | 1.0 | brightness | [0, inf) | 0–4 | - | placeholder | a fully lit lure's own light (cyan) |

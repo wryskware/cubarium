@@ -153,14 +153,6 @@ use crate::{Fauna, FaunaConfig};
 //     document beside it.
 pub const SCHEMA: u32 = 72;
 
-/// **The one-version legacy reader's tag** ([`decode_legacy`]): schema 71, the last whose
-/// config sat positionally inside the state, kept so the 2026-10-08 training starts
-/// (`runs/starts3-2026-10-08`) load. Retire it (delete this, [`decode_legacy`] and its arm in
-/// [`decode`]) once those saves are rewritten in the current format (`voxel_resave`) or no
-/// longer wanted; it can read them only while `FaunaConfig`'s positional layout is still
-/// schema 71's, so the first animal knob added after SAVE-EXTENSIBLE retires it in practice.
-pub const LEGACY_SCHEMA: u32 = 71;
-
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
     schema: u32,
@@ -185,7 +177,7 @@ pub fn encode(fauna: &Fauna) -> Vec<u8> {
 }
 
 pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
-    let (tag, rest): (u32, &[u8]) =
+    let (tag, _): (u32, &[u8]) =
         postcard::take_from_bytes(bytes).context("not a voxel fauna snapshot")?;
     let fauna = match tag {
         SCHEMA => {
@@ -203,7 +195,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
             fauna.config = config;
             fauna
         }
-        LEGACY_SCHEMA => decode_legacy(rest)?,
         found => bail!(
             "voxel fauna snapshot schema {found} is not {SCHEMA}: made by another version of \
              Cubarium whose animal state has another layout; start a fresh world"
@@ -215,20 +206,6 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
     if let Err(e) = validate(&fauna) {
         bail!("invalid voxel fauna snapshot — {e}");
     }
-    Ok(fauna)
-}
-
-/// **One-version legacy reader** ([`LEGACY_SCHEMA`]): a schema-71 animal layer, whose config
-/// sat positionally at the head of the state. Postcard frames nothing, so it is the config's
-/// bytes followed by exactly the state the current envelope carries.
-fn decode_legacy(rest: &[u8]) -> anyhow::Result<Fauna> {
-    let (config, state): (FaunaConfig, &[u8]) = postcard::take_from_bytes(rest).context(
-        "a schema-71 (legacy) animal layer whose config this build no longer reads positionally; \
-         rewrite it with voxel_resave from a build before the animal config changed",
-    )?;
-    let mut fauna: Fauna = postcard::from_bytes(state)
-        .context("the state of a schema-71 (legacy) animal layer does not read")?;
-    fauna.config = config;
     Ok(fauna)
 }
 
@@ -703,20 +680,6 @@ mod tests {
         let bytes = encode(&layer(vec![animal(0, 0.02), animal(1, 0.03)], 2));
         let err = format!("{:#}", decode(&bytes[..bytes.len() - 9]).expect_err("a cut state"));
         assert!(err.contains("does not read as schema"), "{err}");
-    }
-
-    /// The one-version legacy reader: a schema-71 layer, its config positional at the head of
-    /// the state, loads whole.
-    #[test]
-    fn the_legacy_reader_loads_a_positional_config_layer() {
-        let mut config = FaunaConfig::default();
-        config.hatch_chance_per_dusk = 0.3;
-        let fauna = layer_with(config, vec![animal(0, 0.02), animal(4, 0.03)], 5);
-        let legacy = postcard::to_stdvec(&(LEGACY_SCHEMA, &config, &fauna)).unwrap();
-        let back = decode(&legacy).expect("a schema-71 layer");
-        assert_eq!(back.config(), &config);
-        assert_eq!(back.view().animals, fauna.view().animals);
-        assert_eq!(back.view().ledger, fauna.view().ledger);
     }
 
     /// A founder's held actions are bounded actions and its feedback is finite: the
