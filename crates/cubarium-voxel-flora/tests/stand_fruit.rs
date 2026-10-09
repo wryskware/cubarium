@@ -80,6 +80,9 @@ fn config(rate: f64, drop_s: f64) -> FloraConfig {
     c.lanternberry.fruit_drop_s = drop_s;
     c.lanternberry.fruit_mineral_fraction = 0.01;
     c.lanternberry.propagule_rate = 0.0;
+    // F3's mechanism alone (FLOWER-FRUIT): no flowering stage, fruit at par.
+    c.lanternberry.flower_s = 0.0;
+    c.lanternberry.fruit_cost = 1.0;
     c
 }
 

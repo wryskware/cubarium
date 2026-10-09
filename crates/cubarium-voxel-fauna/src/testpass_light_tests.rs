@@ -34,6 +34,9 @@ fn config(learn_rate: f64) -> FaunaConfig {
     // The light alone: since NECTAR-SCENT a hand-placed flower beacon gives off its nectar
     // plume, which would lead a bellwing these cases pass by.
     c.scent.nectar_per_s = 0.0;
+    // The cyan range off (FLOWER-FRUIT): these cases place cyan lights farther than the
+    // bellwing's `cyan_m` (`flower_fruit_light_tests`).
+    c.founders[BW.index()].senses.cyan_m = 0.0;
     c
 }
 

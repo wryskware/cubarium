@@ -37,6 +37,9 @@ fn config(lure_nir: f64) -> FaunaConfig {
     // The light alone: since NECTAR-SCENT a lit lure's plume is smelled at once (no field to
     // settle); the lure's scent has its own case.
     c.light.lure_scent = 0.0;
+    // The cyan range off (FLOWER-FRUIT): these cases place cyan lights farther than the
+    // bellwing's `cyan_m` (`flower_fruit_light_tests`).
+    c.founders[BW.index()].senses.cyan_m = 0.0;
     c
 }
 

@@ -5976,6 +5976,10 @@ pub struct SenseTable {
     /// switch, no registry row).
     #[serde(alias = "uv")]
     pub nir: bool,
+    /// **Cyan only up close** (FLOWER-FRUIT, Wrysk 2026-10-09): a still light of the cyan
+    /// class to its eye (a glowcap; a lure to an eye without near-IR) draws it only within
+    /// this, metres (3D); farther it is passed by. 0: `light_m` alone bounds it.
+    pub cyan_m: f64,
     /// **Looming**: a moving body (any but its own lineage) within this, metres (3D), is a
     /// shadow falling on it; 0 reads none.
     pub loom_m: f64,
@@ -6005,6 +6009,7 @@ impl Default for SenseTable {
             light_m: 0.0,
             light_min: 0.0,
             nir: false,
+            cyan_m: 0.0,
             loom_m: 0.0,
             feeding_sight_fraction: 1.0,
             kin_tracks: 1,
@@ -6127,6 +6132,8 @@ pub fn senses_of(founder: Founder) -> SenseTable {
             light_m: 4.0,
             light_min: 0.05,
             nir: true,
+            // FLOWER-FRUIT: a glowcap draws it within about a metre, not across a cave.
+            cyan_m: 1.0,
             loom_m: 1.0,
             ..t
         },

@@ -2690,7 +2690,9 @@ fn flyer_takeoff(fauna: &mut Fauna, i: usize, cost: f64) {
 /// mouth's reach (the body's radius plus its mouth reach, from its middle) — a
 /// bloomcrown's nectar through [`Flora::take_stand_nectar`], a latticevine face's through
 /// [`Flora::take_nectar`] — into the stomach's nectar pool, and the bloom recorded on the
-/// body (the pollen seam). Only while the eating latch is on.
+/// body (the pollen seam). A sip at another bloom than the last is a pollinator's visit,
+/// booked to it ([`Flora::visit_stand`], [`Flora::visit_face`]). Only while the eating
+/// latch is on.
 #[allow(clippy::too_many_arguments)]
 fn flyer_sip(
     fauna: &mut Fauna,
@@ -2732,6 +2734,15 @@ fn flyer_sip(
         crate::Bloom::Stand(_) => 0,
         crate::Bloom::Vine(_) => 1,
     }] += 1;
+    // FLOWER-FRUIT (Wrysk 2026-10-09): a sip at a bloom other than the last it sipped at is
+    // a pollinator's visit — it brings pollen from elsewhere — booked to the flowers it
+    // came to, where the visits decide the fruit they set.
+    if fauna.animals[i].last_bloom != Some(bloom) {
+        match bloom {
+            crate::Bloom::Stand(site) => flora.visit_stand(site),
+            crate::Bloom::Vine(face) => flora.visit_face(face),
+        };
+    }
     fauna.animals[i].last_bloom = Some(bloom);
     swallow(fauna, i, Food::Nectar, taken);
     true
@@ -5230,6 +5241,9 @@ mod nectar_scent_tests;
 #[cfg(test)]
 #[path = "light_learning_tests.rs"]
 mod light_learning_tests;
+#[cfg(test)]
+#[path = "flower_fruit_light_tests.rs"]
+mod flower_fruit_light_tests;
 #[cfg(test)]
 #[path = "bellwing_lure_tests.rs"]
 mod bellwing_lure_tests;

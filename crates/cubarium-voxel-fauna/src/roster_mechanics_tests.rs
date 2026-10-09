@@ -486,6 +486,9 @@ fn a_hungry_seedporter_finds_a_fruiting_stand_6_m_away() {
     fc.lanternberry.fruit_cap = 2e-3;
     fc.lanternberry.fruit_drop_s = 1e9;
     fc.lanternberry.propagule_rate = 0.0;
+    // F3's fruit alone (FLOWER-FRUIT): no flowering stage, no rest.
+    fc.lanternberry.flower_s = 0.0;
+    fc.lanternberry.fruit_rest_s = 0.0;
     let mut flora = Flora::new(fc);
     let site = full_stand(&mut flora, &world, Plant::Lanternberry, 32, 32);
     for _ in 0..60 {

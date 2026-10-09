@@ -317,10 +317,12 @@ fn above_the_reflush_line_nectar_and_fruit_draw_at_the_night_scale_capped_by_sto
     assert!(close(nectar, sc.nectar_per_s * sc.night_bloom_scale * DT), "nectar {nectar}");
     assert!(close(fruit, sc.fruit_per_s * sc.night_bloom_scale * DT), "fruit {fruit}");
 
-    // Nearly full stocks: the room caps the draw.
+    // Nearly full stocks: the room caps the draw (the fruit's room is what its set still
+    // has to make, FLOWER-FRUIT).
     let (mut s, mut g) = stand(&c, 1.0, None);
     s.nectar = sc.nectar_cap - 1e-7;
     s.fruit = sc.fruit_cap - 2e-7;
+    s.crop = crate::Crop { phase: crate::CropPhase::Fruit, flower_left_s: 0.0, visits: 0, to_make: 2e-7 };
     let before = s;
     tick(&c, &mut s, &mut g, night(1800.0));
     let (_, _, nectar, fruit) = spent(&c, &before, &s);

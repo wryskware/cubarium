@@ -247,6 +247,8 @@ fn an_uneaten_crop_falls_and_rests_on_the_same_cycle_on_either_clock() {
         sc.fruit_per_s = 2.0 * sc.fruit_cap / step;
         sc.fruit_drop_s = 4.0 * step;
         sc.fruit_rest_s = 4.0 * step;
+        // The fall-and-rest cycle alone (FLOWER-FRUIT: no flowering stage).
+        sc.flower_s = 0.0;
     }
     let (drop_s, rest) = (c.species(Species::Lanternberry).fruit_drop_s, c.species(Species::Lanternberry).fruit_rest_s);
     let span = 800u64;

@@ -743,6 +743,7 @@ fn built(config: &FloraConfig, id: u64, site: Site, species: Species, organic: f
         fruit: 0.0,
         fruit_age_s: 0.0,
         fruit_rest_s: 0.0,
+        crop: crate::Crop::default(),
         cured: false,
         dry_s: 0.0,
         support: None,

@@ -194,7 +194,10 @@ pub fn lure_visits_per_s(
         return 0.0;
     }
     let lure = lit * (b[2] + c.lure_scent.max(0.0));
-    let competition = flowers.max(0.0) * b[0] + caps.max(0.0) * b[1];
+    // FLOWER-FRUIT: a still cyan light draws only within `senses.cyan_m`; the glowcaps it
+    // meets fall with the range, as the encounter rate does (`2 r v n / A`).
+    let cyan_reach = if p.senses.cyan_m > 0.0 && p.senses.light_m > 0.0 { (p.senses.cyan_m / p.senses.light_m).min(1.0) } else { 1.0 };
+    let competition = flowers.max(0.0) * b[0] + caps.max(0.0) * b[1] * cyan_reach;
     awake * visit_rate(c, p, body, lit, area) * lure / (lure + competition)
 }
 

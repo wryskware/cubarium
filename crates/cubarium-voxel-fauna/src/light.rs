@@ -7,10 +7,13 @@
 //!
 //! # Beacons ([`Beacon`])
 //!
-//! - **Flowers** — a bloomcrown's head holding nectar, a latticevine face in flower holding
-//!   nectar: near-IR reflectors, bright by the light falling on them (`sky × daylight`), dark at
-//!   night. A whole plant is never a beacon; only its flower, and only while it holds nectar.
-//! - **Glowcaps** — a glowcap with a cap: its own cyan light.
+//! - **Flowers** — a bloomcrown's head holding nectar, a lanternberry's open flowers holding
+//!   nectar, a latticevine face in flower holding nectar: near-IR reflectors, bright by the
+//!   light falling on them (`sky × daylight`) × a reflectance that rises with the nectar they
+//!   hold ([`flower_reflectance_at`], Wrysk 2026-10-09), dark at night. A whole plant is
+//!   never a beacon; only its flower, and only while it holds nectar.
+//! - **Glowcaps** — a glowcap with a cap: its own cyan light. A still cyan light draws a body
+//!   only within its lineage's `senses.cyan_m` (the bellwing's, about a metre).
 //! - **Lures** — a lanternjaw's lit lure, awake: its own cyan light, at the middle of its
 //!   strike capsule inside its jaw band ([`lure_point`]); **moving** when the lanternjaw has
 //!   moved within the still window ([`crate::moved_recently`]). **It mimics a flower**
@@ -210,8 +213,9 @@ impl BeaconKind {
 }
 
 /// **One bright thing** (module note): its kind, where it shines from (ring `x`, `z`,
-/// height `y`, metres), the terrain sky visibility there (`0..=1`), its own light's level
-/// (a lure's lit fraction; 1 for the others) and whether it moved.
+/// height `y`, metres), the terrain sky visibility there (`0..=1`), its level — a lure's
+/// lit fraction, a flower's nectar fill (its nectar over a full flower's,
+/// `fauna.scent.nectar_full`, at most 1), 1 for a glowcap — and whether it moved.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Beacon {
     pub kind: BeaconKind,
@@ -234,9 +238,15 @@ impl Beacon {
 
     /// Its brightness to an eye with (`nir`) or without the near-IR channel: a lure shows a near-IR eye
     /// its near-IR ([`LightConfig::lure_nir`] × `flower_reflectance`) on top of its cyan.
+    ///
+    /// A flower's is the light falling on it × its reflectance, and **its nectar reflects
+    /// near-IR** (Wrysk 2026-10-09): the reflectance rises with its fill, from `1 −
+    /// nectar_nir_share` of `flower_reflectance` nearly drained to all of it full
+    /// ([`flower_reflectance_at`]). A drained flower is dimmer: an honest signal. The lure
+    /// mimics a full flower in full light.
     pub fn brightness_seen(&self, cfg: &LightConfig, daylight: f64, nir: bool) -> f64 {
         match self.kind {
-            BeaconKind::Flower => cfg.flower_reflectance.max(0.0) * self.sky.clamp(0.0, 1.0) * daylight.clamp(0.0, 1.0),
+            BeaconKind::Flower => flower_reflectance_at(cfg, self.power) * self.sky.clamp(0.0, 1.0) * daylight.clamp(0.0, 1.0),
             BeaconKind::Glowcap => cfg.glowcap_emission.max(0.0),
             BeaconKind::Lure => {
                 let mimic = if nir { cfg.lure_nir.max(0.0) * cfg.flower_reflectance.max(0.0) } else { 0.0 };
@@ -257,6 +267,13 @@ impl Beacon {
         let den = around + cfg.background_floor.max(0.0);
         if den > 0.0 { b / den } else if b > 0.0 { f64::INFINITY } else { 0.0 }
     }
+}
+
+/// **A flower's near-IR reflectance at nectar fill `fill`** (`0..=1`, Beacon::brightness_seen):
+/// `flower_reflectance · (1 − s + s · fill)`, `s` the [`LightConfig::nectar_nir_share`].
+pub fn flower_reflectance_at(cfg: &LightConfig, fill: f64) -> f64 {
+    let s = cfg.nectar_nir_share.clamp(0.0, 1.0);
+    cfg.flower_reflectance.max(0.0) * (1.0 - s + s * fill.clamp(0.0, 1.0))
 }
 
 /// **The reward expectation** of `kind`'s class in the record `p` at tick `now` (module note,
@@ -608,7 +625,7 @@ impl Beacons {
                 z: (f64::from(st.site.z) + 0.5) * v,
                 y_m,
                 sky,
-                power: 1.0,
+                power: if kind == BeaconKind::Flower { share(st.nectar).min(1.0) } else { 1.0 },
                 moving: false,
                 body: 0,
             });
@@ -622,7 +639,7 @@ impl Beacons {
                 z: (f64::from(z) + 0.5) * v,
                 y_m: (f64::from(y) + 0.5) * v,
                 sky: view.sky_visibility(i64::from(x), y, z),
-                power: 1.0,
+                power: share(f.nectar).min(1.0),
                 moving: false,
                 body: 0,
             });
@@ -795,6 +812,10 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
                 continue;
             }
             if !b.moving && record.marked(b.x, b.z, tick, cfg.mark_radius_m, ring) {
+                continue;
+            }
+            // FLOWER-FRUIT: a still cyan light draws only up close (`cyan_m`).
+            if !b.moving && table.cyan_m > 0.0 && d > table.cyan_m && b.kind.class_seen(&cfg, table.nir) == CYAN {
                 continue;
             }
             let level = received(&cfg, b.contrast_seen(&cfg, daylight, table.nir), d);

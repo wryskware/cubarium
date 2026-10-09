@@ -990,8 +990,15 @@ impl Default for ScentConfig {
 #[serde(default)]
 pub struct LightConfig {
     /// A nectar flower's brightness (its near-IR) per unit of the light falling on it (`sky ×
-    /// daylight` at its head): a reflector, dark at night. 1.
+    /// daylight` at its head), full of nectar: a reflector, dark at night. 1.
     pub flower_reflectance: f64,
+    /// **Nectar is near-IR reflective** (Wrysk 2026-10-09: "nectar can be made 'IR
+    /// reflective'. thats fairly sound actually"): the share of a full flower's reflectance
+    /// that is its nectar's. A flower's reflectance is `flower_reflectance · (1 − this +
+    /// this · fill)`, `fill` its nectar over a full flower's (`scent.nectar_full`, at most 1),
+    /// so a drained flower is dimmer — an honest signal — and a full one is as bright as
+    /// before. 0: nectar changes nothing. 0.5, a plausible start, untuned.
+    pub nectar_nir_share: f64,
     /// A glowcap's own light, in the same units (it needs no light to be seen). 0.3.
     pub glowcap_emission: f64,
     /// A fully lit lure's own light (its cyan). 1.
@@ -1059,8 +1066,12 @@ pub struct LightConfig {
     /// (pollinators come with a colour bias but are drawn to both; Giurfa et al. 1995).
     #[serde(alias = "uv_innate")]
     pub nir_innate: f64,
-    /// The innate expectation of a cyan emitter. 0.5, like near-IR: a naive bellwing is drawn to
-    /// any bright thing, so the still lure works on the young and the inexperienced.
+    /// The innate expectation of a cyan emitter. 0.12 (FLOWER-FRUIT, Wrysk 2026-10-09: a
+    /// bellwing mistakes a glowcap only when it is close and only if it has not made that
+    /// mistake recently): under `expect_min / (1 − learn_rate)`, so one failed cyan visit
+    /// puts the class under `expect_min` and the bellwing passes glowcaps by until the
+    /// offset relaxes over `forget_s`; how close is the lineage's `senses.cyan_m`. It was
+    /// 0.5, like near-IR. (The lure is a flower, near-IR, to a near-IR eye.)
     pub cyan_innate: f64,
     /// Each outcome moves its class's expectation this fraction of the way to it: 1 after a
     /// sip, 0 after a failed visit (Rescorla–Wagner). 0.3: bees and bumblebees learn a
@@ -1084,6 +1095,7 @@ impl Default for LightConfig {
     fn default() -> LightConfig {
         LightConfig {
             flower_reflectance: 1.0,
+            nectar_nir_share: 0.5,
             glowcap_emission: 0.3,
             lure_emission: 1.0,
             lure_nir: 1.0,
@@ -1102,7 +1114,7 @@ impl Default for LightConfig {
             glow_scent_gate: 0.05,
             learn: true,
             nir_innate: 0.5,
-            cyan_innate: 0.5,
+            cyan_innate: 0.12,
             learn_rate: 0.3,
             forget_s: 3600.0,
             expect_min: 0.1,

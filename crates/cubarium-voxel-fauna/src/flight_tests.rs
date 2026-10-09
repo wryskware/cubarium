@@ -945,6 +945,43 @@ fn a_sip_takes_vine_and_bloomcrown_nectar_the_books_close_and_an_empty_flower_gi
     }
 }
 
+/// **FLOWER-FRUIT: a sip at a lanternberry's flowers is a pollinator's visit, booked to that
+/// bush.** A full-grown lanternberry in flower (its flowers held open for the fixture) and
+/// another out of reach: a hovering bellwing sipping at the first books one visit to it —
+/// its arrival; the sips that follow at the same flowers are not new visits — and none to
+/// the other. The books close.
+#[test]
+fn a_bellwing_sipping_lanternberry_flowers_books_its_visit_to_that_bush() {
+    let mut world = plain_with(config(20, 20, 8, clock_at(12.0)));
+    let mut c = FloraConfig::default();
+    c.lanternberry.flower_s = 1e9;
+    c.lanternberry.nectar_per_s = 1e-3;
+    c.lanternberry.nectar_cap = 2e-3;
+    let mut flora = Flora::new(c);
+    let site = full_stand(&mut flora, &world, Plant::Lanternberry, 8, 4);
+    let other = full_stand(&mut flora, &world, Plant::Lanternberry, 16, 4);
+    for _ in 0..60 {
+        flora.step(&mut world);
+    }
+    let st = *flora.view().stand_at(site).expect("the bush");
+    assert_eq!(st.crop.phase, cubarium_voxel_flora::CropPhase::Flower, "fixture: in flower");
+    assert!(st.nectar > 0.0, "fixture: its flowers hold nectar");
+    let top = crown_top(&flora, site);
+    let organic = flora.view().organic();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::HUNGRY);
+    fly(&mut fauna, id, 0.0, 1.0, -1.0);
+    steps(&mut fauna, &world, &mut flora, 60);
+    let sips = fauna.view().ledger.bites_by_founder_food[BW.index()][Food::Nectar.index()];
+    assert!(sips >= 2, "it sipped there more than once: {sips}");
+    assert_eq!(animal(&fauna, id).last_bloom, Some(Bloom::Stand(site)));
+    assert_eq!(flora.view().stand_at(site).expect("the bush").crop.visits, 1, "one visit, booked to that bush");
+    assert_eq!(flora.view().stand_at(other).expect("the other").crop.visits, 0, "none to the other");
+    assert_eq!(flora.view().ledger.flower_visits[0], 1);
+    ledgers_close(&fauna, &flora, organic);
+}
+
 // ------------------------------------------------------------------ 8. weather
 
 /// A plain whose sky holds water, so it can rain; `downpour` forces one (the world is

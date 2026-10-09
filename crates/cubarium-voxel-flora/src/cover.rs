@@ -414,6 +414,10 @@ pub struct CoveredFace {
     pub nectar: f64,
     /// Organic matter in the bead bunch. Positive only in [`SpurPhase::Fruit`].
     pub fruit: f64,
+    /// Pollinator visits to this face's flower (FLOWER-FRUIT, [`Flora::visit_face`]),
+    /// counted while it is in flower and cleared when the next bud opens.
+    #[serde(default)]
+    pub visits: u16,
 }
 
 impl CoveredFace {
@@ -863,8 +867,19 @@ pub struct VineConfig {
     /// `N · nectar_per_face_s` whatever [`VineConfig::spur_share`] is.
     pub nectar_per_face_s: f64,
     /// **Bead fruit a covered face sets per second over the long run**, organic units per
-    /// reference face, the same way: a bunch sets holding this rate times the mean cycle.
+    /// reference face, the same way: a bunch sets holding this rate times the mean cycle —
+    /// when its flower was pollinated; an unvisited flower sets `pollination_floor` of it.
     pub fruit_per_face_s: f64,
+    /// **What a unit of bead fruit costs the vine**, units of reserve (FLOWER-FRUIT, Wrysk
+    /// 2026-10-09, about 2–3): the unit beyond the fruit is respired, its energy as heat.
+    /// 1: fruit at par.
+    pub fruit_cost: f64,
+    /// **The pollination floor**: the share of a full bunch a flower no pollinator visited
+    /// sets ([`Flora::visit_face`]). 1: visits change nothing.
+    pub pollination_floor: f64,
+    /// **The visit-to-fruit rule**: visits to a flower that set a full bunch; `v` visits set
+    /// `floor + (1 − floor) · min(1, v / pollination_visits)` of it.
+    pub pollination_visits: f64,
     /// Energy per unit of organic matter in the vine's tissue.
     pub energy_density: f64,
     /// **Mineral per unit of the vine's tissue** (the minimal gut's repair 3 item 2): the
@@ -964,6 +979,11 @@ impl Default for VineConfig {
             // 0.01 fruit; a 0.125 m face a quarter of that.
             nectar_per_face_s: 0.002 / 3600.0,
             fruit_per_face_s: 0.005 / 3600.0,
+            // FLOWER-FRUIT (Wrysk 2026-10-09), plausible starts, untuned: the lanternberry's
+            // cost and floor; a vine flower is one flower, so one visit pollinates it.
+            fruit_cost: 2.5,
+            pollination_floor: 0.1,
+            pollination_visits: 1.0,
             energy_density: 1.0,
             mineral_fraction: 0.01,
             founders: 6,
@@ -1531,6 +1551,7 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate, spa
                             let n = nectar_amount.min(v.reserve).max(0.0);
                             v.reserve -= n;
                             f.nectar = n;
+                            f.visits = 0;
                             f.spur = SpurPhase::Flower;
                             f.spur_timer_s += vc.flower_s;
                         }
@@ -1545,11 +1566,23 @@ pub(crate) fn grow(flora: &mut Flora, world: &World, climate: step::Climate, spa
                     } else {
                         f.spur_timer_s -= dt;
                         if f.spur_timer_s <= EPS {
-                            // What the visitors left is taken back; the beads are paid.
+                            // What the visitors left is taken back; the beads set by
+                            // the visits (FLOWER-FRUIT) and are paid at `fruit_cost`, the
+                            // overhead respired.
                             v.reserve += f.nectar;
                             f.nectar = 0.0;
-                            let b = fruit_amount.min(v.reserve).max(0.0);
-                            v.reserve -= b;
+                            let share = crate::pollinated_share(vc.pollination_floor, vc.pollination_visits, f64::from(f.visits));
+                            let cost = vc.fruit_cost.max(1.0);
+                            let b = (share * fruit_amount).min(v.reserve / cost).max(0.0);
+                            v.reserve -= cost * b;
+                            let overhead = (cost - 1.0) * b;
+                            if overhead > 0.0 {
+                                book_respired(ledger, e, overhead);
+                                ledger.fruit_overhead += overhead;
+                            }
+                            let visited = f.visits > 0;
+                            ledger.crops_set[usize::from(visited)] += 1;
+                            ledger.fruit_set[usize::from(visited)] += b;
                             f.fruit = b;
                             f.spur = SpurPhase::Fruit;
                             f.spur_timer_s += vc.fruit_s;
@@ -1843,6 +1876,7 @@ fn spread(
                     rooted: n == root_face,
                     spur: SpurPhase::Bare,
                     spur_timer_s: 0.0,
+                    visits: 0,
                     nectar: 0.0,
                     fruit: 0.0,
                 },
@@ -1997,6 +2031,7 @@ impl Flora {
                 rooted: true,
                 spur: SpurPhase::Bare,
                 spur_timer_s: 0.0,
+                visits: 0,
                 nectar: 0.0,
                 fruit: 0.0,
             },
@@ -2066,6 +2101,7 @@ impl Flora {
             rooted: true,
             spur: SpurPhase::Bare,
             spur_timer_s: 0.0,
+            visits: 0,
             nectar: 0.0,
             fruit: 0.0,
         };
@@ -2118,6 +2154,7 @@ impl Flora {
             rooted: face == cover.vines[vi].root_face,
             spur: SpurPhase::Bare,
             spur_timer_s: 0.0,
+            visits: 0,
             nectar: 0.0,
             fruit: 0.0,
         };
@@ -2177,6 +2214,25 @@ impl Flora {
     /// left. Booked as `consumed_*_out`.
     pub fn take_fruit(&mut self, face: Face, want: f64) -> Option<Taken> {
         self.take_spur(face, want, SpurPhase::Fruit)
+    }
+
+    /// **A pollinator's visit** to `face`'s flower (FLOWER-FRUIT): counted on the face while
+    /// it is in flower, toward the bunch it sets ([`VineConfig::pollination_visits`]), and
+    /// in `FloraLedger::flower_visits`. `false`, booking nothing, unless the face is in
+    /// flower.
+    pub fn visit_face(&mut self, face: Face) -> bool {
+        let cover = &mut self.cover;
+        cover.ensure_built();
+        let Some(s) = cover.slot_of(face) else {
+            return false;
+        };
+        let f = &mut cover.faces[s];
+        if f.spur != SpurPhase::Flower {
+            return false;
+        }
+        f.visits = f.visits.saturating_add(1);
+        self.ledger.flower_visits[1] += 1;
+        true
     }
 
     fn take_spur(&mut self, face: Face, want: f64, phase: SpurPhase) -> Option<Taken> {

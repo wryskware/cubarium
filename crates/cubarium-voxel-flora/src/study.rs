@@ -134,6 +134,7 @@ pub fn start_stand(config: &FloraConfig, species: Species, start: Start) -> Stan
         fruit: 0.0,
         fruit_age_s: 0.0,
         fruit_rest_s: 0.0,
+        crop: crate::Crop::default(),
         cured: false,
         dry_s: 0.0,
         support: None,
