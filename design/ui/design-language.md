@@ -28,6 +28,8 @@ There are three roles.
 
 The title has an offset shadow one title pixel deep: 7 px, #5A1D9D.
 
+Titles carry **one space on each side**, so Gridlite's unlit dot field runs one letter past each end. Wrysk, 2026-10-09: "yes space. definitely." In Godot this is the `NeonTitle` label (`game/ui/neon/neon_title.gd`): set its `title`, and its `pad` adds the spaces.
+
 **Gridlite's axes.** All four are continuous.
 
 | Axis | Range | What it controls |

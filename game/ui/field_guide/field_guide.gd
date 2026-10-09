@@ -385,7 +385,7 @@ func select(id: String) -> void:
 		_art.custom_minimum_size = tex.get_size() * PLATE_SCALE
 	_caption.text = "Plate %02d · %s" % [n["plate"], "Adult" if animal else "Mature"]
 	_text.get_node("Kicker").text = "%s · %s" % [n.get("kind", ""), n.get("kicker", "")]
-	_text.get_node("Name").text = n["name"]
+	_text.get_node("Name").title = n["name"]
 	_text.get_node("FieldNote").text = n.get("note", "")
 	_fact("Role", "Role", n.get("role", ""))
 	if animal:
