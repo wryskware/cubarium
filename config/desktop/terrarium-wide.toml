@@ -14,7 +14,7 @@ haze = 0.55
 water_alpha = 0.5
 dither = 0.04
 sky_gradient = true
-water_every = 1         # the display runs the live water; training, search and studies take 4
+water_every = 1         # the display runs the live water; training, search and studies take 20
 lighting = "lit"        # the desktop's tier; the panel and the cube keep the flat default
 vine_tiles = true       # the latticevine as its tile layer, every other face a plain voxel (Wrysk, 2026-10-02)
 

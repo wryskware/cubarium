@@ -10,7 +10,7 @@ haze = 0.55
 water_alpha = 0.5
 dither = 0.04
 sky_gradient = true
-water_every = 1         # the display runs the live water; training, search and studies take 4
+water_every = 1         # the display runs the live water; training, search and studies take 20
 lighting = "lit"        # the desktop's tier; the panel and the cube keep the flat default
 serve = "0.0.0.0:7878"   # the observatory: stats, dashboard and speed control at http://<host>:7878/ (the home LAN, opened from the desktop; no auth)
 

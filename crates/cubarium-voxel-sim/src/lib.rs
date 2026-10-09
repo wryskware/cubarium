@@ -201,8 +201,13 @@ pub struct SimConfig {
 
 /// The coarse water a training, search or experiment run takes unless its run line says
 /// otherwise (Wrysk, 2026-10-04: water fidelity does not matter there). The display runs
-/// the live water.
-pub const EXPERIMENT_WATER_EVERY: u32 = 4;
+/// the live water. **20** (one water step a second) since 2026-10-09: a paired 8-seed,
+/// 2 h check against 4 kept every population and the water ledger closed (residual ~1e-9);
+/// the lake ended 1–7 % lower ("not that worried about the water thing as long as the
+/// ledger still works out", Wrysk). The plant clock
+/// ([`cubarium_voxel_flora::FloraConfig::step_every`], 40) is a multiple of it, so the plant
+/// step lands on a water tick.
+pub const EXPERIMENT_WATER_EVERY: u32 = 20;
 
 static WATER_EVERY_OVERRIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 

@@ -3078,8 +3078,11 @@ pub struct FloraConfig {
     /// The steps fall on the world ticks that are multiples of `step_every`, the phase the
     /// coarse water keeps (`World::water_due`): with the experiments' `water_every` equal
     /// to it, the plant step lands on the coarse water's tick and the overlapped schedule
-    /// runs the two long phases side by side. **4**, the experiments' `water_every`
-    /// (2026-10-04; it was 5): one plant step per 0.2 s.
+    /// runs the two long phases side by side. **40** (2026-10-09; it was 4, and 5 before
+    /// 2026-10-04): one plant step per 2 s, a multiple of the experiments' `water_every` (20).
+    /// The fastest plant process, cropped turf refilling, takes 2–4 min, so a step is still
+    /// under 2 % of it; a paired 8-seed, 2 h check against 4 kept every population, with
+    /// standing foliage about 2 % lower.
     pub step_every: u32,
     /// **Whether a passing bank waits one check before it sprouts**: `true`,
     /// the shipped rule — the check that finds the gates passing draws the lottery and
@@ -3249,7 +3252,7 @@ impl Default for FloraConfig {
             seed_check_s: 30.0,
             // Plants live on minute-to-hour clocks: a step every quarter second is
             // invisible on the display and a fifth of the per-tick cost.
-            step_every: 4,
+            step_every: 40,
             sprout_after_arming: true,
             upkeep_q10: 2.0,
             wind_tries: 4,

@@ -7,4 +7,4 @@
 # Staged runs and scenario maps: WORKING_POLICY.md, "Staged runs and scenario maps".
 base = "../desktop/terrarium.toml"
 
-# Study tools take the coarse water themselves (`SimConfig::experiment`, water_every 4).
+# Study tools take the coarse water themselves (`SimConfig::experiment`, water_every 20).
