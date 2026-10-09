@@ -677,6 +677,24 @@ control and the reward accounting; display targets after seeing results.
     - Glowcaps stay the visible decomposer, in the dark only.
     - Microbes still do most of the work, as in real ecosystems.
 
+22. **Decided (Wrysk, 2026-10-09): make the world cheaper first, then the two-stage
+    protocol.**
+    - Wrysk: "i feel like maybe we're doing something wrong and that the world shouldnt have
+      to be so expensive."
+    - Measured on d72, one core: today 12–14 ms per tick; plants every 2 s
+      (`flora.step_every` 40) 7.4–8.9 ms; plus water every 1 s (`water_every` 20) 5.7 ms,
+      2.3× faster.
+    - Fauna is the rest, about 3 ms. Remote senses already run at 4 Hz, so FAUNA-SPEED (Codex,
+      xhigh) is diagnosing what dominates.
+    - Adopt the strides only if a side-by-side matches: `runs/stride-2026-10-09`, 8 seeds × 2 h
+      from starts3r m063, old against new strides, heuristic.
+    - **Then protocol A:**
+      - screen every candidate on 8 wide worlds × 2 h from a year-old saved world;
+      - year-check the best on 8 freshly founded wide worlds × 10 h;
+      - judge breeding over each species' own cycle, fast breeders in the screen and
+        megafauna in the year check;
+      - EC2 for big rounds, on Wrysk's go.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
