@@ -584,3 +584,47 @@ fn partly_cropped_caps_offer_only_the_remaining_removable_tissue() {
         0.0
     );
 }
+
+#[test]
+fn places_film_and_shore_egg_point_at_the_reflexes_faces() {
+    let w = shore();
+    let mut f = grazer(&w);
+    let mut flora = film(&w);
+    // From a damp bank, the neighbouring film face is exposed above water, and
+    // the current bank is an eligible shore egg face. Underwater film is hidden
+    // by the water surface, just as it is for the body's other ray senses.
+    crate::testpass3_support::place(&mut f, 0, site(6), 0.0);
+    let target = Site { x: 6, y: 3, z: 1 };
+    for x in 0..16 {
+        for z in 0..6 {
+            let s = Site { z, ..site(x) };
+            if s != target { flora.take_film(s, 1e6); }
+        }
+    }
+    let p = &mut f.config.founders[SN.index()];
+    p.senses.sight_m = 4.0;
+    p.senses.sight_night_m = 4.0;
+    p.senses.sight_still_fraction = 1.0;
+    p.senses.sight_half_angle_deg = 180.0;
+    p.senses.still_gain = 1.0;
+    p.senses.feeding_sight_fraction = 1.0;
+    f.start_tap();
+    f.tick = f.animals[0].id % f.config.perception.stagger_ticks();
+    let sky = sky();
+    crate::places::refresh(&mut f, &w.view(), &flora.view(), &sky);
+    let a = f.animals[0];
+    let am = f.config.founder(SN).amphibious.unwrap();
+    let v = w.view();
+    let fv = flora.view();
+    let frame = crate::observe_v3::Frame::of(&a, f64::from(v.config.width) * V, f.tick);
+    let k = fv.config.film_capacity_per_m2 * V * V;
+    let film_face = super::film_target(&v, &am, &a, true, k, &|s| fv.edible_film_at(s), &[], |_| true).expect("film to walk to");
+    let egg_face = super::shore_target(&f, 0, &v, &sky, am.egg_search_m, |_| true).expect("shore to lay on");
+    for (kind, face) in [("film", film_face), ("shore_egg", egg_face)] {
+        let b = crate::observe_v3::place(&f, &a, kind, &frame, V);
+        let (x, z) = crate::pack::centre(face, V);
+        let (sin, cos, _) = frame.toward(x, z);
+        assert_eq!(b[0], 1.0, "{kind}");
+        assert!((b[1] - sin).abs() < 1e-12 && (b[2] - cos).abs() < 1e-12, "{kind}: {b:?}");
+    }
+}

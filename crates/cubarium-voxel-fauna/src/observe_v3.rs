@@ -20,13 +20,13 @@
 //! component to the right) and `cos` (its component ahead). Coordinates stay here; only the
 //! bearing, the proximity and the flags reach the vector.
 //!
-//! # Places (P6's hook)
+//! # Places (P6)
 //!
 //! Each `Place(kind)` block is five channels (`valid, sin, cos, proximity, fresh`) filled by
 //! [`place`]. Item 24 (training plan §6) decided what fills them: the nearest such place the
 //! body could perceive, else the one it remembers using, fading if not revisited. Only the
-//! den, which a pack member always knows, is filled here; every other kind reads empty until
-//! P6 writes its query and its memory into [`place`].
+//! den is always known. Other kinds read the reflex queries cached by [`crate::places`]
+//! on remote-sense ticks, else the fading memory of a home place the body used.
 
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Site};
@@ -177,7 +177,7 @@ pub(crate) fn encode(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
-    fv: &FloraView<'_>,
+    _fv: &FloraView<'_>,
     manifest: &Manifest,
     clock: Clock,
     obs: &mut [f64],
@@ -242,7 +242,7 @@ pub(crate) fn encode(
             }
             "Social" => out.copy_from_slice(&social(fauna, a, &frame, v, range)),
             name => match name.strip_prefix("Place(").and_then(|r| r.strip_suffix(')')) {
-                Some(kind) => out.copy_from_slice(&place(fauna, a, fv, kind, &frame, v, range)),
+                Some(kind) => out.copy_from_slice(&place(fauna, a, kind, &frame, v)),
                 None => panic!("the {} manifest's v3 block {name} has no encoder", founder.name()),
             },
         }
@@ -385,32 +385,9 @@ fn social(fauna: &Fauna, a: &Animal, frame: &Frame, v: f64, range_m: f64) -> [f6
     out
 }
 
-/// **One place** (module note, P6's hook): `kind` is the name inside `Place(…)`. The den
-/// is a pack member's always (item 24: "always to its den"), at full freshness; every other
-/// kind is empty until P6 fills it with the nearest such place within the body's senses,
-/// else its fading memory of one it used.
-pub(crate) fn place(
-    fauna: &Fauna,
-    a: &Animal,
-    _fv: &FloraView<'_>,
-    kind: &str,
-    frame: &Frame,
-    v: f64,
-    range_m: f64,
-) -> [f64; 5] {
-    match kind {
-        "den" => {
-            let den = a.pack.and_then(|m| fauna.packs.iter().find(|p| p.id == m.pack)).map(|p| p.den);
-            match den {
-                Some(site) => {
-                    let (x, z) = site_xz(site, v);
-                    let (s, c, d) = frame.toward(x, z);
-                    [1.0, s, c, proximity(d, range_m), 1.0]
-                }
-                None => [0.0; 5],
-            }
-        }
-        // P6: shore, water, shore_egg, film, roost, fruit, nest.
-        _ => [0.0; 5],
-    }
+/// **One place** (P6): `kind` is the name inside `Place(…)`. The current pack den
+/// is always known (item 24); other kinds read the cached reflex query within the
+/// body's sight, else the fading memory of a home place it physically used.
+pub(crate) fn place(fauna: &Fauna, a: &Animal, kind: &str, frame: &Frame, v: f64) -> [f64; 5] {
+    crate::places::encode(fauna, a, kind, frame, v)
 }

@@ -901,6 +901,10 @@ pub struct PerceptionConfig {
     /// **The pursuit's memory**: a body not sensed again within this long is given up, and
     /// a pursuit walks to its last-known point until then, seconds. 10 s.
     pub give_up_s: f64,
+    /// Seconds until a last-used roost, water, den or nest fades to zero without a
+    /// visit. Linear freshness; 0 disables recall. Ten minutes allows return trips
+    /// while forgetting abandoned homes; a plausible untuned start.
+    pub place_memory_fade_s: f64,
 }
 
 impl Default for PerceptionConfig {
@@ -914,6 +918,7 @@ impl Default for PerceptionConfig {
             hearing_size_exp: 1.0,
             hearing_near_m: 0.5,
             give_up_s: 10.0,
+            place_memory_fade_s: 600.0,
         }
     }
 }

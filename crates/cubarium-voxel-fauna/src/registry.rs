@@ -685,6 +685,7 @@ fn knob_rows() -> Vec<Row> {
         pk("hearing_speed_exp", "exponent", nonneg, "hearing's emission is speed^this x length^size_exp").search(0.5, 3.0),
         pk("hearing_size_exp", "exponent", nonneg, "the length exponent of hearing's emission").search(0.0, 3.0),
         pk("hearing_near_m", "m", pos, "received loudness is emission over the distance, read as at least this"),
+        pk("place_memory_fade_s", "s", nonneg, "time for last-used home-place freshness to fall linearly to zero without a physical revisit; 0 disables recall").search(60.0, 7200.0).log(),
         pk("give_up_s", "s", nonneg, "a body not sensed again within this is given up; a pursuit walks to its last-known point until then").search(1.0, 60.0).log(),
     ]);
 
