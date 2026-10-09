@@ -713,6 +713,24 @@ control and the reward accounting; display targets after seeing results.
         megafauna in the year check;
       - EC2 for big rounds, on Wrysk's go.
 
+23. **Decided (Wrysk, 2026-10-09): brain contract v3 B, with a hybrid for social
+    megafauna.**
+    - B for frondgrazer, littershredder, ripple-snail, capgnawer, bellwing and lanternjaw:
+      the brain controls everything except physics and starts as a clone of the heuristic.
+    - The B/C hybrid for seedporter, loftstrider and Veilhound: option logits plus the
+      low-level actions, option 0 being own steering. Wrysk: "seedporters and loftstriders
+      are social too, and even frondgrazers have rudimentary social behaviour."
+    - Their menus get social skills ("stay with the troop or family"; the pack's drive,
+      flank, den, rest or play). Those skills are to be written, like the grazers' herding
+      pull.
+    - **Architecture, a research thread Wrysk finds interesting:** "b and c seem like
+      different layers of the brain … semi-independent nets with that integration layer
+      between them. or literally its just a bigger net with more outputs."
+      - Start with the simple form: one net with two output heads.
+      - A layered form is a later study: a slow "intent" layer picking what to do about
+        once a second, feeding a fast "steering" layer every tick, close to hierarchical
+        reinforcement learning (options, feudal networks).
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
