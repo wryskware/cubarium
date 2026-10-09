@@ -306,7 +306,9 @@ fn zero_lost_calm_preserves_unseen_flight_hold() {
 fn perched_watch_uses_start_then_stop_and_releases_at_lost_boundary() {
     let (w, flora, mut f) = fixture();
     f.animals[0].mobility.mode = MobilityMode::Perched;
+    f.animals[0].pose.y_m += crate::step::refuge_height_m(&f.config) + V;
     let mut t = track(&f.animals[0]);
+    t.y_m -= crate::step::refuge_height_m(&f.config) + V;
     t.posture = posture::ACTIVE;
     t.z = f.animals[0].pose.z - vg(&f).flee_start_m;
     t.tick = 10;
@@ -342,6 +344,7 @@ fn zero_lost_calm_preserves_unseen_refuge_hold() {
     let (w, flora, mut f) = fixture();
     f.config.founders[SP.index()].vigilance.lost_calm_s = 0.0;
     f.animals[0].mobility.mode = MobilityMode::Perched;
+    f.animals[0].pose.y_m += crate::step::refuge_height_m(&f.config) + V;
     let id = f.animals[0].id;
     let mut p = Percept::default();
     p.vigil.refuge = true;
@@ -385,8 +388,10 @@ fn held_young_hunter_reads_still_only_after_configured_ticks() {
 fn reaching_a_perch_ends_flight_and_a_waking_facing_hunter_holds_refuge() {
     let (w, flora, mut f) = fixture();
     f.animals[0].mobility.mode = MobilityMode::Perched;
+    f.animals[0].pose.y_m += crate::step::refuge_height_m(&f.config) + V;
     let a = f.animals[0];
     let mut t = track(&a);
+    t.y_m -= crate::step::refuge_height_m(&f.config) + V;
     t.posture = posture::ASLEEP;
     t.tick = 10;
     let mut p = record(t);

@@ -1048,19 +1048,23 @@ pub(crate) fn eaten(fauna: &mut Fauna, hunter: u64, hf: Founder, prey: usize, fa
 }
 
 /// Whether hunter `h` (its table `hunter`, current body) could take a sensed body where it
-/// was: not climbing, and on the ground or with its base within the hunter's jaw band over
-/// the support under it — Wrysk's "grounded or in reach" for a perched or hovering bellwing.
+/// was: on the ground, or with its elevated base within the hunter's strike height.
+/// A rearing hunter also reaches a body clinging to a wall within that band.
 pub fn in_reach(config: &FaunaConfig, h: &Animal, t: &Track) -> bool {
-    if t.climbing {
-        return false;
-    }
-    if t.grounded || t.lift_m <= 0.0 {
+    // A ground prey can be pursued over walkable terrain; the route finds a strike
+    // surface at its elevation. An elevated perch needs the vertical reach check.
+    if t.grounded {
         return true;
     }
     let (Some(geometry), Some(table)) = (crate::body_of(config, h), h.founder.and_then(|f| config.founder(f).active_hunter())) else {
         return false;
     };
-    t.lift_m <= table.jaw_band_height_fraction * geometry.height_m
+    if t.climbing && table.vertical_reach_m <= 0.0 {
+        return false;
+    }
+    // Compare with this hunter's base, not the terrain directly under the prey: a
+    // mesa-top body can stand on terrain while still being above a hunter below.
+    t.y_m < h.pose.y_m + table.strike_height_m(&geometry)
 }
 
 /// The levels and gradients of the channels hunter lineage `f` follows for its prey: every

@@ -2834,7 +2834,9 @@ impl SpeciesConfig {
             foliage_rate: 0.001,
             wood_rate: 0.0003,
             propagule_rate: 0.0008,
-            crown_height_m: [2.25, 3.5],
+            // REACH-HEIGHTS: saplings grow through the browse zone; mature shelves
+            // stand above even the loftstrider's mouth.
+            crown_height_m: [2.25, 6.5],
             crown_radius_m: [0.625, 1.0],
             // Anatomy document §3. The limbs are a sparse Trunk (structure, no foliage);
             // the lobes' sky gaps are porosity 0.45; the drape hangs under the limbs.

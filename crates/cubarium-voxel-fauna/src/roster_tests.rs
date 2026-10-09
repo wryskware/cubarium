@@ -399,8 +399,9 @@ fn a_loftstrider_takes_foliage_at_two_metres_and_none_at_ground_level() {
     let layers: Vec<_> = flora.view().layers_at(tree).collect();
     assert!(layers.iter().all(|l| over(l.cell) >= 0.8), "nothing of the tree below the floor");
     assert!(
-        layers.iter().any(|l| l.stock > 0.0 && (1.5..=2.25).contains(&over(l.cell))),
-        "a stocked crown about 2 m up"
+        layers.iter().any(|l| l.stock > 0.0 &&
+            FounderPhysiology::frozen(Founder::Loftstrider).adult_body().mouth_layers(tree.y, V).contains(&l.cell)),
+        "stocked foliage within the loftstrider's mouth band"
     );
     let mut fauna = Fauna::new(FaunaConfig::default());
     let _ = feeding(&mut fauna, &world, Founder::Loftstrider, 12, 12);

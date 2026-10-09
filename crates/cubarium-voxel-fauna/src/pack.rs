@@ -527,10 +527,10 @@ fn node_radii(geometry: &crate::Body, h: &crate::Hunter, v: f64) -> (u32, u32) {
 }
 
 /// **STRIKE, the height band**: whether a hunter of `geometry` standing on a surface at `s0`
-/// meets, with its jaw band (`[s0, s0 + jaw_band_height_fraction × height]`, the strike
+/// meets, with its strike band (`[s0, s0 + strike_height_m]`, the strike
 /// capsule's band), a body whose base is at `base` and which is `height` tall.
 fn band_meets(geometry: &crate::Body, h: &crate::Hunter, s0: f64, base: f64, height: f64) -> bool {
-    base < s0 + h.jaw_band_height_fraction * geometry.height_m && s0 < base + height
+    base < s0 + h.strike_height_m(geometry) && s0 < base + height
 }
 
 /// The height of body `id` as it is now; 0 when it is gone.

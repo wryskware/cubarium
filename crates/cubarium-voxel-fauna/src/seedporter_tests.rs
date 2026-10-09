@@ -1045,3 +1045,43 @@ fn a_seedporter_gliding_off_a_vine_face_lands_once_and_does_not_relaunch() {
     assert_eq!(again, 0, "it does not climb the face again");
     assert_eq!(mode(&fauna, id), MobilityMode::Ground, "it came down and walks: {:?}", animal(&fauna, id).mobility);
 }
+
+/// With fruit only on a covered wall, the normal teacher finds it and climbs to eat.
+#[test]
+fn a_hungry_seedporter_sees_vine_fruit_climbs_to_it_and_eats() {
+    let (world, mut flora, faces) = vine_wall_in_fruit();
+    assert!(flora.view().stands.is_empty(), "fixture: no stand fruit to distract it");
+    let cfg = FaunaConfig::default();
+    let body = cfg.founder(SP).adult_body();
+    // Keep the nearest beads above a ground mouth, so eating requires a climb.
+    for &face in &faces {
+        if f64::from(face.y) * V <= SURFACE + body.mouth_ceiling_m + V {
+            assert!(flora.take_fruit(face, 1e9).is_some());
+        }
+    }
+    let beads = |flora: &Flora| -> f64 {
+        faces.iter().map(|&f| flora.view().cover.face(f).map_or(0.0, |c| c.fruit)).sum()
+    };
+    let before = beads(&flora);
+    assert!(before > 0.0, "fixture: fruit remains higher on the vine");
+    let organic = flora.view().organic();
+    let consumed = flora.view().ledger.consumed_organic_out;
+    let mut fauna = Fauna::new(cfg);
+    let id = on_ground(&mut fauna, &world, SP, 1, 2, HUNGRY_ADULT);
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(SP, teachers)));
+    let start = animal(&fauna, id).pose;
+    let climbed = std::cell::Cell::new(false);
+    let n = until(&mut fauna, &world, &mut flora, 300, |f| {
+        climbed.set(climbed.get() || mode(f, id) == MobilityMode::Climb);
+        f.view().ledger.eaten_by_food[Food::Fruit.index()] > 0.0
+    });
+    let eaten = fauna.view().ledger.eaten_by_food[Food::Fruit.index()];
+    assert!(eaten > 0.0, "the teacher finds and eats the vine fruit within {n} ticks: {:?}", animal(&fauna, id));
+    assert!(climbed.get() && fauna.view().ledger.climbs > 0, "it climbs to the high beads");
+    assert!((animal(&fauna, id).pose.x - start.x).abs() > V, "it walks toward the wall");
+    assert!((before - beads(&flora) - eaten).abs() <= 1e-12, "the vine loses precisely the fruit eaten");
+    assert!((flora.view().ledger.consumed_organic_out - consumed - eaten).abs() <= 1e-12,
+        "the plant and animal consumption ledgers agree");
+    ledgers_close(&fauna, &flora, organic);
+}

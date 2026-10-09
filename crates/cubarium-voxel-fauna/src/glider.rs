@@ -71,6 +71,21 @@ fn climbable(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, glider: &G
         && fv.config.species(stand.species).crown_height_m_at(stand.wood) >= glider.climb_min_stand_m - EPS
 }
 
+/// Minimum safe refuge rise over a ground Veilhound, metres. Derived from the
+/// mature hunter so roosts remain safe when its reach or body geometry is retuned.
+pub(crate) fn refuge_height_m(config: &crate::FaunaConfig) -> f64 {
+    let hunter = config.founder(crate::Founder::Chorister);
+    hunter.hunter.map_or(0.0, |h| h.strike_height_m(&hunter.body_at(hunter.core.body_max)))
+}
+
+/// A vaulttree crown above the ground hunter's reach; low saplings are no refuge.
+pub(crate) fn safe_crown(fv: &FloraView<'_>, site: Site, v: f64, reach_m: f64) -> bool {
+    fv.stands_on(site).iter().any(|s| s.species == cubarium_voxel_flora::Species::Vaulttree)
+        && crown_span(fv, site).is_some_and(|(_, high)| {
+            (high.cell + 1) as f64 * v - crate::surface_m(site.y, v) > reach_m
+        })
+}
+
 /// A stand's foliage layers holding foliage, lowest and highest.
 /// The face's plant, or its fungus where it holds no plant (`FaceLayer`).
 fn crown_span(fv: &FloraView<'_>, site: Site) -> Option<(StandLayer, StandLayer)> {
@@ -1351,7 +1366,10 @@ pub(super) fn roost_reflex(
             ..still
         }),
         MobilityMode::Ground => {
-            let cands = stands_within(view, fv, &a, glider.roost_search_m, |s| climbable(fv, s, &glider));
+            let safe = refuge_height_m(&fauna.config);
+            let cands = stands_within(view, fv, &a, glider.roost_search_m, |s| {
+                climbable(fv, s, &glider) && safe_crown(fv, s.site, view.config.voxel_m, safe)
+            });
             walk_to_stand(fauna, i, view, fv, &cands, glider.roost_search_m, 0.0, crate::Steer::Roost).map(|(go, _)| go)
         }
         _ => None,
@@ -1491,7 +1509,7 @@ fn ledge_key(l: &crate::Ledge) -> u64 {
 
 /// A preferred roost ([`better_roost`]).
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Roost {
+pub(crate) enum Roost {
     /// A vaulttree: `(id, its site)`, walked to by its stem.
     Crown(u64, Site),
     /// A ledge at this distance, `true` walked to on top, `false` climbed from its foot.
@@ -1499,7 +1517,7 @@ pub(super) enum Roost {
 }
 
 /// Whether body `i` stands on (or by) the lip of a ledge it could have climbed.
-fn on_ledge_top(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> bool {
+pub(crate) fn on_ledge_top(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> bool {
     let a = fauna.animals[i];
     let Some(founder) = a.founder else { return false };
     let phys = *fauna.config.founder(founder);
@@ -1510,10 +1528,13 @@ fn on_ledge_top(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let s = shape(&phys, a.body);
+    let safe = refuge_height_m(&fauna.config);
     ledges(fauna, view, fv).iter().any(|l| {
         let (cx, cz) = crate::pack::centre(l.top, v);
         let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, cx, cz, ring);
-        l.top.y == a.site.y && (dx * dx + dz * dz).sqrt() <= s.r + v && ledge_fits(l, s, v, glider.roost_ledge_min_m)
+        l.top.y == a.site.y && (dx * dx + dz * dz).sqrt() <= s.r + v
+            && ledge_fits(l, s, v, glider.roost_ledge_min_m)
+            && crate::surface_m(l.top.y, v) - crate::surface_m(l.foot.y, v) > safe
     })
 }
 
@@ -1525,29 +1546,36 @@ fn on_ledge_top(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraVie
 /// pressing, and — den rest's guard — cost the walk at cruise and the climb at the climbing
 /// pace no more than `roost_reserve_share` of the reserve over the emergency line. `None`:
 /// it stays where it is (or takes today's nearest stand).
-pub(super) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Roost> {
+pub(crate) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Roost> {
+    let a = fauna.animals[i];
+    let budget = fauna.config.founder(a.founder?).glider?.roost_budget_m;
+    roost_within(fauna, i, view, fv, budget, true)
+}
+
+fn roost_within(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, budget: f64, reserve_guard: bool) -> Option<Roost> {
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
     let glider = phys.glider?;
-    let budget = glider.roost_budget_m;
     if budget <= 0.0 {
         return None;
     }
+    let safe = refuge_height_m(&fauna.config);
+    let v = view.config.voxel_m;
     let perched = a.mobility.mode == MobilityMode::Perched;
     let class = match a.mobility.perch.map(|p| p.anchor) {
         Some(PerchAnchor::Stand { site, .. })
-            if perched && fv.stands_on(site).iter().any(|st| st.species == cubarium_voxel_flora::Species::Vaulttree) =>
+            if perched && safe_crown(fv, site, v, safe)
+                && a.pose.y_m - crate::surface_m(site.y, v) > safe =>
         {
             0
         }
-        Some(PerchAnchor::Face(_)) if perched => 1,
+        Some(PerchAnchor::Face(_)) if perched && on_ledge_top(fauna, i, view, fv) => 1,
         _ => 2,
     };
     if class == 0 {
         return None;
     }
-    let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let s = shape(&phys, a.body);
     let g = phys.body_at(a.body);
@@ -1557,7 +1585,7 @@ pub(super) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     let climb = (phys.climb_speed_fraction * cruise).max(f64::EPSILON);
     let cap = phys.core.reserve_of(a.body);
     let usable = (a.reserve - (1.0 - phys.wake_hunger) * cap).max(0.0);
-    let allowance = glider.roost_reserve_share.clamp(0.0, 1.0) * usable;
+    let allowance = if reserve_guard { glider.roost_reserve_share.clamp(0.0, 1.0) * usable } else { f64::INFINITY };
     let cost = |walk_m: f64, climb_m: f64| {
         a.body
             * (walk_m / cruise * (phys.core.maintenance_per_s + phys.motor_respiration_per_s)
@@ -1576,7 +1604,7 @@ pub(super) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
             .is_some_and(|goal| graph.components[goal] == graph.components[from])
     };
     let vault = stands_within(view, fv, &a, budget, |st| {
-        st.species == cubarium_voxel_flora::Species::Vaulttree && climbable(fv, st, &glider)
+        climbable(fv, st, &glider) && safe_crown(fv, st.site, v, safe)
     });
     for (d, id, site) in vault {
         if shunned.contains(&id) {
@@ -1593,7 +1621,8 @@ pub(super) fn better_roost(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     }
     let mut best: Option<Roost> = None;
     for l in ledges(fauna, view, fv) {
-        if shunned.contains(&ledge_key(&l)) || !ledge_fits(&l, s, v, glider.roost_ledge_min_m) {
+        if shunned.contains(&ledge_key(&l)) || !ledge_fits(&l, s, v, glider.roost_ledge_min_m)
+            || crate::surface_m(l.top.y, v) - crate::surface_m(l.foot.y, v) <= safe {
             continue;
         }
         let (cx, cz) = crate::pack::centre(l.foot, v);
@@ -1727,11 +1756,32 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
 }
 
+// Face food keys use a separate namespace from stand IDs and vine ledge walks.
+// The flat cell address and orientation distinguish individual fruiting faces.
+fn vine_fruit_key(view: &VoxelView<'_>, face: VineFace) -> u64 {
+    let dir = match face.dir { FaceDir::PosX => 0, FaceDir::NegX => 1, FaceDir::PosZ => 2, FaceDir::NegZ => 3, FaceDir::Down => 4 };
+    (1 << 63) | (1 << 62) | ((view.config.index(i64::from(face.x), face.y, face.z) as u64) << 3) | dir
+}
+
+fn fruit_wall_approach(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, phys: &crate::FounderPhysiology, id: u64) -> Option<Actions> {
+    let fruit = fv.cover.faces().into_iter().find(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id)?;
+    let (x, _, z) = fruit.face.front(view)?;
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, ring);
+    if dx.hypot(dz) > shape(phys, a.body).r + v { return None; }
+    let (wx, wz) = crate::pack::centre(Site { x: fruit.face.x, y: fruit.face.y, z: fruit.face.z }, v);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, wx, wz, ring);
+    let mut into = aim_toward(a, dx, dz, 0.5 * v);
+    into.feed = 1.0;
+    Some(into)
+}
+
 /// **Fruit by sight** (S2, review §1: the seedporter's still-object recognition): the nearest
-/// fruiting stand it can climb that it sees — within its sight range for a still body at this
+/// fruiting stand or vine wall it can climb that it sees — within its sight range for a still body at this
 /// light, inside its field, the line from its eye to the crown's middle open of terrain — goes
 /// into its record as its food ([`crate::perception::class::FOOD`]); with none in sight, the
-/// one it last saw, for the pursuit's memory while that stand still fruits. It walks to it;
+/// one it last saw, for the pursuit's memory while that source still fruits. It walks to it;
 /// `None` (its heuristic wanders) when it knows of none.
 fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
     let a = fauna.animals[i];
@@ -1763,6 +1813,23 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
             seen.push((d3, stand.id, stand.site, (sx, my, sz)));
         }
     }
+    // REACH-HEIGHTS: fruit on a vine is food too. Sight is at the bead face, while
+    // the walking destination is the accessible foot of the wall it must climb.
+    if range > 0.0 {
+        for fruit in fv.cover.faces().iter().filter(|f| f.fruit > 0.0 && !f.face.dir.is_underside()) {
+            let face = fruit.face;
+            let Some((x, y, z)) = face.front(view) else { continue };
+            let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+            let dh = dx.hypot(dz);
+            let d3 = dh.hypot(my - origin.1);
+            if d3 > range || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) { continue; }
+            let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
+            let (low, high) = body_rows(crate::surface_m(foot.y, v), shape(&phys, a.body), v);
+            if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(face.x, row as u32, face.z, face.dir)).is_some()) { continue; }
+            seen.push((d3, vine_fruit_key(view, face), foot, (sx, my, sz)));
+        }
+    }
     seen.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
     // EDGE: of those it sees, the nearest it can walk to on its route graph.
     let clear: Vec<(f64, u64, Site, (f64, f64, f64))> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
@@ -1784,17 +1851,20 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
             tick: now,
             ..crate::Track::default()
         };
+        if let Some(into) = fruit_wall_approach(view, fv, &a, &phys, id) { return Some(into); }
         return Some(go);
     }
     // None it sees and can reach: the one it last saw, for the pursuit's memory while that
-    // stand still fruits.
+    // stand or vine face still fruits.
     let food = crate::perception::class::FOOD as usize;
     let m = fauna.percepts.get(&a.id).map(|p| p.best[food]).unwrap_or_default();
     let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
-    let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0);
+    let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0)
+        || fv.cover.faces().iter().any(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id);
     if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
         return None;
     }
+    if let Some(into) = fruit_wall_approach(view, fv, &a, &phys, m.id) { return Some(into); }
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.x, m.z, ring);
     let site = Site { x: m.site.0, y: m.site.1, z: m.site.2 };
     walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
@@ -1805,11 +1875,19 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
 pub(super) fn refuge_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, search_m: f64) -> Option<Actions> {
     let a = fauna.animals[i];
     let glider = fauna.config.founder(a.founder?).glider?;
+    if a.mobility.mode == MobilityMode::Perched {
+        // Leave an unsafe bush for a reachable high crown or mesa.
+        return roost_within(fauna, i, view, fv, search_m, false).and_then(|r| go_roost(fauna, i, view, fv, r));
+    }
     if a.mobility.mode != MobilityMode::Ground {
         return None;
     }
-    let cands = stands_within(view, fv, &a, search_m, |s| climbable(fv, s, &glider));
+    let safe = refuge_height_m(&fauna.config);
+    let cands = stands_within(view, fv, &a, search_m, |s| {
+        climbable(fv, s, &glider) && safe_crown(fv, s.site, view.config.voxel_m, safe)
+    });
     walk_to_stand(fauna, i, view, fv, &cands, search_m, 0.0, crate::Steer::Flee).map(|(go, _)| go)
+        .or_else(|| roost_within(fauna, i, view, fv, search_m, false).and_then(|r| go_roost(fauna, i, view, fv, r)))
 }
 
 /// The stands `keep` accepts within `search_m` of body `a` (straight, across the ring),
@@ -2054,4 +2132,3 @@ impl Fauna {
         true
     }
 }
-

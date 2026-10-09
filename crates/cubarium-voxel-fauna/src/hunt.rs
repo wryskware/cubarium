@@ -1211,7 +1211,7 @@ fn catch_foray(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView
                 let (dx, dz) = crate::pose::wrapped_delta(x, z, target.x, target.z, ring);
                 let dy = target.y_m - crate::surface_m(r.graph.faces[j].y, view.config.voxel_m);
                 (dx.hypot(dz) <= reach && dy <= phys.catch_ceiling_m
-                    && dy.abs() <= h.jaw_band_height_fraction*g.height_m)
+                    && dy.abs() <= h.strike_height_m(&g))
                     .then_some((r.field[&j], j))
             }).min().map(|(_, j)| waypoint(fauna, i, &r.graph, r.from, j, r.steps))
         } else if !cfg.reachable_only {

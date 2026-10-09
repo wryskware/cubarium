@@ -1094,8 +1094,8 @@ pub struct Glider {
     #[serde(default = "roost_reserve_share")]
     pub roost_reserve_share: f64,
     /// **A ledge worth roosting on** stands at least this high over the foot of the
-    /// latticevine wall it is climbed by, metres. 1.0 (a glide's start, so it glides off in
-    /// the morning).
+    /// latticevine wall it is climbed by, metres. It must also exceed the mature
+    /// Veilhound's strike height. 1.0 (the glide's minimum start).
     #[serde(default = "roost_ledge_min_m")]
     pub roost_ledge_min_m: f64,
 }
@@ -1553,6 +1553,10 @@ pub struct Hunter {
     pub strike_reach_length_fraction: f64,
     /// The jaw band `[0, jaw_band_height_fraction × height]` over its standing surface.
     pub jaw_band_height_fraction: f64,
+    /// Rearing and jumping reach above the standing surface, metres. The strike uses
+    /// the larger of this and the ordinary jaw band. 0 disables the extra reach.
+    #[serde(default)]
+    pub vertical_reach_m: f64,
     /// The jaw's point: the nose, this × its current length ahead of its centre (half).
     pub jaw_forward_length_fraction: f64,
     /// The three phases, seconds (§2.3): a crouch, the lunge, and the recovery in which it
@@ -1568,6 +1572,11 @@ pub struct Hunter {
 }
 
 impl Hunter {
+    /// Vertical strike extent over the hunter's support, metres.
+    pub fn strike_height_m(&self, geometry: &Body) -> f64 {
+        self.vertical_reach_m.max(self.jaw_band_height_fraction * geometry.height_m)
+    }
+
     /// The lanternjaw's table (§2.12): power 0.7, window 1.5, reach 0.6 L over the jaw
     /// band 0.6 H, windup 0.15 s, lunge 0.25 s, recovery 3 s, a strike at 100 s of awake
     /// upkeep, and the lure at its awake upkeep.
@@ -1584,6 +1593,7 @@ impl Hunter {
         prey_max_ratio: 1.5,
         strike_reach_length_fraction: 0.6,
         jaw_band_height_fraction: 0.6,
+        vertical_reach_m: 0.0,
         jaw_forward_length_fraction: 0.5,
         windup_s: 0.15,
         lunge_s: 0.25,
@@ -2337,6 +2347,7 @@ impl FounderPhysiology {
                         prey_max_ratio: 4.0,
                         strike_reach_length_fraction: 0.8,
                         jaw_band_height_fraction: 2.0,
+                        vertical_reach_m: 0.0,
                         jaw_forward_length_fraction: 0.5,
                         windup_s: 0.1,
                         lunge_s: 0.15,
@@ -2417,6 +2428,7 @@ impl FounderPhysiology {
                     hunter: Some(Hunter {
                         prey: [false, true, true, false, true, false, true, true, false],
                         lure_power: 0.0,
+                        vertical_reach_m: 2.25,
                         ..Hunter::LANTERNJAW
                     }),
                     diet: crate::Diet::only(crate::Food::Carrion),

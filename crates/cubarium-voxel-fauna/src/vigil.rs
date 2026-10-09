@@ -1243,11 +1243,20 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
     // one it watches (asleep, or resting and not facing it).
     let sensed: Vec<Threat> = th.iter().map(|t| Threat { pressing: !t.calm, ..*t }).collect();
     let grounded = a.mobility.mode == MobilityMode::Ground;
-    // FEAR-2: a perch is its refuge. A flight ends on reaching one, and the refuge watch keeps
+    // A perch above the hunter's reach is its refuge. A flight ends on reaching one, and the refuge watch keeps
     // it there (no step down, no glide; it turns and feeds as it asks) while a hunter it does
     // not watch is within `flee_start_m`, then within `flee_stop_m`, and `lost_calm_s` (at
     // least `calm_s`) after the last.
-    if a.mobility.mode == MobilityMode::Perched {
+    let safe_height = crate::step::refuge_height_m(&fauna.config);
+    let floor = crate::flight::support_below(view, a.pose.x, a.pose.z, a.pose.y_m)
+        .map(|s| crate::surface_m(s.y, view.config.voxel_m));
+    let high_perch = floor.is_some_and(|floor| a.pose.y_m - floor > safe_height)
+        || (a.mobility.mode == MobilityMode::Perched && crate::step::on_ledge_top(fauna, i, view, fv));
+    let safe_anchor = high_perch && !p.tracks().iter().any(|t| {
+        t.class == class::THREAT && now.saturating_sub(t.tick) <= 2 * fauna.config.perception.stagger_ticks()
+            && a.pose.y_m <= t.y_m + safe_height
+    });
+    if a.mobility.mode == MobilityMode::Perched && safe_anchor {
         v.fleeing = false;
         let (start, stop) = (vg.flee_start_m.max(0.0), vg.flee_stop_m.max(vg.flee_start_m.max(0.0)));
         let reach = if v.refuge { stop } else { start };
@@ -1282,6 +1291,8 @@ fn arboreal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_
                     }
                 }
             }
+            MobilityMode::Perched => crate::step::refuge_step(fauna, i, view, fv, vg.refuge_search_m)
+                .or_else(|| Some(away(fauna, view, fv, &a, &v, ring, false))),
             // Up the stem (in the crown, the refuge watch above).
             MobilityMode::Climb if !a.mobility.falling => Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 }),
             _ => None,

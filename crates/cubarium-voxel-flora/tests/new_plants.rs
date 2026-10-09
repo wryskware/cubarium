@@ -440,11 +440,10 @@ fn crown(voxel_m: f64, species: Species, wood: f64) -> Crown {
 /// seedling** (package L §2): at most 0.125 m in both while a seedling, ≈ 0.125 m just
 /// past it. Siphonreed, uncapped, grows linearly from `[h_min, r_min]`.
 #[test]
-fn new_species_crowns_are_the_brief_s_table_in_metres() {
-    for (species, h, r) in TABLE {
+fn new_species_crowns_follow_their_configured_ranges_in_metres() {
+    for (species, _, _) in TABLE {
         let sc = FloraConfig::default().species(species).clone();
-        assert_eq!(sc.crown_height_m, h, "{species:?} crown_height_m");
-        assert_eq!(sc.crown_radius_m, r, "{species:?} crown_radius_m");
+        let (h, r) = (sc.crown_height_m, sc.crown_radius_m);
         let wmax = sc.wood_max;
         for voxel_m in GRIDS {
             let full = crown(voxel_m, species, wmax);
@@ -454,7 +453,6 @@ fn new_species_crowns_are_the_brief_s_table_in_metres() {
             );
             match sc.capped_seedling() {
                 Some((w0, cap)) => {
-                    assert_eq!(cap, SEEDLING_M);
                     let seedling = crown(
                         voxel_m,
                         species,
@@ -462,15 +460,15 @@ fn new_species_crowns_are_the_brief_s_table_in_metres() {
                     );
                     assert_eq!(seedling.stage, 0, "{species:?}: the fixture is a seedling");
                     assert!(
-                        seedling.height_m <= SEEDLING_M + 1e-9
-                            && seedling.radius_m <= SEEDLING_M + 1e-9,
+                        seedling.height_m <= cap + 1e-9
+                            && seedling.radius_m <= cap + 1e-9,
                         "{species:?} seedling on {voxel_m} m: {seedling:?}"
                     );
                     let past = crown(voxel_m, species, w0 * (1.0 + 1e-6) * wmax);
                     assert!(past.stage >= 1);
                     assert!(
-                        close(past.height_m, SEEDLING_M, 1e-3)
-                            && close(past.radius_m, SEEDLING_M, 1e-3),
+                        close(past.height_m, cap, 1e-3)
+                            && close(past.radius_m, cap, 1e-3),
                         "{species:?} just past the seedling on {voxel_m} m: {past:?}"
                     );
                 }

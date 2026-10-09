@@ -101,7 +101,9 @@ pub(crate) use cubarium_voxel::KeyedRng as Rng;
 
 #[path = "glider.rs"]
 mod glider;
-pub(crate) use glider::{OffGraph, glider_fruit_in_reach, off_graph_exit};
+#[cfg(test)]
+pub(crate) use glider::{better_roost, safe_crown, Roost};
+pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, off_graph_exit};
 #[path = "jump.rs"]
 pub(crate) mod jump;
 #[path = "forage.rs"]
@@ -2898,7 +2900,7 @@ fn meets_capsule(
     } else {
         crate::surface_m(striker.site.y, v) + striker.wall_offset_m()
     };
-    let band = (s0, s0 + h.jaw_band_height_fraction * geometry.height_m);
+    let band = (s0, s0 + h.strike_height_m(geometry));
     // A body off the ground (perched, flying, climbing, gliding) has its base at its
     // pose's height; a walker's is its support face's top.
     let p0 = if matches!(
