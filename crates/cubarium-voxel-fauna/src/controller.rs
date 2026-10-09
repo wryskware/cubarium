@@ -1952,6 +1952,48 @@ mod tests {
         o
     }
 
+    #[test]
+    fn heuristics_keep_the_v2_answers_with_a_changing_v3_tail_and_after_reset() {
+        let cfg = TeacherConfig {
+            wander_hold_min: 2,
+            wander_hold_max: 4,
+            wander_turn_samples_min: 1,
+            wander_turn_samples_max: 3,
+            ..TeacherConfig::default()
+        };
+        for founder in Founder::ALL {
+            let manifest = founder.manifest();
+            let mut v2 = heuristic(founder, cfg);
+            let mut v3 = heuristic(founder, cfg);
+            assert!(!v3.reads_tail(), "{founder:?}");
+            let mut observation = quiet(&manifest);
+            observation[0] = 0.3;
+            if founder == Founder::Bellwing {
+                observation[8] = 0.5;
+                observation[9] = 1.0;
+                observation[module_slot(&manifest, "Air").offset + 2] = 1.0;
+            }
+            for sample in 0..80 {
+                if sample == 40 {
+                    v2.reset();
+                    v3.reset();
+                }
+                for (k, v) in observation[manifest.tail_offset()..].iter_mut().enumerate() {
+                    *v = ((sample + k) % 11) as f64 / 10.0;
+                }
+                assert_eq!(
+                    v2.drive(&observation[..manifest.tail_offset()]),
+                    v3.drive(&observation),
+                    "{founder:?}, sample {sample}"
+                );
+                assert_eq!(v2.lift(), v3.lift());
+                assert_eq!(v2.lure(), v3.lure());
+                assert_eq!(v2.seek(), v3.seek());
+                assert_eq!(v2.taste_only(), v3.taste_only());
+            }
+        }
+    }
+
     /// The adapter is the policy boundary's other half: logits go through the
     /// manifest's transfers and then the deadband, bounded actions only through the
     /// deadband, and neither path can touch a world — the function takes no world.

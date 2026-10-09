@@ -1,6 +1,6 @@
 //! The water rules on the host: each rule on the smallest thing that shows it works, and
-//! the drivers against each other. Tolerances, never bit equality: the drivers sum in
-//! different orders.
+//! the drivers against each other. Exchange proposals have a fixed summation order;
+//! changing the worker schedule must preserve every water cell's bits.
 
 use cubarium_rules::water::host::{ExchangeBackend, Serial};
 use cubarium_rules::water::{self, Grid, Params};
@@ -164,6 +164,28 @@ fn the_parallel_exchange_agrees_with_the_serial_one() {
         assert!(worst <= 1e-9, "step {step}: serial and parallel differ by {worst}");
         assert!((b.total() - total).abs() <= 1e-12 * total, "step {step}: parallel drifted");
         assert_eq!(b.wet, b.masks_from_free(), "step {step}: parallel wet masks");
+    }
+}
+
+#[cfg(feature = "par")]
+#[test]
+fn parallel_exchange_keeps_serial_proposal_order_on_different_pools() {
+    use cubarium_rules::water::host::Parallel;
+    let mut expected = Pond::seeded(24, 6, 20, 11);
+    let mut four = expected.clone();
+    let mut eight = expected.clone();
+    let (mut serial, mut p4, mut p8) =
+        (Serial::default(), Parallel::new(4), Parallel::new(8));
+    for tick in 0..40 {
+        expected.step(&mut serial, &P);
+        four.step(&mut p4, &P);
+        eight.step(&mut p8, &P);
+        for (name, pond) in [("four", &four), ("eight", &eight)] {
+            for (cell, (&a, &b)) in expected.free.iter().zip(&pond.free).enumerate() {
+                assert_eq!(a.to_bits(), b.to_bits(), "tick {tick}, {name}, cell {cell}");
+            }
+            assert_eq!(expected.wet, pond.wet, "tick {tick}, {name}");
+        }
     }
 }
 
