@@ -36,6 +36,13 @@ signal changed(index: int)
 	set(v):
 		preview_focus = v
 		queue_redraw()
+## Space between the edge and the track and names, so the focus glow (drawn around the
+## whole control) stands clear of them.
+@export var padding := Vector2i(16, 12):
+	set(v):
+		padding = v
+		update_minimum_size()
+		queue_redraw()
 ## Drawn around the whole control while focused.
 @export var focus_style: StyleBox = preload("res://ui/neon/styles/glow_focus.tres"):
 	set(v):
@@ -193,8 +200,13 @@ func nearest_stop(x: float) -> int:
 	return best
 
 
+## Width inside the padding.
+func _inner_w() -> float:
+	return maxf(0.0, size.x - 2 * padding.x)
+
+
 func _dots() -> int:
-	return maxi(1, int(floor((size.x + pitch - dot_size) / float(pitch))))
+	return maxi(1, int(floor((_inner_w() + pitch - dot_size) / float(pitch))))
 
 
 ## The dot the handle sits on at stop `i`.
@@ -204,7 +216,7 @@ func _stop_dot(i: int) -> int:
 
 
 func _stop_x(i: int) -> float:
-	return _stop_dot(i) * pitch + dot_size / 2.0
+	return padding.x + _stop_dot(i) * pitch + dot_size / 2.0
 
 
 func _apply_disabled() -> void:
@@ -223,10 +235,11 @@ func _get_minimum_size() -> Vector2:
 		for s in stops:
 			w += stop_font.get_string_size(s.to_upper() if uppercase else s, HORIZONTAL_ALIGNMENT_LEFT, -1, stop_font_size).x
 		w += 24.0 * (stops.size() - 1)
-	return Vector2(w, h)
+	return Vector2(w, h) + 2 * Vector2(padding)
 
 
 func _draw() -> void:
+	draw_set_transform(Vector2(padding))
 	var n := _dots()
 	var at := _stop_dot(index)
 	var dy := top_pad + floorf((track_height - dot_size) / 2.0)
@@ -259,7 +272,7 @@ func _draw() -> void:
 			var tw := stop_font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, stop_font_size).x
 			widths.append(tw)
 			total += tw
-		var spare := size.x - total
+		var spare := _inner_w() - total
 		var between := spare / (names.size() - 1) if names.size() > 1 else 0.0
 		var baseline := roundf(top_pad + track_height + names_gap + stop_font.get_ascent(stop_font_size))
 		var x := 0.0
@@ -267,5 +280,6 @@ func _draw() -> void:
 			draw_string(stop_font, Vector2(roundf(x), baseline), names[i], HORIZONTAL_ALIGNMENT_LEFT, -1,
 					stop_font_size, stop_on_color if i == index else stop_color)
 			x += widths[i] + between
+	draw_set_transform(Vector2.ZERO)
 	if (has_focus() or preview_focus) and not disabled and focus_style != null:
 		draw_style_box(focus_style, Rect2(Vector2.ZERO, size))
