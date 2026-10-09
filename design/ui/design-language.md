@@ -121,10 +121,10 @@ A 3 px notched cyan line sits 6 px outside the focused thing, with an 18 px cyan
 
 ## Layout notes
 
-- **The tabbed page is the menu.**
-  - Field guide / Populations / World / Settings replace the pause menu. Wrysk, 2026-10-09: "yeah do option 1".
-  - Start or Esc opens it on the last tab; B resumes.
-  - World holds Save, Load, New world and Quit. Settings holds the settings and a Dev metrics button.
+- **The pause menu and the tabbed page.**
+  - The pause menu stays as its own hub. Wrysk, 2026-10-09: "i think hybrid is probably better. the pause menu should be different. it has shortcuts and 'quit'. probably add other stuff there eventually too.."
+  - The pause menu holds Resume, Save, Load, New world and Quit, plus shortcuts to the tabs (Field guide, Settings) and Dev metrics.
+  - The tabbed page holds Field guide, Populations and Settings. G or Y opens it on Field guide.
 
 - At 23 px the Lanternjaw entry is taller than the panel. The entry scrolls and fades out at the bottom, and the buttons stay fixed below it.
 - Prey chips wrap to four rows. The real screen needs a decision on long entries.

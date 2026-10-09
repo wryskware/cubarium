@@ -5,6 +5,8 @@ date: 2026-10-09
 
 # The tabbed page becomes the menu (2026-10-09)
 
+> **Amended the same day:** Wrysk switched to the hybrid. The pause menu stays, with Resume, Save, Load, New world, Field guide, Settings, Dev metrics and Quit; Field guide and Settings open the tabbed page on that tab. The tabbed page has Field guide, Populations (disabled) and Settings, and no World tab. His words: "i think hybrid is probably better. the pause menu should be different. it has shortcuts and 'quit'. probably add other stuff there eventually too.." Where the text below says otherwise, this note wins.
+
 **Rules.** `design/handoffs/worker-rules-2026-10-07.md` applies in full, with AGENTS.md and WORKING_POLICY.md. The hard ones:
 - **No windows.** Every Godot run goes through `scripts/hidden.sh`.
 - **The 5-minute rule.** Wrap everything in `timeout 270`. Never poll, sleep-loop or wait on a job; anything longer goes detached and you hand back.
