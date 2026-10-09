@@ -224,7 +224,12 @@ fn found_judged_with_water(
         if asked { TerrainPolicy::Stop } else { TerrainPolicy::Redraw },
         keep_mid_shower, water_every,
     ).expect("an unwatched founding completes");
-    let batch = made.batch;
+    let mut batch = made.batch;
+    if made.rejection.is_some() {
+        // A rejected terrain carries its reason and no founders, wherever the check fell.
+        (batch.flora, batch.fauna) = layers.layers();
+        batch.seeded = habitat::Seeded::default();
+    }
     let mut warnings = made.warnings;
     if !made.accepted && made.rejection.is_none() {
         let warning = format!(
@@ -1467,7 +1472,6 @@ mod tests {
     /// founders and all, beside the reason. Every caller today stops on
     /// `terrain_rejection` before using the world, so nothing runs with them.
     #[test]
-    #[ignore = "BUG: found(Seeds::Asked) returns the refused placement's founders beside a post-placement terrain_rejection (contract: the typed reason and no founders)"]
     fn a_post_placement_hard_rejection_of_an_asked_seed_returns_no_founders() {
         let cfg = short_ring();
         let mut layers = LayerConfig::new(&Params::defaults(), cfg.voxel_m);
