@@ -78,7 +78,7 @@ impl Controller for Counting {
 fn a_full_lanternjaw_rests_awake_at_its_basal_upkeep() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     fauna.set_births_enabled(false);
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let calls = Arc::new(AtomicUsize::new(0));
@@ -123,7 +123,7 @@ fn the_ambush_heuristic_eats_a_carcass_to_the_full_event() {
     let world = clock_off(10);
     let mut flora = Flora::new(FloraConfig::default());
     // A fast gut (τ 5 s, b = 2k/τ), so the meal fills inside a couple of hundred ticks.
-    let mut config = FaunaConfig::default();
+    let mut config = crate::rhythm::fixed_config();
     let g = &mut config.founders[Founder::Lanternjaw.index()].gut;
     g.digestion_s = [5.0; crate::Food::COUNT];
     g.bite_per_body_s = 2.0 * g.stomach_k / 5.0;
@@ -167,7 +167,7 @@ fn the_ambush_heuristic_eats_a_carcass_to_the_full_event() {
 fn wx4_sleep_is_a_rest_with_its_own_reason() {
     let world = at_hour(0.0, 10);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let g = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     fauna.step_with(&world, &mut flora, 1);
     let a = animal(&fauna, g);
@@ -182,7 +182,7 @@ fn wx4_sleep_is_a_rest_with_its_own_reason() {
 fn a_lanternjaw_in_surplus_lays_its_clutch_of_dormant_eggs() {
     let world = clock_off(15);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let rule = fauna.config.founder(Founder::Lanternjaw).core.reproduction;
     assert_eq!(rule.mode, crate::BirthMode::Eggs);
     let n = rule.clutch_size as usize;
@@ -214,7 +214,7 @@ fn a_lanternjaw_in_surplus_lays_its_clutch_of_dormant_eggs() {
 fn a_laying_counts_its_clutch_as_given() {
     let world = clock_off(15);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let rule = fauna.config.founder(Founder::Lanternjaw).core.reproduction;
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     assert_eq!(animal(&fauna, lj).reproduction.given, 0.0);
@@ -309,7 +309,7 @@ fn a_buried_egg_pays_its_upkeep_and_is_invisible_and_inedible() {
 fn a_dead_egg_goes_to_litter_and_the_books_close() {
     let world = clock_off(15);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     bury(&mut fauna, &world, EGG_SITE, 3);
     let tick = fauna.tick();
     let doomed = fauna
@@ -347,7 +347,7 @@ fn a_dead_egg_goes_to_litter_and_the_books_close() {
 #[test]
 fn eggs_draw_a_12_h_median_viability_and_thresholds_around_6() {
     let world = clock_off(15);
-    let mut c = FaunaConfig::default();
+    let mut c = crate::rhythm::fixed_config();
     c.predation.egg_viability_median_s = 12.0 * 3600.0;
     c.predation.egg_footfall_min = 2;
     c.predation.egg_footfall_max = 10;
@@ -441,7 +441,7 @@ fn afternoon(threshold: u32, adult_m: Option<f64>) -> (Option<u64>, u64, Fauna) 
     // case is about.
     let mut fauna = Fauna::new(FaunaConfig {
         hatch_chance_per_dusk: 1.0,
-        ..FaunaConfig::default()
+        ..crate::rhythm::fixed_config()
     });
     bury(&mut fauna, &world, EGG_SITE, 1);
     fauna
@@ -515,7 +515,7 @@ fn a_snapshot_keeps_wounds_rest_strikes_and_eggs() {
     assert!(SCHEMA >= 20, "P1 changes the animal record: schema {SCHEMA}");
     let world = at_hour(0.0, 14);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     // Midnight: the grazer sleeps, the nocturnal lanternjaws are up.
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     place(&mut fauna, grazer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);

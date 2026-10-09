@@ -89,7 +89,7 @@ core.reproduction.surplus_hold_s = 548.9126829596756
 # the adult with 0.12-adult hatchlings (egg 1.2 hatchlings, floor a quarter egg), the
 # clutch sized at laying from the surplus (eligible on one affordable egg), and the
 # nest-site brake shipped with it. Plausible, untuned.
-active = "DarkActive"
+active = "Leaning"   # RHYTHMS-CADENCE (2026-10-09): its leaning, shade read as night (was "DarkActive")
 core.birth_body = 0.25536
 core.body_min = 0.076608
 core.reproduction.egg_organic = 0.0919296
@@ -388,7 +388,7 @@ yield_by_food.fruit = 0.4781518604723609
 # the adult with 0.12-adult hatchlings (egg 1.2 hatchlings, floor a quarter egg), the
 # clutch sized at laying from the surplus (eligible on one affordable egg), and the
 # nest-site brake shipped with it. Plausible, untuned.
-active = "DarkActive"
+active = "Leaning"   # RHYTHMS-CADENCE (2026-10-09): its leaning, shade read as night (was "DarkActive")
 core.birth_body = 0.15
 core.body_min = 0.045
 core.reproduction.egg_organic = 0.054

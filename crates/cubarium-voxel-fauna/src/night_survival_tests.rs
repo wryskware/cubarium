@@ -48,7 +48,7 @@ fn a_full_frondgrazer_sleeps_through_the_night_without_waking_for_hunger() {
         let world = at_hour(0.0, 1);
         assert_eq!(world.life_daylight(), 0.0);
         let mut flora = Flora::new(FloraConfig::default());
-        let mut config = FaunaConfig::default();
+        let mut config = crate::rhythm::fixed_config();
         let p = &mut config.founders[Founder::Browser.index()];
         p.wake_hunger = wake_hunger;
         p.core.maintenance_per_s = 0.9 * p.core.reserve_cap / (1.2 * night_s * p.sleep_upkeep);
@@ -113,7 +113,7 @@ fn a_sleeper_at_the_wake_line_wakes_and_feeds() {
     ));
     // The minimal gut: the pre-gut upkeep (0.001/s) so the line is reached inside the
     // case's 2,000 ticks, and an empty founding stomach so nothing digests into it.
-    let mut config = FaunaConfig::default();
+    let mut config = crate::rhythm::fixed_config();
     config.founders[Founder::Browser.index()].core.maintenance_per_s = 0.001;
     config.founders[Founder::Browser.index()].gut.s0 = 0.0;
     let mut fauna = Fauna::new(config);

@@ -16,7 +16,7 @@
 //! death, refusal and hatch a draw), so the twin is never a second model.
 
 use cubarium_voxel::weather::{DayClock, DayMode, Sun};
-use cubarium_voxel_fauna::{Activity, BirthMode, NightClock, FaunaConfig, Food, Founder, FounderPhysiology, SurplusWindow, TICK_HZ};
+use cubarium_voxel_fauna::{Activity, BirthMode, Horizon, NightClock, FaunaConfig, Food, Founder, FounderPhysiology, SurplusWindow, TICK_HZ};
 use cubarium_voxel_flora::Species;
 
 use super::fits::{habitat_food, Encounter, Fits, HunterFit};
@@ -428,6 +428,18 @@ impl FaunaModel {
         NightClock::of(&Sun::at(&self.day, phase, rise, set))
     }
 
+    /// **Where in the day it is** at `t_s` ([`Horizon::of`] of the sim's own sun): the
+    /// leanings' clock (RHYTHMS-CADENCE). [`Horizon::NOON`] with the clock off.
+    pub fn horizon_at(&self, t_s: f64) -> Horizon {
+        if self.day.mode == DayMode::Off {
+            return Horizon::NOON;
+        }
+        let tick = (t_s * f64::from(TICK_HZ)).round().max(0.0) as u64;
+        let phase = self.day.cycle_phase(tick);
+        let (rise, set) = self.day.cycle_rise_set();
+        Horizon::of(&Sun::at(&self.day, phase, rise, set))
+    }
+
     /// **The awake share** of a body of `f` now, outside the emergency latch
     /// (`Activity::awake_under`, `lib.rs:587-598`, read through `circadian`, `step.rs:586-710`):
     /// 1 or 0 by the rhythm, and for a dark-active lineage by day the fitted share of daytime
@@ -440,12 +452,39 @@ impl FaunaModel {
     /// [`FaunaModel::on_phase`] with the lineage's activity window read at `night` (LURE,
     /// `Activity::awake_in`).
     pub fn on_phase_in(&self, f: Founder, daylight: f64, night: NightClock) -> f64 {
+        // Read by the daylight alone, a leaning sits well inside the day or the night.
+        let up = daylight >= self.config.life.day_line;
+        let horizon = if night.since_set_h.is_finite() {
+            Horizon { up: false, edge_h: night.since_set_h.min(night.to_rise_h) }
+        } else {
+            Horizon { up, edge_h: f64::INFINITY }
+        };
+        self.on_phase_at(f, daylight, night, horizon)
+    }
+
+    /// [`FaunaModel::on_phase_in`] with the day's position `horizon` for a leaning
+    /// (RHYTHMS-CADENCE, `rhythm.rs`): its waking chance, the sim's long-run awake share
+    /// under its random rests; a lineage that takes shade for night has, by day, the fitted
+    /// dark share (`day_dark_awake`) at its night chance.
+    pub fn on_phase_at(&self, f: Founder, daylight: f64, night: NightClock, horizon: Horizon) -> f64 {
         let p = self.phys(f);
         if p.lure_daylight {
             return 1.0;
         }
         let clock_on = self.day.mode != DayMode::Off;
         let life = &self.config.life;
+        if p.active == Activity::Leaning {
+            if !clock_on {
+                return 1.0;
+            }
+            let r = p.rhythm;
+            let open = r.chance(horizon, false);
+            if r.shade_is_night && horizon.up {
+                let dark = self.fits.of(f).day_dark_awake.clamp(0.0, 1.0);
+                return dark * r.chance(horizon, true) + (1.0 - dark) * open;
+            }
+            return open;
+        }
         match p.active {
             Activity::DarkActive if clock_on && daylight >= life.day_line => self.fits.of(f).day_dark_awake,
             a => {
@@ -534,6 +573,7 @@ impl FaunaModel {
         let dt = self.dt;
         let daylight = self.daylight_at(self.t_s + dt);
         let night = self.night_at(self.t_s + dt);
+        let horizon = self.horizon_at(self.t_s + dt);
         let dusk = self.day.mode != DayMode::Off
             && self.last_daylight.is_some_and(|d| d >= self.config.life.day_line)
             && daylight < self.config.life.day_line;
@@ -549,7 +589,7 @@ impl FaunaModel {
                 continue;
             }
             let phys = *self.phys(f);
-            let phase = self.on_phase_in(f, daylight, night);
+            let phase = self.on_phase_at(f, daylight, night, horizon);
             let effort = self.fits.of(f).motor_effort;
             let mut acc = Flows::default();
             let mut matured = (0.0, 0.0);

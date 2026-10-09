@@ -443,7 +443,11 @@ fn a_live_blind_forager_flees_its_hunters_footfall_not_a_grazers() {
 #[test]
 fn a_seedporter_detects_a_still_threat_farther_than_a_frondgrazer() {
     let world = world(30);
-    let c = config();
+    let mut c = config();
+    // The observers' own stillness is RHYTHMS-CADENCE's (`rhythm_tests`): off here.
+    for f in [GRAZER, Founder::Seedporter] {
+        c.founders[f.index()].senses.still_gain = 1.0;
+    }
     let still = |f: Founder| {
         let t = c.founder(f).senses;
         t.sight_m * t.sight_still_fraction

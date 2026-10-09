@@ -788,6 +788,35 @@ fn run(
     lj.summary(sim);
     forage_summary(sim);
     herd.summary(sim);
+    rhythm_summary(sim);
+}
+
+/// RHYTHMS-CADENCE's readout over the run (the ledger's counters; never scored): one
+/// `rhythm:` line per lineage that lived — its awake share with the sun up and down, rest
+/// bouts begun, sleepers woken by an alarm, the organic it swallowed, and the paced seconds
+/// of its heuristic walking with their paused share.
+fn rhythm_summary(sim: &Sim) {
+    let l = sim.fauna().view().ledger;
+    for f in cubarium_voxel_fauna::Founder::ALL {
+        let k = f.index();
+        if l.alive_ticks_by_founder[k] == 0 {
+            continue;
+        }
+        let share = |a: u64, b: u64| if b > 0 { format!("{:.3}", a as f64 / b as f64) } else { "-".to_string() };
+        let night_alive = l.alive_ticks_by_founder[k] - l.alive_day_ticks_by_founder[k];
+        let night_awake = l.awake_ticks_by_founder[k] - l.awake_day_ticks_by_founder[k];
+        eprintln!(
+            "rhythm: {} awake_day={} awake_night={} rest_bouts={} alarm_wakes={} swallowed={:.5} paced_s={:.0} pause_share={}",
+            f.name(),
+            share(l.awake_day_ticks_by_founder[k], l.alive_day_ticks_by_founder[k]),
+            share(night_awake, night_alive),
+            l.rest_bouts_by_founder[k],
+            l.alarm_wakes_by_founder[k],
+            l.swallowed_by_founder[k],
+            l.paced_ticks_by_founder[k] as f64 / f64::from(TICK_HZ),
+            share(l.paused_ticks_by_founder[k], l.paced_ticks_by_founder[k]),
+        );
+    }
 }
 
 /// HERD-PULL's diagnostics over the run (never scored): per lineage, the mean distance from

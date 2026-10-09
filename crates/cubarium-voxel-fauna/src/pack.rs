@@ -330,11 +330,10 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
 /// minimal gut).
 pub(crate) fn wants_rest(fauna: &Fauna, i: usize, clock_on: bool, daylight: f64) -> bool {
     let a = &fauna.animals[i];
-    let Some(founder) = a.founder else {
+    if a.founder.is_none() {
         return false;
-    };
-    let phys = fauna.config.founder(founder);
-    !phys.active.awake_in(clock_on, daylight, 1.0, fauna.night, phys.active_window, &fauna.config.life) && !a.emergency
+    }
+    crate::step::off_phase(fauna, i, clock_on, daylight) && !a.emergency
 }
 
 /// A member under the chase floor (`chase_reserve_floor` of its cap) that neither wants

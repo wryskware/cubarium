@@ -374,7 +374,8 @@ fn the_bellwing_table_is_a_diurnal_nectar_flyer() {
 
     let bw = FounderPhysiology::frozen(BW);
     assert_eq!(bw.diet, Diet::only(Food::Nectar));
-    assert_eq!(bw.active, crate::Activity::Diurnal);
+    // RHYTHMS-CADENCE: a leaning (night, some day, dawn and dusk peaks).
+    assert_eq!(bw.active, crate::Activity::Leaning);
     assert_eq!(bw.founding, Founding::Bodies);
     assert_eq!(
         FaunaConfig::default().founder_counts()[BW.index()],

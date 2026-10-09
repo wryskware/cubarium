@@ -67,7 +67,7 @@ fn night_plain(width: u32, height: u32, depth: u32) -> World {
     let day = DayClock { start_hour: 0.0, ..DayClock::default() };
     let mut w = World::empty(config(width, height, depth, day, 0.0));
     soil(&mut w);
-    assert!(w.life_daylight() < FaunaConfig::default().life.day_line, "fixture: night");
+    assert!(w.life_daylight() < crate::rhythm::fixed_config().life.day_line, "fixture: night");
     w
 }
 
@@ -161,7 +161,7 @@ fn distance(fauna: &Fauna, id: u64, site: Site) -> f64 {
 fn seedporter_night(vault: bool, tweak: impl Fn(&mut crate::Glider, f64)) -> (Option<Site>, Site, Option<Site>, bool) {
     let world = night_plain(32, 24, 9);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut cfg = FaunaConfig::default();
+    let mut cfg = crate::rhythm::fixed_config();
     let probe = Fauna::new(cfg.clone());
     let lantern_wood = flora.config().species(Plant::Lanternberry).wood_max;
     let lantern = seed(&mut flora, &world, Plant::Lanternberry, 9, 4, lantern_wood);
@@ -238,7 +238,7 @@ fn vine_mesa(night: bool) -> (World, Flora) {
 #[test]
 fn with_only_a_vine_mesa_in_reach_it_climbs_up_and_roosts_on_top() {
     let (world, mut flora) = vine_mesa(true);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     assert!(glider(&fauna).roost_ledge_min_m <= 6.0 * V, "fixture: the mesa is a ledge worth roosting on");
     let id = on_ground(&mut fauna, &world, SP, 6, 2);
     let n = until(&mut fauna, &world, &mut flora, 600, |f| asleep(f, id));
@@ -250,7 +250,7 @@ fn with_only_a_vine_mesa_in_reach_it_climbs_up_and_roosts_on_top() {
     assert!(fauna.view().ledger.climbs > 0, "it climbed");
     // With the preference off it does not (no stand in reach: it stays awake).
     let (world, mut flora) = vine_mesa(true);
-    let mut cfg = FaunaConfig::default();
+    let mut cfg = crate::rhythm::fixed_config();
     cfg.founders[SP.index()].glider.as_mut().unwrap().roost_budget_m = 0.0;
     let mut fauna = Fauna::new(cfg);
     let id = on_ground(&mut fauna, &world, SP, 6, 2);
@@ -264,7 +264,7 @@ fn with_only_a_vine_mesa_in_reach_it_climbs_up_and_roosts_on_top() {
 #[test]
 fn a_vine_climb_to_a_reachable_lip_ends_perched_on_the_top_and_forward_walks_off() {
     let (world, mut flora) = vine_mesa(false);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let id = on_ground(&mut fauna, &world, SP, 11, 2);
     assert!(fauna.set_controller(id, Box::new(Scripted::new(vec![crate::Actions { forward: 1.0, turn: 0.0, feed: 0.0 }]))));
     let n = until(&mut fauna, &world, &mut flora, 400, |f| {
@@ -305,13 +305,13 @@ fn flight(fauna: &Fauna) -> crate::Flight {
 /// the same lift does.
 #[test]
 fn rain_over_the_threshold_grounds_a_bellwing_until_it_falls_under_the_hysteresis() {
-    let probe = Fauna::new(FaunaConfig::default());
+    let probe = Fauna::new(crate::rhythm::fixed_config());
     let f = flight(&probe);
     let (thr, hyst) = (f.rain_ground_m_per_s, f.rain_ground_hysteresis_m_per_s);
     assert!(thr > 0.0 && hyst > 0.0 && hyst < thr, "fixture: a band to test");
     let (dry, wet, band, under) = (rain_plain(0.0), rain_plain(thr * (1.0 + 1e-4)), rain_plain(thr - 0.5 * hyst), rain_plain(thr - 1.5 * hyst));
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let (x, z) = ((8.5) * V, 4.5 * V);
     let id = aloft(&mut fauna, &dry, x, z, SURFACE + 1.5);
     fly(&mut fauna, id, 0.0, 0.0);
@@ -343,7 +343,7 @@ fn rain_over_the_threshold_grounds_a_bellwing_until_it_falls_under_the_hysteresi
 /// down onto the ground.
 #[test]
 fn a_rain_grounded_bellwing_hangs_under_cover_it_can_reach_else_lands_below() {
-    let probe = Fauna::new(FaunaConfig::default());
+    let probe = Fauna::new(crate::rhythm::fixed_config());
     let wet = rain_plain(flight(&probe).rain_ground_m_per_s * 2.0);
     let mut flora = Flora::new(FloraConfig::default());
     let wood = flora.config().species(Plant::Umbrellafrond).wood_max;
@@ -358,7 +358,7 @@ fn a_rain_grounded_bellwing_hangs_under_cover_it_can_reach_else_lands_below() {
     let stand = *flora.view().stand_at(site).unwrap();
     assert!(crate::layer_columns(&wet.view(), &stand, &lowest).contains(&(10, 4)), "fixture: the slab covers column 10");
     for (x, covered) in [(10.5 * V, true), (17.5 * V, false)] {
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::rhythm::fixed_config());
         let id = aloft(&mut fauna, &wet, x, 4.5 * V, SURFACE + 0.3);
         fly(&mut fauna, id, 0.0, -1.0);
         let n = until(&mut fauna, &wet, &mut flora, 300, |f| animal(f, id).mobility.mode == MobilityMode::Perched);
@@ -379,11 +379,11 @@ fn a_rain_grounded_bellwing_hangs_under_cover_it_can_reach_else_lands_below() {
 /// dry.
 #[test]
 fn a_rain_grounded_perched_bellwing_pays_its_sleep_upkeep() {
-    let probe = Fauna::new(FaunaConfig::default());
+    let probe = Fauna::new(crate::rhythm::fixed_config());
     let sleep = probe.config().founder(BW).sleep_upkeep;
     let rate = |world: &World| {
         let mut flora = Flora::new(FloraConfig::default());
-        let mut fauna = Fauna::new(FaunaConfig::default());
+        let mut fauna = Fauna::new(crate::rhythm::fixed_config());
         let id = on_ground(&mut fauna, world, BW, 8, 4);
         fly(&mut fauna, id, 0.0, 0.0);
         fauna.step(world, &mut flora);

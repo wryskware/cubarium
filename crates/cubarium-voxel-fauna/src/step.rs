@@ -188,6 +188,8 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
     fauna.last_daylight = Some(daylight);
     // LURE: where in the night it is, for the lineages' activity windows.
     fauna.night = if clock_on { crate::NightClock::of(&world.weather().sun()) } else { crate::NightClock::DAY };
+    // RHYTHMS-CADENCE: where in the day it is, for the leanings.
+    fauna.horizon = if clock_on { crate::Horizon::of(&world.weather().sun()) } else { crate::Horizon::NOON };
     let sky = Sky {
         downpour: view.weather.mode == cubarium_voxel::weather::RainMode::Downpour,
         rain_m_per_s: f64::from(view.weather.rain_m_per_s).max(0.0),
@@ -273,12 +275,18 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                 && a.attached.is_none()
             {
                 fauna.ledger.alive_ticks_by_founder[f.index()] += 1;
+                if fauna.horizon.up {
+                    fauna.ledger.alive_day_ticks_by_founder[f.index()] += 1;
+                }
             }
             if let Some(f) = a.founder
                 && a.state != State::Asleep
                 && a.attached.is_none()
             {
                 fauna.ledger.awake_ticks_by_founder[f.index()] += 1;
+                if fauna.horizon.up {
+                    fauna.ledger.awake_day_ticks_by_founder[f.index()] += 1;
+                }
                 if a.eating {
                     fauna.ledger.wanting_ticks_by_founder[f.index()] += 1;
                 }
@@ -661,6 +669,16 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
     let life = fauna.config.life;
     let v = view.config.voxel_m;
     let tick = fauna.tick;
+    // RHYTHMS-CADENCE: the tick on the day's 24-hour clock, and the running bodies a sleeper
+    // may hear (none to read while nobody sleeps).
+    let hours = crate::rhythm::hours_per_tick(&view.config.day);
+    let seed = view.config.seed;
+    let running = if fauna.animals.iter().any(|a| a.state == State::Asleep) {
+        crate::rhythm::running_bodies(fauna)
+    } else {
+        Vec::new()
+    };
+    let alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(fauna.config.predation.alert_s)).unwrap_or(u32::MAX);
     // The packs raising pups: an adult's bout there is a provisioning one.
     let mut nurseries: Vec<u64> = fauna
         .animals
@@ -674,9 +692,11 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
             continue;
         };
         let phys = *fauna.config.founder(founder);
+        let leaning = clock_on && phys.active == crate::Activity::Leaning;
+        let shade = leaning && phys.rhythm.shade_is_night;
         // A dark-active body reads the light at its own face (§3.1B): the face's
-        // terrain sky, cached per face.
-        let sky = if clock_on && phys.active.reads_face_light() {
+        // terrain sky, cached per face. So does a leaning that takes shade for night.
+        let sky = if clock_on && (phys.active.reads_face_light() || shade) {
             let a = &fauna.animals[i];
             match a.pose.column(v, view.config.depth) {
                 Some((cx, cz)) => {
@@ -689,6 +709,29 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         } else {
             1.0
         };
+        // RHYTHMS-CADENCE: a leaning's rest bouts, drawn from its chance now.
+        let dark_face = sky.clamp(0.0, 1.0) * daylight < life.day_line;
+        {
+            let a = &mut fauna.animals[i];
+            if leaning {
+                let p = phys.rhythm.chance(fauna.horizon, dark_face);
+                let left = crate::rhythm::advance(&phys.rhythm, a.rest_ticks, p, hours, seed, a.id, tick);
+                if a.rest_ticks == 0 && left > 0 {
+                    fauna.ledger.rest_bouts_by_founder[founder.index()] += 1;
+                }
+                a.rest_ticks = left;
+            } else {
+                a.rest_ticks = 0;
+            }
+        }
+        // A sleeper that hears a run (the alarm wave) wakes and stays up for `alert_s`.
+        if fauna.animals[i].state == State::Asleep
+            && !running.is_empty()
+            && crate::rhythm::alarm_wakes(fauna, i, &running)
+        {
+            fauna.animals[i].alert_ticks = fauna.animals[i].alert_ticks.max(alert_ticks);
+            fauna.ledger.alarm_wakes_by_founder[founder.index()] += 1;
+        }
         let a = &fauna.animals[i];
         let hungry = hunger(a, &phys.core);
         let emergency = if a.emergency {
@@ -697,8 +740,15 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
             hungry >= phys.wake_hunger
         };
         let on_phase = phys.lure_daylight
-            || phys.active.awake_in(clock_on, daylight, sky, fauna.night, phys.active_window, &life);
-        let dark_awake = on_phase && clock_on && phys.active.reads_face_light() && daylight >= life.day_line;
+            || if leaning {
+                a.rest_ticks == 0
+            } else {
+                phys.active.awake_in(clock_on, daylight, sky, fauna.night, phys.active_window, &life)
+            };
+        let dark_awake = on_phase
+            && clock_on
+            && daylight >= life.day_line
+            && (phys.active.reads_face_light() || (shade && dark_face));
         let free = a.alert_ticks == 0
             && a.mobility.climb.is_none()
             && a.mobility.mode != crate::MobilityMode::Fly
@@ -795,6 +845,22 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
             b.kind = b.kind.max(kind);
         }
     }
+}
+
+/// **Out of its waking now** (before the emergency latch): its lineage's rhythm says it is
+/// not its hour, or, a leaning ([`crate::Activity::Leaning`]), it is in a rest bout. The
+/// circadian stage settles the bout first each tick; the reflexes that send a body to its
+/// rest (the roost, the den, a flyer's descent) read this.
+pub(crate) fn off_phase(fauna: &Fauna, i: usize, clock_on: bool, daylight: f64) -> bool {
+    let a = &fauna.animals[i];
+    let Some(f) = a.founder else {
+        return false;
+    };
+    let phys = fauna.config.founder(f);
+    if phys.active == crate::Activity::Leaning {
+        return clock_on && a.rest_ticks > 0;
+    }
+    !phys.active.awake_in(clock_on, daylight, 1.0, fauna.night, phys.active_window, &fauna.config.life)
 }
 
 /// The reason a bout has this tick (repair 2 item 8): an emergency, then a body feeding
@@ -1618,6 +1684,14 @@ fn controllers(
         if searched.is_some_and(|go| (go.forward, go.turn) != (actions.forward, actions.turn)) {
             rove::overridden(fauna, id);
         }
+        // RHYTHMS-CADENCE: stop and go. A walker or climber searching or foraging on its own
+        // steering moves in bouts with pauses to look and listen; flight and every directed
+        // reflex above keep their pace. After the search leg's check, so a pause does not end
+        // the leg.
+        if driven && !fled && (fauna.controllers.flees(id) || fauna.controllers.pack_tactic(id)) {
+            let period = manifest.cadence_ticks().max(1);
+            actions = pace(fauna, i, view.config.seed, src, actions, period);
+        }
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
         fauna.walk_commit(id, founder, src);
@@ -1636,6 +1710,34 @@ fn controllers(
         s.return_cone(held);
     }
     fauna.grid_scratch = live;
+}
+
+/// **The stop-and-go pace** ([`crate::Cadence`]) over a heuristic body's held `actions`,
+/// counted for `period` ticks (its controller interval): only on its own steering, a search
+/// leg or off a spent patch (`src`), on the ground or a wall (not in the air), and moving —
+/// faster than a stay on food (the teachers' `forage_stay_forward`), so a grazer browsing on
+/// the go is paced and one holding still to feed is not; paused, it stands (no step, no turn,
+/// its feeding as asked), else its forward is the bout's share.
+pub(crate) fn pace(fauna: &mut Fauna, i: usize, seed: u64, src: crate::Steer, actions: Actions, period: u64) -> Actions {
+    let a = &fauna.animals[i];
+    let Some(founder) = a.founder else {
+        return actions;
+    };
+    let cadence = fauna.config.founder(founder).cadence;
+    let own = matches!(src, crate::Steer::Heuristic | crate::Steer::Search | crate::Steer::Leave);
+    let footed = matches!(a.mobility.mode, crate::MobilityMode::Ground | crate::MobilityMode::Wall | crate::MobilityMode::Climb);
+    let moving = actions.forward > fauna.config.teachers.forage_stay_forward.max(0.0);
+    if !cadence.on() || !own || !footed || !moving {
+        return actions;
+    }
+    let p = cadence.at(seed, a.id, fauna.tick);
+    let l = &mut fauna.ledger;
+    l.paced_ticks_by_founder[founder.index()] += period;
+    if p.paused {
+        l.paused_ticks_by_founder[founder.index()] += period;
+        return Actions { forward: 0.0, turn: 0.0, feed: actions.feed };
+    }
+    Actions { forward: actions.forward * p.speed, ..actions }
 }
 
 /// **The flee rule** of the prey heuristics (predation §2.7), `None` when there is
@@ -2489,7 +2591,6 @@ fn flyer_act(
     let phys = *fauna.config.founder(founder);
     let manifest = fauna.config.manifest(founder);
     let sc = phys.core;
-    let life = fauna.config.life;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
     let (asleep, mut held, lift_held, due) = {
         let a = &fauna.animals[i];
@@ -2508,8 +2609,7 @@ fn flyer_act(
     let shape = flight::Shape::of(&phys, &flight, fauna.animals[i].body);
     let basal = sc.maintenance_per_s * fauna.animals[i].body;
     let takeoff_cost = flight.takeoff_s * flight.flight_factor * basal;
-    let sleepy = !phys.active.awake_in(sky.clock_on, sky.daylight, 1.0, fauna.night, phys.active_window, &life)
-        && !fauna.animals[i].emergency;
+    let sleepy = off_phase(fauna, i, sky.clock_on, sky.daylight) && !fauna.animals[i].emergency;
     // Backlog §12: a downpour, or rain over its threshold (the latch), grounds it.
     let weather = sky.downpour || fauna.animals[i].mobility.rain_grounded;
     let grounded = weather || sleepy;
@@ -4208,6 +4308,7 @@ fn newborn(
         gut_seeds: crate::GutSeedLots::default(),
         pack: None,
         homing_ticks: 0,
+        rest_ticks: 0,
         yielding: false,
         hunkered: false,
         // A newborn starts with an empty stomach and its eating latch off (repair 2
@@ -5232,6 +5333,9 @@ mod pack_search_tests;
 #[cfg(test)]
 #[path = "senses_core_tests.rs"]
 mod senses_core_tests;
+#[cfg(test)]
+#[path = "rhythm_tests.rs"]
+mod rhythm_tests;
 #[cfg(test)]
 #[path = "light_tests.rs"]
 mod light_tests;

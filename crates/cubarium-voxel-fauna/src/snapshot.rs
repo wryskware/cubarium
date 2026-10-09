@@ -153,7 +153,11 @@ use crate::{Fauna, FaunaConfig};
 //     scent, a still light) that never brings a taste is given up.
 // 72: SAVE-EXTENSIBLE — the config moved out of the positional state into a named-field
 //     document beside it.
-pub const SCHEMA: u32 = 72;
+// 73: RHYTHMS-CADENCE — `Animal::rest_ticks` (a leaning's rest bout), `Activity::Leaning`,
+//     `FounderPhysiology::{rhythm, cadence}` (`Rhythm`, `Cadence`), `SenseTable::{still_gain,
+//     still_settle_s}`, `Vigilance::sleep_hearing`, and the ledger's `alive_day_ticks`,
+//     `awake_day_ticks`, `rest_bouts`, `alarm_wakes`, `paced_ticks`, `paused_ticks` by founder.
+pub const SCHEMA: u32 = 73;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -575,6 +579,7 @@ mod tests {
             gut_seeds: crate::GutSeedLots::default(),
             pack: None,
             homing_ticks: 0,
+            rest_ticks: 0,
             yielding: false,
             hunkered: false,
             stomach: crate::Stomach::default(),

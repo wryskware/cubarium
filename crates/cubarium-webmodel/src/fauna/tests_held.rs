@@ -250,6 +250,8 @@ fn provision_once(frac: f64) -> (f64, f64, f64, f64) {
     let mut p = Params::defaults();
     p.world.day = DayClock::default();
     let vh = Founder::Chorister;
+    // The on/off rhythm, so an hour has the adults asleep (RHYTHMS-CADENCE leans them).
+    p.fauna.founders[vh.index()].active = cubarium_voxel_fauna::Activity::Diurnal;
     let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
     only(&mut m, &[vh]);
     // An hour the adults are asleep (at the den).
@@ -554,6 +556,8 @@ fn pup_night(scramble: bool, excess: f64) -> (f64, Vec<(u32, f64)>, f64) {
         t.provision_scramble = scramble;
         t.pup_starves_on_empty = true;
     }
+    // The on/off rhythm, so the night has the adults asleep (RHYTHMS-CADENCE leans them).
+    p.fauna.founders[vh.index()].active = cubarium_voxel_fauna::Activity::Diurnal;
     let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
     only(&mut m, &[vh]);
     let day = m.day.day_s();
