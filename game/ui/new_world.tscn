@@ -12,6 +12,8 @@
 [ext_resource type="FontVariation" path="res://ui/neon/fonts/text.tres" id="10_text"]
 [ext_resource type="PackedScene" path="res://ui/terrain_card.tscn" id="11_card"]
 [ext_resource type="Script" path="res://ui/neon/style_box_neon_dashes.gd" id="12_dashes"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
+[ext_resource type="Script" path="res://ui/neon/neon_fade_mask.gd" id="13_fade"]
 
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_seed"]
 
@@ -111,7 +113,9 @@ theme_type_variation = &"TitleLabel"
 theme_override_constants/shadow_offset_x = 4
 theme_override_constants/shadow_offset_y = 4
 theme_override_font_sizes/font_size = 52
-text = "New world"
+text = " New world "
+script = ExtResource("nt_title")
+title = "New world"
 
 [node name="HeadGap" type="Control" parent="Center/Page/Body/Margin/Stack"]
 custom_minimum_size = Vector2(0, 34)
@@ -161,6 +165,9 @@ options = PackedStringArray("Terrarium", "Deep 1.5×", "Deep 2×", "Wide")
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="SizeNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/SizeField/Note"]
 unique_name_in_owner = true
@@ -202,6 +209,9 @@ index = 3
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="TerrainNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/TerrainField/Note"]
 unique_name_in_owner = true
@@ -242,6 +252,9 @@ options = PackedStringArray("Tropical jungle")
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="ClimateNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/ClimateField/Note"]
 unique_name_in_owner = true
@@ -282,6 +295,9 @@ script = ExtResource("6_slider")
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="WaterNote" type="Label" parent="Center/Page/Body/Margin/Stack/Columns/Form/WaterField/Note"]
 unique_name_in_owner = true
@@ -353,14 +369,24 @@ theme_type_variation = &"FactLabel"
 text = "Terrains"
 uppercase = true
 
-[node name="Cards" type="ScrollContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+[node name="Cards" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 3
+mouse_filter = 2
+script = ExtResource("13_fade")
+fade_top = 36
+follow_scroll = true
+
+[node name="CardsScroll" type="ScrollContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards"]
+layout_mode = 0
+anchor_right = 1.0
+anchor_bottom = 1.0
 follow_focus = true
 horizontal_scroll_mode = 0
+vertical_scroll_mode = 3
 
-[node name="CardsMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards"]
+[node name="CardsMargin" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
 mouse_filter = 2
@@ -369,7 +395,7 @@ theme_override_constants/margin_top = 9
 theme_override_constants/margin_right = 9
 theme_override_constants/margin_bottom = 9
 
-[node name="Grid" type="GridContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin"]
+[node name="Grid" type="GridContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -378,44 +404,44 @@ theme_override_constants/h_separation = 30
 theme_override_constants/v_separation = 28
 columns = 2
 
-[node name="Card1" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+[node name="Card1" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid" instance=ExtResource("11_card")]
 layout_mode = 2
 
-[node name="Card3" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+[node name="Card3" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid" instance=ExtResource("11_card")]
 layout_mode = 2
 preview_focus = true
 
-[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3/Margin/Stack/Holder" index="1"]
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card3/Margin/Stack/Holder" index="1"]
 texture = SubResource("AtlasTexture_t3")
 
-[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3/Margin/Stack/TitleRow" index="0"]
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card3/Margin/Stack/TitleRow" index="0"]
 text = "Terrain 3"
 
-[node name="Card5" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+[node name="Card5" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid" instance=ExtResource("11_card")]
 layout_mode = 2
 
-[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5/Margin/Stack/Holder" index="1"]
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card5/Margin/Stack/Holder" index="1"]
 texture = SubResource("AtlasTexture_t5")
 
-[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5/Margin/Stack/TitleRow" index="0"]
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card5/Margin/Stack/TitleRow" index="0"]
 text = "Terrain 5"
 
-[node name="Card7" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid" instance=ExtResource("11_card")]
+[node name="Card7" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid" instance=ExtResource("11_card")]
 layout_mode = 2
 
-[node name="Holder" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack" index="0"]
+[node name="Holder" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7/Margin/Stack" index="0"]
 modulate = Color(1, 1, 1, 0.35)
 
-[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/Holder" index="1"]
+[node name="Sample" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7/Margin/Stack/Holder" index="1"]
 texture = SubResource("AtlasTexture_t7")
 
-[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="0"]
+[node name="Name" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="0"]
 text = "Terrain 7"
 
-[node name="State" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="1"]
+[node name="State" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7/Margin/Stack/TitleRow" index="1"]
 text = "Drawing"
 
-[node name="Bar" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7/Margin/Stack" index="2"]
+[node name="Bar" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7/Margin/Stack" index="2"]
 visible = true
 
 [node name="Founding" type="VBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
@@ -455,16 +481,16 @@ theme_type_variation = &"SmallTextLabel"
 text = "3 of 4 terrains drawn. Pick one to found it."
 autowrap_mode = 3
 
-[node name="Actions" type="MarginContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+[node name="Actions" type="Control" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack"]
+custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
 mouse_filter = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 0
-theme_override_constants/margin_right = 0
-theme_override_constants/margin_bottom = 0
 
 [node name="ActionRow" type="HBoxContainer" parent="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Actions"]
-layout_mode = 2
+layout_mode = 0
+offset_left = 12.0
+offset_right = 12.0
+offset_bottom = 54.0
 mouse_filter = 2
 theme_override_constants/separation = 20
 
@@ -804,8 +830,8 @@ text = "Pan: drag, arrows, WASD or the left stick."
 horizontal_alignment = 2
 vertical_alignment = 1
 
-[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card3"]
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card3"]
 
-[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card5"]
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card5"]
 
-[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsMargin/Grid/Card7"]
+[editable path="Center/Page/Body/Margin/Stack/Columns/Right/RightStack/Cards/CardsScroll/CardsMargin/Grid/Card7"]

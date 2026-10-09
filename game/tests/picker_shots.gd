@@ -40,21 +40,21 @@ func run() -> void:
 	main.picker.select(size)
 	main.picker._seed.text = seed
 	var names := ["low", "medium", "high"]
-	main.picker._water.set_value_no_signal(0)
+	main.picker._water.index = 0
 	main.picker._water_text()
 	main.picker.generate(4)
 	for step in 3:
 		if step > 0:
-			main.picker._water.value = step
+			main.picker._water.choose(step)
 		if not await until(func(): return main.picker.ready_count() == 4, 240.0):
 			print("PICKER SHOTS: terrains not drawn in time")
 			return done()
 		await seconds(6.0)  # the thumbnails' renderer draws its first frames
 		await shot("picker-" + names[step])
-	main.picker._water.value = 0
+	main.picker._water.choose(0)
 	await until(func(): return main.picker.ready_count() == 4, 240.0)
 	await seconds(1.0)
-	main.picker._cards[0]["pick"].pressed.emit()
+	main.picker._cards[0]["root"].pressed.emit()
 	await until(func(): return str(main.session.founding().get("phase", "")) == "shower", 120.0)
 	await seconds(1.0)
 	await shot("founding-1")

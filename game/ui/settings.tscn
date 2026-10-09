@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://ui/settings.gd" id="4_page"]
 [ext_resource type="Script" path="res://ui/neon/neon_dot_slider.gd" id="5_slider"]
 [ext_resource type="Script" path="res://ui/neon/neon_checkbox.gd" id="6_check"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
 
 [node name="Settings" type="Control"]
 anchor_right = 1.0
@@ -80,7 +81,9 @@ theme_type_variation = &"TitleLabel"
 theme_override_constants/shadow_offset_x = 4
 theme_override_constants/shadow_offset_y = 4
 theme_override_font_sizes/font_size = 52
-text = "Animals"
+text = " Animals "
+script = ExtResource("nt_title")
+title = "Animals"
 
 [node name="HeadGap" type="Control" parent="Center/Page/Body/Margin/Stack"]
 custom_minimum_size = Vector2(0, 34)
@@ -124,6 +127,9 @@ index = 0
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="MovementNote" type="Label" parent="Center/Page/Body/Margin/Stack/Form/MovementField/Note"]
 unique_name_in_owner = true
@@ -165,6 +171,9 @@ script = ExtResource("6_check")
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
 
 [node name="SubpixelNote" type="Label" parent="Center/Page/Body/Margin/Stack/Form/SubpixelField/Note"]
 unique_name_in_owner = true

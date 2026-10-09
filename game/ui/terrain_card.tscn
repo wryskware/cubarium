@@ -83,6 +83,7 @@ stretch_mode = 6
 [node name="TitleRow" type="HBoxContainer" parent="Margin/Stack"]
 layout_mode = 2
 mouse_filter = 2
+theme_override_constants/separation = 12
 
 [node name="Name" type="Label" parent="Margin/Stack/TitleRow"]
 unique_name_in_owner = true
