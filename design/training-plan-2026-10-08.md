@@ -851,9 +851,18 @@ control and the reward accounting; display targets after seeing results.
          - The webmodel's bellwing `egg_site` fit (1.0) needs a refit.
        - **Decided (Wrysk, 2026-10-09):** "seedporters should also polinate by moving accross
          them or around them. but we can leave the numbers to ecology."
-         - SEEDPORTER-POLLEN (opus-high, brief `briefs/seedporter-pollen.md`) is running.
-           Seedporters pollinate by contact: pollen carried from another flower, measured in
-           metres, vines only.
+         - SEEDPORTER-POLLEN merged e298b9f0 (fauna schema 75).
+           - Seedporters pollinate by contact: a flower counts when a body newly touches it
+             while carrying pollen from another flower, within the climb-contact tolerance
+             (`PRESSED_M`).
+           - The switch is `pollen_by_contact`, on for seedporters only. Bloomcrowns aren't
+             included (an open choice).
+           - Probe, d72 seeds 1/2, 1 h, before → after:
+             - vine flowers visited: 2.9/2.5 % → 8.8/7.9 %;
+             - fruit set: 0.35/0.43 → 0.50/0.48;
+             - vine share of seedporter fruit: 5.2/5.0 % → 23/20 %;
+             - bellwings at end: 30/34 → 35/34;
+             - no measurable cost per tick.
          - The vine's `spur_share` becomes a supply gene in the ecology genome (ECO-GENOME).
 2b. **Founding (Wrysk, 2026-10-09):** "insanely slow"; "shouldnt have duplicate code";
     "short-circuit bailing for cases like 'no possible place to put this' in which case the
@@ -910,6 +919,21 @@ control and the reward accounting; display targets after seeing results.
        and a launch-ready protocol A screen from the wide baseline's hour-10 saves.
      - It also runs a smoke check.
      - The real search starts after the baseline finishes.
+   - ECO-GENOME merged b4a02be0. Its 9 genes: mass in 5 groups (Veilhound tied to grazers by a
+     ratio, lanternjaw to the small eaters), one gut gene, defence and `spur_share`.
+     - **Blockers it found:**
+       - mass genes on a loaded save starve bodies (frondgrazers 109 → 0 in one minute);
+       - this morning's saves are schema 73.
+     - **Budget:** the leaf target needs frondgrazers at about ×300–900, so the box goes to
+       ×25–900.
+     - **Chosen (Wrysk deferred, "do whatever seems best"):** rescale bodies on load, booked as
+       introduced matter.
+       - ECO-RESCALE (Codex high) is doing this, with the scorer's `KeyError: 'Q'` and the
+         launcher fixes.
+       - Then remake the year-old start library with the current build, a new wide baseline,
+         and launch the screen.
+     - Stopping the old baseline was refused by the permission check, so it runs on at idle
+       priority.
 5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
    and Veilhound. Sensed places plus home memory.
    - **Bellwing nest (from VINE-C):** a bellwing now lays only on vines. Only the heuristic's
