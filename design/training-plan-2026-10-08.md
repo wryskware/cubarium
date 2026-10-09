@@ -772,7 +772,16 @@ control and the reward accounting; display targets after seeing results.
    - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
    - DECAY (Codex): item 21.
 3. A wide-world start library of year-old saves.
-   - SCORE-V3 merged, 97ce0994.
+   - SCORE-V3 merged, 97ce0994. DROP-C1 merged, bdbeb508.
+   - HERD merged, 8d782d9b:
+     - herding pull: frondgrazer 3 m, seedporter 4 m, loftstrider calves 6 m;
+     - many eyes: scan share 0.20 → about 0.15, intake +4–7 %;
+     - packs prefer stragglers;
+     - frondgrazer `kin_tracks` 3 → 6.
+     - The short d72 probes showed frondgrazers already 0.5–1.5 m from their nearest kin, so
+       the "spread out" look is likely many tiny groups.
+     - Check herd **size** on the wide world after the food genes; the pull fades past 4
+       known kin (`herd_max`).
    - The wide founding probe took 472 s, including one refused-seed redraw (seed 1: bellwing
      placed 9 of 15).
    - At founding, 40 % of glowcaps stand on lit faces. The year target is ≤ 1 %, so founding
