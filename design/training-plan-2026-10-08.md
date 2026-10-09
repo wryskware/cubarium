@@ -160,6 +160,35 @@ hour later, 2 h). This repeats bl3:
   - every snail and capgnawer juvenile is under the 0.05 starving line. That is growth by
     design (JUVENILE-FOOD), so for those lineages the starving count is not a health signal.
 
+### 1d. Baseline v4 (TRAPS, HUNGRY-SEARCH, LEADS-PAY, JUVENILE-FOOD)
+
+Setup: binary c92ce6e7 (before NECTAR-SCENT), start library v3 (`runs/starts3-2026-10-08`,
+minute 63), seeds 1–8, 2 h. Report: `runs/bl4-2026-10-08/report.md`.
+
+**The search and stuck failures are gone, and the heuristic now feeds about as well as C1.**
+
+| Measure | Heuristic v3 | Heuristic v4 | C1 v4 |
+|---|---|---|---|
+| Frondgrazers alive at end | 22 | 40.5 | 42 |
+| Frondgrazer juvenile p10 fullness | 0.005 | 0.10 | 0.14 |
+| Bellwing adult p10 fullness | about 0 | 0.19 | 0.19 |
+| Stuck prevalence S | 9.5 % | 0.6 % | 0.5 % |
+| Frondgrazer intake | n/a | 43 | 50 |
+| Frondgrazer moving share | 0.56 | **0.0075** | 0.36 |
+
+- **V now decides everything, the wrong way.** C1 wins 8/8 with median Δ soft P −9.8, and
+  −9.6 of that is V. A fed heuristic frondgrazer stands in a meadow and crops: it moves under
+  1 % of the time and loses nothing for it.
+- Littershredders, capgnawers and loftstriders also move about 0 % in both arms.
+- Standing foliage grows by about 2,500 over 2 h, and litter by about 5,800.
+- **This is Wrysk's point exactly** (WORKING_POLICY "Shape the situation"): the food is so
+  abundant that moving doesn't pay, and a movement term in P then punishes the animal for
+  the world's generosity. The lever is the supply: plant regrowth, patchiness and the browse
+  share per bite. The 2026-09-28 parameter audit found plants about 10³× generous. That is
+  the first gene group for the ecology search (§6 Q10), and V comes out of P (§6 Q5).
+- Every snail and capgnawer juvenile is still below the starving line. That is growth by
+  design (JUVENILE-FOOD), not hunger.
+
 ### 1c. Brain pilot (eidolon, 09:35–14:15)
 
 Setup:
