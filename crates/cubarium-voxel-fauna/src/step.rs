@@ -1618,6 +1618,17 @@ fn controllers(
                 src = crate::Steer::Pack;
             }
         }
+        // VINE-C: a flyer nesting in the vines, ready to lay, holds at a vine nest site or flies
+        // to one it can find (over its own heuristic only, the hover-sip teacher); the light
+        // below still turns it from a looming shadow and a hungry one to food.
+        if driven && !fled && fauna.controllers.rests_when_fed(id) {
+            if let Some((go, up)) = nest_reflex(fauna, i, view, flora) {
+                actions = go;
+                lift = up;
+                lure = 0.0;
+                src = crate::Steer::Nest;
+            }
+        }
         // S3 LIGHT AND FLIGHT (`crate::light`): over a live lineage's heuristic with a light
         // sense — the bellwing's looming, light and nectar smell over its hover-sip (the fed
         // perching above stands but for a looming shadow), the capgnawer's cyan over its
@@ -2821,9 +2832,18 @@ fn flyer_sip(
     if !(bite > 0.0) {
         return false;
     }
+    // VINE-C (Wrysk 2026-10-09, option C): a sip at a vine draws on every open flower in the
+    // mouth's reach, each in proportion to what it holds (the stock read above is their sum).
+    let sipped: Vec<cubarium_voxel_flora::Face> = match bloom {
+        crate::Bloom::Stand(_) => Vec::new(),
+        crate::Bloom::Vine(_) => crate::flight::vine_patch(view, &flora.view(), p, reach, cubarium_voxel_flora::SpurPhase::Flower)
+            .into_iter()
+            .map(|r| r.face)
+            .collect(),
+    };
     let taken = match bloom {
         crate::Bloom::Stand(site) => flora.take_stand_nectar(site, bite),
-        crate::Bloom::Vine(face) => flora.take_nectar(face, bite),
+        crate::Bloom::Vine(_) => flora.take_nectar_patch(&sipped, bite),
     };
     let Some(taken) = taken else {
         return false;
@@ -2839,11 +2859,21 @@ fn flyer_sip(
     // FLOWER-FRUIT (Wrysk 2026-10-09): a sip at a bloom other than the last it sipped at is
     // a pollinator's visit — it brings pollen from elsewhere — booked to the flowers it
     // came to, where the visits decide the fruit they set.
+    //
+    // VINE-C: at a vine the visit pollinates every open flower the body brushes — within
+    // half its span (its wing disc) of where its mouth meets the wall — and every flower it
+    // drank from.
     if fauna.animals[i].last_bloom != Some(bloom) {
         match bloom {
-            crate::Bloom::Stand(site) => flora.visit_stand(site),
-            crate::Bloom::Vine(face) => flora.visit_face(face),
-        };
+            crate::Bloom::Stand(site) => {
+                flora.visit_stand(site);
+            }
+            crate::Bloom::Vine(face) => {
+                for f in crate::flight::pollinated_faces(view, &flora.view(), p, face, shape.r, &sipped) {
+                    flora.visit_face(f);
+                }
+            }
+        }
     }
     fauna.animals[i].last_bloom = Some(bloom);
     swallow(fauna, i, Food::Nectar, taken);
@@ -3921,7 +3951,8 @@ fn reproduce(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, dusk: b
         .collect();
     for mut n in newborns {
         // A newborn flyer is perched on the face it was born on (F1).
-        if n.founder.is_some_and(|f| fauna.config.founder(f).flight.is_some()) {
+        // One hatched in the vines (VINE-C) already clings to its face.
+        if n.mobility.perch.is_none() && n.founder.is_some_and(|f| fauna.config.founder(f).flight.is_some()) {
             n.pose.y_m = crate::surface_m(n.site.y, view.config.voxel_m);
             let site = n.site;
             crate::flight::perch_on_face(&mut n, site);
@@ -4374,7 +4405,8 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// left on the face the body stands on.
 ///
 /// The face has to hold litter — the littershredder lays in the litter it lives in — or,
-/// for a lineage whose [`crate::EggSite`] is film, film; and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
+/// for a lineage whose [`crate::EggSite`] is film, film; a vine nester's clutch goes on a
+/// latticevine face instead ([`vine_egg_site`], VINE-C); and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
 fn lay(
     fauna: &mut Fauna,
@@ -4415,11 +4447,26 @@ fn lay(
     let Some(lineage) = fauna.animals[i].founder else {
         return;
     };
-    let site = fauna.animals[i].site;
+    let mut site = fauna.animals[i].site;
+    // VINE-C: a vine nester's clutch goes on a vine face it clings to or touches, with room
+    // for its hatchling to cling there; `site` becomes the support face below it.
+    let egg_site = fauna.config.founder(lineage).egg_site;
+    let vine = if egg_site == crate::EggSite::Vine && !rule.dormant {
+        let found = vine_egg_site(fauna, i, view, flora, sc.body_min);
+        if found.is_none() {
+            return;
+        }
+        found
+    } else {
+        None
+    };
+    if let Some((_, under)) = vine {
+        site = under;
+    }
     // A dormant egg is buried in soil or litter (predation §2.13); the shredder lays in
     // the litter it lives in, the ripple-snail on the film it grazes (roster R2b,
     // [`crate::EggSite`]).
-    if !rule.dormant {
+    if !rule.dormant && vine.is_none() {
         let ground = flora.view().ground_at(site);
         let fits = match fauna.config.founder(lineage).egg_site {
             crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
@@ -4435,6 +4482,8 @@ fn lay(
                 .founder(lineage)
                 .amphibious
                 .is_some_and(|am| shore_egg_site(view, &am, site)),
+            // Found above, or not at all: never the ground, never a bloomcrown.
+            crate::EggSite::Vine => false,
         };
         if !fits {
             return;
@@ -4443,7 +4492,7 @@ fn lay(
     // A flyer's egg needs room to fly from (bellwing3 item 2): its hatchling appears in
     // the air on this face, so the face needs `egg_headroom_m` clear over the hatchling's
     // body, and its air must reach the open air.
-    if let Some(flight) = fauna.config.founder(lineage).flight {
+    if let Some(flight) = fauna.config.founder(lineage).flight.filter(|_| vine.is_none()) {
         let phys = *fauna.config.founder(lineage);
         let shape = crate::flight::Shape::of(&phys, &flight, sc.body_min);
         let v = view.config.voxel_m;
@@ -4525,6 +4574,7 @@ fn lay(
                 dormancy: Some(crate::Dormancy::draw(&fauna.config.predation, seed, serial, laid_tick)),
                 wet_ticks: 0,
                 dry_ticks: 0,
+                face: None,
             });
             fauna.ledger.eggs_laid += 1;
         }
@@ -4540,13 +4590,150 @@ fn lay(
             dormancy: None,
             wet_ticks: 0,
             dry_ticks: 0,
+            face: vine.map(|(f, _)| f),
         });
         fauna.ledger.eggs_laid += u64::from(eggs);
     }
     fauna.ledger.clutches_laid += 1;
     fauna.ledger.clutches_by_founder[lineage.index()] += 1;
+    if vine.is_some() {
+        fauna.ledger.vine_clutches_by_founder[lineage.index()] += 1;
+    }
     fauna.ledger.eggs_laid_by_founder[lineage.index()] += u64::from(eggs);
     fauna.ledger.reproduction_by_founder[lineage.index()] += cost;
+}
+
+/// **Looking for a nest in the vines** (VINE-C, [`crate::EggSite::Vine`]). For a flyer whose
+/// lineage nests in the vines, awake, free and ready to lay ([`trip_ready`]): at a vine egg
+/// site ([`vine_egg_site`]) whose nest is not crowded it holds still to lay (a hover, or its
+/// cling); otherwise it flies to the nearest covered wall face within
+/// [`crate::Flight::nest_search_m`] (level distance, rows within its band of where it is)
+/// that would take its clutch and whose nest is not crowded, toward the pose it would cling
+/// to it at. With none, `None`: its own steering goes on and it keeps its clutch. Never a
+/// bloomcrown. `(actions, lift)`.
+fn nest_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora) -> Option<(Actions, f64)> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    if phys.egg_site != crate::EggSite::Vine || a.attached.is_some() || a.state == State::Asleep {
+        return None;
+    }
+    let flight = phys.flight?;
+    let sc = body::effective_config(&fauna.config, &a);
+    let rule = sc.reproduction;
+    if !trip_ready(&rule, &a.reproduction, a.reserve, sc.reserve_of(a.body)) {
+        return None;
+    }
+    if vine_egg_site(fauna, i, view, flora, sc.body_min).is_some() && !nest_crowded(fauna, i, view, &rule) {
+        fauna.ledger.nest_holds_by_founder[founder.index()] += 1;
+        return Some((Actions { forward: 0.0, turn: 0.0, feed: 0.0 }, 0.0));
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let reach = flight.nest_search_m.max(0.0);
+    let (lo, hi) = (a.pose.y_m - flight.band_max_m, a.pose.y_m + flight.band_max_m);
+    let fv = flora.view();
+    let mut near: Vec<(f64, cubarium_voxel_flora::Face)> = fv
+        .cover
+        .iter()
+        .filter(|cf| !cf.face.dir.is_underside())
+        .filter_map(|cf| {
+            let f = cf.face;
+            let y = (f64::from(f.y) + 0.5) * v;
+            if y < lo || y > hi {
+                return None;
+            }
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
+            let d = (dx * dx + dz * dz).sqrt();
+            (d <= reach).then_some((d, f))
+        })
+        .collect();
+    near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    let air = fauna.open_air(view, &flight);
+    let mut target = None;
+    // The nearest few that would take the clutch; a scan past them would cost a tick.
+    for (_, face) in near.into_iter().take(NEST_CANDIDATES) {
+        if vine_nest_fits(view, &air, &phys, &flight, sc.body_min, face).is_none() {
+            continue;
+        }
+        let Some((pose, _)) = crate::flight::vine_cling(view, &phys, &flight, a.body, face) else {
+            continue;
+        };
+        if nest_crowded_at(fauna, a.id, founder, pose.x, pose.z, view, &rule) {
+            continue;
+        }
+        target = Some(pose);
+        break;
+    }
+    let t = target?;
+    fauna.ledger.nest_searches_by_founder[founder.index()] += 1;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+    let cfg = fauna.config.light;
+    let lift = (cfg.lift_per_m * (t.y_m - a.pose.y_m)).clamp(-1.0, 1.0);
+    let dh = (dx * dx + dz * dz).sqrt();
+    let forward = if dh <= cfg.near_m { cfg.near_forward } else { 1.0 };
+    let want = if dh > 0.0 { dx.atan2(dz) } else { t.heading_rad };
+    Some((crate::hunt::head(a.pose.heading_rad, want, forward, 1.0), lift))
+}
+
+/// How many of the nearest covered wall faces [`nest_reflex`] tries as a nest.
+const NEST_CANDIDATES: usize = 24;
+
+/// **A vine egg site** (VINE-C, [`crate::EggSite::Vine`]) for body `i`: the
+/// latticevine-covered wall face it clings to, else the nearest one within its mouth's reach
+/// (its radius plus its mouth reach, from its middle) that it is in front of, on which a
+/// hatchling of `body_min` clings ([`crate::flight::vine_cling`]) with
+/// [`crate::Flight::egg_headroom_m`] clear over it in the open air. `(the face, the support face
+/// below the hatchling)`; `None` for a body that does not fly or no such face. A bloomcrown is
+/// never one.
+pub(crate) fn vine_egg_site(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, body_min: f64) -> Option<(cubarium_voxel_flora::Face, Site)> {
+    let a = fauna.animals[i];
+    let phys = *fauna.config.founder(a.founder?);
+    let flight = phys.flight?;
+    let fv = flora.view();
+    let mut faces: Vec<cubarium_voxel_flora::Face> = Vec::new();
+    if let Some(crate::Perch { anchor: crate::PerchAnchor::Vine(face), .. }) = a.mobility.perch {
+        faces.push(face);
+    }
+    let shape = crate::flight::Shape::of(&phys, &flight, a.body);
+    let p = crate::flight::mouth_point(&a, shape);
+    let reach = shape.r + phys.body_at(a.body).mouth_reach_m;
+    let mut near = crate::flight::vine_faces_within(view, &fv, p, p, reach, |_| Some(0.0));
+    near.sort_by(|x, y| x.d.total_cmp(&y.d));
+    faces.extend(near.into_iter().map(|r| r.face));
+    let air = fauna.open_air(view, &flight);
+    faces.into_iter().find_map(|face| {
+        fv.cover.face(face)?;
+        vine_nest_fits(view, &air, &phys, &flight, body_min, face).map(|under| (face, under))
+    })
+}
+
+/// Whether a hatchling of `body_min` clings to vine face `face` with
+/// [`crate::Flight::egg_headroom_m`] clear over it and its cell in the open air: the support
+/// face below it when it does.
+pub(crate) fn vine_nest_fits(
+    view: &VoxelView<'_>,
+    air: &crate::flight::OpenAir,
+    phys: &crate::FounderPhysiology,
+    flight: &crate::Flight,
+    body_min: f64,
+    face: cubarium_voxel_flora::Face,
+) -> Option<Site> {
+    let (pose, under) = crate::flight::vine_cling(view, phys, flight, body_min, face)?;
+    let shape = crate::flight::Shape::of(phys, flight, body_min);
+    let room = crate::flight::overhead_clear(view, shape, pose.x, pose.z, pose.y_m, flight.egg_headroom_m);
+    if room + crate::flight::EPS < flight.egg_headroom_m {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let (cx, cz) = pose.column(v, view.config.depth)?;
+    let cy = ((pose.y_m + 0.5 * shape.h) / v).floor();
+    if cy < 0.0 {
+        return None;
+    }
+    air.cell_is_open(cx.rem_euclid(i64::from(view.config.width)) as u32, cy as u32, cz as u32)
+        .then_some(under)
 }
 
 /// **A shore egg site** (SNAIL-LAND, [`crate::EggSite::Shore`]): `site` has no standing
@@ -4791,12 +4978,27 @@ fn clutch_fate(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 /// Whether a clutch keeps its place: its face is still a support face and, unless its
 /// lineage is aquatic (roster R2b: the ripple-snail lays under water by design), no
 /// standing water over it is deeper than its lineage drowns in.
+///
+/// A clutch in the vines (VINE-C) is on its wall face, not the ground: it holds while the
+/// face's cell stays solid and the air in front of it under no deeper water than its lineage
+/// drowns in, the support face below playing no part.
 fn clutch_holds(fauna: &Fauna, view: &VoxelView<'_>, c: &crate::Clutch) -> bool {
+    let phys = fauna.config.founder(c.lineage);
+    if let Some(face) = c.face {
+        if !view.is_solid(i64::from(face.x), face.y, face.z) {
+            return false;
+        }
+        let Some((fx, fy, fz)) = face.front(view) else {
+            return false;
+        };
+        // The water standing in the eggs' row and up, in the cell in front of them.
+        let depth = if fy == 0 { 0.0 } else { view.water_depth_m(i64::from(fx), fy - 1, fz) };
+        return phys.aquatic || depth <= phys.core.drown_depth_m;
+    }
     let (x, y, z) = (i64::from(c.site.x), c.site.y, c.site.z);
     if !view.is_support(x, y, z) {
         return false;
     }
-    let phys = fauna.config.founder(c.lineage);
     phys.aquatic || view.water_depth_m(x, y, z) <= phys.core.drown_depth_m
 }
 
@@ -4827,7 +5029,6 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
         k += 1;
         keep[k - 1]
     });
-    let voxel_m = view.config.voxel_m;
     for c in due {
         let sc = fauna.config.founder(c.lineage).core;
         // The last hatchling takes the remainder, so the clutch is divided exactly: the
@@ -4844,7 +5045,7 @@ fn hatch(fauna: &mut Fauna, view: &VoxelView<'_>, newborns: &mut Vec<Animal>) {
             left_o -= o;
             left_m -= m;
             left_e -= e;
-            let young = hatchling(fauna, &c, sc.body_min, o, m, e, voxel_m);
+            let young = hatchling(fauna, &c, sc.body_min, o, m, e, view);
             newborns.push(young);
         }
     }
@@ -4859,8 +5060,9 @@ fn hatchling(
     o: f64,
     m: f64,
     e: f64,
-    voxel_m: f64,
+    view: &VoxelView<'_>,
 ) -> Animal {
+    let voxel_m = view.config.voxel_m;
     let lifespan_median_s = fauna.config.founder(c.lineage).core.lifespan_median_s;
     fauna.ledger.hatched += 1;
     fauna.ledger.eggs_hatched_by_founder[c.lineage.index()] += 1;
@@ -4869,14 +5071,32 @@ fn hatchling(
         mineral: m,
         energy: e,
     };
-    newborn(
+    // VINE-C: a clutch in the vines hatches clinging to its face, where it can.
+    let phys = *fauna.config.founder(c.lineage);
+    let cling = match (c.face, phys.flight) {
+        (Some(face), Some(flight)) => crate::flight::vine_cling(view, &phys, &flight, body_min, face).map(|p| (face, p)),
+        _ => None,
+    };
+    let (site, pose) = match cling {
+        Some((_, (pose, under))) => (under, pose),
+        None => (c.site, crate::Pose::at_site(c.site, voxel_m)),
+    };
+    let mut young = newborn(
         fauna,
         (crate::Species::Frondgrazer, Some(c.lineage)),
-        (c.site, crate::Pose::at_site(c.site, voxel_m)),
+        (site, pose),
         body_min,
         parcel,
         lifespan_median_s,
-    )
+    );
+    if let Some((face, _)) = cling {
+        young.mobility.mode = crate::MobilityMode::Perched;
+        young.mobility.perch = Some(crate::Perch {
+            kind: crate::PerchKind::VineFace,
+            anchor: crate::PerchAnchor::Vine(face),
+        });
+    }
+    young
 }
 
 /// **The dormant egg bank's tick** (predation §2.13): each dormant egg hears the prey of
@@ -4959,7 +5179,7 @@ fn dormant_eggs(
             if let Some(host) = host_for(fauna, newborns, &c, (ex, ez), ring) {
                 fauna.clutches.remove(k);
                 let (o, m, e) = (c.organic, c.mineral, c.energy);
-                let mut young = hatchling(fauna, &c, phys.core.body_min, o, m, e, v);
+                let mut young = hatchling(fauna, &c, phys.core.body_min, o, m, e, view);
                 young.attached = Some(crate::Attachment { host: host.id });
                 young.site = host.site;
                 young.pose = host.pose;

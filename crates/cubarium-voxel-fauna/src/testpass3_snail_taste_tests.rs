@@ -167,6 +167,7 @@ fn clutch(c: FaunaConfig, s: Site) -> Fauna {
         dormancy: None,
         wet_ticks: 0,
         dry_ticks: 0,
+        face: None,
     };
     f.ledger.introduced_organic_in += egg.organic;
     f.ledger.introduced_mineral_in += egg.mineral;

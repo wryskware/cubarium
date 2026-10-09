@@ -1562,6 +1562,11 @@ pub struct Clutch {
     pub wet_ticks: u32,
     #[serde(default)]
     pub dry_ticks: u32,
+    /// **A clutch in the vines** (VINE-C, [`EggSite::Vine`]): the latticevine-covered wall
+    /// face the eggs lie on; `site` is then the support face below them, where they would
+    /// fall. `None` for a clutch on its support face.
+    #[serde(default)]
+    pub face: Option<cubarium_voxel_flora::Face>,
 }
 
 impl Clutch {
@@ -3288,6 +3293,15 @@ pub struct FaunaLedger {
     /// Layings the nest-site brake refused ([`Reproduction::nest_crowd_max`]), events.
     #[serde(default)]
     pub nest_refusals_by_founder: [u64; Founder::COUNT],
+    /// VINE-C: clutches laid on a latticevine face ([`EggSite::Vine`]), by lineage.
+    #[serde(default)]
+    pub vine_clutches_by_founder: [u64; Founder::COUNT],
+    /// VINE-C: controller samples a vine nester, ready to lay, held at a nest site, and flew
+    /// toward one it found ([`crate::Flight::nest_search_m`]), by lineage. Diagnostics.
+    #[serde(default)]
+    pub nest_holds_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub nest_searches_by_founder: [u64; Founder::COUNT],
     /// Layings or conceptions the body ceiling compute guard refused
     /// ([`FaunaConfig::lineage_body_ceiling`]), events. Any is a failure of the brakes.
     #[serde(default)]
@@ -3835,11 +3849,13 @@ pub enum Steer {
     Leave,
     /// HUNGRY-SEARCH: a hungry forager's search leg.
     Search,
+    /// VINE-C: a vine nester's hold at, or flight to, a nest site.
+    Nest,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 15] = [
+    pub const ALL: [Steer; 16] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3855,6 +3871,7 @@ impl Steer {
         Steer::Drop,
         Steer::Leave,
         Steer::Search,
+        Steer::Nest,
     ];
 
     /// A short name for tables.
@@ -3875,6 +3892,7 @@ impl Steer {
             Steer::Drop => "drop",
             Steer::Leave => "leave",
             Steer::Search => "search",
+            Steer::Nest => "nest",
         }
     }
 }
@@ -4847,6 +4865,7 @@ impl Fauna {
                 dormancy: Some(Dormancy::draw(&self.config.predation, c.seed, serial, self.tick)),
                 wet_ticks: 0,
                 dry_ticks: 0,
+                face: None,
             });
             self.ledger.eggs_buried += 1;
             self.ledger.introduced_organic_in += organic;

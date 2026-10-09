@@ -905,7 +905,8 @@ fn a_sip_takes_vine_and_bloomcrown_nectar_the_books_close_and_an_empty_flower_gi
         assert_eq!(animal(&fauna, id).last_bloom, Some(Bloom::Vine(face)), "the pollen seam");
         assert_eq!(flora.view().cover.face(face).unwrap().visits, visits_before + 1,
             "repeated sips book one arrival at this flowering face");
-        assert_eq!(flora.view().ledger.flower_visits[1], flower_visits_before + 1,
+        // VINE-C: the one visit also pollinates any other open flower its wings brush.
+        assert!(flora.view().ledger.flower_visits[1] >= flower_visits_before + 1,
             "the vine visit is booked in the flora ledger");
         ledgers_close(&fauna, &flora, organic);
     }
@@ -1414,6 +1415,9 @@ fn a_bellwing_never_lays_under_a_low_perch_or_in_closed_air() {
         };
         assert_eq!(core.reproduction.mode, crate::BirthMode::Eggs, "an egg-layer");
     }
+    // The flyer's egg room is the rule under test, on litter: VINE-C put the bellwing's own
+    // nest in the vines (its vine nest asks the same room, `vine_nest_rooms` below).
+    config.founders[BW.index()].egg_site = crate::EggSite::Litter;
     let mut fauna = Fauna::new(config);
     let mut ids = Vec::new();
     for (s, y) in [(low, 1.0 - 0.1), (boxed, SURFACE + 0.5), (open, SURFACE + 0.5)] {
@@ -1509,6 +1513,8 @@ fn a_clutch_from_surplus_lays_more_eggs_the_more_surplus_up_to_clutch_max() {
             };
             (core.body_min, 0.001, core.reserve_of(core.body_max))
         };
+        // The clutch's size is under test, on litter (VINE-C nests the bellwing in vines).
+        config.founders[BW.index()].egg_site = crate::EggSite::Litter;
         let mut fauna = Fauna::new(config);
         let mut ids = Vec::new();
         for (s, eggs_above) in sites.iter().zip([1.5, 2.5, 6.5]) {
@@ -1649,4 +1655,233 @@ fn a_bellwing_approaches_a_flowering_vine_and_books_a_visit() {
         flora.view().cover.face(visited).unwrap().visits > 0,
         "the particular face receives the visit"
     );
+}
+
+
+// ------------------------------------------------------------------ VINE-C
+
+/// The distance from `p` to the square of side face `f` (`x` unwrapped near `p`), metres.
+fn to_face(p: (f64, f64, f64), f: Face) -> f64 {
+    let (bx, by, bz) = (f64::from(f.x) * V, f64::from(f.y) * V, f64::from(f.z) * V);
+    let (xr, zr) = match f.dir {
+        FaceDir::NegX => ((bx, bx), (bz, bz + V)),
+        FaceDir::PosX => ((bx + V, bx + V), (bz, bz + V)),
+        FaceDir::NegZ => ((bx, bx + V), (bz, bz)),
+        FaceDir::PosZ => ((bx, bx + V), (bz + V, bz + V)),
+        FaceDir::Down => ((bx, bx + V), (bz, bz + V)),
+    };
+    let d = |q: f64, (lo, hi): (f64, f64)| (lo - q).max(0.0).max(q - hi);
+    let (dx, dy, dz) = (d(p.0, xr), d(p.1, (by, by + V)), d(p.2, zr));
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// [`vine_wall`]'s wall with one vine covering its west faces at rows 3..=10 across every
+/// `z`: a sheet of vine, under `config`. The covered faces.
+fn vine_sheet(config: FloraConfig) -> (World, Flora, Vec<Face>) {
+    let mut world = plain_with(config_noon_or_off(false));
+    rock(&mut world, 6..=6, 1..=12);
+    let mut flora = Flora::new(config);
+    let first = Face::new(6, 3, WALL_Z, FaceDir::NegX);
+    let id = flora
+        .seed_vine(&world, VineSeed { root: Site { x: 5, y: 2, z: WALL_Z }, first, reserve: 100.0, lineage: None })
+        .expect("fixture: the vine founder");
+    let mut faces = vec![first];
+    let depth = world.config().depth;
+    // Outward from the founder's strip, row by row, so each face joins a covered one.
+    let mut zs: Vec<u32> = (0..depth).collect();
+    zs.sort_by_key(|&z| z.abs_diff(WALL_Z));
+    for y in 3..=10 {
+        for &z in &zs {
+            let f = Face::new(6, y, z, FaceDir::NegX);
+            if f != first {
+                assert!(flora.cover_face(&world, id, f, 1.0), "fixture: cover {f:?}");
+                faces.push(f);
+            }
+        }
+    }
+    (world, flora, faces)
+}
+
+/// The vine wall's world: 16 × 20 × 5 at 0.25 m, the clock off (or at noon).
+fn config_noon_or_off(noon: bool) -> VoxelConfig {
+    config(16, 20, 5, if noon { clock_at(12.0) } else { clock_off() })
+}
+
+/// **VINE-C (Wrysk 2026-10-09: one visit pollinates every open vine flower within its body
+/// span): the visit reaches the flowers the wings brush.** A sheet of vine in flower, every
+/// face holding nectar; a hungry bellwing hovers sipping at it. At its first sip every open
+/// flower within half its span (its wing disc) of where its mouth meets the wall is
+/// visited, so is every face it drank from (within its mouth's reach), more than one face
+/// in all; a flower beyond both is not; the visits booked are the faces visited.
+#[test]
+fn one_visit_pollinates_the_open_vine_flowers_within_its_span_and_none_beyond() {
+    let (world, mut flora, faces) = vine_sheet(flowering_vines());
+    for &f in &faces {
+        assert!(flora.set_spur(f, SpurPhase::Flower, 1.0e-3), "fixture: a flower on {f:?}");
+    }
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let (_, z) = centre(0, WALL_Z);
+    let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 0.005, z, 6.0 * V + 0.05, EAST, StartingStores::HUNGRY);
+    fly(&mut fauna, id, 0.0, 1.0, 0.0);
+    let n = until(&mut fauna, &world, &mut flora, 40, |f| f.view().ledger.bites_by_food[Food::Nectar.index()] >= 1);
+    assert_eq!(fauna.view().ledger.bites_by_food[Food::Nectar.index()], 1, "one sip ({n} ticks)");
+    let a = animal(&fauna, id);
+    let g = fauna.config().founder(BW).body_at(a.body);
+    let reach = r + g.mouth_reach_m;
+    let p = (a.pose.x, a.pose.y_m + 0.5 * g.height_m.max(1e-6), a.pose.z);
+    // Where the mouth meets the flat wall: straight across from it.
+    let contact = (WALL_FACE_M, p.1, p.2);
+    let mut visited = 0;
+    for &f in &faces {
+        let v = flora.view().cover.face(f).expect("covered").visits > 0;
+        let (span, mouth) = (to_face(contact, f), to_face(p, f));
+        if span < r - 1e-9 || mouth < reach - 1e-9 {
+            assert!(v, "{f:?} within the span ({span} m of {r}) or the mouth's reach ({mouth} m of {reach}) is visited");
+        }
+        if span > r + 1e-9 && mouth > reach + 1e-9 {
+            assert!(!v, "{f:?} beyond the span ({span} m) and the reach ({mouth} m) is not visited");
+        }
+        visited += usize::from(v);
+    }
+    assert!(visited >= 2, "one visit reached more than one flower: {visited}");
+    assert_eq!(flora.view().ledger.flower_visits[1], visited as u64, "each visited flower booked once");
+}
+
+/// A bellwing config ready to lay at once: a one-tick hold, no clutch wait, no nest brake,
+/// incubation `incubation_ticks`.
+fn nesting(incubation_ticks: f64) -> FaunaConfig {
+    let mut config = FaunaConfig::default();
+    let core = &mut config.founders[BW.index()].core;
+    core.reproduction = crate::Reproduction {
+        surplus_hold_s: DT,
+        birth_interval_s: 1000.0 * DT,
+        incubation_s: incubation_ticks * DT,
+        clutch_hold_max_s: 0.0,
+        nest_radius_m: 0.0,
+        ..core.reproduction
+    };
+    assert_eq!(config.founders[BW.index()].egg_site, crate::EggSite::Vine, "the bellwing nests in the vines");
+    config
+}
+
+/// **VINE-C (Wrysk 2026-10-09: "bellwings can also nest in the vines"): a bellwing ready to
+/// lay lays on the vine it hovers at, and its young hatch clinging there.** A bellwing with
+/// a full reserve hovers at a vine-covered wall: within a few ticks it lays one clutch, on a
+/// covered face within its mouth's reach, booked as a vine clutch. At term every egg
+/// hatches into a bellwing perched on that face, pressed against it. The books close through
+/// the laying and the hatching.
+#[test]
+fn a_ready_bellwing_lays_on_the_vine_and_its_young_hatch_clinging_there() {
+    let (world, mut flora, faces) = vine_wall(true, FloraConfig::default());
+    let organic = flora.view().organic();
+    let mut fauna = Fauna::new(nesting(40.0));
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let (_, z) = centre(0, WALL_Z);
+    let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 0.005, z, 6.0 * V + 0.05, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    let n = until(&mut fauna, &world, &mut flora, 20, |f| f.view().ledger.clutches_by_founder[BW.index()] >= 1);
+    let l = &fauna.view().ledger;
+    assert_eq!(l.clutches_by_founder[BW.index()], 1, "a clutch within 20 ticks ({n})");
+    assert_eq!(l.vine_clutches_by_founder[BW.index()], 1, "booked as a vine clutch");
+    let c = *fauna.view().clutches.iter().find(|c| c.lineage == BW).expect("the clutch");
+    let face = c.face.expect("the clutch lies on a vine face");
+    assert!(faces.contains(&face), "on the covered wall: {face:?}");
+    let a = animal(&fauna, id);
+    let g = fauna.config().founder(BW).body_at(a.body);
+    let p = (a.pose.x, a.pose.y_m + 0.5 * g.height_m.max(1e-6), a.pose.z);
+    assert!(to_face(p, face) <= r + g.mouth_reach_m + 1e-9, "within its mouth's reach");
+    ledgers_close(&fauna, &flora, organic);
+
+    let hatched = until(&mut fauna, &world, &mut flora, 80, |f| f.view().ledger.eggs_hatched_by_founder[BW.index()] >= u64::from(c.count));
+    assert_eq!(fauna.view().ledger.eggs_hatched_by_founder[BW.index()], u64::from(c.count), "every egg hatched ({hatched} ticks)");
+    let young: Vec<Animal> = fauna.view().animals.iter().filter(|b| b.founder == Some(BW) && b.id != id).copied().collect();
+    assert_eq!(young.len(), c.count as usize);
+    for b in &young {
+        assert_eq!(b.mobility.mode, MobilityMode::Perched, "{:?}", b.mobility);
+        assert_eq!(b.mobility.perch.map(|p| p.anchor), Some(crate::PerchAnchor::Vine(face)), "clinging to the nest face");
+        let gap = WALL_FACE_M - b.pose.x;
+        assert!(gap >= r - 1e-9 && gap <= r + crate::flight::CLING_M, "pressed against the wall: {gap} m from it");
+        assert_eq!(b.pose.y_m.div_euclid(V) as u32, face.y, "at the face's row");
+    }
+    ledgers_close(&fauna, &flora, organic);
+}
+
+/// **VINE-C ("they cant nest on bloomcrowns"): with bloomcrowns near and no vine, a ready
+/// bellwing lays nothing.** A bellwing with a full reserve hovers over a full-grown
+/// bloomcrown's crown, and another perches on its crown top, over littered ground that the
+/// old litter rule would have taken: in 60 ticks neither lays and both keep their reserve
+/// for it. A third hovers in the open over the littered plain: nothing either.
+#[test]
+fn with_bloomcrowns_near_and_no_vine_a_ready_bellwing_lays_nothing() {
+    let mut world = plain_with(config(16, 20, 9, clock_at(12.0)));
+    let mut flora = Flora::new(FloraConfig::default());
+    let site = full_stand(&mut flora, &world, Plant::Bloomcrown, 8, 4);
+    for s in [site, Site { x: 3, y: 2, z: 4 }] {
+        assert!(flora.deposit(
+            s,
+            cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Litter, organic: 0.2, mineral: 0.004, energy: 0.4 }
+        ));
+    }
+    let _ = &mut world;
+    let mut fauna = Fauna::new(nesting(40.0));
+    let top = crown_top(&flora, site);
+    let (x, z) = centre(8, 4);
+    let over = aloft(&mut fauna, &world, x, z, top + 0.3, EAST, StartingStores::FULL);
+    let on = aloft(&mut fauna, &world, x, z, top, EAST, StartingStores::FULL);
+    let (ox, oz) = centre(3, 4);
+    let open = aloft(&mut fauna, &world, ox, oz, SURFACE + 0.5, EAST, StartingStores::FULL);
+    for id in [over, on, open] {
+        fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    }
+    steps(&mut fauna, &world, &mut flora, 60);
+    let l = &fauna.view().ledger;
+    assert_eq!(l.clutches_by_founder[BW.index()], 0, "no clutch on a bloomcrown or the ground");
+    assert!(fauna.view().clutches.is_empty());
+    for id in [over, on, open] {
+        assert_eq!(animal(&fauna, id).reproduction.given, 0.0, "nothing given to eggs");
+    }
+}
+
+/// **VINE-C: a vine nest asks the same room as any flyer's egg.** The same vine wall with a
+/// rock roof a quarter metre over the hovering bellwing's row: the hatchling would cling
+/// with no room to fly from, so it lays nothing there.
+#[test]
+fn vine_nest_rooms() {
+    let (mut world, mut flora, _) = vine_wall(true, FloraConfig::default());
+    // A roof over the columns in front of the wall at y = 8 (the face rows 3..=7 under it).
+    let depth = world.config().depth;
+    for z in 0..depth {
+        for x in 0..=5i64 {
+            world.apply(WorldCommand::SetMaterial { x, y: 8, z, material: Material::Rock });
+        }
+    }
+    let mut fauna = Fauna::new(nesting(40.0));
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let (_, z) = centre(0, WALL_Z);
+    let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 0.005, z, 6.0 * V + 0.05, EAST, StartingStores::FULL);
+    fly(&mut fauna, id, 0.0, 0.0, 0.0);
+    steps(&mut fauna, &world, &mut flora, 20);
+    assert_eq!(fauna.view().ledger.clutches_by_founder[BW.index()], 0, "no room under the roof: no clutch");
+}
+
+/// **VINE-C: a ready bellwing out of reach of any vine looks for one and lays there.** On its
+/// own heuristic, a bellwing with a full reserve hovering 1.5 m from a vine-covered wall
+/// (inside its [`crate::Flight::nest_search_m`]) flies to the wall and lays its clutch on a
+/// covered face within 300 ticks, its nest search booked.
+#[test]
+fn a_ready_bellwing_flies_to_a_vine_it_can_find_and_lays_there() {
+    let (world, mut flora, faces) = vine_wall(true, FloraConfig::default());
+    let mut fauna = Fauna::new(nesting(1e6));
+    assert!(fauna.config().founder(BW).flight.expect("a flyer").nest_search_m > 1.5 + 0.5, "fixture: the wall is in range");
+    let r = bellwing_flight(&fauna).span_m / 2.0;
+    let (_, z) = centre(0, WALL_Z);
+    let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 1.5, z, 6.0 * V + 0.05, EAST, StartingStores::FULL);
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(BW, teachers)));
+    let n = until(&mut fauna, &world, &mut flora, 300, |f| f.view().ledger.clutches_by_founder[BW.index()] >= 1);
+    assert_eq!(fauna.view().ledger.clutches_by_founder[BW.index()], 1, "it found the vine and laid ({n} ticks), at {:?}", animal(&fauna, id).pose);
+    let face = fauna.view().clutches[0].face.expect("in the vines");
+    assert!(faces.contains(&face));
+    assert!(fauna.view().ledger.nest_searches_by_founder[BW.index()] > 0, "it searched");
 }

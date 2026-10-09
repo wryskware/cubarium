@@ -399,6 +399,48 @@ pub(crate) fn placement(
     Some((site, perch))
 }
 
+/// **A flyer clinging to a vine-covered wall face** (VINE-C, the vine nest): the pose of a
+/// body holding `body` of structure pressed against `face` — its disc's edge half a cling
+/// gap off the wall at the face's middle, facing it, its middle at the face's row (else its
+/// base at the row's foot or its top at the row's head, whichever fits first) — and the
+/// support face below it. `None` for an underside face, a face whose front cell is solid or
+/// out of the world, or no pose that fits ([`placement`]).
+pub(crate) fn vine_cling(
+    view: &VoxelView<'_>,
+    phys: &FounderPhysiology,
+    flight: &Flight,
+    body: f64,
+    face: VineFace,
+) -> Option<(crate::Pose, Site)> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let shape = Shape::of(phys, flight, body);
+    // Into the wall from the front, as (dx, dz).
+    let (ix, iz) = match face.dir {
+        FaceDir::NegX => (1.0, 0.0),
+        FaceDir::PosX => (-1.0, 0.0),
+        FaceDir::NegZ => (0.0, 1.0),
+        FaceDir::PosZ => (0.0, -1.0),
+        FaceDir::Down => return None,
+    };
+    let (cx, cz) = ((f64::from(face.x) + 0.5) * v, (f64::from(face.z) + 0.5) * v);
+    // The wall's plane is half a voxel from the cell's centre; the body stands off it.
+    let off = 0.5 * v + shape.r + 0.5 * CLING_M;
+    let (x, z) = ((cx - ix * off).rem_euclid(f64::from(c.width) * v), cz - iz * off);
+    if !(z >= 0.0 && z < f64::from(c.depth) * v) {
+        return None;
+    }
+    let row = f64::from(face.y) * v;
+    let heading = ix.atan2(iz);
+    for y in [row + 0.5 * (v - shape.h), row, row + v - shape.h] {
+        let pose = crate::Pose { x, z, heading_rad: heading, y_m: y.max(0.0) };
+        if let Some((site, _)) = placement(view, phys, flight, body, &pose) {
+            return Some((pose, site));
+        }
+    }
+    None
+}
+
 /// One tick of air motion: what moved and what it landed on.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Moved {
@@ -625,6 +667,148 @@ fn box_distance(p: (f64, f64, f64), x: (f64, f64), y: (f64, f64), z: (f64, f64))
     (dx * dx + dy * dy + dz * dz).sqrt()
 }
 
+/// One latticevine face a reach takes in ([`vine_faces_within`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct VineReach {
+    pub face: VineFace,
+    /// The distance from the reaching point to the face's square, metres.
+    pub d: f64,
+    /// What the caller's reading of the face gave.
+    pub stock: f64,
+}
+
+/// **The latticevine faces within `reach` of `p`** (VINE-C, Wrysk 2026-10-09: option C, "bites
+/// and pollination act over a body-sized patch, not one face"): every covered face whose
+/// square lies within `reach` metres of `p` and that `front_of` is in front of, with what
+/// `read` gives for it (`None` leaves the face out). Scanned over every cell the reach
+/// covers, in metres, so the patch is the same area at any voxel size. Cells in `y`, `z`,
+/// `x` order and the faces of a cell in [`FaceDir::ALL`] order.
+pub(crate) fn vine_faces_within(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    p: (f64, f64, f64),
+    front_of: (f64, f64, f64),
+    reach: f64,
+    mut read: impl FnMut(&cubarium_voxel_flora::CoveredFace) -> Option<f64>,
+) -> Vec<VineReach> {
+    let mut out = Vec::new();
+    if fv.cover.face_count() == 0 || !(reach >= 0.0) || !reach.is_finite() {
+        return out;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let lo = |q: f64| ((q - reach) / v).floor() as i64;
+    let hi = |q: f64| ((q + reach) / v).floor() as i64;
+    let (x0, x1) = (lo(p.0), hi(p.0).min(lo(p.0) + i64::from(c.width) - 1));
+    for sy in lo(p.1).max(0)..=hi(p.1).min(i64::from(c.height) - 1) {
+        for sz in lo(p.2).max(0)..=hi(p.2).min(i64::from(c.depth) - 1) {
+            for sx in x0..=x1 {
+                let wx = wrap(sx, c.width);
+                if !view.is_solid(wx, sy as u32, sz as u32) {
+                    continue;
+                }
+                let (bx, by, bz) = (sx as f64 * v, sy as f64 * v, sz as f64 * v);
+                for dir in FaceDir::ALL {
+                    // The face's square, and whether `front_of` is in front of its plane.
+                    let (xr, yr, zr) = face_square(dir, (bx, by, bz), v);
+                    let front = match dir {
+                        FaceDir::NegX => front_of.0 < bx,
+                        FaceDir::PosX => front_of.0 > bx + v,
+                        FaceDir::NegZ => front_of.2 < bz,
+                        FaceDir::PosZ => front_of.2 > bz + v,
+                        FaceDir::Down => front_of.1 < by,
+                    };
+                    if !front {
+                        continue;
+                    }
+                    let d = box_distance(p, xr, yr, zr);
+                    if d > reach {
+                        continue;
+                    }
+                    let face = VineFace::new(wx as u32, sy as u32, sz as u32, dir);
+                    let Some(stock) = fv.cover.face(face).and_then(&mut read) else {
+                        continue;
+                    };
+                    out.push(VineReach { face, d, stock });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// What a face holds of `phase`'s product, `None` unless it is in that phase holding some.
+pub(crate) fn spur_held(cf: &cubarium_voxel_flora::CoveredFace, phase: SpurPhase) -> Option<f64> {
+    let stock = match phase {
+        SpurPhase::Flower => cf.nectar,
+        SpurPhase::Fruit => cf.fruit,
+        _ => return None,
+    };
+    (cf.spur == phase && stock > 0.0).then_some(stock)
+}
+
+/// The faces in `phase` holding product within `reach` of `p` (the mouth's patch).
+pub(crate) fn vine_patch(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64, phase: SpurPhase) -> Vec<VineReach> {
+    vine_faces_within(view, fv, p, p, reach, |cf| spur_held(cf, phase))
+}
+
+/// The mouth's patch at a vine: `(the nearest face, its distance, the patch's whole stock)`.
+/// The first face scanned wins a tie.
+fn vine_patch_stock(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f64, f64), reach: f64, phase: SpurPhase) -> Option<(VineFace, f64, f64)> {
+    let patch = vine_patch(view, fv, p, reach, phase);
+    let mut nearest: Option<&VineReach> = None;
+    for r in &patch {
+        if nearest.is_none_or(|n| r.d < n.d) {
+            nearest = Some(r);
+        }
+    }
+    let n = nearest?;
+    Some((n.face, n.d, patch.iter().map(|r| r.stock).sum()))
+}
+
+/// **The flowers one pollinator visit reaches** (VINE-C, Wrysk 2026-10-09: "one visit
+/// pollinates every open vine flower within its body span"): the open flowers (in flower,
+/// nectar or not) within `half_span` metres of the point where the mouth at `p` meets the
+/// sipped face `at` — the patch of wall the wings brush — that `p` is in front of, plus every
+/// face in `sipped` (the mouth touched those). Each face once.
+pub(crate) fn pollinated_faces(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    p: (f64, f64, f64),
+    at: VineFace,
+    half_span: f64,
+    sipped: &[VineFace],
+) -> Vec<VineFace> {
+    let mut out: Vec<VineFace> = sipped.to_vec();
+    let c = view.config;
+    let v = c.voxel_m;
+    // Where the mouth meets the wall: the sipped face's point nearest the mouth, its cell's
+    // `x` taken around the ring to the copy nearest the mouth.
+    let ring = f64::from(c.width) * v;
+    let mut bx = f64::from(at.x) * v;
+    bx += ((p.0 - bx) / ring).round() * ring;
+    let (xr, yr, zr) = face_square(at.dir, (bx, f64::from(at.y) * v, f64::from(at.z) * v), v);
+    let contact = (p.0.clamp(xr.0, xr.1), p.1.clamp(yr.0, yr.1), p.2.clamp(zr.0, zr.1));
+    for r in vine_faces_within(view, fv, contact, p, half_span.max(0.0), |cf| (cf.spur == SpurPhase::Flower).then_some(0.0)) {
+        if !out.contains(&r.face) {
+            out.push(r.face);
+        }
+    }
+    out
+}
+
+/// The square of the `dir` face of the cell whose low corner is `(bx, by, bz)`, as
+/// `(x range, y range, z range)`; one range is a single value, the face's plane.
+fn face_square(dir: FaceDir, (bx, by, bz): (f64, f64, f64), v: f64) -> ((f64, f64), (f64, f64), (f64, f64)) {
+    match dir {
+        FaceDir::NegX => ((bx, bx), (by, by + v), (bz, bz + v)),
+        FaceDir::PosX => ((bx + v, bx + v), (by, by + v), (bz, bz + v)),
+        FaceDir::NegZ => ((bx, bx + v), (by, by + v), (bz, bz)),
+        FaceDir::PosZ => ((bx, bx + v), (by, by + v), (bz + v, bz + v)),
+        FaceDir::Down => ((bx, bx + v), (by, by), (bz, bz + v)),
+    }
+}
+
 /// The top foliage-bearing layer of a stand: its flower head, where a bloom is.
 fn bloom_layer(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand) -> Option<StandLayer> {
     fv.profile_layers(stand)
@@ -706,43 +890,11 @@ fn bloom_in_reach_among<'a>(view: &VoxelView<'_>, fv: &FloraView<'_>, p: (f64, f
             }
         }
     }
-    if fv.cover.face_count() > 0 {
-        let (cx, cy, cz) = ((p.0 / v).floor() as i64, (p.1 / v).floor() as i64, (p.2 / v).floor() as i64);
-        for sy in cy - 1..=cy + 1 {
-            if sy < 0 || sy >= i64::from(c.height) {
-                continue;
-            }
-            for sz in cz - 1..=cz + 1 {
-                if sz < 0 || sz >= i64::from(c.depth) {
-                    continue;
-                }
-                for sx in cx - 1..=cx + 1 {
-                    let wx = wrap(sx, c.width);
-                    if !view.is_solid(wx, sy as u32, sz as u32) {
-                        continue;
-                    }
-                    let (x0, y0, z0) = (sx as f64 * v, sy as f64 * v, sz as f64 * v);
-                    for dir in FaceDir::ALL {
-                        // The face's plane, and whether `p` is in front of it.
-                        let (front, d) = match dir {
-                            FaceDir::NegX => (p.0 < x0, box_distance(p, (x0, x0), (y0, y0 + v), (z0, z0 + v))),
-                            FaceDir::PosX => (p.0 > x0 + v, box_distance(p, (x0 + v, x0 + v), (y0, y0 + v), (z0, z0 + v))),
-                            FaceDir::NegZ => (p.2 < z0, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0, z0))),
-                            FaceDir::PosZ => (p.2 > z0 + v, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0 + v, z0 + v))),
-                            FaceDir::Down => (p.1 < y0, box_distance(p, (x0, x0 + v), (y0, y0), (z0, z0 + v))),
-                        };
-                        if !front || d > reach || best.as_ref().is_some_and(|b| d >= b.0) {
-                            continue;
-                        }
-                        let face = VineFace::new(wx as u32, sy as u32, sz as u32, dir);
-                        if let Some(cf) = fv.cover.face(face) {
-                            if cf.spur == SpurPhase::Flower && cf.nectar > 0.0 {
-                                best = Some((d, Bloom::Vine(face), cf.nectar));
-                            }
-                        }
-                    }
-                }
-            }
+    // VINE-C (Wrysk 2026-10-09, option C): a mouth at a vine takes in every face in reach,
+    // so the stock it reads is their sum, named by the nearest.
+    if let Some((face, d, total)) = vine_patch_stock(view, fv, p, reach, SpurPhase::Flower) {
+        if best.as_ref().is_none_or(|b| d < b.0) {
+            best = Some((d, Bloom::Vine(face), total));
         }
     }
     best.map(|(_, b, n)| (b, n))
@@ -974,42 +1126,11 @@ pub(crate) fn fruit_in_reach(
             }
         }
     }
-    if fv.cover.face_count() > 0 {
-        let (cx, cy, cz) = ((p.0 / v).floor() as i64, (p.1 / v).floor() as i64, (p.2 / v).floor() as i64);
-        for sy in cy - 1..=cy + 1 {
-            if sy < 0 || sy >= i64::from(c.height) {
-                continue;
-            }
-            for sz in cz - 1..=cz + 1 {
-                if sz < 0 || sz >= i64::from(c.depth) {
-                    continue;
-                }
-                for sx in cx - 1..=cx + 1 {
-                    let wx = wrap(sx, c.width);
-                    if !view.is_solid(wx, sy as u32, sz as u32) {
-                        continue;
-                    }
-                    let (x0, y0, z0) = (sx as f64 * v, sy as f64 * v, sz as f64 * v);
-                    for dir in FaceDir::ALL {
-                        let (front, d) = match dir {
-                            FaceDir::NegX => (p.0 < x0, box_distance(p, (x0, x0), (y0, y0 + v), (z0, z0 + v))),
-                            FaceDir::PosX => (p.0 > x0 + v, box_distance(p, (x0 + v, x0 + v), (y0, y0 + v), (z0, z0 + v))),
-                            FaceDir::NegZ => (p.2 < z0, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0, z0))),
-                            FaceDir::PosZ => (p.2 > z0 + v, box_distance(p, (x0, x0 + v), (y0, y0 + v), (z0 + v, z0 + v))),
-                            FaceDir::Down => (p.1 < y0, box_distance(p, (x0, x0 + v), (y0, y0), (z0, z0 + v))),
-                        };
-                        if !front || d > reach || best.as_ref().is_some_and(|b| d >= b.0) {
-                            continue;
-                        }
-                        let face = VineFace::new(wx as u32, sy as u32, sz as u32, dir);
-                        if let Some(cf) = fv.cover.face(face) {
-                            if cf.spur == SpurPhase::Fruit && cf.fruit > 0.0 {
-                                best = Some((d, Bloom::Vine(face), cf.fruit));
-                            }
-                        }
-                    }
-                }
-            }
+    // VINE-C (Wrysk 2026-10-09, option C): a mouth at a vine takes in every face in reach,
+    // so the stock it reads is their sum, named by the nearest.
+    if let Some((face, d, total)) = vine_patch_stock(view, fv, p, reach, SpurPhase::Fruit) {
+        if best.as_ref().is_none_or(|b| d < b.0) {
+            best = Some((d, Bloom::Vine(face), total));
         }
     }
     best.map(|(_, b, n)| (b, n))
@@ -1167,11 +1288,16 @@ impl OpenAir {
 
     /// Whether the air cell over support face `site` is in the open air.
     pub(crate) fn over_face_is_open(&self, site: Site) -> bool {
-        let y = site.y as usize + 1;
+        self.cell_is_open(site.x, site.y + 1, site.z)
+    }
+
+    /// Whether the air cell `(x, y, z)` is part of the open air.
+    pub(crate) fn cell_is_open(&self, x: u32, y: u32, z: u32) -> bool {
+        let y = y as usize;
         if y >= self.height || self.open == u32::MAX {
             return false;
         }
-        let k = (site.z as usize * self.height + y) * self.width + site.x as usize;
+        let k = (z as usize * self.height + y) * self.width + x as usize;
         self.comp.get(k).is_some_and(|&c| c == self.open)
     }
 }

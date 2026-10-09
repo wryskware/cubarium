@@ -1085,3 +1085,151 @@ fn a_hungry_seedporter_sees_vine_fruit_climbs_to_it_and_eats() {
         "the plant and animal consumption ledgers agree");
     ledgers_close(&fauna, &flora, organic);
 }
+
+// ------------------------------------------------------------------ VINE-C: a bite over a patch
+
+/// The distance from `p` to the square of wall face `f` (a side face; `x` unwrapped near
+/// `p`), metres.
+fn to_face(p: (f64, f64, f64), f: Face, v: f64) -> f64 {
+    let (bx, by, bz) = (f64::from(f.x) * v, f64::from(f.y) * v, f64::from(f.z) * v);
+    let (xr, zr) = match f.dir {
+        FaceDir::NegX => ((bx, bx), (bz, bz + v)),
+        FaceDir::PosX => ((bx + v, bx + v), (bz, bz + v)),
+        FaceDir::NegZ => ((bx, bx + v), (bz, bz)),
+        FaceDir::PosZ => ((bx, bx + v), (bz + v, bz + v)),
+        FaceDir::Down => ((bx, bx + v), (bz, bz + v)),
+    };
+    let yr = if f.dir == FaceDir::Down { (by, by) } else { (by, by + v) };
+    let d = |q: f64, (lo, hi): (f64, f64)| (lo - q).max(0.0).max(q - hi);
+    let (dx, dy, dz) = (d(p.0, xr), d(p.1, yr), d(p.2, zr));
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// **VINE-C (Wrysk 2026-10-09, option C): a vine bite draws on every fruiting face within
+/// the mouth's reach, and on none beyond.** A seedporter climbs the vine wall in fruit; every
+/// covered face is then set to the same beads. At its first fruit bite, every face that lost
+/// beads lies within its mouth's reach (its radius plus its mouth reach, from its middle),
+/// more than one face lost beads, every face beyond the reach kept all of its beads, and the
+/// faces in reach each gave the same share. The books close.
+#[test]
+fn a_vine_bite_draws_on_every_face_in_reach_and_none_beyond() {
+    let (world, mut flora, faces) = vine_wall_in_fruit();
+    let mut fauna = Fauna::new(FaunaConfig::default());
+    let id = on_ground(&mut fauna, &world, SP, 3, 2, HUNGRY_ADULT);
+    hold(&mut fauna, id, 1.0, 0.0);
+    until(&mut fauna, &world, &mut flora, 150, |f| {
+        let a = animal(f, id);
+        a.mobility.mode == MobilityMode::Climb && a.pose.y_m >= SURFACE + V
+    });
+    assert_eq!(mode(&fauna, id), MobilityMode::Climb, "fixture: on the vine");
+    hold(&mut fauna, id, 0.0, 1.0);
+    let beads = 1.0e-3;
+    for &f in &faces {
+        assert!(flora.set_spur(f, SpurPhase::Fruit, beads), "fixture: beads on {f:?}");
+    }
+    let organic = flora.view().organic();
+    let n = until(&mut fauna, &world, &mut flora, 60, |f| f.view().ledger.bites_by_food[Food::Fruit.index()] >= 1);
+    assert!(fauna.view().ledger.bites_by_food[Food::Fruit.index()] == 1, "one fruit bite within 60 ticks ({n})");
+    let a = animal(&fauna, id);
+    let phys = fauna.config().founder(SP);
+    let g = phys.body_at(a.body);
+    let reach = g.footprint_radius() + g.mouth_reach_m;
+    let p = (a.pose.x, a.pose.y_m + 0.5 * g.height_m.max(1e-6), a.pose.z);
+    let mut drawn = Vec::new();
+    for &f in &faces {
+        let left = flora.view().cover.face(f).map_or(0.0, |c| c.fruit);
+        let d = to_face(p, f, V);
+        if left < beads {
+            assert!(d <= reach + 1e-9, "{f:?} gave beads from {d} m, beyond the reach {reach} m");
+            drawn.push(beads - left);
+        }
+        if d > reach + 1e-9 {
+            assert_eq!(left, beads, "{f:?} beyond the reach ({d} m > {reach} m) keeps its beads");
+        }
+    }
+    assert!(drawn.len() >= 2, "the bite reached more than one face: {drawn:?}");
+    for x in &drawn {
+        assert!((x - drawn[0]).abs() <= 1e-12, "equal beads give equal shares: {drawn:?}");
+    }
+    let eaten = fauna.view().ledger.eaten_by_food[Food::Fruit.index()];
+    assert!((drawn.iter().sum::<f64>() - eaten).abs() <= 1e-12, "the faces lost what it ate");
+    ledgers_close(&fauna, &flora, organic);
+}
+
+/// A plain of `voxel_m` cells, `w × h × d` cells, soil to 0.75 m, a rock column filling the
+/// cells over `[1.5, 1.75)` m in `x` from the soil up to 2.5 m, and one vine covering the
+/// wall's west faces over `z ∈ [0.5, 0.75)` m, `y ∈ [0.75, 1.0)` m: one face at 0.25 m, four
+/// at 0.125 m. The covered faces.
+fn wall_at(voxel_m: f64) -> (World, Flora, Vec<Face>) {
+    let k = (0.25 / voxel_m).round() as u32;
+    let mut w = World::empty(VoxelConfig {
+        width: 16 * k,
+        height: 12 * k,
+        depth: 8 * k,
+        voxel_m,
+        seed: 7,
+        day: clock_off(),
+        ..VoxelConfig::default()
+    });
+    let c = w.config().clone();
+    for z in 0..c.depth {
+        for x in 0..i64::from(c.width) {
+            for y in 0..3 * k {
+                w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Soil });
+            }
+        }
+    }
+    for z in 0..c.depth {
+        for x in i64::from(6 * k)..i64::from(7 * k) {
+            for y in 3 * k..10 * k {
+                w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Rock });
+            }
+        }
+    }
+    let mut flora = Flora::new(FloraConfig::default());
+    let wf = |y: u32, z: u32| Face::new(6 * k, y, z, FaceDir::NegX);
+    let first = wf(3 * k, 2 * k);
+    let id = flora
+        .seed_vine(&w, VineSeed { root: Site { x: 6 * k - 1, y: 3 * k - 1, z: 2 * k }, first, reserve: 100.0, lineage: None })
+        .expect("fixture: the vine roots");
+    let mut faces = vec![first];
+    for y in 3 * k..4 * k {
+        for z in 2 * k..3 * k {
+            let f = wf(y, z);
+            if f != first {
+                assert!(flora.cover_face(&w, id, f, 1.0), "fixture: cover {f:?}");
+                faces.push(f);
+            }
+        }
+    }
+    (w, flora, faces)
+}
+
+/// **VINE-C: the bite does not depend on the voxel size.** The same beads over the same
+/// square of wall — one 0.25 m face, or four 0.125 m faces holding a quarter each — read as
+/// the same stock to a mouth reaching the whole square, and the same bite takes the same
+/// fruit out of it.
+#[test]
+fn the_same_beads_over_the_same_wall_give_the_same_bite_at_two_voxel_sizes() {
+    let total = 2.0e-3;
+    // A mouth 0.1 m off the wall, level with the square's middle: every part within 0.25 m.
+    let p = (1.5 - 0.1, 0.875, 0.625);
+    let reach = 0.25;
+    let mut got = Vec::new();
+    for v in [0.25, 0.125] {
+        let (w, mut flora, faces) = wall_at(v);
+        for &f in &faces {
+            assert!(flora.set_spur(f, SpurPhase::Fruit, total / faces.len() as f64));
+        }
+        let (source, stock) = crate::flight::fruit_in_reach(&w.view(), &flora.view(), p, reach, None).expect("beads in reach");
+        assert!(matches!(source, crate::Bloom::Vine(_)), "{source:?}");
+        let patch: Vec<Face> = crate::flight::vine_patch(&w.view(), &flora.view(), p, reach, SpurPhase::Fruit).into_iter().map(|r| r.face).collect();
+        assert_eq!(patch.len(), faces.len(), "every face of the square is in reach at {v} m");
+        let bite = 0.3 * total;
+        let taken = flora.take_fruit_patch(&patch, bite).expect("a bite");
+        got.push((faces.len(), stock, taken.organic));
+    }
+    assert_eq!((got[0].0, got[1].0), (1, 4), "fixture: one face against four");
+    assert!((got[0].1 - got[1].1).abs() <= 1e-15, "the same stock read: {got:?}");
+    assert!((got[0].2 - got[1].2).abs() <= 1e-15, "the same bite taken: {got:?}");
+}

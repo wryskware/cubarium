@@ -396,6 +396,7 @@ fn founder_rows() -> Vec<Row> {
         r("flight.egg_air_refresh_s", "s", nonneg, "the open air a flyer's egg site must reach is rebuilt at most this often").optional(),
         r("flight.rain_ground_m_per_s", "m/s of rain", nonneg, "at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips").optional(),
         r("flight.rain_ground_hysteresis_m_per_s", "m/s of rain", nonneg, "a rain-grounded flyer flies again once the rain is under the threshold less this").optional(),
+        r("flight.nest_search_m", "m", nonneg, "VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch").optional(),
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),

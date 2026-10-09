@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2652 rows)
+**`fauna.*`** (2661 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1753,6 +1753,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.littershredder.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.littershredder.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.littershredder.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2024,6 +2025,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.frondgrazer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.frondgrazer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.frondgrazer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2295,6 +2297,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.lanternjaw.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.lanternjaw.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.lanternjaw.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2566,6 +2569,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.capgnawer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.capgnawer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.capgnawer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2837,6 +2841,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.loftstrider.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.loftstrider.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.loftstrider.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3108,6 +3113,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.ripple-snail.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.ripple-snail.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.ripple-snail.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3379,6 +3385,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.egg_air_refresh_s` | 600.0 | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.bellwing.flight.rain_ground_m_per_s` | 0.000005555555555555556 | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.bellwing.flight.rain_ground_hysteresis_m_per_s` | 0.000001388888888888889 | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.bellwing.flight.nest_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3650,6 +3657,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.seedporter.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.seedporter.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.seedporter.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3921,6 +3929,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.egg_air_refresh_s` | (absent) | s | [0, inf) |  | - | placeholder | the open air a flyer's egg site must reach is rebuilt at most this often |
 | `fauna.founders.chorister.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.chorister.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
+| `fauna.founders.chorister.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |

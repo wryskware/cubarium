@@ -1445,6 +1445,17 @@ pub struct Flight {
     /// flies again, m/s. 5 mm/h.
     #[serde(default = "rain_ground_hysteresis")]
     pub rain_ground_hysteresis_m_per_s: f64,
+    /// **Looking for a nest** (VINE-C, [`EggSite::Vine`]): a flyer ready to lay with no vine
+    /// face in reach flies to the nearest latticevine-covered wall face within this many
+    /// metres (level distance, within its band) that would take its clutch; with none, its
+    /// own steering goes on and it keeps its clutch. Bellwing 4.0: the range it sees a
+    /// flower's near-IR at (`SenseTable::light_m`), a wall of vine being no harder to see.
+    #[serde(default = "nest_search")]
+    pub nest_search_m: f64,
+}
+
+fn nest_search() -> f64 {
+    Flight::BELLWING.nest_search_m
 }
 
 fn rain_ground() -> f64 {
@@ -1488,6 +1499,7 @@ impl Flight {
         egg_air_refresh_s: 600.0,
         rain_ground_m_per_s: 20.0 / 1000.0 / 3600.0,
         rain_ground_hysteresis_m_per_s: 5.0 / 1000.0 / 3600.0,
+        nest_search_m: 4.0,
     };
 }
 
@@ -1508,6 +1520,13 @@ pub enum EggSite {
     /// on moist ground, by its lineage's [`Amphibious`] shore knobs. A lineage with no
     /// amphibious table finds no such face.
     Shore,
+    /// **In the vines** (VINE-C, Wrysk 2026-10-09: "bellwings can also nest in the vines. they
+    /// cant nest on bloomcrowns."): on a latticevine-covered wall face the body clings to or
+    /// touches (within its mouth's reach), with room for its hatchling to cling there
+    /// ([`Flight::egg_headroom_m`] clear over it, in the open air). The eggs lie on the face
+    /// and the young hatch clinging to it. A lineage that does not fly finds no such face; a
+    /// bloomcrown is never one.
+    Vine,
 }
 
 /// How a fresh world is founded with a lineage ([`FounderPhysiology::founding`]).
@@ -2264,6 +2283,9 @@ impl FounderPhysiology {
                 core.reproduction.surplus_hold_s = 300.0;
                 FounderPhysiology {
                     core,
+                    // VINE-C (Wrysk 2026-10-09): it nests in the vines, never on a bloomcrown
+                    // (it was the shredder's litter).
+                    egg_site: EggSite::Vine,
                     // Cruise 8 BL/s, 1 m/s at 0.125 m (§3.3).
                     cruise_body_lengths_per_s: 8.0,
                     adult_length_m: 0.125,

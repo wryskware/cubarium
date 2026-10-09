@@ -134,9 +134,15 @@ pub(crate) fn glider_fruit_in_reach(
     {
         return Some((Bloom::Stand(site), stand.fruit));
     }
+    let (p, reach) = fruit_mouth(a, phys);
+    flight::fruit_in_reach(view, fv, p, reach, held.map(Some))
+}
+
+/// The mouth's point and reach for fruit: the body's middle, and its radius plus its mouth
+/// reach (VINE-C: every fruiting vine face within it is one patch).
+fn fruit_mouth(a: &Animal, phys: &crate::FounderPhysiology) -> ((f64, f64, f64), f64) {
     let s = shape(phys, a.body);
-    let reach = s.r + phys.body_at(a.body).mouth_reach_m;
-    flight::fruit_in_reach(view, fv, flight::mouth_point(a, s), reach, held.map(Some))
+    (flight::mouth_point(a, s), s.r + phys.body_at(a.body).mouth_reach_m)
 }
 
 /// The nearest climbable stand the body walks in under: a stand rooted within a voxel of
@@ -1156,9 +1162,18 @@ fn glider_feed(
                 .unwrap_or(fauna.animals[i].site),
         ),
     };
+    // VINE-C: a bite at a vine draws on every fruiting face in the mouth's reach, each in
+    // proportion to what it holds (the stock read above is their sum).
     let taken = match source {
         Bloom::Stand(site) => flora.take_stand_fruit(site, bite),
-        Bloom::Vine(face) => flora.take_fruit(face, bite),
+        Bloom::Vine(_) => {
+            let (p, reach) = fruit_mouth(&fauna.animals[i], phys);
+            let patch: Vec<_> = flight::vine_patch(view, &flora.view(), p, reach, cubarium_voxel_flora::SpurPhase::Fruit)
+                .into_iter()
+                .map(|r| r.face)
+                .collect();
+            flora.take_fruit_patch(&patch, bite)
+        }
     };
     let Some(taken) = taken else {
         return false;
