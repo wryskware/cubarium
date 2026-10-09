@@ -760,6 +760,23 @@ control and the reward accounting; display targets after seeing results.
     'prod'". DROP-C1 (Codex) makes every lineage run its heuristic by default; v3 brains
     replace heuristics species by species.
 
+### Build order (2026-10-09)
+
+1. **Wave 1, running:**
+   - FLOWER-FRUIT (Opus): items 19 and 20;
+   - HERD (Opus): items 15 and 23;
+   - SCORE-V3 (Codex): items 10, 14, 16, 17 and 22;
+   - DROP-C1 (Codex): item 25.
+2. **Wave 2:**
+   - RHYTHMS-CADENCE (Opus): item 18, rhythms and cadence;
+   - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
+   - DECAY (Codex): item 21.
+3. A wide-world start library of year-old saves.
+4. The ecology search: per-lineage `mass_scale`, the gut ratio and supply genes. Screens on the
+   wide world for 2 h, year checks for the best.
+5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
+   and Veilhound. Sensed places plus home memory.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
