@@ -772,6 +772,11 @@ control and the reward accounting; display targets after seeing results.
    - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
    - DECAY (Codex): item 21.
 3. A wide-world start library of year-old saves.
+   - SCORE-V3 merged, 97ce0994.
+   - The wide founding probe took 472 s, including one refused-seed redraw (seed 1: bellwing
+     placed 9 of 15).
+   - At founding, 40 % of glowcaps stand on lit faces. The year target is ≤ 1 %, so founding
+     placement or glowcap survival in light needs a look.
 4. The ecology search: per-lineage `mass_scale`, the gut ratio and supply genes. Screens on the
    wide world for 2 h, year checks for the best.
 5. v3 brains, frondgrazer and littershredder first. The B/C hybrid for seedporter, loftstrider
