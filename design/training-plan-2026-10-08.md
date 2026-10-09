@@ -647,6 +647,20 @@ control and the reward accounting; display targets after seeing results.
       - ripple-snail: as decided (night and after rain, lays on land).
     - **Movement cadence:** speed varies; animals stop to pause and inspect, then move on.
 
+19. **Decided (Wrysk, 2026-10-09): a picked-clean crop rests (A).**
+    - A lanternberry or latticevine crop that has been eaten out rests like one that dropped
+      uneaten (`fruit_rest_s`, tuned by the search). Today it refills at once, about 2.3× a
+      seedporter's intake.
+    - Open: fruit is cheap for the plant. A crop costs about 1 % of a full shrub's income, at
+      one unit of reserve per unit of fruit. Lanternberries have no flowering stage.
+    - The bellwing's "pollinator" role is only a label: nothing depends on its visits.
+20. **Decided (Wrysk, 2026-10-09): near-IR is a glow.**
+    - Flowers and the lanternjaw lure **emit** near-IR, so flowers are visible at night too.
+      Bellwings are drawn to near-IR.
+    - Glowcaps show cyan only. A bellwing mistakes one only when it is close, and only if it
+      hasn't made that mistake recently (the learned expectation per class already
+      relaxes back over `forget_s`).
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
