@@ -847,6 +847,7 @@ fn drive(
     mut stage_b: Option<StageB>,
     production: Option<&super::landscape::Production>,
 ) -> Result<Episode, EpisodeError> {
+    driver.start_tap(sim.fauna_mut());
     let founder = driver.founder();
     let manifest = founder.manifest();
     let cadence = manifest.cadence_ticks().max(1);
@@ -1120,6 +1121,7 @@ fn drive(
             Reacquisition::is_reacquisition(b.r.depleted_tick, b.r.successor_first_bite_tick);
         episode.reacquisition = Some(b.r);
     }
+    driver.take_tap(sim.fauna_mut());
     Ok(episode)
 }
 

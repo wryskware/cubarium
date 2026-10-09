@@ -18,12 +18,12 @@
 //! readable next to `crate::neural::gru`. Nothing here reorders the GRU's loops:
 //! the world still evaluates gates in `(r, z, n)` order for each animal in slot order.
 
-use cubarium_core::neural::gru::{
-    GATES, GRU_PARAMETERS, Gru, HIDDEN, INPUT, OUTPUT, Z, parameter_count,
-};
+use cubarium_core::neural::gru::{GATES, GRU_PARAMETERS, Gru, HIDDEN, INPUT, OUTPUT, Z};
 use cubarium_core::neural::{ActionAdapter, Gru32, Policy, ShapePolicy};
 
 use super::rng::{gaussian, stream};
+#[cfg(test)]
+use cubarium_core::neural::gru::parameter_count;
 
 /// Number of evolved scalars: `3·H·(I + H + 2) + O·(H + 1)` = 10,215.
 pub const PARAMS: usize = GRU_PARAMETERS;
@@ -57,6 +57,8 @@ pub const OFF_B_O: usize = OFF_W_O + OUTPUT * HIDDEN;
 /// Shape-parameterized offsets, with the legacy constants above remaining byte-for-byte flat.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShapeOffsets {
+    pub hidden: usize,
+    pub outputs: usize,
     pub w_i: usize,
     pub w_h: usize,
     pub b_i: usize,
@@ -66,12 +68,19 @@ pub struct ShapeOffsets {
     pub params: usize,
 }
 pub const fn shape_offsets(input: usize, output: usize) -> ShapeOffsets {
-    let w_h = GATES * input;
-    let b_i = w_h + GATES * HIDDEN;
-    let b_h = b_i + GATES;
-    let w_o = b_h + GATES;
-    let b_o = w_o + output * HIDDEN;
+    shape_offsets_hidden(input, output, HIDDEN)
+}
+
+pub const fn shape_offsets_hidden(input: usize, output: usize, hidden: usize) -> ShapeOffsets {
+    let gates = 3 * hidden;
+    let w_h = gates * input;
+    let b_i = w_h + gates * hidden;
+    let b_h = b_i + gates;
+    let w_o = b_h + gates;
+    let b_o = w_o + output * hidden;
     ShapeOffsets {
+        hidden,
+        outputs: output,
         w_i: 0,
         w_h,
         b_i,
@@ -79,6 +88,18 @@ pub const fn shape_offsets(input: usize, output: usize) -> ShapeOffsets {
         w_o,
         b_o,
         params: b_o + output,
+    }
+}
+
+/// A view of a previously shape-checked vector in the canonical tensor order.
+pub fn gru_view<'a>(theta: &'a [f64], o: &ShapeOffsets) -> cubarium_core::neural::gru::GruView<'a> {
+    cubarium_core::neural::gru::GruView {
+        w_i: &theta[o.w_i..o.w_h],
+        w_h: &theta[o.w_h..o.b_i],
+        b_i: &theta[o.b_i..o.b_h],
+        b_h: &theta[o.b_h..o.w_o],
+        w_o: &theta[o.w_o..o.b_o],
+        b_o: &theta[o.b_o..],
     }
 }
 
@@ -113,7 +134,13 @@ pub fn flatten(w: &Gru32) -> Vec<f64> {
 }
 
 pub fn unflatten_shape<const I: usize, const O: usize>(theta: &[f64]) -> Result<Gru<I, O>, String> {
-    let o = shape_offsets(I, O);
+    unflatten_hidden::<I, O, HIDDEN>(theta)
+}
+
+pub fn unflatten_hidden<const I: usize, const O: usize, const H: usize>(
+    theta: &[f64],
+) -> Result<Gru<I, O, H>, String> {
+    let o = shape_offsets_hidden(I, O, H);
     if theta.len() != o.params {
         return Err(format!(
             "parameter vector has {} values, expected {}",
@@ -131,8 +158,8 @@ pub fn unflatten_shape<const I: usize, const O: usize>(theta: &[f64]) -> Result<
     })
 }
 
-pub fn flatten_shape<const I: usize, const O: usize>(w: &Gru<I, O>) -> Vec<f64> {
-    let mut v = Vec::with_capacity(parameter_count(I, O));
+pub fn flatten_shape<const I: usize, const O: usize, const H: usize>(w: &Gru<I, O, H>) -> Vec<f64> {
+    let mut v = Vec::with_capacity(cubarium_core::neural::gru::parameter_count_hidden(I, O, H));
     v.extend_from_slice(&w.w_i);
     v.extend_from_slice(&w.w_h);
     v.extend_from_slice(&w.b_i);
@@ -143,10 +170,16 @@ pub fn flatten_shape<const I: usize, const O: usize>(w: &Gru<I, O>) -> Vec<f64> 
 }
 
 pub fn initial_center_shape<const I: usize, const O: usize>(seed: u64) -> Vec<f64> {
-    let o = shape_offsets(I, O);
+    initial_center_runtime(I, O, HIDDEN, seed)
+}
+
+/// Seeded initialization for any manifest dimensions, including future hidden widths.
+pub fn initial_center_runtime(input: usize, output: usize, hidden: usize, seed: u64) -> Vec<f64> {
+    assert!(input > 0 && output > 0 && hidden > 0);
+    let o = shape_offsets_hidden(input, output, hidden);
     let mut theta = vec![0.; o.params];
-    let si = INIT_GAIN / (I as f64).sqrt();
-    let sh = INIT_GAIN / (HIDDEN as f64).sqrt();
+    let si = INIT_GAIN / (input as f64).sqrt();
+    let sh = INIT_GAIN / (hidden as f64).sqrt();
     for (i, x) in theta[o.w_i..o.w_h].iter_mut().enumerate() {
         *x = si * gaussian(seed, stream::ES_INIT, 0, i as u64);
     }
@@ -156,9 +189,9 @@ pub fn initial_center_shape<const I: usize, const O: usize>(seed: u64) -> Vec<f6
     for (i, x) in theta[o.w_o..o.b_o].iter_mut().enumerate() {
         *x = sh * gaussian(seed, stream::ES_INIT, 2, i as u64);
     }
-    let per = HIDDEN / RETENTION_TAUS.len();
-    for unit in 0..HIDDEN {
-        theta[o.b_h + Z + unit] =
+    let per = hidden.div_ceil(RETENTION_TAUS.len());
+    for unit in 0..hidden {
+        theta[o.b_h + hidden + unit] =
             retention_bias(RETENTION_TAUS[(unit / per).min(RETENTION_TAUS.len() - 1)]);
     }
     theta

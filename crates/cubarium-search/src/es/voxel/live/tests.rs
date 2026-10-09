@@ -1,7 +1,6 @@
 //! The live-training package's tests (`design/handoffs/voxel-live-world-training-2026-09-24.md`,
 //! "Tests"): each at most 200 ticks, no pinned hashes.
 
-use crate::es::voxel::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use cubarium_voxel::{Config, Landform, Preset, Recipe, World};
 use cubarium_voxel_fauna::{Command as FaunaCommand, Founder, Response, StartingStores};
 use cubarium_voxel_sim::{ScheduleMode, Sim, SimConfig};
@@ -11,16 +10,13 @@ use super::variants::VariantTable;
 use super::window::{Placed, Window, newborn_candidate, place_twins};
 use super::world::{is_still, still_water, training_config};
 use crate::es::optimizer::Adam;
-use crate::es::tensor::initial_center_shape;
+use crate::es::tensor::initial_center_runtime;
 use crate::es::voxel::driver::sampled_stores;
 use crate::es::voxel::task::{PreparedArena, Stage, TRAINING_LAYOUT_SEEDS};
 
 fn centre(founder: Founder) -> Vec<f64> {
-    match founder {
-        Founder::Blind => initial_center_shape::<BLIND_I, BLIND_O>(5),
-        Founder::Browser => initial_center_shape::<BROWSER_I, BROWSER_O>(5),
-        _ => unreachable!("this lineage trains from P2"),
-    }
+    let m = founder.manifest();
+    initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 5)
 }
 
 fn logits(r: Response) -> [f64; 3] {
@@ -34,7 +30,7 @@ fn logits(r: Response) -> [f64; 3] {
 /// observation; two on the same variant act identically.
 #[test]
 fn different_variants_act_differently_and_the_same_variant_identically() {
-    for founder in crate::es::voxel::TRAINED_LINEAGES {
+    for founder in Founder::ALL {
         let table =
             VariantTable::antithetic(founder, &centre(founder), 7, 0.5, 0, 2).expect("valid");
         assert_eq!(table.len(), 4);
@@ -73,9 +69,9 @@ fn tables(pairs: usize) -> Vec<Option<VariantTable>> {
     Founder::ALL
         .iter()
         .map(|&f| {
-            crate::es::voxel::TRAINED_LINEAGES.contains(&f).then(|| {
-                VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, pairs).expect("valid")
-            })
+            crate::es::voxel::TRAINED_LINEAGES
+                .contains(&f)
+                .then(|| VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, pairs).expect("valid"))
         })
         .collect()
 }
@@ -113,7 +109,11 @@ fn a_newborn_gets_a_variant_and_its_own_window() {
         w.step(&mut sim);
     }
     let r = w.finish(&sim, 0);
-    assert_eq!(r.lineages[founder.index()].births, 0, "an introduction is not a paid birth");
+    assert_eq!(
+        r.lineages[founder.index()].births,
+        0,
+        "an introduction is not a paid birth"
+    );
     let newborn: Vec<_> = r.scores.iter().filter(|b| b.newborn).collect();
     assert_eq!(newborn.len(), 1, "one newcomer scored");
     let b = newborn[0];
@@ -346,4 +346,90 @@ fn coarse_water_conserves_and_refuses_to_be_the_default() {
     }
     assert!((total(sim.world()) - t0).abs() <= 1e-9 * t0.max(1.0));
     assert_eq!(sim.world().water_every(), 4);
+}
+
+#[test]
+fn a_live_world_runs_one_window_with_every_founders_v3_gru() {
+    use crate::es::voxel::EpisodeDriver;
+    use cubarium_voxel::{Command as WorldCommand, Material};
+    use cubarium_voxel_fauna::{Fauna, FaunaConfig};
+    use cubarium_voxel_flora::{Flora, FloraConfig};
+    let mut world = World::empty(Config {
+        width: 40,
+        height: 16,
+        depth: 16,
+        voxel_m: 0.25,
+        day: cubarium_voxel::weather::DayClock {
+            mode: cubarium_voxel::weather::DayMode::Off,
+            ..Default::default()
+        },
+        ..Config::default()
+    });
+    for z in 0..16 {
+        for x in 0..40 {
+            for y in 1..=2 {
+                world.apply(WorldCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Soil,
+                });
+            }
+        }
+    }
+    let mut fauna = Fauna::new(FaunaConfig::placeholder());
+    for founder in Founder::ALL {
+        assert!(
+            fauna.apply(
+                &world,
+                FaunaCommand::IntroduceFounder {
+                    x: 2 + 4 * founder.index() as i64,
+                    z: 6,
+                    founder,
+                    stores: StartingStores::FULL,
+                    heading_rad: 0.
+                }
+            ),
+            "{} placed",
+            founder.name()
+        );
+    }
+    let drivers: Vec<_> = Founder::ALL
+        .into_iter()
+        .map(|f| (f, EpisodeDriver::gru(&centre(f), f).expect("manifest GRU")))
+        .collect();
+    super::install_centres(&mut fauna, &drivers);
+    for founder in Founder::ALL {
+        assert!(fauna.policy_driven(founder), "{} has a GRU", founder.name());
+    }
+    let mut sim = Sim::new(
+        world,
+        Flora::new(FloraConfig::default()),
+        fauna,
+        SimConfig::with_threads(1),
+        None,
+    );
+    sim.set_mode(ScheduleMode::Static);
+    let tables: Vec<_> = Founder::ALL
+        .into_iter()
+        .map(|f| Some(VariantTable::antithetic(f, &centre(f), 3, 0.05, 0, 1).expect("all tables")))
+        .collect();
+    let ticks = Founder::ALL
+        .into_iter()
+        .map(|f| f.manifest().cadence_ticks())
+        .max()
+        .unwrap()
+        * 2;
+    let mut window = Window::begin(&mut sim, &tables, &[0; Founder::COUNT], ticks);
+    while !window.done() {
+        window.step(&mut sim);
+    }
+    let report = window.finish(&sim, 0);
+    for founder in Founder::ALL {
+        assert!(
+            report.scores.iter().any(|score| score.founder == founder),
+            "{} scored",
+            founder.name()
+        );
+    }
 }

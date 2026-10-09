@@ -4,74 +4,33 @@
 //! body.
 //!
 //! The table's shape follows the lineage's manifest (its input count), so a new lineage
-//! joins by having a manifest and a centre; a manifest with an input width no table has
-//! yet is refused by name here, which is the one place a new width is added.
+//! joins by having a manifest and a centre; every manifest shape is supported. A vector that
+//! has the wrong length or non-finite values is refused by name.
 
 use std::sync::Arc;
 
-use cubarium_core::neural::ShapePolicy;
-use cubarium_core::neural::gru::HIDDEN;
-use cubarium_voxel_fauna::{Controller, Founder, Response};
-
-use crate::es::tensor;
+use crate::es::voxel::controller::EpisodeGru;
 use crate::es::voxel::trainer::{Candidate, candidate_theta};
-use crate::es::voxel::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O, voxel_schema_digest};
+use cubarium_voxel_fauna::{Controller, Founder};
 
-/// A body's controller: a handle into its lineage's table for this generation, and its
-/// own memory.
-pub struct TableGru<const I: usize, const O: usize> {
-    table: Arc<[ShapePolicy<I, O>]>,
-    index: usize,
-    hidden: [f64; HIDDEN],
-}
-
-impl<const I: usize, const O: usize> Controller for TableGru<I, O> {
-    fn drive(&mut self, observation: &[f64]) -> Response {
-        let mut x = [0.0; I];
-        x.copy_from_slice(observation);
-        let logits = self.table[self.index].weights.forward(&x, &mut self.hidden);
-        Response::logits(&logits)
-    }
-
-    fn reset(&mut self) {
-        self.hidden = [0.0; HIDDEN];
-    }
-}
-
-/// One lineage's variants for one generation, validated against its manifest digest.
+/// One lineage's variants for one generation, built from its manifest (I, H, heads).
 #[derive(Clone)]
-pub enum VariantTable {
-    /// The littershredder's v3 shape ([`BLIND_I`] → [`BLIND_O`]).
-    I23(Founder, Arc<[ShapePolicy<BLIND_I, BLIND_O>]>),
-    /// The frondgrazer's ([`BROWSER_I`] → [`BROWSER_O`]).
-    I37(Founder, Arc<[ShapePolicy<BROWSER_I, BROWSER_O>]>),
+pub struct VariantTable {
+    founder: Founder,
+    policies: Arc<[Arc<EpisodeGru>]>,
 }
 
 impl VariantTable {
-    /// A table of `thetas`, in order, for `founder`. Refuses a vector the manifest does
-    /// not accept (length, finiteness, digest) and a manifest width no table serves.
     pub fn build(founder: Founder, thetas: &[Vec<f64>]) -> Result<VariantTable, String> {
-        let digest = voxel_schema_digest(founder);
-        fn policies<const I: usize, const O: usize>(
-            thetas: &[Vec<f64>],
-            digest: u64,
-        ) -> Result<Arc<[ShapePolicy<I, O>]>, String> {
-            thetas
-                .iter()
-                .map(|t| tensor::shape_policy::<I, O>(t, digest))
-                .collect::<Result<Vec<_>, _>>()
-                .map(Arc::from)
-        }
-        let m = founder.manifest();
-        match (m.inputs(), m.outputs()) {
-            (BLIND_I, BLIND_O) => Ok(VariantTable::I23(founder, policies(thetas, digest)?)),
-            (BROWSER_I, BROWSER_O) => Ok(VariantTable::I37(founder, policies(thetas, digest)?)),
-            (n, o) => Err(format!(
-                "the {} manifest has {n} inputs and {o} outputs; live training has no table of \
-                 that shape yet (contract v3's P3 makes the runtime generic)",
-                founder.name()
-            )),
-        }
+        let manifest = founder.manifest();
+        let policies = thetas
+            .iter()
+            .map(|theta| EpisodeGru::from_manifest(theta, &manifest).map(Arc::new))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self {
+            founder,
+            policies: Arc::from(policies),
+        })
     }
 
     /// The generation's table from the lineage centre: `2·pairs` antithetic variants in
@@ -94,36 +53,17 @@ impl VariantTable {
     }
 
     pub fn founder(&self) -> Founder {
-        match self {
-            VariantTable::I23(f, _) | VariantTable::I37(f, _) => *f,
-        }
+        self.founder
     }
-
     pub fn len(&self) -> usize {
-        match self {
-            VariantTable::I23(_, t) => t.len(),
-            VariantTable::I37(_, t) => t.len(),
-        }
+        self.policies.len()
     }
-
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.policies.is_empty()
     }
 
-    /// A fresh controller running variant `index`: fresh memory, the table shared.
+    /// A fresh controller with shared weights and independent memory.
     pub fn controller(&self, index: usize) -> Box<dyn Controller> {
-        assert!(index < self.len(), "variant {index} of {}", self.len());
-        match self {
-            VariantTable::I23(_, t) => Box::new(TableGru::<BLIND_I, BLIND_O> {
-                table: Arc::clone(t),
-                index,
-                hidden: [0.0; HIDDEN],
-            }),
-            VariantTable::I37(_, t) => Box::new(TableGru::<BROWSER_I, BROWSER_O> {
-                table: Arc::clone(t),
-                index,
-                hidden: [0.0; HIDDEN],
-            }),
-        }
+        Box::new(self.policies[index].controller(false))
     }
 }

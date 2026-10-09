@@ -45,8 +45,10 @@ pub struct ImitationProvenance {
     pub updates: u32,
     /// Final mean squared error against the teacher's **adapted** action, per action:
     /// forward, turn, feed.
-    pub mse: [f64; 3],
+    pub mse: Vec<f64>,
     pub mse_mean: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_ce: Option<f64>,
     /// Fraction of teacher steps whose turn sign the clone matches.
     pub turn_sign_agreement: f64,
 }
@@ -224,9 +226,13 @@ impl VoxelPolicyFile {
         }
         if self.theta.len() != want {
             return Err(format!(
-                "{name}: theta has {} values, expected {want} for {}",
+                "{name}: theta has {} values, expected {want} for {} (I={}, actions={}, options={}, H={})",
                 self.theta.len(),
-                founder.name()
+                founder.name(),
+                manifest.inputs(),
+                manifest.actions.len(),
+                manifest.option_head,
+                manifest.hidden
             ));
         }
         if let Some(i) = self.theta.iter().position(|x| !x.is_finite()) {
@@ -287,33 +293,34 @@ impl VoxelPolicyFile {
     }
 }
 
-/// A fresh, valid contract-v3 centre for `founder` (the two compiled shapes), for tests.
+/// A fresh, valid contract-v3 centre for any `founder`, for tests.
 #[cfg(test)]
 pub(crate) fn test_centre(founder: Founder, seed: u64) -> VoxelPolicyFile {
-    let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(seed)
-    } else {
-        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(seed)
-    };
+    let theta = crate::es::tensor::initial_center_runtime(
+        founder.manifest().inputs(),
+        founder.manifest().outputs(),
+        founder.manifest().hidden,
+        seed,
+    );
     VoxelPolicyFile {
-            schema: POLICY_SCHEMA.into(),
-            build: "test".into(),
-            founder: founder.name().into(),
-            digest: voxel_schema_digest(founder),
-            train_seed: 20_260_918,
-            generation: Some(3),
-            score: Some(0.25),
-            start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
-            starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
-            arena_protocol: crate::es::voxel::task::arena_protocol(
-                founder,
-                crate::es::voxel::task::Stage::A,
-                crate::es::voxel::task::Band::Landed,
-            ),
-            protocol_hash: None,
-            imitation: None,
-            stage: crate::es::voxel::task::Stage::A.as_str().into(),
-            theta,
+        schema: POLICY_SCHEMA.into(),
+        build: "test".into(),
+        founder: founder.name().into(),
+        digest: voxel_schema_digest(founder),
+        train_seed: 20_260_918,
+        generation: Some(3),
+        score: Some(0.25),
+        start_heading: crate::es::voxel::task::START_HEADING_PROTOCOL.into(),
+        starting_stores: crate::es::voxel::task::STARTING_STORES_PROTOCOL.into(),
+        arena_protocol: crate::es::voxel::task::arena_protocol(
+            founder,
+            crate::es::voxel::task::Stage::A,
+            crate::es::voxel::task::Band::Landed,
+        ),
+        protocol_hash: None,
+        imitation: None,
+        stage: crate::es::voxel::task::Stage::A.as_str().into(),
+        theta,
     }
 }
 
@@ -342,16 +349,26 @@ mod tests {
     /// transfer: they are contract v2.
     #[test]
     fn a_v2_centre_is_refused_against_v3_by_name() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
-        for file in ["r2-frondgrazer-upd160.json", "r2-littershredder-upd512.json"] {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+        for file in [
+            "r2-frondgrazer-upd160.json",
+            "r2-littershredder-upd512.json",
+        ] {
             let path = dir.join(file);
-            for spec in [path.display().to_string(), format!("transfer:{}", path.display())] {
-                let err = VoxelPolicyFile::load_or_transfer(std::path::Path::new(&spec)).expect_err("refused");
-                assert!(err.contains("contract-v2") && err.contains("contract v3"), "{err}");
+            for spec in [
+                path.display().to_string(),
+                format!("transfer:{}", path.display()),
+            ] {
+                let err = VoxelPolicyFile::load_or_transfer(std::path::Path::new(&spec))
+                    .expect_err("refused");
+                assert!(
+                    err.contains("contract-v2") && err.contains("contract v3"),
+                    "{err}"
+                );
             }
         }
     }
-
 
     /// A policy round-trips exactly and loads into a validated driver.
     #[test]
@@ -379,7 +396,11 @@ mod tests {
         let mut file = sample(Founder::Blind);
         file.founder = Founder::Browser.name().into();
         let err = file.validate_named("p.json").expect_err("refused");
-        assert!(err.contains(&Founder::Blind.manifest().parameter_count().to_string()) && err.contains("frondgrazer"), "{err}");
+        assert!(
+            err.contains(&Founder::Blind.manifest().parameter_count().to_string())
+                && err.contains("frondgrazer"),
+            "{err}"
+        );
 
         // A right-length file whose digest is the other founder's.
         let mut file = sample(Founder::Browser);
@@ -503,5 +524,37 @@ mod tests {
             "{err}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn every_founders_store_round_trips_and_refuses_v2_or_wrong_hidden_by_name() {
+        let dir =
+            std::env::temp_dir().join(format!("cubarium-v3-all-shapes-{}", std::process::id()));
+        for founder in Founder::ALL {
+            let file = sample(founder);
+            let path = dir.join(format!("{}.json", founder.name()));
+            file.write(&path).expect("write");
+            let back = VoxelPolicyFile::load(&path).expect("any manifest shape loads");
+            assert_eq!(file, back);
+            back.driver().expect("any founder drives");
+            let m = founder.manifest();
+            let mut wrong = file.clone();
+            wrong.theta =
+                crate::es::tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden + 7, 3);
+            let err = wrong.validate_named("wrong-H.json").expect_err("wrong H");
+            assert!(
+                err.contains("wrong-H.json") && err.contains(founder.name()) && err.contains("H="),
+                "{err}"
+            );
+            let mut old = file;
+            old.theta = vec![0.; cubarium_voxel_fauna::gru32_parameter_count(m.tail_offset(), 3)];
+            let err = old.validate_named("v2.json").expect_err("old layout");
+            assert!(
+                err.contains("v2.json")
+                    && err.contains(founder.name())
+                    && err.contains("contract-v2"),
+                "{err}"
+            );
+        }
+        std::fs::remove_dir_all(&dir).expect("test cleanup");
     }
 }

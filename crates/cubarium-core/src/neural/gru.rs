@@ -1,6 +1,6 @@
-//! The GRU32 forward pass and the policy tensor set (contract §5).
+//! The shape-generic GRU forward pass and the policy tensor set (contract §5).
 //!
-//! One GRU layer, `H = 32`, input `I = 70`, linear head `O = 7`, `f64` throughout.
+//! One GRU layer with caller-selected I, O and H, `f64` throughout. Legacy aliases use H = 32.
 //! **Reset-after** convention with PyTorch gate order `(r, z, n)` and two bias vectors per
 //! gate:
 //!
@@ -31,7 +31,11 @@ pub const Z: usize = HIDDEN;
 pub const N: usize = 2 * HIDDEN;
 
 pub const fn parameter_count(input: usize, output: usize) -> usize {
-    3 * HIDDEN * (input + HIDDEN + 2) + output * (HIDDEN + 1)
+    parameter_count_hidden(input, output, HIDDEN)
+}
+
+pub const fn parameter_count_hidden(input: usize, output: usize, hidden: usize) -> usize {
+    3 * hidden * (input + hidden + 2) + output * (hidden + 1)
 }
 
 /// Shape-parameterized GRU arithmetic. Gate order is `(r,z,n)` and recurrence is reset-after.
@@ -44,7 +48,7 @@ pub const fn parameter_count(input: usize, output: usize) -> usize {
 /// workspace embeds one. A blanket `#[serde(rename = "Gru32")]` would also mislabel every
 /// other instantiation (`Gru23`, `Gru37`), so the generic name stands.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Gru<const I: usize, const O: usize> {
+pub struct Gru<const I: usize, const O: usize, const H: usize = HIDDEN> {
     pub w_i: Vec<f64>,
     pub w_h: Vec<f64>,
     pub b_i: Vec<f64>,
@@ -57,30 +61,75 @@ pub type Gru32 = Gru<INPUT, OUTPUT>;
 pub type Gru23 = Gru<23, 3>;
 pub type Gru37 = Gru<37, 3>;
 
-impl<const I: usize, const O: usize> Default for Gru<I, O> {
+impl<const I: usize, const O: usize, const H: usize> Default for Gru<I, O, H> {
     fn default() -> Self {
         Self::zeros()
     }
 }
-impl<const I: usize, const O: usize> Gru<I, O> {
+impl<const I: usize, const O: usize, const H: usize> Gru<I, O, H> {
     pub fn zeros() -> Self {
         Self {
-            w_i: vec![0.; GATES * I],
-            w_h: vec![0.; GATES * HIDDEN],
-            b_i: vec![0.; GATES],
-            b_h: vec![0.; GATES],
-            w_o: vec![0.; O * HIDDEN],
+            w_i: vec![0.; (3 * H) * I],
+            w_h: vec![0.; (3 * H) * H],
+            b_i: vec![0.; 3 * H],
+            b_h: vec![0.; 3 * H],
+            w_o: vec![0.; O * H],
             b_o: vec![0.; O],
         }
     }
     pub fn validate(&self) -> Result<(), String> {
+        self.view().validate(I, O, H)
+    }
+    pub fn view(&self) -> GruView<'_> {
+        GruView {
+            w_i: &self.w_i,
+            w_h: &self.w_h,
+            b_i: &self.b_i,
+            b_h: &self.b_h,
+            w_o: &self.w_o,
+            b_o: &self.b_o,
+        }
+    }
+
+    pub fn parameters(&self) -> usize {
+        self.w_i.len()
+            + self.w_h.len()
+            + self.b_i.len()
+            + self.b_h.len()
+            + self.w_o.len()
+            + self.b_o.len()
+    }
+    pub fn forward(&self, x: &[f64; I], hidden: &mut [f64; H]) -> [f64; O] {
+        let mut next = [0.; H];
+        let mut y = [0.; O];
+        self.view().forward(x, hidden, &mut next, &mut y);
+        y
+    }
+}
+
+/// Borrowed GRU tensors for manifests whose dimensions are known at runtime.
+/// Action and option heads occupy separate row ranges of w_o and b_o, sharing h'.
+#[derive(Clone, Copy, Debug)]
+pub struct GruView<'a> {
+    pub w_i: &'a [f64],
+    pub w_h: &'a [f64],
+    pub b_i: &'a [f64],
+    pub b_h: &'a [f64],
+    pub w_o: &'a [f64],
+    pub b_o: &'a [f64],
+}
+impl GruView<'_> {
+    pub fn validate(&self, input: usize, output: usize, hidden: usize) -> Result<(), String> {
+        if input == 0 || hidden == 0 || output == 0 {
+            return Err("GRU dimensions must be nonzero".into());
+        }
         for (name, v, want) in [
-            ("w_i", &self.w_i, GATES * I),
-            ("w_h", &self.w_h, GATES * HIDDEN),
-            ("b_i", &self.b_i, GATES),
-            ("b_h", &self.b_h, GATES),
-            ("w_o", &self.w_o, O * HIDDEN),
-            ("b_o", &self.b_o, O),
+            ("w_i", self.w_i, 3 * hidden * input),
+            ("w_h", self.w_h, 3 * hidden * hidden),
+            ("b_i", self.b_i, 3 * hidden),
+            ("b_h", self.b_h, 3 * hidden),
+            ("w_o", self.w_o, output * hidden),
+            ("b_o", self.b_o, output),
         ] {
             if v.len() != want {
                 return Err(format!(
@@ -94,57 +143,51 @@ impl<const I: usize, const O: usize> Gru<I, O> {
         }
         Ok(())
     }
-    pub fn parameters(&self) -> usize {
-        self.w_i.len()
-            + self.w_h.len()
-            + self.b_i.len()
-            + self.b_h.len()
-            + self.w_o.len()
-            + self.b_o.len()
-    }
-    pub fn forward(&self, x: &[f64; I], hidden: &mut [f64; HIDDEN]) -> [f64; O] {
-        let mut gi = [0.; GATES];
-        let mut gh = [0.; GATES];
-        for row in 0..GATES {
-            let mut a = self.b_i[row];
-            for c in 0..I {
-                a += self.w_i[row * I + c] * x[c];
+
+    /// Reset-after arithmetic shared by the const-generic and manifest-driven runtimes.
+    /// `next` is scratch; neither this function nor the runtime controller allocates.
+    pub fn forward(&self, x: &[f64], hidden: &mut [f64], next: &mut [f64], y: &mut [f64]) {
+        let h = hidden.len();
+        assert_eq!(next.len(), h);
+        let gate = |row: usize| {
+            let mut gi = self.b_i[row];
+            for c in 0..x.len() {
+                gi += self.w_i[row * x.len() + c] * x[c];
             }
-            gi[row] = a;
-            let mut a = self.b_h[row];
-            for c in 0..HIDDEN {
-                a += self.w_h[row * HIDDEN + c] * hidden[c];
+            let mut gh = self.b_h[row];
+            for c in 0..h {
+                gh += self.w_h[row * h + c] * hidden[c];
             }
-            gh[row] = a;
-        }
-        let mut next = [0.; HIDDEN];
-        for j in 0..HIDDEN {
-            let r = sigmoid(gi[R + j] + gh[R + j]);
-            let z = sigmoid(gi[Z + j] + gh[Z + j]);
-            let n = (gi[N + j] + r * gh[N + j]).tanh();
+            (gi, gh)
+        };
+        for j in 0..h {
+            let (ir, hr) = gate(j);
+            let (iz, hz) = gate(h + j);
+            let (inn, hn) = gate(2 * h + j);
+            let r = sigmoid(ir + hr);
+            let z = sigmoid(iz + hz);
+            let n = (inn + r * hn).tanh();
             next[j] = z * hidden[j] + (1. - z) * n;
         }
-        *hidden = next;
-        let mut y = [0.; O];
-        for o in 0..O {
+        hidden.copy_from_slice(next);
+        for (o, slot) in y.iter_mut().enumerate() {
             let mut a = self.b_o[o];
-            for j in 0..HIDDEN {
-                a += self.w_o[o * HIDDEN + j] * hidden[j];
+            for j in 0..h {
+                a += self.w_o[o * h + j] * hidden[j];
             }
-            y[o] = a;
+            *slot = a;
         }
-        y
     }
 }
 
 /// A shape-aware policy whose schema meaning is supplied by its caller.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ShapePolicy<const I: usize, const O: usize> {
-    pub weights: Gru<I, O>,
+pub struct ShapePolicy<const I: usize, const O: usize, const H: usize = HIDDEN> {
+    pub weights: Gru<I, O, H>,
     pub schema_digest: u64,
 }
-impl<const I: usize, const O: usize> ShapePolicy<I, O> {
-    pub fn new(weights: Gru<I, O>, schema_digest: u64) -> Self {
+impl<const I: usize, const O: usize, const H: usize> ShapePolicy<I, O, H> {
+    pub fn new(weights: Gru<I, O, H>, schema_digest: u64) -> Self {
         Self {
             weights,
             schema_digest,
@@ -484,5 +527,25 @@ mod tests {
             .expect_err("a foreign digest is refused");
         assert!(err.contains("0123456789abcdef"), "{err}");
         assert!(err.contains("fedcba9876543210"), "{err}");
+    }
+    #[test]
+    fn hidden_width_changes_gate_offsets_and_all_tensor_shapes() {
+        fn check<const H: usize>() {
+            let mut w = Gru::<2, 2, H>::zeros();
+            assert_eq!(w.parameters(), parameter_count_hidden(2, 2, H));
+            w.validate().expect("generic dimensions");
+            w.b_i[H + H - 1] = 0.7;
+            w.b_h[2 * H + H - 1] = 0.3;
+            w.w_o[H - 1] = 2.;
+            let mut hidden = [0.; H];
+            hidden[H - 1] = 0.4;
+            let expected = sigmoid(0.7) * 0.4 + (1. - sigmoid(0.7)) * (0.5f64 * 0.3).tanh();
+            let y = w.forward(&[0.; 2], &mut hidden);
+            assert!((hidden[H - 1] - expected).abs() < 1e-14);
+            assert!((y[0] - 2. * expected).abs() < 1e-14);
+        }
+        check::<3>();
+        check::<7>();
+        check::<64>();
     }
 }

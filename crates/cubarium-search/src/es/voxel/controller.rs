@@ -36,12 +36,13 @@ use std::sync::{Arc, Mutex};
 use cubarium_core::neural::ShapePolicy;
 use cubarium_core::neural::gru::HIDDEN;
 use cubarium_voxel_fauna::{
-    Actions, BrowserForager, Controller, Founder, Response, TeacherConfig,
-    resolve_actions,
+    Actions, BrowserForager, Controller, Founder, Response, TeacherConfig, resolve_actions,
 };
 
 use super::super::tensor;
-use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O, voxel_schema_digest};
+#[cfg(test)]
+use super::voxel_schema_digest;
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 
 /// How many leading observation channels are the founder's own v2 `Self` block (contract
 /// v3's `SelfV3` block sits after the v2 layout and counts as a sense here). The two
@@ -413,22 +414,111 @@ pub struct EpisodeDriver {
     /// [`RecordingController`] writing its `(observation, adapted action)` pairs here.
     /// The episode itself is unchanged: the wrapper returns the inner response untouched.
     record: Option<TeacherSink>,
+    tap: Option<Arc<Mutex<Option<cubarium_voxel_fauna::ActionTap>>>>,
 }
 
 /// The controller body a driver runs.
 #[derive(Clone, Debug)]
 pub enum EpisodeKind {
     /// The seeded or perturbed GRU centre, by shape.
-    Gru(EpisodeGru),
+    Gru(Arc<EpisodeGru>),
     /// The disclosed diagnostic controls and the observation-only heuristic.
     Control(VoxelControl),
 }
 
-/// The shape of an [`EpisodeKind::Gru`]: the two voxel schemas this driver runs.
+/// One lineage's manifest-shaped GRU and two linear heads on the same hidden state.
+/// The flat layout stores the action rows first, then the option rows (zero for B).
 #[derive(Clone, Debug)]
-pub enum EpisodeGru {
-    Blind(Box<ShapePolicy<BLIND_I, BLIND_O>>),
-    Browser(Box<ShapePolicy<BROWSER_I, BROWSER_O>>),
+pub struct EpisodeGru {
+    inputs: usize,
+    actions: usize,
+    options: usize,
+    offsets: tensor::ShapeOffsets,
+    schema_digest: u64,
+    theta: Vec<f64>,
+}
+
+impl EpisodeGru {
+    pub fn from_manifest(
+        theta: &[f64],
+        manifest: &cubarium_voxel_fauna::Manifest,
+    ) -> Result<Self, String> {
+        let offsets =
+            tensor::shape_offsets_hidden(manifest.inputs(), manifest.outputs(), manifest.hidden);
+        if theta.len() != offsets.params {
+            return Err(format!(
+                "{}: theta has {} values, expected {} for I={} actions={} options={} H={}",
+                manifest.founder.name(),
+                theta.len(),
+                offsets.params,
+                manifest.inputs(),
+                manifest.actions.len(),
+                manifest.option_head,
+                manifest.hidden
+            ));
+        }
+        if manifest.actions.len() > 5 || manifest.outputs() > cubarium_voxel_fauna::MAX_OUTPUTS {
+            return Err(format!(
+                "{}: too many manifest outputs",
+                manifest.founder.name()
+            ));
+        }
+        tensor::gru_view(theta, &offsets)
+            .validate(manifest.inputs(), manifest.outputs(), manifest.hidden)
+            .map_err(|e| format!("{}: {e}", manifest.founder.name()))?;
+        Ok(Self {
+            inputs: manifest.inputs(),
+            actions: manifest.actions.len(),
+            options: manifest.option_head,
+            offsets,
+            schema_digest: manifest.digest(),
+            theta: theta.to_vec(),
+        })
+    }
+    pub fn theta(&self) -> &[f64] {
+        &self.theta
+    }
+    pub fn schema_digest(&self) -> u64 {
+        self.schema_digest
+    }
+    pub fn controller(self: &Arc<Self>, ablate_senses: bool) -> RuntimeGruPolicy {
+        RuntimeGruPolicy {
+            policy: Arc::clone(self),
+            hidden: vec![0.; self.offsets.hidden],
+            next: vec![0.; self.offsets.hidden],
+            input: vec![0.; self.inputs],
+            logits: vec![0.; self.actions + self.options],
+            ablate_senses,
+        }
+    }
+}
+
+/// Per-body recurrent state; weights are shared across a live-training variant table.
+pub struct RuntimeGruPolicy {
+    policy: Arc<EpisodeGru>,
+    hidden: Vec<f64>,
+    next: Vec<f64>,
+    input: Vec<f64>,
+    logits: Vec<f64>,
+    ablate_senses: bool,
+}
+impl Controller for RuntimeGruPolicy {
+    fn drive(&mut self, observation: &[f64]) -> Response {
+        self.input.copy_from_slice(observation);
+        if self.ablate_senses {
+            self.input[SELF_CHANNELS.min(self.policy.inputs)..].fill(0.);
+        }
+        tensor::gru_view(&self.policy.theta, &self.policy.offsets).forward(
+            &self.input,
+            &mut self.hidden,
+            &mut self.next,
+            &mut self.logits,
+        );
+        Response::logits(&self.logits)
+    }
+    fn reset(&mut self) {
+        self.hidden.fill(0.);
+    }
 }
 
 /// The diagnostic controllers the commands name.
@@ -453,37 +543,13 @@ impl EpisodeDriver {
     /// A GRU driver from a flat parameter vector, for `founder`, validated against that
     /// founder's manifest digest.
     pub fn gru(theta: &[f64], founder: Founder) -> Result<EpisodeDriver, String> {
-        let digest = voxel_schema_digest(founder);
-        let gru = match founder {
-            Founder::Blind => {
-                EpisodeGru::Blind(Box::new(tensor::shape_policy::<BLIND_I, BLIND_O>(theta, digest)?))
-            }
-            Founder::Browser => {
-                EpisodeGru::Browser(Box::new(tensor::shape_policy::<BROWSER_I, BROWSER_O>(theta, digest)?))
-            }
-            Founder::Lanternjaw => {
-                return Err(
-                    "the lanternjaw has no GRU policy until its contract v3 (predation P2)"
-                        .to_string(),
-                );
-            }
-            Founder::Capgnawer
-            | Founder::Loftstrider
-            | Founder::RippleSnail
-            | Founder::Bellwing
-            | Founder::Seedporter
-        | Founder::Chorister => {
-                return Err(format!(
-                    "the {} has no GRU policy until contract v3 (P2); its heuristic drives it",
-                    founder.name()
-                ));
-            }
-        };
+        let gru = EpisodeGru::from_manifest(theta, &founder.manifest())?;
         Ok(EpisodeDriver {
             founder,
-            kind: EpisodeKind::Gru(gru),
+            kind: EpisodeKind::Gru(Arc::new(gru)),
             ablate_senses: false,
             record: None,
+            tap: None,
         })
     }
 
@@ -506,6 +572,7 @@ impl EpisodeDriver {
             kind: EpisodeKind::Control(control),
             ablate_senses: false,
             record: None,
+            tap: None,
         }
     }
 
@@ -516,6 +583,22 @@ impl EpisodeDriver {
     pub fn recording(mut self, sink: TeacherSink) -> EpisodeDriver {
         self.record = Some(sink);
         self
+    }
+
+    /// Record the body tap, including executed body actions and steering sources.
+    pub fn tapping(mut self, tap: Arc<Mutex<Option<cubarium_voxel_fauna::ActionTap>>>) -> Self {
+        self.tap = Some(tap);
+        self
+    }
+    pub(crate) fn start_tap(&self, fauna: &mut cubarium_voxel_fauna::Fauna) {
+        if self.tap.is_some() {
+            fauna.start_tap();
+        }
+    }
+    pub(crate) fn take_tap(&self, fauna: &mut cubarium_voxel_fauna::Fauna) {
+        if let Some(sink) = &self.tap {
+            *sink.lock().expect("tap sink") = fauna.take_tap();
+        }
     }
 
     /// The founder this driver runs.
@@ -537,16 +620,7 @@ impl EpisodeDriver {
     /// runs no reflex ignores it.
     pub fn fresh(&self, teachers: TeacherConfig) -> Box<dyn Controller> {
         let mut controller: Box<dyn Controller> = match &self.kind {
-            EpisodeKind::Gru(EpisodeGru::Blind(policy)) => Box::new(GruPolicy::<BLIND_I, BLIND_O> {
-                policy: (**policy).clone(),
-                hidden: [0.0; HIDDEN],
-                ablate_senses: self.ablate_senses,
-            }),
-            EpisodeKind::Gru(EpisodeGru::Browser(policy)) => Box::new(GruPolicy::<BROWSER_I, BROWSER_O> {
-                policy: (**policy).clone(),
-                hidden: [0.0; HIDDEN],
-                ablate_senses: self.ablate_senses,
-            }),
+            EpisodeKind::Gru(policy) => Box::new(policy.controller(self.ablate_senses)),
             EpisodeKind::Control(VoxelControl::NoIntake) => Box::new(NoIntake),
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => Box::new(StationaryFeeding),
             EpisodeKind::Control(VoxelControl::Cruise) => Box::new(Cruise),
@@ -600,12 +674,7 @@ impl EpisodeDriver {
     /// handed a *different* centre for the same lineage, not only a bare demotion.
     pub fn digest(&self) -> u64 {
         match &self.kind {
-            EpisodeKind::Gru(EpisodeGru::Blind(policy)) => {
-                weights_fnv1a(&tensor::flatten_shape(&policy.weights))
-            }
-            EpisodeKind::Gru(EpisodeGru::Browser(policy)) => {
-                weights_fnv1a(&tensor::flatten_shape(&policy.weights))
-            }
+            EpisodeKind::Gru(policy) => weights_fnv1a(policy.theta()),
             EpisodeKind::Control(_) => 0,
         }
     }
@@ -630,9 +699,11 @@ mod tests {
     fn the_gru_returns_logits_and_reset_clears_its_memory() {
         let theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(11);
         let mut run =
-            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
+            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind))
+                .expect("policy");
         let mut fresh =
-            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
+            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind))
+                .expect("policy");
         let obs = [0.25; BLIND_I];
         let Response::Logits(first) = run.drive(&obs) else {
             panic!("the GRU answers logits");
@@ -669,7 +740,8 @@ mod tests {
         let resolved = cubarium_voxel_fauna::resolve_actions(no.drive(&[0.5; BLIND_I]), &manifest);
         assert_eq!(resolved, Actions::REST);
         let mut feed = StationaryFeeding;
-        let resolved = cubarium_voxel_fauna::resolve_actions(feed.drive(&[0.5; BLIND_I]), &manifest);
+        let resolved =
+            cubarium_voxel_fauna::resolve_actions(feed.drive(&[0.5; BLIND_I]), &manifest);
         assert_eq!(
             resolved,
             Actions {
@@ -728,8 +800,10 @@ mod tests {
             "an unablated policy sees its senses"
         );
 
-        let mut blind_a = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
-        let mut blind_b = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_a =
+            GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_b =
+            GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
         assert!(blind_a.senses_ablated());
         assert_eq!(
             blind_a.drive(&senses_a),
@@ -741,14 +815,16 @@ mod tests {
         // observation is unchanged by the ablation.
         let mut self_hi = [0.0; BLIND_I];
         self_hi[..SELF_CHANNELS].fill(0.8);
-        let mut blind_c = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_c =
+            GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
         let mut open3 = GruPolicy::<BLIND_I, BLIND_O>::new(&theta, digest).expect("policy");
         assert_ne!(
             blind_c.drive(&self_hi),
             blind_b.drive(&senses_b),
             "the Self block still reaches an ablated policy"
         );
-        let mut blind_d = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_d =
+            GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
         assert_eq!(
             blind_d.drive(&self_hi),
             open3.drive(&self_hi),
@@ -786,8 +862,11 @@ mod tests {
     /// their first drive, whatever the prototype has already done.
     #[test]
     fn fresh_hands_out_fresh_memory_per_episode() {
-        let driver = EpisodeDriver::gru(&tensor::initial_center_shape::<BLIND_I, BLIND_O>(13), Founder::Blind)
-            .expect("policy");
+        let driver = EpisodeDriver::gru(
+            &tensor::initial_center_shape::<BLIND_I, BLIND_O>(13),
+            Founder::Blind,
+        )
+        .expect("policy");
         let mut a = driver.fresh(TeacherConfig::default());
         let mut b = driver.fresh(TeacherConfig::default());
         let obs = [0.1; BLIND_I];
@@ -813,7 +892,10 @@ mod tests {
 
         // A blind-shaped theta refused as a browser policy: wrong length, named.
         let err = EpisodeDriver::gru(&blind, Founder::Browser).expect_err("wrong length");
-        assert!(err.contains(&Founder::Blind.manifest().parameter_count().to_string()), "{err}");
+        assert!(
+            err.contains(&Founder::Blind.manifest().parameter_count().to_string()),
+            "{err}"
+        );
 
         // A right-length policy stamped with a corrupted digest is refused by the
         // boundary the world uses: `ShapePolicy::new` (the authoring stamp) against
@@ -824,5 +906,79 @@ mod tests {
         );
         let err = claimed.validate(browser_digest).expect_err("digest");
         assert!(err.contains("schema_digest"), "{err}");
+    }
+    #[test]
+    fn every_founder_builds_its_manifest_shape_and_resolves_all_body_actions() {
+        for founder in Founder::ALL {
+            let m = founder.manifest();
+            let want = 3 * m.hidden * (m.inputs() + m.hidden + 2) + m.outputs() * (m.hidden + 1);
+            assert_eq!(m.parameter_count(), want);
+            let mut theta = tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 7);
+            assert_eq!(theta.len(), want);
+            eprintln!(
+                "shape {}: {} -> {}+{}, H={}, params={}",
+                founder.name(),
+                m.inputs(),
+                m.actions.len(),
+                m.option_head,
+                m.hidden,
+                want
+            );
+            let offsets = tensor::shape_offsets_hidden(m.inputs(), m.outputs(), m.hidden);
+            theta.fill(0.);
+            for k in 0..m.outputs() {
+                theta[offsets.b_o + k] = if k == 1 { -1. } else { 1. };
+            }
+            let d = EpisodeDriver::gru(&theta, founder).expect("all nine shapes");
+            let EpisodeKind::Gru(g) = d.kind() else {
+                panic!("GRU");
+            };
+            assert_eq!(g.theta().len(), want);
+            assert_eq!(g.schema_digest(), m.digest());
+            let mut c = d.fresh(TeacherConfig::default());
+            let r = c.drive(&vec![0.; m.inputs()]);
+            let expected: Vec<_> = (0..m.outputs())
+                .map(|k| if k == 1 { -1. } else { 1. })
+                .collect();
+            assert_eq!(r, Response::logits(&expected));
+            let resolved = cubarium_voxel_fauna::resolve(r, &m);
+            for action in m.actions {
+                let value = match action.name {
+                    "forward_effort" => resolved.actions.forward,
+                    "turn_effort" => -resolved.actions.turn,
+                    "feed_effort" => resolved.actions.feed,
+                    "sprint_effort" => resolved.body.sprint,
+                    "hunker_effort" => resolved.body.hunker,
+                    "retract_effort" => resolved.body.retract,
+                    "lure_effort" => resolved.body.lure,
+                    "lift_effort" => resolved.body.lift,
+                    name => panic!("unhandled {name}"),
+                };
+                assert!(value > 0., "{} {} is resolved", founder.name(), action.name);
+            }
+        }
+    }
+
+    #[test]
+    fn a_manifest_can_change_hidden_width_and_add_an_independent_option_head() {
+        for founder in [
+            Founder::Loftstrider,
+            Founder::Seedporter,
+            Founder::Chorister,
+        ] {
+            let mut m = founder.manifest();
+            m.hidden += 7;
+            m.option_head = 3;
+            let mut theta = tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 5);
+            assert_eq!(theta.len(), m.parameter_count());
+            theta.fill(0.);
+            let o = tensor::shape_offsets_hidden(m.inputs(), m.outputs(), m.hidden);
+            theta[o.b_o + m.actions.len() + 2] = 5.;
+            let p = Arc::new(EpisodeGru::from_manifest(&theta, &m).expect("runtime dimensions"));
+            let mut c = p.controller(false);
+            let r = cubarium_voxel_fauna::resolve(c.drive(&vec![0.; m.inputs()]), &m);
+            assert_eq!(r.option, Some(2));
+            assert!(EpisodeGru::from_manifest(&theta, &founder.manifest()).is_err());
+        }
     }
 }

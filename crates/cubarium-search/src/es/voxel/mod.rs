@@ -85,8 +85,7 @@ pub mod training_world;
 #[cfg(test)]
 mod training_world_tests;
 
-/// The two shapes the voxel runtime is compiled for (contract v3; P3 makes it generic):
-/// the littershredder's and the frondgrazer's inputs and outputs, the manifests' own.
+/// Legacy fixed-shape convenience aliases; the runtime takes every founder's manifest.
 pub use cubarium_voxel_fauna::{
     BLIND_INPUTS as BLIND_I, BLIND_OUTPUTS as BLIND_O, BROWSER_INPUTS as BROWSER_I,
     BROWSER_OUTPUTS as BROWSER_O,
@@ -127,17 +126,29 @@ pub const TRAINED_LINEAGES: [Founder; 2] = [Founder::Blind, Founder::Browser];
 
 pub fn parse_founder(s: &str) -> Result<Founder, String> {
     let t = s.trim().to_ascii_lowercase();
-    Ok(match t.as_str() {
-        "blind" | "littershredder" | "litter" => Founder::Blind,
-        "browser" | "frondgrazer" | "sighted" | "foliage" => Founder::Browser,
-        "lanternjaw" => Founder::Lanternjaw,
-        other => {
-            return Err(format!(
-                "unknown founder `{other}`; use `blind` (littershredder), `browser` \
-                 (frondgrazer) or `lanternjaw`"
-            ));
-        }
-    })
+    let alias = match t.as_str() {
+        "blind" | "litter" => Some(Founder::Blind),
+        "browser" | "sighted" | "foliage" => Some(Founder::Browser),
+        "snail" => Some(Founder::RippleSnail),
+        "veilhound" | "chorister" => Some(Founder::Chorister),
+        _ => None,
+    };
+    alias
+        .or_else(|| {
+            Founder::ALL
+                .into_iter()
+                .find(|f| f.name().eq_ignore_ascii_case(&t))
+        })
+        .ok_or_else(|| {
+            format!(
+                "unknown founder `{s}`; use {}",
+                Founder::ALL
+                    .into_iter()
+                    .map(Founder::name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
 }
 
 #[cfg(test)]

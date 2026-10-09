@@ -1128,11 +1128,10 @@ impl VoxelCheckpoint {
             .founder_parsed()
             .expect("the protocol names a founder");
         let train_seed = protocol.train_seed;
-        let theta = if founder == Founder::Blind {
-            super::super::tensor::initial_center_shape::<BLIND_I, BLIND_O>(protocol.train_seed)
-        } else {
-            super::super::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(protocol.train_seed)
-        };
+        let manifest = founder.manifest();
+        let theta = super::super::tensor::initial_center_runtime(
+            manifest.inputs(), manifest.outputs(), manifest.hidden, protocol.train_seed,
+        );
         let hash = protocol.hash();
         VoxelCheckpoint {
             schema: CHECKPOINT_SCHEMA.into(),

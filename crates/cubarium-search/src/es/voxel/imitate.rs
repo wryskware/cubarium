@@ -13,9 +13,9 @@
 //! Two halves, both here:
 //!
 //! - **Recording.** [`record_streams`] runs the heuristic through the ordinary episode
-//!   driver with [`super::controller::RecordingController`] attached, so the episode is
-//!   the real one and the pairs are the real observations and the real *adapted* actions
-//!   (the fauna's own `resolve_actions`). One [`TeacherStream`] per acting body per
+//!   driver with the body tap enabled. B fits executed actions; the three hybrids fit
+//!   their own steering. Both labels include body actions through the shared adapter.
+//!   One [`TeacherStream`] per acting body per
 //!   fixture ([`record_fixtures`]; a landscape has one body per placed founder).
 //! - **Fitting.** [`fit`] minimises the squared error between the GRU's adapted actions
 //!   and the teacher's over those streams, **teacher-forced**: the network reads the
@@ -26,7 +26,7 @@
 //!
 //! # What is and is not in a stream
 //!
-//! A stream holds the observation vector the body sampled and the three bounded actions
+//! A stream holds the observation vector, all bounded manifest actions and option labels
 //! the world then held. There is no site, no distance, no stock, no patch identity and no
 //! layout geometry: a clone fitted on these has been told exactly what a policy in that
 //! slot is told. Streams come from the **training** layouts only; the held-out seeds are
@@ -34,33 +34,38 @@
 //!
 //! # The objective, exactly
 //!
-//! The teacher target is the adapted action: `resolve_actions(Bounded(heuristic), …)`,
-//! transfer and 0.05 deadband applied, which is what the body held. The network's action
-//! is `resolve_actions(Logits(y), …)` — the manifest's sigmoid/tanh transfer, then the
+//! The teacher target is the chosen tap action with the manifest's deadband applied.
+//! The network's action is `resolve(Logits(y), …)` — the manifest's sigmoid/tanh transfer, then the
 //! same deadband. The **reported** MSE is over those adapted values.
 //!
 //! The **descended** objective drops the deadband: below it the adapted action is a flat
 //! zero with no gradient at all, so a network whose transferred output sits at 0.03 while
 //! the teacher asks for 0.6 would receive nothing to learn from. The optimiser therefore
 //! differentiates `transfer(y)` (a straight-through deadband), and the finite-difference
-//! test checks exactly that function. The two differ only inside a 0.05 band.
+//! test checks exactly that function. Option logits use categorical cross-entropy;
+//! until P8 defines the skill menu, the tap labels option 0 (own steering).
 
 #[allow(unused_imports)]
 use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
-use cubarium_core::neural::gru::{GATES, HIDDEN, N, R, Z};
+#[cfg(test)]
+use cubarium_core::neural::gru::HIDDEN;
 use cubarium_voxel_fauna::{Founder, Manifest, Transfer};
 use serde::{Deserialize, Serialize};
 
-use super::controller::{EpisodeDriver, VoxelControl, teacher_sink};
+#[cfg(test)]
+use super::controller::teacher_sink;
+use super::controller::{EpisodeDriver, VoxelControl};
 use super::landscape::{LANDSCAPE_HORIZON_TICKS, LANDSCAPE_PROTOCOL};
 use super::task::{self, Band, Prepared, Stage};
 use super::{driver, voxel_schema_digest};
 use crate::es::bits::hex_f64s;
 use crate::es::optimizer::Adam;
-use crate::es::tensor::{self, ShapeOffsets, shape_offsets};
+#[cfg(test)]
+use crate::es::tensor::shape_offsets;
+use crate::es::tensor::{self, ShapeOffsets, shape_offsets_hidden};
 
 /// The teacher-stream file's schema token. A file that is not this is refused by name,
 /// never reinterpreted.
@@ -108,9 +113,19 @@ pub struct TeacherStream {
     /// `steps × inputs`, row-major by step.
     #[serde(with = "hex_f64s")]
     pub observations: Vec<f64>,
-    /// `steps × 3`, in manifest action order: forward, turn, feed.
+    /// Continuous action width; legacy three-action recordings keep their own width.
+    #[serde(default = "legacy_action_width")]
+    pub actions_per_step: usize,
+    /// One categorical option label per step when the manifest has an option head.
+    #[serde(default)]
+    pub option_labels: Vec<usize>,
+    /// `steps × actions_per_step`, in manifest action order.
     #[serde(with = "hex_f64s")]
     pub actions: Vec<f64>,
+}
+
+fn legacy_action_width() -> usize {
+    3
 }
 
 impl TeacherStream {
@@ -218,11 +233,33 @@ impl TeacherStream {
                 self.steps
             ));
         }
-        if self.actions.len() != self.steps * 3 {
+        let manifest = founder.manifest();
+        if self.actions_per_step != manifest.actions.len() {
             return Err(format!(
-                "{name}: {} action values is not {} steps × 3",
+                "{name}: {} action outputs, expected {} for {}",
+                self.actions_per_step,
+                manifest.actions.len(),
+                founder.name()
+            ));
+        }
+        if manifest.option_head > 0
+            && (self.option_labels.len() != self.steps
+                || self
+                    .option_labels
+                    .iter()
+                    .any(|&o| o >= manifest.option_head))
+        {
+            return Err(format!(
+                "{name}: option labels do not fit the {} option head",
+                founder.name()
+            ));
+        }
+        if self.actions.len() != self.steps * self.actions_per_step {
+            return Err(format!(
+                "{name}: {} action values is not {} steps × {}",
                 self.actions.len(),
-                self.steps
+                self.steps,
+                self.actions_per_step
             ));
         }
         if self.steps == 0 {
@@ -244,9 +281,9 @@ impl TeacherStream {
         &self.observations[step * self.inputs..(step + 1) * self.inputs]
     }
 
-    /// One step's teacher action, `[forward, turn, feed]`.
+    /// One step's teacher action in manifest order.
     pub fn action(&self, step: usize) -> &[f64] {
-        &self.actions[step * 3..step * 3 + 3]
+        &self.actions[step * self.actions_per_step..(step + 1) * self.actions_per_step]
     }
 }
 
@@ -276,6 +313,51 @@ pub struct TapStream {
     /// `steps × actions_per_step`, in manifest action order.
     pub actions: Vec<f64>,
     pub steer: Vec<cubarium_voxel_fauna::Steer>,
+    /// P8 will map steering sources to options; today every label is own steering (0).
+    pub option_labels: Vec<usize>,
+}
+
+impl TapStream {
+    /// A tap recording as a self-contained teacher-forced fitting stream.
+    pub fn teacher_stream(&self) -> TeacherStream {
+        TeacherStream {
+            schema: TEACHER_SCHEMA.into(),
+            build: crate::evaluate::BUILD_ID.into(),
+            teacher: TEACHER_CONTROLLER.into(),
+            founder: self.founder.name().into(),
+            digest: voxel_schema_digest(self.founder),
+            stage: LANDSCAPE_STAGE.into(),
+            band: "none".into(),
+            arena_protocol: LANDSCAPE_PROTOCOL.into(),
+            start_heading: task::START_HEADING_PROTOCOL.into(),
+            starting_stores: task::STARTING_STORES_PROTOCOL.into(),
+            layout_seed: 0,
+            fixture: "tap".into(),
+            body: self.body as usize,
+            horizon: 0,
+            inputs: self.inputs,
+            steps: self.steps,
+            observations: self.observations.clone(),
+            actions: self.actions.clone(),
+            actions_per_step: self.actions_per_step,
+            option_labels: self.option_labels.clone(),
+        }
+    }
+}
+
+/// Fit a per-body tap recording with all body actions and its categorical option labels.
+pub fn fit_tap(
+    founder: Founder,
+    streams: &[TapStream],
+    spec: &FitSpec,
+) -> Result<(Vec<f64>, FitReport), String> {
+    let mut teachers = Vec::new();
+    for stream in streams {
+        let teacher = stream.teacher_stream();
+        teacher.validate("tap", founder)?;
+        teachers.push(teacher);
+    }
+    Ok(fit(founder, &teachers, spec))
 }
 
 /// One held label as the manifest's action vector.
@@ -299,7 +381,11 @@ fn held_actions(manifest: &Manifest, held: &cubarium_voxel_fauna::Held) -> Vec<f
 
 /// **The tap's streams for `founder`, under `label`**: one per body of that lineage, in id
 /// order, never interleaved.
-pub fn tap_streams(tap: &cubarium_voxel_fauna::ActionTap, founder: Founder, label: TapLabel) -> Vec<TapStream> {
+pub fn tap_streams(
+    tap: &cubarium_voxel_fauna::ActionTap,
+    founder: Founder,
+    label: TapLabel,
+) -> Vec<TapStream> {
     let manifest = founder.manifest();
     let inputs = manifest.inputs();
     tap.streams()
@@ -308,7 +394,12 @@ pub fn tap_streams(tap: &cubarium_voxel_fauna::ActionTap, founder: Founder, labe
             let mut observations = Vec::with_capacity(samples.len() * inputs);
             let mut actions = Vec::with_capacity(samples.len() * manifest.actions.len());
             for s in samples {
-                assert_eq!(s.observation.len(), inputs, "a {} sample of another width", founder.name());
+                assert_eq!(
+                    s.observation.len(),
+                    inputs,
+                    "a {} sample of another width",
+                    founder.name()
+                );
                 observations.extend_from_slice(&s.observation);
                 let held = match label {
                     TapLabel::Own => &s.own,
@@ -325,6 +416,7 @@ pub fn tap_streams(tap: &cubarium_voxel_fauna::ActionTap, founder: Founder, labe
                 observations,
                 actions,
                 steer: samples.iter().map(|s| s.steer).collect(),
+                option_labels: vec![0; samples.len()],
             }
         })
         .collect()
@@ -379,7 +471,6 @@ pub fn record_fixtures(
     horizon: Option<u64>,
     workers: usize,
 ) -> Result<Vec<TeacherStream>, String> {
-    let inputs = founder.manifest().inputs();
     let cancel = AtomicBool::new(false);
     let slots: std::sync::Mutex<Vec<Option<Vec<TeacherStream>>>> =
         std::sync::Mutex::new(vec![None; prepared.len()]);
@@ -413,9 +504,9 @@ pub fn record_fixtures(
                                 .map_or(LANDSCAPE_HORIZON_TICKS, |a| a.stage.horizon())
                         })
                     });
-                    let sink = teacher_sink();
+                    let sink = std::sync::Arc::new(std::sync::Mutex::new(None));
                     let d = EpisodeDriver::control(VoxelControl::Heuristic, founder)
-                        .recording(sink.clone());
+                        .tapping(sink.clone());
                     let outcome = driver::run_prepared(
                         fixture,
                         &d,
@@ -427,42 +518,28 @@ pub fn record_fixtures(
                         *failure.lock().expect("failure") = Some(e.to_string());
                         return;
                     }
-                    let buffers = sink.lock().expect("sink").clone();
-                    let streams = buffers
+                    let tap = sink
+                        .lock()
+                        .expect("tap")
+                        .take()
+                        .expect("episode returns its tap");
+                    let label = match founder {
+                        Founder::Seedporter | Founder::Loftstrider | Founder::Chorister => {
+                            TapLabel::Own
+                        }
+                        _ => TapLabel::Executed,
+                    };
+                    let streams = tap_streams(&tap, founder, label)
                         .iter()
-                        .enumerate()
-                        .filter(|(_, pairs)| !pairs.is_empty())
-                        .map(|(body, pairs)| {
-                            let mut observations = Vec::with_capacity(pairs.len() * inputs);
-                            let mut actions = Vec::with_capacity(pairs.len() * 3);
-                            for p in pairs {
-                                observations.extend_from_slice(&p.observation);
-                                actions.extend_from_slice(&[
-                                    p.action.forward,
-                                    p.action.turn,
-                                    p.action.feed,
-                                ]);
-                            }
-                            TeacherStream {
-                                schema: TEACHER_SCHEMA.into(),
-                                build: crate::evaluate::BUILD_ID.into(),
-                                teacher: TEACHER_CONTROLLER.into(),
-                                founder: founder.name().into(),
-                                digest: voxel_schema_digest(founder),
-                                stage: stage.clone(),
-                                band: band.clone(),
-                                arena_protocol: protocol.clone(),
-                                start_heading: task::START_HEADING_PROTOCOL.into(),
-                                starting_stores: task::STARTING_STORES_PROTOCOL.into(),
-                                layout_seed: fixture.layout_seed(),
-                                fixture: fixture.label(),
-                                body,
-                                horizon,
-                                inputs,
-                                steps: pairs.len(),
-                                observations,
-                                actions,
-                            }
+                        .map(|pairs| {
+                            let mut stream = pairs.teacher_stream();
+                            stream.stage = stage.clone();
+                            stream.band = band.clone();
+                            stream.arena_protocol = protocol.clone();
+                            stream.layout_seed = fixture.layout_seed();
+                            stream.fixture = fixture.label();
+                            stream.horizon = horizon;
+                            stream
                         })
                         .collect();
                     slots.lock().expect("slots")[index] = Some(streams);
@@ -537,40 +614,46 @@ pub struct FitReport {
     pub updates: u32,
     pub steps: usize,
     /// Mean squared error against the teacher's **adapted** action, per action, at the
-    /// end of the fit: forward, turn, feed.
-    pub mse: [f64; 3],
+    /// end of the fit, in manifest order.
+    pub mse: Vec<f64>,
     /// Their mean — the number the descent is reported against.
     pub mse_mean: f64,
-    /// The same three at the initial centre, so the fit's own movement is visible.
-    pub initial_mse: [f64; 3],
+    /// The same action losses at the initial centre, so the fit's own movement is visible.
+    pub initial_mse: Vec<f64>,
     /// Fraction of teacher steps whose turn **sign** the clone matches. A teacher step
     /// with a deadbanded (zero) turn counts as matched when the clone is also zero.
     pub turn_sign_agreement: f64,
     /// The mean loss every `report_every` updates, for the plateau judgement.
     pub loss_history: Vec<f64>,
+    pub option_ce: Option<f64>,
+    pub initial_option_ce: Option<f64>,
 }
 
 /// Fit a clone of the teacher to `streams`, teacher-forced.
 pub fn fit(founder: Founder, streams: &[TeacherStream], spec: &FitSpec) -> (Vec<f64>, FitReport) {
-    let manifest = founder.manifest();
+    fit_manifest(&founder.manifest(), streams, spec)
+}
+
+pub fn fit_manifest(
+    manifest: &Manifest,
+    streams: &[TeacherStream],
+    spec: &FitSpec,
+) -> (Vec<f64>, FitReport) {
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, manifest.outputs());
-    let mut theta = if founder == Founder::Blind {
-        tensor::initial_center_shape::<BLIND_I, BLIND_O>(spec.seed)
-    } else {
-        tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(spec.seed)
-    };
+    let offs = shape_offsets_hidden(inputs, manifest.outputs(), manifest.hidden);
+    let mut theta =
+        tensor::initial_center_runtime(inputs, manifest.outputs(), manifest.hidden, spec.seed);
     let mut adam = Adam::new(theta.len());
     adam.learning_rate = spec.learning_rate;
 
     let total_steps: usize = streams.iter().map(|s| s.steps).sum();
-    let scale = 1.0 / (total_steps.max(1) * 3) as f64;
-    let initial_mse = measure(founder, streams, &theta).0;
+    let objectives = manifest.actions.len() + usize::from(manifest.option_head > 0);
+    let scale = 1.0 / (total_steps.max(1) * objectives) as f64;
+    let (initial_mse, _, initial_option_ce) = measure_manifest(manifest, streams, &theta);
     let mut loss_history = Vec::new();
 
     for update in 0..spec.updates {
-        let (loss, gradient) =
-            full_gradient(&manifest, inputs, &offs, streams, &theta, spec, scale);
+        let (loss, gradient) = full_gradient(manifest, inputs, &offs, streams, &theta, spec, scale);
         let norm = gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
         let factor = if norm > spec.clip && norm.is_finite() {
             spec.clip / norm
@@ -585,15 +668,17 @@ pub fn fit(founder: Founder, streams: &[TeacherStream], spec: &FitSpec) -> (Vec<
         }
     }
 
-    let (mse, turn_sign_agreement) = measure(founder, streams, &theta);
+    let (mse, turn_sign_agreement, option_ce) = measure_manifest(manifest, streams, &theta);
     let report = FitReport {
         updates: spec.updates,
         steps: total_steps,
+        mse_mean: mse.iter().sum::<f64>() / mse.len() as f64,
         mse,
-        mse_mean: mse.iter().sum::<f64>() / 3.0,
         initial_mse,
         turn_sign_agreement,
         loss_history,
+        option_ce,
+        initial_option_ce,
     };
     (theta, report)
 }
@@ -659,20 +744,27 @@ fn stream_gradient(
     scale: f64,
     grad: &mut [f64],
 ) -> f64 {
-    let mut hidden = vec![0.0; HIDDEN];
+    let mut hidden = vec![0.0; manifest.hidden];
     let mut loss = 0.0;
     let mut start = 0;
     while start < stream.steps {
         let end = (start + chunk).min(stream.steps);
         let observations = &stream.observations[start * inputs..end * inputs];
-        let targets = &stream.actions[start * 3..end * 3];
-        loss += gradient_of_chunk(
+        let actions = manifest.actions.len();
+        let targets = &stream.actions[start * actions..end * actions];
+        let options = if manifest.option_head > 0 {
+            &stream.option_labels[start..end]
+        } else {
+            &[]
+        };
+        loss += gradient_of_chunk_options(
             manifest,
             inputs,
             offs,
             theta,
             observations,
             targets,
+            options,
             &mut hidden,
             scale,
             grad,
@@ -712,25 +804,67 @@ pub fn gradient_of_chunk(
     scale: f64,
     grad: &mut [f64],
 ) -> f64 {
-    let steps = targets.len() / 3;
+    gradient_of_chunk_options(
+        manifest,
+        inputs,
+        offs,
+        theta,
+        observations,
+        targets,
+        &vec![0; targets.len() / manifest.actions.len()],
+        hidden,
+        scale,
+        grad,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn gradient_of_chunk_options(
+    manifest: &Manifest,
+    inputs: usize,
+    offs: &ShapeOffsets,
+    theta: &[f64],
+    observations: &[f64],
+    targets: &[f64],
+    options: &[usize],
+    hidden: &mut [f64],
+    scale: f64,
+    grad: &mut [f64],
+) -> f64 {
+    let actions = manifest.actions.len();
+    let outputs = manifest.outputs();
+    let hidden_width = manifest.hidden;
+    let gates = 3 * hidden_width;
+    let (r_offset, z_offset, n_offset) = (0, hidden_width, 2 * hidden_width);
+    let steps = targets.len() / actions;
+    if steps == 0 {
+        return 0.;
+    }
+    assert_eq!(offs.hidden, hidden_width);
+    assert_eq!(offs.outputs, outputs);
+    assert_eq!(targets.len(), steps * actions);
+    assert_eq!(observations.len(), steps * inputs);
+    if manifest.option_head > 0 {
+        assert_eq!(options.len(), steps);
+    }
     let h0: Vec<f64> = hidden.to_vec();
     let mut cache = Cache {
-        gh: vec![0.0; steps * GATES],
-        r: vec![0.0; steps * HIDDEN],
-        z: vec![0.0; steps * HIDDEN],
-        n: vec![0.0; steps * HIDDEN],
-        h: vec![0.0; steps * HIDDEN],
-        y: vec![0.0; steps * 3],
+        gh: vec![0.0; steps * gates],
+        r: vec![0.0; steps * hidden_width],
+        z: vec![0.0; steps * hidden_width],
+        n: vec![0.0; steps * hidden_width],
+        h: vec![0.0; steps * hidden_width],
+        y: vec![0.0; steps * outputs],
     };
     let mut loss = 0.0;
-    let mut gi = vec![0.0; GATES];
+    let mut gi = vec![0.0; gates];
     let mut hp = h0.clone();
     for t in 0..steps {
         let x = &observations[t * inputs..(t + 1) * inputs];
         if t > 0 {
-            hp.copy_from_slice(&cache.h[(t - 1) * HIDDEN..t * HIDDEN]);
+            hp.copy_from_slice(&cache.h[(t - 1) * hidden_width..t * hidden_width]);
         }
-        for row in 0..GATES {
+        for row in 0..gates {
             let mut a = theta[offs.b_i + row];
             let w = offs.w_i + row * inputs;
             for c in 0..inputs {
@@ -738,85 +872,94 @@ pub fn gradient_of_chunk(
             }
             gi[row] = a;
             let mut b = theta[offs.b_h + row];
-            let w = offs.w_h + row * HIDDEN;
-            for c in 0..HIDDEN {
+            let w = offs.w_h + row * hidden_width;
+            for c in 0..hidden_width {
                 b += theta[w + c] * hp[c];
             }
-            cache.gh[t * GATES + row] = b;
+            cache.gh[t * gates + row] = b;
         }
-        for j in 0..HIDDEN {
-            let gh = &cache.gh[t * GATES..(t + 1) * GATES];
-            let r = sigmoid(gi[R + j] + gh[R + j]);
-            let z = sigmoid(gi[Z + j] + gh[Z + j]);
-            let n = (gi[N + j] + r * gh[N + j]).tanh();
-            cache.r[t * HIDDEN + j] = r;
-            cache.z[t * HIDDEN + j] = z;
-            cache.n[t * HIDDEN + j] = n;
-            cache.h[t * HIDDEN + j] = z * hp[j] + (1.0 - z) * n;
+        for j in 0..hidden_width {
+            let gh = &cache.gh[t * gates..(t + 1) * gates];
+            let r = sigmoid(gi[r_offset + j] + gh[r_offset + j]);
+            let z = sigmoid(gi[z_offset + j] + gh[z_offset + j]);
+            let n = (gi[n_offset + j] + r * gh[n_offset + j]).tanh();
+            cache.r[t * hidden_width + j] = r;
+            cache.z[t * hidden_width + j] = z;
+            cache.n[t * hidden_width + j] = n;
+            cache.h[t * hidden_width + j] = z * hp[j] + (1.0 - z) * n;
         }
-        for k in 0..3 {
+        for k in 0..outputs {
             let mut a = theta[offs.b_o + k];
-            let w = offs.w_o + k * HIDDEN;
-            for j in 0..HIDDEN {
-                a += theta[w + j] * cache.h[t * HIDDEN + j];
+            let w = offs.w_o + k * hidden_width;
+            for j in 0..hidden_width {
+                a += theta[w + j] * cache.h[t * hidden_width + j];
             }
-            cache.y[t * 3 + k] = a;
+            cache.y[t * outputs + k] = a;
         }
-        for k in 0..3 {
-            let d = transfer(cache.y[t * 3 + k], manifest.actions[k].transfer) - targets[t * 3 + k];
+        for k in 0..actions {
+            let d = transfer(cache.y[t * outputs + k], manifest.actions[k].transfer)
+                - targets[t * actions + k];
             loss += scale * d * d;
         }
+        if manifest.option_head > 0 {
+            let logits = &cache.y[t * outputs + actions..(t + 1) * outputs];
+            loss += scale * cross_entropy(logits, options[t]);
+        }
     }
-    hidden.copy_from_slice(&cache.h[(steps - 1) * HIDDEN..steps * HIDDEN]);
+    hidden.copy_from_slice(&cache.h[(steps - 1) * hidden_width..steps * hidden_width]);
 
     // Backward.
-    let mut dh_next = vec![0.0; HIDDEN];
-    let mut dh = vec![0.0; HIDDEN];
-    let mut dhp = vec![0.0; HIDDEN];
-    let mut dgi = vec![0.0; GATES];
-    let mut dgh = vec![0.0; GATES];
+    let mut dh_next = vec![0.0; hidden_width];
+    let mut dh = vec![0.0; hidden_width];
+    let mut dhp = vec![0.0; hidden_width];
+    let mut dgi = vec![0.0; gates];
+    let mut dgh = vec![0.0; gates];
     for t in (0..steps).rev() {
         let x = &observations[t * inputs..(t + 1) * inputs];
         let hp: &[f64] = if t == 0 {
             &h0
         } else {
-            &cache.h[(t - 1) * HIDDEN..t * HIDDEN]
+            &cache.h[(t - 1) * hidden_width..t * hidden_width]
         };
         dh.copy_from_slice(&dh_next);
-        for k in 0..3 {
-            let y = cache.y[t * 3 + k];
-            let a = transfer(y, manifest.actions[k].transfer);
-            let dy = 2.0
-                * scale
-                * (a - targets[t * 3 + k])
-                * transfer_derivative(y, a, manifest.actions[k].transfer);
+        for k in 0..outputs {
+            let y = cache.y[t * outputs + k];
+            let dy = if k < actions {
+                let a = transfer(y, manifest.actions[k].transfer);
+                2.0 * scale
+                    * (a - targets[t * actions + k])
+                    * transfer_derivative(y, a, manifest.actions[k].transfer)
+            } else {
+                let logits = &cache.y[t * outputs + actions..(t + 1) * outputs];
+                scale * (softmax(logits, k - actions) - f64::from(k - actions == options[t]))
+            };
             grad[offs.b_o + k] += dy;
-            let w = offs.w_o + k * HIDDEN;
-            for j in 0..HIDDEN {
-                grad[w + j] += dy * cache.h[t * HIDDEN + j];
+            let w = offs.w_o + k * hidden_width;
+            for j in 0..hidden_width {
+                grad[w + j] += dy * cache.h[t * hidden_width + j];
                 dh[j] += dy * theta[w + j];
             }
         }
         dhp.iter_mut().for_each(|v| *v = 0.0);
-        for j in 0..HIDDEN {
-            let z = cache.z[t * HIDDEN + j];
-            let n = cache.n[t * HIDDEN + j];
-            let r = cache.r[t * HIDDEN + j];
-            let gh_n = cache.gh[t * GATES + N + j];
+        for j in 0..hidden_width {
+            let z = cache.z[t * hidden_width + j];
+            let n = cache.n[t * hidden_width + j];
+            let r = cache.r[t * hidden_width + j];
+            let gh_n = cache.gh[t * gates + n_offset + j];
             let dz = dh[j] * (hp[j] - n);
             let dn = dh[j] * (1.0 - z);
             dhp[j] += dh[j] * z;
             let da_n = dn * (1.0 - n * n);
-            dgi[N + j] = da_n;
-            dgh[N + j] = da_n * r;
+            dgi[n_offset + j] = da_n;
+            dgh[n_offset + j] = da_n * r;
             let da_z = dz * z * (1.0 - z);
-            dgi[Z + j] = da_z;
-            dgh[Z + j] = da_z;
+            dgi[z_offset + j] = da_z;
+            dgh[z_offset + j] = da_z;
             let da_r = da_n * gh_n * r * (1.0 - r);
-            dgi[R + j] = da_r;
-            dgh[R + j] = da_r;
+            dgi[r_offset + j] = da_r;
+            dgh[r_offset + j] = da_r;
         }
-        for row in 0..GATES {
+        for row in 0..gates {
             let a = dgi[row];
             let b = dgh[row];
             grad[offs.b_i + row] += a;
@@ -827,8 +970,8 @@ pub fn gradient_of_chunk(
                     grad[w + c] += a * x[c];
                 }
             }
-            let w = offs.w_h + row * HIDDEN;
-            for c in 0..HIDDEN {
+            let w = offs.w_h + row * hidden_width;
+            for c in 0..hidden_width {
                 grad[w + c] += b * hp[c];
                 dhp[c] += b * theta[w + c];
             }
@@ -843,82 +986,82 @@ pub fn gradient_of_chunk(
 /// This is the **reported** measurement: the deadband is applied, exactly as the world
 /// applies it, so the numbers say how close the clone's held actions are to the
 /// teacher's held actions.
-pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> ([f64; 3], f64) {
-    let manifest = founder.manifest();
+pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> (Vec<f64>, f64) {
+    let (mse, agreement, _) = measure_manifest(&founder.manifest(), streams, theta);
+    (mse, agreement)
+}
+
+fn measure_manifest(
+    manifest: &Manifest,
+    streams: &[TeacherStream],
+    theta: &[f64],
+) -> (Vec<f64>, f64, Option<f64>) {
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, manifest.outputs());
-    let mut sums = [0.0f64; 3];
-    let mut steps = 0usize;
-    let mut turn_matches = 0usize;
+    let offs = shape_offsets_hidden(inputs, manifest.outputs(), manifest.hidden);
+    let mut sums = vec![0.; manifest.actions.len()];
+    let (mut steps, mut turn_matches, mut option_loss) = (0usize, 0usize, 0.);
     for stream in streams {
-        let mut hidden = vec![0.0; HIDDEN];
+        assert_eq!(stream.inputs, inputs);
+        assert_eq!(stream.actions_per_step, manifest.actions.len());
+        let mut hidden = vec![0.; manifest.hidden];
         for t in 0..stream.steps {
             let y = forward_step(inputs, &offs, theta, stream.observation(t), &mut hidden);
-            let response = cubarium_voxel_fauna::Response::logits(&y);
-            let a = cubarium_voxel_fauna::resolve_actions(response, &manifest);
-            let mine = [a.forward, a.turn, a.feed];
+            let a =
+                cubarium_voxel_fauna::resolve(cubarium_voxel_fauna::Response::logits(&y), manifest);
+            let mine = held_actions(
+                manifest,
+                &cubarium_voxel_fauna::Held {
+                    actions: a.actions,
+                    body: a.body,
+                },
+            );
             let teacher = stream.action(t);
-            for k in 0..3 {
-                let d = mine[k] - teacher[k];
-                sums[k] += d * d;
+            for k in 0..mine.len() {
+                sums[k] += (mine[k] - teacher[k]).powi(2);
             }
             if sign(mine[1]) == sign(teacher[1]) {
                 turn_matches += 1;
+            }
+            if manifest.option_head > 0 {
+                option_loss += cross_entropy(&y[manifest.actions.len()..], stream.option_labels[t]);
             }
             steps += 1;
         }
     }
     let n = steps.max(1) as f64;
     (
-        [sums[0] / n, sums[1] / n, sums[2] / n],
+        sums.iter().map(|v| v / n).collect(),
         turn_matches as f64 / n,
+        (manifest.option_head > 0).then_some(option_loss / n),
     )
 }
 
-/// One forward step of the flat-theta GRU. Identical arithmetic to
-/// [`cubarium_core::neural::gru::Gru::forward`]; a test asserts they agree value for
-/// value on both voxel shapes.
+/// The exact core arithmetic over a manifest's flat vector, including both heads.
 pub fn forward_step(
     inputs: usize,
     offs: &ShapeOffsets,
     theta: &[f64],
     x: &[f64],
     hidden: &mut [f64],
-) -> [f64; 3] {
-    let mut gi = [0.0f64; GATES];
-    let mut gh = [0.0f64; GATES];
-    for row in 0..GATES {
-        let mut a = theta[offs.b_i + row];
-        let w = offs.w_i + row * inputs;
-        for c in 0..inputs {
-            a += theta[w + c] * x[c];
-        }
-        gi[row] = a;
-        let mut b = theta[offs.b_h + row];
-        let w = offs.w_h + row * HIDDEN;
-        for c in 0..HIDDEN {
-            b += theta[w + c] * hidden[c];
-        }
-        gh[row] = b;
-    }
-    let mut next = [0.0f64; HIDDEN];
-    for j in 0..HIDDEN {
-        let r = sigmoid(gi[R + j] + gh[R + j]);
-        let z = sigmoid(gi[Z + j] + gh[Z + j]);
-        let n = (gi[N + j] + r * gh[N + j]).tanh();
-        next[j] = z * hidden[j] + (1.0 - z) * n;
-    }
-    hidden.copy_from_slice(&next);
-    let mut y = [0.0f64; 3];
-    for (k, slot) in y.iter_mut().enumerate() {
-        let mut a = theta[offs.b_o + k];
-        let w = offs.w_o + k * HIDDEN;
-        for j in 0..HIDDEN {
-            a += theta[w + j] * hidden[j];
-        }
-        *slot = a;
-    }
+) -> Vec<f64> {
+    assert_eq!(x.len(), inputs);
+    let mut next = vec![0.; offs.hidden];
+    let mut y = vec![0.; offs.outputs];
+    tensor::gru_view(theta, offs).forward(x, hidden, &mut next, &mut y);
     y
+}
+
+fn option_normalizer(logits: &[f64]) -> (f64, f64) {
+    let peak = logits.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (peak, logits.iter().map(|v| (v - peak).exp()).sum::<f64>())
+}
+fn cross_entropy(logits: &[f64], label: usize) -> f64 {
+    let (peak, sum) = option_normalizer(logits);
+    sum.ln() - (logits[label] - peak)
+}
+fn softmax(logits: &[f64], option: usize) -> f64 {
+    let (peak, sum) = option_normalizer(logits);
+    (logits[option] - peak).exp() / sum
 }
 
 fn sigmoid(v: f64) -> f64 {
@@ -967,33 +1110,77 @@ mod tests {
     /// with the body action last; bodies of other lineages and streams never mix.
     #[test]
     fn the_tap_streams_offer_both_labels_per_body() {
-        use cubarium_voxel_fauna::{Actions, ActionTap, BodyActions, Held, Steer, TapSample};
+        use cubarium_voxel_fauna::{ActionTap, Actions, BodyActions, Held, Steer, TapSample};
         let width = Founder::Browser.manifest().inputs();
         let sample = |tick: u64, own: f64, held: f64, hunker: f64, steer: Steer| TapSample {
             tick,
             observation: vec![tick as f64 * 0.01; width],
-            own: Held { actions: Actions { forward: own, turn: 0.5, feed: 1.0 }, body: BodyActions::default() },
+            own: Held {
+                actions: Actions {
+                    forward: own,
+                    turn: 0.5,
+                    feed: 1.0,
+                },
+                body: BodyActions::default(),
+            },
             executed: Held {
-                actions: Actions { forward: held, turn: 0.5, feed: 1.0 },
-                body: BodyActions { hunker, ..BodyActions::default() },
+                actions: Actions {
+                    forward: held,
+                    turn: 0.5,
+                    feed: 1.0,
+                },
+                body: BodyActions {
+                    hunker,
+                    ..BodyActions::default()
+                },
             },
             steer,
         };
         let tap = ActionTap::from_streams([
-            (3, Founder::Browser, vec![sample(5, 0.9, 0.0, 1.0, Steer::Flee), sample(10, 0.4, 0.4, 0.0, Steer::Heuristic)]),
-            (7, Founder::Browser, vec![sample(5, 0.2, 0.2, 0.0, Steer::Heuristic)]),
+            (
+                3,
+                Founder::Browser,
+                vec![
+                    sample(5, 0.9, 0.0, 1.0, Steer::Flee),
+                    sample(10, 0.4, 0.4, 0.0, Steer::Heuristic),
+                ],
+            ),
+            (
+                7,
+                Founder::Browser,
+                vec![sample(5, 0.2, 0.2, 0.0, Steer::Heuristic)],
+            ),
             (9, Founder::Blind, vec![]),
         ]);
         let own = tap_streams(&tap, Founder::Browser, TapLabel::Own);
         let done = tap_streams(&tap, Founder::Browser, TapLabel::Executed);
-        assert_eq!(own.iter().map(|s| s.body).collect::<Vec<_>>(), vec![3, 7], "per body, its lineage only");
+        assert_eq!(
+            own.iter().map(|s| s.body).collect::<Vec<_>>(),
+            vec![3, 7],
+            "per body, its lineage only"
+        );
         let a = &done[0];
         assert_eq!((a.steps, a.inputs, a.actions_per_step), (2, width, 4));
-        assert_eq!(&a.actions[..4], &[0.0, 0.5, 1.0, 1.0], "executed: forward, turn, feed, hunker");
-        assert_eq!(&own[0].actions[..4], &[0.9, 0.5, 1.0, 0.0], "own: the controller's answer");
+        assert_eq!(
+            &a.actions[..4],
+            &[0.0, 0.5, 1.0, 1.0],
+            "executed: forward, turn, feed, hunker"
+        );
+        assert_eq!(
+            &own[0].actions[..4],
+            &[0.9, 0.5, 1.0, 0.0],
+            "own: the controller's answer"
+        );
         assert_eq!(a.steer, vec![Steer::Flee, Steer::Heuristic]);
-        assert_eq!(&a.observations[width..], &vec![0.1; width][..], "the second sample's observation");
-        assert_eq!(done[1].actions, own[1].actions, "no override: the two labels agree");
+        assert_eq!(
+            &a.observations[width..],
+            &vec![0.1; width][..],
+            "the second sample's observation"
+        );
+        assert_eq!(
+            done[1].actions, own[1].actions,
+            "no override: the two labels agree"
+        );
     }
 
     /// The flat-theta forward step is the core GRU's, value for value, on both shapes.
@@ -1019,13 +1206,14 @@ mod tests {
                     xa.copy_from_slice(&x);
                     w.forward(&xa, &mut theirs).to_vec()
                 } else {
-                    let w: Gru<BROWSER_I, BROWSER_O> = tensor::unflatten_shape(&theta).expect("shape");
+                    let w: Gru<BROWSER_I, BROWSER_O> =
+                        tensor::unflatten_shape(&theta).expect("shape");
                     let mut xa = [0.0; BROWSER_I];
                     xa.copy_from_slice(&x);
                     w.forward(&xa, &mut theirs).to_vec()
                 };
-                // The fit drives the three local actions; a body action's output is P3's.
-                assert_eq!(a[..], b[..3], "step {step} of {}", founder.name());
+                // Every head row uses the same arithmetic as the core forward pass.
+                assert_eq!(a[..], b[..], "step {step} of {}", founder.name());
                 assert_eq!(mine.as_slice(), theirs.as_slice());
             }
         }
@@ -1141,6 +1329,8 @@ mod tests {
             steps,
             observations,
             actions,
+            actions_per_step: founder.manifest().actions.len(),
+            option_labels: Vec::new(),
         };
         stream.validate("synthetic", founder).expect("valid");
         let spec = FitSpec {
@@ -1193,8 +1383,9 @@ mod tests {
                 streams: streams.len(),
                 steps: report.steps,
                 updates: report.updates,
-                mse: report.mse,
+                mse: report.mse.clone(),
                 mse_mean: report.mse_mean,
+                option_ce: report.option_ce,
                 turn_sign_agreement: report.turn_sign_agreement,
             }),
             stage: Stage::B.as_str().into(),
@@ -1253,6 +1444,8 @@ mod tests {
             steps: 2,
             observations: vec![0.25; 2 * inputs],
             actions: vec![0.5; 6],
+            actions_per_step: founder.manifest().actions.len(),
+            option_labels: Vec::new(),
         };
         base.validate("base", founder).expect("valid");
 
@@ -1391,5 +1584,143 @@ mod tests {
         assert_eq!(streams_digest(&streams), streams_digest(&streams));
         let other = record_streams(founder, Stage::A, Band::Landed, 1, 100, 1).expect("recorded");
         assert_ne!(streams_digest(&streams), streams_digest(&other));
+    }
+    #[test]
+    fn a_tap_clone_reduces_loss_on_every_manifest_action_and_hybrid_head() {
+        use cubarium_voxel_fauna::{ActionTap, Actions, BodyActions, Held, Steer, TapSample};
+        for founder in Founder::ALL {
+            let m = founder.manifest();
+            let held = Held {
+                actions: Actions {
+                    forward: 0.9,
+                    turn: -0.6,
+                    feed: 0.1,
+                },
+                body: BodyActions {
+                    sprint: 0.8,
+                    hunker: 0.8,
+                    retract: 0.8,
+                    lure: 0.8,
+                    lift: 0.8,
+                },
+            };
+            let samples = (0..4)
+                .map(|t| TapSample {
+                    tick: t,
+                    observation: (0..m.inputs())
+                        .map(|k| 0.2 + 0.1 * ((t as usize + k) as f64).sin())
+                        .collect(),
+                    own: held,
+                    executed: held,
+                    steer: Steer::Heuristic,
+                })
+                .collect();
+            let tap = ActionTap::from_streams([(1, founder, samples)]);
+            let streams = tap_streams(&tap, founder, TapLabel::Executed);
+            assert!(streams[0].option_labels.iter().all(|&label| label == 0));
+            let spec = FitSpec {
+                updates: 60,
+                chunk: 2,
+                workers: 1,
+                ..FitSpec::default()
+            };
+            let (theta, report) = fit_tap(founder, &streams, &spec).expect("tap fit");
+            assert_eq!(theta.len(), m.parameter_count());
+            assert_eq!(report.mse.len(), m.actions.len());
+            for (k, action) in m.actions.iter().enumerate() {
+                assert!(
+                    report.mse[k] < report.initial_mse[k],
+                    "{} {}: {report:?}",
+                    founder.name(),
+                    action.name
+                );
+            }
+            if matches!(
+                founder,
+                Founder::Loftstrider | Founder::Seedporter | Founder::Chorister
+            ) {
+                let mut hybrid = m;
+                hybrid.hidden += 3;
+                hybrid.option_head = 3;
+                let teacher = streams[0].teacher_stream();
+                let (theta, report) = fit_manifest(&hybrid, &[teacher], &spec);
+                assert_eq!(theta.len(), hybrid.parameter_count());
+                for k in 0..hybrid.actions.len() {
+                    assert!(report.mse[k] < report.initial_mse[k], "{report:?}");
+                }
+                assert!(
+                    report.option_ce.unwrap() < report.initial_option_ce.unwrap(),
+                    "{report:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn both_heads_and_generic_hidden_match_finite_differences() {
+        let mut m = Founder::Seedporter.manifest();
+        m.hidden = 3;
+        m.option_head = 3;
+        let inputs = 2;
+        let offs = shape_offsets_hidden(inputs, m.outputs(), m.hidden);
+        let mut theta: Vec<f64> = (0..offs.params)
+            .map(|k| 0.1 * (k as f64 * 0.37).sin())
+            .collect();
+        let observations = vec![0.2, -0.7, 0.4, 0.1, -0.3, 0.6];
+        let targets: Vec<_> = (0..3 * m.actions.len())
+            .map(|k| 0.3 + 0.1 * (k as f64).cos())
+            .collect();
+        let labels = [0, 2, 1];
+        let loss_at = |theta: &[f64]| {
+            let mut h = vec![0.; m.hidden];
+            let mut loss = 0.;
+            for t in 0..3 {
+                let y = forward_step(
+                    inputs,
+                    &offs,
+                    theta,
+                    &observations[t * inputs..(t + 1) * inputs],
+                    &mut h,
+                );
+                for k in 0..m.actions.len() {
+                    loss += (transfer(y[k], m.actions[k].transfer)
+                        - targets[t * m.actions.len() + k])
+                        .powi(2);
+                }
+                loss += cross_entropy(&y[m.actions.len()..], labels[t]);
+            }
+            loss
+        };
+        let mut grad = vec![0.; theta.len()];
+        let loss = gradient_of_chunk_options(
+            &m,
+            inputs,
+            &offs,
+            &theta,
+            &observations,
+            &targets,
+            &labels,
+            &mut vec![0.; m.hidden],
+            1.,
+            &mut grad,
+        );
+        assert!((loss - loss_at(&theta)).abs() < 1e-12);
+        for i in 0..theta.len() {
+            let original = theta[i];
+            theta[i] = original + 1e-6;
+            let up = loss_at(&theta);
+            theta[i] = original - 1e-6;
+            let down = loss_at(&theta);
+            theta[i] = original;
+            assert!(((up - down) / 2e-6 - grad[i]).abs() < 1e-7, "parameter {i}");
+        }
+        assert!(
+            grad[offs.w_o + m.actions.len() * m.hidden..offs.b_o]
+                .iter()
+                .any(|v| v.abs() > 0.)
+        );
+        assert!(cross_entropy(&[1000., 1001., 999.], 1).is_finite());
+        assert!((cross_entropy(&[1e300, 1e300], 0) - 2f64.ln()).abs() < 1e-14);
+        assert_eq!(softmax(&[1e300, 1e300], 1), 0.5);
     }
 }
