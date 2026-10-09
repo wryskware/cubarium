@@ -922,6 +922,14 @@ control and the reward accounting; display targets after seeing results.
 
      A full bellwing can then bank energy only by laying, so nesting pays without a nest
      term.
+   - V3-CONTRACT (opus-high, brief `briefs/v3-contract.md`) is running proposal packages P1
+     then P0:
+     - P1: v3 manifests and observation, H per lineage, room for the hybrid's option head,
+       and the `Places` layout with a bellwing vine nest place;
+     - P0: recording the executed action plus its `Steer` source.
+
+     Still open for Wrysk before P3 and P5: the digestible stomach in the score, pack-shared
+     reward (Q4b), and H 64 (Q5).
 
 ## 7. Work log (2026-10-08)
 
