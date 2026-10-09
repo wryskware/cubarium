@@ -589,6 +589,33 @@ control and the reward accounting; display targets after seeing results.
         - predators present in training worlds.
     - Herding is never scored or rewarded.
 
+16. **Decided (Wrysk, 2026-10-09): population targets.** Targets are set on the **wide
+    world** (`config/desktop/terrarium-wide.toml`, 80 × 12 m). Wrysk: "the right balace is
+    really one veilhound pack and one loftstrider family per wide d96 world".
+    - **Megafauna, fixed count:**
+      - one Veilhound pack and one loftstrider family per wide world, about 2–6 each;
+      - a smaller world may hold them, but that isn't the balance he wants ("they maybe
+        survive but dont thrive as well or kill too many other animals").
+    - **The rest scale with floor area.** Per d72 area (32 × 9 m):
+      - frondgrazer, littershredder, ripple-snail 8–24;
+      - seedporter 4–12;
+      - capgnawer 6–18;
+      - lanternjaw 6–8 ("smaller to me");
+      - bellwing up to about 90, swinging.
+
+      On the wide world (×3.3): about 27–80, 13–40, 20–60, 20–27 lanternjaws, bellwing up to
+      about 300.
+    - Kept:
+      - each species settles at 1–3× founders, with no peak above 5× (bellwings exempt);
+      - hunts 0.5–2 per world-hour;
+      - the hungriest tenth of adults at least 30 % full.
+    - **Later, not now:** an overpopulated Veilhound lineage splits into packs that fight over
+      territory.
+    - The ecology search's balance check therefore runs on the wide world, about 3× a d72 run.
+    - Side note from Wrysk, same day: animals move at one constant pace. They should vary
+      speed, stop to pause and inspect, then move on, like real foraging or resting animals.
+      This is queued as a topic.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
