@@ -1,10 +1,10 @@
 extends Control
-## The pause menu: Resume, Save, Load, New world, Settings, Dev metrics, Quit. The shell (main.gd) owns what each
+## The pause menu: Resume, Save, Load, New world, Field guide, Settings, Dev metrics, Quit. The shell (main.gd) owns what each
 ## does and when the menu shows; Esc never quits.
 
 signal chosen(item: String)
 
-const ITEMS := [["resume", "Resume"], ["save", "Save"], ["load", "Load"], ["new", "New world"], ["settings", "Settings"], ["metrics", "Dev metrics"], ["quit", "Quit"]]
+const ITEMS := [["resume", "Resume"], ["save", "Save"], ["load", "Load"], ["new", "New world"], ["guide", "Field guide"], ["settings", "Settings"], ["metrics", "Dev metrics"], ["quit", "Quit"]]
 
 var buttons := {}
 var _title: Label
@@ -39,11 +39,12 @@ func _init() -> void:
 		buttons[item[0]] = b
 
 
-## Show it. Without a running world, Resume, Save and Dev metrics are off.
+## Show it. Without a running world, Resume, Save, Field guide and Dev metrics are off.
 func open(has_world: bool) -> void:
 	buttons["resume"].disabled = not has_world
 	buttons["save"].disabled = not has_world
 	buttons["metrics"].disabled = not has_world
+	buttons["guide"].disabled = not has_world
 	_title.text = "Paused" if has_world else "Cubarium"
 	visible = true
 	focus_first()

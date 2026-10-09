@@ -1,0 +1,31 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/field_guide/species_chip.gd" id="1_chip"]
+[ext_resource type="Script" path="res://ui/neon/neon_label.gd" id="2_lbl"]
+
+[node name="SpeciesChip" type="BaseButton"]
+layout_mode = 2
+size_flags_vertical = 4
+theme_type_variation = &"Chip"
+script = ExtResource("1_chip")
+
+[node name="Content" type="HBoxContainer" parent="."]
+layout_mode = 0
+mouse_filter = 2
+theme_type_variation = &"ChipContent"
+
+[node name="Swatch" type="ColorRect" parent="Content"]
+custom_minimum_size = Vector2(8, 8)
+layout_mode = 2
+size_flags_vertical = 4
+mouse_filter = 2
+color = Color(0.64705884, 0.58431375, 0.84705883, 1)
+
+[node name="Name" type="Label" parent="Content"]
+layout_mode = 2
+theme_type_variation = &"ChipText"
+text = "Carrion"
+vertical_alignment = 1
+script = ExtResource("2_lbl")
+look = &"ChipText"
+pressed_look = &"ChipTextSelected"
