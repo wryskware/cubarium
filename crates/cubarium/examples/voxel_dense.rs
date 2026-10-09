@@ -82,13 +82,12 @@ fn found(config: &Path, seed: u64, threads: usize) -> (Sim, u64) {
 }
 
 fn assemble(world: World, flora: Flora, mut fauna: Fauna, threads: usize) -> Sim {
-    install_default_founders(&mut fauna).expect("the built-in centres validate");
+    install_default_founders(&mut fauna).expect("the default heuristic controllers install");
     Sim::ambient(world, flora, fauna, SimConfig::with_threads(threads))
 }
 
 fn load(dir: &Path, threads: usize) -> (Sim, u64) {
-    // The one safe load: every lineage's heuristic back (the ones without a built-in
-    // centre rested here before), the built-in centres installed over it by `assemble`.
+    // The one safe load: every lineage's default heuristic restored.
     let s = cubarium_voxel_sim::saved::load(dir, &cubarium::voxel::policy_founders(&[])).unwrap_or_else(|e| panic!("load: {e}"));
     let (world, flora, fauna, minute) = (s.world, s.flora, s.fauna, s.minute);
     eprintln!(

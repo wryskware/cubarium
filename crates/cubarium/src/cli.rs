@@ -137,18 +137,13 @@ pub struct Voxel {
     /// A validated voxel policy file, used only with `--arena … --controller gru`.
     #[arg(long)]
     pub policy: Option<PathBuf>,
-    /// Drive one founder lineage of the **ambient** run with a saved GRU centre instead
-    /// of the trained centre built into the binary:
-    /// `--founder-policy littershredder=centre.json`. Repeatable, at most once per
-    /// lineage; the lineage the file declares must be the one named. Lineages left out
-    /// run their centre in `crates/cubarium/assets/policies` (the 2026-10-02 curiosity gate's C1).
+    /// Drive one ambient lineage with an explicit saved GRU policy:
+    /// `--founder-policy littershredder=centre.json`. Repeatable, once per lineage.
+    /// The declared lineage must match; every lineage left out runs its heuristic.
     #[arg(long, value_name = "FOUNDER=FILE", conflicts_with = "arena")]
     pub founder_policy: Vec<String>,
-    /// Put one founder lineage of the **ambient** run back on its observation-only
-    /// heuristic instead of the built-in trained centre: `--founder-heuristic
-    /// littershredder`, or `all` for every lineage. Repeatable, at most once per
-    /// lineage, and never for a lineage `--founder-policy` also names. This is the
-    /// disclosed control for the trained default, not a second default.
+    /// Legacy no-op: heuristics are now the default. Accepts a lineage or `all`;
+    /// an explicit `--founder-policy` still takes precedence.
     #[arg(long, value_name = "FOUNDER|all", conflicts_with = "arena")]
     pub founder_heuristic: Vec<String>,
     /// Development control (`design/predation-and-flight-2026-09-28.md` §2.9): put `N`
@@ -244,15 +239,8 @@ pub struct Voxel {
 impl Voxel {
     /// Reject flag combinations clap cannot express.
     pub fn validate(&self) -> anyhow::Result<()> {
-        let policies = self.founder_policies()?;
-        for founder in self.founder_heuristics()? {
-            anyhow::ensure!(
-                !policies.iter().any(|(f, _)| *f == founder),
-                "--founder-heuristic and --founder-policy both name {}: one run cannot \
-                 drive a lineage with a saved centre and with its heuristic",
-                founder.name()
-            );
-        }
+        self.founder_policies()?;
+        self.founder_heuristics()?;
         if self.arena.is_none() {
             anyhow::ensure!(
                 self.policy.is_none(),
@@ -374,12 +362,7 @@ impl Voxel {
         }
     }
 
-    /// The parsed `--founder-heuristic` list: the lineages this run puts back on their
-    /// observation-only heuristic instead of the trained centre built into the binary.
-    ///
-    /// `all` names every lineage at once, which is the control the whole default is
-    /// measured against; a lineage may not be named twice, by its own name or through
-    /// `all`, because the second flag contradicts the first rather than refining it.
+    /// Parse the legacy no-op selection, preserving lineage and duplicate validation.
     pub fn founder_heuristics(&self) -> anyhow::Result<Vec<Founder>> {
         let mut out: Vec<Founder> = Vec::new();
         for spec in &self.founder_heuristic {
@@ -1013,82 +996,35 @@ mod tests {
         );
     }
 
-    /// `--founder-heuristic` is the disclosed control for the trained default: it names
-    /// one lineage or `all`, it cannot name a lineage twice (directly or through `all`),
-    /// and it cannot name a lineage `--founder-policy` also names, because the run would
-    /// then be told to drive one lineage two ways.
     #[test]
-    fn founder_heuristic_is_the_disclosed_control_for_the_trained_default() {
-        // The default names no control at all: both lineages take the built-in centre.
-        assert!(
-            voxel(["cubarium", "voxel"])
-                .founder_heuristics()
-                .expect("no flags")
-                .is_empty()
-        );
-
+    fn founder_heuristic_is_an_accepted_legacy_no_op() {
         let v = voxel(["cubarium", "voxel", "--founder-heuristic", "all"]);
         assert_eq!(
-            v.founder_heuristics().expect("all is every lineage"),
+            v.founder_heuristics().expect("all lineages"),
             Founder::ALL.to_vec()
         );
-        v.validate()
-            .expect("the whole-world control is a valid run");
-
-        let v = voxel(["cubarium", "voxel", "--founder-heuristic", "frondgrazer"]);
-        assert_eq!(
-            v.founder_heuristics().expect("one lineage"),
-            vec![Founder::Browser]
-        );
-
-        for (args, want) in [
-            (vec!["--founder-heuristic", "wombat"], "unknown founder"),
-            (
-                vec!["--founder-heuristic", "blind", "--founder-heuristic", "all"],
-                "twice",
-            ),
-        ] {
-            let mut line = vec!["cubarium", "voxel"];
-            line.extend(args.iter().copied());
-            let err = format!(
-                "{:#}",
-                match Cli::parse_from(line).command {
-                    Command::Voxel(v) => v.founder_heuristics().expect_err("refused"),
-                    other => panic!("expected a voxel command, got {other:?}"),
-                }
-            );
-            assert!(err.contains(want), "{args:?}: {err}");
-        }
-
-        // One lineage cannot be both a saved centre and the control.
-        let err = format!(
-            "{:#}",
-            voxel([
-                "cubarium",
-                "voxel",
-                "--founder-policy",
-                "blind=a.json",
-                "--founder-heuristic",
-                "littershredder",
-            ])
-            .validate()
-            .expect_err("contradictory instructions for one lineage")
-        );
-        assert!(err.contains("littershredder"), "{err}");
-
-        // The other lineage's control beside a policy is fine.
+        v.validate().expect("legacy flag is valid");
         voxel([
             "cubarium",
             "voxel",
             "--founder-policy",
             "blind=a.json",
             "--founder-heuristic",
-            "browser",
+            "all",
         ])
         .validate()
-        .expect("different lineages, different drivers");
-
-        // An arena owns its own controller selection.
+        .expect("an explicit policy takes precedence");
+        for args in [
+            vec!["--founder-heuristic", "wombat"],
+            vec!["--founder-heuristic", "blind", "--founder-heuristic", "all"],
+        ] {
+            let mut line = vec!["cubarium", "voxel"];
+            line.extend(args);
+            match Cli::parse_from(line).command {
+                Command::Voxel(v) => assert!(v.founder_heuristics().is_err()),
+                other => panic!("expected voxel, got {other:?}"),
+            }
+        }
         assert!(
             Cli::try_parse_from([
                 "cubarium",
@@ -1098,8 +1034,7 @@ mod tests {
                 "--founder-heuristic",
                 "all",
             ])
-            .is_err(),
-            "--founder-heuristic is the ambient run's, not the arena's"
+            .is_err()
         );
     }
 

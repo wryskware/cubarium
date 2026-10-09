@@ -12,17 +12,16 @@
 //! `habitat::seed`, the settled live [`Senses`] field, exactly the setup
 //! `examples/voxel_census.rs` uses — steps it for the given number of simulated minutes
 //! (default 60) and writes every event the question needs. Add `half` for the founder-count
-//! comparison or `heuristic` for the disclosed control, and `threads=N` to run on `N`
+//! comparison; `heuristic` is a legacy no-op. Use `threads=N` to run on `N`
 //! threads instead of every core (for runs side by side). `overlap=0` runs the chained
 //! tick instead of the overlapped one (`SimConfig::overlap`).
 //!
 //! **It is read-only on the model.** Nothing here changes a birth, feeding, movement or
 //! physiology rule, the seeder, or a constant.
 //!
-//! The founders are driven by the built-in trained centres by default, the same drivers
-//! `cubarium voxel`'s ambient run installs, so this autopsies the world that ships. A
-//! trailing `heuristic` argument keeps the old, observation-only control:
-//! `voxel_founder_autopsy -- 60 generated closed heuristic`.
+//! Every lineage runs its observation-only heuristic by default. Supply
+//! `policy=LINEAGE=FILE` to install a saved policy explicitly. The trailing `heuristic`
+//! argument remains accepted as a no-op.
 //!
 //! # What it writes
 //!
@@ -181,8 +180,7 @@ fn main() {
     {
         cubarium_voxel::set_thread_override(n);
     }
-    // `policy=<lineage>=<file>`: that lineage runs a saved policy instead of the
-    // built-in centre (P5-C).
+    // `policy=<lineage>=<file>` explicitly replaces that lineage's default heuristic.
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
     let minutes: f64 = args
         .iter()
@@ -192,10 +190,7 @@ fn main() {
     let generated = args.iter().any(|a| a == "generated");
     let closed = args.iter().any(|a| a == "closed");
     let half_founders = args.iter().any(|a| a == "half");
-    // The shipped world's founders are driven by the built-in trained centres by
-    // default, exactly as `cubarium voxel`'s ambient run installs them; `heuristic` as a
-    // trailing argument keeps the old, observation-only control.
-    let heuristic = args.iter().any(|a| a == "heuristic");
+    // `heuristic` remains accepted as a legacy no-op; explicit policies win.
     // The **before** arm, on this build: every plant reduced to the one-disc lollipop
     // the model was before `design/handoffs/voxel-plant-layers-2026-09-22.md`, so an
     // arm can be compared against the layered one on the same landforms, seed, bodies
@@ -322,11 +317,7 @@ fn main() {
     if lollipop {
         eprintln!("plants: one_layer_species (the pre-layers control)");
     }
-    if heuristic {
-        eprintln!("founders: the observation-only heuristic (control)");
-    } else {
-        install_founders_with(&mut fauna, &policies).expect("the founder centres validate");
-    }
+    install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
     for f in Founder::ALL {
         let sc = fauna_cfg.founder(f).core;
         let m = f.manifest();

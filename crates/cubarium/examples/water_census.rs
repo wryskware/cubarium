@@ -77,7 +77,7 @@ fn main() {
         false,
     );
     let (world, flora, mut fauna) = (founded.world, founded.flora, founded.fauna);
-    install_default_founders(&mut fauna).expect("the built-in centres validate");
+    install_default_founders(&mut fauna).expect("the default heuristic controllers install");
     let threads = cubarium_voxel::default_threads();
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(threads));
     let c = sim.world().config().clone();

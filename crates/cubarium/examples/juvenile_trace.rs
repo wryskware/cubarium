@@ -5,8 +5,8 @@
 //! ```
 //!
 //! Loads a saved run (`voxel_census save=` / a staged checkpoint), installs the drivers as
-//! `voxel_census load=` does (the built-in centres, or the observation-only heuristics with
-//! `heuristic`), steps `minutes` simulated minutes and reads every founder body every tick.
+//! `voxel_census load=` does (default heuristics; `heuristic` is a legacy no-op),
+//! steps `minutes` simulated minutes and reads every founder body every tick.
 //! Per lineage and stage (juvenile / adult) it prints, on stdout, once at the end:
 //! - `awake_s`: awake body-seconds; `eat`: share of them with the eating latch on;
 //! - `ask`: share of the latch-on controller samples whose held `feed` is on (the mouth
@@ -75,7 +75,7 @@ fn main() {
     let dir = get("load=").expect("load=DIR");
     let minutes: f64 = get("minutes=").map_or(10.0, |s| s.parse().expect("minutes="));
     let threads: usize = get("threads=").map_or(2, |s| s.parse().expect("threads="));
-    let heuristic = args.iter().any(|a| a == "heuristic");
+    // `heuristic` remains accepted as a legacy no-op.
     let only: Option<String> = get("lineage=");
     // `dump=N`: also print every N-th latch-on controller sample of each juvenile (stderr).
     let dump: u64 = get("dump=").map_or(0, |s| s.parse().expect("dump="));
@@ -88,17 +88,15 @@ fn main() {
     let every: u64 = get("every=").map_or(1, |s| s.parse().expect("every="));
     cubarium_voxel::set_thread_override(threads);
 
-    let driven = if heuristic { Vec::new() } else { cubarium::voxel::policy_founders(&[]) };
+    let driven = cubarium::voxel::policy_founders(&[]);
     let saved = cubarium_voxel_sim::saved::load(std::path::Path::new(&dir), &driven)
         .unwrap_or_else(|e| panic!("load: {e}"));
     let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
-    if !heuristic {
-        install_founders_with(&mut fauna, &[]).expect("the founder centres validate");
-    }
+    install_founders_with(&mut fauna, &[]).expect("default heuristic controllers");
     eprintln!(
         "loaded {dir} at minute {minute}: animals {} ({})",
         fauna.view().animals.len(),
-        if heuristic { "heuristic" } else { "centres" }
+        "heuristic"
     );
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
 

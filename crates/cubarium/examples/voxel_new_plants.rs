@@ -60,7 +60,7 @@ fn main() {
         founded.seed,
         if founded.accepted { "accepted" } else { "NOT accepted" }
     );
-    install_default_founders(&mut fauna).expect("the built-in centres validate");
+    install_default_founders(&mut fauna).expect("the default heuristic controllers install");
     let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(threads));
 
     let tag = format!("{},{}", preset.name, seed);

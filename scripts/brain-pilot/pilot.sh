@@ -5,7 +5,9 @@
 #   cd R && setsid nohup bash scripts/pilot.sh > pilot.log 2>&1 < /dev/null &
 #
 # Run from the pilot directory R, which holds bin/cubarium-search, config/ (scenarios and
-# desktop maps), policies/ (the C1 centres), scripts/noise.py. One chained script:
+# desktop maps), scripts/noise.py. Set PILOT_FRONDGRAZER_POLICY and
+# PILOT_LITTERSHREDDER_POLICY to explicit centre paths for this historical pilot.
+# One chained script:
 #   1. p1-noise: sigma 0, C1 centres, 2 generations, 8 worlds, 8 pairs, 10-min windows,
 #      curiosity weight 0 -> noise.py readout + curiosity-2026-10-08.toml.
 #   2. p2-train: warm start C1, sigma 0.02, lr 0.005, 8 pairs, 8 worlds, 10-min windows,
@@ -24,8 +26,8 @@ KIT=$HOME/cubarium-train/kit
 CENSUS=$KIT/voxel_census.1ea9dfce   # vitals v2
 BIN=$R/bin/cubarium-search
 MAP=$R/config/scenarios/train-flat-nopred.toml
-C1F=$R/policies/frondgrazer-curio-c1-2026-10-02.json
-C1L=$R/policies/littershredder-curio-c1-2026-10-02.json
+C1F=${PILOT_FRONDGRAZER_POLICY:?historical pilot requires an explicit frondgrazer policy path}
+C1L=${PILOT_LITTERSHREDDER_POLICY:?historical pilot requires an explicit littershredder policy path}
 D72=$R/config/desktop/terrarium-d72.toml
 TRAIN_WALL=${TRAIN_WALL:-14400}
 MID_AFTER=${MID_AFTER:-7200}
@@ -82,7 +84,7 @@ if kill -0 $TRAIN 2>/dev/null; then
   M=$R/gate-mid/centres
   gate_flat "$R/gate-mid/flat" \
     --arm "trained=policy=frondgrazer=$M/latest-frondgrazer.json policy=littershredder=$M/latest-littershredder.json still=lanternjaw" \
-    --arm "c1=still=lanternjaw" --arm "heuristic=heuristic still=lanternjaw" > gate-mid.log 2>&1 \
+    --arm "c1=policy=frondgrazer=$C1F policy=littershredder=$C1L still=lanternjaw" --arm "heuristic=heuristic still=lanternjaw" > gate-mid.log 2>&1 \
     || log "midway gate batch exited nonzero (see gate-mid.log)"
   score "$R/gate-mid/flat" c1
 else
@@ -102,10 +104,10 @@ F=$R/p2-train/centres
 [ -f "$F/final-frondgrazer.json" ] && [ -f "$F/final-littershredder.json" ] || fail "no final centres in $F"
 trained="policy=frondgrazer=$F/final-frondgrazer.json policy=littershredder=$F/final-littershredder.json still=lanternjaw"
 # c1 and heuristic on these seeds ran in the midway gate; run them here only if it didn't.
-if [ -f gate-mid/flat/DONE ]; then extra=(); else extra=(--arm "c1=still=lanternjaw" --arm "heuristic=heuristic still=lanternjaw"); fi
+if [ -f gate-mid/flat/DONE ]; then extra=(); else extra=(--arm "c1=policy=frondgrazer=$C1F policy=littershredder=$C1L still=lanternjaw" --arm "heuristic=heuristic still=lanternjaw"); fi
 GATE_PAR=6 gate_flat "$R/gate-end/flat" --arm "trained=$trained" "${extra[@]}" > gate-end-flat.log 2>&1 &
 FLAT=$!
-python3 "$KIT/scripts/studies/batch.py" "$R/gate-end/d72" --bin "$CENSUS" --arm "trained=$trained" --arm "c1=still=lanternjaw" \
+python3 "$KIT/scripts/studies/batch.py" "$R/gate-end/d72" --bin "$CENSUS" --arm "trained=$trained" --arm "c1=policy=frondgrazer=$C1F policy=littershredder=$C1L still=lanternjaw" \
   --config "$D72" --seeds 1-8 --hours 1 --threads 1 --max-parallel 8 --slot-base 14 \
   --stage "check_min=3 segment_min=15 keep=2" > gate-end-d72.log 2>&1 || log "d72 gate batch exited nonzero"
 wait $FLAT || log "end flat gate batch exited nonzero"
