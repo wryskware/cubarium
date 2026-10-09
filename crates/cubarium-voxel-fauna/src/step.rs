@@ -2312,6 +2312,11 @@ fn act(
                 a.pose.y_m = crate::surface_m(a.site.y, v);
             }
         }
+        // SEEDPORTER-POLLEN: pollen brushes off a body that carries it onto the vine flowers
+        // it moved into touch with.
+        if fauna.animals[i].founder.is_some_and(|f| fauna.config.founder(f).pollen_by_contact) {
+            brush_pollen(fauna, view, flora, &before, i);
+        }
         // What the body did, for the senses of others (predation §2.2): its ground speed
         // this tick, and how long it has been still.
         let length = crate::body_of(&fauna.config, &fauna.animals[i]).map_or(v, |b| b.length_m);
@@ -2326,6 +2331,49 @@ fn act(
         }
     }
     carry_riders(fauna);
+}
+
+/// **Pollen by contact** (SEEDPORTER-POLLEN, Wrysk 2026-10-09: "seedporters should also
+/// polinate by moving accross them or around them"), for a body whose lineage has
+/// [`crate::FounderPhysiology::pollen_by_contact`]: the open vine flowers its body moved
+/// into touch with this tick — within [`crate::flight::PRESSED_M`] of its collision
+/// cylinder (its footprint disc, or a flyer's span disc, its height tall) — are visited when it brings pollen from
+/// another flower ([`crate::flight::brushed_flowers`] has the rule), booked to the flowers
+/// ([`Flora::visit_face`]) and to the lineage's contact visits. A body that did not move
+/// touched nothing new, so it is not scanned; nor is a world without vines.
+fn brush_pollen(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora, before: &crate::Pose, i: usize) {
+    let a = &fauna.animals[i];
+    if a.pose == *before {
+        return;
+    }
+    let Some(founder) = a.founder else {
+        return;
+    };
+    let (visited, carries) = {
+        let fv = flora.view();
+        if fv.cover.face_count() == 0 {
+            return;
+        }
+        // The body's own collision shape: a flyer's span disc, a walker's footprint disc.
+        let phys = fauna.config.founder(founder);
+        let shape = match phys.flight {
+            Some(flight) => crate::flight::Shape::of(phys, &flight, a.body),
+            None => {
+                let g = phys.body_at(a.body);
+                crate::flight::Shape {
+                    r: g.footprint_radius(),
+                    h: g.height_m.max(1e-6),
+                }
+            }
+        };
+        crate::flight::brushed_flowers(view, &fv, before, &a.pose, shape, crate::flight::PRESSED_M, a.last_bloom)
+    };
+    fauna.animals[i].last_bloom = carries;
+    for f in visited {
+        if flora.visit_face(f) {
+            fauna.ledger.contact_visits_by_founder[founder.index()] += 1;
+        }
+    }
 }
 
 /// One body's act (step 5).

@@ -989,7 +989,10 @@ pub struct Animal {
     /// motion, controller, sensing or strikes of its own; its position is its host's.
     /// Saved as the host's id.
     pub attached: Option<Attachment>,
-    /// **The last bloom it sipped from** (F1 §3.7, the pollen seam): `None` until a sip.
+    /// **The last bloom it took pollen from** (F1 §3.7, the pollen seam): the one it last
+    /// sipped from, or (SEEDPORTER-POLLEN, a body with
+    /// [`FounderPhysiology::pollen_by_contact`]) the vine flower it last brushed against.
+    /// `None` until then.
     #[serde(default)]
     pub last_bloom: Option<Bloom>,
     /// **Seeds in the gut** (F3, a lineage with [`FounderPhysiology::gut_seeds`]): each
@@ -3296,6 +3299,12 @@ pub struct FaunaLedger {
     /// VINE-C: clutches laid on a latticevine face ([`EggSite::Vine`]), by lineage.
     #[serde(default)]
     pub vine_clutches_by_founder: [u64; Founder::COUNT],
+    /// SEEDPORTER-POLLEN: vine flower visits by contact — open flowers a body that carries
+    /// pollen ([`FounderPhysiology::pollen_by_contact`]) touched as it moved, bringing pollen
+    /// from another flower — by lineage. Each is also one of the plant layer's
+    /// `flower_visits`; the rest of those are sip visits.
+    #[serde(default)]
+    pub contact_visits_by_founder: [u64; Founder::COUNT],
     /// VINE-C: controller samples a vine nester, ready to lay, held at a nest site, and flew
     /// toward one it found ([`crate::Flight::nest_search_m`]), by lineage. Diagnostics.
     #[serde(default)]

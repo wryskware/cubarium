@@ -26,6 +26,10 @@ use crate::{Animal, Bloom, ConeHit, Flight, FounderPhysiology, MobilityMode, Per
 pub(crate) const EPS: f64 = 1e-9;
 /// How near a flyer's disc must come to a wall to cling to it, metres.
 pub(crate) const CLING_M: f64 = 0.01;
+/// How near a walker's footprint must come to a wall to be **pressed** against it, metres:
+/// a glider's vine climb starts there, and (SEEDPORTER-POLLEN) a body that carries pollen
+/// touches a covered face that near. A sweep stops within float dust of it.
+pub(crate) const PRESSED_M: f64 = 0.02;
 /// How far a perch's height may drift from the body's before the perch is gone, metres
 /// (a crown that grew a stage, a face that changed): a millimetre.
 const PERCH_SLACK_M: f64 = 1e-3;
@@ -795,6 +799,124 @@ pub(crate) fn pollinated_faces(
         }
     }
     out
+}
+
+/// **How far a body's shape is from a covered face** (SEEDPORTER-POLLEN), metres, or `None`
+/// when the body's middle is not in front of the face's plane (it can't touch it from
+/// behind). The body is its collision cylinder: the footprint disc of radius `shape.r` at
+/// `(pose.x, pose.z)`, from its base `pose.y_m` up `shape.h`. The face's cell `x` is taken
+/// around the ring to the copy nearest the body. The cylinder and the face's square are both
+/// a horizontal shape times a vertical range, so the gap is the horizontal gap (disc to the
+/// square's footprint) and the vertical gap (the two ranges) put together.
+pub(crate) fn body_face_gap(view: &VoxelView<'_>, pose: &crate::Pose, shape: Shape, face: VineFace) -> Option<f64> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let mut bx = f64::from(face.x) * v;
+    bx += ((pose.x - bx) / ring).round() * ring;
+    let (by, bz) = (f64::from(face.y) * v, f64::from(face.z) * v);
+    let mid = pose.y_m + 0.5 * shape.h;
+    let front = match face.dir {
+        FaceDir::NegX => pose.x < bx,
+        FaceDir::PosX => pose.x > bx + v,
+        FaceDir::NegZ => pose.z < bz,
+        FaceDir::PosZ => pose.z > bz + v,
+        FaceDir::Down => mid < by,
+    };
+    if !front {
+        return None;
+    }
+    let (xr, yr, zr) = face_square(face.dir, (bx, by, bz), v);
+    let d = |q: f64, (lo, hi): (f64, f64)| (lo - q).max(0.0).max(q - hi);
+    let (dx, dz) = (d(pose.x, xr), d(pose.z, zr));
+    let horizontal = ((dx * dx + dz * dz).sqrt() - shape.r).max(0.0);
+    let vertical = (yr.0 - (pose.y_m + shape.h)).max(0.0).max(pose.y_m - yr.1);
+    Some((horizontal * horizontal + vertical * vertical).sqrt())
+}
+
+/// **The covered faces a body touches** (SEEDPORTER-POLLEN): every covered face within
+/// `touch` metres of the body's collision cylinder ([`body_face_gap`]) that `keep` accepts.
+/// Scanned over only the cells that cylinder, grown by `touch`, covers — a few around the
+/// body — in metres, so it is the same patch of wall at any voxel size.
+pub(crate) fn vine_faces_touching(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    pose: &crate::Pose,
+    shape: Shape,
+    touch: f64,
+    mut keep: impl FnMut(&cubarium_voxel_flora::CoveredFace) -> bool,
+) -> Vec<VineFace> {
+    let mut out = Vec::new();
+    if fv.cover.face_count() == 0 || !(touch >= 0.0) || !touch.is_finite() {
+        return out;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let grow = shape.r + touch;
+    let cell = |q: f64| (q / v).floor() as i64;
+    let (x0, x1) = (cell(pose.x - grow), cell(pose.x + grow).min(cell(pose.x - grow) + i64::from(c.width) - 1));
+    let (z0, z1) = (cell(pose.z - grow).max(0), cell(pose.z + grow).min(i64::from(c.depth) - 1));
+    let (y0, y1) = (cell(pose.y_m - touch).max(0), cell(pose.y_m + shape.h + touch).min(i64::from(c.height) - 1));
+    for sy in y0..=y1 {
+        for sz in z0..=z1 {
+            for sx in x0..=x1 {
+                let wx = wrap(sx, c.width);
+                if !view.is_solid(wx, sy as u32, sz as u32) {
+                    continue;
+                }
+                for dir in FaceDir::ALL {
+                    let face = VineFace::new(wx as u32, sy as u32, sz as u32, dir);
+                    if body_face_gap(view, pose, shape, face).is_some_and(|g| g <= touch)
+                        && fv.cover.face(face).is_some_and(&mut keep)
+                    {
+                        out.push(face);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// **What a body that carries pollen pollinates as it moves** (SEEDPORTER-POLLEN, Wrysk
+/// 2026-10-09: "seedporters should also polinate by moving accross them or around them"):
+/// pollen brushes off the body onto the open vine flowers it touches.
+///
+/// - **Touching** is the body's collision cylinder within `touch` metres of the face
+///   ([`vine_faces_touching`]); only open flowers (in flower, nectar or not) count.
+/// - **A visit** is a flower the body touches now that it did not touch from `before` (its
+///   pose a tick ago), while it carries pollen from a different flower (`carried`, the bloom
+///   it last took pollen from, is another one). A body resting against the same flowers
+///   touches nothing new, so it visits nothing tick after tick.
+/// - **The pollen it carries on** is from the last flower it newly touched; with none and no
+///   pollen yet, from the first open flower it touches.
+///
+/// `(the flowers visited, the bloom it now carries pollen from)`.
+pub(crate) fn brushed_flowers(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    before: &crate::Pose,
+    now: &crate::Pose,
+    shape: Shape,
+    touch: f64,
+    carried: Option<Bloom>,
+) -> (Vec<VineFace>, Option<Bloom>) {
+    let touching = vine_faces_touching(view, fv, now, shape, touch, |cf| cf.spur == SpurPhase::Flower);
+    let mut visited = Vec::new();
+    let mut carries = carried;
+    for &f in &touching {
+        if body_face_gap(view, before, shape, f).is_some_and(|g| g <= touch) {
+            continue;
+        }
+        if carried.is_some_and(|b| b != Bloom::Vine(f)) {
+            visited.push(f);
+        }
+        carries = Some(Bloom::Vine(f));
+    }
+    if carries.is_none() {
+        carries = touching.first().map(|&f| Bloom::Vine(f));
+    }
+    (visited, carries)
 }
 
 /// The square of the `dir` face of the cell whose low corner is `(bx, by, bz)`, as

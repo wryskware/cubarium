@@ -2706,6 +2706,18 @@ impl VineLog {
             self.sp[4],
             self.sp[5],
         );
+        // SEEDPORTER-POLLEN: the vine visits by contact (a body that carries pollen brushing
+        // open flowers as it moves), by lineage, kept apart from the sips (the rest of the
+        // plant layer's vine visits).
+        let contact: u64 = l.contact_visits_by_founder.iter().sum();
+        eprintln!(
+            "vine_pollen: visit_events={} by_contact={} by_sip={} contact_seedporter={} flowers_visited_share={:.4}",
+            fl.flower_visits[1],
+            contact,
+            fl.flower_visits[1].saturating_sub(contact),
+            l.contact_visits_by_founder[Founder::Seedporter.index()],
+            (self.visits_hist[1] + self.visits_hist[2]) as f64 / closed,
+        );
         // VINE-C's nest readout: the bellwing's clutches and where, its hatchlings, the nest
         // reflex's samples, where it perches, and how many live at the end.
         let b = Founder::Bellwing.index();

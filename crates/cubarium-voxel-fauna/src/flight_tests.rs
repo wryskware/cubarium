@@ -1885,3 +1885,40 @@ fn a_ready_bellwing_flies_to_a_vine_it_can_find_and_lays_there() {
     assert!(faces.contains(&face));
     assert!(fauna.view().ledger.nest_searches_by_founder[BW.index()] > 0, "it searched");
 }
+
+// ------------------------------------------------------------------ SEEDPORTER-POLLEN
+
+/// **Pollen by contact is the lineage's switch, not a species rule, and the bellwing's is
+/// off.** A bellwing carrying another flower's pollen flies north along the flowering vine
+/// sheet, its disc pressed against the wall, not feeding, for 30 ticks: with the default
+/// table no flower is visited (its visits are sips alone); with `pollen_by_contact` switched
+/// on for it, the flowers it moves along are visited by contact.
+#[test]
+fn a_bellwing_brushing_along_flowers_visits_none_unless_its_lineage_has_the_switch() {
+    for on in [false, true] {
+        let (world, mut flora, faces) = vine_sheet(flowering_vines());
+        for &f in &faces {
+            assert!(flora.set_spur(f, SpurPhase::Flower, 1.0e-3), "fixture: a flower on {f:?}");
+        }
+        let mut config = FaunaConfig::default();
+        assert!(!config.founder(BW).pollen_by_contact, "the bellwing pollinates by its sips");
+        config.founders[BW.index()].pollen_by_contact = on;
+        let mut fauna = Fauna::new(config);
+        let r = bellwing_flight(&fauna).span_m / 2.0;
+        let id = aloft(&mut fauna, &world, WALL_FACE_M - r - 0.005, 0.2, 6.0 * V + 0.05, 0.0, StartingStores::FULL);
+        let k = fauna.animals.iter().position(|a| a.id == id).expect("the body");
+        fauna.animals[k].last_bloom = Some(Bloom::Stand(Site { x: 0, y: 0, z: 0 }));
+        fly(&mut fauna, id, 1.0, 0.0, 0.0);
+        let z0 = animal(&fauna, id).pose.z;
+        steps(&mut fauna, &world, &mut flora, 30);
+        assert!(animal(&fauna, id).pose.z > z0 + V, "fixture: it flew along the wall");
+        let booked = flora.view().ledger.flower_visits[1];
+        assert_eq!(fauna.view().ledger.bites_by_food[Food::Nectar.index()], 0, "fixture: no sip");
+        if on {
+            assert!(booked > 0, "with the switch its body pollinates the flowers it passes");
+            assert_eq!(fauna.view().ledger.contact_visits_by_founder[BW.index()], booked);
+        } else {
+            assert_eq!(booked, 0, "without the switch it visits nothing it only brushes");
+        }
+    }
+}

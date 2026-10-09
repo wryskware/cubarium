@@ -159,7 +159,10 @@ use crate::{Fauna, FaunaConfig};
 //     `awake_day_ticks`, `rest_bouts`, `alarm_wakes`, `paced_ticks`, `paused_ticks` by founder.
 // 74: VINE-C — `Clutch::face` (a clutch in the vines: a state layout change). The new
 //     `EggSite::Vine` and `Flight::nest_search_m` are config, not bumps.
-pub const SCHEMA: u32 = 74;
+// 75: SEEDPORTER-POLLEN — `FaunaLedger::contact_visits_by_founder` (a state layout change);
+//     `Animal::last_bloom` now also holds the vine flower a contact pollinator last brushed.
+//     The `FounderPhysiology::pollen_by_contact` switch is config, not a bump.
+pub const SCHEMA: u32 = 75;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
