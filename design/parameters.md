@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1110 rows)
+**`flora.*`** (1113 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -399,7 +399,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.bloomcrown.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.bloomcrown.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.bloomcrown.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.bloomcrown.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.bloomcrown.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.bloomcrown.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.bloomcrown.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -513,7 +513,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.umbrellafrond.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.umbrellafrond.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.umbrellafrond.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.umbrellafrond.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.umbrellafrond.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.umbrellafrond.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.umbrellafrond.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -627,7 +627,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.springturf.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.springturf.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.springturf.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.springturf.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.springturf.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.springturf.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.springturf.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -741,7 +741,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.stonecushion.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.stonecushion.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.stonecushion.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.stonecushion.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.stonecushion.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.stonecushion.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.stonecushion.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -855,7 +855,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.velvetpad.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.velvetpad.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.velvetpad.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.velvetpad.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.velvetpad.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.velvetpad.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.velvetpad.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -969,7 +969,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.mycelium_graze_fraction` | 0.5 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.glowcap.sun_shade_max` | 0.2 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.glowcap.sun_cap_loss_per_s` | 0.0006 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.glowcap.sun_mycelium_loss_per_s` | 0.01 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.glowcap.sun_mycelium_loss_per_s` | 0.01 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.glowcap.sun_dark_shelter` | 1.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.glowcap.substrate_yield` | 0.4 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.glowcap.establish_substrate_min` | 0.02 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1083,7 +1083,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.vaulttree.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.vaulttree.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.vaulttree.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.vaulttree.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.vaulttree.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.vaulttree.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.vaulttree.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1197,7 +1197,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.lanternberry.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.lanternberry.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.lanternberry.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.lanternberry.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.lanternberry.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.lanternberry.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.lanternberry.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1311,7 +1311,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.mycelium_graze_fraction` | 0.0 | fraction of living mycelium | [0, 1] |  | - | placeholder | fungal tissue exposed to grazers after edible caps are cropped |
 | `flora.siphonreed.sun_shade_max` | 0.0 | fraction of open sun | [0, 1] |  | - | placeholder | saprotroph: exposure at and below which the sun costs nothing (shade) |
 | `flora.siphonreed.sun_cap_loss_per_s` | 0.0 | /s of cap tissue at full exposure | [0, inf) |  | - | placeholder | saprotroph: caps dried to litter in full sun and daylight |
-| `flora.siphonreed.sun_mycelium_loss_per_s` | 0.0 | /s of mycelium at full exposure | [0, inf) |  | - | placeholder | saprotroph: surface mycelium dried to litter in full sun and daylight |
+| `flora.siphonreed.sun_mycelium_loss_per_s` | 0.0 | /s of mycelial capacity at full exposure | [0, inf) |  | - | placeholder | saprotroph: exposed footprint dried to litter, capped by remaining mycelium |
 | `flora.siphonreed.sun_dark_shelter` | 0.0 | fraction of the drying | [0, 1] |  | - | placeholder | saprotroph: its own dark habitat's shelter from the sun (drying x (1 - shelter x darkness)) |
 | `flora.siphonreed.substrate_yield` | 0.0 | fraction | [0, 1] | 0.2–0.7 | A | placeholder | saprotroph: share of the substrate taken that becomes tissue |
 | `flora.siphonreed.establish_substrate_min` | 0.0 | org-units | [0, inf) |  | C | placeholder | saprotroph: substrate a spore cohort needs in its box |
@@ -1464,6 +1464,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | C | placeholder | a banked latticevine seed (voided from a gut) older than this at its check falls to litter |
 | `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
+| `flora.litter_fragment_boost` | 0.25 | fraction | [0, inf) |  | - | placeholder | extra local microbial decay after shredder feeding |
+| `flora.litter_fragment_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | radius of shredder fragmentation |
+| `flora.litter_fragment_duration_s` | 600.0 | s | [0, inf) |  | - | placeholder | time for fragmentation to fade linearly |
 | `flora.wood_decomposition` | 0.0001 | /s | [0, inf) | yes | C | placeholder | k_w: dead-wood decomposition |
 | `flora.carrion_decomposition` | 0.00028 | /s | [0, inf) | yes | A | placeholder | k_c: carrion decomposition |
 | `flora.litter_energy_cap` | 2.0 | energy per org-unit | [0, inf) |  | C | placeholder | retained energy cap per unit of litter |
@@ -1504,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2526 rows)
+**`fauna.*`** (2652 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1629,6 +1632,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.littershredder.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.littershredder.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.littershredder.rhythm.day` | 0.7 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.littershredder.rhythm.night` | 0.8 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.littershredder.rhythm.twilight` | 0.8 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.littershredder.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.littershredder.rhythm.rest_mean_h` | 0.5 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.littershredder.rhythm.rest_min_h` | 0.1 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.littershredder.cadence.cycle_s` | 8.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.littershredder.cadence.pause_min_s` | 0.5 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.littershredder.cadence.pause_max_s` | 2.5 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.littershredder.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.littershredder.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.littershredder.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.littershredder.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -1656,11 +1670,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.littershredder.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.littershredder.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.littershredder.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.littershredder.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.littershredder.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.littershredder.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.littershredder.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.littershredder.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.littershredder.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -1886,6 +1903,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.frondgrazer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.frondgrazer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.frondgrazer.rhythm.day` | 0.9 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.frondgrazer.rhythm.night` | 0.15 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.frondgrazer.rhythm.twilight` | 0.6 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.frondgrazer.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.frondgrazer.rhythm.rest_mean_h` | 0.75 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.frondgrazer.rhythm.rest_min_h` | 0.1 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.frondgrazer.cadence.cycle_s` | 10.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.frondgrazer.cadence.pause_min_s` | 1.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.frondgrazer.cadence.pause_max_s` | 3.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.frondgrazer.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.frondgrazer.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.frondgrazer.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.frondgrazer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -1913,11 +1941,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.frondgrazer.senses.feeding_sight_fraction` | 0.25 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.frondgrazer.senses.kin_tracks` | 6 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.frondgrazer.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.frondgrazer.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.frondgrazer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.frondgrazer.vigilance.scan_s` | 1.5 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.frondgrazer.vigilance.scan_kin_m` | 4.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -2143,6 +2174,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.lanternjaw.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.lanternjaw.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.lanternjaw.rhythm.day` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.lanternjaw.rhythm.night` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.lanternjaw.rhythm.twilight` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.lanternjaw.rhythm.twilight_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.lanternjaw.rhythm.rest_mean_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.lanternjaw.rhythm.rest_min_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.lanternjaw.cadence.cycle_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.lanternjaw.cadence.pause_min_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.lanternjaw.cadence.pause_max_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.lanternjaw.cadence.speed_min` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.lanternjaw.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.lanternjaw.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.lanternjaw.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2170,11 +2212,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.lanternjaw.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.lanternjaw.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.lanternjaw.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.lanternjaw.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.lanternjaw.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.lanternjaw.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.lanternjaw.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.lanternjaw.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.lanternjaw.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -2400,6 +2445,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.capgnawer.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.capgnawer.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.capgnawer.rhythm.day` | 0.15 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.capgnawer.rhythm.night` | 0.85 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.capgnawer.rhythm.twilight` | 0.6 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.capgnawer.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.capgnawer.rhythm.rest_mean_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.capgnawer.rhythm.rest_min_h` | 0.25 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.capgnawer.cadence.cycle_s` | 8.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.capgnawer.cadence.pause_min_s` | 0.5 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.capgnawer.cadence.pause_max_s` | 2.5 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.capgnawer.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.capgnawer.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.capgnawer.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.capgnawer.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2427,11 +2483,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.capgnawer.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.capgnawer.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.capgnawer.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.capgnawer.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.capgnawer.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.capgnawer.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.capgnawer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.capgnawer.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.capgnawer.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -2657,6 +2716,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.loftstrider.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.loftstrider.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.loftstrider.rhythm.day` | 0.85 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.loftstrider.rhythm.night` | 0.25 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.loftstrider.rhythm.twilight` | 0.6 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.loftstrider.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.loftstrider.rhythm.rest_mean_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.loftstrider.rhythm.rest_min_h` | 0.25 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.loftstrider.cadence.cycle_s` | 10.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.loftstrider.cadence.pause_min_s` | 1.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.loftstrider.cadence.pause_max_s` | 3.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.loftstrider.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.loftstrider.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.loftstrider.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.loftstrider.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2684,11 +2754,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.loftstrider.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.loftstrider.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.loftstrider.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.loftstrider.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.loftstrider.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.loftstrider.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.loftstrider.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -2914,6 +2987,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.ripple-snail.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.ripple-snail.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.ripple-snail.rhythm.day` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.ripple-snail.rhythm.night` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.ripple-snail.rhythm.twilight` | 1.0 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.ripple-snail.rhythm.twilight_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.ripple-snail.rhythm.rest_mean_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.ripple-snail.rhythm.rest_min_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.ripple-snail.cadence.cycle_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.ripple-snail.cadence.pause_min_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.ripple-snail.cadence.pause_max_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.ripple-snail.cadence.speed_min` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.ripple-snail.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.ripple-snail.sleep_upkeep` | 0.3 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.ripple-snail.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -2941,11 +3025,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.ripple-snail.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.ripple-snail.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.ripple-snail.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.ripple-snail.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.ripple-snail.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.ripple-snail.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.ripple-snail.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.ripple-snail.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.ripple-snail.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -3171,6 +3258,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.bellwing.active_window.before_rise_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.bellwing.active_window.after_set_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.bellwing.rhythm.day` | 0.25 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.bellwing.rhythm.night` | 0.7 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.bellwing.rhythm.twilight` | 0.95 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.bellwing.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.bellwing.rhythm.rest_mean_h` | 0.5 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.bellwing.rhythm.rest_min_h` | 0.1 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.bellwing.cadence.cycle_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.bellwing.cadence.pause_min_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.bellwing.cadence.pause_max_s` | 0.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.bellwing.cadence.speed_min` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.bellwing.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.bellwing.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.bellwing.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -3198,11 +3296,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.senses.loom_m` | 1.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.bellwing.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.bellwing.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.bellwing.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.bellwing.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.bellwing.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.bellwing.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.bellwing.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.bellwing.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.bellwing.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -3428,6 +3529,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.seedporter.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.seedporter.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.seedporter.rhythm.day` | 0.9 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.seedporter.rhythm.night` | 0.05 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.seedporter.rhythm.twilight` | 0.5 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.seedporter.rhythm.twilight_h` | 1.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.seedporter.rhythm.rest_mean_h` | 1.5 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.seedporter.rhythm.rest_min_h` | 0.25 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.seedporter.cadence.cycle_s` | 8.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.seedporter.cadence.pause_min_s` | 0.5 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.seedporter.cadence.pause_max_s` | 2.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.seedporter.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.seedporter.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.seedporter.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.seedporter.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -3455,11 +3567,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.seedporter.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.seedporter.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.seedporter.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.seedporter.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.seedporter.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.seedporter.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.seedporter.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.seedporter.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.seedporter.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |
@@ -3685,6 +3800,17 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.catch_foray_s` | 8.0 | s | [0, inf) |  | - | placeholder | MIMIC-2: maximum catch foray without a reward, before avoiding its patch |
 | `fauna.founders.chorister.active_window.before_rise_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it wakes this long before sunrise on top of its rhythm (LURE: dawn flight) |
 | `fauna.founders.chorister.active_window.after_set_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | decision | it stays awake this long after sunset on top of its rhythm (LURE: dusk flight) |
+| `fauna.founders.chorister.rhythm.day` | 0.35 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun up, beyond twilight_h of the horizon |
+| `fauna.founders.chorister.rhythm.night` | 0.35 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance with the sun down, beyond twilight_h of the horizon |
+| `fauna.founders.chorister.rhythm.twilight` | 0.35 | chance | [0, 1] |  | - | placeholder | a leaning's waking chance at sunrise and sunset (above both: a dawn and dusk peak) |
+| `fauna.founders.chorister.rhythm.twilight_h` | 0.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | the chance eases from the twilight value to the day or night value over this either side of the horizon |
+| `fauna.founders.chorister.rhythm.rest_mean_h` | 2.0 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's mean length (rests begin at random so the awake share follows the chance; 0: never rests) |
+| `fauna.founders.chorister.rhythm.rest_min_h` | 0.5 | h on the 24-h day clock | [0, inf) |  | - | placeholder | a rest bout's shortest length (the rest is this plus an exponential draw) |
+| `fauna.founders.chorister.cadence.cycle_s` | 12.0 | s | [0, inf) |  | - | placeholder | stop and go: one moving bout and its pause, a pause at a random point in each (0: steady cruise) |
+| `fauna.founders.chorister.cadence.pause_min_s` | 1.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's shortest (uniform draw) |
+| `fauna.founders.chorister.cadence.pause_max_s` | 3.0 | s | [0, inf) |  | - | placeholder | stop and go: a pause's longest |
+| `fauna.founders.chorister.cadence.speed_min` | 0.7 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's slowest pace (uniform draw) |
+| `fauna.founders.chorister.cadence.speed_max` | 1.0 | x asked forward | [0, inf) |  | - | placeholder | stop and go: a bout's fastest pace |
 | `fauna.founders.chorister.sleep_upkeep` | 0.5 | x basal upkeep | [0, 1] | 0.1–1 | - | decision | upkeep while asleep (and a flyer perched out the rain) |
 | `fauna.founders.chorister.wake_hunger` | 0.9 | hunger 0..1 | [0, 1] | 0.1–1 | - | placeholder | the emergency latch goes on (awake in any phase) at this reserve hunger |
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
@@ -3712,11 +3838,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
 | `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.chorister.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
+| `fauna.founders.chorister.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.chorister.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.chorister.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
 | `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
 | `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
+| `fauna.founders.chorister.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
 | `fauna.founders.chorister.vigilance.scan_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: a scan pause |
 | `fauna.founders.chorister.vigilance.scan_kin_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD-PULL many eyes: kin it knows within this share the watch (0: it scans alone) |

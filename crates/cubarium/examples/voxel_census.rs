@@ -474,17 +474,19 @@ fn main() {
         }
         assert!(!generated, "a preset arm builds its own world");
         // The host's founding loop, verbatim: lake gate, pre-roll with the opening
-        // shower, seeding and the acceptance check, redrawn on a refusal. The world
+        // shower, seeding and the acceptance check, with placement retries on settled
+        // water and the experiment's water stride already in force. The world
         // comes back already seeded.
         let params = resolve(arm_config);
         let arm_config = params.world.clone();
         let founding_started = std::time::Instant::now();
-        let founded = cubarium::voxel::found(
+        let founded = cubarium_voxel_sim::found::found_with_water_every(
             &arm_config,
             &cubarium::voxel::LayerConfig::new(&params, arm_config.voxel_m),
             founder_counts(&params.fauna),
             cubarium::voxel::Seeds::from(seed_base),
             false,
+            SimConfig::experiment().water_every,
         );
         eprintln!("founded in {:.1} s", founding_started.elapsed().as_secs_f64());
         let (world, flora, mut fauna, seeded) =
@@ -789,6 +791,8 @@ fn run(
     forage_summary(sim);
     herd.summary(sim);
     rhythm_summary(sim);
+    let shredder_intake: f64 = sim.fauna().view().ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
+    eprintln!("decay probe: shredder_intake_organic={shredder_intake:.6}");
 }
 
 /// RHYTHMS-CADENCE's readout over the run (the ledger's counters; never scored): one

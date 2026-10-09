@@ -70,7 +70,9 @@ use crate::{Flora, FloraConfig};
 // 40: FLOWER-FRUIT — `Stand::crop` (the crop's flowering, visits and set), `CoveredFace::visits`,
 //     `FloraLedger::{flower_visits, crops_set, fruit_set, fruit_overhead}`; a crop eaten out
 //     rests like a fallen one.
-pub const SCHEMA: u32 = 40;
+// 41: DECAY-GLOWCAP — Ground::fragmented_s; mycelium drying withdraws against its
+//     full footprint (wood_max) and exposed tissue does not regrow in daylight.
+pub const SCHEMA: u32 = 41;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

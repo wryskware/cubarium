@@ -117,10 +117,12 @@ pub struct Flows {
 pub enum Death {
     Starved,
     Drought,
+    Desiccated,
 }
 
 /// `L_eff = L (1 + h) / (L + h)` (`step::light_response`, `step.rs:1206`).
 pub fn light_response(sc: &SpeciesConfig, l: f64) -> f64 {
+    if sc.trophic == Trophic::Saprotroph { return l; }
     let half = sc.light_half.max(0.0);
     if l <= 0.0 {
         return 0.0;
@@ -259,8 +261,10 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
         Trophic::Saprotroph => 1.0,
     };
     let m = sc.maintenance * c.upkeep * night * w0 * dt;
-    let d_p = (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * dt);
-    let d_w = (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * dt);
+    let growing = !(sc.trophic == Trophic::Saprotroph && sc.sun_mycelium_loss_per_s > 0.0
+        && site.light_eff > sc.sun_shade_max && c.daylight > 0.0);
+    let d_p = if growing { (p_cap - p0).max(0.0).min(sc.foliage_rate * w0 * dt) } else { 0.0 };
+    let d_w = if growing { (sc.wood_max - w0).max(0.0).min(sc.wood_rate * w0 * dt) } else { 0.0 };
     let d_q = (q_max - q0).max(0.0);
     let (a, arrived_mineral) = match sc.trophic {
         Trophic::Photo => {
@@ -406,8 +410,22 @@ fn grow_once(sc: &SpeciesConfig, st: &mut StandState, site: Site, c: Clock) -> (
     st.wood -= die_back;
     if sc.trophic == Trophic::Saprotroph && sc.substrate_required { out.litter += die_back; }
     else { out.dead_wood += die_back; }
-    // 4.7 death (step.rs:3260)
-    let death = (st.wood < sc.alive_min).then_some(Death::Starved);
+    // Surface desiccation mirrors voxel flora: raw cap exposure, daylight and
+    // terrain shelter; the exposed footprint persists as the mycelium retreats.
+    let mut desiccated = false;
+    if sc.trophic == Trophic::Saprotroph && site.light_eff > sc.sun_shade_max && sc.sun_shade_max < 1.0 {
+        let exposure = ((site.light_eff - sc.sun_shade_max) / (1.0 - sc.sun_shade_max)).clamp(0.0, 1.0);
+        let shelter = (1.0 - sc.sun_dark_shelter.clamp(0.0, 1.0) * site.darkness.clamp(0.0, 1.0)).max(0.0);
+        let sun = exposure * c.daylight.max(0.0) * shelter;
+        let cap = (sc.sun_cap_loss_per_s * sun * dt).clamp(0.0, 1.0) * st.foliage.max(0.0);
+        let myc = (sc.sun_mycelium_loss_per_s * sun * dt * sc.wood_max).max(0.0).min(st.wood.max(0.0));
+        let was = st.wood;
+        st.foliage -= cap;
+        st.wood -= myc;
+        out.litter += cap + myc;
+        desiccated = was >= sc.alive_min && st.wood < sc.alive_min;
+    }
+    let death = (st.wood < sc.alive_min).then_some(if desiccated { Death::Desiccated } else { Death::Starved });
     (out, death)
 }
 

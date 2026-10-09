@@ -29,8 +29,8 @@ use std::collections::BTreeMap;
 
 use cubarium_voxel::{Material, Settle, VoxelView, World};
 use cubarium_voxel_fauna::{
-    Command as FaunaCommand, Controller, DenChoice, Fauna, Founder, FounderPhysiology, RouteMap,
-    StartingStores, has_headroom,
+    Command as FaunaCommand, Controller, DenChoice, Fauna, Founder, FounderPhysiology, RouteGraph,
+    RouteMap, StartingStores, has_headroom,
 };
 use cubarium_voxel_flora::{
     Command as FloraCommand, Deposit, DepositKind, Flora, FloraView, Site, Species, SpeciesConfig,
@@ -336,8 +336,12 @@ pub fn seed_with_founder_counts_capturing(
     founder_counts: [usize; Founder::COUNT],
     mid_shower: Option<&mut Option<World>>,
 ) -> Seeded {
-    let pre = pre_roll_capturing(world, true, mid_shower);
-    seed_pre_rolled(world, flora, fauna, &pre, founder_counts)
+    let clock = FoundingClock::new(&());
+    let pre =
+        pre_roll_watched(world, true, mid_shower, &clock).expect("an unwatched pre-roll completes");
+    let seeded = seed_pre_rolled_watched(world, flora, fauna, &pre, founder_counts, &clock);
+    clock.report(world.config().seed, 1);
+    seeded
 }
 
 /// Hard cap on the opening rain, in ticks: five simulated minutes. The opening shower
@@ -489,6 +493,10 @@ pub trait FoundingWatch {
     fn attempt(&self, _k: usize, _of: usize, _placement_seed: u64) {}
     /// `phase` has stepped `ticks` ticks so far (0 when it starts).
     fn progress(&self, _phase: FoundingPhase, _ticks: u32) {}
+    /// Placement finished; the acceptance check begins.
+    fn accepting(&self) {}
+    /// The acceptance check finished.
+    fn judged(&self) {}
     /// Whether to keep founding; asked after every tick.
     fn go_on(&self) -> bool {
         true
@@ -496,6 +504,89 @@ pub trait FoundingWatch {
 }
 
 impl FoundingWatch for () {}
+
+/// Wall-clock diagnostics kept outside the deterministic founding state.
+pub(crate) struct FoundingClock<'a> {
+    watcher: &'a dyn FoundingWatch,
+    started: std::time::Instant,
+    phase: std::cell::Cell<Option<usize>>,
+    since: std::cell::Cell<std::time::Instant>,
+    seconds: std::cell::Cell<[f64; 7]>,
+}
+
+impl<'a> FoundingClock<'a> {
+    pub(crate) fn new(watcher: &'a dyn FoundingWatch) -> Self {
+        let started = std::time::Instant::now();
+        Self {
+            watcher,
+            started,
+            phase: std::cell::Cell::new(None),
+            since: std::cell::Cell::new(started),
+            seconds: std::cell::Cell::new([0.0; 7]),
+        }
+    }
+
+    fn next(&self, phase: Option<usize>) {
+        if self.phase.get() == phase {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if let Some(i) = self.phase.replace(phase) {
+            let mut seconds = self.seconds.get();
+            let elapsed = now.duration_since(self.since.get()).as_secs_f64();
+            seconds[i] += elapsed;
+            if i < FoundingPhase::ALL.len() {
+                eprintln!(
+                    "cubarium voxel: founding phase {}={elapsed:.3}s",
+                    FoundingPhase::ALL[i].name()
+                );
+            }
+            self.seconds.set(seconds);
+        }
+        self.since.set(now);
+    }
+
+    pub(crate) fn report(&self, seed: u64, attempts: usize) {
+        self.next(None);
+        let s = self.seconds.get();
+        eprintln!(
+            "cubarium voxel: founding timing seed={seed} placements={attempts} settle={:.3}s shower={:.3}s drain={:.3}s lake_rest={:.3}s stream_watch={:.3}s placing={:.3}s acceptance={:.3}s total={:.3}s",
+            s[0],
+            s[1],
+            s[2],
+            s[3],
+            s[4],
+            s[5],
+            s[6],
+            self.started.elapsed().as_secs_f64()
+        );
+    }
+}
+
+impl FoundingWatch for FoundingClock<'_> {
+    fn attempt(&self, k: usize, of: usize, seed: u64) {
+        self.watcher.attempt(k, of, seed);
+    }
+    fn progress(&self, phase: FoundingPhase, ticks: u32) {
+        let i = FoundingPhase::ALL
+            .iter()
+            .position(|p| *p == phase)
+            .expect("known phase");
+        self.next(Some(i));
+        self.watcher.progress(phase, ticks);
+    }
+    fn accepting(&self) {
+        self.next(Some(6));
+        self.watcher.accepting();
+    }
+    fn judged(&self) {
+        self.next(None);
+        self.watcher.judged();
+    }
+    fn go_on(&self) -> bool {
+        self.watcher.go_on()
+    }
+}
 
 /// [`pre_roll_capturing`] with someone watching ([`FoundingWatch`]): exactly the same
 /// pre-roll, tick for tick, unless the watcher says stop — then `None`, part way through.
@@ -632,6 +723,18 @@ pub fn seed_pre_rolled(
     pre: &PreRoll,
     founder_counts: [usize; Founder::COUNT],
 ) -> Seeded {
+    seed_pre_rolled_watched(world, flora, fauna, pre, founder_counts, &())
+}
+
+pub(crate) fn seed_pre_rolled_watched(
+    world: &mut World,
+    flora: &mut Flora,
+    fauna: &mut Fauna,
+    pre: &PreRoll,
+    founder_counts: [usize; Founder::COUNT],
+    watcher: &dyn FoundingWatch,
+) -> Seeded {
+    watcher.progress(FoundingPhase::Placing, 0);
     // The founding table at this world's size: every count, and every plant species'
     // founder cap below, scaled by the dry support area over the table's own
     // (`FoundingConfig::reference_land_m2`; 1 when it is zero).
@@ -659,7 +762,9 @@ pub fn seed_pre_rolled(
     let sites = &pre.sites;
     let wettest = &pre.wettest;
     let Some(highest_y) = sites.iter().map(|s| s.y).max() else {
+        watcher.accepting();
         seeded.acceptance = accept(world, flora, fauna, founder_counts);
+        watcher.judged();
         return seeded;
     };
     let mut sky: Vec<f64> = {
@@ -749,7 +854,16 @@ pub fn seed_pre_rolled(
                 taken.push(site);
                 seeded.stands += 1;
                 seeded.stands_by_species[species.index()] += 1;
-                shade_under(sites, &mut sky, site, &sc, wood, width, voxel_m, founding.founder_canopy_shade);
+                shade_under(
+                    sites,
+                    &mut sky,
+                    site,
+                    &sc,
+                    wood,
+                    width,
+                    voxel_m,
+                    founding.founder_canopy_shade,
+                );
             }
         }
     }
@@ -768,12 +882,28 @@ pub fn seed_pre_rolled(
     // the faces another glowcap took, and goes under a plant founder's crown.
     let mut taken_fungus: Vec<Site> = Vec::new();
     let sc = flora.config().species(Species::Glowcap).clone();
+    // Check the cap's actual exposure at every possible founder size, through the
+    // same layer-weighted shade law the living stand reads. The terrain darkness
+    // gate alone admits log-fed mushrooms in open sun.
+    let mut exposure = vec![0.0f64; sites.len()];
+    for fraction in fractions {
+        let candidates: Vec<_> = sites
+            .iter()
+            .map(|&site| (site, fraction * sc.wood_max))
+            .collect();
+        for (bound, light) in exposure
+            .iter_mut()
+            .zip(flora.glowcap_founder_light(world, &candidates))
+        {
+            *bound = bound.max(light);
+        }
+    }
     let mut pool: Vec<Site> = Vec::new();
     let mut dark_pool: Vec<(Site, f64)> = Vec::new();
     {
         let view = world.view();
         for (i, site) in sites.iter().enumerate() {
-            if wettest[i] > sc.drown_depth_m {
+            if wettest[i] > sc.drown_depth_m || exposure[i] > sc.sun_shade_max {
                 continue;
             }
             // The substrate is the log this seeder is about to lay, so the gate is asked
@@ -785,9 +915,14 @@ pub fn seed_pre_rolled(
             // Legacy seep admits bare dark faces; required-carbon founders get the
             // same log parcel as the ordinary substrate founders below.
             let bare = establishment_gates_with_sky(&view, *site, &sc, terrain_sky[i], 0.0, 0.0);
-            let dark = sc.dark_founder_share > 0.0 && if sc.substrate_required {
-                sc.dark_establish_min > 0.0 && gates.darkness >= sc.dark_establish_min && gates.passes()
-            } else { bare.passes() };
+            let dark = sc.dark_founder_share > 0.0
+                && if sc.substrate_required {
+                    sc.dark_establish_min > 0.0
+                        && gates.darkness >= sc.dark_establish_min
+                        && gates.passes()
+                } else {
+                    bare.passes()
+                };
             if on_log || dark {
                 seeded.eligible_by_species[Species::Glowcap.index()] += 1;
             }
@@ -819,10 +954,17 @@ pub fn seed_pre_rolled(
         .enumerate()
     {
         if sc.substrate_required {
-            if !flora.deposit(site, Deposit {
-                kind: DepositKind::DeadWood, organic: log_organic,
-                mineral: sc.n_tissue * log_organic, energy: sc.energy_density * log_organic,
-            }) { continue; }
+            if !flora.deposit(
+                site,
+                Deposit {
+                    kind: DepositKind::DeadWood,
+                    organic: log_organic,
+                    mineral: sc.n_tissue * log_organic,
+                    energy: sc.energy_density * log_organic,
+                },
+            ) {
+                continue;
+            }
             seeded.logs += 1;
         }
         let wood = fractions[i % fractions.len()] * sc.wood_max;
@@ -875,6 +1017,9 @@ pub fn seed_pre_rolled(
         }
     }
 
+    flora.stagger_founder_crops(world);
+    flora.refresh_founder_light(world);
+
     // Latticevine founders (D15 Revision 2): soil at the foot of a wall or on a ledge's
     // lip, as many as `FloraConfig::latticevine.founders` asks for.
     seeded.vines = flora.seed_vine_founders(world);
@@ -918,10 +1063,20 @@ pub fn seed_pre_rolled(
             cubarium_voxel_fauna::Founding::Pack => {
                 if want > 0 {
                     let size = phys.pack.map_or(0, |t| t.pack_size);
-                    let before = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
+                    let before = fauna
+                        .view()
+                        .animals
+                        .iter()
+                        .filter(|a| a.founder == Some(founder))
+                        .count();
                     let stores = founder_arrival(&fauna.config().founding);
                     let _ = found_packs(world, flora, fauna, founder, want, stores, None);
-                    let after = fauna.view().animals.iter().filter(|a| a.founder == Some(founder)).count();
+                    let after = fauna
+                        .view()
+                        .animals
+                        .iter()
+                        .filter(|a| a.founder == Some(founder))
+                        .count();
                     seeded.founders[founder.index()] += after - before;
                     seeded.shortfall[founder.index()] =
                         (want * size).saturating_sub(seeded.founders[founder.index()]);
@@ -944,7 +1099,17 @@ pub fn seed_pre_rolled(
         // Every lineage left is founded as bodies ([`place_bodies`]), each arriving grown
         // and full ([`founder_arrival`]).
         let stores = vec![founder_arrival(&fauna.config().founding); want];
-        let placed = place_bodies(world, flora, fauna, founder, &stores, sites, wettest, &mut taken, usize::MAX);
+        let placed = place_bodies(
+            world,
+            flora,
+            fauna,
+            founder,
+            &stores,
+            sites,
+            wettest,
+            &mut taken,
+            usize::MAX,
+        );
         seeded.founders[founder.index()] += placed.placed;
         seeded.litter_tiles += placed.litter_tiles;
         seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);
@@ -960,8 +1125,45 @@ pub fn seed_pre_rolled(
         + flora.view().ledger.deposited_organic_in
         + fauna.view().ledger.introduced_organic_in
         - organic_before;
+    watcher.accepting();
     seeded.acceptance = accept(world, flora, fauna, founder_counts);
+    watcher.judged();
     seeded
+}
+
+/// After placement retries, distinguish inadequate habitat from an unlucky placement.
+/// Only a lineage's missing stock or clear perches can justify drawing new terrain.
+pub(crate) fn food_capacity_refusal(world: &World, flora: &Flora, fauna: &Fauna, seeded: &Seeded) -> Option<String> {
+    use cubarium_voxel_fauna::{Founding, FoundingSite};
+    let view = world.view();
+    let fv = flora.view();
+    for founder in Founder::ALL {
+        let wanted = seeded.wanted[founder.index()];
+        if wanted == 0 || seeded.shortfall[founder.index()] == 0 { continue; }
+        let phys = fauna.config().founder(founder);
+        if phys.founding != Founding::Bodies { continue; }
+        if phys.founding_site == FoundingSite::NearNectar || phys.glider.is_some() {
+            return Some(format!("{}: no sufficient clear, dry perches near its food after placement retries", founder.name()));
+        }
+        let graph = RouteGraph::for_founder(&view, phys, fauna.config().founding.clearance_margin_m);
+        let (_, food) = food_on_graph(&view, &fv, phys, &graph);
+        let need = fauna.config().founding.accept_founder_hours * founding_upkeep_per_hour(phys);
+        let mut available = 0usize;
+        for (&component, f) in &food {
+            if component == usize::MAX { continue; }
+            if phys.founding_site == FoundingSite::LitterBed && f.producers == 0 { continue; }
+            // Starter litter is deposited at each shredder's own founder face.
+            let effective_need = if phys.founding_site == FoundingSite::LitterBed {
+                (need - fauna.config().founding.starter_litter_organic).max(0.0)
+            } else { need };
+            let capacity = (1..=wanted).take_while(|&n| covers(phys, *f, effective_need, n)).last().unwrap_or(0);
+            available = available.saturating_add(capacity);
+        }
+        if available < wanted {
+            return Some(format!("{}: food across all walkable components covers {available} of {wanted} founders", founder.name()));
+        }
+    }
+    None
 }
 
 /// What [`place_bodies`] did for one lineage.
@@ -1032,7 +1234,7 @@ pub fn place_bodies(
     if phys.founding_site == cubarium_voxel_fauna::FoundingSite::NearNectar {
         let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
         let reach = founder.manifest().cone_range_m;
-        let pool_of = |stands_only: bool, taken: &[Site]| -> Vec<Site> {
+        let pool_of = |stands_only: bool| -> Vec<Site> {
             let view = world.view();
             let fv = flora.view();
             let sources = if stands_only {
@@ -1043,11 +1245,11 @@ pub fn place_bodies(
             sites
                 .iter()
                 .copied()
-                .enumerate()
-                .filter(|(i, s)| {
-                    !taken.contains(s)
-                        && wettest[*i] <= 0.0
-                        && view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
+                .filter(|s| {
+                    // Flyers can leave a perch in the next shower. The water that
+                    // stood here during the completed pre-roll does not strand them,
+                    // and a plant on the face is precisely the food they perch at.
+                    view.water_depth_m(i64::from(s.x), s.y, s.z) <= 0.0
                         && has_headroom(&view, i64::from(s.x), s.y, s.z, room)
                         // Its span fits on the face, with room to take off: a fifth of
                         // its band clear overhead.
@@ -1060,24 +1262,35 @@ pub fn place_bodies(
                         )
                         && near_nectar(&view, &sources, *s, reach)
                 })
-                .map(|(_, s)| s)
                 .collect()
         };
         // Near the flowers that feed first (a bloomcrown's nectar carries mineral; a
         // latticevine's does not, and flowers only after a shower); near any nectar
         // when no such face is left.
-        let mut pool = pool_of(true, &taken);
+        let mut pool = pool_of(true);
         if pool.len() < want {
-            for s in pool_of(false, &taken) {
+            for s in pool_of(false) {
                 if !pool.contains(&s) {
                     pool.push(s);
                 }
             }
         }
+        let sources = nectar_sources(&world.view(), &flora.view());
+        sort_near_sources(&mut pool, world, &sources);
         let chosen = place(&pool, want, |_| Some(0), |_, _| true);
         out.chosen = chosen.len();
         for (k, site) in chosen.into_iter().enumerate() {
-            match attempt(&mut out, world, fauna, founder, site, k, want, stores, max_attempts) {
+            match attempt(
+                &mut out,
+                world,
+                fauna,
+                founder,
+                site,
+                k,
+                want,
+                stores,
+                max_attempts,
+            ) {
                 None => break,
                 Some(false) => {}
                 Some(true) => {
@@ -1089,14 +1302,11 @@ pub fn place_bodies(
         return out;
     }
     // Every lineage left is founded as walking bodies on the ground: only where the
-    // whole disc clears its headroom, in the largest walkable component (fix 2,
-    // `design/handoffs/browser-stuck-in-crags-2026-10-01.md`). A founder with its disc
-    // in a wall cannot move, and one in a pocket of a few square metres cannot leave
-    // it. An aquatic body's graph wades any depth, so its water faces are in it.
-    let found: std::collections::HashSet<Site> =
-        cubarium_voxel_fauna::founding_faces(&world.view(), &phys, founding.clearance_margin_m)
-            .into_iter()
-            .collect();
+    // whole disc clears its headroom. Every component with enough food is a candidate;
+    // a small dark grove can carry capgnawers even when the largest component is bright.
+    // An aquatic body's graph wades any depth, so its water faces are in it.
+    let graph = RouteGraph::for_founder(&world.view(), &phys, founding.clearance_margin_m);
+    let found: std::collections::HashSet<Site> = graph.faces.iter().copied().collect();
     // A glider (F3, the seedporter) is founded on the ground within its roost reach of
     // a fruit source (a fruiting stand past its seedling profile or a latticevine-
     // covered face): its food hangs in crowns and on walls, out of a walker's
@@ -1104,7 +1314,7 @@ pub fn place_bodies(
     if let Some(glider) = phys.glider {
         let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
         let drown = phys.drown_depth_m(&phys.adult_body());
-        let pool: Vec<Site> = {
+        let mut pool: Vec<Site> = {
             let view = world.view();
             let fv = flora.view();
             let sources = fruit_sources(&view, &fv);
@@ -1123,10 +1333,25 @@ pub fn place_bodies(
                 .map(|(_, s)| s)
                 .collect()
         };
+        sort_near_sources(
+            &mut pool,
+            world,
+            &fruit_sources(&world.view(), &flora.view()),
+        );
         let chosen = place(&pool, want, |_| Some(0), |_, _| true);
         out.chosen = chosen.len();
         for (k, site) in chosen.into_iter().enumerate() {
-            match attempt(&mut out, world, fauna, founder, site, k, want, stores, max_attempts) {
+            match attempt(
+                &mut out,
+                world,
+                fauna,
+                founder,
+                site,
+                k,
+                want,
+                stores,
+                max_attempts,
+            ) {
                 None => break,
                 Some(false) => {}
                 Some(true) => {
@@ -1138,7 +1363,12 @@ pub fn place_bodies(
         return out;
     }
     let need = founding.accept_founder_hours * founding_upkeep_per_hour(&phys);
-    let (map, food) = lineage_food(&world.view(), &flora.view(), &phys, founder);
+    let (map, food) = food_on_graph(&world.view(), &flora.view(), &phys, &graph);
+    let nearest = nearest_food_faces(
+        &graph,
+        &food_faces(&map, &world.view(), &flora.view(), phys.diet),
+        world.config().seed,
+    );
     match phys.founding_site {
         // On litter-bearing soil: dry open soil away from the stands, each with its
         // own starter tile of leaf litter laid under it first, so the founder begins
@@ -1146,7 +1376,7 @@ pub fn place_bodies(
         // too, and it is counted.
         cubarium_voxel_fauna::FoundingSite::LitterBed => {
             let room = phys.adult_body().headroom_voxels(world.config().voxel_m);
-            let pool: Vec<Site> = {
+            let mut pool: Vec<Site> = {
                 let view = world.view();
                 sites
                     .iter()
@@ -1167,6 +1397,7 @@ pub fn place_bodies(
                     .map(|(_, s)| s)
                     .collect()
             };
+            pool.sort_by_key(|s| nearest.get(s).copied().unwrap_or((u32::MAX, 0)));
             let chosen = place(
                 &pool,
                 want,
@@ -1197,7 +1428,18 @@ pub fn place_bodies(
                     continue;
                 }
                 out.litter_tiles += 1;
-                if attempt(&mut out, world, fauna, founder, site, k, want, stores, max_attempts) == Some(true) {
+                if attempt(
+                    &mut out,
+                    world,
+                    fauna,
+                    founder,
+                    site,
+                    k,
+                    want,
+                    stores,
+                    max_attempts,
+                ) == Some(true)
+                {
                     taken.push(site);
                     out.placed += 1;
                 }
@@ -1209,15 +1451,16 @@ pub fn place_bodies(
         // There is no foodless fallback: a lineage with nowhere to live is a
         // shortfall in `Seeded` and nothing is placed (plan §5).
         cubarium_voxel_fauna::FoundingSite::AtFood => {
-            let mut meadow =
-                faces_at_food(&map, &food, &world.view(), &flora.view(), phys.diet);
+            let mut meadow: Vec<Site> = nearest.keys().copied().collect();
+            meadow.sort_by_key(|s| nearest[s]);
             // A body drowns in the stream's way as surely as a plant does: under its
             // own height of water it would be drowning (package mobility). An aquatic
             // body never drowns (roster R2b).
             if !phys.aquatic {
                 let drown = phys.drown_depth_m(&phys.adult_body());
                 // Each face's first index among `sites`, looked up rather than scanned for.
-                let mut first: std::collections::HashMap<Site, usize> = std::collections::HashMap::with_capacity(sites.len());
+                let mut first: std::collections::HashMap<Site, usize> =
+                    std::collections::HashMap::with_capacity(sites.len());
                 for (i, s) in sites.iter().enumerate() {
                     first.entry(*s).or_insert(i);
                 }
@@ -1232,7 +1475,17 @@ pub fn place_bodies(
             );
             out.chosen = chosen.len();
             for (k, site) in chosen.into_iter().enumerate() {
-                match attempt(&mut out, world, fauna, founder, site, k, want, stores, max_attempts) {
+                match attempt(
+                    &mut out,
+                    world,
+                    fauna,
+                    founder,
+                    site,
+                    k,
+                    want,
+                    stores,
+                    max_attempts,
+                ) {
                     None => break,
                     Some(false) => {}
                     Some(true) => out.placed += 1,
@@ -1306,8 +1559,8 @@ fn near_nectar(view: &VoxelView<'_>, sources: &[(f64, f64)], site: Site, reach: 
     })
 }
 
-/// Choose up to `want` faces from `pool`, spread over it: a stride sample first and then
-/// the rest of the pool in order, taking a face only while `fits(component, k)` says its
+/// Choose up to `want` faces from `pool` in its nearest-food order, taking a face
+/// only while `fits(component, k)` says its
 /// component can carry `k` founders with this one among them. A face on no component is
 /// never taken.
 fn place(
@@ -1318,8 +1571,7 @@ fn place(
 ) -> Vec<Site> {
     let mut chosen: Vec<Site> = Vec::new();
     let mut count: BTreeMap<usize, usize> = BTreeMap::new();
-    let first = strided(pool, want);
-    for site in first.iter().chain(pool.iter()) {
+    for site in pool {
         if chosen.len() >= want {
             break;
         }
@@ -1376,6 +1628,121 @@ pub fn lineage_food(
     let map = RouteMap::for_founder(view, phys);
     let food = food_on(&map, view, fv, phys);
     (map, food)
+}
+
+fn food_on_graph(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    phys: &FounderPhysiology,
+    graph: &RouteGraph,
+) -> (RouteMap, BTreeMap<usize, ComponentFood>) {
+    let mut map = RouteMap::for_founder(view, phys);
+    // Mouth reach and body-clear walking must refer to the same components. Faces
+    // outside the walking graph get a sentinel component that no founder can occupy.
+    for (site, component) in map.faces.iter().zip(&mut map.components) {
+        *component = graph.component_of(*site).unwrap_or(usize::MAX);
+    }
+    let food = food_on(&map, view, fv, phys);
+    (map, food)
+}
+
+fn placement_rank(seed: u64, s: Site) -> u64 {
+    crate::found::placement_seed(
+        seed,
+        (u64::from(s.x) << 40) ^ (u64::from(s.y) << 20) ^ u64::from(s.z),
+    )
+}
+
+/// Multi-source BFS, on the live disc-clear graph, from every face whose mouth can
+/// reach food. All stocked components participate; the largest has no special status.
+fn nearest_food_faces(
+    graph: &RouteGraph,
+    sources: &[Site],
+    seed: u64,
+) -> std::collections::HashMap<Site, (u32, u64)> {
+    let mut distance = vec![u32::MAX; graph.faces.len()];
+    let mut queue = std::collections::VecDeque::new();
+    for &site in sources {
+        if let Some(i) = graph.face(site) {
+            if distance[i] == u32::MAX {
+                distance[i] = 0;
+                queue.push_back(i);
+            }
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        // The shared graph owns edge clearance, steps and climbs. Its one-step BFS
+        // exposes exactly those neighbours without duplicating the movement rules.
+        for (j, step) in graph.distances(i, 1) {
+            if step == 1 && distance[j] == u32::MAX {
+                distance[j] = distance[i] + 1;
+                queue.push_back(j);
+            }
+        }
+    }
+    graph
+        .faces
+        .iter()
+        .copied()
+        .zip(distance)
+        .filter(|(_, d)| *d != u32::MAX)
+        .map(|(s, d)| (s, (d, placement_rank(seed, s))))
+        .collect()
+}
+
+fn sort_near_sources(pool: &mut [Site], world: &World, sources: &[(f64, f64)]) {
+    let v = world.config().voxel_m;
+    let width = f64::from(world.config().width) * v;
+    let distance = |s: Site| {
+        sources
+            .iter()
+            .map(|&(x, z)| {
+                let dx = ((f64::from(s.x) + 0.5) * v - x).abs();
+                let dx = dx.min((width - dx).abs());
+                let dz = (f64::from(s.z) + 0.5) * v - z;
+                dx * dx + dz * dz
+            })
+            .fold(f64::INFINITY, f64::min)
+    };
+    pool.sort_by(|a, b| {
+        distance(*a).total_cmp(&distance(*b)).then_with(|| {
+            placement_rank(world.config().seed, *a).cmp(&placement_rank(world.config().seed, *b))
+        })
+    });
+}
+
+fn food_faces(
+    map: &RouteMap,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    diet: cubarium_voxel_fauna::Diet,
+) -> Vec<Site> {
+    use cubarium_voxel_fauna::Food;
+    let mut faces = Vec::new();
+    for stand in fv.stands.iter() {
+        for layer in fv.layers(stand) {
+            faces.extend(
+                map.faces_reaching_layer(fv, view, stand, &layer, diet)
+                    .into_iter()
+                    .map(|i| map.faces[i]),
+            );
+        }
+    }
+    for g in fv.ground.iter() {
+        if (diet.eats(Food::Litter) && g.litter > 0.0)
+            || (diet.eats(Food::Carrion) && g.carrion > 0.0)
+            || (diet.eats(Food::Film) && g.film > 0.0)
+        {
+            faces.extend(
+                map.faces_reaching_pool(g.site)
+                    .into_iter()
+                    .map(|i| map.faces[i]),
+            );
+        }
+    }
+    faces.sort_unstable_by_key(|s| (s.y, s.x, s.z));
+    faces.dedup();
+    faces
 }
 
 /// One lineage's **reachability at founding** (training maps, 2026-10-08): how its
@@ -1610,6 +1977,14 @@ pub fn accept(
     let mut out = Acceptance::default();
     for founder in Founder::ALL {
         let phys = *fauna.config().founder(founder);
+        if wanted[founder.index()] == 0 && !av.animals.iter().any(|a| a.founder == Some(founder)) {
+            out.lineages[founder.index()] = LineageVerdict {
+                accepted: true,
+                ratio: f64::INFINITY,
+                ..LineageVerdict::default()
+            };
+            continue;
+        }
         // A flyer (F1): one verdict over the world, each placed body within its fan's
         // range of a nectar source; the food is the sources' nectar now and per hour. A
         // glider (F3) likewise over fruit, within its roost reach of a fruit source.
@@ -1671,9 +2046,8 @@ pub fn accept(
                     habitable: !sources.is_empty(),
                 });
             }
-            v.accepted = v.placed >= v.wanted
-                && v.stranded == 0
-                && v.components.iter().all(|c| c.habitable);
+            v.accepted =
+                v.placed >= v.wanted && v.stranded == 0 && v.components.iter().all(|c| c.habitable);
             v.ratio = if v.wanted == 0 {
                 f64::INFINITY
             } else if v.placed == 0 || v.stranded > 0 || !(u > 0.0) {
@@ -1685,7 +2059,9 @@ pub fn accept(
             out.lineages[founder.index()] = v;
             continue;
         }
-        let (map, food) = lineage_food(&view, &fv, &phys, founder);
+        let graph =
+            RouteGraph::for_founder(&view, &phys, fauna.config().founding.clearance_margin_m);
+        let (map, food) = food_on_graph(&view, &fv, &phys, &graph);
         let u = founding_upkeep_per_hour(&phys);
         // A carnivore arrives from its egg bank, not as a placed body: the seeder places
         // none of it and the verdict asks for none (its count is the bank's clutches).
@@ -1750,9 +2126,8 @@ pub fn accept(
         if v.stranded > 0 {
             worst = 0.0;
         }
-        v.accepted = v.placed >= v.wanted
-            && v.stranded == 0
-            && v.components.iter().all(|c| c.habitable);
+        v.accepted =
+            v.placed >= v.wanted && v.stranded == 0 && v.components.iter().all(|c| c.habitable);
         v.ratio = if v.wanted == 0 {
             f64::INFINITY
         } else if v.placed == 0 {
@@ -2211,6 +2586,7 @@ fn browser_faces(view: &VoxelView<'_>, fv: &FloraView<'_>, fauna: &Fauna) -> Vec
 
 /// [`browser_faces`]' rule for any diet, on a route map and its food already built: the
 /// faces of an [`cubarium_voxel_fauna::FoundingSite::AtFood`] lineage.
+#[cfg(test)]
 fn faces_at_food(
     map: &RouteMap,
     food: &BTreeMap<usize, ComponentFood>,
@@ -2580,10 +2956,9 @@ mod tests {
         );
     }
 
-    /// No foodless fallback. A habitat with one lone patch gives a browser nowhere to go
-    /// when it is bare, so nothing is placed and `Seeded` says how many were owed.
+    /// A single reachable patch is enough when its stock covers every requested founder.
     #[test]
-    fn a_browser_with_one_patch_is_a_shortfall_not_a_placement() {
+    fn a_browser_can_found_at_one_patch_with_enough_stock() {
         let cfg = Config {
             width: 24,
             height: 16,
@@ -2619,12 +2994,26 @@ mod tests {
             browser_faces(&world.view(), &flora.view(), &fauna).is_empty(),
             "one patch is not a route to a second one"
         );
-        let out = seed_with_founder_counts(&mut world, &mut flora, &mut fauna, [0, 4, 0, 0, 0, 0, 0, 0, 0]);
-        assert_eq!(out.founders[Founder::Browser.index()], 0);
+        let phys = fauna.config().founder(Founder::Browser);
+        let (_, food) = lineage_food(&world.view(), &flora.view(), phys, Founder::Browser);
+        let stock = food.values().map(|f| f.stock).sum::<f64>();
+        assert!(stock > 0.0, "the fixture holds edible stock");
+        let upkeep = founding_upkeep_per_hour(phys);
+        let mut cfg = *fauna.config();
+        cfg.founding.reference_land_m2 = 0.0;
+        cfg.founding.accept_founder_hours = if upkeep > 0.0 { stock / (2.0 * 4.0 * upkeep) } else { 1.0 };
+        fauna = Fauna::new(cfg);
+        let out = seed_with_founder_counts(
+            &mut world,
+            &mut flora,
+            &mut fauna,
+            [0, 4, 0, 0, 0, 0, 0, 0, 0],
+        );
+        assert_eq!(out.founders[Founder::Browser.index()], 4);
         assert_eq!(
             out.shortfall[Founder::Browser.index()],
-            4,
-            "the shortfall is reported, not filled with bare soil: {out:?}"
+            0,
+            "a single stocked patch can cover the requested founders: {out:?}"
         );
     }
 
@@ -3128,7 +3517,8 @@ mod tests {
         let b = seeded(crate::scene::authored(config())).3;
         assert_eq!(a, b, "the same world seeds the same habitat");
         assert!(a.stands >= 10, "a populated picture, not a specimen: {a:?}");
-        assert!(a.logs > 0, "the glowcap grove has its wood: {a:?}");
+        assert!(a.logs >= a.stands_by_species[Species::Glowcap.index()].saturating_sub(a.dark_glowcaps),
+            "every log-fed glowcap has its wood: {a:?}");
         assert!(a.animals() > 0, "something moves: {a:?}");
         // The two grazing lineages are placed as bodies; the lanternjaw arrives as a
         // founding egg bank.
@@ -3224,8 +3614,14 @@ mod tests {
         assert_eq!(counts[Founder::Capgnawer.index()], 6, "the preset's count is honoured");
         assert_eq!(counts[Founder::Loftstrider.index()], 0, "an unnamed lineage keeps its 0");
         let mut world = crate::scene::authored(config());
-        let mut flora = Flora::new(Default::default());
+        // This checks capgnawer placement, with food held through the pre-roll;
+        // sun survival is tested independently on lit and roofed fixtures.
+        let mut flora_config = cubarium_voxel_flora::FloraConfig::default();
+        flora_config.glowcap.sun_cap_loss_per_s = 0.0;
+        flora_config.glowcap.sun_mycelium_loss_per_s = 0.0;
+        let mut flora = Flora::new(flora_config);
         let mut fauna = Fauna::new(params.fauna.clone());
+        let pre = pre_roll(&mut world, true);
         // The authored scene's own glowcaps all sit in a 13-face pocket the capgnawer's
         // founding faces (crag fix 2: the largest walkable component) exclude. Stock two
         // glowcaps on logs in that component first, so there is food a founder can reach.
@@ -3268,7 +3664,7 @@ mod tests {
             }
             assert_eq!(stocked.len(), 2, "two glowcaps stocked where a capgnawer walks");
         }
-        let got = seed(&mut world, &mut flora, &mut fauna);
+        let got = seed_pre_rolled(&mut world, &mut flora, &mut fauna, &pre, counts);
         let placed = got.founders[Founder::Capgnawer.index()];
         assert!((1..=6).contains(&placed), "up to the preset's six: {got:?}");
         assert_eq!(

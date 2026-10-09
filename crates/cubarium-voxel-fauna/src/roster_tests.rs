@@ -275,6 +275,8 @@ fn the_shredder_never_takes_a_cap_and_still_takes_litter_and_carrion() {
     steps(&mut fauna, &world, &mut flora, 20);
     let l = &fauna.view().ledger;
     assert!(l.bites_by_food[Food::Litter.index()] >= 1, "litter: {:?}", l.bites_by_food);
+    assert!(flora.view().ground_at(s).unwrap().fragmented_s > 0.0,
+        "a successful shredder litter bite fragments the feeding face");
 
     deposit(&mut flora, s, DepositKind::Carrion, 0.01);
     steps(&mut fauna, &world, &mut flora, 20);

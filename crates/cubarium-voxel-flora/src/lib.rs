@@ -607,6 +607,8 @@ pub struct Ground {
     pub litter_energy: f64,
     /// The mineral held in the litter, released to `mineral` as the litter decomposes.
     pub litter_mineral: f64,
+    /// Seconds left of a shredder's local fragmentation; carries no matter.
+    pub fragmented_s: f64,
     /// The site's seed bank, **sorted by species then `bin_start_tick`**, oldest first.
     /// One entry per species per arrival bin: a landing joins the bin whose window covers
     /// the current tick, creating it if it is not there, so a site a donor feeds every
@@ -713,6 +715,7 @@ impl Ground {
             litter: 0.0,
             litter_energy: 0.0,
             litter_mineral: 0.0,
+            fragmented_s: 0.0,
             seeds: Vec::new(),
             dead_wood: 0.0,
             dead_wood_mineral: 0.0,
@@ -1030,10 +1033,12 @@ pub struct SpeciesConfig {
     /// dries and collapses in sun — to its own face's litter. /s; 0 is off.
     #[serde(default)]
     pub sun_cap_loss_per_s: f64,
-    /// **Saprotroph only.** The share of its mycelium (wood) a fully exposed stand loses
+    /// **Saprotroph only.** The share of its full mycelial footprint a fully exposed stand loses
     /// per second in full daylight — the surface mycelium in sunlit, drying litter — to its
     /// own face's litter, with its mineral and energy. Where this outruns the stand's
-    /// regrowth the stand dies ([`DeathCause::Desiccated`]). /s; 0 is off.
+    /// regrowth the stand dies ([`DeathCause::Desiccated`]). The rate draws against
+    /// `wood_max`, capped by remaining stock: the exposed footprint persists as
+    /// tissue retreats. Exposed tissue does not regrow by day. /s; 0 is off.
     #[serde(default)]
     pub sun_mycelium_loss_per_s: f64,
     /// **Saprotroph only.** How far its own dark habitat shelters it from the sun: the drying
@@ -3122,6 +3127,12 @@ pub struct FloraConfig {
     /// system (`respired_out`, energy to heat) and its mineral is released to the site's
     /// pool at the same fraction.
     pub decomposition: f64,
+    /// Extra microbial litter decay multiplier immediately after a shredder feeds (fraction).
+    pub litter_fragment_boost: f64,
+    /// Radius of feeding-induced fragmentation, metres, including vertical distance.
+    pub litter_fragment_radius_m: f64,
+    /// Seconds until the local fragmentation boost fades linearly to zero; 0 disables it.
+    pub litter_fragment_duration_s: f64,
     /// `k_w`: dead-wood decomposition per second, the same two flows, slow.
     pub wood_decomposition: f64,
     /// `k_c`: **carrion** decomposition per second ([`Ground::carrion`]), the same two
@@ -3336,6 +3347,9 @@ impl Default for FloraConfig {
             latticevine: VineConfig::default(),
             shade_k_per_m2: 0.09375,
             decomposition: 0.001,
+            litter_fragment_boost: 0.25,
+            litter_fragment_radius_m: 0.5,
+            litter_fragment_duration_s: 600.0,
             wood_decomposition: 0.0001,
             carrion_decomposition: 0.00028,
             litter_energy_cap: 2.0,
@@ -5736,14 +5750,8 @@ impl Flora {
     }
 
     /// [`Flora::seed_founder`] in a named place.
-    fn seed_founder_in(&mut self, site: Site, species: Species, wood: f64, place: FaceLayer) -> bool {
+    fn founder_stand(&self, site: Site, species: Species, wood: f64, place: FaceLayer) -> Stand {
         let sc = self.config.species(species);
-        if !(wood.is_finite() && wood >= sc.alive_min) {
-            return false;
-        }
-        let Err(at) = find_stand(&self.config, &self.stands, site, place) else {
-            return false;
-        };
         let mut stand = Stand {
             id: self.ledger.births,
             site,
@@ -5773,6 +5781,110 @@ impl Flora {
         };
         // A founder arrives full, so its layers arrive at their capacities.
         stand.bin_foliage(sc, self.config.voxel_m);
+        stand
+    }
+
+    /// Exposure of hypothetical full glowcaps at each candidate size. Candidates receive
+    /// light but cast no shade, so the gate uses only the already founded plants.
+    pub fn glowcap_founder_light(&self, world: &World, candidates: &[(Site, f64)]) -> Vec<f64> {
+        let mut stands = self.stands.clone();
+        let start = stands.len();
+        for &(site, wood) in candidates {
+            let mut stand = self.founder_stand(site, Species::Glowcap, wood, FaceLayer::Fungus);
+            stand.foliage = 0.0;
+            stand.layer_stock.fill(0.0);
+            stands.push(stand);
+        }
+        step::founder_light(&self.config, &stands, world)[start..].to_vec()
+    }
+
+    /// Publish founding light without advancing the ecological clock or any stock.
+    pub fn refresh_founder_light(&mut self, world: &World) {
+        let light = step::founder_light(&self.config, &self.stands, world);
+        for (stand, light) in self.stands.iter_mut().zip(light) {
+            stand.light = light;
+        }
+    }
+
+    /// Founding crops sample time uniformly over flowering, fruit filling/hanging and rest.
+    /// Fruit already hanging is imported tissue, booked exactly like the founder itself.
+    pub fn stagger_founder_crops(&mut self, world: &World) {
+        for stand in &mut self.stands {
+            let sc = self.config.species(stand.species);
+            if sc.fruit_per_s <= 0.0 || stand.profile_stage < 1 {
+                continue;
+            }
+            let flower = sc.flower_s.max(0.0);
+            let fruit = sc.fruit_drop_s.max(0.0);
+            let rest = sc.fruit_rest_s.max(0.0);
+            let cycle = flower + fruit + rest;
+            if cycle <= 0.0 {
+                continue;
+            }
+            let mut rng =
+                cubarium_voxel::keyed::KeyedRng::keyed(15, world.config().seed, stand.id, 0);
+            let phase = rng.unit() * cycle;
+            if phase < flower {
+                stand.crop = Crop {
+                    phase: CropPhase::Flower,
+                    flower_left_s: flower - phase,
+                    visits: 0,
+                    to_make: 0.0,
+                };
+            } else if phase < flower + fruit {
+                let age = phase - flower;
+                let set = step::pollinated_share(sc.pollination_floor, sc.pollination_visits, 0.0)
+                    * sc.fruit_cap.max(0.0);
+                let hanging = (sc.fruit_per_s * age).min(set).max(0.0);
+                stand.crop = Crop {
+                    phase: CropPhase::Fruit,
+                    flower_left_s: 0.0,
+                    visits: 0,
+                    to_make: set - hanging,
+                };
+                stand.fruit_age_s = age;
+                stand.fruit = hanging;
+                let mineral = sc.fruit_mineral_fraction.max(0.0) * hanging;
+                stand.mineral += mineral;
+                self.ledger.seeded_organic_in += hanging;
+                self.ledger.seeded_mineral_in += mineral;
+                self.ledger.seeded_energy_in += sc.energy_density * hanging;
+            } else {
+                stand.crop = Crop::default();
+                stand.fruit_rest_s = cycle - phase;
+            }
+        }
+    }
+
+    /// Recently feeding shredders fragment existing nearby faces, including across the x seam.
+    pub fn fragment_litter(&mut self, world: &World, site: Site) {
+        self.fragment_litter_world(&world.view(), site);
+    }
+
+    /// Feeding bridge for consumers already holding a world view.
+    pub fn fragment_litter_world(&mut self, world: &VoxelView<'_>, site: Site) {
+        let radius = self.config.litter_fragment_radius_m / world.config.voxel_m;
+        let width = f64::from(world.config.width);
+        for ground in &mut self.ground {
+            let dx = (f64::from(ground.site.x) - f64::from(site.x)).abs();
+            let dx = dx.min(width - dx);
+            let dy = f64::from(ground.site.y) - f64::from(site.y);
+            let dz = f64::from(ground.site.z) - f64::from(site.z);
+            if dx * dx + dy * dy + dz * dz <= radius * radius {
+                ground.fragmented_s = self.config.litter_fragment_duration_s;
+            }
+        }
+    }
+
+    fn seed_founder_in(&mut self, site: Site, species: Species, wood: f64, place: FaceLayer) -> bool {
+        let sc = self.config.species(species);
+        if !(wood.is_finite() && wood >= sc.alive_min) {
+            return false;
+        }
+        let Err(at) = find_stand(&self.config, &self.stands, site, place) else {
+            return false;
+        };
+        let mut stand = self.founder_stand(site, species, wood, place);
         self.ledger.births += 1;
         let organic = stand.organic();
         // A founder arrives at the species' own tissue mineral content: it is
