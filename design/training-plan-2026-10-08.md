@@ -767,6 +767,17 @@ control and the reward accounting; display targets after seeing results.
    - HERD (Opus): items 15 and 23;
    - SCORE-V3 (Codex): items 10, 14, 16, 17 and 22;
    - DROP-C1 (Codex): item 25.
+   - FLOWER-FRUIT merged, df8dc551 (flora schema 40):
+     - lanternberries: `flower_s` 900, `fruit_cost` 2.5, `pollination_floor` 0.1,
+       `pollination_visits` 3;
+     - vine: cost 2.5, floor 0.1;
+     - `cyan_innate` 0.5 → 0.12, so one failure is enough;
+     - `SenseTable::cyan_m` 1.0 m for the bellwing;
+     - `nectar_nir_share` 0.5.
+     - Probe (0.5 h, d72): 75 % of crops pollinated; seedporters eating fruit.
+     - **Bellwings never visited a vine flower,** so vine fruit falls to the 10 % floor.
+       Fix in REACH-HEIGHTS.
+     - The founding bushes all flower together; staggered in DECAY-GLOWCAP.
 2. **Wave 2:**
    - RHYTHMS-CADENCE (Opus): item 18, rhythms and cadence;
    - REACH-HEIGHTS (Codex): item 18, heights, reach and roosts, plus a latticevine fruit check;
