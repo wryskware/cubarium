@@ -79,7 +79,7 @@ func run() -> void:
 		if info is Dictionary and info.get("water_level_m") != null \
 				and absf(float(main.picker.water_levels[k]["water_level_m"]) - float(info["water_level_m"])) < 1e-6:
 			start_step = k
-	check(main.picker._water_box.visible and int(main.picker._water.value) == start_step,
+	check(main.picker._water_box.visible and main.picker._water.index == start_step,
 		"the water slider starts on the config's own table (%s m: step %d)" % [str(info.get("water_level_m")), start_step])
 	check(NewWorld.seed_problem("18446744073709551615") == "" and NewWorld.seed_problem("18446744073709551616") != "",
 		"a seed may be any unsigned 64-bit number")
@@ -110,14 +110,14 @@ func run() -> void:
 	# The water slider brings the same terrains back at another level.
 	var seeds: Array = cands.map(func(c): return c["seed"])
 	var other := 2 if start_step != 2 else 0
-	main.picker._water.value = other
+	main.picker._water.choose(other)
 	await frames(1)
 	check(is_equal_approx(float(main.picker.spec().get("water_level_m", -1.0)), float(main.picker.water_levels[other]["water_level_m"])),
 		"the slider sets the spec's water_level_m (%s)" % str(main.picker.spec().get("water_level_m")))
 	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
 	check(ready and main.session.candidates().map(func(c): return c["seed"]) == seeds,
 		"moving the slider draws the same terrains again: %s" % [main.session.candidates().map(func(c): return c["seed"])])
-	main.picker._water.value = start_step
+	main.picker._water.choose(start_step)
 	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
 	check(ready, "and back at the config's own level")
 
@@ -138,7 +138,7 @@ func run() -> void:
 	ready = await until(func(): return main.picker.ready_count() == 2, 90.0)
 	check(ready, "the two terrains again")
 	var terrain0: String = str(main.session.candidates()[0]["terrain"])
-	main.picker._cards[1]["pick"].pressed.emit()
+	main.picker._cards[1]["root"].pressed.emit()
 	await frames(2)
 	check(main.picker.is_founding() and main.picker._found_box.visible and main.picker._generate.disabled,
 		"picking one shows the founding panel and holds the rest")
@@ -151,7 +151,7 @@ func run() -> void:
 	check(stopped, "the founding thread ends")
 
 	# The picked terrain founded, with a real progress bar, and run.
-	main.picker._cards[0]["pick"].pressed.emit()
+	main.picker._cards[0]["root"].pressed.emit()
 	var progress := []
 	var phases := []
 	var bar := []
@@ -168,7 +168,7 @@ func run() -> void:
 	var fd: Dictionary = main.session.founding()
 	check(founded and fd["state"] == "done", "candidate 0 founded (%d s): %s" % [int(fd.get("elapsed_s", 0)), str(fd.get("error", ""))])
 	check(progress.size() > 3 and progress.any(func(p): return p > 0.0 and p < 1.0), "the bar moved with the founding: %d readings, %s" % [progress.size(), phases])
-	check(bar.any(func(v): return v > 0.0 and v < 100.0), "the picker's bar showed it")
+	check(bar.any(func(v): return v > 0.0 and v < 1.0), "the picker's bar showed it")
 	check(str(fd.get("terrain", "")) == terrain0, "the founded world kept the picked terrain")
 	await until(func(): return main.has_world(), 20.0)
 	check(main.has_world(), "picking candidate 0 runs it")

@@ -1,0 +1,122 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://ui/neon/neon_button.gd" id="1_button"]
+[ext_resource type="StyleBox" path="res://ui/neon/styles/inner_box.tres" id="2_box"]
+[ext_resource type="StyleBox" path="res://ui/neon/styles/glow_focus.tres" id="3_glow"]
+[ext_resource type="Script" path="res://ui/neon/style_box_neon_stack.gd" id="4_stack"]
+[ext_resource type="Texture2D" path="res://ui/neon/art/world.png" id="5_world"]
+[ext_resource type="Script" path="res://ui/neon/neon_dot_progress.gd" id="6_progress"]
+
+[sub_resource type="StyleBox" id="StyleBox_hover"]
+resource_local_to_scene = false
+resource_name = ""
+content_margin_left = -1.0
+content_margin_top = -1.0
+content_margin_right = -1.0
+content_margin_bottom = -1.0
+script = ExtResource("4_stack")
+layers = Array[StyleBox]([ExtResource("2_box"), ExtResource("3_glow")])
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_sample"]
+atlas = ExtResource("5_world")
+region = Rect2(200, 560, 336, 168)
+
+[node name="TerrainCard" type="BaseButton"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+theme_override_constants/press_drop = 0
+theme_override_constants/disabled_opacity = 40
+theme_override_styles/normal = ExtResource("2_box")
+theme_override_styles/pressed = ExtResource("2_box")
+theme_override_styles/hover = SubResource("StyleBox_hover")
+theme_override_styles/hover_pressed = SubResource("StyleBox_hover")
+theme_override_styles/disabled = ExtResource("2_box")
+theme_override_styles/focus = ExtResource("3_glow")
+button_mask = 0
+script = ExtResource("1_button")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 0
+mouse_filter = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="Stack" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 10
+
+[node name="Holder" type="Control" parent="Margin/Stack"]
+unique_name_in_owner = true
+clip_contents = true
+custom_minimum_size = Vector2(0, 168)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Backdrop" type="ColorRect" parent="Margin/Stack/Holder"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.043137256, 0.019607844, 0.14509805, 0.5)
+
+[node name="Sample" type="TextureRect" parent="Margin/Stack/Holder"]
+unique_name_in_owner = true
+texture_filter = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = SubResource("AtlasTexture_sample")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="TitleRow" type="HBoxContainer" parent="Margin/Stack"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 12
+
+[node name="Name" type="Label" parent="Margin/Stack/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_type_variation = &"SmallText"
+text = "Terrain 1"
+vertical_alignment = 1
+
+[node name="State" type="Label" parent="Margin/Stack/TitleRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Ready"
+vertical_alignment = 1
+uppercase = true
+
+[node name="Bar" type="Control" parent="Margin/Stack"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(312, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+mouse_filter = 2
+script = ExtResource("6_progress")
+value = 0.55
+show_percent = false
+small = true
+
+[node name="Info" type="Label" parent="Margin/Stack"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(240, 0)
+layout_mode = 2
+theme_type_variation = &"SmallTextLabel"
+autowrap_mode = 3

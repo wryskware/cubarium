@@ -61,7 +61,7 @@ func run() -> void:
 	await shot("03-candidate")
 	main.picker.close_large()
 
-	main.picker._cards[0]["pick"].pressed.emit()
+	main.picker._cards[0]["root"].pressed.emit()
 	await until(func(): return main.has_world(), 20.0)
 	await seconds(2.0)
 	await shot("04-live")

@@ -98,7 +98,7 @@ func run() -> void:
 	await until(func(): return main.session.candidates().any(func(c): return c["state"] == "ready"), 240.0)
 	var still_drawing: bool = main.session.candidates().any(func(c): return c["state"] == "generating")
 	print("     moving the slider with %s" % [main.session.candidates().map(func(c): return c["state"])])
-	main.picker._water.value = (int(main.picker._water.value) + 1) % 3
+	main.picker._water.choose((main.picker._water.index + 1) % 3)
 	check(drawing, "the second batch was being drawn when the slider moved (still drawing: %s)" % still_drawing)
 	await every_card_shown("after the water slider moved mid-draw")
 	finish()
@@ -146,7 +146,7 @@ func every_card_shown(what: String) -> void:
 		check(renderer_error == "", "%s: card %d's renderer reports no error" % [what, i])
 		check(wv != null and wv.renderer != null and not wv.renderer.stats().get("unlit", false),
 			"%s: card %d's thumbnail was drawn with its sky plane (lit)" % [what, i])
-		check(p._cards[i].get("ready", false) and not p._cards[i]["open"].disabled,
+		check(p._cards[i].get("ready", false) and p.can_open(i),
 			"%s: card %d can be opened" % [what, i])
 		if wv != null and wv._image != null:
 			check(colours(wv._image) > 1, "%s: card %d's thumbnail is not all one colour" % [what, i])
