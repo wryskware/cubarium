@@ -158,6 +158,7 @@ h2{margin:0;color:#fff;font-size:17px;font-weight:600}
   <div class="ctl">Steps (Low / Medium / High) <div class="seg" data-k="steps"></div></div>
   <div class="ctl">On / off <div class="seg" data-k="toggle"></div></div>
   <div class="ctl">Progress <div class="seg" data-k="progress"></div></div>
+  <div class="ctl">Title <div class="seg" data-k="tpad"><button data-v="tight">As is</button><button data-v="spaced">A space each side</button></div></div>
   <div class="legend">The four controls the New world and Settings screens need, in round 3's look (notched lines, dithered bands, lit dots, glow focus, Gridlite chrome, Pixelify 23 px). Each section shows every option with its states; click one to choose it. The three screen views put your current mix on the real screens; their content follows what those screens do today. Hover still equals focus. Choices stay in this browser.</div>
 </aside>
 <main class="page" id="page"></main>
@@ -181,7 +182,7 @@ const WATER=['Low','Medium','High'];
 const D='·';
 
 // Wrysk's picks, 2026-10-09: arrows, dot slider, checkbox, dot row
-let st={view:'sheet',choice:'cycle',steps:'slider',toggle:'box',progress:'dots'};
+let st={view:'sheet',choice:'cycle',steps:'slider',toggle:'box',progress:'dots',tpad:'tight'};
 const KEY='cub-ui-r4';
 try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
 function save(){if(document.body.classList.contains('shot'))return;try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
@@ -308,7 +309,7 @@ function sheet(){
 // ---------- screens ----------
 const shell=(head,inner,hints)=>`<div class="screen neon"><img class="world" src="../round1/assets/world.png" alt=""><div class="scrim"></div>
   <main class="body fr main fill-dither">${head}${inner}</main><footer class="hints lt">${hints}</footer></div>`;
-const head=(kick,title)=>`<div class="head"><div class="kick lt">${kick}</div><div class="ptitle">${title}</div></div>`;
+const head=(kick,title)=>`<div class="head"><div class="kick lt">${kick}</div><div class="ptitle">${st.tpad==='spaced'?`&nbsp;${title}&nbsp;`:title}</div></div>`;
 function worldForm(focus,dis=''){
   return `<div class="form ${dis}">
     ${field('Size',choice(SIZES,0),'256 × 128 × 48 cells, the standard terrarium.')}

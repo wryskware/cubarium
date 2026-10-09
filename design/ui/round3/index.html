@@ -142,6 +142,7 @@ h2{margin:0;color:#fff;font-size:17px;font-weight:600}
   <div class="ctl">Controls <div class="seg" data-k="ctl"></div></div>
   <div class="ctl">Focus <div class="seg" data-k="focus"></div></div>
   <div class="ctl">Chrome colour <div class="seg" data-k="col"><button data-v="r1">As round 1</button><button data-v="tabs">Brighter tabs</button><button data-v="bright">Brighter</button></div></div>
+  <div class="ctl">Title <div class="seg" data-k="tpad"><button data-v="tight">As is</button><button data-v="spaced">A space each side</button></div></div>
   <div class="legend">Type is fixed at round 2's picks: Gridlite PE for titles and chrome (your settings), Pixelify Sans 23 px for text. Each section shows every option for one piece, using your current choices for the rest; click an option to choose it. "Full screen" puts the chosen mix on the Lanternjaw page. The palette is unchanged from round 2. Numbers are sample data. Choices stay in this browser.</div>
 </aside>
 <main class="page" id="page"></main>
@@ -168,7 +169,7 @@ const SERIES=[4,4,5,5,5,6,6,6,5,5,6,7,7,7,8,8,7,7,7,6,6,7,7,8,8,8,7,7,7,7,8,7,7,
 const D='·',M='-'; // the Adobe kit's Gridlite has no minus sign
 
 // Wrysk's picks, 2026-10-09: notched lines, dithered bands, lit dots, glow focus
-let st={view:'sheet',border:'notch',fill:'dither',ctl:'lit',focus:'glow',col:'tabs'};
+let st={view:'sheet',border:'notch',fill:'dither',ctl:'lit',focus:'glow',col:'tabs',tpad:'tight'};
 const KEY='cub-ui-r3';
 try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
@@ -353,7 +354,7 @@ function screen(){
       </div>
       <div class="textcol"><div class="scroll">
         <div class="kick lt">Animal ${D} Predator</div>
-        <h1 class="name">Lanternjaw</h1>
+        <h1 class="name">${st.tpad==='spaced'?'&nbsp;Lanternjaw&nbsp;':'Lanternjaw'}</h1>
         <div class="binom">[binomial]</div>
         <div class="rule"></div>
         <p class="field">A low violet scorpid that hunts by waiting. Its forked tail arches over its back and holds two cyan lures before its face, dead still, until prey comes within reach of its mantis striking arms. Keeping the lures costs it reserve. At the edge of another hunter's kill, it takes what it can.</p>
