@@ -19,14 +19,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn centre(f: Founder) -> PathBuf {
-    let file = match f {
-        Founder::Blind => "r2-littershredder-upd512.json",
-        _ => "r2-frondgrazer-upd160.json",
-    };
-    PathBuf::from(format!(
-        "transfer:{}/../../config/training/centres/{file}",
-        env!("CARGO_MANIFEST_DIR")
-    ))
+    crate::es::voxel::store::test_centre_path(f, "lockstep")
 }
 
 /// Two generations' worth of a unified search on small still worlds: λ = 2 and one seed

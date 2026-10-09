@@ -49,6 +49,28 @@ impl Actions {
     };
 }
 
+/// **The body's own actions** beyond forward, turn and feed (contract v3, proposal §2.3 B),
+/// each 0 for a lineage whose manifest does not declare it. Resolved by [`resolve`] from a
+/// network's logits; P2 wires each to the body (until then the step reads the lure and the
+/// lift through the interim seams, [`Controller::lure`] and [`Controller::lift`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BodyActions {
+    pub sprint: f64,
+    pub hunker: f64,
+    pub retract: f64,
+    pub lure: f64,
+    pub lift: f64,
+}
+
+/// Everything one response resolves to under a manifest ([`resolve`]): the three local
+/// actions, the body's own, and the option the head chose (`None` without an option head).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Resolved {
+    pub actions: Actions,
+    pub body: BodyActions,
+    pub option: Option<usize>,
+}
+
 /// What a controller answers with. The distinction is the whole adapter: bounded
 /// responses are deadbanded as they are, logits are transferred first, and both paths
 /// are the same code in training and viewing.
@@ -56,9 +78,26 @@ impl Actions {
 pub enum Response {
     /// Actions already inside the manifest's bounds, from a diagnostic controller.
     Bounded(Actions),
-    /// Unbounded logits in manifest action order, from a network controller. The
+    /// Unbounded logits from a network controller: the manifest's actions in its order,
+    /// then its option head ([`Manifest::outputs`]); slots past those are not read. The
     /// adapter applies the manifest's transfer per action before the deadband.
-    Logits([f64; 3]),
+    Logits([f64; crate::manifest::MAX_OUTPUTS]),
+}
+
+impl Response {
+    /// A network's outputs as a response: `outputs` in manifest order, at most
+    /// [`crate::manifest::MAX_OUTPUTS`] (more is a shape error in the caller).
+    pub fn logits(outputs: &[f64]) -> Response {
+        assert!(
+            outputs.len() <= crate::manifest::MAX_OUTPUTS,
+            "{} network outputs exceed the response's {}",
+            outputs.len(),
+            crate::manifest::MAX_OUTPUTS
+        );
+        let mut l = [0.0; crate::manifest::MAX_OUTPUTS];
+        l[..outputs.len()].copy_from_slice(outputs);
+        Response::Logits(l)
+    }
 }
 
 /// One controller: a pure function of the observation and its own private state. The
@@ -153,6 +192,15 @@ pub trait Controller: Send + Sync {
     fn seek(&self) -> Seek {
         Seek::Unknown
     }
+
+    /// **Whether this controller reads the v3 blocks** (contract v3) — the slots after its
+    /// manifest's v2 layout ([`Manifest::tail_offset`]). A policy does, so the default is
+    /// yes; the observation-only heuristics read only their v2 slots and answer no, and the
+    /// step then leaves their v3 blocks zero (unless the executed-action tap records them).
+    /// Encoding reads only, so the answer changes the cost, never the world.
+    fn reads_tail(&self) -> bool {
+        true
+    }
 }
 
 /// HUNGRY-SEARCH: what a foraging heuristic's last answer was for ([`Controller::seek`]).
@@ -177,28 +225,57 @@ pub enum Seek {
 /// for training and viewing. Non-finite logits and out-of-range bounded actions are
 /// rejected to the deadband's zero rather than trained through.
 pub fn resolve_actions(response: Response, manifest: &Manifest) -> Actions {
+    resolve(response, manifest).actions
+}
+
+/// **The adapter per manifest action** (contract v3): every action the manifest declares is
+/// transferred (logits), clamped into its bounds and deadbanded — the `[0, 1]` ones below
+/// the deadband to 0, the signed ones on their magnitude — and routed by its name; the
+/// option head's logits follow the actions, and the option is the largest (the first on a
+/// tie; a non-finite logit never wins). A bounded response carries only the three local
+/// actions, so its body actions are 0 and it chooses no option.
+pub fn resolve(response: Response, manifest: &Manifest) -> Resolved {
     let deadband = manifest.deadband;
+    let mut out = Resolved::default();
+    let mut put = |name: &str, v: f64| match name {
+        "forward_effort" => out.actions.forward = v,
+        "turn_effort" => out.actions.turn = v,
+        "feed_effort" => out.actions.feed = v,
+        "sprint_effort" => out.body.sprint = v,
+        "hunker_effort" => out.body.hunker = v,
+        "retract_effort" => out.body.retract = v,
+        "lure_effort" => out.body.lure = v,
+        "lift_effort" => out.body.lift = v,
+        other => panic!("manifest action {other} has no slot in the response"),
+    };
+    let band = |v: f64, t: Transfer| match t {
+        Transfer::Sigmoid => deadband_low(v, deadband),
+        Transfer::Tanh => deadband_sym(v, deadband),
+    };
     match response {
-        Response::Bounded(a) => Actions {
-            forward: deadband_low(
-                clean(a.forward, manifest.actions[0].low, manifest.actions[0].high),
-                deadband,
-            ),
-            turn: deadband_sym(
-                clean(a.turn, manifest.actions[1].low, manifest.actions[1].high),
-                deadband,
-            ),
-            feed: deadband_low(
-                clean(a.feed, manifest.actions[2].low, manifest.actions[2].high),
-                deadband,
-            ),
-        },
-        Response::Logits(l) => Actions {
-            forward: deadband_low(transfer(l[0], manifest.actions[0].transfer), deadband),
-            turn: deadband_sym(transfer(l[1], manifest.actions[1].transfer), deadband),
-            feed: deadband_low(transfer(l[2], manifest.actions[2].transfer), deadband),
-        },
+        Response::Bounded(a) => {
+            for (k, v) in [a.forward, a.turn, a.feed].into_iter().enumerate() {
+                let act = manifest.actions[k];
+                put(act.name, band(clean(v, act.low, act.high), act.transfer));
+            }
+        }
+        Response::Logits(l) => {
+            for (k, act) in manifest.actions.iter().enumerate() {
+                put(act.name, band(transfer(l[k], act.transfer).clamp(act.low, act.high), act.transfer));
+            }
+            let head = &l[manifest.actions.len()..manifest.outputs()];
+            out.option = head
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| v.is_finite())
+                .fold(None, |best: Option<(usize, f64)>, (k, &v)| match best {
+                    Some((_, b)) if b >= v => best,
+                    _ => Some((k, v)),
+                })
+                .map(|(k, _)| k);
+        }
     }
+    out
 }
 
 /// A finite value clamped into the action's declared bounds; anything non-finite is 0.
@@ -302,6 +379,15 @@ impl FounderControllers {
             .binary_search_by_key(&id, |e| e.0)
             .ok()
             .map_or(0.0, |at| self.entries[at].1.lift())
+    }
+
+    /// Whether a body's controller reads its v3 blocks ([`Controller::reads_tail`]); false
+    /// with no controller.
+    pub fn reads_tail(&self, id: u64) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .ok()
+            .is_some_and(|at| self.entries[at].1.reads_tail())
     }
 
     /// Whether a body's controller opts into the prey flee rule ([`Controller::flees`]).
@@ -535,9 +621,18 @@ struct Wander {
     /// Samples left turning, and which way.
     turning: u32,
     sign: f64,
+    /// How many leading observation channels the seed folds (0: all): the lineage's v2
+    /// layout ([`Manifest::tail_offset`]), so a walk's seed is the same whether or not the
+    /// v3 blocks were encoded after it.
+    seed_len: usize,
 }
 
 impl Wander {
+    /// A fresh walk whose seed folds the first `seed_len` channels.
+    fn over(seed_len: usize) -> Wander {
+        Wander { seed_len, ..Wander::default() }
+    }
+
     fn next(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         cubarium_voxel::mix(self.state)
@@ -557,7 +652,8 @@ impl Wander {
             return;
         }
         self.seeded = true;
-        self.state = o.iter().fold(0x5EED_0F_A11C_E5u64, |h, v| {
+        let seen = if self.seed_len == 0 { o } else { &o[..self.seed_len.min(o.len())] };
+        self.state = seen.iter().fold(0x5EED_0F_A11C_E5u64, |h, v| {
             (h ^ v.to_bits()).wrapping_mul(0x0100_0000_01B3)
         });
         self.hold = self.hold(cfg);
@@ -703,7 +799,7 @@ impl BlindForager {
         BlindForager {
             cfg,
             turn_bias: 1.0,
-            wander: Wander::default(),
+            wander: Wander::over(manifest.tail_offset()),
             escape: 0,
             on_food: false,
             turn_back: 0,
@@ -722,6 +818,10 @@ impl Default for BlindForager {
 }
 
 impl Controller for BlindForager {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let c = &self.contact;
         let (front, left, right) = (o[c.offset], o[c.offset + 1], o[c.offset + 2]);
@@ -851,7 +951,7 @@ impl Controller for BlindForager {
 
     fn reset(&mut self) {
         self.turn_bias = 1.0;
-        self.wander = Wander::default();
+        self.wander = Wander::over(self.wander.seed_len);
         self.escape = 0;
         self.on_food = false;
         self.turn_back = 0;
@@ -953,6 +1053,10 @@ impl Default for BrowserForager {
 }
 
 impl Controller for BrowserForager {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let front = o[self.contact.offset];
         let taste_resp = o[self.taste.offset];
@@ -1147,6 +1251,10 @@ impl FruitForager {
 }
 
 impl Controller for FruitForager {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let cfg = self.cfg;
         // The body's latch decides whether a bite is taken (the minimal gut).
@@ -1265,7 +1373,7 @@ impl HoverSip {
     pub fn with_config(cfg: TeacherConfig) -> HoverSip {
         let m = Founder::Bellwing.manifest();
         HoverSip {
-            wander: Wander::default(),
+            wander: Wander::over(m.tail_offset()),
             escape: 0,
             selfm: module_slot(&m, "Self"),
             air: module_slot(&m, "Air"),
@@ -1289,6 +1397,10 @@ impl HoverSip {
 }
 
 impl Controller for HoverSip {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn taste_only(&self) -> bool {
         // Between replans, drive either holds its answer or stops for a fresh taste.
         // Neither branch consumes Self, Air or Fan. The mouth still samples each tick.
@@ -1417,7 +1529,7 @@ impl Controller for HoverSip {
     }
 
     fn reset(&mut self) {
-        self.wander = Wander::default();
+        self.wander = Wander::over(self.wander.seed_len);
         self.escape = 0;
         self.resting = false;
         self.lift = 0.0;
@@ -1536,6 +1648,10 @@ impl Default for LanternjawAmbush {
 }
 
 impl Controller for LanternjawAmbush {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let cfg = self.cfg;
         let front = o[self.contact.offset];
@@ -1661,6 +1777,10 @@ impl LanternjawPatrol {
 }
 
 impl Controller for LanternjawPatrol {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         let t = self.ambush.taste.offset;
         self.meal = o[t + 2] > 0.5 && o[t] > self.ambush.cfg.feed_gate;
@@ -1706,6 +1826,10 @@ impl PackHunter {
 }
 
 impl Controller for PackHunter {
+    fn reads_tail(&self) -> bool {
+        false
+    }
+
     fn drive(&mut self, o: &[f64]) -> Response {
         self.ambush.drive(o)
     }
@@ -1839,15 +1963,15 @@ mod tests {
         // saturates to 1.
         // σ(0) = 0.5 for forward and feed (above the deadband), and tanh(0) = 0 is
         // deadbanded to no turn.
-        let a = resolve_actions(Response::Logits([0.0, 0.0, 100.0]), &manifest);
+        let a = resolve_actions(Response::logits(&[0.0, 0.0, 100.0]), &manifest);
         assert_eq!((a.forward, a.turn, a.feed), (0.5, 0.0, 1.0));
         // σ(0) = 0.5 exactly, so forward and feed are 0.5; turn tanh(5) ≈ 1.
-        let a = resolve_actions(Response::Logits([0.0, 5.0, 0.0]), &manifest);
+        let a = resolve_actions(Response::logits(&[0.0, 5.0, 0.0]), &manifest);
         assert_eq!(a.forward, 0.5);
         assert_eq!(a.feed, 0.5);
         assert!(a.turn > 0.99);
         // tanh of a small logit is inside the deadband: no turn.
-        let a = resolve_actions(Response::Logits([10.0, 0.01, 10.0]), &manifest);
+        let a = resolve_actions(Response::logits(&[10.0, 0.01, 10.0]), &manifest);
         assert_eq!(a.turn, 0.0);
         assert!(a.forward > 0.9 && a.feed > 0.9);
 
@@ -1881,7 +2005,7 @@ mod tests {
             "NAN forward is zero, turn 7 clamps to 1, feed -3 clamps to 0"
         );
         let a = resolve_actions(
-            Response::Logits([f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
+            Response::logits(&[f64::NAN, f64::INFINITY, f64::NEG_INFINITY]),
             &manifest,
         );
         assert_eq!(a, Actions::REST, "non-finite logits are zeroed");

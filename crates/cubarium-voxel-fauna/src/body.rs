@@ -4346,7 +4346,7 @@ pub(crate) fn observation(
     senses: Option<&mut crate::Senses>,
     cone_occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Vec<f64> {
-    let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy, true, None);
+    let (obs, writes) = observation_read(fauna, i, view, fv, manifest, senses.as_deref(), cone_occupancy, true, None, None);
     if let Some(s) = senses {
         writes.apply(s, view);
     }
@@ -4357,7 +4357,35 @@ pub(crate) fn observation(
 /// a light-memo miss) come back beside the vector for the caller to apply. A body's
 /// observation reads nothing another body's observation writes, so a stage's
 /// observations can be built side by side and their writes applied afterwards.
+///
+/// `tail` (contract v3): with a clock, the manifest's v3 blocks are encoded after the v2
+/// layout ([`crate::observe_v3::encode`]); without one they read zero. Encoding reads only,
+/// so whether it runs never changes the world.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn observation_read(
+    fauna: &Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    manifest: &Manifest,
+    senses: Option<&crate::Senses>,
+    cone_occupancy: Option<crate::senses::Occ<'_>>,
+    full_observation: bool,
+    blooms: Option<&crate::flight::Blooms>,
+    tail: Option<crate::observe_v3::Clock>,
+) -> (Vec<f64>, crate::senses::SenseWrites) {
+    let (mut obs, writes) =
+        observation_v2(fauna, i, view, fv, manifest, senses, cone_occupancy, full_observation, blooms);
+    if let Some(clock) = tail {
+        crate::observe_v3::encode(fauna, i, view, fv, manifest, clock, &mut obs);
+    }
+    (obs, writes)
+}
+
+/// The v2 layout of [`observation_read`], in a vector of the manifest's full width (the v3
+/// blocks zero).
+#[allow(clippy::too_many_arguments)]
+fn observation_v2(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
@@ -5499,7 +5527,8 @@ mod tests {
         let fv = flora.view();
         let manifest = Founder::Blind.manifest();
         let obs = observation(&fauna, 0, &view, &fv, &manifest, None, None);
-        assert_eq!(obs.len(), 23);
+        assert_eq!(obs.len(), manifest.inputs());
+        assert_eq!(manifest.tail_offset(), 23, "the v2 layout");
         // Introduced at the adult reference: energy and reserve read 1. Birth readiness
         // is the step's own rule (contract v2): an adult in surplus that has held none
         // of it yet is not about to lay.
@@ -5566,7 +5595,7 @@ mod tests {
             None,
             Some((&cone_occupancy).into()),
         );
-        assert_eq!(obs.len(), 37);
+        assert_eq!(obs.len(), Founder::Browser.manifest().inputs());
         assert_eq!(obs[36], 1.0, "the cone reads the real world");
         assert!(
             obs[24] < 1.0,

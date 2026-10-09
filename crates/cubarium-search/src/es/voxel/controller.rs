@@ -41,9 +41,10 @@ use cubarium_voxel_fauna::{
 };
 
 use super::super::tensor;
-use super::voxel_schema_digest;
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O, voxel_schema_digest};
 
-/// How many leading observation channels are the founder's own `Self` block. The two
+/// How many leading observation channels are the founder's own v2 `Self` block (contract
+/// v3's `SelfV3` block sits after the v2 layout and counts as a sense here). The two
 /// manifests agree: indices 0..8 are energy, reserve, birth readiness, structural loss,
 /// assimilated intake, resolved forward, resolved turn, motor delivery. Everything from
 /// index 8 on is a **sense** — contact, wet, taste, chem, light, cone — including its
@@ -59,21 +60,21 @@ pub const SELF_CHANNELS: usize = 8;
 /// normally, the policy's own memory is untouched, and a policy whose score does not move
 /// under the ablation was not using its senses.
 #[derive(Clone, Debug)]
-pub struct GruPolicy<const I: usize> {
-    policy: ShapePolicy<I, 3>,
+pub struct GruPolicy<const I: usize, const O: usize> {
+    policy: ShapePolicy<I, O>,
     hidden: [f64; HIDDEN],
     ablate_senses: bool,
 }
 
-impl<const I: usize> GruPolicy<I> {
+impl<const I: usize, const O: usize> GruPolicy<I, O> {
     /// Build a controller from a flat parameter vector, validated against the founder's
     /// manifest digest — the [`tensor::shape_policy`] boundary with the digest plug-in
     /// ([`super::voxel_schema_digest`]) filled in.
     ///
     /// Refuses a wrong-length vector, a non-finite value, and a digest mismatch by name.
-    pub fn new(theta: &[f64], digest: u64) -> Result<GruPolicy<I>, String> {
+    pub fn new(theta: &[f64], digest: u64) -> Result<GruPolicy<I, O>, String> {
         Ok(GruPolicy {
-            policy: tensor::shape_policy::<I, 3>(theta, digest)?,
+            policy: tensor::shape_policy::<I, O>(theta, digest)?,
             hidden: [0.0; HIDDEN],
             ablate_senses: false,
         })
@@ -81,7 +82,7 @@ impl<const I: usize> GruPolicy<I> {
 
     /// The same policy with every sense channel zeroed before it is read
     /// (see [`SELF_CHANNELS`]).
-    pub fn new_ablated(theta: &[f64], digest: u64) -> Result<GruPolicy<I>, String> {
+    pub fn new_ablated(theta: &[f64], digest: u64) -> Result<GruPolicy<I, O>, String> {
         let mut p = GruPolicy::new(theta, digest)?;
         p.ablate_senses = true;
         Ok(p)
@@ -93,12 +94,12 @@ impl<const I: usize> GruPolicy<I> {
     }
 
     /// The validated policy this controller runs.
-    pub fn policy(&self) -> &ShapePolicy<I, 3> {
+    pub fn policy(&self) -> &ShapePolicy<I, O> {
         &self.policy
     }
 }
 
-impl<const I: usize> Controller for GruPolicy<I> {
+impl<const I: usize, const O: usize> Controller for GruPolicy<I, O> {
     fn drive(&mut self, observation: &[f64]) -> Response {
         let mut x = [0.0; I];
         x.copy_from_slice(observation);
@@ -106,7 +107,7 @@ impl<const I: usize> Controller for GruPolicy<I> {
             x[SELF_CHANNELS.min(I)..].fill(0.0);
         }
         let logits = self.policy.weights.forward(&x, &mut self.hidden);
-        Response::Logits(logits)
+        Response::logits(&logits)
     }
 
     fn reset(&mut self) {
@@ -115,9 +116,9 @@ impl<const I: usize> Controller for GruPolicy<I> {
 }
 
 /// The blind founder's GRU runtime.
-pub type GruBlind = GruPolicy<23>;
+pub type GruBlind = GruPolicy<BLIND_I, BLIND_O>;
 /// The browser's GRU runtime.
-pub type GruBrowser = GruPolicy<37>;
+pub type GruBrowser = GruPolicy<BROWSER_I, BROWSER_O>;
 
 /// Stand still, take nothing: what the starting stores alone buy, and the check that no
 /// free intake or scoring artifact exists.
@@ -426,8 +427,8 @@ pub enum EpisodeKind {
 /// The shape of an [`EpisodeKind::Gru`]: the two voxel schemas this driver runs.
 #[derive(Clone, Debug)]
 pub enum EpisodeGru {
-    Blind(Box<ShapePolicy<23, 3>>),
-    Browser(Box<ShapePolicy<37, 3>>),
+    Blind(Box<ShapePolicy<BLIND_I, BLIND_O>>),
+    Browser(Box<ShapePolicy<BROWSER_I, BROWSER_O>>),
 }
 
 /// The diagnostic controllers the commands name.
@@ -455,10 +456,10 @@ impl EpisodeDriver {
         let digest = voxel_schema_digest(founder);
         let gru = match founder {
             Founder::Blind => {
-                EpisodeGru::Blind(Box::new(tensor::shape_policy::<23, 3>(theta, digest)?))
+                EpisodeGru::Blind(Box::new(tensor::shape_policy::<BLIND_I, BLIND_O>(theta, digest)?))
             }
             Founder::Browser => {
-                EpisodeGru::Browser(Box::new(tensor::shape_policy::<37, 3>(theta, digest)?))
+                EpisodeGru::Browser(Box::new(tensor::shape_policy::<BROWSER_I, BROWSER_O>(theta, digest)?))
             }
             Founder::Lanternjaw => {
                 return Err(
@@ -536,12 +537,12 @@ impl EpisodeDriver {
     /// runs no reflex ignores it.
     pub fn fresh(&self, teachers: TeacherConfig) -> Box<dyn Controller> {
         let mut controller: Box<dyn Controller> = match &self.kind {
-            EpisodeKind::Gru(EpisodeGru::Blind(policy)) => Box::new(GruPolicy::<23> {
+            EpisodeKind::Gru(EpisodeGru::Blind(policy)) => Box::new(GruPolicy::<BLIND_I, BLIND_O> {
                 policy: (**policy).clone(),
                 hidden: [0.0; HIDDEN],
                 ablate_senses: self.ablate_senses,
             }),
-            EpisodeKind::Gru(EpisodeGru::Browser(policy)) => Box::new(GruPolicy::<37> {
+            EpisodeKind::Gru(EpisodeGru::Browser(policy)) => Box::new(GruPolicy::<BROWSER_I, BROWSER_O> {
                 policy: (**policy).clone(),
                 hidden: [0.0; HIDDEN],
                 ablate_senses: self.ablate_senses,
@@ -627,12 +628,12 @@ mod tests {
     /// this crate's — and reset() clears its memory.
     #[test]
     fn the_gru_returns_logits_and_reset_clears_its_memory() {
-        let theta = tensor::initial_center_shape::<23, 3>(11);
+        let theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(11);
         let mut run =
-            GruPolicy::<23>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
+            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
         let mut fresh =
-            GruPolicy::<23>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
-        let obs = [0.25; 23];
+            GruPolicy::<BLIND_I, BLIND_O>::new(&theta, voxel_schema_digest(Founder::Blind)).expect("policy");
+        let obs = [0.25; BLIND_I];
         let Response::Logits(first) = run.drive(&obs) else {
             panic!("the GRU answers logits");
         };
@@ -665,10 +666,10 @@ mod tests {
     fn the_controls_answer_bounded_rest_and_full_feed() {
         let manifest = Founder::Blind.manifest();
         let mut no = NoIntake;
-        let resolved = cubarium_voxel_fauna::resolve_actions(no.drive(&[0.5; 23]), &manifest);
+        let resolved = cubarium_voxel_fauna::resolve_actions(no.drive(&[0.5; BLIND_I]), &manifest);
         assert_eq!(resolved, Actions::REST);
         let mut feed = StationaryFeeding;
-        let resolved = cubarium_voxel_fauna::resolve_actions(feed.drive(&[0.5; 23]), &manifest);
+        let resolved = cubarium_voxel_fauna::resolve_actions(feed.drive(&[0.5; BLIND_I]), &manifest);
         assert_eq!(
             resolved,
             Actions {
@@ -687,8 +688,8 @@ mod tests {
     fn the_cruise_control_is_open_loop() {
         let manifest = Founder::Browser.manifest();
         let mut cruise = Cruise;
-        let a = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.0; 37]), &manifest);
-        let b = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.9; 37]), &manifest);
+        let a = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.0; BROWSER_I]), &manifest);
+        let b = cubarium_voxel_fauna::resolve_actions(cruise.drive(&[0.9; BROWSER_I]), &manifest);
         assert_eq!(a, b, "cruise cannot depend on the observation");
         assert_eq!(
             a,
@@ -710,25 +711,25 @@ mod tests {
     /// same policy unablated tells them apart. The `Self` block still drives it.
     #[test]
     fn ablating_the_senses_hides_only_the_sense_channels() {
-        let theta = tensor::initial_center_shape::<23, 3>(21);
+        let theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(21);
         let digest = voxel_schema_digest(Founder::Blind);
-        let mut senses_a = [0.3; 23];
-        let mut senses_b = [0.3; 23];
-        for i in SELF_CHANNELS..23 {
+        let mut senses_a = [0.3; BLIND_I];
+        let mut senses_b = [0.3; BLIND_I];
+        for i in SELF_CHANNELS..BLIND_I {
             senses_a[i] = 0.9;
             senses_b[i] = 0.05;
         }
 
-        let mut open = GruPolicy::<23>::new(&theta, digest).expect("policy");
-        let mut open2 = GruPolicy::<23>::new(&theta, digest).expect("policy");
+        let mut open = GruPolicy::<BLIND_I, BLIND_O>::new(&theta, digest).expect("policy");
+        let mut open2 = GruPolicy::<BLIND_I, BLIND_O>::new(&theta, digest).expect("policy");
         assert_ne!(
             open.drive(&senses_a),
             open2.drive(&senses_b),
             "an unablated policy sees its senses"
         );
 
-        let mut blind_a = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
-        let mut blind_b = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_a = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_b = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
         assert!(blind_a.senses_ablated());
         assert_eq!(
             blind_a.drive(&senses_a),
@@ -738,16 +739,16 @@ mod tests {
 
         // Not a lobotomy: the Self block still moves the output, and a zero-sense
         // observation is unchanged by the ablation.
-        let mut self_hi = [0.0; 23];
+        let mut self_hi = [0.0; BLIND_I];
         self_hi[..SELF_CHANNELS].fill(0.8);
-        let mut blind_c = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
-        let mut open3 = GruPolicy::<23>::new(&theta, digest).expect("policy");
+        let mut blind_c = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
+        let mut open3 = GruPolicy::<BLIND_I, BLIND_O>::new(&theta, digest).expect("policy");
         assert_ne!(
             blind_c.drive(&self_hi),
             blind_b.drive(&senses_b),
             "the Self block still reaches an ablated policy"
         );
-        let mut blind_d = GruPolicy::<23>::new_ablated(&theta, digest).expect("policy");
+        let mut blind_d = GruPolicy::<BLIND_I, BLIND_O>::new_ablated(&theta, digest).expect("policy");
         assert_eq!(
             blind_d.drive(&self_hi),
             open3.drive(&self_hi),
@@ -759,14 +760,14 @@ mod tests {
     /// and it is a no-op on a control that reads no observation.
     #[test]
     fn the_driver_carries_the_ablation_into_every_fresh_body() {
-        let theta = tensor::initial_center_shape::<23, 3>(31);
+        let theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(31);
         let plain = EpisodeDriver::gru(&theta, Founder::Blind).expect("policy");
         let ablated = plain.clone().with_ablated_senses();
         assert_eq!(plain.name(), "gru");
         assert_eq!(ablated.name(), "gru-ablated");
         assert!(!plain.senses_ablated() && ablated.senses_ablated());
 
-        let mut obs = [0.2; 23];
+        let mut obs = [0.2; BLIND_I];
         obs[SELF_CHANNELS..].fill(0.95);
         let mut a = plain.fresh(TeacherConfig::default());
         let mut b = ablated.fresh(TeacherConfig::default());
@@ -785,11 +786,11 @@ mod tests {
     /// their first drive, whatever the prototype has already done.
     #[test]
     fn fresh_hands_out_fresh_memory_per_episode() {
-        let driver = EpisodeDriver::gru(&tensor::initial_center_shape::<23, 3>(13), Founder::Blind)
+        let driver = EpisodeDriver::gru(&tensor::initial_center_shape::<BLIND_I, BLIND_O>(13), Founder::Blind)
             .expect("policy");
         let mut a = driver.fresh(TeacherConfig::default());
         let mut b = driver.fresh(TeacherConfig::default());
-        let obs = [0.1; 23];
+        let obs = [0.1; BLIND_I];
         // Evolve `a` far from fresh.
         for _ in 0..9 {
             let _ = a.drive(&obs);
@@ -801,8 +802,8 @@ mod tests {
     /// Shape acceptance and incompatible-policy rejection at the digest boundary.
     #[test]
     fn the_two_shapes_are_accepted_and_the_mismatched_policy_is_refused() {
-        let blind = tensor::initial_center_shape::<23, 3>(7);
-        let browser = tensor::initial_center_shape::<37, 3>(7);
+        let blind = tensor::initial_center_shape::<BLIND_I, BLIND_O>(7);
+        let browser = tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(7);
         let browser_digest = voxel_schema_digest(Founder::Browser);
 
         let d = EpisodeDriver::gru(&blind, Founder::Blind).expect("blind accepts");
@@ -812,13 +813,13 @@ mod tests {
 
         // A blind-shaped theta refused as a browser policy: wrong length, named.
         let err = EpisodeDriver::gru(&blind, Founder::Browser).expect_err("wrong length");
-        assert!(err.contains("5571"), "{err}");
+        assert!(err.contains(&Founder::Blind.manifest().parameter_count().to_string()), "{err}");
 
         // A right-length policy stamped with a corrupted digest is refused by the
         // boundary the world uses: `ShapePolicy::new` (the authoring stamp) against
         // `validate` (the expected digest).
         let claimed = ShapePolicy::new(
-            tensor::unflatten_shape::<37, 3>(&browser).expect("shape"),
+            tensor::unflatten_shape::<BROWSER_I, BROWSER_O>(&browser).expect("shape"),
             browser_digest ^ 1,
         );
         let err = claimed.validate(browser_digest).expect_err("digest");

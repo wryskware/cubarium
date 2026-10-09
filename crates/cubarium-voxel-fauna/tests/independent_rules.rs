@@ -1416,8 +1416,14 @@ fn a_controller_receives_exactly_the_manifest_length_and_nothing_else() {
 
         let samples = log.lock().expect("log").clone();
         assert_eq!(samples.len(), 4, "{}: sample count", founder.name());
-        // The two channels the schema encodes as signed: a resolved turn and a smoothed
-        // time derivative. Everything else is a normalized magnitude in [0, 1].
+        // The channels the schema encodes as signed: a resolved turn, a smoothed time
+        // derivative, and contract v3's bearings (`sin`, `cos`), gradients (`forward`,
+        // `right`) and the day's phase. Everything else is a normalized magnitude in [0, 1].
+        let signed_name = |c: &str| {
+            matches!(c, "resolved_turn" | "trend" | "forward" | "right" | "day_sin" | "day_cos")
+                || c.ends_with("sin")
+                || c.ends_with("cos")
+        };
         let signed: Vec<usize> = manifest
             .modules
             .iter()
@@ -1425,7 +1431,7 @@ fn a_controller_receives_exactly_the_manifest_length_and_nothing_else() {
                 m.channels
                     .iter()
                     .enumerate()
-                    .filter(|(_, c)| **c == "resolved_turn" || **c == "trend")
+                    .filter(|(_, c)| signed_name(c))
                     .map(move |(k, _)| m.offset + k)
             })
             .collect();
@@ -1453,9 +1459,10 @@ fn a_controller_receives_exactly_the_manifest_length_and_nothing_else() {
             }
         }
     }
-    // The two widths the plan writes down, so a manifest edit cannot quietly move them.
-    assert_eq!(Manifest::blind().inputs(), 23);
-    assert_eq!(Manifest::browser().inputs(), 37);
+    // The two v2 widths the plan writes down, which contract v3 keeps in place before its
+    // blocks, so a manifest edit cannot quietly move them.
+    assert_eq!(Manifest::blind().tail_offset(), 23);
+    assert_eq!(Manifest::browser().tail_offset(), 37);
 }
 
 /// Tests plan §1, "Policy boundary": *"the observation contains no value that changes when

@@ -48,6 +48,8 @@
 //! `Δorganic + maintenance + motor + corpse`; digestive respiration is deliberately
 //! excluded, because it is the share of a bite that never became animal tissue.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1148,9 +1150,9 @@ mod tests {
 
     fn gru(founder: Founder) -> EpisodeDriver {
         let theta = if founder == Founder::Blind {
-            crate::es::tensor::initial_center_shape::<23, 3>(5)
+            crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(5)
         } else {
-            crate::es::tensor::initial_center_shape::<37, 3>(5)
+            crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(5)
         };
         EpisodeDriver::gru(&theta, founder).expect("a valid centre")
     }
@@ -1477,12 +1479,12 @@ mod tests {
     /// and a driver for the other founder is refused at the episode boundary.
     #[test]
     fn a_policy_for_the_other_founder_is_refused_by_name() {
-        let browser_theta = crate::es::tensor::initial_center_shape::<37, 3>(3);
+        let browser_theta = crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(3);
         let err = EpisodeDriver::gru(&browser_theta, Founder::Blind)
             .expect_err("a browser-shaped theta is not a blind policy");
-        assert!(err.contains("6915"), "{err}");
+        assert!(err.contains(&Founder::Browser.manifest().parameter_count().to_string()), "{err}");
         // A right-length theta carrying a non-finite weight is refused too.
-        let mut corrupt = crate::es::tensor::initial_center_shape::<23, 3>(3);
+        let mut corrupt = crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(3);
         corrupt[0] = f64::NAN;
         let err = EpisodeDriver::gru(&corrupt, Founder::Blind).expect_err("non-finite");
         assert!(err.contains("finite"), "{err}");

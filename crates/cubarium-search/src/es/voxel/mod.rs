@@ -85,6 +85,13 @@ pub mod training_world;
 #[cfg(test)]
 mod training_world_tests;
 
+/// The two shapes the voxel runtime is compiled for (contract v3; P3 makes it generic):
+/// the littershredder's and the frondgrazer's inputs and outputs, the manifests' own.
+pub use cubarium_voxel_fauna::{
+    BLIND_INPUTS as BLIND_I, BLIND_OUTPUTS as BLIND_O, BROWSER_INPUTS as BROWSER_I,
+    BROWSER_OUTPUTS as BROWSER_O,
+};
+
 pub use controller::{
     CRUISE_FORWARD, Cruise, EpisodeDriver, EpisodeGru, EpisodeKind, GruBlind, GruBrowser,
     GruPolicy, NoIntake, RecordingController, SELF_CHANNELS, StationaryFeeding, TeacherSink,

@@ -93,7 +93,7 @@ use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Species, StandLayer};
 use serde::{Deserialize, Serialize};
 
-use crate::perception::{TerrainOnly, Visit};
+use crate::perception::{LightReading, TerrainOnly, Visit};
 use crate::{Actions, Animal, Fauna, FaunaConfig, LightConfig, MobilityMode};
 
 /// What a beacon is.
@@ -726,7 +726,7 @@ fn bearing(heading: f64, dx: f64, dz: f64) -> f64 {
 }
 
 /// A body's eye: its centre column at its eye height over its base.
-fn eye_of(config: &FaunaConfig, a: &Animal, v: f64) -> Option<(f64, f64, f64)> {
+pub(crate) fn eye_of(config: &FaunaConfig, a: &Animal, v: f64) -> Option<(f64, f64, f64)> {
     let g = crate::body_of(config, a)?;
     Some((a.pose.x, crate::perception::base_m(a, v) + g.eye_m, a.pose.z))
 }
@@ -748,9 +748,38 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
     if !(table.light_m > 0.0) && !(table.loom_m > 0.0) {
         return;
     }
+    if eye_of(&fauna.config, &a, view.config.voxel_m).is_none() {
+        return;
+    }
+    if light_due(fauna, &a) && table.light_m > 0.0 {
+        fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);
+    }
+    if let Some(reading) = light_reading(fauna, &a, view, daylight) {
+        fauna.percepts.entry(a.id).or_default().light = reading;
+    }
+}
+
+/// Whether body `a`'s beacons are read this tick: at the remote senses' rate (staggered by
+/// id), or when it has never read them.
+pub(crate) fn light_due(fauna: &Fauna, a: &Animal) -> bool {
+    let stagger = fauna.config.perception.stagger_ticks();
+    let p = fauna.percepts.get(&a.id);
+    p.is_none_or(|p| p.light.tick == 0) || a.id % stagger == fauna.tick % stagger
+}
+
+/// **The photoreceptor's reading** of body `a` as [`refresh_light`] writes it, read only:
+/// the beacons must already be refreshed when they are due ([`light_due`]). `None` for a
+/// body with no light sense or no eye. The v3 observation reads it for a body whose
+/// reflexes do not refresh its record ([`crate::observe_v3`]).
+pub(crate) fn light_reading(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, daylight: f64) -> Option<LightReading> {
+    let founder = a.founder?;
+    let table = fauna.config.founder(founder).senses;
+    if !(table.light_m > 0.0) && !(table.loom_m > 0.0) {
+        return None;
+    }
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let Some(eye) = eye_of(&fauna.config, &a, v) else { return };
+    let eye = eye_of(&fauna.config, a, v)?;
     let tick = fauna.tick;
     // Looming: the nearest moving body of another lineage within `loom_m` (3D, to its middle).
     let mut loom: Option<(f64, f64)> = None;
@@ -780,18 +809,13 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
             }
         }
     }
-    let stagger = fauna.config.perception.stagger_ticks();
-    let due = {
-        let p = fauna.percepts.get(&a.id);
-        p.is_none_or(|p| p.light.tick == 0) || a.id % stagger == tick % stagger
-    };
+    let due = light_due(fauna, a);
     let ambient = daylight.clamp(0.0, 1.0) * view.sky_visibility(eye.0.div_euclid(v) as i64, a.sense_layer(v), a.site.z);
     let mut reading = fauna.percepts.get(&a.id).map(|p| p.light).unwrap_or_default();
     reading.ambient = ambient;
     reading.looming = loom.map_or(0.0, |(d, _)| (1.0 - d / table.loom_m).clamp(0.0, 1.0).max(1e-9));
     reading.loom_bearing = loom.map_or(0.0, |(_, b)| b);
     if due && table.light_m > 0.0 {
-        fauna.beacons.refresh(view, fv, fauna.config.scent.nectar_full);
         let cfg = fauna.config.light;
         let record = fauna.percepts.get(&a.id).copied().unwrap_or_default();
         let lures = lures(fauna, view);
@@ -874,7 +898,7 @@ pub(crate) fn refresh_light(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, f
         }
         reading.tick = tick.max(1);
     }
-    fauna.percepts.entry(a.id).or_default().light = reading;
+    Some(reading)
 }
 
 /// What an inspection came to ([`inspect`]).

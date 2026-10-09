@@ -2097,7 +2097,7 @@ mod tests {
             "a static arena holds its settled field"
         );
         let obs = first_sample_of_a_founder_on_the_tile(sim, site);
-        assert_eq!(obs.len(), 23);
+        assert_eq!(obs.len(), cubarium_voxel_fauna::Founder::Blind.manifest().inputs());
         assert_eq!(obs[20], 1.0, "chem validity from the settled field");
         assert!(
             obs[18] > 0.0,

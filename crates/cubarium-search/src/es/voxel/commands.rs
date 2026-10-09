@@ -23,6 +23,8 @@
 //! stops at the measured sixteen-worker saturation point everywhere. The score-counter
 //! state is named in every run's output.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -115,9 +117,9 @@ pub fn check(
         let start = prepared.fixture_arena().animal_pose().expect("placed");
         let cancel = AtomicBool::new(false);
         let theta = if *f == Founder::Blind {
-            crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+            crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
         } else {
-            crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+            crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
         };
         let mut drivers: Vec<(String, EpisodeDriver)> = vec![(
             "gru-centre".into(),
@@ -208,9 +210,9 @@ pub fn bench(
     let fixture = task::PreparedArena::build_stage(founder, task::TRAINING_LAYOUT_SEEDS[0], stage);
     let prepared = task::Prepared::from(fixture.clone());
     let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
     } else {
-        crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
     };
     let gru = EpisodeDriver::gru(&theta, founder)?;
 
@@ -1342,9 +1344,9 @@ pub fn landscapes(
     }
 
     let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
     } else {
-        crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
     };
     let gru = EpisodeDriver::gru(&theta, founder)?;
     let cancel = AtomicBool::new(false);
@@ -1573,9 +1575,9 @@ pub fn landscape_arms(
         pin::format_cpu_list(&mask),
     );
     let theta = if founder == Founder::Blind {
-        crate::es::tensor::initial_center_shape::<23, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(task::TRAINING_SEED)
     } else {
-        crate::es::tensor::initial_center_shape::<37, 3>(task::TRAINING_SEED)
+        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(task::TRAINING_SEED)
     };
     let gru = EpisodeDriver::gru(&theta, founder)?;
     let cancel = AtomicBool::new(false);

@@ -45,6 +45,8 @@
 //! differentiates `transfer(y)` (a straight-through deadband), and the finite-difference
 //! test checks exactly that function. The two differ only inside a 0.05 band.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
@@ -472,11 +474,11 @@ pub struct FitReport {
 pub fn fit(founder: Founder, streams: &[TeacherStream], spec: &FitSpec) -> (Vec<f64>, FitReport) {
     let manifest = founder.manifest();
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, 3);
+    let offs = shape_offsets(inputs, manifest.outputs());
     let mut theta = if founder == Founder::Blind {
-        tensor::initial_center_shape::<23, 3>(spec.seed)
+        tensor::initial_center_shape::<BLIND_I, BLIND_O>(spec.seed)
     } else {
-        tensor::initial_center_shape::<37, 3>(spec.seed)
+        tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(spec.seed)
     };
     let mut adam = Adam::new(theta.len());
     adam.learning_rate = spec.learning_rate;
@@ -764,7 +766,7 @@ pub fn gradient_of_chunk(
 pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> ([f64; 3], f64) {
     let manifest = founder.manifest();
     let inputs = manifest.inputs();
-    let offs = shape_offsets(inputs, 3);
+    let offs = shape_offsets(inputs, manifest.outputs());
     let mut sums = [0.0f64; 3];
     let mut steps = 0usize;
     let mut turn_matches = 0usize;
@@ -772,7 +774,7 @@ pub fn measure(founder: Founder, streams: &[TeacherStream], theta: &[f64]) -> ([
         let mut hidden = vec![0.0; HIDDEN];
         for t in 0..stream.steps {
             let y = forward_step(inputs, &offs, theta, stream.observation(t), &mut hidden);
-            let response = cubarium_voxel_fauna::Response::Logits(y);
+            let response = cubarium_voxel_fauna::Response::logits(&y);
             let a = cubarium_voxel_fauna::resolve_actions(response, &manifest);
             let mine = [a.forward, a.turn, a.feed];
             let teacher = stream.action(t);
@@ -883,13 +885,13 @@ mod tests {
     /// The flat-theta forward step is the core GRU's, value for value, on both shapes.
     #[test]
     fn the_flat_forward_step_is_the_core_gru() {
-        for (inputs, founder) in [(23usize, Founder::Blind), (37, Founder::Browser)] {
+        for (inputs, founder) in [(BLIND_I, Founder::Blind), (BROWSER_I, Founder::Browser)] {
             let theta = if founder == Founder::Blind {
-                tensor::initial_center_shape::<23, 3>(3)
+                tensor::initial_center_shape::<BLIND_I, BLIND_O>(3)
             } else {
-                tensor::initial_center_shape::<37, 3>(3)
+                tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(3)
             };
-            let offs = shape_offsets(inputs, 3);
+            let offs = shape_offsets(inputs, founder.manifest().outputs());
             let mut mine = vec![0.0; HIDDEN];
             let mut theirs = [0.0; HIDDEN];
             for step in 0..5 {
@@ -898,17 +900,18 @@ mod tests {
                     .collect();
                 let a = forward_step(inputs, &offs, &theta, &x, &mut mine);
                 let b = if founder == Founder::Blind {
-                    let w: Gru<23, 3> = tensor::unflatten_shape(&theta).expect("shape");
-                    let mut xa = [0.0; 23];
+                    let w: Gru<BLIND_I, BLIND_O> = tensor::unflatten_shape(&theta).expect("shape");
+                    let mut xa = [0.0; BLIND_I];
                     xa.copy_from_slice(&x);
-                    w.forward(&xa, &mut theirs)
+                    w.forward(&xa, &mut theirs).to_vec()
                 } else {
-                    let w: Gru<37, 3> = tensor::unflatten_shape(&theta).expect("shape");
-                    let mut xa = [0.0; 37];
+                    let w: Gru<BROWSER_I, BROWSER_O> = tensor::unflatten_shape(&theta).expect("shape");
+                    let mut xa = [0.0; BROWSER_I];
                     xa.copy_from_slice(&x);
-                    w.forward(&xa, &mut theirs)
+                    w.forward(&xa, &mut theirs).to_vec()
                 };
-                assert_eq!(a, b, "step {step} of {}", founder.name());
+                // The fit drives the three local actions; a body action's output is P3's.
+                assert_eq!(a[..], b[..3], "step {step} of {}", founder.name());
                 assert_eq!(mine.as_slice(), theirs.as_slice());
             }
         }
@@ -919,10 +922,10 @@ mod tests {
     #[test]
     fn the_analytic_gradient_matches_finite_differences_on_a_tiny_shape() {
         let inputs = 2usize;
-        let offs = shape_offsets(inputs, 3);
         let manifest = Founder::Blind.manifest();
+        let offs = shape_offsets(inputs, manifest.outputs());
         let steps = 3usize;
-        let mut theta = tensor::initial_center_shape::<23, 3>(5)[..offs.params].to_vec();
+        let mut theta = tensor::initial_center_shape::<BLIND_I, BLIND_O>(5)[..offs.params].to_vec();
         for (i, v) in theta.iter_mut().enumerate() {
             *v += 0.1 * ((i as f64) * 0.37).sin();
         }

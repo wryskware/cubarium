@@ -357,7 +357,7 @@ fn the_r2b_physiology_table_scales_the_shredders() {
     let film = module(SNAIL, "Chem");
     assert_eq!(film.name, "Chem(film)");
     assert_eq!((film.offset, film.width), (blind.offset, blind.width), "the same slot");
-    assert_eq!(SNAIL.manifest().inputs(), Founder::Blind.manifest().inputs());
+    assert_eq!(SNAIL.manifest().tail_offset(), Founder::Blind.manifest().tail_offset());
     assert_ne!(SNAIL.manifest().digest(), Founder::Blind.manifest().digest());
     assert_ne!(SNAIL.manifest().digest(), Founder::Capgnawer.manifest().digest());
     assert!(module_opt_wet(SNAIL), "`Wet` is in the layout");

@@ -431,8 +431,8 @@ fn the_seedporter_table_scales_the_browsers_and_glides() {
 
     // Its own manifest, the browser's width and actions.
     let m = SP.manifest();
-    assert_eq!(m.inputs(), Founder::Browser.manifest().inputs(), "the browser's width");
-    assert_eq!(m.actions.len(), 3);
+    assert_eq!(m.tail_offset(), Founder::Browser.manifest().tail_offset(), "the browser's v2 layout");
+    assert_eq!(m.actions.len(), 4, "the three and its sprint (contract v3)");
     assert_ne!(m.digest(), Founder::Browser.manifest().digest());
 }
 

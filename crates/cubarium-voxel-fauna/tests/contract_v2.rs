@@ -78,9 +78,10 @@ fn the_browser_fan_has_forty_five_rays_at_the_five_pitches() {
         "the decided pitch set"
     );
     assert_eq!(browser.ray_count(), 45, "3 sectors x 3 yaws x 5 pitches");
-    assert_eq!(browser.inputs(), 37, "the channel count does not move");
-    assert_eq!(Founder::Blind.manifest().inputs(), 23);
-    assert_eq!(cubarium_voxel_fauna::SCHEMA_VERSION, 2, "contract v2");
+    // Contract v3 keeps the v2 layouts in place and appends its blocks after them.
+    assert_eq!(browser.tail_offset(), 37, "the v2 channel count does not move");
+    assert_eq!(Founder::Blind.manifest().tail_offset(), 23);
+    assert_eq!(cubarium_voxel_fauna::SCHEMA_VERSION, 3, "contract v3");
 }
 
 // --------------------------------------------------------------- occlusion (D3)

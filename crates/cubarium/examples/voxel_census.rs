@@ -624,6 +624,61 @@ enum SegmentKind {
 /// Step the coupled layers for the asked-for hours, writing one row a simulated minute.
 /// Both arms end here, so a preset world is measured by the same code path as the ridge.
 /// A loaded run starts at `minute0` and prints from the minute after it.
+/// `CUB_STEER_LOG=FILE` (a diagnostic, env only): per minute and lineage, the body-ticks
+/// each write-side layer held ([`cubarium_voxel_fauna::Steer`]) and the population, as
+/// `minute,lineage,what,count` rows — the heuristic-behaviour comparison of two builds.
+/// `CUB_TAP=1` runs the executed-action tap (contract v3, P0) the whole run, drained each
+/// minute (`minute,all,tap_samples,N`), so a tapped and an untapped run can be compared.
+struct SteerLog {
+    out: std::io::BufWriter<std::fs::File>,
+    counts: std::collections::BTreeMap<(usize, &'static str), u64>,
+    tap: bool,
+}
+
+impl SteerLog {
+    fn from_env(sim: &mut Sim) -> Option<SteerLog> {
+        let path = std::env::var("CUB_STEER_LOG").ok()?;
+        let tap = std::env::var("CUB_TAP").is_ok_and(|v| v == "1");
+        if tap {
+            sim.fauna_mut().start_tap();
+        }
+        let out = std::io::BufWriter::new(std::fs::File::create(&path).expect("the steer log"));
+        Some(SteerLog { out, counts: Default::default(), tap })
+    }
+
+    fn tick(&mut self, sim: &mut Sim, tick: u64) {
+        use std::io::Write as _;
+        let fauna = sim.fauna();
+        for a in fauna.view().animals {
+            let Some(f) = a.founder else { continue };
+            let s = fauna.steer_of(a.id).map_or("none", |s| s.name());
+            *self.counts.entry((f.index(), s)).or_default() += 1;
+        }
+        if tick % TICKS_PER_MIN != 0 {
+            return;
+        }
+        let minute = tick / TICKS_PER_MIN;
+        for ((k, s), n) in std::mem::take(&mut self.counts) {
+            let _ = writeln!(self.out, "{minute},{},{s},{n}", Founder::ALL[k].name());
+        }
+        let mut pop = [0u64; Founder::COUNT];
+        for a in fauna.view().animals {
+            if let Some(f) = a.founder {
+                pop[f.index()] += 1;
+            }
+        }
+        for f in Founder::ALL {
+            let _ = writeln!(self.out, "{minute},{},pop,{}", f.name(), pop[f.index()]);
+        }
+        if self.tap {
+            let n: usize = sim.fauna_mut().take_tap().map_or(0, |t| t.streams().map(|(_, _, s)| s.len()).sum());
+            sim.fauna_mut().start_tap();
+            let _ = writeln!(self.out, "{minute},all,tap_samples,{n}");
+        }
+        let _ = self.out.flush();
+    }
+}
+
 fn run(
     sim: &mut Sim,
     hours: f64,
@@ -719,12 +774,16 @@ fn run(
     });
     let mut vitals_time = std::time::Duration::ZERO;
     let first_tick = tick;
+    let mut steer_log = SteerLog::from_env(sim);
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if let Some(l) = steer_log.as_mut() {
+            l.tick(sim, tick);
+        }
         if let Some(v) = vitals.as_mut() {
             let start = std::time::Instant::now();
             v.recorder.observe(sim.fauna(), tick);

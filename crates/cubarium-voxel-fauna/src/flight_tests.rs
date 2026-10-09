@@ -398,9 +398,9 @@ fn the_bellwing_table_is_a_diurnal_nectar_flyer() {
     assert_eq!(m.actions[3].name, "lift_effort");
     assert_eq!((m.actions[3].low, m.actions[3].high), (-1.0, 1.0));
     assert_eq!(m.actions[3].transfer, crate::Transfer::Tanh);
+    // Contract v3: no other lineage has a lift.
     for other in Founder::ALL.into_iter().filter(|&o| o != BW) {
-        let want = if other == Founder::Lanternjaw { 4 } else { 3 };
-        assert_eq!(other.manifest().actions.len(), want, "{other:?}'s actions do not move");
+        assert!(other.manifest().actions.iter().all(|a| a.name != "lift_effort"), "{other:?} lifts");
     }
 }
 

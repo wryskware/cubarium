@@ -8,6 +8,8 @@
 //! vector, a non-finite weight, and a digest mismatch **by name** — the schema-digest
 //! rule: a policy is refused, never reinterpreted.
 
+#[allow(unused_imports)]
+use super::{BLIND_I, BLIND_O, BROWSER_I, BROWSER_O};
 use std::path::Path;
 
 use cubarium_voxel_fauna::Founder;
@@ -206,6 +208,20 @@ impl VoxelPolicyFile {
         let founder = super::parse_founder(&self.founder).map_err(|e| format!("{name}: {e}"))?;
         let manifest = founder.manifest();
         let want = manifest.parameter_count();
+        // Contract v3 refuses a v2 centre by name, strict or as a transfer: its weights
+        // were fitted to the v2 layout and three outputs, and padding them into v3's
+        // input matrix would be the re-anchoring "always fresh" rules out. v3 centres
+        // start from clones of the executed heuristic.
+        let v2 = cubarium_voxel_fauna::gru32_parameter_count(manifest.tail_offset(), 3);
+        if self.theta.len() == v2 && v2 != want {
+            return Err(format!(
+                "{name}: a contract-v2 {} centre ({v2} values: the v2 layout of {} inputs, 3 \
+                 outputs); contract v3 ({want} values) refuses it and never transplants its \
+                 weights: start from a clone of the executed heuristic",
+                founder.name(),
+                manifest.tail_offset()
+            ));
+        }
         if self.theta.len() != want {
             return Err(format!(
                 "{name}: theta has {} values, expected {want} for {}",
@@ -271,18 +287,15 @@ impl VoxelPolicyFile {
     }
 }
 
+/// A fresh, valid contract-v3 centre for `founder` (the two compiled shapes), for tests.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::es::voxel::trainer::CHECKPOINT_SCHEMA;
-
-    fn sample(founder: Founder) -> VoxelPolicyFile {
-        let theta = if founder == Founder::Blind {
-            crate::es::tensor::initial_center_shape::<23, 3>(5)
-        } else {
-            crate::es::tensor::initial_center_shape::<37, 3>(5)
-        };
-        VoxelPolicyFile {
+pub(crate) fn test_centre(founder: Founder, seed: u64) -> VoxelPolicyFile {
+    let theta = if founder == Founder::Blind {
+        crate::es::tensor::initial_center_shape::<BLIND_I, BLIND_O>(seed)
+    } else {
+        crate::es::tensor::initial_center_shape::<BROWSER_I, BROWSER_O>(seed)
+    };
+    VoxelPolicyFile {
             schema: POLICY_SCHEMA.into(),
             build: "test".into(),
             founder: founder.name().into(),
@@ -301,8 +314,44 @@ mod tests {
             imitation: None,
             stage: crate::es::voxel::task::Stage::A.as_str().into(),
             theta,
+    }
+}
+
+/// [`test_centre`] written to a fresh temp file, for the tests that load a centre by path.
+#[cfg(test)]
+pub(crate) fn test_centre_path(founder: Founder, tag: &str) -> std::path::PathBuf {
+    let path = std::env::temp_dir().join(format!(
+        "cub-v3-centre-{}-{}-{tag}.json",
+        std::process::id(),
+        founder.name()
+    ));
+    test_centre(founder, 5).write(&path).expect("a test centre");
+    path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::es::voxel::trainer::CHECKPOINT_SCHEMA;
+
+    fn sample(founder: Founder) -> VoxelPolicyFile {
+        super::test_centre(founder, 5)
+    }
+
+    /// Contract v3 refuses the two shipped round-2 centres by name, strict and as a
+    /// transfer: they are contract v2.
+    #[test]
+    fn a_v2_centre_is_refused_against_v3_by_name() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/training/centres");
+        for file in ["r2-frondgrazer-upd160.json", "r2-littershredder-upd512.json"] {
+            let path = dir.join(file);
+            for spec in [path.display().to_string(), format!("transfer:{}", path.display())] {
+                let err = VoxelPolicyFile::load_or_transfer(std::path::Path::new(&spec)).expect_err("refused");
+                assert!(err.contains("contract-v2") && err.contains("contract v3"), "{err}");
+            }
         }
     }
+
 
     /// A policy round-trips exactly and loads into a validated driver.
     #[test]
@@ -330,7 +379,7 @@ mod tests {
         let mut file = sample(Founder::Blind);
         file.founder = Founder::Browser.name().into();
         let err = file.validate_named("p.json").expect_err("refused");
-        assert!(err.contains("5571") && err.contains("frondgrazer"), "{err}");
+        assert!(err.contains(&Founder::Blind.manifest().parameter_count().to_string()) && err.contains("frondgrazer"), "{err}");
 
         // A right-length file whose digest is the other founder's.
         let mut file = sample(Founder::Browser);

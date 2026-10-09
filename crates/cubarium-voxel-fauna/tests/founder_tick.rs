@@ -690,7 +690,7 @@ fn the_controller_receives_only_the_vector_and_it_stays_finite() {
         fauna.step(&world, &mut flora);
     }
     for obs in log.lock().unwrap().iter() {
-        assert_eq!(obs.len(), 23, "the blind manifest's width");
+        assert_eq!(obs.len(), Founder::Blind.manifest().inputs(), "the blind manifest's width");
         assert!(obs.iter().all(|v| v.is_finite()), "no non-finite channel");
         assert!(
             obs[18..21].iter().all(|v| *v == 0.0),

@@ -28,6 +28,7 @@ mod encounter;
 mod knobs;
 mod hunt;
 mod manifest;
+pub(crate) mod observe_v3;
 mod pose;
 mod predation;
 mod pack;
@@ -71,6 +72,8 @@ mod hot_path_tests;
 #[cfg(test)]
 mod herd_tests;
 #[cfg(test)]
+mod observe_v3_tests;
+#[cfg(test)]
 mod testpass4_herd_tests;
 #[cfg(test)]
 mod roster_tests;
@@ -105,6 +108,7 @@ pub use den::{DenQuality, den_quality};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, Seek, heuristic, resolve_actions,
+    BodyActions, Resolved, resolve,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
@@ -122,7 +126,9 @@ pub use manifest::{
     ACTION_DEADBAND, Action, BIRTH_READINESS_RULE, BROWSER_RAY_PITCH_OFFSETS_DEG,
     BROWSER_RAY_YAW_OFFSETS_DEG, BROWSER_SECTOR_CENTRES_DEG, BROWSER_VISIBLE_CLASSES,
     Founder, cruise_body_lengths_per_s, HIDDEN, Manifest, Module, OCCLUSION_RULE, SCHEMA_VERSION,
-    Transfer, Tunings, gru32_parameter_count,
+    Transfer, Tunings, gru32_parameter_count, gru_parameter_count, MAX_OUTPUTS, V3_ENCODING_RULE,
+    BLIND_INPUTS, BLIND_OUTPUTS, BROWSER_INPUTS, BROWSER_OUTPUTS, SCENT_REFERENCE, TREMOR_REFERENCE,
+    HEIGHT_REFERENCE_M,
 };
 pub use knobs::{CueConfig, FoundingConfig, HuntConfig, LifeConfig, LightConfig, PerceptionConfig, PredationConfig, ScentConfig, TeacherConfig};
 pub use hunt::{FruitlessPatch, HuntMemory, HuntMode, accepts, attack_chance, attack_preference, encounter_share, profitability, FRUITLESS_SLOTS};
@@ -3691,6 +3697,15 @@ pub struct Fauna {
     /// sun at the start of every tick, read by the leanings. Derived, so not saved.
     #[serde(skip)]
     pub(crate) horizon: Horizon,
+    /// **The day's phase this tick** (0 midnight, 0.5 noon; 0.5 with the clock off): set from
+    /// the world's sun at the start of every tick, read by the v3 observation. Derived, so
+    /// not saved.
+    #[serde(skip)]
+    pub(crate) day_phase: f64,
+    /// **The executed-action tap** (contract v3, P0): while `Some`, every controller sample
+    /// records its v3 observation and both labels ([`TapSample`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) tap: Option<ActionTap>,
     /// The last tick rain fell (SNAIL-FIX: an amphibious body's roam hours run on for
     /// [`Amphibious::roam_after_rain_s`] after it). `None` before any rain.
     #[serde(default)]
@@ -3897,6 +3912,57 @@ impl Steer {
     }
 }
 
+/// **What a body held**, as the executed-action tap records it (contract v3, P0): the three
+/// local actions and the body's own ([`BodyActions`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Held {
+    pub actions: Actions,
+    pub body: BodyActions,
+}
+
+/// **One sample of the executed-action tap** (contract v3, P0;
+/// `design/brain-contract-v3-proposal-2026-10-08.md` §2.3 "Seeding" and §4 P0): at one of
+/// a body's controller samples, the v3 observation it was sampled on, the two labels, and
+/// which layer set the held actions.
+///
+/// - `own` is the **pre-override** label: its controller's own answer through the shared
+///   adapter, before any reflex (the hybrid's option 0 clones this).
+/// - `executed` is what the write side **held** after every layer (B's clone fits this):
+///   the actions, the lure and the lift as held, and the hunker and retraction the body is
+///   in. The sprint is P2's (the gait decides it after this stage) and reads 0.
+/// - `steer` is the layer that set it ([`Steer`]); [`Steer::Heuristic`] means no override,
+///   and then `own == executed` but for the stop-and-go pace and the body's states.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapSample {
+    pub tick: u64,
+    pub observation: Vec<f64>,
+    pub own: Held,
+    pub executed: Held,
+    pub steer: Steer,
+}
+
+/// The tap's recording: one stream per body, by id ([`Fauna::tap`]).
+#[derive(Clone, Debug, Default)]
+pub struct ActionTap {
+    streams: std::collections::BTreeMap<u64, (Founder, Vec<TapSample>)>,
+}
+
+impl ActionTap {
+    /// Body `id`'s stream so far.
+    pub fn stream(&self, id: u64) -> Option<&[TapSample]> {
+        self.streams.get(&id).map(|(_, s)| s.as_slice())
+    }
+
+    /// Every body's stream, in id order: `(id, founder, samples)`.
+    pub fn streams(&self) -> impl Iterator<Item = (u64, Founder, &[TapSample])> + '_ {
+        self.streams.iter().map(|(&id, (f, s))| (id, *f, s.as_slice()))
+    }
+
+    pub(crate) fn push(&mut self, id: u64, founder: Founder, sample: TapSample) {
+        self.streams.entry(id).or_insert_with(|| (founder, Vec::new())).1.push(sample);
+    }
+}
+
 /// The most targets a body keeps given up at once ([`Fauna::walk_shun`]): a memory bound,
 /// not a knob; the soonest to lapse goes first.
 pub(crate) const WALK_SHUN_SLOTS: usize = 8;
@@ -4036,6 +4102,12 @@ impl Fauna {
         self.scent.level(view, ch, i64::from(site.x), site.y, site.z)
     }
 
+    /// The carcass faces as [`Fauna::carcass_sites`] last read them, if it read them this
+    /// tick; else none (the v3 observation's read side, which cannot refresh the list).
+    pub(crate) fn carcass_list(&self) -> &[cubarium_voxel_flora::Site] {
+        if self.carcass_sites.0 == Some(self.tick) { &self.carcass_sites.1 } else { &[] }
+    }
+
     pub(crate) fn carcass_sites(&mut self, fv: &cubarium_voxel_flora::FloraView<'_>) -> &[cubarium_voxel_flora::Site] {
         if self.carcass_sites.0 != Some(self.tick) {
             let list = &mut self.carcass_sites.1;
@@ -4132,6 +4204,8 @@ impl Fauna {
             last_daylight: None,
             night: NightClock::DAY,
             horizon: Horizon::NOON,
+            day_phase: 0.5,
+            tap: None,
             last_rain_tick: None,
             seed_voids: Vec::new(),
             pack_events: Vec::new(),
@@ -4162,6 +4236,24 @@ impl Fauna {
             herd_tally: [HerdTally::default(); Founder::COUNT],
             ledges: (None, Vec::new()),
         })
+    }
+
+    /// **Start the executed-action tap** (contract v3, P0), empty: from the next tick every
+    /// founder's controller sample records its v3 observation, its controller's own answer
+    /// and what was held ([`TapSample`]). Recording reads only: a tapped world steps exactly
+    /// as an untapped one.
+    pub fn start_tap(&mut self) {
+        self.tap = Some(ActionTap::default());
+    }
+
+    /// Stop the tap and hand back what it recorded (`None` if it was not running).
+    pub fn take_tap(&mut self) -> Option<ActionTap> {
+        self.tap.take()
+    }
+
+    /// The tap's recording so far, if it is running.
+    pub fn tap(&self) -> Option<&ActionTap> {
+        self.tap.as_ref()
     }
 
     /// EDGE's readout: which layer set the founder `id`'s held actions on its last
