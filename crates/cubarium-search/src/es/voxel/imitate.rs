@@ -250,6 +250,86 @@ impl TeacherStream {
     }
 }
 
+/// **Which label a clone fits** from the executed-action tap (contract v3, P0;
+/// `cubarium_voxel_fauna::TapSample`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapLabel {
+    /// The controller's own answer before any reflex: the B/C hybrid's option 0 clones it.
+    Own,
+    /// What the body held after every layer: B's clone fits it.
+    Executed,
+}
+
+/// **One body's tap recording as fitting pairs**: its v3 observations and the chosen label
+/// in its manifest's action order (forward, turn, feed, then its body action), with the
+/// layer that set each sample ([`cubarium_voxel_fauna::Steer`], the option label P8 clones).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapStream {
+    pub body: u64,
+    pub founder: Founder,
+    pub inputs: usize,
+    /// The manifest's action count (the option head is not a recorded action).
+    pub actions_per_step: usize,
+    pub steps: usize,
+    /// `steps × inputs`, row-major by step.
+    pub observations: Vec<f64>,
+    /// `steps × actions_per_step`, in manifest action order.
+    pub actions: Vec<f64>,
+    pub steer: Vec<cubarium_voxel_fauna::Steer>,
+}
+
+/// One held label as the manifest's action vector.
+fn held_actions(manifest: &Manifest, held: &cubarium_voxel_fauna::Held) -> Vec<f64> {
+    manifest
+        .actions
+        .iter()
+        .map(|a| match a.name {
+            "forward_effort" => held.actions.forward,
+            "turn_effort" => held.actions.turn,
+            "feed_effort" => held.actions.feed,
+            "sprint_effort" => held.body.sprint,
+            "hunker_effort" => held.body.hunker,
+            "retract_effort" => held.body.retract,
+            "lure_effort" => held.body.lure,
+            "lift_effort" => held.body.lift,
+            other => panic!("manifest action {other} has no recorded label"),
+        })
+        .collect()
+}
+
+/// **The tap's streams for `founder`, under `label`**: one per body of that lineage, in id
+/// order, never interleaved.
+pub fn tap_streams(tap: &cubarium_voxel_fauna::ActionTap, founder: Founder, label: TapLabel) -> Vec<TapStream> {
+    let manifest = founder.manifest();
+    let inputs = manifest.inputs();
+    tap.streams()
+        .filter(|&(_, f, s)| f == founder && !s.is_empty())
+        .map(|(body, _, samples)| {
+            let mut observations = Vec::with_capacity(samples.len() * inputs);
+            let mut actions = Vec::with_capacity(samples.len() * manifest.actions.len());
+            for s in samples {
+                assert_eq!(s.observation.len(), inputs, "a {} sample of another width", founder.name());
+                observations.extend_from_slice(&s.observation);
+                let held = match label {
+                    TapLabel::Own => &s.own,
+                    TapLabel::Executed => &s.executed,
+                };
+                actions.extend(held_actions(&manifest, held));
+            }
+            TapStream {
+                body,
+                founder,
+                inputs,
+                actions_per_step: manifest.actions.len(),
+                steps: samples.len(),
+                observations,
+                actions,
+                steer: samples.iter().map(|s| s.steer).collect(),
+            }
+        })
+        .collect()
+}
+
 /// A digest over a set of streams, for the clone's provenance: FNV-1a 64 over each
 /// stream's exact hex bytes in the order given.
 pub fn streams_digest(streams: &[TeacherStream]) -> u64 {
@@ -881,6 +961,40 @@ fn sign(v: f64) -> i8 {
 mod tests {
     use super::*;
     use cubarium_core::neural::gru::Gru;
+
+    /// The tap's recorder offers both labels per body: the pre-override label is the
+    /// controller's own answer, the executed one what was held, in manifest action order
+    /// with the body action last; bodies of other lineages and streams never mix.
+    #[test]
+    fn the_tap_streams_offer_both_labels_per_body() {
+        use cubarium_voxel_fauna::{Actions, ActionTap, BodyActions, Held, Steer, TapSample};
+        let width = Founder::Browser.manifest().inputs();
+        let sample = |tick: u64, own: f64, held: f64, hunker: f64, steer: Steer| TapSample {
+            tick,
+            observation: vec![tick as f64 * 0.01; width],
+            own: Held { actions: Actions { forward: own, turn: 0.5, feed: 1.0 }, body: BodyActions::default() },
+            executed: Held {
+                actions: Actions { forward: held, turn: 0.5, feed: 1.0 },
+                body: BodyActions { hunker, ..BodyActions::default() },
+            },
+            steer,
+        };
+        let tap = ActionTap::from_streams([
+            (3, Founder::Browser, vec![sample(5, 0.9, 0.0, 1.0, Steer::Flee), sample(10, 0.4, 0.4, 0.0, Steer::Heuristic)]),
+            (7, Founder::Browser, vec![sample(5, 0.2, 0.2, 0.0, Steer::Heuristic)]),
+            (9, Founder::Blind, vec![]),
+        ]);
+        let own = tap_streams(&tap, Founder::Browser, TapLabel::Own);
+        let done = tap_streams(&tap, Founder::Browser, TapLabel::Executed);
+        assert_eq!(own.iter().map(|s| s.body).collect::<Vec<_>>(), vec![3, 7], "per body, its lineage only");
+        let a = &done[0];
+        assert_eq!((a.steps, a.inputs, a.actions_per_step), (2, width, 4));
+        assert_eq!(&a.actions[..4], &[0.0, 0.5, 1.0, 1.0], "executed: forward, turn, feed, hunker");
+        assert_eq!(&own[0].actions[..4], &[0.9, 0.5, 1.0, 0.0], "own: the controller's answer");
+        assert_eq!(a.steer, vec![Steer::Flee, Steer::Heuristic]);
+        assert_eq!(&a.observations[width..], &vec![0.1; width][..], "the second sample's observation");
+        assert_eq!(done[1].actions, own[1].actions, "no override: the two labels agree");
+    }
 
     /// The flat-theta forward step is the core GRU's, value for value, on both shapes.
     #[test]

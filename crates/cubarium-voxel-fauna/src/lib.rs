@@ -74,6 +74,8 @@ mod herd_tests;
 #[cfg(test)]
 mod observe_v3_tests;
 #[cfg(test)]
+mod tap_tests;
+#[cfg(test)]
 mod testpass4_herd_tests;
 #[cfg(test)]
 mod roster_tests;
@@ -3956,6 +3958,11 @@ impl ActionTap {
     /// Every body's stream, in id order: `(id, founder, samples)`.
     pub fn streams(&self) -> impl Iterator<Item = (u64, Founder, &[TapSample])> + '_ {
         self.streams.iter().map(|(&id, (f, s))| (id, *f, s.as_slice()))
+    }
+
+    /// A recording from per-body streams (tools and tests that read a saved one).
+    pub fn from_streams(streams: impl IntoIterator<Item = (u64, Founder, Vec<TapSample>)>) -> ActionTap {
+        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect() }
     }
 
     pub(crate) fn push(&mut self, id: u64, founder: Founder, sample: TapSample) {
