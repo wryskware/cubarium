@@ -121,6 +121,11 @@ A 3 px notched cyan line sits 6 px outside the focused thing, with an 18 px cyan
 
 ## Layout notes
 
+- **The tabbed page is the menu.**
+  - Field guide / Populations / World / Settings replace the pause menu. Wrysk, 2026-10-09: "yeah do option 1".
+  - Start or Esc opens it on the last tab; B resumes.
+  - World holds Save, Load, New world and Quit. Settings holds the settings and a Dev metrics button.
+
 - At 23 px the Lanternjaw entry is taller than the panel. The entry scrolls and fades out at the bottom, and the buttons stay fixed below it.
 - Prey chips wrap to four rows. The real screen needs a decision on long entries.
 - The species list scrolls under a fixed search box, with the same fade, and focus keeps the selected row in view. Wrysk: "i think the compendium area definitely needs scrolling cuz it overflowed easily".
