@@ -38,6 +38,10 @@ pub use light::{Beacon, BeaconKind};
 pub mod vigil;
 pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
+pub mod herding;
+pub use herding::{HerdTally, Herding};
+#[cfg(test)]
+mod herding_tests;
 mod gait;
 pub use gait::Sprint;
 pub use step::jump::DropRule;
@@ -3746,6 +3750,9 @@ pub struct Fauna {
     /// saved.
     #[serde(skip)]
     pub(crate) lead_give_ups: [u64; Founder::COUNT],
+    /// HERD-PULL's readout per lineage ([`HerdTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) herd_tally: [HerdTally; Founder::COUNT],
     /// ROOSTS (backlog §12): the latticevine ledges a glider may roost on ([`Ledge`]) and
     /// the tick they were read, re-read at the teachers' `route_refresh_s`. Derived from the
     /// terrain and the cover: not saved.
@@ -4100,6 +4107,7 @@ impl Fauna {
             rove: FxHashMap::default(),
             forage_tally: [ForageTally::default(); Founder::COUNT],
             lead_give_ups: [0; Founder::COUNT],
+            herd_tally: [HerdTally::default(); Founder::COUNT],
             ledges: (None, Vec::new()),
         })
     }

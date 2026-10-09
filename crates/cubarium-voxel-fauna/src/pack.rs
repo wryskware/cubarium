@@ -1164,12 +1164,31 @@ fn nearest_member(fauna: &Fauna, own: u64, me: u64, x: f64, z: f64, ring: f64) -
 
 /// **The choice score** (PACK-TUNE) of body `o`, known as `k`, to the member at `i` with `n`
 /// members at hand: prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`),
-/// the member's own distance.
+/// the member's own distance, × the straggler's factor ([`straggler`], HERD-PULL).
 #[allow(clippy::too_many_arguments)]
 fn score(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
     let a = &fauna.animals[i];
     let d = distance(a, k.x, k.z, ring);
     prospect(fauna, i, o, k, n, ring) * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
+        * straggler(fauna, o, t, ring)
+}
+
+/// **The straggler** (HERD-PULL, [`Pack::select_straggler_m`]): 1 + `select_straggler_gain` ×
+/// min(d, `select_straggler_m`) / `select_straggler_m`, d the distance from body `o` to the
+/// nearest awake body of its lineage (none: the full gain); 1 with either knob 0. The pack
+/// singles out the body standing apart from its herd.
+fn straggler(fauna: &Fauna, o: &Animal, t: &Pack, ring: f64) -> f64 {
+    let (m, gain) = (t.select_straggler_m, t.select_straggler_gain);
+    if !(m > 0.0) || !(gain > 0.0) || o.founder.is_none() {
+        return 1.0;
+    }
+    let nearest = fauna
+        .animals
+        .iter()
+        .filter(|k| k.id != o.id && k.founder == o.founder && k.state != crate::State::Asleep)
+        .map(|k| distance(o, k.pose.x, k.pose.z, ring))
+        .fold(f64::INFINITY, f64::min);
+    1.0 + gain * nearest.min(m) / m
 }
 
 /// **The switch's worth** (CHURN2) of body `o`, known as `k`, to the pack: prospect ×
@@ -2176,3 +2195,7 @@ mod testpass2_pack_unit_tests;
 #[cfg(test)]
 #[path = "testpass4_pup_unit_tests.rs"]
 mod testpass4_pup_unit_tests;
+
+#[cfg(test)]
+#[path = "herding_pack_tests.rs"]
+mod herding_pack_tests;

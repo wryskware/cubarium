@@ -715,6 +715,8 @@ fn run(
     // Every run's first row is its start: a founding's minute 0, or the load minute of a
     // loaded or resumed one, before any tick.
     print_row(minute0, sim, 0.0, timing.patch_min);
+    let mut herd = HerdLog::default();
+    herd.minute(sim);
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
     let mut window = SeedWindow::default();
@@ -758,6 +760,7 @@ fn run(
                 vitals_time += start.elapsed();
             }
             print_row(minute, sim, ms, timing.patch_min);
+            herd.minute(sim);
             spells.minute(sim, minute);
             phases.report(minute, sim, ms);
             if let Some(from) = timing.ab_from_min.filter(|from| minute >= *from) {
@@ -805,6 +808,61 @@ fn run(
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
     forage_summary(sim);
+    herd.summary(sim);
+}
+
+/// HERD-PULL's diagnostics over the run (never scored): per lineage, the mean distance from
+/// each body to its nearest other body of its lineage (`Fauna::mean_nearest_kin_m`) at the
+/// first and last minute rows and averaged over them; the share of its herd response's
+/// cropping samples spent in a scan pause; and the controller samples the drift back leaned.
+/// One `herd:` line per lineage with two bodies at some minute row, or that scanned.
+#[derive(Default)]
+struct HerdLog {
+    first: [Option<f64>; cubarium_voxel_fauna::Founder::COUNT],
+    last: [Option<f64>; cubarium_voxel_fauna::Founder::COUNT],
+    sum: [f64; cubarium_voxel_fauna::Founder::COUNT],
+    rows: [u32; cubarium_voxel_fauna::Founder::COUNT],
+}
+
+impl HerdLog {
+    fn minute(&mut self, sim: &Sim) {
+        let ring = f64::from(sim.world().config().width) * sim.world().config().voxel_m;
+        for f in cubarium_voxel_fauna::Founder::ALL {
+            let d = sim.fauna().mean_nearest_kin_m(f, ring);
+            let k = f.index();
+            if self.rows[k] == 0 && self.first[k].is_none() {
+                self.first[k] = d;
+            }
+            self.last[k] = d;
+            if let Some(d) = d {
+                self.sum[k] += d;
+                self.rows[k] += 1;
+            }
+        }
+    }
+
+    fn summary(&self, sim: &Sim) {
+        let tally = sim.fauna().herd_tally();
+        let fmt = |d: Option<f64>| d.map_or("-".to_string(), |d| format!("{d:.2}"));
+        for f in cubarium_voxel_fauna::Founder::ALL {
+            let k = f.index();
+            let t = tally[k];
+            if self.rows[k] == 0 && t.crop_samples == 0 {
+                continue;
+            }
+            eprintln!(
+                "herd: {} nearest_kin_m first={} last={} mean={} rows={} scan_share={:.4} crop_samples={} pulled_samples={}",
+                f.name(),
+                fmt(self.first[k]),
+                fmt(self.last[k]),
+                fmt((self.rows[k] > 0).then(|| self.sum[k] / f64::from(self.rows[k]))),
+                self.rows[k],
+                t.scan_samples as f64 / t.crop_samples.max(1) as f64,
+                t.crop_samples,
+                t.pulled_samples,
+            );
+        }
+    }
 }
 
 /// FORAGE-LEAVE's readout over the run (it is session state, so a segment's own): one
