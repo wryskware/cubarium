@@ -654,6 +654,15 @@ control and the reward accounting; display targets after seeing results.
     - Open: fruit is cheap for the plant. A crop costs about 1 % of a full shrub's income, at
       one unit of reserve per unit of fruit. Lanternberries have no flowering stage.
     - The bellwing's "pollinator" role is only a label: nothing depends on its visits.
+    - **Decided (Wrysk, 2026-10-09, "yes"): flowering and pollination, and costlier fruit.**
+      - Lanternberries flower before they fruit. Flowers glow near-IR and hold a little
+        nectar. Fruit sets only on flowers a bellwing visited, with a small floor for setting
+        fruit without a visit, so a bellwing crash slows berries without ending them. The same
+        rule may extend to latticevines and bloomcrowns.
+      - The bush pays for the whole flower–fruit cycle, about 2–3 units of reserve per unit
+        of edible fruit, so a crop is a real investment. The search balances the amount
+        against seedporter numbers.
+      - Flower glow follows the nectar held, like the scent. The lure mimics a full flower.
 20. **Decided (Wrysk, 2026-10-09): near-IR is a glow.**
     - Flowers and the lanternjaw lure **emit** near-IR, so flowers are visible at night too.
       Bellwings are drawn to near-IR.
