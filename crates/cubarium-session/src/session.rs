@@ -226,6 +226,9 @@ enum ToReader {
     Closed,
     Feed { chunks: Vec<ChunkData>, frame: Option<Arc<Frame>>, events: Vec<LifeEvent> },
     Publication(Box<Snapshot>),
+    /// The field guide's table from the running world's config ([`crate::guide`]): after a
+    /// reset, and again after a console line (which may change the config).
+    Guide(Box<Value>),
     Vitals(Box<VitalsMinute>),
     Notice(Notice),
     Error(Option<String>),
@@ -247,6 +250,7 @@ struct Hub {
     events: VecDeque<LifeEvent>,
     dropped_events: u64,
     notices: VecDeque<Notice>,
+    guide: Option<Value>,
 }
 
 impl Hub {
@@ -266,6 +270,7 @@ impl Hub {
             events: VecDeque::new(),
             dropped_events: 0,
             notices: VecDeque::new(),
+            guide: None,
         }
     }
 }
@@ -872,7 +877,9 @@ impl Session {
     /// (`{"since": tick}` optional), `species`, `status`, `candidates`, `founding`, `saves`
     /// (`{"dir": path}`: the save slots under it, read without loading any), `presets`
     /// (the landform and climate presets a [`WorldSpec`] can name), `vitals`
-    /// (`{"since": minute}` optional: the study recorder's per-minute rows, [`VitalsRing`]).
+    /// (`{"since": minute}` optional: the study recorder's per-minute rows, [`VitalsRing`]),
+    /// `guide` (the field guide's per-species facts from the running world's config,
+    /// [`crate::guide`]).
     pub fn query(&self, name: &str, args: &Value) -> Result<Value, String> {
         match name {
             "species" => return Ok(crate::species_table()),
@@ -895,6 +902,7 @@ impl Session {
                 return Ok(json!({ "config": h.history.config(), "samples": to(&samples) }));
             }
             "vitals" => return Ok(h.vitals.query(args.get("since").and_then(Value::as_f64))),
+            "guide" => return h.guide.clone().ok_or_else(|| "no world is running".to_string()),
             "animal" => {
                 let id = args.get("id").and_then(Value::as_u64).ok_or("`animal` wants {\"id\": N}")?;
                 let life = h.book.record(id).cloned();
@@ -921,7 +929,7 @@ impl Session {
             other => {
                 return Err(format!(
                     "unknown query `{other}`; known: summary clock environment populations run \
-                     snapshot animals animal history vitals species status candidates founding spec saves presets"
+                     snapshot animals animal history vitals guide species status candidates founding spec saves presets"
                 ));
             }
         })
@@ -1344,6 +1352,7 @@ impl Loop {
                 };
                 let Run { sim, console, pacer, observer, .. } = r;
                 sim.with_layers_mut(|world, flora, fauna| console.handle(world, flora, fauna, &line));
+                let _ = self.out.send(ToReader::Guide(Box::new(crate::guide::guide_table(sim.flora().config(), sim.fauna().config()))));
                 if pacer.sync(console) {
                     self.next = Instant::now() + PERIOD;
                 }
@@ -1405,6 +1414,7 @@ impl Loop {
             chunks,
             frame,
         });
+        let _ = self.out.send(ToReader::Guide(Box::new(crate::guide::guide_table(sim.flora().config(), sim.fauna().config()))));
         let mut console = Console::new(self.speed, dims);
         console.paused = self.paused;
         console.default_save_dir = crate::console::tick_save_dir;
@@ -1506,6 +1516,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
             }
             ToReader::Closed => {
                 h.snapshot = None;
+                h.guide = None;
                 h.chunks.clear();
                 h.frame = None;
                 h.full = false;
@@ -1532,6 +1543,7 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 }
             }
             ToReader::Vitals(m) => h.vitals.push(*m),
+            ToReader::Guide(g) => h.guide = Some(*g),
             ToReader::Publication(s) => {
                 let sample = Sample::of(&s.clock, &s.populations, &s.environment);
                 h.history.offer(sample);
