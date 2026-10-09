@@ -558,6 +558,10 @@ pub struct FounderPhysiology {
     /// instead of flight. Off for every lineage but the frondgrazer.
     #[serde(default)]
     pub hunker: crate::Hunker,
+    /// **Its group pull** (HERD-PULL, [`crate::Herding`]): its heuristic keeps it near the kin
+    /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
+    #[serde(default)]
+    pub herding: crate::Herding,
     /// **Its jump down when trapped** (DROP, [`crate::DropRule`]): off its route graph with no
     /// walking way back on and no glide, it jumps down past its step, at a wound. No jump for
     /// the bellwing and the ripple-snail.
@@ -776,6 +780,15 @@ pub struct Pack {
     pub select_body_exp: f64,
     #[serde(default = "pack_select_judge_m")]
     pub select_judge_m: f64,
+    /// **The straggler** (HERD-PULL, Wrysk 2026-10-09: "Veilhound packs single out the most
+    /// isolated grazer"): the score is also × (1 + `select_straggler_gain` × min(d,
+    /// `select_straggler_m`) / `select_straggler_m`), d the distance from the prey to the
+    /// nearest awake body of its lineage (none: the full gain). A choice among prey, not a
+    /// prospect: it never makes a pack decline a hunt. Metres, factor; either 0 turns it off.
+    #[serde(default = "pack_select_straggler_m")]
+    pub select_straggler_m: f64,
+    #[serde(default = "pack_select_straggler_gain")]
+    pub select_straggler_gain: f64,
     /// It commits only to a prospect of at least this.
     #[serde(default = "pack_select_min_prospect")]
     pub select_min_prospect: f64,
@@ -810,6 +823,12 @@ fn pack_select_body_exp() -> f64 {
 }
 fn pack_select_judge_m() -> f64 {
     Pack::CHORISTER.select_judge_m
+}
+fn pack_select_straggler_m() -> f64 {
+    Pack::CHORISTER.select_straggler_m
+}
+fn pack_select_straggler_gain() -> f64 {
+    Pack::CHORISTER.select_straggler_gain
 }
 fn pack_select_min_prospect() -> f64 {
     Pack::CHORISTER.select_min_prospect
@@ -963,6 +982,13 @@ impl Pack {
         select_airborne_factor: 0.25,
         select_body_exp: 0.5,
         select_judge_m: 6.0,
+        // HERD-PULL's straggler: wolves and lions pick the animal that lags or stands apart
+        // from its group (Mech 1970; FitzGibbon 1990, *Anim. Behav.* 39:1116, cheetahs
+        // selecting the isolated and the less vigilant Thomson's gazelle). A prey with no
+        // herd-mate within 6 m (twice the grazer's 3 m comfort, the pack radius) scores
+        // double one with a herd-mate beside it; untuned.
+        select_straggler_m: 6.0,
+        select_straggler_gain: 1.0,
         select_min_prospect: 0.1,
         break_off_below: 0.05,
         shun_s: 120.0,
@@ -1726,6 +1752,7 @@ impl FounderPhysiology {
         p.vigilance = crate::vigil::vigilance_of(founder);
         p.sprint = crate::gait::sprint_of(founder);
         p.hunker = crate::vigil::hunker_of(founder);
+        p.herding = crate::herding::herding_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p
     }
@@ -1840,6 +1867,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
                 pack: None,
             },
@@ -1921,6 +1949,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
                 pack: None,
             },
@@ -2025,6 +2054,7 @@ impl FounderPhysiology {
                 vigilance: crate::Vigilance::default(),
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
+                herding: crate::Herding::default(),
                 drop: crate::DropRule::default(),
                 pack: None,
             },
@@ -6049,11 +6079,12 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // its eye stalks; a walking Veilhound heard at 6 m, a running one to 8 m; predator
         // odour at 3–4 m; ~1 m of footfall.
         // S2: live; head down while cropping it sees a quarter of its range (Astra's "reduced
-        // clarity while cropping"); it weighs its three nearest herd-mates.
+        // clarity while cropping"); it weighs its six nearest herd-mates (HERD-PULL: three
+        // until 2026-10-09; its many eyes count up to four and its pull fades past four).
         Founder::Browser => SenseTable {
             live: true,
             feeding_sight_fraction: 0.25,
-            kin_tracks: 3,
+            kin_tracks: 6,
             sight_m: 8.0,
             sight_night_m: 4.0,
             sight_still_fraction: 0.625,

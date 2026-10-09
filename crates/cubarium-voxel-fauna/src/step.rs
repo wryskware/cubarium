@@ -1377,6 +1377,23 @@ fn controllers(
                 src = crate::Steer::Leave;
             }
         }
+        // HERD-PULL (`crate::herding`): a heuristic body of a herding lineage, walking on its
+        // own steering, a search leg or off a spent patch, with its nearest known kin beyond
+        // its comfort, leans its turn back toward them. Its pace and feeding stay its own;
+        // flight and every reflex below still win. A bent search leg is still the leg.
+        if driven
+            && fauna.controllers.flees(id)
+            && matches!(src, crate::Steer::Heuristic | crate::Steer::Search | crate::Steer::Leave)
+        {
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let seek = fauna.controllers.seek(id);
+            if let Some(go) = crate::herding::steer(fauna, i, actions, seek, ring) {
+                actions = go;
+                if src == crate::Steer::Search {
+                    searched = Some(go);
+                }
+            }
+        }
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
         // instead of fleeing: a threat it sees or feels stops and closes it.
         let retracts = fauna.config.founder(founder).amphibious.is_some_and(|am| am.retract_hold_s > 0.0);

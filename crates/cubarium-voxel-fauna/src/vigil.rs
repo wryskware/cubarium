@@ -7,7 +7,11 @@
 //! - **Herd** (the frondgrazer, the loftstrider):
 //!   - a **scan pause** while cropping: every `scan_every_s` of cropping it stands with its
 //!     head up for `scan_s`. Between scans its head is down and it sees only within
-//!     [`crate::SenseTable::feeding_sight_fraction`] of its range: its blind window;
+//!     [`crate::SenseTable::feeding_sight_fraction`] of its range: its blind window.
+//!     **Many eyes** (HERD-PULL, 2026-10-09): each kin it knows within `scan_kin_m` (at most
+//!     `scan_kin_max`) lengthens the cropping between scans by `scan_kin_gain` ×
+//!     `scan_every_s` ([`Vigilance::scan_every_with`]): a grazer in a herd crops more and
+//!     scans less, never not at all, and the alarm wave is the payoff of its watchers;
 //!   - **orients** to an approaching threat (seen moving or near, heard, or felt) it has not
 //!     faced yet: stands and faces it for `orient_s`, then grazes on while it stays away
 //!     (habituated to that one body);
@@ -156,6 +160,13 @@ pub struct Vigilance {
     pub scan_every_s: f64,
     /// A scan pause, seconds.
     pub scan_s: f64,
+    /// **Many eyes** (HERD-PULL): kin it knows within this share the watch, metres; 0: it
+    /// scans alone whatever its herd.
+    pub scan_kin_m: f64,
+    /// ...each lengthens the cropping between its scans by this × `scan_every_s`. Factor.
+    pub scan_kin_gain: f64,
+    /// ...counting at most this many, so a big herd still scans. Count.
+    pub scan_kin_max: u32,
     /// It faces a newly sensed threat this long, seconds; 0 never orients.
     pub orient_s: f64,
     /// A kin heard with an emission at least this many times its walking emission (cruise
@@ -199,6 +210,9 @@ impl Default for Vigilance {
             run_noise: 1.0,
             scan_every_s: 0.0,
             scan_s: 0.0,
+            scan_kin_m: 0.0,
+            scan_kin_gain: 0.0,
+            scan_kin_max: 0,
             orient_s: 0.0,
             alarm_emission_factor: 0.0,
             alarm_bolt_s: 0.0,
@@ -236,6 +250,9 @@ const NONE: Vigilance = Vigilance {
     run_noise: 1.0,
     scan_every_s: 0.0,
     scan_s: 0.0,
+    scan_kin_m: 0.0,
+    scan_kin_gain: 0.0,
+    scan_kin_max: 0,
     orient_s: 0.0,
     alarm_emission_factor: 0.0,
     alarm_bolt_s: 0.0,
@@ -447,6 +464,14 @@ pub fn vigilance_of(founder: Founder) -> Vigilance {
             run_noise: 3.0,
             scan_every_s: 6.0,
             scan_s: 1.5,
+            // HERD-PULL's many eyes: herd-mates within its 4 m flight start share the watch,
+            // each a quarter more cropping between scans, up to four (a solitary grazer
+            // scans 1.5 s in 7.5, one with four beside it 1.5 s in 13.5). Group vigilance
+            // falls with group size and levels off (Elgar 1989, *Biol. Rev.* 64:13; Pulliam
+            // 1973, *J. Theor. Biol.* 38:419); untuned.
+            scan_kin_m: 4.0,
+            scan_kin_gain: 0.25,
+            scan_kin_max: 4,
             orient_s: 3.0,
             alarm_emission_factor: 2.0,
             alarm_bolt_s: 3.0,
@@ -533,6 +558,16 @@ pub struct Vigil {
     /// **FEAR-2**: at its last sample it held its perch under a hunter (the refuge watch: in
     /// refuge, not in flight).
     pub refuge: bool,
+}
+
+impl Vigilance {
+    /// **Many eyes** (HERD-PULL): the cropping between two scan pauses with `kin` known within
+    /// `scan_kin_m`, seconds: `scan_every_s` × (1 + `scan_kin_gain` × min(`kin`,
+    /// `scan_kin_max`)). Finite, so a body in any herd still scans.
+    pub fn scan_every_with(&self, kin: u32) -> f64 {
+        let k = if self.scan_kin_m > 0.0 { kin.min(self.scan_kin_max) } else { 0 };
+        self.scan_every_s * (1.0 + self.scan_kin_gain.max(0.0) * f64::from(k))
+    }
 }
 
 impl Vigil {
@@ -836,6 +871,23 @@ fn condition_of(config: &FaunaConfig, a: &Animal) -> f64 {
     if cap > 0.0 { (a.reserve / cap).clamp(0.0, 1.0) } else { 0.0 }
 }
 
+/// **Many eyes** (HERD-PULL): the kin it knows (its record's fresh kin tracks) within `r`
+/// metres; none at `r` 0.
+fn kin_within(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, r: f64) -> u32 {
+    if !(r > 0.0) {
+        return 0;
+    }
+    let fresh = 2 * config.perception.stagger_ticks();
+    p.tracks()
+        .iter()
+        .filter(|t| t.class == class::KIN && t.id != a.id && now.saturating_sub(t.tick) <= fresh)
+        .filter(|t| {
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, t.x, t.z, ring);
+            dx.hypot(dz) <= r
+        })
+        .count() as u32
+}
+
 /// The kin it knows (its record's fresh kin tracks): their mean point, and the distance to
 /// the nearest; `None` with none.
 fn kin_of(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64) -> Option<((f64, f64), f64)> {
@@ -1137,7 +1189,8 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
     let cropping = held.feed > 0.5 && held.forward <= fauna.config.teachers.forage_stay_forward;
     v.cropping = out.is_none() && cropping;
     if out.is_none() && vg.scan_every_s > 0.0 && vg.scan_s > 0.0 {
-        let every = ticks(vg.scan_every_s).max(1);
+        // HERD-PULL's many eyes: the kin it knows close by share the watch.
+        let every = ticks(vg.scan_every_with(kin_within(&fauna.config, &a, &p, now, ring, vg.scan_kin_m))).max(1);
         if cropping && !v.scanning(now) {
             if v.next_scan == 0 {
                 v.next_scan = now + 1 + a.id % every;
@@ -1151,6 +1204,11 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         if v.scanning(now) {
             v.cropping = false;
             out = Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
+        }
+        if cropping {
+            let t = &mut fauna.herd_tally[k];
+            t.crop_samples += 1;
+            t.scan_samples += u64::from(v.scanning(now));
         }
     }
     fauna.percepts.entry(a.id).or_default().vigil = v;
