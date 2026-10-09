@@ -106,6 +106,9 @@ pub fn load_or_create_world(
                     spec.seed.map_or(Seeds::Drawn(random_seed), Seeds::Asked),
                     false,
                 );
+                if let Some(why) = &founded.terrain_rejection {
+                    anyhow::bail!("terrain seed {} rejected: {why}", founded.seed);
+                }
                 let rejected = founded.lake_rejected + founded.habitat_rejected;
                 let label = if rejected > 0 {
                     format!("generated (seed {}, {rejected} rejected)", founded.seed)

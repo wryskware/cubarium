@@ -679,6 +679,11 @@ impl Session {
                         info.state = "failed".into();
                         info.error = Some(why);
                     }
+                    Outcome::Rejected(why) => {
+                        info.state = "rejected".into();
+                        info.error = Some(why.to_string());
+                        info.terrain_rejection = Some(why);
+                    }
                     Outcome::Cancelled => info.state = "cancelled".into(),
                 }
             })
@@ -1561,6 +1566,116 @@ fn ingest_main(rx: Receiver<ToReader>, shared: &Shared, max_events: usize) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod founding_rejection_tests {
+    use super::*;
+    use cubarium_voxel_sim::found::{LayerConfig, TerrainRejection};
+
+    #[test]
+    fn rejected_terrain_reports_structured_reason_without_installing_or_redrawing() {
+        let params = SimParams {
+            world: cubarium_voxel::Config {
+                width: 16,
+                height: 12,
+                depth: 4,
+                voxel_m: 0.25,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        // A raised wall across the whole strip breaks its closed walking route.
+        let mut world = World::empty(params.world.clone());
+        for z in 0..params.world.depth {
+            for x in 0..params.world.width as i64 {
+                let top = if x == 8 { 7 } else { 4 };
+                for y in 1..=top {
+                    world.apply(cubarium_voxel::Command::SetMaterial {
+                        x, y, z, material: cubarium_voxel::Material::Rock,
+                    });
+                }
+            }
+        }
+        let terrain = format!("{:016x}", world.terrain_hash());
+        let layers = LayerConfig::new(&params.resolve_sets(&[]).unwrap(), params.world.voxel_m);
+        let (flora, fauna) = layers.layers();
+        let seed = world.config().seed;
+        let mut session = Session::new(SessionOptions {
+            placement_tries: 3,
+            ..Default::default()
+        });
+        {
+            let mut candidates = session.candidates.lock().unwrap();
+            candidates.spec = Some(WorldSpec {
+                seed: Some(seed),
+                ..Default::default()
+            });
+            candidates.params = Some(params.clone());
+            candidates.list.push(Candidate {
+                slot: Slot::Ready(Arc::new(Prepared {
+                    world,
+                    flora,
+                    fauna,
+                    label: "no-route fixture".into(),
+                    exec: params,
+                })),
+                info: CandidateInfo {
+                    index: 0,
+                    state: "ready".into(),
+                    seed: Some(seed),
+                    terrain: Some(terrain.clone()),
+                    label: None,
+                    error: None,
+                    summary: None,
+                    populations: None,
+                    feasible: Some(false),
+                    notes: Vec::new(),
+                },
+            });
+        }
+        // Intercept the worker's install channel; completion is joined, with no polling.
+        let (to_sim, installs) = mpsc::channel();
+        session.to_sim = to_sim;
+        session.promote(0).unwrap();
+        let worker = session.threads.workers.lock().unwrap().pop().unwrap();
+        worker.join().unwrap();
+
+        let info = session.founding();
+        assert_eq!(info.state, "rejected");
+        assert_eq!(
+            info.terrain_rejection,
+            Some(TerrainRejection::NoClosedWalkRoute)
+        );
+        assert!(info.error.as_deref().is_some_and(|e| !e.is_empty()));
+        assert_eq!(
+            (info.attempt, info.phase.as_str()),
+            (0, ""),
+            "no pre-roll or placement"
+        );
+        assert_eq!(
+            (info.seed, info.terrain.as_ref()),
+            (Some(seed), Some(&terrain))
+        );
+        let status = serde_json::to_value(&info).unwrap();
+        assert_eq!(status["terrain_rejection"]["check"], "no_closed_walk_route");
+        assert_eq!(
+            serde_json::from_value::<FoundingInfo>(status).unwrap(),
+            info
+        );
+        let candidates = session.candidates();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            (candidates[0].seed, candidates[0].terrain.as_ref()),
+            (Some(seed), Some(&terrain))
+        );
+        assert!(
+            matches!(installs.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "nothing sent for installation"
+        );
+        assert_eq!(session.status().generation, 0);
+        assert_eq!(session.workers(), 0);
     }
 }
 

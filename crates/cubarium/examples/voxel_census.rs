@@ -489,6 +489,11 @@ fn main() {
             SimConfig::experiment().water_every,
         );
         eprintln!("founded in {:.1} s", founding_started.elapsed().as_secs_f64());
+        if let Some(why) = &founded.terrain_rejection {
+            // A rejected terrain carries no founders: stop rather than census an empty world.
+            eprintln!("terrain rejected: {why}");
+            std::process::exit(3);
+        }
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(

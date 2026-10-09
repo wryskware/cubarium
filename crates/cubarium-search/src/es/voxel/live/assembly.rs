@@ -271,6 +271,9 @@ pub struct Built {
 pub fn e0_start(world: &Config, eco: &EcologyParams, seed: u64, policy: Vec<String>) -> Result<Built, String> {
     eco.params()?;
     let f = found::found(world, &eco.layers(world.voxel_m), eco.fauna().founder_counts(), found::Seeds::Asked(seed), false);
+    if let Some(why) = &f.terrain_rejection {
+        return Err(format!("terrain seed {seed} rejected: {why}"));
+    }
     let identity = Identity::this_build(world, policy);
     let manifest = Manifest::of("e0", seed, f.accepted, identity, &f.world, &f.flora, &f.fauna);
     Ok(Built { manifest, world: f.world, flora: f.flora, fauna: f.fauna })
@@ -364,6 +367,9 @@ pub fn e1_start(
         (Sim::ambient(s.world, s.flora, s.fauna, sim_config), r.accepted, r.growth)
     } else {
         let f = found::found(world_cfg, &eco.layers(world_cfg.voxel_m), [0; Founder::COUNT], found::Seeds::Asked(seed), false);
+        if let Some(why) = &f.terrain_rejection {
+            return Err(format!("terrain seed {seed} rejected: {why}"));
+        }
         let accepted = f.accepted;
         let mut sim = Sim::ambient(f.world, f.flora, f.fauna, sim_config);
         let minutes = (recipe.plant_hours * 60.0).round() as u64;

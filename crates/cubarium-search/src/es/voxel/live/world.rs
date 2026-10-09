@@ -95,6 +95,7 @@ pub fn found_world_from(
         lake_rejected,
         habitat_rejected,
         accepted,
+        terrain_rejection,
         ..
     } = found::found(
         cfg,
@@ -103,6 +104,10 @@ pub fn found_world_from(
         seeds,
         false,
     );
+    // A rejected terrain carries no founders; training on it would be silent nonsense.
+    if let Some(why) = terrain_rejection {
+        panic!("terrain seed {seed} rejected: {why}");
+    }
     let sim = Sim::ambient(
         world,
         flora,

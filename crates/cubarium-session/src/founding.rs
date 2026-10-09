@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use cubarium_voxel_sim::found::{self, LAKE_SEED_TRIES, LayerConfig, NoTerrain, TerrainFounding};
+use cubarium_voxel_sim::found::{self, LAKE_SEED_TRIES, LayerConfig, NoTerrain, TerrainFounding, TerrainRejection};
 use cubarium_voxel_sim::habitat::{self, FoundingPhase, FoundingWatch};
 use serde::{Deserialize, Serialize};
 
@@ -23,7 +23,7 @@ pub const TERRAIN_TRIES: usize = LAKE_SEED_TRIES;
 /// What a picked candidate's founding is doing, read without waiting on it.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FoundingInfo {
-    /// `idle`, `founding`, `done`, `failed` or `cancelled`.
+    /// `idle`, `founding`, `done`, `rejected`, `failed` or `cancelled`.
     pub state: String,
     /// The candidate being (or last) founded.
     pub candidate: Option<usize>,
@@ -46,6 +46,9 @@ pub struct FoundingInfo {
     pub elapsed_s: f64,
     /// Why it failed, in plain words.
     pub error: Option<String>,
+    /// The failed terrain check, with its plant or lineage where applicable. A rejected
+    /// terrain stays selected; the app can read `state` and this object for feedback.
+    pub terrain_rejection: Option<TerrainRejection>,
     /// The founded world's label, once done.
     pub label: Option<String>,
 }
@@ -180,6 +183,7 @@ impl FoundingWatch for Job {
 /// How a founding ended.
 pub(crate) enum Outcome {
     Founded(Box<Prepared>),
+    Rejected(TerrainRejection),
     Refused(String),
     Cancelled,
     Failed(String),
@@ -210,6 +214,7 @@ pub(crate) fn found_picked(
             };
             match made {
                 TerrainFounding::Cancelled => return Ok(Outcome::Cancelled),
+                TerrainFounding::Rejected(why) => return Ok(Outcome::Rejected(why)),
                 TerrainFounding::Refused(why) => {
                     let last = why.last().cloned().unwrap_or_default();
                     return Ok(Outcome::Refused(format!(

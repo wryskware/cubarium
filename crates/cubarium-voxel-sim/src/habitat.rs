@@ -1131,9 +1131,96 @@ pub(crate) fn seed_pre_rolled_watched(
     seeded
 }
 
+/// A cheap upper bound before water runs: some dry/clear body face and some enabled
+/// source of this lineage's renewable food must exist. Water and future canopy shade
+/// are deliberately allowed to improve, so this never rejects merely dry raw soil.
+pub(crate) fn terrain_food_refusal(
+    world: &World,
+    layers: &crate::found::LayerConfig,
+    counts: [usize; Founder::COUNT],
+    sites: &[Site],
+) -> Option<crate::found::TerrainRejection> {
+    use cubarium_voxel_fauna::{Food, Founding, FoundingSite};
+    use crate::found::TerrainRejection;
+    let view = world.view();
+    let scale = land_scale(&layers.fauna.founding, land_m2(world, sites));
+    // A source on a clear body face is already in some reachable component. This
+    // cheap path answers ordinary viable terrain without building routes or mouth maps.
+    // Awkward terrain falls back to the same mouth-column scan as live feeding.
+    let mut potential: Vec<Vec<Option<bool>>> = vec![vec![None; sites.len()]; Species::COUNT];
+    for lineage in Founder::ALL {
+        let wanted = scaled_count(counts[lineage.index()], scale);
+        let phys = layers.fauna.founder(lineage);
+        if wanted == 0 || phys.founding != Founding::Bodies { continue; }
+        let body = phys.adult_body();
+        let radius = body.footprint_radius();
+        let room = body.headroom_voxels(world.config().voxel_m);
+        let body_faces: Vec<usize> = sites.iter().enumerate().filter_map(|(i, s)| {
+            let z = (f64::from(s.z) + 0.5) * world.config().voxel_m;
+            (z >= radius && z <= f64::from(world.config().depth) * world.config().voxel_m - radius
+                && has_headroom(&view, i64::from(s.x), s.y, s.z, room)).then_some(i)
+        }).collect();
+        let foods: Vec<Species> = PRODUCERS.into_iter().chain([Species::Glowcap]).filter(|&species| {
+            let sc = layers.flora.species(species);
+            let enabled = sc.founder_per_m2 > 0.0 && scaled_count(sc.founder_cap as usize, scale) > 0;
+            enabled && if phys.founding_site == FoundingSite::NearNectar {
+                sc.nectar_per_s > 0.0
+            } else if phys.glider.is_some() {
+                sc.fruit_per_s > 0.0
+            } else if phys.founding_site == FoundingSite::LitterBed {
+                sc.senescence > 0.0
+            } else { phys.diet.accepts(sc.trophic) }
+        }).collect();
+        let mut source_at = |i: usize| foods.iter().any(|&species| {
+            let sc = layers.flora.species(species);
+            *potential[species.index()][i].get_or_insert_with(|| {
+                let site = sites[i];
+                let sky = view.sky_visibility(i64::from(site.x), site.y, site.z);
+                let gates = establishment_gates_with_sky(&view, site, sc, sky,
+                    layers.flora.founder_log_organic, 0.0);
+                // Rain changes moisture, flooding and aeration, but cannot add root
+                // soil or terrain light. Log substrate is supplied by founding itself.
+                gates.light_ok && gates.substrate_ok
+                    && (gates.soil_voxels > 0 || sc.damp_available(None, gates.darkness).is_some())
+            })
+        });
+        let mut plant_food = body_faces.iter().copied().any(&mut source_at);
+        if !plant_food && !body_faces.is_empty() {
+            let sources: Vec<_> = (0..sites.len()).filter(|&i| source_at(i)).map(|i| sites[i]).collect();
+            if phys.founding_site == FoundingSite::LitterBed
+                || phys.founding_site == FoundingSite::NearNectar || phys.glider.is_some() {
+                // Litter is deposited at the body, flyers leave their perch, and gliders
+                // reach hanging fruit. Do not impose a walker's mouth on these diets.
+                plant_food = !sources.is_empty();
+            } else if !sources.is_empty() {
+                let columns: std::collections::HashSet<_> = sources.iter().map(|s| (i64::from(s.x), s.z)).collect();
+                // Water may drain before placement; do not let today's wade gate
+                // remove a possible future route. Otherwise use the shared mouth map.
+                if body_faces.iter().any(|&i| view.water_depth_m(i64::from(sites[i].x), sites[i].y, sites[i].z) > phys.wade_depth_m(&body)) {
+                    plant_food = true;
+                } else {
+                    let map = RouteMap::for_founder(&view, phys);
+                    plant_food = (0..map.faces.len()).any(|i| map.mouth_columns(i).iter()
+                        .any(|&(x, z)| columns.contains(&(x.rem_euclid(i64::from(view.config.width)), z))));
+                }
+            }
+        }
+        let cover_food = layers.flora.latticevine.founders > 0
+            && (phys.founding_site == FoundingSite::NearNectar || phys.glider.is_some());
+        let film_food = phys.diet.eats(Food::Film) && layers.flora.seed_film_at_founding;
+        let starter_food = phys.founding_site == FoundingSite::LitterBed
+            && layers.fauna.founding.starter_litter_organic > 0.0;
+        if body_faces.is_empty() || !(plant_food || cover_food || film_food || starter_food) {
+            return Some(TerrainRejection::NoReachableFoodCapacity { lineage, available: 0, wanted });
+        }
+    }
+    None
+}
+
 /// After placement retries, distinguish inadequate habitat from an unlucky placement.
 /// Only a lineage's missing stock or clear perches can justify drawing new terrain.
-pub(crate) fn food_capacity_refusal(world: &World, flora: &Flora, fauna: &Fauna, seeded: &Seeded) -> Option<String> {
+pub(crate) fn food_capacity_refusal(world: &World, flora: &Flora, fauna: &Fauna, seeded: &Seeded) -> Option<crate::found::TerrainRejection> {
+    use crate::found::TerrainRejection;
     use cubarium_voxel_fauna::{Founding, FoundingSite};
     let view = world.view();
     let fv = flora.view();
@@ -1143,7 +1230,7 @@ pub(crate) fn food_capacity_refusal(world: &World, flora: &Flora, fauna: &Fauna,
         let phys = fauna.config().founder(founder);
         if phys.founding != Founding::Bodies { continue; }
         if phys.founding_site == FoundingSite::NearNectar || phys.glider.is_some() {
-            return Some(format!("{}: no sufficient clear, dry perches near its food after placement retries", founder.name()));
+            return Some(TerrainRejection::NoFoodPerches { lineage: founder });
         }
         let graph = RouteGraph::for_founder(&view, phys, fauna.config().founding.clearance_margin_m);
         let (_, food) = food_on_graph(&view, &fv, phys, &graph);
@@ -1160,7 +1247,7 @@ pub(crate) fn food_capacity_refusal(world: &World, flora: &Flora, fauna: &Fauna,
             available = available.saturating_add(capacity);
         }
         if available < wanted {
-            return Some(format!("{}: food across all walkable components covers {available} of {wanted} founders", founder.name()));
+            return Some(TerrainRejection::NoReachableFoodCapacity { lineage: founder, available, wanted });
         }
     }
     None
