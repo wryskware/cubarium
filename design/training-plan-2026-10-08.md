@@ -682,6 +682,22 @@ control and the reward accounting; display targets after seeing results.
       hasn't made that mistake recently (the learned expectation per class already relaxes
       back over `forget_s`).
     - An earlier reading of "glow" as flowers emitting was wrong and is withdrawn.
+    - **Nectar is near-IR reflective** (Wrysk: "nectar can be made 'IR reflective'. thats
+      fairly sound actually"). A flower's brightness is the light falling on it × its
+      reflectance, rising with the nectar it holds. A drained flower looks dimmer, which is an
+      honest signal. The lure mimics a full, fully lit flower.
+24. **Decided (Wrysk, 2026-10-09): brains know places within sense range, plus remembered
+    home places.**
+    - The brain gets bearings to the nearest shore, climbable tree or roost it could
+      perceive, and always to its den.
+    - It also remembers the few key places it has used: roost trees, its water, its den.
+      These fade if not revisited.
+    - Escape hatches: Wrysk would "verge on potentially some high-level behavioural escape
+      hatches, but idk if thats strictly necessary". Recommendation: none at the brain level
+      for now.
+      - The body-level ones already bind brains: TRAPS, LEADS-PAY and DROP (item 12).
+      - Add one only if training shows a specific failure the world can't fix.
+      - Log every trigger as a cost.
 21. **Decided (Wrysk, 2026-10-09): shredders speed up decay (A).**
     - Litter near littershredders rots faster, so its nutrients return sooner to nearby
       plants (real detritivores speed decomposition by about a quarter on average).
