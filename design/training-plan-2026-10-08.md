@@ -239,14 +239,39 @@ and `runs/pilot-end-2026-10-08/{flat,d72}`, profile `gate-1h`, 8 seeds, 1 h fres
     energy term fell from 0.80 to 0.70;
   - curiosity's spread across bodies is 0.15–0.23 against energy's 0.4–0.5, enough for
     the search to trade one for the other.
-- **Control running:** `p3-zero` on eidolon is the same training with curiosity 0, then the
-  same flat gate (results about 20:30). If its frondgrazers keep C1's intake, curiosity
-  caused the drift, and the share should drop to about 0.1 or fade with age.
+- **Control `p3-zero`: curiosity caused the drift.** It's the same training with curiosity 0
+  (20 generations), then the same flat gate. Results are in `runs/pilot-zero-2026-10-08/`
+  (`score.txt` and `report.md`, scored with `--baseline mid:c1` through
+  `cmp/{zero,mid}`; same binary as the midway gate).
+
+  | Frondgrazer, flat, median | No curiosity | Curiosity, midway | Curiosity, end | C1 |
+  |---|---|---|---|---|
+  | Moving share | 0.22 | 0.49 | 0.60 | 0.33 |
+  | Delivered BL/s | 0.036 | 0.097 | 0.117 | 0.049 |
+  | Intake | 13.6 | 11.5 | 9.7 | 14.2 |
+  | Fullness p10 | 0.13 | 0.10 | 0.08 | 0.13 |
+  | Cohort energy gain | 0.227 | 0.188 | 0.150 | 0.235 |
+
+  - Without curiosity the brains feed like C1 and move a little less.
+  - They don't beat C1 either:
+    - generation scores swing from 0.42 to 0.96 with no trend (`gensplit.py`);
+    - the noise table repeats p1 (paired-difference SD 0.35, shredder 0.38).
+  - P ranks it below C1 (2/8, median Δ +1.44) only because V penalises a moving share under
+    0.30.
+  - Littershredders are unchanged again (intake 1.04).
 
 **What it means:**
-- Brain gradients need more signal than 8 pairs × 10-min windows give: more worlds (EC2), longer
-  windows, or a lower curiosity share. A σ-control rerun at the same scale would
-  only confirm the noise.
+- **Curiosity is a reward for moving, and it bought motion at the cost of food.** Under "Shape
+  the situation" (WORKING_POLICY), my recommendation is curiosity 0 for training. Exploration
+  should pay through the world: food scarce or patchy enough that a body that stays put goes
+  hungry (FOOD-BUDGET, Q10). Your call (Q14).
+- Without curiosity the training doesn't drift, but it doesn't learn either. In this world
+  every brain that eats is about as good as every other. Browsers take 0.33 % of foliage
+  production, and a body breaks even feeding 2–5 % of the time (FOOD-BUDGET). So behaviour
+  barely changes energy, and the gradient stays at noise level.
+  More worlds (EC2) or longer windows would sharpen the estimate. A world where behaviour
+  decides intake would give it something to estimate. Run the next brain pilot after the
+  ecology genes make food matter.
 - The V weight against F and the energy gain (§6 Q5) is now a concrete choice: as weighted, P
   promotes a brain whose bodies gain energy 36 % slower than C1's.
 - The heuristic arm in these gates ran on the 09:27 binary, before today's heuristic fixes,
@@ -510,6 +535,16 @@ control and the reward accounting; display targets after seeing results.
       - starving juveniles 27.9 → 9.9, and give-ups fell from 293 to 6.
 
       The give-up rule stays as "abandon food you can't reach".
+14. **Curiosity in the brain reward.** `p3-zero` (§1c) shows the curiosity term bought
+    motion at the cost of food: intake −19 % midway and −32 % at the end, against −4 %
+    without it.
+    - It rewards moving itself, which "Shape the situation" rules out.
+    - My recommendation: curiosity 0, and let scarcer or patchier food make exploration pay
+      (Q10).
+    - The alternative is a small share (about 0.1) that fades with age, kept only as a
+      newborn's exploration prior.
+    - The next brain pilot waits for the ecology genes either way: in today's world, behaviour
+      barely changes intake.
 
 ## 7. Work log (2026-10-08)
 
@@ -551,3 +586,5 @@ control and the reward accounting; display targets after seeing results.
 | NECTAR-SCENT: nectar scent is a plume at the bloom, scaled by the nectar held (the real fix behind Q13) | Opus | 9a5a6eba |
 | Start library v3 resaved in the new format: `runs/starts3r-2026-10-08` | desktop | chained after starts3 |
 | Start library v3 and baseline v4 (TRAPS + HUNGRY-SEARCH) | desktop | chained after the end gate |
+| LORE-NIR: the flowers' and the lure's light channel is near-IR, not UV (red dwarf sun); saved configs read renamed knobs through a per-layer table | Codex + parent | 7ff82b35 |
+| Brain control p3-zero (curiosity 0, 20 generations) and its flat gate: curiosity caused the drift; no learning either way (§1c, Q14) | eidolon | `runs/pilot-zero-2026-10-08` |
