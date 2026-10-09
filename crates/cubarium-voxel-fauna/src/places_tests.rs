@@ -606,3 +606,59 @@ fn the_current_den_is_always_known_and_a_used_former_den_fades() {
     f.tick += cubarium_voxel::ticks_at_least_one(f.config.perception.place_memory_fade_s);
     assert_eq!(block(&f, &w, id, "den"), [0.0; 5]);
 }
+
+fn shore_search_fixture(seed: u64) -> (World, Fauna) {
+    let w = clock_off(seed);
+    let mut cfg = config();
+    let phys = &mut cfg.founders[Founder::Loftstrider.index()];
+    phys.adult_length_m = VOXEL_M;
+    phys.adult_width_m = 0.5 * VOXEL_M;
+    phys.adult_height_m = 0.5 * VOXEL_M;
+    phys.step_up_m = 0.0;
+    phys.step_down_m = 0.0;
+    cfg.founding.clearance_margin_m = 0.0;
+    let mut f = Fauna::new(cfg);
+    body(&mut f, &w, Founder::Loftstrider);
+    (w, f)
+}
+
+#[test]
+fn a_seeded_shore_search_preserves_ties_when_the_square_wraps_repeatedly() {
+    let (w, mut f) = shore_search_fixture(23);
+    let id = f.animals[0].id;
+    place(&mut f, id, 0.5 * VOXEL_M, 4.5 * VOXEL_M, 0.0);
+    let first = Site { x: 1, y: SURFACE_Y, z: 4 };
+    let last = Site { x: w.config().width - 1, ..first };
+    let reach = f64::from(w.config().width) * VOXEL_M;
+    // Both are equally near. At k=width the original -k..=k scan meets x=1
+    // before x=width-1, although the local seed meets the latter first.
+    assert_eq!(
+        crate::step::shallows_target(&mut f, 0, &w.view(), reach, |s| s == first || s == last),
+        Some(first)
+    );
+}
+
+#[test]
+fn an_unseen_local_shore_does_not_truncate_the_remaining_search() {
+    let (w, mut f) = shore_search_fixture(24);
+    let a = f.animals[0];
+    let farther = Site { x: a.site.x + 4, ..a.site };
+    assert_eq!(
+        crate::step::shallows_target(&mut f, 0, &w.view(), 5.0 * VOXEL_M, |s| s == farther),
+        Some(farther)
+    );
+}
+
+#[test]
+fn a_bounded_shore_rescan_stays_inside_the_original_site_square() {
+    let (w, mut f) = shore_search_fixture(25);
+    let site = f.animals[0].site;
+    // Deliberately separate pose and site to exercise both bounds. A candidate
+    // near the pose can still lie outside the original square about the site.
+    f.animals[0].pose.x += 4.0 * VOXEL_M;
+    let outside = Site { x: site.x + 5, ..site };
+    assert_eq!(
+        crate::step::shallows_target(&mut f, 0, &w.view(), 4.0 * VOXEL_M, |s| s == site || s == outside),
+        Some(site)
+    );
+}

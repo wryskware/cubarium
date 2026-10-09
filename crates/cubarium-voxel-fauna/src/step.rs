@@ -2070,6 +2070,13 @@ pub(crate) fn water_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, reach:
         }
         for dx in -k..=k {
             let x = (hx + dx).rem_euclid(i64::from(c.width));
+            // Range and the current best need no terrain or visibility query.
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if !(d <= reach && best.is_none_or(|(b, _, _, _)| d < b)) {
+                continue;
+            }
             let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
                 continue;
             };
@@ -2078,12 +2085,7 @@ pub(crate) fn water_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, reach:
             }
             let site = Site { x: x as u32, y, z: z as u32 };
             if !keep(site) { continue; }
-            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
-            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
-            let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach && best.is_none_or(|(b, _, _, _)| d < b) {
-                best = Some((d, ddx, ddz, site));
-            }
+            best = Some((d, ddx, ddz, site));
         }
     }
     best.map(|(_, _, _, site)| site)
@@ -2199,11 +2201,17 @@ pub(crate) fn film_target<F: Fn(Site) -> f64>(view: &VoxelView<'_>, am: &crate::
         }
         for dx in -k..=k {
             let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if d > reach || !(d > 0.0) {
+                continue;
+            }
             let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
                 continue;
             };
             let s = Site { x: x as u32, y, z: z as u32 };
-            if s == a.site || !keep(s) {
+            if s == a.site {
                 continue;
             }
             let wet = view.standing_depth_m(x, y, s.z) > 0.0;
@@ -2215,14 +2223,9 @@ pub(crate) fn film_target<F: Fn(Site) -> f64>(view: &VoxelView<'_>, am: &crate::
             if per < worth || per <= here {
                 continue;
             }
-            let (tx, tz) = ((x as f64 + 0.5) * v, (f64::from(s.z) + 0.5) * v);
-            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
-            let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d > reach || !(d > 0.0) {
-                continue;
-            }
             let score = (per - here) / d;
-            if best.is_none_or(|(b, _, _, _)| score > b) {
+            // A ray is only needed for food that could improve the choice.
+            if best.is_none_or(|(b, _, _, _)| score > b) && keep(s) {
                 best = Some((score, ddx, ddz, s));
             }
         }
@@ -2321,7 +2324,7 @@ pub(crate) fn shore_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &
             let (tx, tz) = ((x as f64 + 0.5) * v, (f64::from(z) + 0.5) * v);
             let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
             let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach && keep(Site { x: x as u32, y, z }) {
+            if d <= reach {
                 near.push((d, ddx, ddz, Site { x: x as u32, y, z }));
             }
         }
@@ -2341,7 +2344,9 @@ pub(crate) fn shore_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, sky: &
             continue;
         }
         let (fx, fz) = ((f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v);
-        if nest_crowded_at(fauna, a.id, founder, fx, fz, view, &rule) {
+        // Sorted in the original distance/tie order. Reject unsuitable nests
+        // before tracing a ray, then take the first perceptible one.
+        if nest_crowded_at(fauna, a.id, founder, fx, fz, view, &rule) || !keep(s) {
             continue;
         }
         best = Some((d, ddx, ddz, s));
@@ -5556,35 +5561,68 @@ pub(crate) fn shallows_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>,
             }
         }
     }
-    let mut best: Option<(f64, f64, f64, Site)> = None;
-    for dz in -k..=k {
-        let z = hz + dz;
-        if z < 0 || z >= i64::from(c.depth) {
-            continue;
+    // Seed the nearest search locally, then bound the rescan by that candidate.
+    // Rank ties by the original z/dx scan, including its first occurrence when
+    // the search square wraps around x more than once. `keep` is a pure predicate.
+    let width = i64::from(c.width);
+    let order = |s: Site| (s.z, (i64::from(s.x) - hx + k).rem_euclid(width) - k);
+    let choose = |x: i64, z: i64, best: &mut Option<(f64, f64, f64, Site)>| {
+        if z < 0 || z >= i64::from(c.depth) || z < hz - k || z > hz + k {
+            return;
         }
-        for dx in -k..=k {
-            let x = (hx + dx).rem_euclid(i64::from(c.width));
-            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
-                continue;
-            };
-            if view.water_depth_m(x, y, z as u32) > wade {
-                continue;
+        let x = x.rem_euclid(width);
+        let first_dx = (x - hx + k).rem_euclid(width) - k;
+        if first_dx > k {
+            return; // This column was outside the original search square.
+        }
+        let tx = (x as f64 + 0.5) * v;
+        let tz = (z as f64 + 0.5) * v;
+        let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+        let d = (ddx * ddx + ddz * ddz).sqrt();
+        if !(d <= reach && best.is_none_or(|(b, _, _, s)| d < b || (d == b && (z as u32, first_dx) < order(s)))) {
+            return;
+        }
+        let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+            return;
+        };
+        if view.water_depth_m(x, y, z as u32) > wade {
+            return;
+        }
+        // Only where the body itself can stand: its centre inside the strip's z
+        // ends, its disc clear over the face. Sight rejects range/FOV cheaply.
+        if tz < r || tz > depth_m - r {
+            return;
+        }
+        let face = Site { x: x as u32, y, z: z as u32 };
+        if shunned.contains(&Fauna::walk_key_face(face)) || !keep(face) || !body::disc_clear_on_face(view, &geometry, face, limits) {
+            return;
+        }
+        *best = Some((d, ddx, ddz, face));
+    };
+    let mut best = None;
+    // A nearby face commonly wins on dry ground. This only seeds a bound; it
+    // neither returns early nor replaces the original search if nothing is seen.
+    let local = k.clamp(0, 1);
+    for dz in -local..=local {
+        for dx in -local..=local {
+            choose(hx + dx, hz + dz, &mut best);
+        }
+    }
+    if let Some((d, _, _, _)) = best {
+        // A winning face lies inside this square about the actual pose. Pad by
+        // one column so rounding at its boundary cannot exclude an equal tie.
+        let span = (d / v).ceil() as i64 + 1;
+        let cx = (a.pose.x / v).floor() as i64;
+        let cz = (a.pose.z / v).floor() as i64;
+        for z in (cz - span).max(hz - k).max(0)..=(cz + span).min(hz + k).min(i64::from(c.depth) - 1) {
+            for x in cx - span..=cx + span {
+                choose(x, z, &mut best);
             }
-            let tx = (x as f64 + 0.5) * v;
-            let tz = (z as f64 + 0.5) * v;
-            // Only where the body itself can stand: its centre inside the strip's `z`
-            // ends, its disc clear over the face.
-            if tz < r || tz > depth_m - r {
-                continue;
-            }
-            let face = Site { x: x as u32, y, z: z as u32 };
-            if !keep(face) || shunned.contains(&Fauna::walk_key_face(face)) || !body::disc_clear_on_face(view, &geometry, face, limits) {
-                continue;
-            }
-            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
-            let d = (ddx * ddx + ddz * ddz).sqrt();
-            if d <= reach && best.is_none_or(|(b, _, _, _)| d < b) {
-                best = Some((d, ddx, ddz, face));
+        }
+    } else {
+        for dz in -k..=k {
+            for dx in -k..=k {
+                choose(hx + dx, hz + dz, &mut best);
             }
         }
     }
