@@ -963,6 +963,19 @@ control and the reward accounting; display targets after seeing results.
 
      Still open for Wrysk before P3 and P5: the digestible stomach in the score, pack-shared
      reward (Q4b), and H 64 (Q5).
+   - V3-CONTRACT merged 67a3da7a: P1 83087dd0, P0 e976056f, and a Codex fix 0240fb84.
+     - Every lineage keeps its v2 slots and gets v3 blocks after them.
+     - The Places hook is `observe_v3::place()`. Only the den is filled; the rest, including
+       the bellwing nest, wait for P6.
+     - Only the shredder and frondgrazer GRU shapes are compiled until P3.
+     - Gaps:
+       - the Veilhound's pup begging;
+       - the lanternjaw's patrol target and its senses table;
+       - the sprint label (P2).
+     - The tap costs about 0.07 ms per tick.
+     - Codex found that the apparent drift was water nondeterminism already on main: parallel
+       proposals were summed in thread-arrival order. They're now summed in a fixed order, and
+       base, tap off and tap on are identical row for row.
 
 ## 7. Work log (2026-10-08)
 
