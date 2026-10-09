@@ -38,9 +38,11 @@ retrain = true
 [[gene]]
 name = "mass_grazer"
 path = ["fauna.founders.frondgrazer.mass_scale", "fauna.founders.chorister.mass_scale"]
-range = [25.0, 75.0]
-value = 43.3
-what = "frondgrazer body mass (and the Veilhound with it); Wrysk's x25-75, start at the box's log centre"
+# Target headcounts need roughly x300-900 to eat 10-30 % of leaf growth;
+# keep the lower end for exploration and start at sqrt(25 * 900).
+range = [25.0, 900.0]
+value = 150.0
+what = "frondgrazer body mass (and the Veilhound with it); x25-900 reaches the leaf-offtake target, start at the box's log centre"
 
 [[gene]]
 name = "vh_ratio"

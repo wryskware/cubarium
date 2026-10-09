@@ -5,9 +5,10 @@ import math
 from pathlib import Path
 import random
 import tempfile
+import tomllib
 import unittest
 
-from eco_search import (COMPONENTS, SepCMA, candidate_order, decode, from_unit, gene_args, improvement,
+from eco_search import (COMPONENTS, SepCMA, arm_row, candidate_order, decode, from_unit, gene_args, improvement,
                         read_genes, to_unit)
 
 
@@ -137,6 +138,14 @@ def arm(feasible, rank):
 
 
 class ScorerAdapterTest(unittest.TestCase):
+    def test_missing_components_and_medians_are_unavailable(self):
+        summary = dict(feasible=True, rankable=True, total_losses=0, mean_P=1.0,
+                       sd_P=0.0, rank=1.0)
+        r = report(["base"], {"base": summary})
+        self.assertTrue(all(v is None for v in arm_row(r, "base")["components"].values()))
+        summary["components"] = {"Q": {}}
+        self.assertIsNone(arm_row(r, "base")["components"]["Q"])
+
     def test_the_order_is_the_scorers_ranking_without_base(self):
         r = report(["c2", "base", "c0", "c1"], {})
         self.assertEqual(candidate_order(r, ["c0", "c1", "c2"]), [2, 0, 1])
@@ -190,6 +199,32 @@ class FakeSearch:
 
 
 class StagingTest(unittest.TestCase):
+    def test_generation_scores_profiles_that_omit_components(self):
+        profiles = tomllib.loads((Path(__file__).resolve().parents[2]
+                                 / "config/training/fitness-v3.toml").read_text())["profiles"]
+        for profile in ("wide-year", "wide-screen-2h"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as directory:
+                out = Path(directory)
+                search = FakeSearch.make(out, generations=1, holdout_every=0)
+                score = search.score
+
+                def missing_components(directory, report=None):
+                    result = score(directory, report)
+                    for summary in result["arms"].values():
+                        summary["components"] = {
+                            t: value for t, value in summary["components"].items()
+                            if t in profiles[profile]["active"]}
+                    return result
+
+                search.score = missing_components
+                search.run()
+                self.assertTrue((out / "DONE").exists())
+                self.assertEqual(search.state["generation"], 1)
+                for row in (out / "generations.tsv").read_text().splitlines():
+                    cells = row.split("\t")[-len(COMPONENTS):]
+                    for term, cell in zip(COMPONENTS, cells):
+                        self.assertEqual(cell, "0" if term in profiles[profile]["active"] else "")
+
     def test_stop_pauses_and_resume_continues_with_holdouts_on_schedule(self):
         with tempfile.TemporaryDirectory() as directory:
             out = Path(directory)

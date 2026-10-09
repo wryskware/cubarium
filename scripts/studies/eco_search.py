@@ -208,7 +208,8 @@ def arm_row(report, arm):
                 total_losses=summary["total_losses"], mean_soft_P=summary["mean_P"],
                 sd_soft_P=summary["sd_P"], rank=summary["rank"],
                 median_delta=paired.get("median_delta"), wins=paired.get("wins"), n=paired.get("n"),
-                components={term: summary["components"][term]["median"] for term in COMPONENTS})
+                components={term: summary.get("components", {}).get(term, {}).get("median")
+                            for term in COMPONENTS})
 
 
 def improvement(report, arm, baseline="base"):
@@ -393,7 +394,8 @@ class Search:
                 fields = [g, arm, ",".join(map(str, seeds)), place] + [fmt(v[gene["name"]]) for gene in genes]
                 fields += [fmt(row[key]) for key in ("feasible", "rankable", "total_losses", "mean_soft_P",
                                                      "sd_soft_P", "rank", "median_delta", "wins")]
-                fields += [fmt(row["components"][term]) for term in COMPONENTS]
+                fields += ["" if row["components"][term] is None else fmt(row["components"][term])
+                           for term in COMPONENTS]
                 stream.write("\t".join(map(str, fields)) + "\n")
         # Best so far: the largest paired improvement over base among feasible candidates.
         improved = False

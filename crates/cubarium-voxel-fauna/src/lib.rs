@@ -22,6 +22,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod mass_rescale_tests;
+
 mod body;
 mod controller;
 mod encounter;
@@ -4390,12 +4393,60 @@ impl Fauna {
     /// **A loaded layer's configuration replacement** (the episode initializer,
     /// `design/handoffs/assembly-step1-2026-10-03.md`): `config` replaces the saved one
     /// whole, after [`FaunaConfig::validate`], and the route and air caches built from the
-    /// old one are dropped. Bodies, clutches, packs and the ledger are left exactly as they
-    /// are: the caller changes only rates that leave stored state valid. The controllers'
+    /// old one are dropped. A changed lineage mass scale rescales its held matter, including
+    /// eggs, and books the signed difference as introduced matter. Per-unit rates, clocks,
+    /// positions and historical flows stay as saved. The controllers'
     /// recipes read the config when they are installed, so a caller reinstalls them after.
     #[doc(hidden)]
     pub fn replace_config(&mut self, config: FaunaConfig) -> Result<(), String> {
         config.validate()?;
+        for a in &mut self.animals {
+            let Some(f) = a.founder else { continue };
+            let k = config.founder(f).mass_scale / self.config.founder(f).mass_scale;
+            if k == 1.0 {
+                continue;
+            }
+            let before = [a.stored_organic(), a.stored_mineral(), a.stored_energy()];
+            a.body *= k;
+            a.reserve *= k;
+            a.mineral *= k;
+            a.energy *= k;
+            // Brood is a label inside the reserve, not additional matter.
+            a.reproduction.brood *= k;
+            for t in std::iter::once(&mut a.gut).chain(a.stomach.pools.iter_mut()) {
+                t.organic *= k;
+                t.mineral *= k;
+                t.energy *= k;
+            }
+            if let Some(e) = &mut a.reproduction.escrow {
+                e.organic *= k;
+                e.mineral *= k;
+                e.energy *= k;
+            }
+            for lot in a.gut_seeds.lots.iter_mut().filter(|l| l.plant.is_some()) {
+                lot.organic *= k;
+                lot.mineral *= k;
+                lot.energy *= k;
+            }
+            self.ledger.introduced_organic_in += a.stored_organic() - before[0];
+            self.ledger.introduced_mineral_in += a.stored_mineral() - before[1];
+            self.ledger.introduced_energy_in += a.stored_energy() - before[2];
+        }
+        // egg_organic follows SpeciesConfig::scale_mass; a clutch is a paid package
+        // of that lineage's future bodies. Keep egg counts and incubation clocks.
+        for c in &mut self.clutches {
+            let k = config.founder(c.lineage).mass_scale / self.config.founder(c.lineage).mass_scale;
+            if k == 1.0 {
+                continue;
+            }
+            let before = [c.organic, c.mineral, c.energy];
+            c.organic *= k;
+            c.mineral *= k;
+            c.energy *= k;
+            self.ledger.introduced_organic_in += c.organic - before[0];
+            self.ledger.introduced_mineral_in += c.mineral - before[1];
+            self.ledger.introduced_energy_in += c.energy - before[2];
+        }
         self.config = config;
         self.pack_routes.clear();
         self.pack_paths.clear();
