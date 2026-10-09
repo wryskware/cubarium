@@ -616,6 +616,37 @@ control and the reward accounting; display targets after seeing results.
       speed, stop to pause and inspect, then move on, like real foraging or resting animals.
       This is queued as a topic.
 
+17. **Decided (Wrysk, 2026-10-09): landscape at one year.** Targets are shares of the
+    floor on the wide world at 10 h:
+    - woods about a quarter, with at least two vaulttree groves big enough for a
+      loftstrider family;
+    - at least one big meadow (10–20 %), kept open by grazing;
+    - several lanternberry groves;
+    - turf and velvetpad for the rest;
+    - glowcaps only in the dark.
+
+    These replace the old never-binding targets (meadow 2 m², grove 0.5 m², one vaulttree
+    recruit). Soak2 at 9 h (d72, pre-fix) had no woods, glowcaps 31 → 10,000 and the largest
+    meadow 10 m².
+18. **World and behaviour direction (Wrysk, 2026-10-09), to build:**
+    - **Vaulttrees taller.** Today the crown is 2.25–3.5 m, all inside the loftstrider's 3.5 m
+      mouth reach. The top canopy should be out of reach even of its tendrils. Real
+      reference: giraffes browse to about 6 m and elephants reach about 7 m; savanna
+      acacias are 5–12 m, and saplings must grow through the browse zone.
+    - **Seedporters** should get a decent share of food from latticevine fruit too.
+    - **Veilhound reach.** It can rear up and jump, so lanternberry bushes (crowns ≤ 1.1 m)
+      are no refuge. Only vaulttrees and mesas are.
+    - **Daily rhythms:**
+      - littershredder: no fixed cycle, random breaks;
+      - capgnawer: night-leaning (drawn to glow, exposed to lanternjaws);
+      - grazers: day, with herds staying vigilant at night;
+      - Veilhound: hunts any time, and sleeps or plays a lot between hunts, like lions;
+      - loftstrider: day-leaning;
+      - bellwing: night-leaning, occasionally by day, huge swarms at dawn and dusk;
+      - seedporter: diurnal, roosting in vaulttrees or on mesas out of predators' reach;
+      - ripple-snail: as decided (night and after rain, lays on land).
+    - **Movement cadence:** speed varies; animals stop to pause and inspect, then move on.
+
 ## 7. Work log (2026-10-08)
 
 | Package | Lane | State |
