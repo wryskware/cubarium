@@ -1,7 +1,7 @@
 extends Node
 ## **The app shell** (package C of design/handoffs/godot-direction-2026-10-07.md): the live
 ## world through a `WorldView`, the pause menu, save slots, the new-world picker, the
-## Settings page and the animal inspect panel. Rust is the simulation (`CubariumSession`); this file owns the
+## tabbed page (Field guide / Populations / Settings) and the animal inspect panel. Rust is the simulation (`CubariumSession`); this file owns the
 ## flow between screens and the one reader of the session's notices.
 ##
 ## Start-up opens the last save if there is one, else the new-world picker.
@@ -9,8 +9,11 @@ extends Node
 ## pause menu. Esc never quits; only the menu's Quit does. Gamepad: Start toggles the
 ## menu, B goes back, Select (or P) pauses the world without a menu. F3 opens the dev
 ## metrics panel over the running world (the pause menu's Dev metrics opens it too); back,
-## Esc or F3 again closes it. G or the pad's Y opens the field guide the same way (the
-## pause menu's Field guide too); back or Esc closes it, and inside it Y is Show in world.
+## Esc or F3 again closes it. G or the pad's Y opens the tabbed page on the Field guide (the
+## pause menu's Field guide and Settings open it on that tab); back or Esc closes it, to
+## the pause menu when it came from there; inside, LB / RB (or Q / E) switch tabs and Y
+## is Show in world. Only the pause menu pauses the world: from it the tabbed page
+## resumes the world (unless the player paused it), and back to the menu pauses it again.
 ##
 ## Command line (after `--`): `--saves DIR` (the slots' root, default `user://saves`),
 ## `--no-autoload` (don't open the last save), `--new` (open the picker at start-up).
@@ -21,9 +24,8 @@ const PauseMenu := preload("res://ui/pause_menu.tscn")
 const SaveSlots := preload("res://ui/save_slots.tscn")
 const NewWorld := preload("res://ui/new_world.tscn")
 const InspectPanel := preload("res://ui/inspect_panel.tscn")
-const SettingsPage := preload("res://ui/settings.tscn")
 const MetricsPanel := preload("res://ui/dev/metrics_panel.gd")
-const FieldGuide := preload("res://ui/field_guide/field_guide.tscn")
+const TabbedPage := preload("res://ui/tabbed_page/tabbed_page.tscn")
 const Dialog := preload("res://ui/dialog.tscn")
 const Notices := preload("res://ui/notices.tscn")
 const PausedBadge := preload("res://ui/paused_badge.tscn")
@@ -37,7 +39,7 @@ var saves_root := ""
 var autoload := true
 var start_new := false
 ## Where the shell keeps its own small settings (last slot, founding times, the Settings
-## page's choices).
+## tab's choices).
 var settings_path := SETTINGS
 ## What Quit does; tests swap it for a recorder.
 var quit_hook: Callable
@@ -52,13 +54,15 @@ var ui: Control
 var menu
 var slots
 var picker
-var settings_page
 var metrics
 ## The metrics panel was opened from the pause menu, which it goes back to.
 var metrics_from_menu := false
+## The tabbed page, and its Field guide and Settings tabs' contents.
+var tabbed
 var guide
-## The field guide was opened from the pause menu, which it goes back to.
-var guide_from_menu := false
+var settings_page
+## The tabbed page was opened from the pause menu, which it goes back to.
+var tabbed_from_menu := false
 var inspect
 var dialog
 var notices
@@ -135,7 +139,9 @@ func _actions() -> void:
 			["shell_back", [pad.call(JOY_BUTTON_B)]],
 			["shell_pause", [key.call(KEY_P), pad.call(JOY_BUTTON_BACK)]],
 			["shell_metrics", [key.call(KEY_F3)]],
-			["shell_guide", [key.call(KEY_G), pad.call(JOY_BUTTON_Y)]]]:
+			["shell_guide", [key.call(KEY_G), pad.call(JOY_BUTTON_Y)]],
+			["shell_tab_prev", [key.call(KEY_Q), pad.call(JOY_BUTTON_LEFT_SHOULDER)]],
+			["shell_tab_next", [key.call(KEY_E), pad.call(JOY_BUTTON_RIGHT_SHOULDER)]]]:
 		if InputMap.has_action(a[0]):
 			continue
 		InputMap.add_action(a[0])
@@ -185,21 +191,18 @@ func _build_ui() -> void:
 	ui.add_child(picker)
 	picker.setup()
 
-	settings_page = SettingsPage.instantiate()
-	settings_page.back.connect(func(): close_screen(settings_page))
-	settings_page.changed.connect(_on_motion_changed)
-	ui.add_child(settings_page)
-
 	metrics = MetricsPanel.new()
 	metrics.shell = self
 	metrics.back.connect(close_metrics)
 	ui.add_child(metrics)
 
-	guide = FieldGuide.instantiate()
-	guide.shell = self
-	guide.back.connect(close_guide)
+	tabbed = TabbedPage.instantiate()
+	tabbed.shell = self
+	ui.add_child(tabbed)
+	guide = tabbed.guide
 	guide.show_in_world.connect(_on_show_in_world)
-	ui.add_child(guide)
+	settings_page = tabbed.settings
+	settings_page.changed.connect(_on_motion_changed)
 
 	dialog = Dialog.instantiate()
 	dialog.shell = self
@@ -236,7 +239,7 @@ func busy() -> String:
 
 ## Whether anything covers the world: the menu, a screen or a dialog.
 func overlay_open() -> bool:
-	return menu.visible or slots.visible or picker.visible or settings_page.visible or metrics.visible or guide.visible or dialog.is_open()
+	return menu.visible or slots.visible or picker.visible or tabbed.visible or metrics.visible or dialog.is_open()
 
 
 func species_label(name: String) -> String:
@@ -284,7 +287,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		if metrics.visible:
 			close_metrics()
-		elif has_world() and not dialog.is_open() and not slots.visible and not picker.visible and not settings_page.visible and not guide.visible:
+		elif has_world() and not dialog.is_open() and not slots.visible and not picker.visible and not tabbed.visible:
 			open_metrics()
 	elif event.is_action_pressed("shell_guide") and not _typing():
 		if guide.visible:
@@ -293,10 +296,20 @@ func _input(event: InputEvent) -> void:
 			if event is InputEventJoypadButton:
 				guide.press_show()
 			else:
-				close_guide()
-		elif has_world() and not dialog.is_open() and not slots.visible and not picker.visible and not settings_page.visible and not metrics.visible:
+				close_tabbed()
+		elif tabbed.visible:
+			# On another tab, G or Y goes to the Field guide tab.
+			get_viewport().set_input_as_handled()
+			if not dialog.is_open():
+				tabbed.show_tab("guide")
+		elif has_world() and not dialog.is_open() and not slots.visible and not picker.visible and not metrics.visible:
 			get_viewport().set_input_as_handled()
 			open_guide()
+	elif (event.is_action_pressed("shell_tab_prev") or event.is_action_pressed("shell_tab_next")) and tabbed.visible:
+		# Q and E typed into the search box stay text; LB and RB switch tabs from anywhere.
+		if not dialog.is_open() and not (_typing() and event is InputEventKey):
+			get_viewport().set_input_as_handled()
+			tabbed.step(-1 if event.is_action_pressed("shell_tab_prev") else 1)
 	elif event.is_action_pressed("shell_pause") and not overlay_open() and not _typing():
 		get_viewport().set_input_as_handled()
 		set_player_paused(not player_paused)
@@ -330,14 +343,11 @@ func back_one(start := false) -> bool:
 	if slots.visible:
 		close_screen(slots)
 		return true
-	if settings_page.visible:
-		close_screen(settings_page)
-		return true
 	if metrics.visible:
 		close_metrics()
 		return true
-	if guide.visible:
-		close_guide()
+	if tabbed.visible:
+		close_tabbed()
 		return true
 	if inspect.visible and not menu.visible and not start:
 		inspect.close()
@@ -415,9 +425,8 @@ func close_all() -> void:
 	picker.leave()
 	picker.visible = false
 	slots.visible = false
-	settings_page.visible = false
 	metrics.visible = false
-	guide.close()
+	tabbed.close()
 	menu.visible = false
 
 
@@ -453,22 +462,34 @@ func close_metrics() -> void:
 		open_menu()
 
 
-# --- Field guide --------------------------------------------------------------------
+# --- The tabbed page: Field guide, Populations, Settings ------------------------------
 
-## The field guide over the world, like the metrics panel: from the pause menu it stands in
-## for the menu (the world stays paused) and goes back to it; from G or Y the world keeps
-## running under it. It never changes the pause state itself.
-func open_guide() -> void:
-	guide_from_menu = menu.visible
+## The tabbed page over the world on tab `tab`. From the pause menu it stands in for the
+## menu and goes back to it; the world runs under it (unless the player paused it with
+## Select or P), and the menu pauses it again on the way back. From G or Y the pause state
+## doesn't change.
+func open_tabbed(tab: String) -> void:
+	tabbed_from_menu = menu.visible
 	menu.visible = false
 	_hover_off()
-	guide.open()
+	if tabbed_from_menu and has_world() and not player_paused:
+		session.resume()
+	tabbed.open(tab, has_world())
+
+
+func close_tabbed() -> void:
+	tabbed.close()
+	if tabbed_from_menu:
+		open_menu()
+
+
+## The field guide: the tabbed page on its Field guide tab.
+func open_guide() -> void:
+	open_tabbed("guide")
 
 
 func close_guide() -> void:
-	guide.close()
-	if guide_from_menu:
-		open_menu()
+	close_tabbed()
 
 
 ## Show in world: close the guide (and the menu under it), pan to one living animal of
@@ -487,16 +508,14 @@ func _on_show_in_world(lineage: String) -> void:
 	if pick < 0:
 		notices.add("No living %s to show." % species_label(lineage), true)
 		return
-	guide.close()
-	if guide_from_menu:
-		guide_from_menu = false
-		close_menu()
+	tabbed.close()
+	tabbed_from_menu = false
 	_on_clicked(pick)
 
 
 # --- Settings -----------------------------------------------------------------------
 
-## The Settings page's choices: in the shell's settings file, per viewer. A viewer who has
+## The Settings tab's choices: in the shell's settings file, per viewer. A viewer who has
 ## chosen them has them applied as the renderer starts, after the environment's overrides
 ## (what `CUBARIUM_ANIMALS` or `CUBARIUM_ANIMAL_SUBPIXEL` names keeps the environment's
 ## value for this run); a change on the page applies to the running world at once, over
@@ -523,11 +542,9 @@ func current_motion() -> Dictionary:
 	return m if not m.is_empty() else {"movement": "smooth", "subpixel": true}
 
 
+## The tabbed page on its Settings tab, which shows the settings in force.
 func open_settings() -> void:
-	var m := current_motion()
-	# The page stands in for the menu, which comes back with Back or Esc.
-	menu.visible = false
-	settings_page.open(m["movement"], m["subpixel"])
+	open_tabbed("settings")
 
 
 func _on_motion_changed(movement: String, subpixel: bool) -> void:

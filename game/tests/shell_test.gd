@@ -7,7 +7,9 @@ extends SceneTree
 ## survives the menu; Start opens the menu; the inspect panel opens on a living animal and
 ## Esc closes it before the menu opens; save, list, rename, delete through the slots
 ## screen; a save from another version is listed, refused on load, and can be deleted;
-## a good save loads back; the Settings page (from the menu) reloads the viewer's stored
+## a good save loads back; with no world the menu's Settings opens the tabbed page on
+## Settings with its Field guide tab off, and back returns to the menu; the Settings tab
+## (from the menu) reloads the viewer's stored
 ## animal settings into the renderer at start-up, its two toggles reach the running
 ## world's renderer at once (the frames drawn report them) and are stored again, and
 ## Subpixel is off under Stepped. Prints PASS/FAIL lines, exits 0 only if all passed.
@@ -67,6 +69,26 @@ func run() -> void:
 		await frames(1)
 	check(quits == 0, "Esc never quits (5 presses, no quit)")
 	check(main.menu.visible, "with no world, Esc leaves the menu up (nothing to resume)")
+
+	# With no world the menu's Settings still opens the tabbed page, whose Field guide tab
+	# is off; G does nothing; back returns to the menu.
+	check(main.menu.buttons["guide"].disabled and not main.menu.buttons["settings"].disabled,
+		"with no world the menu's Field guide is off and Settings is on")
+	main.menu.buttons["settings"].pressed.emit()
+	await frames(1)
+	check(main.tabbed.visible and main.tabbed.tab == "settings" and main.settings_page.visible and not main.menu.visible,
+		"with no world Settings opens the tabbed page on Settings")
+	check(main.tabbed.buttons["guide"].disabled and main.tabbed.buttons["populations"].disabled,
+		"with no world its Field guide tab is off (Populations is always off)")
+	pad(JOY_BUTTON_LEFT_SHOULDER)
+	await frames(1)
+	check(main.tabbed.tab == "settings" and not main.guide.visible, "LB doesn't reach the Field guide tab with no world")
+	pad(JOY_BUTTON_B)
+	await frames(1)
+	check(not main.tabbed.visible and main.menu.visible, "B returns from it to the menu")
+	key(KEY_G)
+	await frames(1)
+	check(not main.tabbed.visible and main.menu.visible, "with no world G doesn't open the field guide")
 
 	# Terrain candidates of the smallest size: bare terrains, nothing founded on them.
 	main._on_menu("new")

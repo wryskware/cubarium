@@ -8,20 +8,21 @@ extends Control
 ##
 ## The look is settings.tscn, laid out in the editor from ui/neon/ (round 4's Settings
 ## view): Movement is a two-stop NeonDotSlider, Subpixel a NeonCheckbox, greyed under
-## Stepped. This script only wires them. Opened by itself (the editor, or a picture of the
-## scene) it keeps the scene's sample page and its stand-in world picture; under the shell
-## it starts hidden over the live world.
+## Stepped. This script only wires them. It is the tabbed page's Settings tab
+## (ui/tabbed_page/), which holds the frame, tabs and hints around it. Without a shell
+## (the editor, or a picture of the scene) it keeps the scene's sample values; under the
+## shell it starts hidden and the tabbed page shows it.
 
-signal back
 signal changed(movement: String, subpixel: bool)
 
 ## The slider's stops, left to right.
 const MOVEMENTS := ["smooth", "stepped"]
 
+## The shell (main.gd); null in the editor or a picture, which keeps the sample values.
+var shell: Node
 var movement := "smooth"
 var subpixel := true
 
-@onready var _world_picture: Control = $World
 @onready var _movement: NeonDotSlider = %Movement
 @onready var _subpixel: NeonCheckbox = %Subpixel
 
@@ -29,15 +30,13 @@ var subpixel := true
 func _ready() -> void:
 	_movement.changed.connect(_on_movement)
 	_subpixel.toggled.connect(_on_subpixel)
-	if get_parent() is Window:
+	if shell == null:
 		# By itself: the sample page stays as laid out.
 		movement = MOVEMENTS[_movement.index]
 		subpixel = _subpixel.button_pressed
 		_sync()
 		return
 	visible = false
-	# The live world shows through the scrim; the picture is the editor's stand-in.
-	_world_picture.visible = false
 	_sync()
 
 

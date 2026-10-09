@@ -9,14 +9,13 @@ extends Control
 ## - body size, height, diet, prey and eaten-by: `session.query("guide")` (the running
 ##   world's config);
 ## - counts: `query("populations")`; the bars: `query("history")` (36 bars of 10 min over
-##   the last 6 h of world time, empty where the world is younger); the clock:
-##   `query("clock")`; Paused: `session.status()`.
+##   the last 6 h of world time, empty where the world is younger).
 ##
-## The shell (main.gd) opens it and closes it with back or Esc; "Show in world" asks the
-## shell to select one living animal of the species. It asks the session about once a
-## second, only while open.
+## It is the tabbed page's first tab (ui/tabbed_page/): the page around it holds the tab
+## strip, the clock, the main panel and the key hints. The shell (main.gd) opens it there
+## and closes it with back or Esc; "Show in world" asks the shell to select one living
+## animal of the species. It asks the session about once a second, only while shown.
 
-signal back
 signal show_in_world(species: String)
 
 const NOTES := "res://data/field_guide.md"
@@ -57,12 +56,11 @@ var _plants_open := false
 var _animals_open := true
 var _populations := {}
 
-@onready var _world_picture: Control = $World
-@onready var _search: LineEdit = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/SearchMargin/Search/SearchRow/SearchField
-@onready var _search_box: Control = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/SearchMargin/Search
-@onready var _index_fade: Control = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/IndexFade
-@onready var _scroll: ScrollContainer = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll
-@onready var _list: Control = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll/IndexList
+@onready var _search: LineEdit = $Columns/SpeciesIndex/IndexStack/SearchMargin/Search/SearchRow/SearchField
+@onready var _search_box: Control = $Columns/SpeciesIndex/IndexStack/SearchMargin/Search
+@onready var _index_fade: Control = $Columns/SpeciesIndex/IndexStack/IndexFade
+@onready var _scroll: ScrollContainer = $Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll
+@onready var _list: Control = $Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll/IndexList
 @onready var _animal_rows: VBoxContainer = _list.get_node("SpeciesListMargin/SpeciesList")
 @onready var _plant_rows: VBoxContainer = _list.get_node("PlantsListMargin/PlantsList")
 @onready var _animals_toggle: BaseButton = _list.get_node("AnimalsHeader/Toggle")
@@ -72,7 +70,7 @@ var _populations := {}
 @onready var _plants_toggle: BaseButton = _list.get_node("PlantsGroup/Toggle")
 @onready var _chevron: Control = _list.get_node("PlantsGroup/Toggle/Row/Name/Chevron")
 @onready var _plants_count: Label = _list.get_node("PlantsGroup/Toggle/Row/Count")
-@onready var _entry: Control = $Center/Page/Body/Columns/Entry/EntryRow
+@onready var _entry: Control = $Columns/Entry/EntryRow
 @onready var _art: TextureRect = _entry.get_node("PlateColumn/Plate/PlateClip/ArtCenter/Art")
 @onready var _caption: Label = _entry.get_node("PlateColumn/Plate/CaptionMargin/Caption")
 @onready var _count: Label = _entry.get_node("PlateColumn/LiveCount/LiveMargin/LiveStack/LiveBody/CountColumn/Count")
@@ -84,7 +82,6 @@ var _populations := {}
 @onready var _chips: Control = _facts.get_node("EatsCell/Chips")
 @onready var _show: BaseButton = _entry.get_node("TextColumn/Actions/ActionRow/ShowInWorld")
 @onready var _populations_button: BaseButton = _entry.get_node("TextColumn/Actions/ActionRow/Populations")
-@onready var _clock: Control = $Center/Page/Top/Clock
 
 
 func _ready() -> void:
@@ -99,8 +96,6 @@ func _ready() -> void:
 	if shell == null:
 		return
 	visible = false
-	# The live world shows through the scrim; the picture is the editor's stand-in.
-	_world_picture.visible = false
 	notes = read_notes(NOTES)
 	_build_rows()
 
@@ -280,12 +275,6 @@ func _refresh() -> void:
 		_load_tables(s)
 		if not _guide.is_empty() and selected != "":
 			select(selected)
-	_clock.get_node("Paused").visible = st.get("paused", false)
-	var clock = s.query("clock", null)
-	if clock is Dictionary:
-		_clock.get_node("Day").text = str(int(clock.get("day", 0)))
-		var hour: float = clock.get("hour", 0.0)
-		_clock.get_node("Time").text = "%02d:%02d" % [int(hour) % 24, int(fmod(hour, 1.0) * 60.0)]
 	var pops = s.query("populations", null)
 	_populations = pops if pops is Dictionary else {}
 	var since = {"since": int(_samples[-1]["tick"]) + 1} if not _samples.is_empty() else null
