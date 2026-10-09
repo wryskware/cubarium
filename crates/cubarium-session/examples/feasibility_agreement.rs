@@ -20,6 +20,7 @@ fn main() {
         let check = feasibility(&mut probe, &layers, counts).acceptance;
         let actual = match found_terrain(world, seed, &layers, counts, 1, &()) {
             TerrainFounding::Founded(_) => "accepted".to_string(),
+            TerrainFounding::Rejected(why) => format!("terrain rejected: {why}"),
             TerrainFounding::Refused(why) => format!("refused: {}", why.join("; ")),
             TerrainFounding::Cancelled => "cancelled".into(),
         };

@@ -489,6 +489,9 @@ fn main() {
             SimConfig::experiment().water_every,
         );
         eprintln!("founded in {:.1} s", founding_started.elapsed().as_secs_f64());
+        if let Some(why) = &founded.terrain_rejection {
+            eprintln!("terrain rejected: {why}");
+        }
         let (world, flora, mut fauna, seeded) =
             (founded.world, founded.flora, founded.fauna, founded.seeded);
         eprintln!(
