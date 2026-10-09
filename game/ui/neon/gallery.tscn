@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://ui/neon/neon_dot_slider.gd" id="8_slider"]
 [ext_resource type="Script" path="res://ui/neon/neon_checkbox.gd" id="9_check"]
 [ext_resource type="Script" path="res://ui/neon/neon_dot_progress.gd" id="10_progress"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
 
 [sub_resource type="ButtonGroup" id="ButtonGroup_1bi8p"]
 
@@ -741,7 +742,9 @@ autowrap_mode = 3
 [node name="Title" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=143160018]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
-text = "Lanternjaw"
+text = " Lanternjaw "
+script = ExtResource("nt_title")
+title = "Lanternjaw"
 vertical_alignment = 1
 
 [node name="BigNumber" type="Label" parent="Center/Page/Panel/PanelMargin/Sections/Type" unique_id=813116693]

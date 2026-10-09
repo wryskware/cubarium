@@ -1,42 +1,39 @@
 extends VBoxContainer
 ## Plain notices in the lower left: what a save or a load did, in words. Each stays a few
 ## seconds, then fades out (never pops).
+##
+## The look is notices.tscn and one notice.tscn per message (a NoticeBox with SmallText,
+## WarningText for a warning), laid out in the editor from ui/neon/. Without a shell
+## (opened in the editor, or by itself) the scene's two sample notices stay.
 
+const NOTICE := preload("res://ui/notice.tscn")
 const SHOWN_S := 6.0
 const FADE_S := 0.8
 
+## The shell (main.gd); null in the editor, which keeps the samples.
+var shell: Node
 ## Every notice said, oldest first (tests read it).
 var said: Array[String] = []
 
 
-func _init() -> void:
-	anchor_left = 0.0
-	anchor_right = 0.0
-	anchor_top = 1.0
-	anchor_bottom = 1.0
-	offset_left = 16
-	offset_right = 720
-	offset_bottom = -16
-	grow_vertical = Control.GROW_DIRECTION_BEGIN
-	alignment = BoxContainer.ALIGNMENT_END
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_theme_constant_override("separation", 6)
+func _ready() -> void:
+	if shell == null:
+		return
+	for c in get_children():
+		remove_child(c)
+		c.queue_free()
 
 
 func add(text: String, warn := false) -> void:
 	said.append(text)
-	var panel := PanelContainer.new()
-	panel.theme_type_variation = &"Tip"
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	panel.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	var label := Label.new()
+	var panel: Control = NOTICE.instantiate()
+	var label: Label = panel.get_node("Margin/Text")
 	label.text = text
 	if text.length() > 70:  # long ones wrap at a fixed width; short ones fit their text
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		label.custom_minimum_size = Vector2(660, 0)
 	if warn:
-		label.theme_type_variation = &"Warn"
-	panel.add_child(label)
+		label.theme_type_variation = &"WarningText"
 	add_child(panel)
 	panel.modulate.a = 0.0
 	var t := panel.create_tween()

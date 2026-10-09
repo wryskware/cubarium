@@ -54,6 +54,7 @@ var _samples: Array = []
 var _generation := -1
 var _refresh_left := 0.0
 var _plants_open := false
+var _animals_open := true
 var _populations := {}
 
 @onready var _world_picture: Control = $World
@@ -64,7 +65,9 @@ var _populations := {}
 @onready var _list: Control = $Center/Page/Body/Columns/SpeciesIndex/IndexStack/IndexFade/IndexScroll/IndexList
 @onready var _animal_rows: VBoxContainer = _list.get_node("SpeciesListMargin/SpeciesList")
 @onready var _plant_rows: VBoxContainer = _list.get_node("PlantsListMargin/PlantsList")
-@onready var _animals_count: Label = _list.get_node("AnimalsHeader/Row/Count")
+@onready var _animals_toggle: BaseButton = _list.get_node("AnimalsHeader/Toggle")
+@onready var _animals_chevron: Control = _list.get_node("AnimalsHeader/Toggle/Row/Name/Chevron")
+@onready var _animals_count: Label = _list.get_node("AnimalsHeader/Toggle/Row/Count")
 @onready var _fill: Control = _list.get_node("Fill")
 @onready var _plants_toggle: BaseButton = _list.get_node("PlantsGroup/Toggle")
 @onready var _chevron: Control = _list.get_node("PlantsGroup/Toggle/Row/Name/Chevron")
@@ -89,6 +92,7 @@ func _ready() -> void:
 	_search.focus_entered.connect(_search_box.queue_redraw)
 	_search.focus_exited.connect(_search_box.queue_redraw)
 	_search_box.draw.connect(_draw_search_focus)
+	_animals_toggle.toggled.connect(_set_animals_open)
 	_plants_toggle.toggled.connect(_set_plants_open)
 	_show.pressed.connect(press_show)
 	get_viewport().gui_focus_changed.connect(_on_focus_changed)
@@ -164,6 +168,7 @@ func _build_rows() -> void:
 		r.pressed.connect(select.bind(r.species))
 		(_animal_rows if n["animal"] else _plant_rows).add_child(r)
 		_rows[r.species] = r
+	_animals_open = true
 	_set_plants_open(false)
 
 
@@ -174,8 +179,16 @@ func _set_plants_open(on: bool) -> void:
 	_filter()
 
 
-## Show the rows whose name holds the search text; while there is text, both groups show
-## their matches. Group counts are the rows shown.
+## The Animals group collapses as Plants does (open at the start).
+func _set_animals_open(on: bool) -> void:
+	_animals_open = on
+	if _animals_toggle.button_pressed != on:
+		_animals_toggle.set_pressed_no_signal(on)
+	_filter()
+
+
+## Show the rows whose name holds the search text; while there is text, both groups open
+## and show their matches. Group counts are the rows that match.
 func _filter() -> void:
 	var q := _search.text.strip_edges().to_lower()
 	var shown := [0, 0]
@@ -186,6 +199,9 @@ func _filter() -> void:
 		r.visible = q == "" or String(n["name"]).to_lower().contains(q)
 		if r.visible:
 			shown[0 if n["animal"] else 1] += 1
+	var animals_open := _animals_open or q != ""
+	_animal_rows.get_parent().visible = animals_open
+	_animals_chevron.pixels = CHEVRON_OPEN if animals_open else CHEVRON_CLOSED
 	var open := _plants_open or q != ""
 	_plant_rows.get_parent().visible = open
 	_chevron.pixels = CHEVRON_OPEN if open else CHEVRON_CLOSED
@@ -385,7 +401,7 @@ func select(id: String) -> void:
 		_art.custom_minimum_size = tex.get_size() * PLATE_SCALE
 	_caption.text = "Plate %02d · %s" % [n["plate"], "Adult" if animal else "Mature"]
 	_text.get_node("Kicker").text = "%s · %s" % [n.get("kind", ""), n.get("kicker", "")]
-	_text.get_node("Name").text = n["name"]
+	_text.get_node("Name").title = n["name"]
 	_text.get_node("FieldNote").text = n.get("note", "")
 	_fact("Role", "Role", n.get("role", ""))
 	if animal:
@@ -461,6 +477,8 @@ func _go_to(id: String) -> void:
 		return
 	if not n["animal"] and not _plants_open:
 		_set_plants_open(true)
+	if n["animal"] and not _animals_open:
+		_set_animals_open(true)
 	select(id)
 	var r = _rows.get(id)
 	if r != null and r.is_visible_in_tree():

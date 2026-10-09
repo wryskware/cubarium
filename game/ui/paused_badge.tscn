@@ -1,0 +1,19 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+
+[node name="PausedBadge" type="PanelContainer"]
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 40.0
+offset_bottom = 40.0
+mouse_filter = 2
+theme = ExtResource("1_theme")
+theme_type_variation = &"NoticeBox"
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 2
+theme_type_variation = &"WarningLabel"
+text = "Paused"
+vertical_alignment = 1
+uppercase = true

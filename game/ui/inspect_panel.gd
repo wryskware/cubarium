@@ -2,66 +2,57 @@ extends PanelContainer
 ## The inspect panel: one animal's stats and life history from `query("animal", {id})`,
 ## refreshed about once a second, with a plain "died" state once it is gone. The shell
 ## highlights and follows the animal while the panel is open.
+##
+## The look is inspect_panel.tscn, laid out in the editor from ui/neon/ (the field guide's
+## facts, label and value): this script only fills it. Every fact row is in the scene and
+## shows only with a value. The life list's sample lines are its templates: the first
+## Event* (when, what) and Note* lines are copied for each line shown. Without a shell
+## (opened in the editor, or by itself) the scene's sample animal stays.
 
 signal closed
 
 const REFRESH_S := 1.0
 const EVENTS_SHOWN := 40
+## The fact rows in the scene (Facts/<Key>LabelCell and <Key>Cell), in order.
+const FACTS := ["Age", "Energy", "Reserve", "Fullness", "Wound", "Size", "Where", "Gestating", "Pack", "Riding"]
 
 var shell  # main.gd
 var animal_id := -1
 var dead := false
 var last := {}  # the newest answer
 var _since := 0.0
-var _title: Label
-var _close: Button
-var _state: Label
-var _stats: GridContainer
-var _life: VBoxContainer
+var _event_line: Control
+var _note_line: Label
+
+@onready var _stack: Control = $Margin/Stack
+@onready var _kicker: Label = _stack.get_node("Kicker")
+@onready var _title: Label = _stack.get_node("Name")
+@onready var _state: Label = _stack.get_node("State")
+@onready var _stats: GridContainer = _stack.get_node("Facts")
+@onready var _life: VBoxContainer = _stack.get_node("LifeFade/LifeScroll/Life")
+@onready var _life_scroll: ScrollContainer = _stack.get_node("LifeFade/LifeScroll")
+@onready var _close: BaseButton = _stack.get_node("Actions/Close")
 
 
-func _init() -> void:
-	visible = false
-	anchor_left = 1.0
-	anchor_right = 1.0
-	anchor_top = 0.0
-	anchor_bottom = 1.0
-	offset_left = -400
-	offset_right = -16
-	offset_top = 16
-	offset_bottom = -16
-	var box := VBoxContainer.new()
-	add_child(box)
-	var head := HBoxContainer.new()
-	box.add_child(head)
-	_title = Label.new()
-	_title.theme_type_variation = &"Title"
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_title.clip_text = true
-	head.add_child(_title)
-	_close = Button.new()
-	_close.text = "Close"
+func _ready() -> void:
 	_close.pressed.connect(close)
-	head.add_child(_close)
-	_state = Label.new()
-	_state.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_state)
-	_stats = GridContainer.new()
-	_stats.columns = 2
-	_stats.add_theme_constant_override("v_separation", 4)
-	box.add_child(_stats)
-	var life_title := Label.new()
-	life_title.text = "Life"
-	life_title.add_theme_font_size_override("font_size", 21)
-	box.add_child(life_title)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	box.add_child(scroll)
-	_life = VBoxContainer.new()
-	_life.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_life.add_theme_constant_override("separation", 2)
-	scroll.add_child(_life)
+	for c in _life.get_children():
+		if _event_line == null and c.name.begins_with("Event"):
+			_event_line = c.duplicate()
+		elif _note_line == null and c.name.begins_with("Note"):
+			_note_line = c.duplicate()
+	if shell == null:
+		return
+	visible = false
+	_clear_life()
+
+
+func _notification(what: int) -> void:
+	# The two line templates live outside the tree.
+	if what == NOTIFICATION_PREDELETE:
+		for t in [_event_line, _note_line]:
+			if is_instance_valid(t):
+				t.free()
 
 
 func open(id: int) -> void:
@@ -71,6 +62,7 @@ func open(id: int) -> void:
 	visible = true
 	_since = 0.0
 	refresh()
+	_life_scroll.scroll_vertical = 0
 	_close.grab_focus()
 
 
@@ -83,7 +75,7 @@ func close() -> void:
 
 
 func _process(delta: float) -> void:
-	if not visible:
+	if not visible or shell == null:
 		return
 	_since += delta
 	if _since >= REFRESH_S:
@@ -94,11 +86,13 @@ func _process(delta: float) -> void:
 func refresh() -> void:
 	if animal_id < 0:
 		return
+	_kicker.text = "Animal · #%d" % animal_id
 	var q = shell.session.query("animal", {"id": animal_id})
 	if not (q is Dictionary) or q.has("error"):
 		dead = true
 		_title.text = "#%d" % animal_id
 		_state.text = "Gone: nothing is remembered of it any more."
+		_fill_stats(null)
 		return
 	last = q
 	var body = q.get("animal")
@@ -108,7 +102,8 @@ func refresh() -> void:
 		label = body.get("label", "")
 	elif life is Dictionary:
 		label = life.get("label", "")
-	_title.text = "%s #%d" % [label, animal_id]
+	# The species as the field guide names it ("Ripple-snail"): the sim's label, capitalised.
+	_title.text = label.left(1).to_upper() + label.substr(1) if label != "" else "#%d" % animal_id
 	var death = life.get("death") if life is Dictionary else null
 	dead = body == null
 	if dead:
@@ -123,68 +118,76 @@ func refresh() -> void:
 
 
 func _fill_stats(body) -> void:
-	for c in _stats.get_children():
+	var values := {}
+	if body is Dictionary:
+		values = {
+			"Age": _duration(body.get("age_s", 0.0)) + " of " + _duration(body.get("lifespan_s", 0.0)),
+			"Energy": "%.3f" % body.get("energy", 0.0),
+			"Reserve": "%.3f" % body.get("reserve", 0.0),
+			"Fullness": "%d %%" % int(100.0 * body.get("fullness", 0.0)),
+			"Wound": "%.2f" % body.get("wound", 0.0),
+			"Size": "%.2f" % body.get("size", 0.0),
+			"Where": "%.1f, %.1f, %.1f m" % [body.get("x_m", 0.0), body.get("y_m", 0.0), body.get("z_m", 0.0)],
+		}
+		if body.get("gestating", false):
+			values["Gestating"] = "yes"
+		if body.get("pack") != null:
+			values["Pack"] = str(body["pack"])
+		if body.get("riding") != null:
+			values["Riding"] = "#%s" % body["riding"]
+	for key in FACTS:
+		var v: String = values.get(key, "")
+		var l := _stats.get_node(key + "LabelCell")
+		var c := _stats.get_node(key + "Cell")
+		l.visible = v != ""
+		c.visible = v != ""
+		c.get_node("Value").text = v
+
+
+func _clear_life() -> void:
+	for c in _life.get_children():
+		_life.remove_child(c)
 		c.queue_free()
-	if not (body is Dictionary):
-		return
-	var rows := [
-		["Age", _duration(body.get("age_s", 0.0)) + " of " + _duration(body.get("lifespan_s", 0.0))],
-		["Energy", "%.3f" % body.get("energy", 0.0)],
-		["Reserve", "%.3f" % body.get("reserve", 0.0)],
-		["Fullness", "%d %%" % int(100.0 * body.get("fullness", 0.0))],
-		["Wound", "%.2f" % body.get("wound", 0.0)],
-		["Size", "%.2f" % body.get("size", 0.0)],
-		["Where", "%.1f, %.1f, %.1f m" % [body.get("x_m", 0.0), body.get("y_m", 0.0), body.get("z_m", 0.0)]],
-	]
-	if body.get("gestating", false):
-		rows.append(["Gestating", "yes"])
-	if body.get("pack") != null:
-		rows.append(["Pack", str(body["pack"])])
-	if body.get("riding") != null:
-		rows.append(["Riding", "#%s" % body["riding"]])
-	for r in rows:
-		var k := Label.new()
-		k.text = r[0]
-		k.theme_type_variation = &"Small"
-		_stats.add_child(k)
-		var v := Label.new()
-		v.text = r[1]
-		_stats.add_child(v)
 
 
 func _fill_life(life) -> void:
-	for c in _life.get_children():
-		c.queue_free()
+	_clear_life()
 	if not (life is Dictionary):
-		_line("No events recorded yet.", true)
+		_note("No events recorded yet.")
 		return
 	var origin = life.get("origin")
 	if origin is Dictionary:
-		_line("%s  %s" % [_when(origin), _event_text(origin)], false)
+		_event(origin)
 	if life.get("parent") != null:
-		_line("Parent: #%s" % life["parent"], true)
+		_note("Parent: #%s" % life["parent"])
 	var offspring: Array = life.get("offspring", [])
 	if offspring.size() > 0:
-		_line("Offspring: %s" % ", ".join(offspring.map(func(o): return "#%s" % o)), true)
+		_note("Offspring: %s" % ", ".join(offspring.map(func(o): return "#%s" % o)))
 	var events: Array = life.get("events", [])
 	if int(life.get("dropped", 0)) > 0:
-		_line("(%d older events not kept)" % int(life["dropped"]), true)
+		_note("(%d older events not kept)" % int(life["dropped"]))
 	var newest := events.slice(maxi(events.size() - EVENTS_SHOWN, 0))
 	newest.reverse()
 	var death = life.get("death")
 	if death is Dictionary:
-		_line("%s  %s" % [_when(death), _event_text(death)], false)
+		_event(death)
 	for e in newest:
-		_line("%s  %s" % [_when(e), _event_text(e)], false)
+		_event(e)
 
 
-func _line(text: String, small: bool) -> void:
-	var l := Label.new()
-	l.text = text
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	if small:
-		l.theme_type_variation = &"Small"
-	_life.add_child(l)
+## One event line: when, then what, from the scene's first Event line.
+func _event(e: Dictionary) -> void:
+	var line: Control = _event_line.duplicate()
+	line.get_node("When").text = _when(e)
+	line.get_node("What").text = _event_text(e)
+	_life.add_child(line)
+
+
+## One note line (parent, offspring, events not kept), from the scene's first Note line.
+func _note(text: String) -> void:
+	var line: Label = _note_line.duplicate()
+	line.text = text
+	_life.add_child(line)
 
 
 func _when(e: Dictionary) -> String:

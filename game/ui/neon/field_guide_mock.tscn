@@ -10,6 +10,7 @@
 [ext_resource type="Texture2D" path="res://ui/neon/art/lanternjaw-px.png" id="8_qryoj"]
 [ext_resource type="Script" path="res://ui/neon/neon_bar_chart.gd" id="9_fhnqt"]
 [ext_resource type="Script" path="res://ui/neon/neon_fade_mask.gd" id="10_pclhd"]
+[ext_resource type="Script" path="res://ui/neon/neon_title.gd" id="nt_title"]
 
 [sub_resource type="ButtonGroup" id="ButtonGroup_5euc7"]
 
@@ -906,7 +907,9 @@ mouse_filter = 2
 [node name="Name" type="Label" parent="Center/Page/Body/Columns/Entry/EntryRow/TextColumn/EntryFade/EntryScroll/EntryText" unique_id=2111251029]
 layout_mode = 2
 theme_type_variation = &"TitleLabel"
-text = "Lanternjaw"
+text = " Lanternjaw "
+script = ExtResource("nt_title")
+title = "Lanternjaw"
 vertical_alignment = 1
 
 [node name="Gap2" type="Control" parent="Center/Page/Body/Columns/Entry/EntryRow/TextColumn/EntryFade/EntryScroll/EntryText" unique_id=1851991407]

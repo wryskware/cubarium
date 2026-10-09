@@ -169,7 +169,7 @@ const SERIES=[4,4,5,5,5,6,6,6,5,5,6,7,7,7,8,8,7,7,7,6,6,7,7,8,8,8,7,7,7,7,8,7,7,
 const D='·',M='-'; // the Adobe kit's Gridlite has no minus sign
 
 // Wrysk's picks, 2026-10-09: notched lines, dithered bands, lit dots, glow focus
-let st={view:'sheet',border:'notch',fill:'dither',ctl:'lit',focus:'glow',col:'tabs',tpad:'tight'};
+let st={view:'sheet',border:'notch',fill:'dither',ctl:'lit',focus:'glow',col:'tabs',tpad:'spaced'};
 const KEY='cub-ui-r3';
 try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
 function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}

@@ -182,7 +182,7 @@ const WATER=['Low','Medium','High'];
 const D='·';
 
 // Wrysk's picks, 2026-10-09: arrows, dot slider, checkbox, dot row
-let st={view:'sheet',choice:'cycle',steps:'slider',toggle:'box',progress:'dots',tpad:'tight'};
+let st={view:'sheet',choice:'cycle',steps:'slider',toggle:'box',progress:'dots',tpad:'spaced'};
 const KEY='cub-ui-r4';
 try{Object.assign(st,JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){}
 function save(){if(document.body.classList.contains('shot'))return;try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}

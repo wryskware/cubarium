@@ -1,0 +1,23 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://ui/neon/neon_theme.tres" id="1_theme"]
+
+[node name="Notice" type="PanelContainer"]
+size_flags_horizontal = 0
+mouse_filter = 2
+theme = ExtResource("1_theme")
+theme_type_variation = &"NoticeBox"
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 8
+
+[node name="Text" type="Label" parent="Margin"]
+layout_mode = 2
+theme_type_variation = &"SmallText"
+text = "Saved \"World 1\"."
+vertical_alignment = 1

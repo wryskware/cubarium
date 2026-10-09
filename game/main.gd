@@ -17,15 +17,17 @@ extends Node
 
 const WorldViews := preload("res://ui/world_views.gd")
 const Saves := preload("res://ui/saves.gd")
-const PauseMenu := preload("res://ui/pause_menu.gd")
-const SaveSlots := preload("res://ui/save_slots.gd")
+const PauseMenu := preload("res://ui/pause_menu.tscn")
+const SaveSlots := preload("res://ui/save_slots.tscn")
 const NewWorld := preload("res://ui/new_world.gd")
-const InspectPanel := preload("res://ui/inspect_panel.gd")
+const InspectPanel := preload("res://ui/inspect_panel.tscn")
 const SettingsPage := preload("res://ui/settings.gd")
 const MetricsPanel := preload("res://ui/dev/metrics_panel.gd")
 const FieldGuide := preload("res://ui/field_guide/field_guide.tscn")
-const Dialog := preload("res://ui/dialog.gd")
-const Notices := preload("res://ui/notices.gd")
+const Dialog := preload("res://ui/dialog.tscn")
+const Notices := preload("res://ui/notices.tscn")
+const PausedBadge := preload("res://ui/paused_badge.tscn")
+const BusyPanel := preload("res://ui/busy_panel.tscn")
 const THEME := preload("res://ui/theme.tres")
 const SETTINGS := "user://shell.cfg"
 const THUMB := Vector2i(320, 160)
@@ -64,7 +66,7 @@ var tooltip: PanelContainer
 var tooltip_label: Label
 var busy_panel: PanelContainer
 var busy_label: Label
-var paused_label: Label
+var paused_label: Control
 
 ## The player paused the world (Select or P) outside any menu.
 var player_paused := false
@@ -151,33 +153,28 @@ func _build_ui() -> void:
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(ui)
 
-	paused_label = Label.new()
-	paused_label.text = "Paused"
-	paused_label.position = Vector2(16, 12)
+	# The neon screens (ui/*.tscn) carry ui/neon/neon_theme.tres themselves; the picker,
+	# Settings and the dev metrics keep the dev theme above.
+	paused_label = PausedBadge.instantiate()
 	paused_label.visible = false
 	ui.add_child(paused_label)
 
-	inspect = InspectPanel.new()
+	inspect = InspectPanel.instantiate()
 	inspect.shell = self
 	inspect.closed.connect(_on_inspect_closed)
 	ui.add_child(inspect)
 
-	busy_panel = PanelContainer.new()
-	busy_panel.theme_type_variation = &"Tip"
-	busy_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	busy_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	busy_panel.grow_vertical = Control.GROW_DIRECTION_BOTH
+	busy_panel = BusyPanel.instantiate()
 	busy_panel.visible = false
-	busy_label = Label.new()
-	busy_label.add_theme_font_size_override("font_size", 22)
-	busy_panel.add_child(busy_label)
+	busy_label = busy_panel.get_node("Margin/Text")
 	ui.add_child(busy_panel)
 
-	menu = PauseMenu.new()
+	menu = PauseMenu.instantiate()
+	menu.shell = self
 	menu.chosen.connect(_on_menu)
 	ui.add_child(menu)
 
-	slots = SaveSlots.new()
+	slots = SaveSlots.instantiate()
 	slots.shell = self
 	slots.back.connect(func(): close_screen(slots))
 	ui.add_child(slots)
@@ -204,7 +201,8 @@ func _build_ui() -> void:
 	guide.show_in_world.connect(_on_show_in_world)
 	ui.add_child(guide)
 
-	dialog = Dialog.new()
+	dialog = Dialog.instantiate()
+	dialog.shell = self
 	ui.add_child(dialog)
 
 	# On top of everything: the hover tooltip and the notices.
@@ -216,7 +214,8 @@ func _build_ui() -> void:
 	tooltip.add_child(tooltip_label)
 	ui.add_child(tooltip)
 
-	notices = Notices.new()
+	notices = Notices.instantiate()
+	notices.shell = self
 	ui.add_child(notices)
 
 
