@@ -20,6 +20,7 @@ pub mod create;
 pub mod feed;
 pub mod founders;
 pub mod founding;
+pub mod guide;
 pub mod hook;
 pub mod params;
 mod session;
@@ -29,6 +30,8 @@ pub mod vitals;
 
 #[cfg(test)]
 mod feed_tests;
+#[cfg(test)]
+mod guide_tests;
 #[cfg(test)]
 mod tests;
 

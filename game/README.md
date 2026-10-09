@@ -175,6 +175,16 @@ header's tooltip is the column's meaning and unit. Rows start fresh at each load
 `tests/metrics_test.gd -- --open SAVE` checks it headless (without `--open` it founds a
 terrarium first); with `--shots DIR` under `scripts/hidden.sh` it takes two pictures.
 
+**Field guide** (G, the pad's Y, or the pause menu's Field guide; back or Esc closes it to
+where it was opened; it never changes the pause state): `ui/field_guide/field_guide.tscn`,
+laid out in the editor from `ui/neon/` and opened there it shows round 3's Lanternjaw page.
+The order, swatches and text come from `data/field_guide.md`; sizes, diets, prey and
+eaten-by from `query("guide")` (the running world's config,
+`crates/cubarium-session/src/guide.rs`); counts from `populations`, the 36 bars from
+`history`, the clock from `clock`. List rows and chips are `species_row.tscn` and
+`species_chip.tscn`; plates come from `scripts/make-field-guide-plates.sh`. Inside it the
+pad's Y is Show in world. `tests/guide_test.gd -- --open SAVE [--shots DIR]` checks it.
+
 `tests/quit_test.gd -- --saves DIR --at draw|founding|running [--via menu|tree]` quits while
 terrains are drawn, while the pick is founded, or with a world running. **Every test here
 must exit 0, not 139**: the extension stops and joins its own threads before Godot unloads
@@ -250,7 +260,7 @@ a String (up to 18446744073709551615) or a non-negative int.
 | `command(line: String)` | the console (`p`, `s N`, `speed X`, `r`, `i X Y Z`, …) |
 | `pause()` `resume()` `set_speed(x: float)` `step(n: int)` | run control |
 | `status() -> Dictionary` | `running`, `paused`, `speed`, `tick`, `generation`, `loading`, `saving`, `label`, `last_error`, `step_ms`, `feed_ms` |
-| `query(name: String, args) -> Variant` | `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`, `animal` `{id}`, `history` `{since}`, `species`, `status`, `candidates`, `founding`, `spec` `{spec}` (its landform kind, `water_level_m` and the water steps), `saves` `{dir}`; `{"error": …}` on a refusal |
+| `query(name: String, args) -> Variant` | `summary`, `clock`, `environment`, `populations`, `run`, `snapshot`, `animals`, `animal` `{id}`, `history` `{since}`, `guide` (per species: body, diet with sources, prey, height, eaten-by, from the running world's config), `species`, `status`, `candidates`, `founding`, `spec` `{spec}` (its landform kind, `water_level_m` and the water steps), `saves` `{dir}`; `{"error": …}` on a refusal |
 | `take_view() -> Dictionary` | see below |
 | `take_events() -> Array` | life events since the last take: `tick`, `animal`, `kind` (born, meal, kill, injured, died, …) and the kind's fields |
 | `take_notices() -> Array` | console replies; `saved`/`save_failed`/`loaded`/`load_failed` with `path` and `meta` |
