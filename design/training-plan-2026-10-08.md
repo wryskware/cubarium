@@ -459,6 +459,24 @@ control and the reward accounting; display targets after seeing results.
    - At least, a config change should bump the schema, so the loader refuses cleanly.
 10. **The real ecology genome** for `eco_search.py`: which levers to search (Astra: 6–12
     related genes at first). That's Wrysk's call; only a 3-gene smoke genome exists.
+    FOOD-BUDGET (`design/7_Research/food-budget-2026-10-08.md`) measured the supply:
+    - Animals eat 0.17 % of what plants fix. Browsers eat 0.33 % of the foliage made,
+      shredders 0.03 % of the litter.
+    - Cropped foliage refills in 2–4 min. Leaves live 6–29 min.
+    - Gut ceilings are 18–45× upkeep; real animals manage about 3–7×.
+    - A frondgrazer needs to travel 0 m/h today.
+
+    Recommended genes, in order: plant defence per bite (×1–30; it penalises parking and leaves
+    total supply alone), defence half-life, the plant clock (`@bio_rate`) or browser body mass
+    (never both), senescence, fruit, graze refuge, nectar, glowcap foliage. Movement stays out
+    of the objective.
+
+    **World-model questions that come before any search** (Shape the situation):
+    - plants run on a clock about 300–500× the animals';
+    - a turf face holds about 4,000× natural stock density;
+    - a fruit crop eaten out refills at once (by design, plants-flowering-vines 2026-10-03, so
+      a picked bush feeds forever);
+    - no litter decomposer role exists (Q11).
 11. **Shredders by day?** The heuristic shredder is DarkActive. It sleeps while its face is
     lit, so adults lay about one egg per 2 h. Option: litter cover counts as dark, or a
     shredder on food stays awake. Visible effect: shredders feed by day and eggs roughly
