@@ -206,6 +206,14 @@ class Ec2Pool:
         return elapsed_h, elapsed_h * float(info.get("spot_usd_h", 0))
 
     def down(self, reason):
+        # Save what the host has before terminating it (best effort; spot loss can't).
+        for row in self.on_ec2():
+            try:
+                job = self.d.job(row["job"])
+                view = job.tasks[row["name"]]
+                self.d.transports["ec2"].get(self.d.remote_out(self.host, job, view), view.out, timeout=240)
+            except Exception as error:  # noqa: BLE001
+                self.d.events.emit("ec2-error", task=row["name"], job=row["job"], reason=f"fetch before down: {error}")
         done = self.script("down", timeout=300)
         hours, usd = self.cost()
         if done.returncode:
