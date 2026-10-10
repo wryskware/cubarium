@@ -11,7 +11,7 @@
 //! until every adult pays `1 / water_mineral`) with the survivors' spacing.
 //!
 //! ```text
-//! cargo run --release -p cubarium --example shade_probe -- --save DIR [--config FILE] [--wm 0.6]
+//! cargo run --release -p cubarium --example shade_probe -- --save DIR [--config FILE] [--wm 0.6] [--build-config]
 //! ```
 
 use std::path::PathBuf;
@@ -34,12 +34,14 @@ fn main() -> Result<()> {
     let mut config = PathBuf::from("config/desktop/terrarium-wide.toml");
     let mut save = None::<PathBuf>;
     let mut wm = 1.0f64;
+    let mut build_config = false;
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
         match k.as_str() {
             "--config" => config = it.next().context("--config FILE")?.into(),
             "--save" => save = Some(it.next().context("--save DIR")?.into()),
             "--wm" => wm = it.next().context("--wm X")?.parse()?,
+            "--build-config" => build_config = true,
             _ => anyhow::bail!("unknown argument {k}"),
         }
     }
@@ -56,6 +58,13 @@ fn main() -> Result<()> {
         c.width, c.height, c.depth, fc.light_extinction_k
     );
     let old: Vec<f64> = flora.view().stands.iter().map(|s| s.light).collect();
+    if build_config {
+        // The save's stands under this build's defaults (crowns, profiles, every knob),
+        // not the config the save ran.
+        flora.set_config_rebinned(cubarium_voxel_flora::FloraConfig::for_voxel_size(voxel_m));
+        println!("plant config: this build's defaults (--build-config)");
+    }
+    let fc = flora.config().clone();
     flora.refresh_founder_light(&world);
     let pays = |f: &Flora, i: usize, l: f64| {
         // At full foliage (`α · W`): whether the light lets a whole crown pay, not whether a

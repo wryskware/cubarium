@@ -5985,6 +5985,18 @@ impl Flora {
         self.crowns = CrownCache::default();
     }
 
+    /// **Run the saved stands under another plant config** (a probe's diagnostic,
+    /// SHADE-REAL): the config replaced, every stand's foliage re-binned into the new
+    /// profile's layers, the crown cache dropped. For reading a save under this build's
+    /// geometry; a world that will run on is loaded the ordinary way.
+    pub fn set_config_rebinned(&mut self, config: FloraConfig) {
+        self.config = config;
+        for s in &mut self.stands {
+            s.bin_layers(&self.config);
+        }
+        self.crowns = CrownCache::default();
+    }
+
     /// Publish founding light without advancing the ecological clock or any stock.
     pub fn refresh_founder_light(&mut self, world: &World) {
         let light = step::founder_light(&self.config, &self.stands, world);
