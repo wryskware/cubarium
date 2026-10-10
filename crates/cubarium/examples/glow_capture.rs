@@ -550,6 +550,7 @@ fn main() -> Result<()> {
     let mut tracked_set: HashSet<Cell> = tracked.iter().copied().collect();
     let mut last_event: HashMap<Cell, u64> = HashMap::new();
     let mut prev: [HashMap<Cell, (f64, f64)>; 2] = [HashMap::new(), HashMap::new()];
+    let mut last_sat: [Option<Sat>; 2] = [None, None];
     let mut steps = [Steps::default(); 2];
     let (mut ms, mut n_events) = ([0.0f64; 2], 0usize);
     let fade_s = if a.colour { cfg_b.light.colour_fade_s } else { cfg_b.light.emit_fade_s };
@@ -616,6 +617,13 @@ fn main() -> Result<()> {
             for &c in &tracked {
                 let (own, around) = rects(&proj, c, s);
                 let Some((mo, ma)) = sat.means(own, around) else { continue };
+                // A cell first followed this frame is measured against the frame before,
+                // so the step its own event drew is counted.
+                if !prev[j].contains_key(&c)
+                    && let Some(m) = last_sat[j].as_ref().and_then(|l| l.means(own, around))
+                {
+                    prev[j].insert(c, m);
+                }
                 if let Some(&(po, pa)) = prev[j].get(&c) {
                     let (dot, da) = ((mo - po).abs(), (ma - pa).abs());
                     let st = &mut steps[j];
@@ -636,6 +644,7 @@ fn main() -> Result<()> {
                 }
                 prev[j].insert(c, (mo, ma));
             }
+            last_sat[j] = Some(sat);
         }
         if let Some(f) = &mut log {
             writeln!(
