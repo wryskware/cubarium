@@ -1009,6 +1009,14 @@ control and the reward accounting; display targets after seeing results.
      predation, capgnawer/shredder breeding, lanternjaw maturation, woods), then pin worlds at target
      and measure drift (thin=), fit per-lineage responses, confirm, year check. About 320 core-h
      against about 1,150 for 12 CMA generations. Awaiting Wrysk's go.
+   - Plan approved (Wrysk, 2026-10-09: "i like the new plan. can do some ec2 with it to accellerate").
+     Running: start-world library on main (`runs/library-2026-10-09`, 8 wide × 10 h), NEST-SPEED
+     (Codex), P2/P3 probes. DRIFT-READOUT merged 35317bcb (`drift=FROM:TO`, `scripts/studies/drift.py`).
+     Roles doc: `design/ecology-roles-2026-10-09.md` (3a24ff42).
+   - Role call 1, loftstrider (Wrysk, 2026-10-09): A+B, a breeding season plus grown young leaving an
+     over-size family, with the condition that leaving must not sink world resources: the leaver's
+     matter goes to litter where it leaves. DISPERSAL (Codex) building; Veilhound dispersal built but
+     off until role call 2.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;

@@ -178,6 +178,9 @@ fn founder_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     let fraction = Range::fraction();
     vec![
+        r("dispersal.group_max", "bodies", nonneg, "closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count"),
+        r("dispersal.enabled", "switch", fraction, "closed-world dispersal switch (false by default; true enables it)").optional(),
+        r("dispersal.at", "transition", nonneg, "closed-world dispersal transition: adult (breeding size) or independent (pack pup age)").optional(),
         r("motor_respiration_per_s", "org-units/s per unit body at full cruise", nonneg, "paid motion")
             .search(2e-5, 1e-2).log().grade("B"),
         r("step_up_m", "m", nonneg, "tallest riser stepped (rounded down to voxels)")

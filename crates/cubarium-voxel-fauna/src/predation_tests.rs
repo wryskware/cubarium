@@ -625,3 +625,31 @@ fn a_wound_heals_at_the_set_rate_paying_reserve_and_the_speed_cap_follows_it() {
         "wounded 0.5 it walked {ratio} of the whole grazer's distance, not {want}"
     );
 }
+
+/// Optional census instrumentation retains the actual prey mass at each booking.
+#[test]
+fn census_predation_matches_the_funnel_and_keeps_prey_mass() {
+    let (world, mut flora, mut fauna) = arena(Some(0.0), 2);
+    fauna.set_census_readout(true);
+    let (lj, prey, feed) = striker_and_prey(&mut fauna, &world, Founder::Browser,
+        StartingStores { body: 0.3, reserve: 1.0 }, IN_CAPSULE_M, WEST);
+    feed.store(true, Ordering::Relaxed);
+    step_until(&mut fauna, &world, &mut flora, 40, |f| f.ledger.strikes_by_founder[Founder::Lanternjaw.index()] > 0).expect("strike begins");
+    let before = animal(&fauna, prey).body;
+    crate::step::apply_hit(&mut fauna, &mut flora, prey, 1.0, Founder::Lanternjaw);
+    assert!(fauna.view().animal(prey).is_none());
+    let r = fauna.census_readout().unwrap();
+    assert_eq!(r.introduced[Founder::Browser.index()], 1);
+    assert_eq!(r.introduced[Founder::Lanternjaw.index()], 1);
+    let events = &r.predation;
+    let kills: Vec<_> = events.iter().filter(|e| e.kill).collect();
+    assert_eq!(kills.len(), 1);
+    let kill = kills[0];
+    assert_eq!(kill.predator, animal(&fauna, lj).founder.unwrap());
+    assert_eq!(kill.prey, Founder::Browser);
+    assert_eq!(kill.prey_body, before);
+    for stage in [crate::perception::STRUCK, crate::perception::KILLED] {
+        let count = events.iter().filter(|e| e.kill == (stage == crate::perception::KILLED)).count() as u64;
+        assert_eq!(count, fauna.ledger.funnel[Founder::Lanternjaw.index()][Founder::Browser.index()][stage]);
+    }
+}
