@@ -166,3 +166,30 @@ Tests: none new (a bake and a default); run `cubarium-voxel-flora` and `cubarium
 (each under `timeout 270`, detached if longer) and report failures without re-pinning.
 Return: commits, thresholds, cells per state and variant, picture and .glb paths. Stop
 before merge.
+
+## Round 4b (2026-10-10): the 2-shelf barest variant, two medium shelves
+
+Round 4 is on branch `vault-states` (1d7a02c5, unmerged; its full rebake was stopped by
+the parent before it finished, so `assets/` is not rebaked yet). Wrysk kept the 0/1/2
+barest variants and asked: "can the 2S tree be like two medium shelves instead of the big
+one at the top and medium one at the side? choose like a different branch for a medium or
+small shelf."
+
+Today b0-2 variant 2 keeps shelves {0, 6} of `VAULT_SHELVES` (0 is the big crowning shelf,
+ph 190; 6 is medium, ph 115, right side). My pick: **{2, 6}**: shelf 2 (ph 140, left, high)
+and shelf 6 (ph 115, right, mid), two medium shelves on opposite sides of the trunk. Both
+are in b6's set {0, 2, 4, 6, 8, 10}, so every state still contains the thinner states'
+cells. Variants 0 (none) and 1 (the crowning shelf) stay.
+
+Make the barest state's kept shelves explicit per variant (e.g. a `shelves` list per
+variant in the state's spec, picked by variant in the bake as `shelf_fill` lists are),
+rather than the evenly spaced rule. Check in the picture that 2 and 6 hang from different
+limbs; if they share one, pick the nearest medium pair from b6's set that doesn't, and say
+which.
+
+Then: merge main into the branch first (main has the drape cords now, so the pictures show
+cords; `voxel_specimens.rs` may conflict with the drape tooling, keep both), re-run the
+round-4 pictures for the barest state (lone v0/v1/v2, the barest groves, the 15-tree mixed
+grove), re-export `vaulttree-shipped-b0-2-v2.glb` and rebuild the .blend, then relaunch
+the full rebake and its checks detached (`runs/bake.sh` then `runs/after-bake.sh`, which
+writes `runs/after-bake-DONE`) and hand back. Return as round 4.
