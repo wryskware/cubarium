@@ -213,6 +213,17 @@ def bone_of(start, name):
         ob["bone"] = name
 
 
+def own_cell(start, group, slots=None):
+    """Every organism part built since `start` (of material slot in `slots`, or all) is
+    one part `group` that keeps a cell of its own on its bone, the way an eye keeps its
+    accent cell: the bake gives it one when the voxelizer left it none
+    (`bake_voxel_models.voxelize_animal`). For a rigged part too small to own a cell that
+    the clip must show moving (FEED-ROLLOUT: the seedporter's fruit hands)."""
+    for ob in L.ORG[start:]:
+        if slots is None or slot_of(ob.data.materials[0].name) in slots:
+            ob["own_cell"] = group
+
+
 def bone_ahead(start, x, name):
     """Every organism part built since `start`: what lies ahead of `x` (reference metres,
     +x forward) belongs to rig bone `name`, what lies behind to the part's own bone. For a
@@ -1192,6 +1203,9 @@ def sp_body(spec):
         n0 = len(L.ORG)
         sp_digits(sw, (spec["fruit"] - sw).normalized(), Vector((0, 0, 1)), 3, 0.022, 0.01, 0.004)
         bone_of(n0, f"hand_{side}")
+        # the hand keeps a cell of its own, so the reach and pluck show (Wrysk 2026-10-10:
+        # "give them a voxel")
+        own_cell(n0, f"hand_{side}", {"a_main"})
         frame["arms"][side] = (ss, se, sw, m(spec["small_pole"]))
         # the hind legs, and their feet
         hp = m(spec["hip"])
@@ -1212,6 +1226,7 @@ def sp_body(spec):
     n0 = len(L.ORG)
     ell(spec["fruit"], (0.028, 0.028, 0.03), c("a_fruit"))
     bone_of(n0, "hand_l")
+    own_cell(n0, "fruit")
     frame["fruit"] = Vector(spec["fruit"])
     # the long prehensile tail, its dorsal stripe along the outside
     pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]

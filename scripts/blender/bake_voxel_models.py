@@ -572,7 +572,49 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
             if bones is not None:
                 c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
                 bones[key] = A.part_bone(bone, c)
+    if bones is not None:
+        own_cells(objs, vox, cells, bones)
     return cells
+
+
+def own_cells(objs, vox, cells, bones):
+    """A rig's own-cell parts (`animal_models.own_cell`): each group left without a cell
+    of its material on its bone claims one, as an eye claims its accent cell. The cell its
+    centre is in, or, while that holds another bone's part, the next one ahead (+x, the
+    way the model faces), so the claimed cell sits in front of the body. The groups go
+    from the most central (across, y) out, and one whose cell another group has taken
+    steps sideways toward its own side, so a pair beside a middle part stays a pair."""
+    groups = {}
+    for ob in objs:
+        if "own_cell" in ob:
+            groups.setdefault(ob["own_cell"], []).append(ob)
+    if not groups:
+        return
+    centre = {}
+    for g, obs in groups.items():
+        vs = [v.co for ob in obs for v in ob.data.vertices]
+        lo = Vector(min(v[k] for v in vs) for k in range(3))
+        hi = Vector(max(v[k] for v in vs) for k in range(3))
+        centre[g] = (lo + hi) / 2
+    mid = sum((p.y for p in centre.values())) / len(centre)
+    claimed, todo = {}, []
+    for g in sorted(groups, key=lambda g: abs(centre[g].y - mid)):
+        ob, p = groups[g][0], centre[g]
+        slot, bone = A.slot_of(ob.data.materials[0].name), A.part_bone(ob, p)
+        have = [key for key in cells if cells[key] == slot and bones.get(key) == bone]
+        if have:
+            claimed.update((key, g) for key in have)
+        else:
+            todo.append((g, p, slot, bone))
+    for g, p, slot, bone in todo:
+        i, j, k = (math.floor(p[a] / vox) for a in range(3))
+        while (i, j, k) in cells and bones.get((i, j, k)) != bone and (i, j, k) not in claimed:
+            i += 1
+        side = 1 if p.y >= mid else -1
+        while (i, j, k) in claimed:
+            j += side
+        claimed[(i, j, k)] = g
+        cells[(i, j, k)], bones[(i, j, k)] = slot, bone
 
 
 def animal_cells(objs, vox, floor=0):

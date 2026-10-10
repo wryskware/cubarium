@@ -5093,20 +5093,20 @@
    ]
   },
   "seedporter-stand": {
-   "bytes": 276,
+   "bytes": 299,
    "bins": [
     {
      "length_m": 0.31,
-     "cells": 39
+     "cells": 42
     }
    ]
   },
   "seedporter-ground": {
-   "bytes": 289,
+   "bytes": 299,
    "bins": [
     {
      "length_m": 1.14,
-     "cells": 40
+     "cells": 42
     }
    ]
   },
