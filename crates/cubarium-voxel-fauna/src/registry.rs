@@ -657,6 +657,8 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
+        t("capgnawer_stay_worth", "fraction of a full cap bite", fraction, "the capgnawer holds still to feed only on food whose bite tastes at least this worth; weaker food it eats on the move (CAPGNAWER-CAPS)")
+            .search(0.05, 0.9),
         t("press_replan_s", "s", nonneg, "a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE)").search(1.0, 10.0),
         t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
         t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),

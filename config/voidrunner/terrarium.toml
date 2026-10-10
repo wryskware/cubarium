@@ -83,11 +83,17 @@ core.reproduction.egg_fungus_radius_m = 0.5
 core.reproduction.clutch_hold_max_s = 1800.0
 # Role call 5A (Wrysk 2026-10-10, ROLES5): caps are its real food. Litter yields it a
 # twentieth of a cap (0.025 against the caps' 0.5, was 0.25), so it lives at the glowcaps,
-# lays there, and its numbers follow theirs; it weighs its foods by yield
-# (`taste_by_yield`), so ordinary litter tastes under its feed gate and the fungal scent
-# leads it on.
+# lays there, and its numbers follow theirs. It weighs its foods by the worth of a bite
+# (`taste_by_yield`): a bite saturates in stock, so litter tastes a twentieth of a cap
+# however deep the pile (CAPGNAWER-CAPS).
 yield_by_food.litter = 0.025
 taste_by_yield = true
+
+[fauna.teachers]
+# CAPGNAWER-CAPS: the capgnawer holds still to feed only on food worth a quarter of a full
+# cap bite (caps down to a third of their bite half-stock); its litter it eats on the move
+# while the fungal scent leads it on. Plausible, untuned.
+capgnawer_stay_worth = 0.25
 
 [fauna.founders.loftstrider]
 founding_count = 2
