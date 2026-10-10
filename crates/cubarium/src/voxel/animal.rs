@@ -88,6 +88,14 @@ pub(super) fn hunker_cells<'l>(
     lib.specimen(model::hunker_model(founder)?)?.select(length)
 }
 
+/// The cells of `animal`'s baked rider model ([`model::rider_model`]) while it rides a
+/// host: one bin, one size from hatching to drop-off. `None` for a body not riding, a
+/// lineage with no rider model, or a library without it.
+pub(super) fn rider_cells<'l>(lib: &'l ModelLibrary, animal: &Animal) -> Option<&'l [ModelCell]> {
+    animal.attached?;
+    lib.specimen(model::rider_model(animal.founder?)?)?.select(f64::INFINITY)
+}
+
 /// What a model body is posed by this rebuild: its sleep, idle and hunker weights (each
 /// with its rate), and its baked hunker while it hunkers.
 #[derive(Clone, Copy, Default)]

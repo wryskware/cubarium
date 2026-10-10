@@ -943,6 +943,31 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
     })
 }
 
+/// A rider drawn as its lineage's baked rider model ([`animal::rider_cells`]) at `at` (its
+/// host's feet lifted by `rider_lift`), facing `heading`, painted as a founder's model is
+/// (`animal::model_colours`). Under the animal's body key, so its drop-off to the free
+/// juvenile's model is the track's model-swap fade.
+fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models: &mut FigureModels, flash: f32, emission: bool) -> Option<Spec> {
+    let cells = animal::rider_cells(lib, a)?;
+    let founder = a.founder?;
+    let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None))?;
+    let starving = animal::is_starving(a);
+    let wounded = animal::is_wounded(a) && !starving;
+    let palette = models
+        .info(model)
+        .paints
+        .iter()
+        .map(|p| match *p {
+            Paint::Coat { material, band, accent } => {
+                let (style, emit) = animal::model_colours(founder, material, band, accent, starving, wounded, flash);
+                PaletteEntry { base: style.wood, emit: emit.filter(|_| emission).map(srgb_linear) }
+            }
+            Paint::Style | Paint::Flat => PaletteEntry::default(),
+        })
+        .collect();
+    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None })
+}
+
 /// Every animal of `fauna` as figures, after [`Animals::rebuild_without_living`] moved the
 /// pose and flash memory on to this tick. `lib` is the baked models (or `None` for the
 /// dev-mode glyphs).
@@ -974,6 +999,12 @@ pub fn specs(
             };
             let mut at = feet(host, v);
             at[1] += f64::from(lift);
+            // Its baked larva, where the library has one: on the host's centre line, facing
+            // the host's heading, in its lineage's coat. Else the glyph.
+            if let Some(s) = lib.and_then(|lib| larva_spec(a, lib, at, host.pose.heading_rad, models, flash, emission)) {
+                out.push(s);
+                continue;
+            }
             if let Some(mut s) = glyph_spec(a, &fauna, v, at, models, flash) {
                 if let Orient::Ground(_) = s.orient {
                     s.orient = Orient::Ground(host.pose.heading_rad);
@@ -1827,3 +1858,7 @@ mod tests {
         assert_eq!(pick.nearest(30, 24, 5.0), None);
     }
 }
+
+#[cfg(test)]
+#[path = "rider_tests.rs"]
+mod rider_tests;

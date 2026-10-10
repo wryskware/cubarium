@@ -1751,6 +1751,15 @@
      "cells": 13
     }
    ]
+  },
+  "lanternjaw-larva": {
+   "bytes": 94,
+   "bins": [
+    {
+     "length_m": 0.57,
+     "cells": 6
+    }
+   ]
   }
  },
  "specimens": {
@@ -1763,6 +1772,7 @@
   "loftstrider": "loftstrider.cvm",
   "seedporter-stand": "seedporter-stand.cvm",
   "seedporter-ground": "seedporter-ground.cvm",
-  "seedporter-glide": "seedporter-glide.cvm"
+  "seedporter-glide": "seedporter-glide.cvm",
+  "lanternjaw-larva": "lanternjaw-larva.cvm"
  }
 }
