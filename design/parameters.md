@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2789 rows)
+**`fauna.*`** (2822 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1515,7 +1515,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.frondgrazer.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.frondgrazer.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.frondgrazer.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.frondgrazer.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.frondgrazer.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1537,6 +1537,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.frondgrazer.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.frondgrazer.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.frondgrazer.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.frondgrazer.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.frondgrazer.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.frondgrazer.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -1548,7 +1551,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.littershredder.core.body_min` | 0.09375 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.littershredder.core.birth_body` | 0.375 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.littershredder.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1570,6 +1573,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.littershredder.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.littershredder.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.littershredder.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.littershredder.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.littershredder.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -1834,7 +1840,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.frondgrazer.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.frondgrazer.core.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.frondgrazer.core.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.frondgrazer.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1856,6 +1862,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.frondgrazer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.frondgrazer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.frondgrazer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2120,7 +2129,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00030000000000000003 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.lanternjaw.core.body_min` | 0.0525 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.lanternjaw.core.birth_body` | 0.3675 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2142,9 +2151,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.lanternjaw.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 1800.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
-| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.5 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.75 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
@@ -2199,7 +2211,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2406,7 +2418,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.capgnawer.core.body_max` | 0.6384 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.capgnawer.core.growth_max_per_s` | 0.00017364479999999998 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.capgnawer.core.growth_max_per_s` | 0.00017364479999999998 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.capgnawer.core.body_min` | 0.1596 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.capgnawer.core.birth_body` | 0.6384 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.capgnawer.core.birth_cost` | 0.3192 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2428,6 +2440,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.capgnawer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.capgnawer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.capgnawer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2692,7 +2707,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.loftstrider.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.loftstrider.core.body_max` | 5.28 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.loftstrider.core.growth_max_per_s` | 0.0010032 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.loftstrider.core.growth_max_per_s` | 0.0010032 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.loftstrider.core.body_min` | 0.528 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.loftstrider.core.birth_body` | 3.168 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.loftstrider.core.birth_cost` | 1.056 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2714,6 +2729,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.loftstrider.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.loftstrider.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.loftstrider.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2978,7 +2996,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.ripple-snail.core.body_max` | 0.1455552 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.ripple-snail.core.body_min` | 0.0363888 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.ripple-snail.core.birth_body` | 0.1455552 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.ripple-snail.core.birth_cost` | 0.0727776 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3000,6 +3018,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.ripple-snail.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.ripple-snail.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.ripple-snail.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3264,7 +3285,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.bellwing.core.body_max` | 0.03 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.bellwing.core.body_min` | 0.003 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.bellwing.core.birth_body` | 0.015 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.bellwing.core.birth_cost` | 0.015 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3286,6 +3307,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.bellwing.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.bellwing.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.bellwing.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.bellwing.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 300.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.bellwing.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3550,7 +3574,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.seedporter.core.body_max` | 0.35555555555555557 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.seedporter.core.growth_max_per_s` | 0.00006755555555555557 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.seedporter.core.growth_max_per_s` | 0.00006755555555555557 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.seedporter.core.body_min` | 0.035555555555555556 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.seedporter.core.birth_body` | 0.21333333333333335 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.seedporter.core.birth_cost` | 0.07111111111111111 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3572,6 +3596,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.seedporter.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.seedporter.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.seedporter.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.seedporter.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.seedporter.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.seedporter.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3836,7 +3863,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.chorister.core.body_max` | 2.7439999999999998 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.chorister.core.body_min` | 0.26655999999999996 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.chorister.core.birth_body` | 1.6463999999999996 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.chorister.core.birth_cost` | 0.5331199999999999 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3858,6 +3885,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.chorister.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.chorister.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.chorister.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.chorister.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.chorister.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.chorister.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -4293,10 +4323,13 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founding.accept_founder_hours` | 1.0 | founder-hours | [0, inf) | 0.1–6 | - | placeholder | founder-hours of adult upkeep a component's stock must cover per founder |
 | `fauna.founding.clearance_margin_m` | 0.03 | m | [0, inf) |  | - | placeholder | slack added to the founder's disc radius when choosing where founders may be placed |
 | `fauna.founding.reference_land_m2` | 0.0 | m2 | [0, inf) |  | - | decision | dry support area the founding counts are written for; positive scales counts and plant founder caps by the world's own area (0: counts as written) |
-| `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
+| `fauna.hatch_chance_per_dusk` | 0.6666666666666666 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
-| `fauna.parasite_take_body_per_day` | 2.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
-| `fauna.parasite_host_bear_per_day` | 0.5 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
+| `fauna.parasite_take_body_per_day` | 4.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
+| `fauna.parasite_host_bear_per_day` | 1.8 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
 | `fauna.parasite_detach_body_fraction` | 0.28 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
+| `fauna.parasite_switch` | (absent) | switch | [0, 1] |  | N | decision | LJ-HOSTSWITCH: a rider that outgrew its host below drop-off size looks for one that bears it before going free (false: it goes free) |
+| `fauna.parasite_switch_radius_m` | 3.0 | m | [0, inf) | 1–8 | N | placeholder | LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it |
+| `fauna.parasite_switch_give_up_s` | 600.0 | s | [0, inf) | 60–3600 log | N | placeholder | LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free |
 | `fauna.lineage_body_ceiling` | 2500 | bodies | [0, inf) |  | N | decision | COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off) |

@@ -508,6 +508,9 @@ fn the_gut_ceiling_and_mass_exponent_are_the_sims_digestion() {
             cfg.founders[f.index()].gut.s0 = 0.9;
             cfg.founders[f.index()].gut.mass_exponent = e;
             cfg.founders[f.index()].core.lifespan_median_s = 0.0;
+            // Isolate digestion at the same body size in both layers. Growth changes
+            // the sim's throughput during the one-second comparison.
+            cfg.founders[f.index()].core.growth_max_per_s = 0.0;
             let ph = *cfg.founder(f);
             let food = ph.diet.foods().next().unwrap();
             let mut per_body = Vec::new();

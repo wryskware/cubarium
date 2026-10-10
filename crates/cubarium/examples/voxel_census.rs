@@ -138,6 +138,8 @@
 
 #[path = "support/census_drift.rs"]
 mod census_drift;
+#[path = "support/sp_shredder_probe.rs"]
+mod sp_shredder_probe;
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -898,6 +900,7 @@ fn run(
     let mut vitals_time = std::time::Duration::ZERO;
     let first_tick = tick;
     let mut steer_log = SteerLog::from_env(sim);
+    let mut shredder_probe = sp_shredder_probe::Probe::new(sim);
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
@@ -908,6 +911,9 @@ fn run(
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if tick % u64::from(TICK_HZ) == 0 {
+            if let Some(p) = shredder_probe.as_mut() { p.sample(sim); }
+        }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -981,6 +987,7 @@ fn run(
     }
     if let Some(d) = &mut drift { d.finish(sim, tick).unwrap_or_else(|e| panic!("{e}")); }
     weather.summary(sim);
+    if let Some(p) = shredder_probe { p.report(sim); }
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
     vine.summary(sim, summary_start);
@@ -991,21 +998,28 @@ fn run(
     let shredder_intake: f64 = ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
     eprintln!("decay probe: shredder_intake_organic={shredder_intake:.6}");
     // ROLES5: the egg-laying refusals, last in err.log.
-    eprintln!("{}", lay_refusal_line(sim.fauna().lay_refusals_by_founder(), &ledger.nest_refusals_by_founder));
+    eprintln!(
+        "{}",
+        lay_refusal_line(sim.fauna().lay_refusals_by_founder(), &ledger.nest_refusals_by_founder, &sim.fauna().nest_seek_tally())
+    );
 }
 
 /// ROLES5's readout of why egg-layers did not lay (never scored), one line: per lineage
 /// held at any gate since load, the body-seconds a breeding-size body was held at each of
 /// `lay`'s gates ([`cubarium_voxel_fauna::LAY_GATES`]: surplus hold, interval, clutch wait,
-/// wall, egg site, crowded nest with its retry wait) and the crowded-nest refusals, events.
+/// wall, egg site, crowded nest with its retry wait, on a walk off a crowded nest) and the
+/// crowded-nest refusals, events; then SHREDDER-NEST's walks off a crowded nest since load
+/// (`walk_offs` begun, `walk_lays` ended by a clutch, `give_ups`).
 fn lay_refusal_line(
     held: &[[u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT],
     refusals: &[u64; Founder::COUNT],
+    seek: &[cubarium_voxel_fauna::NestSeekTally; Founder::COUNT],
 ) -> String {
     let mut parts = Vec::new();
     for f in Founder::ALL {
         let k = f.index();
-        if held[k].iter().all(|&t| t == 0) && refusals[k] == 0 {
+        let t = seek[k];
+        if held[k].iter().all(|&t| t == 0) && refusals[k] == 0 && t == cubarium_voxel_fauna::NestSeekTally::default() {
             continue;
         }
         let gates: Vec<String> = cubarium_voxel_fauna::LAY_GATES
@@ -1013,7 +1027,15 @@ fn lay_refusal_line(
             .zip(held[k])
             .map(|(name, ticks)| format!("{name}={:.0}", ticks as f64 / f64::from(TICK_HZ)))
             .collect();
-        parts.push(format!("{} {} refused={}", f.name(), gates.join(" "), refusals[k]));
+        parts.push(format!(
+            "{} {} refused={} walk_offs={} walk_lays={} give_ups={}",
+            f.name(),
+            gates.join(" "),
+            refusals[k],
+            t.walk_offs,
+            t.walk_lays,
+            t.give_ups
+        ));
     }
     if parts.is_empty() {
         parts.push("none".to_string());
@@ -1934,6 +1956,9 @@ fn print_header() {
     // Parasite hatchlings: riders on a host now, then cumulative riders attached,
     // drop-offs at the detach size and riders freed by their host's departure.
     header.push_str(",riders_now,riders_attached,rider_dropoffs,riders_freed");
+    // LJ-HOSTSWITCH (2026-10-10): outgrown riders that set out for a bigger host, the new
+    // hosts taken and the give-ups (cumulative this session), and those looking now.
+    header.push_str(",host_switch_tried,host_switches,host_switch_gave_up,host_seekers");
     // Flowering and fruiting (plants-flowering-vines 2026-10-03): the latticevine's
     // covered faces (on walls, on undersides) and its spurs by phase, the organic matter
     // in its flowers and beads; bloomcrowns holding nectar and lanternberries hanging
@@ -2193,6 +2218,13 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
     row.push(l.rider_dropoffs.to_string());
     row.push(l.riders_freed.to_string());
     {
+        let t = sim.fauna().host_switches();
+        row.push(t.tried.to_string());
+        row.push(t.made.to_string());
+        row.push(t.gave_up.to_string());
+        row.push(sim.fauna().host_seekers().to_string());
+    }
+    {
         use cubarium_voxel_flora::SpurPhase;
         let faces = f.cover.faces();
         let phase = |p: SpurPhase| faces.iter().filter(|c| c.spur == p).count();
@@ -2424,10 +2456,13 @@ impl DeathLog {
 ///   phase (attach tick, the host's lineage, growth per hour on the host, how it let go
 ///   and at what age), its free phase (strikes begun, the lowest and last reserve as a
 ///   share of body, the largest body, whether it reached `birth_body`), and its death
-///   cause and age.
+///   cause and age. LJ-HOSTSWITCH: `host` is its last host, `first_host` its first, and
+///   `switches` the new hosts it took after outgrowing one; how it let go is of its last.
 /// - `lj_chain:` one summary per run: the summed dusk links, riders, free juveniles,
 ///   adults established, the lineage's strikes, hits, kills, intake and eggs laid over
-///   the run, and the first link with zero throughput.
+///   the run, the host switches (LJ-HOSTSWITCH: outgrown riders that set out for a bigger
+///   host, new hosts taken, give-ups, ones that grew to drop-off size while looking, and
+///   the new hosts by lineage), and the first link with zero throughput.
 struct LjChain {
     line: f64,
     clock_on: bool,
@@ -2441,6 +2476,7 @@ struct LjChain {
     bodies: std::collections::BTreeMap<u64, LjBody>,
     done: Vec<LjBody>,
     start: cubarium_voxel_fauna::FaunaLedger,
+    start_switch: cubarium_voxel_fauna::HostSwitchTally,
     last_deaths: [u64; Departure::COUNT],
 }
 
@@ -2451,6 +2487,8 @@ struct LjBody {
     rider: bool,
     host_lineage: Option<Founder>,
     host_id: Option<u64>,
+    first_host: Option<Founder>,
+    switches: u32,
     attach_body: f64,
     detach: Option<(&'static str, u64, f64)>,
     strikes: u64,
@@ -2483,6 +2521,7 @@ impl LjChain {
             bodies: Default::default(),
             done: Vec::new(),
             start: fa.ledger.clone(),
+            start_switch: sim.fauna().host_switches(),
             last_deaths: fa.ledger.deaths_by_founder_cause[Founder::Lanternjaw.index()],
         };
         lj.track(sim);
@@ -2615,11 +2654,21 @@ impl LjChain {
                     rider: a.attached.is_some(),
                     host_lineage: host.and_then(|h| h.founder),
                     host_id: host.map(|h| h.id),
+                    first_host: host.and_then(|h| h.founder),
                     attach_body: a.body,
                     min_reserve_share: f64::INFINITY,
                     ..LjBody::default()
                 }
             });
+            // LJ-HOSTSWITCH: an outgrown rider that took a new host rides again.
+            if b.rider && b.detach.is_some() && b.death.is_none() {
+                if let Some(h) = a.attached.and_then(|h| fa.animal(h.host)) {
+                    b.switches += 1;
+                    b.detach = None;
+                    b.host_lineage = h.founder;
+                    b.host_id = Some(h.id);
+                }
+            }
             if b.rider && b.detach.is_none() && a.attached.is_none() {
                 let line = fa.config.parasite_detach_body_fraction
                     * cubarium_voxel_fauna::effective_config(fa.config, a).body_max;
@@ -2698,11 +2747,13 @@ impl LjChain {
             "-".to_string()
         };
         eprintln!(
-            "lj_body: id={} born_min={:.1} host={} rider={} growth_per_h={} attach_body={:.5} \
+            "lj_body: id={} born_min={:.1} host={} first_host={} switches={} rider={} growth_per_h={} attach_body={:.5} \
              strikes={} min_reserve_share={} last_reserve_share={:.3} max_body={:.5} adult={} death={} tick={}",
             b.id,
             b.born_tick as f64 / TICKS_PER_MIN as f64,
             b.host_lineage.map_or("-", |f| f.name()),
+            b.first_host.map_or("-", |f| f.name()),
+            b.switches,
             rider,
             growth,
             b.attach_body,
@@ -2743,10 +2794,20 @@ impl LjChain {
         chain.push(("adult", adults as u64));
         chain.push(("bred", eggs_laid));
         let first = chain.iter().find(|(_, c)| *c == 0).map_or("none", |(n, _)| n);
+        let sw = sim.fauna().host_switches();
+        let hosts: Vec<String> = Founder::ALL
+            .iter()
+            .filter_map(|f| {
+                let n = sw.by_host[f.index()] - self.start_switch.by_host[f.index()];
+                (n > 0).then(|| format!("{}:{n}", f.name()))
+            })
+            .collect();
+        let switch_hosts = if hosts.is_empty() { "-".to_string() } else { hosts.join(",") };
         eprintln!(
             "lj_chain: dusks={} viable={} footfall={} unblocked={} host={} drawn={} hatched={} \
              off_dusk_hatches={} riders={} detached={} free_bodies={} adults={} strikes={} hits={} \
-             kills={} intake={:.5} carrion={:.5} eggs_laid={} eggs_died={} first_zero={}",
+             kills={} intake={:.5} carrion={:.5} eggs_laid={} eggs_died={} switch_tried={} switch_made={} \
+             switch_gave_up={} switch_grew={} switch_hosts={} first_zero={}",
             self.dusks,
             self.links[0], self.links[1], self.links[2], self.links[3], self.links[4], self.links[5],
             self.off_dusk_hatches,
@@ -2761,6 +2822,11 @@ impl LjChain {
             l.eaten_carrion_by_founder[k] - s.eaten_carrion_by_founder[k],
             eggs_laid,
             l.eggs_died - s.eggs_died,
+            sw.tried - self.start_switch.tried,
+            sw.made - self.start_switch.made,
+            sw.gave_up - self.start_switch.gave_up,
+            sw.grew - self.start_switch.grew,
+            switch_hosts,
             first,
         );
     }
@@ -3070,17 +3136,27 @@ mod session_summary_tests {
         let mut held = [[0u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT];
         let mut refused = [0u64; Founder::COUNT];
         let k = Founder::Blind.index();
-        held[k] = [1, 2, 3, 4, 5, 6].map(|s| s * u64::from(TICK_HZ));
+        held[k] = [1, 2, 3, 4, 5, 6, 8].map(|s| s * u64::from(TICK_HZ));
         refused[k] = 7;
-        let line = lay_refusal_line(&held, &refused);
+        let mut seek = [cubarium_voxel_fauna::NestSeekTally::default(); Founder::COUNT];
+        seek[k] = cubarium_voxel_fauna::NestSeekTally { walk_offs: 9, walk_lays: 10, give_ups: 11 };
+        let line = lay_refusal_line(&held, &refused, &seek);
         assert!(line.starts_with("lay refusals"), "{line}");
         let name = Founder::Blind.name();
         assert!(
-            line.contains(&format!("{name} surplus=1 interval=2 clutch_wait=3 wall=4 site=5 crowded=6 refused=7")),
+            line.contains(&format!(
+                "{name} surplus=1 interval=2 clutch_wait=3 wall=4 site=5 crowded=6 seeking=8 refused=7 walk_offs=9 walk_lays=10 give_ups=11"
+            )),
             "{line}"
         );
         assert!(!line.contains(Founder::Capgnawer.name()), "a lineage held nowhere is left out: {line}");
-        assert!(lay_refusal_line(&[[0; 6]; Founder::COUNT], &[0; Founder::COUNT]).ends_with("none"));
+        let none = [cubarium_voxel_fauna::NestSeekTally::default(); Founder::COUNT];
+        let zero = [[0; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT];
+        assert!(lay_refusal_line(&zero, &[0; Founder::COUNT], &none).ends_with("none"));
+        // A lineage that only walked off a nest is still listed.
+        let mut walked = none;
+        walked[k].walk_offs = 1;
+        assert!(lay_refusal_line(&zero, &[0; Founder::COUNT], &walked).contains("walk_offs=1"));
     }
 
     #[test]

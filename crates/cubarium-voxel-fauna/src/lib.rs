@@ -98,6 +98,8 @@ mod flight_tests;
 #[cfg(test)]
 mod seedporter_tests;
 #[cfg(test)]
+mod sp_shredder_tests;
+#[cfg(test)]
 mod roost_rain_tests;
 mod flight;
 /// FLUSH (HUNT-ESCAPE): a flyer's escape from a hunter it senses coming.
@@ -1411,8 +1413,9 @@ pub fn rider_take_per_s(config: &FaunaConfig, rider_body: f64) -> f64 {
 /// **Whether a host bears a rider** of `rider_body` (LANTERNJAW-LIFE): the rider's take
 /// ([`FaunaConfig::parasite_take_body_per_day`] × its body) is no more than the host gives,
 /// [`FaunaConfig::parasite_host_bear_per_day`] × the host's body, both per world day. A
-/// rider its host no longer bears has outgrown it and drops off; a hatchling no host in
-/// reach bears stays in the egg.
+/// rider its host no longer bears has outgrown it and drops off (and looks for a host that
+/// does, [`FaunaConfig::parasite_switch`]); a hatchling no host in reach bears stays in
+/// the egg.
 pub fn host_bears(config: &FaunaConfig, rider_body: f64, host_body: f64) -> bool {
     config.parasite_take_body_per_day * rider_body <= config.parasite_host_bear_per_day * host_body
 }
@@ -1725,6 +1728,26 @@ pub struct Reproduction {
     /// waits before it tries to lay again; its surplus keeps standing.
     #[serde(default = "default_nest_retry_s")]
     pub nest_retry_s: f64,
+    /// **Walking off a crowded nest** (SHREDDER-NEST, Wrysk 2026-10-10: "a shredder that finds
+    /// its spot crowded goes somewhere quieter to lay, the way insects spread out their egg
+    /// sites"), a switch: a body the nest-site brake refuses, ready on every other gate,
+    /// takes the nearest face within [`Reproduction::nest_seek_m`] that is not crowded and
+    /// holds its lineage's egg-site rule as a goal, walks there and lays if it is still
+    /// uncrowded, instead of waiting out [`Reproduction::nest_retry_s`] in the crowd. With no
+    /// such face, or after [`Reproduction::nest_seek_give_up_s`], it drops the goal and waits
+    /// out its retry. **false** (the default): refused, it stays put. Never for a vine nester
+    /// (its own nest reflex looks) or a shore layer (its trip ashore already passes over a
+    /// crowded nest).
+    #[serde(default)]
+    pub nest_seek: bool,
+    /// How far, metres, a body walking off a crowded nest looks for a free egg face (level
+    /// distance, faces within one step of its own height).
+    #[serde(default = "default_nest_seek_m")]
+    pub nest_seek_m: f64,
+    /// Seconds a body walking off a crowded nest keeps its goal before giving up (its walk
+    /// blocked, or the face never reached); it then waits out its retry.
+    #[serde(default = "default_nest_seek_give_up_s")]
+    pub nest_seek_give_up_s: f64,
     /// **A full clutch first** (the capgnawer package, 2026-10-05), seconds: with a clutch
     /// from surplus ([`Reproduction::clutch_max`] above 0), a body whose hold is met waits
     /// up to this long for its reserve to pay for its **full clutch** and lays it the tick
@@ -1785,6 +1808,18 @@ fn default_surplus_share() -> f64 {
 }
 
 fn default_nest_retry_s() -> f64 {
+    NEST_RETRY_S
+}
+
+/// The default [`Reproduction::nest_seek_m`]: three of the shipped 1 m nest radii, room to
+/// clear a crowd and its rim. Plausible, untuned.
+fn default_nest_seek_m() -> f64 {
+    3.0
+}
+
+/// The default [`Reproduction::nest_seek_give_up_s`]: the retry's minute, so a walk that
+/// fails costs no more time than one refusal. Plausible, untuned.
+fn default_nest_seek_give_up_s() -> f64 {
     NEST_RETRY_S
 }
 
@@ -1903,6 +1938,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
@@ -1944,6 +1982,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
@@ -1990,6 +2031,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 1800.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.5,
@@ -2068,6 +2112,11 @@ impl Reproduction {
     /// Ticks a refused laying waits ([`Reproduction::nest_retry_s`]).
     pub fn retry_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.nest_retry_s)
+    }
+
+    /// [`Reproduction::nest_seek_give_up_s`] in ticks, at least one.
+    pub fn nest_seek_give_up_ticks(&self) -> u64 {
+        cubarium_voxel::ticks_at_least_one(self.nest_seek_give_up_s)
     }
 
     /// The reserve a body has to hold to be in surplus: the package plus the floor.
@@ -2334,8 +2383,9 @@ pub struct FaunaConfig {
     /// species'; [`effective_config`] is the one lookup every rule uses.
     pub founders: [FounderPhysiology; Founder::COUNT],
     /// The chance a dormant egg past its footfall gate hatches at one dusk
-    /// ([`hatch_draw`]; default a third: the bank bet-hedges
-    /// across nights).
+    /// ([`hatch_draw`]; default two thirds, LJ-GROW (Wrysk 2026-10-10, was a third): the
+    /// bank still bet-hedges across nights, and an egg left unhatched mostly dies of its
+    /// viability (median ~7.3 h shipped) before a later dusk.
     pub hatch_chance_per_dusk: f64,
     /// **Parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
     /// metres from a hatching egg's column centre within which the nearest living
@@ -2349,20 +2399,20 @@ pub struct FaunaConfig {
     /// it takes out of its host — reserve first, then structure, all three currencies at the
     /// host's density — straight into its own reserve. Replaces the fixed share of the
     /// host (`parasite_take_per_day`, 0.09 of the host a day), which left a rider on a small
-    /// host sitting under drop-off for hours. Default 2: about twice its own body a world
-    /// day, so a hatchling grows about 1.9 e-folds a world day after its upkeep and goes
-    /// from hatchling to drop-off (×5.6) on a grazer in about 0.9 world days (1.8 h).
+    /// host sitting under drop-off for hours. LJ-GROW-B: default 4, four times its own
+    /// body per world day; the shipped growth budget predicts about 54 min attached
+    /// and 73 min from hatch to adult on a mid-size grazer.
     pub parasite_take_body_per_day: f64,
     /// **What a host can bear** (LANTERNJAW-LIFE): the host's body per world day it gives a
     /// rider at most. A rider whose take ([`FaunaConfig::parasite_take_body_per_day`] × its
     /// body) would exceed this × its host's body has **outgrown its host** and drops off,
-    /// below the normal drop-off size if need be, and does not look for another; a host that
-    /// cannot bear even a hatchling is no host. So "outgrows" is set by the take the host
-    /// can bear, a host-to-rider size ratio of `bear / take` (0.25 at the defaults). Default
-    /// 0.5: a grown grazer (1.5) carries a rider to 0.375, past drop-off; a littershredder
-    /// (0.375) lets go of it at about 0.09, a fifth of the way; a ripple-snail (0.15) can
-    /// carry no hatchling. Half its body a day at the end of a ride is about eight times a
-    /// grazer's own daily need, which its intake (about 29 times its upkeep) covers.
+    /// below the normal drop-off size if need be, and then looks for a host that bears it
+    /// ([`FaunaConfig::parasite_switch`]); a host that cannot bear even a hatchling is no
+    /// host. So "outgrows" is set by the take the host
+    /// can bear, a rider-to-host size ratio of `bear / take` (0.45 at the defaults).
+    /// LJ-GROW-B: default 1.8. A mid-size grazer (0.67 org-units) bears the rider to
+    /// its normal drop-off (0.294); smaller hosts release it sooner. The faster drain
+    /// is a parasite cost, paid from the host's reserve before its structure.
     pub parasite_host_bear_per_day: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
     /// `body_max`, dimensionless within `(0, 1]`. Default 0.28 (LANTERNJAW-LIFE, was 0.24):
@@ -2370,6 +2420,26 @@ pub struct FaunaConfig {
     /// `body_max` (0.074 ou at the shipped mass) in about 3 h at the 0.025 ou/h free
     /// juveniles were measured growing (`design/ecology-roles-2026-10-09.md` §1).
     pub parasite_detach_body_fraction: f64,
+    /// **Host switch** (LJ-HOSTSWITCH; Wrysk 2026-10-10: an outgrown larva looks for a
+    /// bigger host, "yes thats what i meant"): whether a rider that outgrew its host below
+    /// its drop-off size ([`FaunaConfig::parasite_detach_body_fraction`]) looks for another
+    /// that bears it ([`host_bears`] on that host's current body) before it goes free. It
+    /// walks to the nearest such host within [`FaunaConfig::parasite_switch_radius_m`]
+    /// (over its own heuristic only) and takes it on contact by the hatchlings' rule
+    /// (`parasite_attach_radius_m`); with none in reach it goes on as a free juvenile,
+    /// still taking one that comes within contact or sense, until
+    /// [`FaunaConfig::parasite_switch_give_up_s`]. A rider at or past its drop-off size
+    /// goes free as before. Default on; false is the earlier rule (outgrown means free).
+    pub parasite_switch: bool,
+    /// How far an outgrown rider senses a host that would bear it and walks to it, metres
+    /// (LJ-HOSTSWITCH). Default 3, the lanternjaw's tremor range (`senses.tremor_m`): it
+    /// feels a host's footfall that far off. Metres do not scale with mass.
+    pub parasite_switch_radius_m: f64,
+    /// How long an outgrown rider keeps looking for a bigger host, seconds (LJ-HOSTSWITCH),
+    /// after which it is a free juvenile like any other. Default 600 (ten minutes, a
+    /// twelfth of a world day): a short quest, long enough for a herd to come within its
+    /// sense range on most ground, short against the hours a free juvenile needs to grow.
+    pub parasite_switch_give_up_s: f64,
     /// Predation, threat perception, wounds and the egg bank ([`PredationConfig`]).
     pub predation: PredationConfig,
     /// The day's lines, the lifespan draw, the gut and the wall climb ([`LifeConfig`]).
@@ -2429,13 +2499,17 @@ impl Default for FaunaConfig {
         FaunaConfig {
             frondgrazer,
             founders: Founder::ALL.map(FounderPhysiology::frozen),
-            hatch_chance_per_dusk: 1.0 / 3.0,
+            hatch_chance_per_dusk: 2.0 / 3.0,
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_take_body_per_day: 2.0,
-            parasite_host_bear_per_day: 0.5,
+            parasite_take_body_per_day: 4.0,
+            parasite_host_bear_per_day: 1.8,
             parasite_detach_body_fraction: 0.28,
+            // Wrysk 2026-10-10: an outgrown larva looks for a bigger host.
+            parasite_switch: true,
+            parasite_switch_radius_m: 3.0,
+            parasite_switch_give_up_s: 600.0,
             predation: PredationConfig::default(),
             life: LifeConfig::default(),
             cue: CueConfig::default(),
@@ -3822,8 +3896,29 @@ pub struct CensusPredation {
 /// - `wall`: climbing, not on the litter;
 /// - `site`: no egg site where it stands (litter, film, fungus, shore, vine; a flyer's
 ///   headroom);
-/// - `crowded`: the nest-site brake, its refusal and the retry wait after it.
-pub const LAY_GATES: [&str; 6] = ["surplus", "interval", "clutch_wait", "wall", "site", "crowded"];
+/// - `crowded`: the nest-site brake, its refusal and the retry wait after it;
+/// - `seeking`: on its way off a crowded nest to a free egg face (SHREDDER-NEST,
+///   [`Reproduction::nest_seek`]), the crowd still refusing it where it stands.
+pub const LAY_GATES: [&str; 7] = ["surplus", "interval", "clutch_wait", "wall", "site", "crowded", "seeking"];
+
+/// **A walk off a crowded nest** (SHREDDER-NEST, [`Reproduction::nest_seek`]): the free egg
+/// face a refused layer is walking to and the tick it set out. Session state, never saved:
+/// after a load the body is refused again at its next laying and looks again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NestTrip {
+    pub(crate) target: Site,
+    pub(crate) since: u64,
+}
+
+/// SHREDDER-NEST's readout per lineage, since construction or load (never saved, never
+/// scored): walks off a crowded nest begun, clutches laid on one, and walks given up (the
+/// give-up time ran out, or the face was crowded or unfit on arrival).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NestSeekTally {
+    pub walk_offs: u64,
+    pub walk_lays: u64,
+    pub give_ups: u64,
+}
 
 /// Run-scoped instrumentation. Skipped by saves; no rule reads it.
 #[derive(Clone, Debug, Default)]
@@ -4067,6 +4162,38 @@ pub struct Fauna {
     /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
     #[serde(skip)]
     pub(crate) wade_outs: [u64; Founder::COUNT],
+    /// SHREDDER-NEST: per body, the walk off a crowded nest it is on ([`NestTrip`]). Session
+    /// state: not saved.
+    #[serde(skip)]
+    pub(crate) nest_trips: FxHashMap<u64, NestTrip>,
+    /// SHREDDER-NEST's readout per lineage ([`NestSeekTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) nest_seek_tally: [NestSeekTally; Founder::COUNT],
+    /// LJ-HOSTSWITCH: per outgrown rider looking for a bigger host, by id, the tick it gives
+    /// up ([`FaunaConfig::parasite_switch_give_up_s`]). Session state, not saved: a loaded
+    /// world's seekers are free juveniles. A `BTreeMap`, so passes over it go in id order.
+    #[serde(skip)]
+    pub(crate) host_quests: std::collections::BTreeMap<u64, u64>,
+    /// LJ-HOSTSWITCH's readout ([`HostSwitchTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) host_switch: HostSwitchTally,
+}
+
+/// **LJ-HOSTSWITCH's readout** ([`Fauna::host_switches`]), since construction or load: what
+/// came of the riders that outgrew a host below their drop-off size. A diagnostic; no rule
+/// reads it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostSwitchTally {
+    /// Outgrown riders that set out to find a host that bears them.
+    pub tried: u64,
+    /// Of those, the ones that took a new host.
+    pub made: u64,
+    /// The ones that found none within the give-up time and went free.
+    pub gave_up: u64,
+    /// The ones that grew to their drop-off size while looking, so needed no host.
+    pub grew: u64,
+    /// New hosts taken, by the host's lineage ([`Founder::index`]).
+    pub by_host: [u64; Founder::COUNT],
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -4107,11 +4234,13 @@ pub enum Steer {
     Nest,
     /// WADE-OUT: a held walker's way out through water past its wade depth.
     Wade,
+    /// LJ-HOSTSWITCH: an outgrown rider's walk to a new host.
+    Host,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 17] = [
+    pub const ALL: [Steer; 18] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4129,6 +4258,7 @@ impl Steer {
         Steer::Search,
         Steer::Nest,
         Steer::Wade,
+        Steer::Host,
     ];
 
     /// A short name for tables.
@@ -4151,6 +4281,7 @@ impl Steer {
             Steer::Search => "search",
             Steer::Nest => "nest",
             Steer::Wade => "wade",
+            Steer::Host => "host",
         }
     }
 }
@@ -4493,6 +4624,10 @@ impl Fauna {
             wading: FxHashMap::default(),
             flushes: FxHashMap::default(),
             wade_outs: [0; Founder::COUNT],
+            nest_trips: FxHashMap::default(),
+            nest_seek_tally: [NestSeekTally::default(); Founder::COUNT],
+            host_quests: std::collections::BTreeMap::new(),
+            host_switch: HostSwitchTally::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
@@ -4866,6 +5001,21 @@ impl Fauna {
         self.wade_outs
     }
 
+    /// SHREDDER-NEST's walks off a crowded nest by lineage since construction or load.
+    pub fn nest_seek_tally(&self) -> [NestSeekTally; Founder::COUNT] {
+        self.nest_seek_tally
+    }
+
+    /// LJ-HOSTSWITCH's readout, this session ([`HostSwitchTally`]).
+    pub fn host_switches(&self) -> HostSwitchTally {
+        self.host_switch
+    }
+
+    /// LJ-HOSTSWITCH: the outgrown riders looking for a bigger host now.
+    pub fn host_seekers(&self) -> usize {
+        self.host_quests.len()
+    }
+
     /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
     /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
     /// the probe picks it. `false` when there is no such body.
@@ -4881,6 +5031,7 @@ impl Fauna {
         self.drop_plans.remove(&id);
         self.wading.remove(&id);
         self.flushes.remove(&id);
+        self.nest_trips.remove(&id);
         true
     }
 

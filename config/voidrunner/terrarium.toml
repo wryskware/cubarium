@@ -161,6 +161,8 @@ core.reproduction.surplus_hold_s = 182.97089431989187
 # between groves, founded on the ground within its roost reach of fruit (lanternberry
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
+# SP-SHREDDER: small ground prey supplements fruit; the catch switch gates this table.
+hunter.prey = [true, false, true, false, false, false, true, false, false]
 # Fruit at the mouth is 1e-4..1e-3 ou: K is about a third of a ripe vine patch.
 fruit_bite_half_stock = 0.0005
 # Leave below ~2 upkeep rates (5% of the ~45-upkeep full gut rate).
@@ -394,6 +396,14 @@ core.reproduction.egg_organic = 0.054
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# SHREDDER-NEST (Wrysk 2026-10-10, option A: "a shredder that finds its spot crowded goes
+# somewhere quieter to lay, the way insects spread out their egg sites"): refused by the
+# nest brake, it walks to the nearest uncrowded litter face within 3 m (three nest radii,
+# room to clear a huddle and its rim) and lays there; a walk not ended by a clutch within
+# a minute (the retry's length, ~5x a straight 3 m walk at cruise) is given up. Untuned.
+core.reproduction.nest_seek = true
+core.reproduction.nest_seek_m = 3.0
+core.reproduction.nest_seek_give_up_s = 60.0
 # Generation time (D1b, 2026-10-05): the gut's throughput scales with body as small
 # animals' does (intake at a full stomach ~ body^0.75, Kleiber: a hatchling digests faster
 # per unit of itself), and a mature body earmarks 0.8 of its net income for its next full
@@ -426,7 +436,10 @@ yield_by_food.fruit = 0.3364781725258478
 [fauna.founders.lanternjaw]
 # Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
 wade.swim_out = false
-core.growth_max_per_s = 0.00010069939815158275
+# LJ-GROW (Wrysk 2026-10-10: "bugs dont take like 4 months to grow"): the ceiling
+# on structure built from the reserve, about 3x the searched 1.0e-4 (growth is this x
+# fullness, and the old ceiling held riders well under their take). Food still pays.
+core.growth_max_per_s = 0.0003
 # LANTERNJAW-LIFE (Wrysk 2026-10-10, many offspring, low survival): at most one clutch a
 # world day (the code default), not the searched egg-layers' 1098 s.
 core.reproduction.birth_interval_s = 7200.0
@@ -436,13 +449,18 @@ core.reproduction.birth_interval_s = 7200.0
 # `Reproduction::DORMANT_EGGS_PLACEHOLDER`.
 core.reproduction.surplus_floor = 0.06
 core.reproduction.surplus_hold_s = 548.9126829596756
-yield_by_food.litter = 0.46905315573017675
-yield_by_food.cap_tissue = 0.46905315573017675
-yield_by_food.carrion = 0.46905315573017675
-yield_by_food.foliage = 0.46905315573017675
-yield_by_food.film = 0.46905315573017675
-yield_by_food.nectar = 0.46905315573017675
-yield_by_food.fruit = 0.46905315573017675
+# LJ-GROW (d): three quarters of a grown body's net income saved for its next clutch
+# (the shared 0.5), so a new adult lays sooner.
+core.reproduction.brood_share = 0.75
+# LJ-GROW: a predatory insect's conversion, about 0.6 (assimilation ~0.85 less the
+# construction overhead; was the searched 0.469).
+yield_by_food.litter = 0.6
+yield_by_food.cap_tissue = 0.6
+yield_by_food.carrion = 0.6
+yield_by_food.foliage = 0.6
+yield_by_food.film = 0.6
+yield_by_food.nectar = 0.6
+yield_by_food.fruit = 0.6
 
 [fauna.founding]
 starter_litter_organic = 0.13232116851858008

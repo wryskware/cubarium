@@ -58,6 +58,14 @@ def cargo_args(spec):
     return argv, relative
 
 
+def source_key(ctx, repo, commit):
+    key = f"source:{commit}"
+    if ctx.store:
+        ctx.store.x("INSERT INTO recipes(key, spec) VALUES(?, ?) ON CONFLICT(key) DO NOTHING", key,
+                    json.dumps(dict(provider="source", repo=repo, commit=commit)))
+    return key
+
+
 class Build(Kind):
     name = "build"
     description = "cargo build at a commit into the artifact cache"
@@ -93,7 +101,7 @@ class Build(Kind):
         trees = ctx.paths.cache / "trees"
         common = dict(threads=spec["threads"], mem_gb=spec["mem_gb"], produces={key: f"artifact/{spec['target']}"},
                       est_h=spec.get("est_h", 0.25), timeout_h=spec.get("timeout_h", 2), priority=10,
-                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key))
+                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key, kind="build"))
         if spec["arch"] == ctx.arch:
             argv = [ctx.python, str(ctx.lab_dir / "snaprun.py"), "--repo", spec["repo"], "--commit", spec["commit"],
                     "--trees", str(trees), *[a for s in seeds(ctx, spec["repo"]) for a in ("--seed", s)],
@@ -101,10 +109,7 @@ class Build(Kind):
                     "--out", "{out}", "--", *cargo]
             return [Task(name="build", argv=argv, local_only=True, arch=ctx.arch, **common)]
         # Another arch builds natively on its host from a source archive of the same commit.
-        source = f"source:{spec['commit']}"
-        if ctx.store:
-            ctx.store.x("INSERT INTO recipes(key, spec) VALUES(?, ?) ON CONFLICT(key) DO NOTHING", source,
-                        json.dumps(dict(provider="source", repo=spec["repo"], commit=spec["commit"])))
+        source = source_key(ctx, spec["repo"], spec["commit"])
         bootstrap = ('command -v cargo >/dev/null || . "$HOME/.cargo/env" 2>/dev/null || '
                      '{ curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null && . "$HOME/.cargo/env"; }; '
                      'exec "$@"')

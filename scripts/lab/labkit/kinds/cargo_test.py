@@ -8,7 +8,7 @@
 """
 
 from ..core import Kind, SpecError, Task
-from .build import pin, seeds
+from .build import pin, seeds, source_key
 
 
 class CargoTest(Kind):
@@ -31,10 +31,16 @@ class CargoTest(Kind):
         argv = [ctx.python, str(ctx.lab_dir / "snaprun.py"), "--repo", spec["repo"], "--commit", spec["commit"],
                 "--trees", str(trees), *[a for s in seeds(ctx, spec["repo"]) for a in ("--seed", s)],
                 "--profile", spec["profile"], "--out", "{out}", "--", *spec["command"]]
-        return [Task(name="test", argv=argv, threads=spec["threads"], mem_gb=spec["mem_gb"], local_only=True,
+        source = source_key(ctx, spec["repo"], spec["commit"])
+        remote = ["{python}", "{lab}/snaprun.py", "--commit", spec["commit"], "--trees", "{lab}/../trees",
+                  "--source-tar", "{input:" + source + "}", "--profile", spec["profile"], "--out", "{out}",
+                  "--target-dir", "{lab}/../target",
+                  "--", *spec["command"]]
+        return [Task(name="test", argv=argv, remote_argv=remote, inputs=[source],
+                     hosts=spec.get("hosts"), arch=ctx.arch, threads=spec["threads"], mem_gb=spec["mem_gb"],
                      est_h=spec.get("est_h", 0.25), timeout_h=spec.get("timeout_h", 1),
                      env={"CARGO_BUILD_JOBS": str(spec["threads"])},
-                     meta=dict(tree=str(trees / spec["commit"][:16])))]
+                     meta=dict(tree=str(trees / spec["commit"][:16]), kind="cargo-test"))]
 
     def finish(self, job, ctx):
         view = job.tasks.get("test")

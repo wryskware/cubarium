@@ -48,6 +48,8 @@ use crate::sink::{FrameSink, Output, WebSink};
 use crate::voxel::{Lighting, VoxelConfig};
 use crate::voxel::animal::{AnimalPart, Animals, Specimen};
 use crate::voxel::candle::{self, Candle};
+use crate::voxel::colour_fade::{StyleFades, VineFades};
+use crate::voxel::glow_ease::{self, Ease, GlowEase, Kind as EaseKind, Target as EaseTarget};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
 use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, PlantDraw, Spec};
@@ -88,6 +90,12 @@ use snapshot::{Hint, Mirror, PackSnapshot};
 /// This bounds both automatic sim pools before they are initialized; explicit worker
 /// counts remain a host override. No CPU identifiers or machine topology are assumed.
 pub const WORKER_RESERVE: usize = 4;
+
+/// GLOW-EASE round 2: style slots kept free of colour swaps' blends, for the styles a pack
+/// makes beside them. A swap's group takes a slot while it runs (two the pack it moves
+/// on); one that does not fit waits (round 3: the cell keeps its old colours,
+/// `StyleFades::draw`) rather than push texels onto the overflow slot.
+const STYLE_FADE_ROOM: usize = 8;
 
 /// The knobs `cubarium voxel --sink gpu` takes.
 #[derive(Clone, Debug)]
@@ -180,6 +188,8 @@ pub struct VoxelGpuSink<T: SinkTarget = GpuTarget> {
     sunvis: Option<SunVisDriver>,
     /// The frame clock in seconds of sim time ([`VoxelGpuSink::set_clock`]).
     clock_s: f64,
+    /// GLOW-EASE: the emitter table's cells this frame (scratch).
+    emit_cells: Vec<cubarium_gpu::voxel::EmitCell>,
     /// The operator's viewer, fed from this renderer's own readback.
     web: Option<(WebSink, f64)>,
     web_raster: Option<cube_proto::Raster>,
@@ -301,6 +311,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         };
         packer.animals.set_hunker_s(cfg.hunker_s);
         packer.animals.set_meal_flash(cfg.meal_flash);
+        packer.animals.set_condition_fade_s(cfg.light.colour_fade_s);
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
@@ -346,6 +357,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
                 .volume_on(params.lit)
                 .then(|| SunVisDriver::new(f64::from(cfg.light.volumetric_rebake_s))),
             clock_s: 0.0,
+            emit_cells: Vec::new(),
             web: None,
             web_raster: None,
             web_last: None,
@@ -591,6 +603,14 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         if let Some(c) = self.packer.candle {
             self.renderer.set_emit_gains(&candle_gains(Some(c), self.clock_s));
         }
+        // GLOW-EASE: every emitter's colour on the frame clock (its ramp, flicker, candle),
+        // and every vine cell's old tile while it cross-fades (round 2, both tiers).
+        if self.packer.emit_table_live() || !self.emit_cells.is_empty() {
+            let mut cells = std::mem::take(&mut self.emit_cells);
+            self.packer.emit_cells(self.clock_s, &mut cells);
+            self.renderer.set_emit_cells(&cells);
+            self.emit_cells = cells;
+        }
         self.move_figures(tick as f64 + fraction.clamp(0.0, 1.0));
     }
 
@@ -769,6 +789,25 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
     /// linear light: empty in the flat tier and with emission off. For captures.
     pub fn emitters(&self) -> &[((u32, u32, u32), [f32; 3])] {
         self.packer.light.as_ref().map_or(&[], |l| &l.emitters)
+    }
+
+    /// GLOW-EASE round 2: the cells whose colour or vine tile swap began in the last pack
+    /// (a flush vine's at its rock face), whether or not they fade. For captures.
+    pub fn colour_switches(&self) -> Vec<(u32, u32, u32)> {
+        let p = self.renderer.params();
+        self.packer.switched.iter().map(|&c| cell_xyz(c, p.width, p.height)).collect()
+    }
+
+    /// GLOW-EASE's targets in the last pack: each emitting cell and what it should glow
+    /// (its colour times its level), before the ramps, the flicker and the candle. Empty
+    /// in the flat tier and with emission off. For captures.
+    pub fn emit_targets(&self) -> Vec<((u32, u32, u32), [f32; 3])> {
+        let p = self.renderer.params();
+        self.packer
+            .ease_targets
+            .iter()
+            .map(|t| (cell_xyz(t.cell, p.width, p.height), t.rgb.map(|k| k * t.level)))
+            .collect()
     }
 
     /// Draw these covered faces instead of the flora's own (`None` goes back to the
@@ -1288,8 +1327,10 @@ struct Packer {
     /// Scratch: the overlay's texture indices.
     overlay: Vec<u32>,
     /// This tick's latticevine cells (`crate::voxel::vine`), for the tile layer, and the
-    /// tiled ones by texture index.
+    /// tiled ones by texture index. `vines` is `vines_raw`, the cover's own, with the
+    /// flowers GLOW-EASE still holds put back.
     vines: Vec<VineCell>,
+    vines_raw: Vec<VineCell>,
     vine_at: rustc_hash::FxHashMap<u32, VineCell>,
     /// The vine key the tile cells were built under ([`crate::voxel::stand::vine_key`]),
     /// and whether this tick rebuilt them.
@@ -1315,6 +1356,26 @@ struct Packer {
     incremental: bool,
     /// The plant pass's cells between ticks, when plants are models (`[figures] plants`).
     plants: Option<plants::PlantTracker>,
+    /// GLOW-EASE (lit tier, emission on): every emitting cell's ramp, and what the cells
+    /// ramping out still draw ([`Hold`]), the cells to compose again because a hold began
+    /// or ended, and the vine holds the vines were last put together with.
+    ease: Option<GlowEase>,
+    ease_holds: rustc_hash::FxHashMap<u32, Hold>,
+    ease_dirty: Vec<u32>,
+    ease_vine_holds: Vec<VineCell>,
+    ease_targets: Vec<EaseTarget>,
+    ease_fill: rustc_hash::FxHashMap<u32, f64>,
+    /// GLOW-EASE round 2 (both tiers): the plant cells part way through a style swap and
+    /// the vine cells part way through a tile swap, and the presenter's clock of this pack.
+    style_fades: StyleFades,
+    vine_fades: VineFades,
+    fade_now: f64,
+    /// The cells whose colour or tile swap began this pack, as voxels drawn at (a flush
+    /// vine's rock face, not its air cell): for captures.
+    switched: Vec<u32>,
+    /// Round 3: the vine cells whose waiting third tile began fading in this pack (their
+    /// texels go back to their own tile): packed again.
+    vine_restarted: Vec<u32>,
     /// The change-only pack's state.
     delta: Delta,
 }
@@ -1425,6 +1486,10 @@ pub(crate) struct Emission {
     reach: u32,
     /// The glowcap candle (`[light] candle_min`, `candle_period_s`).
     candle: Candle,
+    /// GLOW-EASE's knobs (`crate::voxel::glow_ease`).
+    ease: Ease,
+    /// GLOW-EASE round 2: `[light] colour_fade_s` (`crate::voxel::colour_fade`), both tiers.
+    colour_fade_s: f32,
 }
 
 impl Emission {
@@ -1437,6 +1502,8 @@ impl Emission {
             min: 1.0,
             period_s: 0.0,
         },
+        ease: Ease::STEPS,
+        colour_fade_s: 0.0,
     };
 
     fn of(cfg: &VoxelConfig) -> Emission {
@@ -1445,6 +1512,8 @@ impl Emission {
             glow: cfg.light.glow.max(0.0),
             reach: cfg.light.glow_reach,
             candle: Candle::of(&cfg.light),
+            ease: Ease::of(&cfg.light),
+            colour_fade_s: cfg.light.colour_fade_s,
         }
     }
 }
@@ -1480,6 +1549,21 @@ struct LightPlanes {
     stand_emitter_cells: rustc_hash::FxHashSet<u32>,
     animal_emitters: Vec<((u32, u32, u32), u8, [f32; 3])>,
     vine_emitters: Vec<((u32, u32, u32), u8, [f32; 3])>,
+}
+
+/// What a cell GLOW-EASE is ramping out of still draws, so its emitting texels have
+/// something to fade on (and its bloom with them).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Hold {
+    /// The cell still holds a plant part that no longer emits (a lantern gone unripe, a lip
+    /// gone dark, a plain vine flower closed): its emitting glyph is kept.
+    Glyph,
+    /// The plant part is gone (eaten, died): the texel it was last drawn with, and its
+    /// style, drawn where nothing else is.
+    Ghost(VoxelTexel, Option<StyleKey>),
+    /// A latticevine tile cell whose flower closed or went: the cell as it was, flower and
+    /// all.
+    Vine(VineCell),
 }
 
 /// The glyph plane never changes after construction: one key for the life of a renderer.
@@ -1522,6 +1606,17 @@ impl Packer {
             candle_class: Vec::new(),
             incremental: true,
             plants: None,
+            ease: (p.lit && emission.on).then(|| GlowEase::new(emission.ease)),
+            ease_holds: Default::default(),
+            ease_dirty: Vec::new(),
+            ease_vine_holds: Vec::new(),
+            ease_targets: Vec::new(),
+            ease_fill: Default::default(),
+            style_fades: StyleFades::new(emission.colour_fade_s),
+            vine_fades: VineFades::new(emission.colour_fade_s),
+            fade_now: 0.0,
+            switched: Vec::new(),
+            vine_restarted: Vec::new(),
             animals,
             models,
             figures: false,
@@ -1546,6 +1641,7 @@ impl Packer {
             glyphs,
             overlay: Vec::new(),
             vines: Vec::new(),
+            vines_raw: Vec::new(),
             vine_at: Default::default(),
             vine_key: None,
             vines_moved: false,
@@ -1684,6 +1780,16 @@ impl Packer {
         candle_s: f64,
         hint: Hint<'_>,
     ) -> [u64; SLOW_PLANES] {
+        // GLOW-EASE round 2: this pack's time on the presenter's clock.
+        self.fade_now = candle_s;
+        self.switched.clear();
+        // Round 3: the slots the swaps' blends may take this pack (`StyleFades`).
+        let free = MAX_STYLES.saturating_sub(self.palette.live() + STYLE_FADE_ROOM);
+        self.style_fades.begin(candle_s, free);
+        self.vine_fades.begin(candle_s);
+        let restarted = &mut self.vine_restarted;
+        restarted.clear();
+        self.vine_fades.retire(candle_s, |c| restarted.push(c));
         // The terrain first: a moved terrain (or another world) packs in full.
         let same_snapshot = hint.terrain.zip(self.roof_snapshot.as_ref())
             .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
@@ -1771,12 +1877,18 @@ impl Packer {
                     Some(d) => d.clone(),
                     None => flora.cover.draw(),
                 };
-                self.vines = vine::cells(&draws, view.config, root);
+                self.vines_raw = vine::cells(&draws, view.config, root);
                 self.vine_key = Some(key);
                 self.vines_moved = true;
             }
         }
         lap!("vines");
+        if self.ease.is_some() {
+            self.ease_step(view, flora, candle_s);
+            lap!("glow ease");
+        } else if self.vines_moved {
+            self.vines.clone_from(&self.vines_raw);
+        }
         let mut keys = [0; SLOW_PLANES];
         let incremental = self.incremental && !self.delta.full;
         if let Some(l) = &mut self.light {
@@ -1839,6 +1951,7 @@ impl Packer {
                         incremental,
                         self.vines_moved,
                         &gains,
+                        self.ease.as_ref().map(|e| (e, candle_s, view.config.width, view.config.height)),
                     );
                 } else {
                     // The emitters: every stamped cell whose style emits, and the tile
@@ -1846,23 +1959,32 @@ impl Packer {
                     // counts: the glow volume is coarse.
                     l.emitters.clear();
                     let class = &self.candle_class;
-                    l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
-                        let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
-                        let c = stands
-                            .owner(i64::from(x), y, z)
-                            .and_then(|o| class.get(o).copied())
-                            .unwrap_or(0);
-                        Some(((x, y, z), rgb.map(|k| k * gains[usize::from(c)])))
-                    }));
+                    match &self.ease {
+                        // GLOW-EASE: every plant and vine emitter at its ramp this tick.
+                        Some(e) => {
+                            let (w, h) = (view.config.width, view.config.height);
+                            e.each(candle_s, |cell, rgb, _| l.emitters.push((cell_xyz(cell, w, h), rgb)));
+                        }
+                        None => l.emitters.extend(stands.cells().filter_map(|(x, y, z)| {
+                            let rgb = stands.emission(stands.at(i64::from(x), i64::from(y), z))?;
+                            let c = stands
+                                .owner(i64::from(x), y, z)
+                                .and_then(|o| class.get(o).copied())
+                                .unwrap_or(0);
+                            Some(((x, y, z), rgb.map(|k| k * gains[usize::from(c)])))
+                        })),
+                    }
                     let animals = &self.animals;
                     l.emitters.extend(animals.cells().filter_map(|(x, y, z)| {
                         let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
                         Some(((x, y, z), rgb))
                     }));
                     l.emitters.extend_from_slice(&self.figure_emitters);
-                    for c in self.vines.iter().filter(|c| c.kind.tiled()) {
-                        if let Some(rgb) = colours::vine_emission(c.accent) {
-                            l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
+                    if self.ease.is_none() {
+                        for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+                            if let Some(rgb) = colours::vine_emission(c.accent) {
+                                l.emitters.push(((c.x, c.y, c.z), srgb_linear(rgb)));
+                            }
                         }
                     }
                     l.glow.build(l.emitters.iter().copied(), l.emission.glow, l.emission.reach);
@@ -1894,7 +2016,35 @@ impl Packer {
         incremental: bool,
         vines_moved: bool,
         gains: &[f32],
+        ease: Option<(&GlowEase, f64, u32, u32)>,
     ) -> u64 {
+        // GLOW-EASE: the plants' and the vine's emitters are its instances, mixed in at
+        // their ramps every tick; the grids hold the animals' and figures' alone.
+        if let Some((e, now, w, h)) = ease {
+            let beasts: Vec<_> = animals
+                .cells()
+                .filter_map(|(x, y, z)| {
+                    let rgb = animals.emission(animals.at(i64::from(x), i64::from(y), z))?;
+                    Some(((x, y, z), 0u8, rgb))
+                })
+                .chain(figures.iter().map(|&(v, rgb)| (v, 0u8, rgb)))
+                .collect();
+            if !incremental || beasts != l.animal_emitters || !l.stand_emitters.is_empty() || !l.vine_emitters.is_empty() {
+                l.stand_emitters.clear();
+                l.stand_emitter_cells.clear();
+                l.vine_emitters.clear();
+                l.animal_emitters = beasts;
+                l.glow_set.update(l.animal_emitters.iter().copied(), l.emission.glow, l.emission.reach);
+            }
+            lap!("glow emitters");
+            l.emitters.clear();
+            e.each(now, |cell, rgb, _| l.emitters.push((cell_xyz(cell, w, h), rgb)));
+            l.emitters.extend(l.animal_emitters.iter().map(|&(v, _, rgb)| (v, rgb)));
+            let n = l.emitters.len() - l.animal_emitters.len();
+            l.glow_set.mix_with(gains, l.emitters[..n].iter().copied(), l.emission.glow, l.emission.reach);
+            lap!("glow mix");
+            return l.glow_set.key;
+        }
         // A dirty stand cell moves the emitters only if it emits now or did.
         let moved = !incremental
             || stands.dirty().iter().any(|&g| {
@@ -1945,9 +2095,211 @@ impl Packer {
             l.glow_set.update(all.into_iter(), l.emission.glow, l.emission.reach);
         }
         lap!("glow emitters");
-        l.glow_set.mix(gains);
+        l.glow_set.mix_with(gains, std::iter::empty(), 0.0, 0);
         lap!("glow mix");
         l.glow_set.key
+    }
+
+    /// GLOW-EASE's tick (`crate::voxel::glow_ease`): this tick's targets from the stands'
+    /// emitting cells and the vine's open flowers (each flower at its nectar fill), the
+    /// ramps moved to them at `now`, what the cells let go of still draw ([`Hold`]), and
+    /// the vines put together again with the held flowers when those moved.
+    fn ease_step(&mut self, view: &VoxelView<'_>, flora: FloraView<'_>, now: f64) {
+        let Some(mut ease) = self.ease.take() else { return };
+        let c = view.config;
+        let (w, h) = (c.width, c.height);
+        // Each open flower's nectar fill, by the air cell its tile is drawn in: its nectar
+        // over what a latticevine flower opens with (`VineConfig::nectar_per_flower`), so a
+        // full flower glows full. Not the animals' `scent.nectar_full`: that is a full
+        // bloomcrown's stock, some 70 times a vine flower's, and drew every flower at ~1.5 %.
+        self.ease_fill.clear();
+        if ease.ease.nectar {
+            let full = flora.config.latticevine.nectar_per_flower();
+            for f in flora.cover.flowers() {
+                let (ox, oy, oz) = f.face.dir.offset();
+                let (y, z) = (i64::from(f.face.y) + oy, i64::from(f.face.z) + oz);
+                if y < 0 || y >= i64::from(h) || z < 0 || z >= i64::from(c.depth) {
+                    continue;
+                }
+                let x = (i64::from(f.face.x) + ox).rem_euclid(i64::from(w)) as u32;
+                let cell = VoxelStaging::index(w, h, x, y as u32, z as u32) as u32;
+                let fill = if full > 0.0 { (f.nectar / full).clamp(0.0, 1.0) } else { 1.0 };
+                let e = self.ease_fill.entry(cell).or_insert(0.0);
+                *e = e.max(fill);
+            }
+        }
+        let fill = |cell: u32| self.ease_fill.get(&cell).copied().unwrap_or(0.0);
+        let targets = &mut self.ease_targets;
+        targets.clear();
+        let stands = &self.stands;
+        for g in stands.stamped() {
+            let part = stands.at_index(g);
+            let Some(rgb) = stands.emission(part) else { continue };
+            let (x, y, z) = stands.xyz(g);
+            let cell = VoxelStaging::index(w, h, x, y, z) as u32;
+            let seed = glow_ease::cell_seed(cell);
+            let owner = stands.owner(i64::from(x), y, z).and_then(|o| flora.stands.get(o));
+            let (kind, seed, level) = match owner.map(|s| (s.species, s.id)) {
+                Some((cubarium_voxel_flora::Species::Lanternberry, _)) => (EaseKind::Lantern, seed, 1.0),
+                Some((cubarium_voxel_flora::Species::Glowcap, id)) => (EaseKind::Lip, id, 1.0),
+                Some(_) => (EaseKind::Steady, seed, 1.0),
+                // An emitting cell no stand owns is a plain-cell vine flower.
+                None => (EaseKind::Flower, seed, ease.ease.flower_level(fill(cell))),
+            };
+            targets.push(EaseTarget { cell, rgb, level, kind, seed });
+        }
+        let mouth = srgb_linear(colours::BELL_MOUTH);
+        for v in self.vines_raw.iter().filter(|v| v.kind.tiled() && v.accent.emissive()) {
+            let cell = VoxelStaging::index(w, h, v.x, v.y, v.z) as u32;
+            let level = ease.ease.flower_level(fill(cell));
+            targets.push(EaseTarget { cell, rgb: mouth, level, kind: EaseKind::Flower, seed: glow_ease::cell_seed(cell) });
+        }
+        ease.update(now, targets.iter().copied());
+        // What each cell let go of drew, so it has something to fade on.
+        for &cell in ease.released() {
+            let (x, y, z) = cell_xyz(cell, w, h);
+            let i = cell as usize;
+            let hold = if appearance::plant_class(stands.at(i64::from(x), i64::from(y), z)) != PART_NONE {
+                Some(Hold::Glyph)
+            } else if let Some(v) = self.vine_at.get(&cell) {
+                Some(Hold::Vine(*v))
+            } else {
+                let t = self.delta.master[i];
+                let key = self.delta.is_keyed(i).then(|| self.palette.key(t.style()).copied()).flatten();
+                (t.material() == 0 && t.part() != PART_NONE && t.part() != PART_ANIMAL_INTERIM)
+                    .then_some(Hold::Ghost(t, key))
+            };
+            if let Some(hold) = hold {
+                self.ease_holds.insert(cell, hold);
+                self.ease_dirty.push(cell);
+            }
+        }
+        // A hold ends when its cell has ramped out, or is lit again.
+        let dirty = &mut self.ease_dirty;
+        self.ease_holds.retain(|&cell, _| {
+            let keep = ease.holds(cell);
+            if !keep {
+                dirty.push(cell);
+            }
+            keep
+        });
+        // The vines with the held flowers back in, when either moved.
+        let mut held: Vec<VineCell> = self
+            .ease_holds
+            .values()
+            .filter_map(|h| match h {
+                Hold::Vine(v) => Some(*v),
+                _ => None,
+            })
+            .collect();
+        held.sort_unstable_by_key(|v| (v.z, v.y, v.x));
+        if self.vines_moved || held != self.ease_vine_holds {
+            self.vines.clone_from(&self.vines_raw);
+            for v in &held {
+                match self.vines.binary_search_by_key(&(v.z, v.y, v.x), |c| (c.z, c.y, c.x)) {
+                    Ok(at) => self.vines[at] = *v,
+                    Err(at) => self.vines.insert(at, *v),
+                }
+            }
+            self.ease_vine_holds = held;
+            self.vines_moved = true;
+        }
+        self.ease = Some(ease);
+    }
+
+    /// GLOW-EASE: every emitting cell's colour and on share at `now`, for the renderer's
+    /// emitter table, in cell order.
+    fn emit_cells(&self, now: f64, out: &mut Vec<cubarium_gpu::voxel::EmitCell>) {
+        out.clear();
+        if let Some(e) = &self.ease {
+            e.each(now, |cell, rgb, on| out.push(cubarium_gpu::voxel::EmitCell::emitter(cell, rgb, on)));
+            out.sort_unstable_by_key(|c| c.cell);
+        }
+        // GLOW-EASE round 2: each vine cell part way through a tile swap, its old tile and
+        // the share of it still shown, with its emission when it has one.
+        if !self.vine_fades.is_empty() {
+            let emitters = out.len();
+            self.vine_fades.each(now, |cell, tile, share| match out[..emitters].binary_search_by_key(&cell, |c| c.cell) {
+                Ok(at) => out[at].vine = Some((tile, share)),
+                Err(_) => out.push(cubarium_gpu::voxel::EmitCell {
+                    cell,
+                    rgb: [0.0; 3],
+                    on: 0.0,
+                    emits: false,
+                    vine: Some((tile, share)),
+                }),
+            });
+            out.sort_unstable_by_key(|c| c.cell);
+        }
+    }
+
+    /// Whether the renderer's emitter table has anything to carry: an eased emitter or a
+    /// vine cell part way through a tile swap.
+    fn emit_table_live(&self) -> bool {
+        self.ease.is_some() || !self.vine_fades.is_empty()
+    }
+
+    /// GLOW-EASE round 2: the vines were put together again (`old` the cells they had): a
+    /// cell keeping its vine with another tile (density, accent, shape) cross-fades from the
+    /// old tile ([`VineFades`]); a cell gaining or losing its vine does not.
+    fn vine_switches(&mut self, old: &rustc_hash::FxHashMap<u32, VineCell>, w: u32, h: u32) {
+        let now = self.fade_now;
+        if self.vine_fades.on() {
+            for c in self.vines.iter().filter(|c| c.kind.tiled()) {
+                let i = VoxelStaging::index(w, h, c.x, c.y, c.z) as u32;
+                match old.get(&i) {
+                    Some(o) if o.kind == c.kind => {
+                        let ((_, ob, oa), (_, nb, na)) = (o.texel_bytes(), c.texel_bytes());
+                        if (ob, oa) != (nb, na) {
+                            let flush = c.kind == cubarium_session::view_state::vine::CellKind::Flush;
+                            self.switched.push(VoxelStaging::index(w, h, c.x, c.y, c.z + u32::from(flush)) as u32);
+                        }
+                        self.vine_fades.switch(i, (ob, oa), (nb, na), now);
+                    }
+                    _ => self.vine_fades.forget(i),
+                }
+            }
+            for &i in old.keys() {
+                let (x, y, z) = cell_xyz(i, w, h);
+                if self.vines.binary_search_by_key(&(z, y, x), |c| (c.z, c.y, c.x)).is_err() {
+                    self.vine_fades.forget(i);
+                }
+            }
+        }
+    }
+
+    /// GLOW-EASE round 2: the style key cell `i` drew with last pack, if it drew a plant
+    /// with one (what a colour swap starts from).
+    fn held_key(&self, i: usize) -> Option<StyleKey> {
+        let m = &self.delta.master[i];
+        (self.delta.is_keyed(i) && is_plant(m)).then(|| self.palette.key(m.style()).copied()).flatten()
+    }
+
+    /// GLOW-EASE round 2: the style key plant cell `i` (texel `t`) draws with this pack:
+    /// `key`'s, unless its colours are part way through a swap ([`StyleFades`]), when its
+    /// colours are the blend this pack. `held` is what it drew last pack ([`Packer::held_key`]):
+    /// a swap from it begins when it differs in colour alone, between keys of the same texture
+    /// role and faces by more than a visible step (`colour_fade::close`); one the style
+    /// table has no room for waits, the cell keeping what it drew (`StyleFades::draw`).
+    fn faded_key(&mut self, i: usize, t: &VoxelTexel, key: Option<StyleKey>, held: Option<StyleKey>) -> Option<StyleKey> {
+        if !self.style_fades.on() {
+            return key;
+        }
+        let cell = i as u32;
+        let Some(k) = key.filter(|_| is_plant(t)) else {
+            self.style_fades.forget(cell);
+            return key;
+        };
+        let held = if self.style_fades.fading(cell) {
+            None
+        } else {
+            held.filter(|hk| hk.1 == k.1 && hk.2 == k.2 && hk.0 != k.0).map(|hk| hk.0)
+        };
+        let style = self.style_fades.draw(cell, held, k.0, self.fade_now);
+        if held.is_some() && self.style_fades.fading(cell) {
+            self.switched.push(cell);
+        }
+        Some((style, k.1, k.2, k.3))
     }
 
     /// The style key a plant part draws with, resolved once a tick.
@@ -2035,6 +2387,14 @@ impl Packer {
         }
         let class = appearance::plant_class(p);
         if class == PART_NONE {
+            // GLOW-EASE: an emitter eaten or gone draws as it was while it fades.
+            if !self.ease_holds.is_empty()
+                && let Some(&Hold::Ghost(g, key)) = self.ease_holds.get(&(i as u32))
+            {
+                let mut t = texel_of(mats, m, view.free[src], view.pore[src], g.part(), g.glyph(), 0);
+                t.0[2] = g.0[2];
+                return Some((t, key));
+            }
             return None;
         }
         let stands = &self.stands;
@@ -2046,7 +2406,11 @@ impl Packer {
         // An emitting crown or heart cell draws the atlas's emissive variant (only the lit
         // tier with emission gives a style one).
         let emits = stands.emission(p).is_some();
-        if matches!(p, Part::Crown { .. }) && emits {
+        // GLOW-EASE: a cell ramping out keeps its emitting texels to fade on.
+        let held = !emits
+            && !self.ease_holds.is_empty()
+            && matches!(self.ease_holds.get(&(i as u32)), Some(Hold::Glyph));
+        if matches!(p, Part::Crown { .. }) && (emits || held) {
             glyph = appearance::emissive_glyph(glyph);
         }
         // A glowcap's lip takes its candle curve's copy of the style.
@@ -2078,11 +2442,14 @@ impl Packer {
     /// The vine's tile texel over `t`, if the vine has a cell there that nothing else
     /// claimed: an organism, a stand or a ground mark in the same voxel wins.
     #[inline]
-    fn with_vine(t: VoxelTexel, c: &VineCell) -> Option<VoxelTexel> {
+    /// `tile`: the tile its texel carries in place of its own while a third tile waits
+    /// (`VineFades::drawn`).
+    fn with_vine(t: VoxelTexel, c: &VineCell, tile: Option<(u8, u8)>) -> Option<VoxelTexel> {
         // A head's faceless cell gives way to a vine as it does to a plant.
         let soft = t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0 && sleep::is_soft_mark(t.0[2]);
         if t.material() == 0 && (t.part() == PART_NONE || soft) {
             let (glyph, b, a) = c.texel_bytes();
+            let (b, a) = tile.unwrap_or((b, a));
             return Some(t.with_vine(glyph, b, a));
         }
         None
@@ -2172,6 +2539,17 @@ impl Packer {
 
     /// The full pack into `master`, and everything the change-only pack keeps reset to it.
     fn fill_full(&mut self, view: &VoxelView<'_>, w: u32, h: u32, d: u32) {
+        // GLOW-EASE round 2: what each plant cell drew, for a colour swap to start from, as
+        // the change-only pack would read it, before the table is emptied.
+        let mut held_keys: rustc_hash::FxHashMap<u32, StyleKey> = Default::default();
+        if self.style_fades.on() && !self.delta.master.is_empty() {
+            for (x, y, z) in self.stands.cells() {
+                let i = VoxelStaging::index(w, h, x, y, z);
+                if let Some(k) = self.held_key(i) {
+                    held_keys.insert(i as u32, k);
+                }
+            }
+        }
         self.palette.reset();
         self.delta.overflowed.clear();
         let (wu, hu, du) = (w as usize, h as usize, d as usize);
@@ -2198,12 +2576,18 @@ impl Packer {
         let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
         self.overlay.extend(self.stands.cells().map(index));
         self.overlay.extend(self.animals.cells().map(index));
+        self.overlay.extend(
+            self.ease_holds.iter().filter(|(_, h)| matches!(h, Hold::Ghost(..))).map(|(&c, _)| c),
+        );
+        self.ease_dirty.clear();
         self.overlay.sort_unstable();
         self.overlay.dedup();
         let overlay = std::mem::take(&mut self.overlay);
         for &i in &overlay {
             let i = i as usize;
             if let Some((mut t, key)) = self.overlay(view, i, w, h) {
+                let held = held_keys.get(&(i as u32)).copied();
+                let key = self.faded_key(i, &t, key, held);
                 let (slot, keyed) = self.acquire(i as u32, key);
                 t.0[3] = slot;
                 self.delta.master[i] = t;
@@ -2212,11 +2596,12 @@ impl Packer {
         }
         self.overlay = overlay;
         // The vines last, into the air cells nothing else claimed.
-        self.vine_at.clear();
+        let old_vines = std::mem::take(&mut self.vine_at);
+        self.vine_switches(&old_vines, w, h);
         for c in self.vines.iter().filter(|c| c.kind.tiled()) {
             let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
             self.vine_at.insert(i as u32, *c);
-            if let Some(t) = Packer::with_vine(self.delta.master[i], c) {
+            if let Some(t) = Packer::with_vine(self.delta.master[i], c, self.vine_fades.drawn(i as u32)) {
                 self.delta.master[i] = t;
             }
         }
@@ -2359,6 +2744,19 @@ impl Packer {
             }
         }
         delta.canopy_cols = cols;
+        // GLOW-EASE's held cells, where a hold began or ended.
+        for &i in &self.ease_dirty {
+            delta.mark(i);
+        }
+        self.ease_dirty.clear();
+        // GLOW-EASE round 2: every cell part way through a colour swap moves on this pack.
+        for i in self.style_fades.cells() {
+            delta.mark(i);
+        }
+        // Round 3: a vine cell whose waiting tile began fading in carries its own again.
+        for &i in &self.vine_restarted {
+            delta.mark(i);
+        }
         lap!("plant cells");
         // The animals: where they were and where they are.
         let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
@@ -2375,16 +2773,16 @@ impl Packer {
         delta.animals = now;
         // The vine's tile cells, when they were rebuilt.
         if self.vines_moved {
-            let old: Vec<u32> = self.vine_at.keys().copied().collect();
-            for i in old {
+            let old = std::mem::take(&mut self.vine_at);
+            for &i in old.keys() {
                 delta.mark(i);
             }
-            self.vine_at.clear();
             for c in self.vines.iter().filter(|c| c.kind.tiled()) {
                 let i = VoxelStaging::index(w, h, c.x, c.y, c.z) as u32;
                 self.vine_at.insert(i, *c);
                 delta.mark(i);
             }
+            self.vine_switches(&old, w, h);
         }
 
         lap!("animal+vine cells");
@@ -2401,10 +2799,12 @@ impl Packer {
             let base = texel_of(mats, view.material[src], view.free[src], view.pore[src], PART_NONE, 0, 0);
             let (mut t, key) = self.overlay(view, iu, w, h).unwrap_or((base, None));
             if let Some(c) = self.vine_at.get(&i)
-                && let Some(v) = Packer::with_vine(t, c)
+                && let Some(v) = Packer::with_vine(t, c, self.vine_fades.drawn(i))
             {
                 t = v;
             }
+            let held = self.held_key(iu);
+            let key = self.faded_key(iu, &t, key, held);
             let held = self.delta.master[iu];
             let same = held.0[..3] == t.0[..3]
                 && match (&key, self.delta.is_keyed(iu)) {
@@ -2467,6 +2867,18 @@ impl Packer {
         self.wet = !delta.wet.is_empty();
         lap!("wet list");
     }
+}
+
+/// Whether a texel draws a plant (a part, not an animal's): what a colour swap fades.
+#[inline]
+fn is_plant(t: &VoxelTexel) -> bool {
+    t.part() != PART_NONE && t.part() != PART_ANIMAL_INTERIM
+}
+
+/// Texture index `cell` as its voxel, in a `w × h` wide and high volume.
+#[inline]
+fn cell_xyz(cell: u32, w: u32, h: u32) -> (u32, u32, u32) {
+    (cell % w, (cell / w) % h, cell / (w * h))
 }
 
 /// The free-water byte a texel holding `free` packs ([`texel_of`]'s `g`).

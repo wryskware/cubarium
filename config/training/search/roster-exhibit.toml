@@ -344,7 +344,7 @@ what = "litter decay (dead wood and carrion follow)"
 [[gene]]
 name = "rider_take"
 path = "fauna.parasite_take_body_per_day"
-range = [0.25, 4.0]
+range = [0.125, 2.0] # LJ-GROW-B: x1 is 4; the absolute box stays 0.5-8.
 value = 1.0
 
 [[gene]]

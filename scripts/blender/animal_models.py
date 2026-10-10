@@ -213,6 +213,17 @@ def bone_of(start, name):
         ob["bone"] = name
 
 
+def own_cell(start, group, slots=None):
+    """Every organism part built since `start` (of material slot in `slots`, or all) is
+    one part `group` that keeps a cell of its own on its bone, the way an eye keeps its
+    accent cell: the bake gives it one when the voxelizer left it none
+    (`bake_voxel_models.voxelize_animal`). For a rigged part too small to own a cell that
+    the clip must show moving (FEED-ROLLOUT: the seedporter's fruit hands)."""
+    for ob in L.ORG[start:]:
+        if slots is None or slot_of(ob.data.materials[0].name) in slots:
+            ob["own_cell"] = group
+
+
 def bone_ahead(start, x, name):
     """Every organism part built since `start`: what lies ahead of `x` (reference metres,
     +x forward) belongs to rig bone `name`, what lies behind to the part's own bone. For a
@@ -222,6 +233,29 @@ def bone_ahead(start, x, name):
     for ob in L.ORG[start:]:
         ob["bone_cut_x"] = x
         ob["bone_ahead"] = name
+
+
+def nested(start):
+    """Every organism part built since `start` lies nested inside the body at rest (a
+    retractable neck's segment inside its shield, FEED-ROLLOUT frondgrazer): it claims no
+    cell of its own, so the silhouette is the body's, but each cell hidden inside the body
+    (all six faces against held cells) whose centre is in the part takes the part's
+    material and bone (`bake_voxel_models.nested_cells`). Hidden, those cells change
+    nothing at rest; the clip slides them out with the bone."""
+    for ob in L.ORG[start:]:
+        ob["nested"] = True
+
+
+def root_ahead(start, x, name):
+    """Every organism part built since `start` that is on the root (no bone of its own):
+    what lies ahead of `x` belongs to rig bone `name`, as `bone_ahead`. For a small rig
+    whose front part is too small to win a cell (FEED-ROLLOUT small feeders round 2): the
+    body's front-most cells, whatever part claimed them, move with the front, so the
+    silhouette stays and the front shows. Parts on a bone of their own keep it."""
+    for ob in L.ORG[start:]:
+        if "bone" not in ob:
+            ob["bone_cut_x"] = x
+            ob["bone_ahead"] = name
 
 
 def bone_nearest(start, segs):
@@ -506,6 +540,14 @@ def frondgrazer(pose="rest"):
             # (an accent claims a cell even where it is hidden, and the lens would show)
             ell((0.363, sy * 0.042, 0.105), (0.012, 0.012, 0.012), c("a_glow"))
         return
+    # the retracted neck (FEED-ROLLOUT, Wrysk 2026-10-10: "the head is retractable"): its
+    # segment nested inside the shield behind the neck's base, on the rig's `neck_in` bone,
+    # which slides it out into the front notch as the neck reaches (`nested`: it takes only
+    # cells hidden inside the shield, so the resting body is unchanged)
+    start = len(L.ORG)
+    tube([FG_NECK_IN, FG_NECK[0]], 0.065, 0.065, c("a_limb"), seg=14)
+    bone_of(start, "neck_in")
+    nested(start)
     # the folded neck, rising out of the shield's front to the transverse cropping scoop;
     # its lower two segments on the rig's first neck bone, its upper two on the second
     neck = FG_NECK
@@ -529,101 +571,114 @@ def frondgrazer_hunker():
     frondgrazer("hunker")
 
 
-# --- the frondgrazer's rig and feeding clip (FEED-RIG, 2026-10-09) ---------------------
+# --- the frondgrazer's rig and feeding clip (FEED-RIG 2026-10-09; FEED-ROLLOUT 2026-10-10) --
 #
 # `design/handoffs/feeding-motion-rig-2026-10-09.md`: one armature and one action, the one
 # source of the feeding motion for the flipbook (each sampled frame re-voxelized) and for
 # the renderer's bones (`crates/cubarium/src/voxel/rig.rs`). Every part the rest builder
 # draws belongs to one bone (`bone_of`; a part with none is the root's). The clip is a
-# placeholder graze for judging the method; Wrysk directs the real choreography later.
+# placeholder graze; Wrysk directs the real choreography.
+#
+# FEED-ROLLOUT (Wrysk 2026-10-10: "push forward/extend it (you can fill in extra voxels if
+# needed. the head is retractable afterall)"): the neck telescopes. Its segment nested in
+# the shield (`neck_in`, cells hidden at rest) slides up and forward into the front notch,
+# where the neck's base shows at rest; from there the neck runs straight forward and down
+# to the scoop, which crops on the ground ahead of the front feet. The neck's segments
+# slide along one another (each bone's pivot displacement, `sample_clip`) as well as turn.
 #
 # The action is the **loop** (two bites and a chew) in the reached posture. The reach and
 # the return are the renderer's clip weight easing 0 -> 1 and back over `FG_FEED_EASE_S`
-# (each bone's turn eased from none, about its own pivot), so an animal can enter and leave
-# the loop anywhere in it and two grazers keep their own phases.
+# (each bone's turn eased from none, about its own pivot, and its slide scaled), so an
+# animal can enter and leave the loop anywhere in it and two grazers keep their own phases.
 
 FG_NECK = [(0.29, 0, 0.2), (0.34, 0, 0.24), (0.40, 0, 0.29), (0.45, 0, 0.35), (0.48, 0, 0.385)]
+# the rear end of the neck's segment nested inside the shield: 0.12 m back from the neck's
+# base along its first segment
+FG_NECK_IN = (0.197, 0, 0.124)
 # name, parent index, head, tail (reference metres, Blender axes)
 FG_BONES = [
     ("root", None, (0.0, 0.0, 0.2), (0.1, 0.0, 0.2)),
-    ("neck_a", 0, FG_NECK[0], FG_NECK[2]),
-    ("neck_b", 1, FG_NECK[2], FG_NECK[4]),
-    ("head", 2, FG_NECK[4], (0.545, 0.0, 0.4)),
-    ("eye_l", 3, (0.49, 0.09, 0.41), (0.505, 0.15, 0.465)),
-    ("eye_r", 3, (0.49, -0.09, 0.41), (0.505, -0.15, 0.465)),
+    ("neck_in", 0, FG_NECK_IN, FG_NECK[0]),
+    ("neck_a", 1, FG_NECK[0], FG_NECK[2]),
+    ("neck_b", 2, FG_NECK[2], FG_NECK[4]),
+    ("head", 3, FG_NECK[4], (0.545, 0.0, 0.4)),
+    ("eye_l", 4, (0.49, 0.09, 0.41), (0.505, 0.15, 0.465)),
+    ("eye_r", 4, (0.49, -0.09, 0.41), (0.505, -0.15, 0.465)),
 ]
 FG_FEED_FPS = 30
 FG_FEED_LOOP_S = 1.2
 FG_FEED_EASE_S = 0.4
-# Reached: the scoop's lip on the ground line about one voxel (0.125 m) ahead of the front
-# feet (their hooves' toes, x 0.372), the scoop level as at rest. Its lip is 0.065 m ahead of
-# the head's pivot and its underside 0.015 m below it.
+# The reach, in reference metres (x forward, z up), read off the grown body's 125 mm cells,
+# the desktop's: the nested segment slides `FG_SLIDE` (one cell up and forward) into the
+# front notch `FG_NOTCH`, where the neck's base cell sits at rest; the neck's upper cells
+# (`neck_b`, at rest the notch cell and the one ahead of it, `FG_NOTCH` their first) line up
+# on the straight run from the notch to the scoop; the scoop's cell (at rest centred on
+# `FG_SCOOP`) comes down to the ground cell centred `FG_SCOOP_REACH`, its rear on the
+# front feet's toes (x `FG_FRONT_FOOT_X`) plus one cell: two cells ahead of the front feet.
+FG_SLIDE = (0.125, 0.125)
+FG_NOTCH = (0.375, 0.3125)
+FG_SCOOP = (0.5, 0.4375)
 FG_FRONT_FOOT_X = 0.372
-FG_LIP = (0.065, -0.015)
-# The loop's key poses: (seconds, the pivot's dip (+ up, metres), the scoop's tip (+
-# forward, degrees)): two bites of 0.35 s (dip 3 cm, tip 15 deg), a chew of 0.5 s (lift
-# 4 cm, tilted back 8 deg: "a little").
+FG_SCOOP_REACH = (FG_FRONT_FOOT_X + 0.25, 0.0625)
+# The loop's key poses: (seconds, the scoop's dip (+ up, metres), its tip (+ forward,
+# degrees)): two bites of 0.35 s (dip 3 cm, tip 15 deg), a chew of 0.5 s (lift 4 cm, tilted
+# back 8 deg: "a little").
 FG_FEED_KEYS = [(0.0, 0.0, 0.0), (0.175, -0.03, 15.0), (0.35, 0.0, 0.0), (0.525, -0.03, 15.0),
                 (0.70, 0.0, 0.0), (0.95, 0.04, -8.0), (1.20, 0.0, 0.0)]
 # Blender (x forward, y side, z up) <-> the model's (x forward, y up, z side).
 SWAP_YZ = Matrix(((1, 0, 0, 0), (0, 0, 1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))
 
 
-def fg_feed_angles(dip, tip_deg):
-    """Each bone's turn about the side axis, radians counter-clockwise in the (x, z) plane
-    (+ lifts the nose), relative to its parent, for the reached pose dipped by `dip` and
-    tipped forward by `tip_deg`: the neck a two-bone reach to the head's pivot, the head
-    turned so the scoop is tipped by `tip_deg` from level, the eye stalks counter-turned
+def side_turn(angle, rest, posed):
+    """The armature-space move (4x4, Blender axes) that turns about the side axis by
+    `angle` (radians, counter-clockwise in the (x, z) plane: + lifts the nose) and carries
+    point `rest` to `posed` ((x, z) or (x, y, z), reference metres)."""
+    a3 = Vector((rest[0], 0.0, rest[1])) if len(rest) == 2 else Vector(rest)
+    p3 = Vector((posed[0], 0.0, posed[1])) if len(posed) == 2 else Vector(posed)
+    return Matrix.Translation(p3) @ Matrix.Rotation(-angle, 4, "Y") @ Matrix.Translation(-a3)
+
+
+def fg_feed_moves(dip, tip_deg):
+    """Each bone's move from rest (`side_turn`, armature space, in `FG_BONES` order) in the
+    reached pose with the scoop dipped by `dip` and tipped forward by `tip_deg`: the nested
+    segment slid into the notch, the neck straight from the notch to the scoop, its upper
+    cells evenly along it, the scoop level but for its tip, the eye stalks counter-turned
     so the eyes stay level."""
-    p0, p2, p4 = (Vector((p[0], p[2])) for p in (FG_NECK[0], FG_NECK[2], FG_NECK[4]))
-    target = Vector((FG_FRONT_FOOT_X + 0.125 - FG_LIP[0], -FG_LIP[1] + dip))
-    l1, l2 = (p2 - p0).length, (p4 - p2).length
-    to = target - p0
-    dist = min(max(to.length, abs(l1 - l2) + 1e-6), l1 + l2 - 1e-6)
-    base = math.atan2(to.y, to.x)
-    bend = math.acos(max(-1.0, min(1.0, (l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist))))
-    # the joint on the forward-up side of the reach, as a folded neck carries it
-    joints = [p0 + Vector((math.cos(base + s * bend), math.sin(base + s * bend))) * l1 for s in (1, -1)]
-    joint = max(joints, key=lambda j: j.x + j.y)
-    ang = lambda v: math.atan2(v.y, v.x)  # noqa: E731
-    a1 = ang(joint - p0) - ang(p2 - p0)
-    a2 = ang(target - joint) - ang(p4 - p2) - a1
+    notch = Vector(FG_NOTCH)
+    scoop = Vector((FG_SCOOP_REACH[0], FG_SCOOP_REACH[1] + dip))
+    run = scoop - notch
+    reach = math.atan2(run.y, run.x)
     tip = math.radians(tip_deg)
-    head = -tip - (a1 + a2)
-    return [0.0, a1, a2, head, tip, tip]
+    neck_in = side_turn(0.0, (0.0, 0.0), FG_SLIDE)
+    p0 = (FG_NECK[0][0], FG_NECK[0][2])
+    neck_a = side_turn(reach, p0, (p0[0] + FG_SLIDE[0], p0[1] + FG_SLIDE[1]))
+    neck_b = side_turn(reach, FG_NOTCH, notch + run / 3)
+    head = side_turn(-tip, FG_SCOOP, scoop)
+    eyes = []
+    for _, _, h, _ in FG_BONES[5:]:
+        e = Vector(h)
+        eyes.append(Matrix.Translation(head @ e - e))
+    return [Matrix.Identity(4), neck_in, neck_a, neck_b, head, *eyes]
 
 
 def fg_feed_armature():
     """The armature and its feeding action, in the current scene at reference size,
     standing at the origin as `frondgrazer()` draws: the action keyed at the loop's key
-    poses (Bezier, eased), at `FG_FEED_FPS` frames a second."""
-    sc = bpy.context.scene
-    sc.render.fps = FG_FEED_FPS
-    arm = bpy.data.armatures.new("fg_rig")
-    ob = bpy.data.objects.new("fg_rig", arm)
-    sc.collection.objects.link(ob)
-    bpy.context.view_layer.objects.active = ob
-    bpy.ops.object.mode_set(mode="EDIT")
-    for name, parent, head, tail in FG_BONES:
-        eb = arm.edit_bones.new(name)
-        eb.head, eb.tail = Vector(head), Vector(tail)
-        if parent is not None:
-            eb.parent = arm.edit_bones[FG_BONES[parent][0]]
-    bpy.ops.object.mode_set(mode="OBJECT")
-    ob.animation_data_create()
-    ob.animation_data.action = bpy.data.actions.new("fg_feed")
+    poses (Bezier, eased), each bone's turn and slide, at `FG_FEED_FPS` frames a second."""
+    ob = rig_armature("fg_rig", FG_BONES, FG_FEED_FPS)
     for t, dip, tip in FG_FEED_KEYS:
         frame = t * FG_FEED_FPS
-        for (name, _, _, _), a in zip(FG_BONES, fg_feed_angles(dip, tip)):
+        moves = fg_feed_moves(dip, tip)
+        for (name, parent, _, _), move in zip(FG_BONES, moves):
             pb = ob.pose.bones[name]
             pb.rotation_mode = "QUATERNION"
-            # the turn about the side axis through the bone's head, in armature space
-            # (Blender's +y; a counter-clockwise (x, z) turn is a negative turn about +y),
-            # as the bone's own basis: Q^-1 R Q, its rest orientation Q
-            q = pb.bone.matrix_local.to_quaternion()
-            r = Matrix.Rotation(-a, 4, "Y").to_quaternion()
-            pb.rotation_quaternion = q.inverted() @ r @ q
+            # the bone's pose relative to its parent's, as its own basis: the move D of
+            # the bone over its parent's Dp, in the bone's rest frame M: M^-1 Dp^-1 D M
+            m = pb.bone.matrix_local
+            up = Matrix.Identity(4) if parent is None else moves[parent]
+            pb.matrix_basis = m.inverted() @ up.inverted() @ move @ m
             pb.keyframe_insert("rotation_quaternion", frame=frame)
+            pb.keyframe_insert("location", frame=frame)
     return ob
 
 
@@ -631,7 +686,7 @@ def fg_feed_clip():
     """The feeding clip sampled at `FG_FEED_FPS` over its loop, in the model's axes and
     reference metres (anchor at the origin): each bone's name, parent and pivot (its
     head), and per frame per bone its turn about its pivot relative to its parent (a 3x3
-    rotation) and the pivot's displacement (metres; zero for this armature's pure turns)."""
+    rotation) and the pivot's displacement (metres): the neck's slides."""
     return sample_clip(fg_feed_armature(), FG_BONES, round(FG_FEED_LOOP_S * FG_FEED_FPS), FG_FEED_FPS)
 
 
@@ -813,6 +868,7 @@ def ch_feed_clip():
 
 def littershredder():
     kx, kz = 0.00051, 0.00044
+    start0 = len(L.ORG)
 
     def X(px):
         return (392 - px) * kx
@@ -858,6 +914,8 @@ def littershredder():
         bone_of(start, f"feeler_{LJ_SIDE[sy]}")
     # one magenta sensor spot on the second plate, near its top
     ell((X(307), 0.0, Z(118)), (0.008, 0.006, 0.004), c("magenta"))
+    # round 2: the body's cells ahead of the plough's rear move with the plough
+    root_ahead(start0, LT_PLOUGH_PIVOT[0], "plough")
 
 
 # --- ripple-snail · organic azure dome (0.19 x 0.19 x 0.125 m) -----------------------------
@@ -867,6 +925,7 @@ def littershredder():
 # with two pink-tipped palps. 0.00035 m/px.
 
 def ripple_snail():
+    start0 = len(L.ORG)
     # the dark foot, spreading under the shell and trailing behind it
     ell((-0.03, 0, 0.009), (0.12, 0.104, 0.011), c("a_dark"))
     ell((-0.115, 0.015, 0.006), (0.04, 0.07, 0.007), c("a_dark"))
@@ -898,6 +957,8 @@ def ripple_snail():
         tube([root, mid, tip], 0.0065, 0.006, c("a_limb"), seg=8)
         ell(tip, (0.014, 0.009, 0.0075), c("a_glow"), rot=rz(sy * 18))
     bone_of(start, "front")
+    # round 2: the body's cells ahead of the opening's rear (the skirt's front) move with it
+    root_ahead(start0, RS_PIVOT[0], "front")
 
 
 # --- capgnawer · rose-mauve bark mantle (0.25 x 0.21 x 0.19 m) ------------------------------
@@ -908,6 +969,7 @@ def ripple_snail():
 # light pink sensor patches (large upper, small lower); six stout legs on pale toes.
 
 def capgnawer():
+    start0 = len(L.ORG)
     for sy in (-1, 1):
         cy, cz = sy * 0.058, 0.085
         start = len(L.ORG)
@@ -944,7 +1006,8 @@ def capgnawer():
             ob.data.transform(tilt)
     ell((0.0, 0, 0.065), (0.11, 0.09, 0.055), c("a_limb"))           # the body under the mantle
     # the face under the cleft (the rig's `front` bone, FEED-ROLLOUT: face, mouth,
-    # mandibles and sensor patches; the lobes, body and legs stay on the root)
+    # mandibles and sensor patches; the lobes, body and legs stay on the root behind the
+    # face's rear, and move with the front ahead of it: `root_ahead` below)
     start = len(L.ORG)
     ell((0.105, 0, 0.062), (0.035, 0.05, 0.035), c("a_limb"))
     box((0.139, 0, 0.063), (0.006, 0.005, 0.042), c("a_dark"))       # the vertical mouth
@@ -962,6 +1025,9 @@ def capgnawer():
             tube([(px, s2 * 0.06, 0.05), (px + 0.006, s2 * 0.09, 0.03), foot], 0.022, 0.018, c("a_limb"), seg=10)
             for t in range(4):
                 ell((px + 0.03, s2 * 0.105 + (t - 1.5) * 0.009, 0.007), (0.009, 0.0055, 0.007), c("a_foot"))
+    # round 2: the body's cells ahead of the face's rear (the lobes' fronts, the front
+    # toes) move with the front
+    root_ahead(start0, CG_PIVOT[0], "front")
 
 
 # --- seedporter · moss-green glider, the selected image (upright, as pictured) ---------------
@@ -1192,6 +1258,9 @@ def sp_body(spec):
         n0 = len(L.ORG)
         sp_digits(sw, (spec["fruit"] - sw).normalized(), Vector((0, 0, 1)), 3, 0.022, 0.01, 0.004)
         bone_of(n0, f"hand_{side}")
+        # the hand keeps a cell of its own, so the reach and pluck show (Wrysk 2026-10-10:
+        # "give them a voxel")
+        own_cell(n0, f"hand_{side}", {"a_main"})
         frame["arms"][side] = (ss, se, sw, m(spec["small_pole"]))
         # the hind legs, and their feet
         hp = m(spec["hip"])
@@ -1212,6 +1281,7 @@ def sp_body(spec):
     n0 = len(L.ORG)
     ell(spec["fruit"], (0.028, 0.028, 0.03), c("a_fruit"))
     bone_of(n0, "hand_l")
+    own_cell(n0, "fruit")
     frame["fruit"] = Vector(spec["fruit"])
     # the long prehensile tail, its dorsal stripe along the outside
     pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]

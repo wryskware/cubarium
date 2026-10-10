@@ -37,9 +37,11 @@ class Task:
     mem_gb: float = 1.0
     l3: bool = False                 # must run inside one shared-L3 group
     arch: str | None = None          # None: any; else x86_64 / aarch64
-    hosts: list | None = None        # allowed host names (None: local hosts; "ec2" opts in)
+    hosts: list | None = None        # allowed host names (None: non-EC2 hosts; "ec2" opts in)
     local_only: bool = False
     inputs: list = field(default_factory=list)      # artifact keys; argv may use {input:KEY}
+    files: dict = field(default_factory=dict)       # local file/dir -> execution-host path (placeholders allowed)
+    remote_argv: list | None = None                 # optional command for source-archive execution
     outputs: str | None = None       # dir; default <job>/<name>; argv may use {out}
     done_marker: str | None = None   # relative to outputs; required for success when set
     deps: list = field(default_factory=list)        # task names in the same job

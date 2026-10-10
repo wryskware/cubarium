@@ -246,8 +246,61 @@ a voxel."
 - Rebake the two pose models and their rigs (specimen path); report cells per bone.
 - Evidence: the feed MP4 again, today (main) | after, `seedporter-feed-r2-px{6,12}.mp4`.
 
-Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question). Then sleep, idle and hunker move onto the rig.
+### Small feeders round 2: the front owns its cells
+
+Small feeders merged (f013da6d): at 125 mm the littershredder's plough and the
+ripple-snail's front own no cells (the root claims them), and the capgnawer's front owns
+one, so the clips barely show. The seedporter's hands (7d85b28b) got cells of their own by
+`own_cells` (a claimed extra cell), which made its front three cells wide, wider than the
+chest. Wrysk's rule: a rigged part gets a voxel.
+
+- Prefer **reassigning** over adding: give the front bone the body's front-most cells by
+  position (as the Veilhound's neck and the lanternjaw's head are split: cells ahead of a
+  plane), so the silhouette doesn't change and the front moves. Use `own_cells` only where
+  a part has no cell at all after that, and say where.
+- Littershredder (all 5 bins), ripple-snail, capgnawer; both voxel sizes. Report cells per
+  bone before/after, and a rest still today | after (6 px, 12 px) to show the silhouette
+  holds.
+- Evidence: the three feed MP4s again, today (main) | after, `<name>-feed-r2-px{6,12}.mp4`.
+
+Next sections (written when each starts): sleep, idle and hunker move onto the rig.
+
+### Frondgrazer (last eater; the neck reaches out of the shield)
+
+Wrysk (2026-10-10) saw today's placeholder
+(`art/gen/runs/feed-rollout-2026-10-10/frondgrazer-feed-today-px12.mp4`, FEED-RIG round 1's
+clip). Only 5 of its 81 cells are on bones: the head column at the shield's front. When it
+crops, the head tips down behind the shield's front corner, and the bite barely reads.
+Asked whether the neck should reach out from under the shield, he said: "push
+forward/extend it (you can fill in extra voxels if needed. the head is retractable
+afterall)".
+
+- **The reach.** In the cropping clip, the neck slides forward and down out of the
+  shield's front notch, so the head and scoop visibly reach the plants in front of the
+  front feet and crop there.
+  - The engine already carries a bone's pivot displacement as well as its turn
+    (`sample_clip`), so a telescoping neck can be a translation along the neck.
+  - Today's clip, `fg_feed_angles` / `fg_feed_armature` / `fg_feed_clip` in
+    `scripts/blender/animal_models.py` around 595-660, is a pure two-bone turn whose
+    reach is capped by the folded neck's length. Rework it.
+- **Extra voxels.** Because the head is retractable, the neck may carry more cells than
+  the resting model shows:
+  - neck segments nested inside the shield at rest, which slide out with the reach;
+  - or cells owned by position, as the small feeders' fronts are (`own_cells`, the
+    position split).
+  Either way, **the resting silhouette and the hunker model stay byte-identical**: check
+  this the way small feeders round 2 did. The new cells use the neck's own colours (`a_limb`,
+  and `a_head` for the scoop). No new parts or colours.
+- **Keep:** the head turn, so the scoop is level for the bite; the eye stalks counter-turned;
+  the hunker pose (`frondgrazer_hunker`, `FOUNDER_POSES`) and its tests
+  (`crates/cubarium/src/voxel/hunker_tests.rs`) unchanged.
+- **Evidence:** as the pattern says, today | after, side-on and three-quarter, px 6 and 12,
+  `frondgrazer-feed-r2-px{6,12}.mp4`. Report cells per bone.
+
+Worktree `.claude/worktrees/fg-look`, branch `fg-look` (already made from main; its
+`target/` is seeded and `voxel_feed_capture` is built). Rebake only the frondgrazer (and the
+hunker if the shared builder changes it); commit only the files you meant to change (the
+bake is not reproducible, backlog 21).
 
 ## Return
 

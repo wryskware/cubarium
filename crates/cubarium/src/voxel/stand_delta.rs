@@ -350,8 +350,12 @@ fn collect(s: &mut Stands, stamp: impl FnOnce(&mut Stands)) -> Vec<(u32, Part)> 
 fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Option<&ModelLibrary>) {
     let seen = inc(s).seen;
     for (k, stand) in flora.stands.iter().enumerate() {
-        // A face's plant before its fungus, as the full rebuild places them.
-        let order = (site_key(stand.site) << 1) | flora.config.face_layer(stand.species).index() as u64;
+        // In `FloraView::stands`' own order, which the full rebuild places in: by site, then
+        // by the stand's place on its face (`Stand::place`: the top plant, its fungus, the
+        // plant beneath). Two plants share a face's species layer, so the place and not the
+        // species' layer tells them apart. Two bits for the place keep a stand's order
+        // under the marks' (`pass << 48`) for any strip narrower than 2^14 voxels.
+        let order = (site_key(stand.site) << 2) | stand.place.index() as u64;
         let moved = as_drawn(view, flora, stand);
         let stand = moved.as_ref().unwrap_or(stand);
         let i = inc(s);
@@ -369,7 +373,12 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
         i.k_of_slot[slot as usize] = k as u32;
         let c = &mut i.claimants[slot as usize];
         c.seen = seen;
-        c.order = order;
+        if c.order != order {
+            // The face's two plants swapped places: what it claims resolves again in its
+            // new order, even if its cells hold.
+            c.order = order;
+            i.changed.extend(c.claims.iter().map(|&(cell, _)| cell));
+        }
         s.placing = slot + 1;
         match lib.and_then(|lib| model_cells(lib, flora, stand).map(|c| (lib, c))) {
             Some((lib, cells)) => {

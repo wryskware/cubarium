@@ -126,7 +126,8 @@ fn species_rows() -> Vec<Row> {
             .search(0.01, 0.12).log().grade("A"),
         r("body_max", "org-units", nonneg, "adult structure").grade("D"),
         r("growth_max_per_s", "org-units/s", nonneg, "fastest structure grows from the reserve")
-            .search(1e-6, 1e-4).log().grade("B").prov("derived"),
+            // Includes shipped mass-scaled ceilings and cotrain's x4 maturity box.
+            .search(1e-6, 1e-2).log().grade("B").prov("derived"),
         r("body_min", "org-units", Range::positive(), "death threshold, and a newborn's body").evolve().grade("B"),
         r("birth_body", "org-units", nonneg, "structure at which it can pay for a birth").evolve().grade("B"),
         r("birth_cost", "org-units", nonneg, "a gestation's package: the newborn's body_min plus its reserve")
@@ -163,6 +164,11 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 30.0),
         r("reproduction.nest_retry_s", "s", nonneg, "a refused layer (nest site, body ceiling) waits this long before trying again")
             .search(5.0, 600.0).log(),
+        r("reproduction.nest_seek", "switch", Range::fraction(), "SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is)").optional(),
+        r("reproduction.nest_seek_m", "m", nonneg, "SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height)")
+            .search(0.5, 8.0),
+        r("reproduction.nest_seek_give_up_s", "s", nonneg, "SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry")
+            .search(10.0, 600.0).log(),
         r("reproduction.clutch_hold_max_s", "s", nonneg, "clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once)")
             .search(0.0, 7200.0),
         r("reproduction.egg_fungus_radius_m", "m", nonneg, "fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face)")
@@ -506,6 +512,13 @@ fn rows() -> Vec<Row> {
             .search(0.1, 2.0).log().grade("N"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
             .search(0.15, 0.5).grade("N"),
+        // LJ-HOSTSWITCH (Wrysk 2026-10-10: an outgrown larva looks for a bigger host).
+        r("fauna.parasite_switch", "switch", Range::fraction(), "LJ-HOSTSWITCH: a rider that outgrew its host below drop-off size looks for one that bears it before going free (false: it goes free)")
+            .grade("N").prov("decision").optional(),
+        r("fauna.parasite_switch_radius_m", "m", Range::nonneg(), "LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it")
+            .search(1.0, 8.0).grade("N"),
+        r("fauna.parasite_switch_give_up_s", "s", Range::nonneg(), "LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free")
+            .search(60.0, 3600.0).log().grade("N"),
         r("fauna.lineage_body_ceiling", "bodies", Range::nonneg(), "COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off)")
             .grade("N").prov("decision"),
     ]);
@@ -681,7 +694,8 @@ fn knob_rows() -> Vec<Row> {
         hk("sight_m", "m", nonneg, "how far it sees a prey body ahead of it and not hidden").search(0.5, 3.0),
         hk("tremor_turn", "tremor units", nonneg, "the faintest prey tremor (left + right, size-eligible prey) it turns toward").search(1e-4, 0.05).log(),
         hk("search_memory_s", "s", pos, "e-fold time of the search image's encounter memory").search(120.0, 7200.0).log(),
-        // `share_switching` and `strike_chosen_only` (true / false) are switches: no rows.
+        // `share_switching`, `strike_chosen_only`, and LJ-HUNT's `wait_strikes` and
+        // `lunge_sweeps_band` (true / false) are switches: no rows.
         hk("switch_exponent", "exponent", pos, "share switching: the attack preference is the relative encounter share to this power").search(1.0, 4.0),
         hk("attack_prior_s", "s of contact", nonneg, "share switching: contact credited to every listed lineage before the shares are taken").search(1.0, 120.0).log(),
         hk("attack_half_s", "s of contact", pos, "D2's rule: encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
@@ -750,7 +764,8 @@ fn knob_rows() -> Vec<Row> {
         lk("near_m", "m", nonneg, "inside this of a beacon it slows to near_forward; walkers also start the no-reward inspection timer"),
         lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
         lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
-        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
+        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming
+        // (LJ-HUNT's `fauna.light.lure_masks_loom` is a switch: no row).
         lk("nir_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a near-IR reflector (flowers); learned ones relax back to it"),
         lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
         lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),

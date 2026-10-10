@@ -591,9 +591,12 @@ fn drain_riders(fauna: &mut Fauna) {
 /// from here on, when it reaches its detach size — `parasite_detach_body_fraction` × its
 /// lineage's `body_max` — or (LANTERNJAW-LIFE, Wrysk 2026-10-10: "they should drop off when
 /// theyre too big") when it has **outgrown its host**: its host no longer bears its take
-/// ([`crate::host_bears`]), whatever its size. It does not look for another host.
+/// ([`crate::host_bears`]), whatever its size. One that outgrew its host below its detach
+/// size then looks for a host that bears it (LJ-HOSTSWITCH, [`seek_hosts`]) while
+/// `parasite_switch` is on.
 fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let fraction = fauna.config.parasite_detach_body_fraction;
+    let give_up = cubarium_voxel::ticks_at_least_one(fauna.config.parasite_switch_give_up_s);
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
             continue;
@@ -610,7 +613,89 @@ fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
         crate::release(&mut fauna.animals[r], &host);
         fauna.step_off_beside(view, r, &host);
         fauna.ledger.rider_dropoffs += 1;
+        if rider < line && fauna.config.parasite_switch {
+            fauna.host_quests.insert(fauna.animals[r].id, fauna.tick + give_up);
+            fauna.host_switch.tried += 1;
+        }
     }
+    seek_hosts(fauna, view);
+}
+
+/// Step 2, after the drop-offs: **an outgrown rider takes a new host** (LJ-HOSTSWITCH; Wrysk
+/// 2026-10-10: an outgrown larva looks for a bigger host). Each one looking, in id order,
+/// takes the nearest host that bears it within `parasite_attach_radius_m` — the hatchlings'
+/// rule, [`bearing_host`] — onto its back as a hatchling does. One at or past its detach
+/// size needs none and stops looking; one past its give-up tick goes on free. The walk to a
+/// host farther off is its heuristic's ([`host_seek`]).
+fn seek_hosts(fauna: &mut Fauna, view: &VoxelView<'_>) {
+    if fauna.host_quests.is_empty() {
+        return;
+    }
+    let tick = fauna.tick;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let fraction = fauna.config.parasite_detach_body_fraction;
+    let quests: Vec<(u64, u64)> = fauna.host_quests.iter().map(|(&id, &until)| (id, until)).collect();
+    for (id, until) in quests {
+        let Ok(r) = fauna.animals.binary_search_by_key(&id, |a| a.id) else {
+            // Gone (eaten, starved): nothing to tally.
+            fauna.host_quests.remove(&id);
+            continue;
+        };
+        let a = fauna.animals[r];
+        let Some(lineage) = a.founder else {
+            fauna.host_quests.remove(&id);
+            continue;
+        };
+        if a.attached.is_some() {
+            fauna.host_quests.remove(&id);
+            continue;
+        }
+        if a.body >= fraction * body::effective_config(&fauna.config, &a).body_max {
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.grew += 1;
+            continue;
+        }
+        let at = (a.pose.x, a.pose.z);
+        // Mid-strike or on a wall it finishes first; it takes a host from the ground.
+        let free = a.strike.is_none() && a.mobility.climb.is_none();
+        let radius = fauna.config.parasite_attach_radius_m;
+        if let Some(host) = free.then(|| bearing_host(fauna, &[], lineage, a.body, at, radius, ring)).flatten() {
+            let rider = &mut fauna.animals[r];
+            rider.attached = Some(crate::Attachment { host: host.id });
+            rider.site = host.site;
+            rider.pose = host.pose;
+            fauna.drop_plans.remove(&id);
+            fauna.wading.remove(&id);
+            fauna.trapped.remove(&id);
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.made += 1;
+            if let Some(f) = host.founder {
+                fauna.host_switch.by_host[f.index()] += 1;
+            }
+            continue;
+        }
+        if tick >= until {
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.gave_up += 1;
+        }
+    }
+}
+
+/// The write side's **host seek** (LJ-HOSTSWITCH): an outgrown rider looking for a new host,
+/// over its own heuristic, walks straight at the nearest host that bears it within
+/// `parasite_switch_radius_m` ([`bearing_host`]); `None` when it is not looking or none is
+/// in reach, and its heuristic goes on (a lanternjaw is fast: it runs a host down rather
+/// than waiting for one to pass, and hunts meanwhile when none is near).
+fn host_seek(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    if a.attached.is_some() || !fauna.host_quests.contains_key(&a.id) {
+        return None;
+    }
+    let lineage = a.founder?;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let host = bearing_host(fauna, &[], lineage, a.body, (a.pose.x, a.pose.z), fauna.config.parasite_switch_radius_m, ring)?;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, host.pose.x, host.pose.z, ring);
+    Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
 /// After the act: **every rider is carried** to its host's place (§2) — the host's face,
@@ -1755,6 +1840,16 @@ fn controllers(
         if driven && hunters_here && retracts && prey {
             retract(fauna, i);
         }
+        // SHREDDER-NEST: a layer the crowd refused walks to the free egg face it chose, over
+        // its forager, its search and the herd; flight, deep water and thirst (below) win.
+        if driven && prey {
+            if let Some(go) = nest_seek_reflex(fauna, i, view) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Nest;
+            }
+        }
         let mut fled = false;
         if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
@@ -1894,6 +1989,15 @@ fn controllers(
                     lure = 0.0;
                     src = crate::Steer::Yield;
                 }
+            }
+        }
+        // LJ-HOSTSWITCH: an outgrown rider looking for a new host walks to the nearest one
+        // in reach that bears it, over its patrol (its own heuristic only).
+        if driven && patrol {
+            if let Some(go) = host_seek(fauna, i, view) {
+                actions = go;
+                lure = 0.0;
+                src = crate::Steer::Host;
             }
         }
         if driven && pack {
@@ -3386,7 +3490,51 @@ fn meets_capsule(
     if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
         return false;
     }
-    in_strike_band(view, striker, geometry, h, prey, &pg)
+    in_strike_band(view, striker, geometry, h, prey, &pg) || lunge_start_band(config, view, striker, geometry, h, prey, &pg)
+}
+
+/// **The lunge sweeps its band** (LJ-HUNT, [`crate::HuntConfig::lunge_sweeps_band`]): a
+/// lanternjaw's lunge that stepped up or down a ledge on the way also meets a prey in the band
+/// over the face it began on — the support face of its start column nearest the one it stands
+/// on now, within its step limits. False off the switch, for another lineage, a perched
+/// striker, or no lunge.
+fn lunge_start_band(
+    config: &crate::FaunaConfig,
+    view: &VoxelView<'_>,
+    striker: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    prey: &Animal,
+    pg: &crate::Body,
+) -> bool {
+    let Some(s) = striker.strike else { return false };
+    if !config.hunt.lunge_sweeps_band
+        || striker.founder != Some(crate::Founder::Lanternjaw)
+        || s.phase != StrikePhase::Lunge
+        || striker.mobility.mode == crate::MobilityMode::Perched
+    {
+        return false;
+    }
+    let v = view.config.voxel_m;
+    let Some((cx, cz)) = (crate::Pose { x: s.from_x, z: s.from_z, ..striker.pose }).column(v, view.config.depth) else {
+        return false;
+    };
+    let limits = config.founder(crate::Founder::Lanternjaw).step_limits(v);
+    // It stepped down at most `limits.down` from where it began, or up at most `limits.up`.
+    match view.nearest_support(cx.rem_euclid(i64::from(view.config.width)), cz, striker.site.y, limits.up, limits.down) {
+        Some(y) if y != striker.site.y => band_meets(view, crate::surface_m(y, v) + striker.wall_offset_m(), geometry, h, prey, pg),
+        _ => false,
+    }
+}
+
+/// The base of `striker`'s jaw band, metres: a perched body's pose height, a walker's
+/// support face's top (plus its wall offset).
+fn band_base(view: &VoxelView<'_>, striker: &Animal) -> f64 {
+    if striker.mobility.mode == crate::MobilityMode::Perched {
+        striker.pose.y_m
+    } else {
+        crate::surface_m(striker.site.y, view.config.voxel_m) + striker.wall_offset_m()
+    }
 }
 
 /// The strike capsule's height test ([`meets_capsule`]): the band from the striker's base up
@@ -3400,12 +3548,12 @@ pub(crate) fn in_strike_band(
     prey: &Animal,
     pg: &crate::Body,
 ) -> bool {
+    band_meets(view, band_base(view, striker), geometry, h, prey, pg)
+}
+
+/// Whether the jaw band over the base `s0` (metres) meets `prey`'s cylinder (`pg`, its body).
+fn band_meets(view: &VoxelView<'_>, s0: f64, geometry: &crate::Body, h: &crate::Hunter, prey: &Animal, pg: &crate::Body) -> bool {
     let v = view.config.voxel_m;
-    let s0 = if striker.mobility.mode == crate::MobilityMode::Perched {
-        striker.pose.y_m
-    } else {
-        crate::surface_m(striker.site.y, v) + striker.wall_offset_m()
-    };
     let band = (s0, s0 + h.strike_height_m(geometry));
     // A body off the ground (perched, flying, climbing, gliding) has its base at its
     // pose's height; a walker's is its support face's top.
@@ -4969,6 +5117,128 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// for a lineage whose [`crate::EggSite`] is film, film; a vine nester's clutch goes on a
 /// latticevine face instead ([`vine_egg_site`], VINE-C); and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
+/// SHREDDER-NEST: a walk off a crowded nest ends without a clutch — given up — when its
+/// [`crate::Reproduction::nest_seek_give_up_s`] has run out, or when the body stands on its
+/// face and the face no longer holds its egg-site rule (the litter eaten or washed off). The
+/// body then waits out its retry, as a refused layer does; at its next laying the crowd
+/// refuses it again and it looks again.
+fn end_nest_trip(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, rule: &crate::Reproduction) {
+    let a = &fauna.animals[i];
+    let Some(trip) = fauna.nest_trips.get(&a.id).copied() else { return };
+    let Some(lineage) = a.founder else { return };
+    let late = fauna.tick.saturating_sub(trip.since) >= rule.nest_seek_give_up_ticks();
+    let arrived = (a.site.x, a.site.z) == (trip.target.x, trip.target.z);
+    if late || (arrived && !egg_site_fits(fauna, lineage, view, flora, a.site, rule)) {
+        let id = a.id;
+        fauna.nest_trips.remove(&id);
+        fauna.nest_seek_tally[lineage.index()].give_ups += 1;
+        fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
+    }
+}
+
+/// Whether `site` holds lineage `lineage`'s egg-site rule for a clutch on the ground
+/// ([`crate::EggSite`]): litter over `litter_min`, film under standing water, a fungus within
+/// `egg_fungus_radius_m`, a shore egg face. A vine nester's clutch never goes on the ground.
+fn egg_site_fits(fauna: &Fauna, lineage: Founder, view: &VoxelView<'_>, flora: &Flora, site: Site, rule: &crate::Reproduction) -> bool {
+    let ground = flora.view().ground_at(site);
+    match fauna.config.founder(lineage).egg_site {
+        crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
+        // Under water (SNAIL-FIX): land film is grazed, not laid on; laying above
+        // the waterline is not decided.
+        crate::EggSite::Film => {
+            ground.is_some_and(|g| g.film > 0.0) && view.standing_depth_m(i64::from(site.x), site.y, site.z) > 0.0
+        }
+        crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
+        crate::EggSite::Shore => fauna
+            .config
+            .founder(lineage)
+            .amphibious
+            .is_some_and(|am| shore_egg_site(view, &am, site)),
+        // Found above, or not at all: never the ground, never a bloomcrown.
+        crate::EggSite::Vine => false,
+    }
+}
+
+/// **Where a refused layer walks to** (SHREDDER-NEST, [`crate::Reproduction::nest_seek`]): the
+/// nearest support face within `nest_seek_m` (level distance around the ring and across,
+/// faces within one `step_up_m` of its own height, so the walk is not up or down a wall) that
+/// holds its egg-site rule ([`egg_site_fits`]) and whose nest is not crowded
+/// ([`nest_crowded_at`], the laying's own test). Its own face is never the target. `None`
+/// for a vine nester or a shore layer (each has its own trip), or with no such face. A
+/// heuristic world query, as the shore trip's is.
+fn nest_seek_target(fauna: &Fauna, i: usize, view: &VoxelView<'_>, flora: &Flora, rule: &crate::Reproduction) -> Option<Site> {
+    let a = &fauna.animals[i];
+    let founder = a.founder?;
+    let phys = fauna.config.founder(founder);
+    if matches!(phys.egg_site, crate::EggSite::Vine | crate::EggSite::Shore) {
+        return None;
+    }
+    let c = view.config;
+    let v = c.voxel_m;
+    let reach = rule.nest_seek_m.max(0.0);
+    if !(reach > 0.0) {
+        return None;
+    }
+    let k = (reach / v).ceil() as i64;
+    let step = (phys.step_up_m.max(0.0) / v).floor() as u32;
+    let top = (a.site.y + step).min(c.height.saturating_sub(1));
+    let low = a.site.y.saturating_sub(step);
+    let (hx, hz) = (i64::from(a.site.x), i64::from(a.site.z));
+    let ring = f64::from(c.width) * v;
+    // The faces in reach that pass the cheap tests, nearest first; the first whose nest is
+    // not crowded is the target.
+    let mut near: Vec<(f64, Site)> = Vec::new();
+    for dz in -k..=k {
+        let z = hz + dz;
+        if z < 0 || z >= i64::from(c.depth) {
+            continue;
+        }
+        for dx in -k..=k {
+            let x = (hx + dx).rem_euclid(i64::from(c.width));
+            let (tx, tz) = ((x as f64 + 0.5) * v, (z as f64 + 0.5) * v);
+            let (ddx, ddz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, tx, tz, ring);
+            let d = (ddx * ddx + ddz * ddz).sqrt();
+            if !(d <= reach) {
+                continue;
+            }
+            let Some(y) = view.highest_support_in(x, z as u32, 0, top) else {
+                continue;
+            };
+            let s = Site { x: x as u32, y, z: z as u32 };
+            if y < low || (s.x, s.z) == (a.site.x, a.site.z) || !egg_site_fits(fauna, founder, view, flora, s, rule) {
+                continue;
+            }
+            near.push((d, s));
+        }
+    }
+    near.sort_by(|p, q| p.0.total_cmp(&q.0));
+    near.into_iter()
+        .find(|&(_, s)| !nest_crowded_at(fauna, a.id, founder, (f64::from(s.x) + 0.5) * v, (f64::from(s.z) + 0.5) * v, view, rule))
+        .map(|(_, s)| s)
+}
+
+/// **The walk off a crowded nest** (SHREDDER-NEST): a body on a [`crate::NestTrip`], on the
+/// ground, free and awake, still ready to lay ([`trip_ready`]: a body whose reserve no longer
+/// pays for its clutch goes back to feeding) walks to the trip's face, and holds still on
+/// it. Committed: nothing but the trip's own end ([`end_nest_trip`], or a clutch) takes the
+/// goal away, so it never turns back to the huddle between samples. Flight from a threat,
+/// deep water and sleep still win (the step's chain); `None` otherwise.
+fn nest_seek_reflex(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    let trip = fauna.nest_trips.get(&a.id)?;
+    if a.state == State::Asleep || a.attached.is_some() || a.mobility.mode != crate::MobilityMode::Ground {
+        return None;
+    }
+    let sc = body::effective_config(&fauna.config, a);
+    if !trip_ready(&sc.reproduction, &a.reproduction, a.reserve, sc.reserve_of(a.body)) {
+        return None;
+    }
+    if (a.site.x, a.site.z) == (trip.target.x, trip.target.z) {
+        return Some(Actions { forward: 0.0, turn: 0.0, feed: 0.0 });
+    }
+    Some(walk_to_place(a, view, trip.target, 0.0))
+}
+
 /// [`crate::LAY_GATES`]' indices.
 const LAY_SURPLUS: usize = 0;
 const LAY_INTERVAL: usize = 1;
@@ -4976,6 +5246,7 @@ const LAY_CLUTCH_WAIT: usize = 2;
 const LAY_WALL: usize = 3;
 const LAY_SITE: usize = 4;
 const LAY_CROWDED: usize = 5;
+const LAY_SEEKING: usize = 6;
 
 /// ROLES5: one body-tick held at `gate`, for a founder body of breeding size (a juvenile
 /// is not yet held by any gate). Instrumentation only.
@@ -4997,6 +5268,7 @@ fn lay(
     rule: &crate::Reproduction,
 ) {
     let seed = view.config.seed;
+    end_nest_trip(fauna, i, view, flora, rule);
     // ROLES5: which gate held a breeding-size body back, counted per tick (`LAY_GATES`).
     if fauna.animals[i].reproduction.retry_ticks > 0 {
         lay_held(fauna, i, sc, LAY_CROWDED);
@@ -5057,24 +5329,7 @@ fn lay(
     // the litter it lives in, the ripple-snail on the film it grazes (roster R2b,
     // [`crate::EggSite`]).
     if !rule.dormant && vine.is_none() {
-        let ground = flora.view().ground_at(site);
-        let fits = match fauna.config.founder(lineage).egg_site {
-            crate::EggSite::Litter => ground.is_some_and(|g| g.litter > rule.litter_min),
-            // Under water (SNAIL-FIX): land film is grazed, not laid on; laying above
-            // the waterline is not decided.
-            crate::EggSite::Film => {
-                ground.is_some_and(|g| g.film > 0.0)
-                    && view.standing_depth_m(i64::from(site.x), site.y, site.z) > 0.0
-            }
-            crate::EggSite::Fungus => fungus_near(view, flora, site, rule.egg_fungus_radius_m),
-            crate::EggSite::Shore => fauna
-                .config
-                .founder(lineage)
-                .amphibious
-                .is_some_and(|am| shore_egg_site(view, &am, site)),
-            // Found above, or not at all: never the ground, never a bloomcrown.
-            crate::EggSite::Vine => false,
-        };
+        let fits = egg_site_fits(fauna, lineage, view, flora, site, rule);
         if !fits {
             lay_held(fauna, i, sc, LAY_SITE);
             return;
@@ -5115,10 +5370,35 @@ fn lay(
         return;
     }
     if !rule.dormant && nest_crowded(fauna, i, view, rule) {
+        // SHREDDER-NEST: on its way off a crowded nest, the crowd where it stands holds it
+        // (no refusal booked, no retry) until it reaches the free face; a face crowded on
+        // arrival ends the walk as a refusal.
+        let id = fauna.animals[i].id;
+        if let Some(trip) = fauna.nest_trips.get(&id).copied() {
+            let here = fauna.animals[i].site;
+            if (here.x, here.z) != (trip.target.x, trip.target.z) {
+                lay_held(fauna, i, sc, LAY_SEEKING);
+                return;
+            }
+            fauna.nest_trips.remove(&id);
+            fauna.nest_seek_tally[lineage.index()].give_ups += 1;
+        } else if rule.nest_seek
+            && let Some(target) = nest_seek_target(fauna, i, view, flora, rule)
+        {
+            // Refused here, it sets out for the nearest free egg face instead of waiting.
+            fauna.nest_trips.insert(id, crate::NestTrip { target, since: fauna.tick });
+            fauna.nest_seek_tally[lineage.index()].walk_offs += 1;
+            fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
+            lay_held(fauna, i, sc, LAY_CROWDED);
+            return;
+        }
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
         lay_held(fauna, i, sc, LAY_CROWDED);
         return;
+    }
+    if fauna.nest_trips.remove(&fauna.animals[i].id).is_some() {
+        fauna.nest_seek_tally[lineage.index()].walk_lays += 1;
     }
     // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
     // above).
@@ -5823,19 +6103,35 @@ fn dormant_eggs(
     }
 }
 
-/// **A hatching egg's host** (parasite §1): the nearest living animal not of the egg's own
-/// lineage, and not itself riding, within `parasite_attach_radius_m` of the egg's column
-/// centre (wrapped on the ring), carrying fewer than `parasite_max_per_host` riders —
-/// this tick's hatchlings counted — and able to bear a hatchling ([`crate::host_bears`],
-/// LANTERNJAW-LIFE). A tie goes to the lower id.
+/// **A hatching egg's host** (parasite §1): [`bearing_host`] for a `body_min` hatchling of
+/// the egg's lineage within `parasite_attach_radius_m` of the egg's column centre.
 fn host_for(
     fauna: &Fauna,
     newborns: &[Animal],
     c: &crate::Clutch,
-    (ex, ez): (f64, f64),
+    at: (f64, f64),
     ring: f64,
 ) -> Option<Animal> {
-    let radius = fauna.config.parasite_attach_radius_m;
+    let body = fauna.config.founder(c.lineage).core.body_min;
+    bearing_host(fauna, newborns, c.lineage, body, at, fauna.config.parasite_attach_radius_m, ring)
+}
+
+/// **The nearest host that bears a rider** (parasite §1; the one rule both a hatching egg
+/// and an outgrown rider looking for a new host, LJ-HOSTSWITCH, take a host by): the
+/// nearest living animal not of the rider's `lineage`, and not itself riding, within
+/// `radius` of `(x, z)` (wrapped on the ring, horizontal), carrying fewer than
+/// `parasite_max_per_host` riders — `newborns` counted — and able to bear a rider of
+/// `rider_body` on its current body ([`crate::host_bears`], LANTERNJAW-LIFE). A tie goes
+/// to the lower id.
+pub(crate) fn bearing_host(
+    fauna: &Fauna,
+    newborns: &[Animal],
+    lineage: crate::Founder,
+    rider_body: f64,
+    (x, z): (f64, f64),
+    radius: f64,
+    ring: f64,
+) -> Option<Animal> {
     let most = fauna.config.parasite_max_per_host;
     let riders = |id: u64| {
         fauna
@@ -5847,19 +6143,19 @@ fn host_for(
     };
     let mut best: Option<(f64, Animal)> = None;
     for a in &fauna.animals {
-        if a.founder == Some(c.lineage) || a.attached.is_some() {
+        if a.founder == Some(lineage) || a.attached.is_some() {
             continue;
         }
-        let (dx, dz) = crate::pose::wrapped_delta(ex, ez, a.pose.x, a.pose.z, ring);
+        let (dx, dz) = crate::pose::wrapped_delta(x, z, a.pose.x, a.pose.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
         if d > radius || best.is_some_and(|(b, _)| d >= b) {
             continue;
         }
-        if riders(a.id) >= most as usize {
+        // LANTERNJAW-LIFE: a host that cannot bear the rider is no host.
+        if !crate::host_bears(&fauna.config, rider_body, a.body) {
             continue;
         }
-        // LANTERNJAW-LIFE: a host that cannot bear even a hatchling is no host.
-        if !crate::host_bears(&fauna.config, fauna.config.founder(c.lineage).core.body_min, a.body) {
+        if riders(a.id) >= most as usize {
             continue;
         }
         best = Some((d, *a));
@@ -6156,6 +6452,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.flushes.remove(id);
         fauna.forage.remove(id);
         fauna.rove.remove(id);
+        fauna.nest_trips.remove(id);
     }
     for (a, cause) in &dead {
         if a.pack.is_some_and(|m| m.pup) {
@@ -6189,6 +6486,9 @@ mod den_rest_birth_tests;
 #[cfg(test)]
 #[path = "detritivore_tests.rs"]
 mod detritivore_tests;
+#[cfg(test)]
+#[path = "shredder_nest_tests.rs"]
+mod shredder_nest_tests;
 #[cfg(test)]
 #[path = "generation_tests.rs"]
 mod generation_tests;
@@ -6234,6 +6534,9 @@ mod hunt_tests;
 #[cfg(test)]
 #[path = "hunt_meal_tests.rs"]
 mod hunt_meal_tests;
+#[cfg(test)]
+#[path = "lj_hunt_tests.rs"]
+mod lj_hunt_tests;
 #[cfg(test)]
 #[path = "pack_search_tests.rs"]
 mod pack_search_tests;

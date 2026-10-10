@@ -239,8 +239,8 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // S on is row `row - S` of its cap, from the back edge, as the atlas lays them out. A
 // posing body's cap (WX4) is drawn through here from the band's own voxel, so the walk
 // still calls each glyph function from one place.
-bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out bool lum) {
-    lum = false;
+bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out vec3 glow) {
+    glow = vec3(0.0);
     uint q = cordGlyphTexel(v, dx, row);
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
@@ -249,13 +249,24 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
     int localY = top ? row - S : row;
     float hz = hazeAt(float(z) + (top ? float(RISE - 1 - localY) / float(RISE) : 0.0));
     if (tone == 63 && !top) { return false; }
+    // GLOW-EASE: an emitter part way on adds its colour over its pigment's share.
+    vec3 eAdd = vec3(0.0);
+    float keep = 1.0;
     if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
-        // An emitter: its style's emissive colour, unshadowed and at full value.
+        // An emitter: its style's emissive colour (or the host's for this cell this
+        // frame), unshadowed and at full value.
         vec3 e = styleEmit(int(v.a));
+        float on = 1.0;
+        cellEmit(x, y, z, e, on);
         if (any(greaterThan(e, vec3(0.0)))) {
-            rgb = hazed(e, hz);
-            lum = true;
-            return true;
+            // `glow`, the emission alone, is what the bloom and the walk's emitter test read.
+            glow = hazed(e, hz);
+            if (on >= 1.0) {
+                rgb = glow;
+                return true;
+            }
+            eAdd = e;
+            keep = 1.0 - on;
         }
     }
     if (!plantTexel(x, y, z, v, top, dx, localY, base)) { return false; }
@@ -296,7 +307,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
             vec3 f = shadeFront(base, x, y, z, dx, localY, cf);
             c = rim ? mix(f, tl, u.plantA.z) : f;
         }
-        rgb = hazed(c, hz);
+        rgb = hazed(c * keep + eAdd, hz);
         return true;
     }
     if (top) {
@@ -330,20 +341,28 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
 }
 
 // `localY` is the cap's row from its back edge (RISE - 1 - r for a cell where it stands).
-bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, out bool lum) {
-    lum = false;
+bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, out vec3 glow) {
+    glow = vec3(0.0);
     int r = RISE - 1 - localY;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
     int tone = int(q >> 2);
+    vec3 eAdd = vec3(0.0);
+    float keep = 1.0;
     if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
         vec3 e = styleEmit(int(v.a));
+        float on = 1.0;
+        cellEmit(x, y, z, e, on);
         if (any(greaterThan(e, vec3(0.0)))) {
-            rgb = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
-            lum = true;
-            return true;
+            glow = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
+            if (on >= 1.0) {
+                rgb = glow;
+                return true;
+            }
+            eAdd = e;
+            keep = 1.0 - on;
         }
     }
     if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
@@ -359,7 +378,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
             float gain = 0.5 + float(tone & 15) / 16.0;
             lc = mix(lc, own / u.plantA.x * gain, u.shadeB.y);
         }
-        rgb = hazed(lc, hazeAt(float(z) + float(r) / float(RISE)));
+        rgb = hazed(lc * keep + eAdd, hazeAt(float(z) + float(r) / float(RISE)));
         return true;
     }
     float shade = roofShade(roofGap(x, y, z));
@@ -1311,7 +1330,10 @@ vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
         uint q = texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r;
         vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
         vec3 e = styleEmit(int(v.a));
-        if ((int(q >> 2) == TONE_EMIT || emitsWhole(pigment.a)) && any(greaterThan(e, vec3(0.0)))) {
+        bool emits = int(q >> 2) == TONE_EMIT || emitsWhole(pigment.a);
+        float on = 1.0;
+        if (emits) { cellEmit(c.x, c.y, c.z, e, on); }
+        if (emits && any(greaterThan(e, vec3(0.0)))) {
             return hazed(e, hazeAt(float(c.z)));
         }
         base = pigment.rgb;
@@ -1911,6 +1933,63 @@ vec3 hiTint(vec3 c) { return mix(c, vec3(1.0), u.hiK.x); }
 #if defined(PLANT_VIS) || defined(PLANT_SHADE)
 #include "plant_main.glsl"
 #else
+// A latticevine texel at face pixel (dx, row S - 1 - r) of the vine `vv` carried by voxel
+// (x, level, zc), drawn at depth z (z - 1 is the voxel in front, whose canopy shades it):
+// its colour into `acc` through `trans`. Returns its coverage: 1 ends the walk here (and
+// `trans` is set as the walk's end leaves it), 0 is a hole, between is a vine cell part way
+// through a change of tile (GLOW-EASE round 2: the old tile's share of coverage and colour
+// over the new one's), and `trans` is cut by it.
+float vineDraw(uvec4 vv, int x, int level, int zc, int z, int dx, int r,
+               inout vec3 acc, inout vec3 trans) {
+    int dy = S - 1 - r;
+    vec4 t = vineTexel(vv, x, level, zc, dx, dy);
+    // The cell's emitter table entry, looked up once for its old tile and its emission.
+    bool en = LIT && vineEmits(t);
+    int ent = (en || (uint(u.view.w) & EMIT_VINES) != 0u) ? cellEntry(x, level, zc) : -1;
+    uvec4 o = vv;
+    float s = entryVineFrom(ent, o);
+    float cn = t.a >= 0.5 ? 1.0 - s : 0.0;
+    vec4 p = vec4(0.0);
+    float co = 0.0;
+    if (s > 0.0) {
+        p = vineTexel(o, x, level, zc, dx, dy);
+        co = p.a >= 0.5 ? s : 0.0;
+    }
+    float cover = cn + co;
+    if (cover <= 0.0) { return 0.0; }
+    float h = hazeAt(float(z));
+    // GLOW-EASE: a flagged mouth texel draws the host's colour for the cell this frame
+    // over its pigment's share. The old tile fades out as its pigment (an emitter's glow
+    // went before its tile). Round 3: the two pigments are lit together, once: the face's
+    // light is affine in the pigment (`litBy`), so their weighted mean lit equals the
+    // weighted mean of each lit, at half the walk's lighting code.
+    vec3 e = vec3(0.0);
+    bool em = false;
+    float wn = cn;
+    if (cn > 0.0 && en) {
+        e = t.rgb;
+        float on = 1.0;
+        entryEmit(ent, e, on);
+        wn = cn * (1.0 - on);
+        em = any(greaterThan(e, vec3(0.0)));
+    }
+    vec3 col = cn * e;
+    float wp = wn + co;
+    if (wp > 0.0) {
+        vec3 pig = (wn * t.rgb + co * p.rgb) / wp;
+        if (LIT) { pig = shadeFront(pig, x, level, z, dx, dy, canopyAt(x, z - 1, level)); }
+        col += wp * pig;
+    }
+    if (cover >= 0.999) {
+        acc += trans * hazed(col, h);
+        trans = em ? emitterTrans(trans, hazed(e * cn, h), h) : vec3(0.0);
+        return 1.0;
+    }
+    acc += trans * cover * hazed(col / cover, h);
+    trans *= 1.0 - cover;
+    return cover;
+}
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -1960,51 +2039,38 @@ void main() {
         // comes first walking front to back.
         if (level < H) {
             uvec4 v = at(x, level, z);
-            if (solidV(v)) {
-                // A covered rock face looking at the camera: its vine, carried by the air
-                // cell in front, is drawn flush on the rock, which shows through its holes.
+            bool solid = solidV(v);
+            // The vine drawn here, if any (one call site: GLOW-EASE round 3 keeps the walk's
+            // code small). A covered rock face looking at the camera: its vine, carried by
+            // the air cell in front, is drawn flush on the rock, which shows through its
+            // holes. An open cell: a plant stands in the void and the water of its own cell
+            // blends over it (a trunk in a pool is submerged, so the water is nearer than
+            // the plant), then a curtain or a sliver of vine.
+            uvec4 vc = v;
+            int vz = z;
+            bool vineHere = false;
+            if (solid) {
                 if (z > 0 && u.tex.y != 0) {
-                    uvec4 f = at(x, level, z - 1);
-                    if (isVine(f) && vineKind(f) == VINE_FLUSH) {
-                        vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
-                        if (t.a >= 0.5) {
-                            if (LIT && !vineEmits(t)) {
-                                t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
-                                                   canopyAt(x, z - 1, level));
-                            }
-                            float h = hazeAt(float(z));
-                            acc += trans * hazed(t.rgb, h);
-                            trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
-                                                        : vec3(0.0);
-                            zHit = float(z); break;
-                        }
-                    }
+                    vc = at(x, level, z - 1);
+                    vz = z - 1;
+                    vineHere = isVine(vc) && vineKind(vc) == VINE_FLUSH;
                 }
+            } else {
+                if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
+                if (isVine(v)) {
+                    int k = vineKind(v);
+                    int q = max(1, S / 4);
+                    vineHere = k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
+                        || (k == VINE_SLIVER_R && dx >= S - q);
+                }
+            }
+            if (vineHere && vineDraw(vc, x, level, vz, z, dx, r, acc, trans) >= 1.0) {
+                zHit = float(z); break;
+            }
+            if (solid) {
                 acc += trans * blockFront(x, level, z, v, r, dx);
                 trans = vec3(0.0);
                 zHit = float(z); break;
-            }
-            // A plant stands in the void and the water of its own cell blends over it: a
-            // trunk in a pool is submerged, so the water is nearer than the plant.
-            if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
-            if (isVine(v)) {
-                int k = vineKind(v);
-                int q = max(1, S / 4);
-                if (k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
-                    || (k == VINE_SLIVER_R && dx >= S - q)) {
-                    vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
-                    if (t.a >= 0.5) {
-                        if (LIT && !vineEmits(t)) {
-                            t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
-                                               canopyAt(x, z - 1, level));
-                        }
-                        float h = hazeAt(float(z));
-                        acc += trans * hazed(t.rgb, h);
-                        trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
-                                                    : vec3(0.0);
-                        zHit = float(z); break;
-                    }
-                }
             }
             int p = partOf(v);
             if (p != 0 && !walkSkipsPlant(v, trans)) {
@@ -2018,12 +2084,13 @@ void main() {
                     v = at(x, fy, z);
                 }
                 vec3 art;
-                bool lum;
-                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
+                vec3 glow;
+                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, glow)) {
                     plantBehind = plantHidden(v);
                     if (partOf(v) == ANIMAL_INTERIM && highlighted(x, fy, z)) { art = hiTint(art); }
                     acc += trans * art;
-                    trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
+                    trans = LIT && any(greaterThan(glow, vec3(0.0)))
+                        ? emitterTrans(trans, glow, hazeAt(float(z))) : vec3(0.0);
                     zHit = float(z); break;
                 }
             }
@@ -2049,16 +2116,16 @@ void main() {
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
             vec3 cap;
-            bool lum;
+            vec3 glow;
             // A posing cell's cap is where its settle and breath put it (WX4).
             int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
             if (isBlockPart(p) && !walkSkipsPlant(v, trans) && cl >= 0
-                && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+                && glyphCapAt(x, below, z, v, cl, dx, cap, glow)) {
                 plantBehind = plantHidden(v);
                 if (p == ANIMAL_INTERIM && highlighted(x, below, z)) { cap = hiTint(cap); }
                 acc += trans * cap;
-                trans = LIT && lum
-                    ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))
+                trans = LIT && any(greaterThan(glow, vec3(0.0)))
+                    ? emitterTrans(trans, glow, hazeAt(float(z) + float(r) / float(RISE)))
                     : vec3(0.0);
                 zHit = float(z) + (float(r) + 0.5) / float(RISE); break;
             }
