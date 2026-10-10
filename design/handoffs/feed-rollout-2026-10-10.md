@@ -151,8 +151,36 @@ aiming is a great idea, or at least the framework for it."
 - **Evidence** as round 1, plus an aiming clip: one animal browsing bites placed low, high,
   and to each side (stage them in `voxel_feed_capture`), today | round 2.
 
+### Lanternjaw (third)
+
+Seedporter merged (3e107bd1): rigs are looked up by model name
+(`ModelLibrary::rig_in_mode`), so pose models can carry rigs. The Veilhound
+(`chorister`, `ch_feed_*`) is the nearest pattern: a carrion tear.
+
+The ambush carnivore (`lanternjaw()` in `animal_models.py`): an armoured body under six
+back plates, a head with a central ridge and four magenta eyes, **two large pale fangs
+hanging in front of the mouth**, **two striking arms** (a raised femur, a tibia curving
+down into a pale razor blade), walking legs, and the tail branches carrying the lure orbs.
+
+- **Bones**: root (body, plates, walking legs, tail), head (eyes, ridge, fangs), each
+  striking arm a femur and a tibia/blade. Leave the tail and lure on the root unless the
+  clip needs them. Report bones and cells per bone, every bin (the larva is a separate
+  model: leave it).
+- **Feed clip (placeholder; Wrysk directs the real one)**: at a carcass on the ground
+  ahead.
+  1. Pin: both striking arms swing down so the blades press the ground about one voxel
+     ahead, 0.35 s, eased; the head lowers toward the same spot.
+  2. Tear: the head pulls back and up about 4 cm with a small twist, alternating sides,
+     0.4 s, the arms pressing down harder as it pulls; then the head dips again, 0.3 s.
+  3. Every second tear, a swallow: the head lifts about 6 cm, 0.4 s, the arms easing up.
+  4. Loop while it crops; the reach and return from the clip weight.
+- If the aim framework lands on main before you finish (branch `feed-loftstrider2`), don't
+  wait for it; the lanternjaw's carrion is ahead on the ground either way.
+- **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, the
+  adult and the smallest bin past the larva.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), lanternjaw, bellwing, capgnawer, littershredder,
+open look question), bellwing, capgnawer, littershredder,
 ripple-snail. Then sleep, idle and hunker move onto the rig.
 
 ## Return
