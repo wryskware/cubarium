@@ -235,6 +235,18 @@ def bone_ahead(start, x, name):
         ob["bone_ahead"] = name
 
 
+def root_ahead(start, x, name):
+    """Every organism part built since `start` that is on the root (no bone of its own):
+    what lies ahead of `x` belongs to rig bone `name`, as `bone_ahead`. For a small rig
+    whose front part is too small to win a cell (FEED-ROLLOUT small feeders round 2): the
+    body's front-most cells, whatever part claimed them, move with the front, so the
+    silhouette stays and the front shows. Parts on a bone of their own keep it."""
+    for ob in L.ORG[start:]:
+        if "bone" not in ob:
+            ob["bone_cut_x"] = x
+            ob["bone_ahead"] = name
+
+
 def bone_nearest(start, segs):
     """Every organism part built since `start` (one mesh across several bones: a loft up a
     neck, a frond's blade): each point belongs to the bone of `segs` ((name, (head, tail)),
@@ -824,6 +836,7 @@ def ch_feed_clip():
 
 def littershredder():
     kx, kz = 0.00051, 0.00044
+    start0 = len(L.ORG)
 
     def X(px):
         return (392 - px) * kx
@@ -869,6 +882,8 @@ def littershredder():
         bone_of(start, f"feeler_{LJ_SIDE[sy]}")
     # one magenta sensor spot on the second plate, near its top
     ell((X(307), 0.0, Z(118)), (0.008, 0.006, 0.004), c("magenta"))
+    # round 2: the body's cells ahead of the plough's rear move with the plough
+    root_ahead(start0, LT_PLOUGH_PIVOT[0], "plough")
 
 
 # --- ripple-snail · organic azure dome (0.19 x 0.19 x 0.125 m) -----------------------------
@@ -878,6 +893,7 @@ def littershredder():
 # with two pink-tipped palps. 0.00035 m/px.
 
 def ripple_snail():
+    start0 = len(L.ORG)
     # the dark foot, spreading under the shell and trailing behind it
     ell((-0.03, 0, 0.009), (0.12, 0.104, 0.011), c("a_dark"))
     ell((-0.115, 0.015, 0.006), (0.04, 0.07, 0.007), c("a_dark"))
@@ -909,6 +925,8 @@ def ripple_snail():
         tube([root, mid, tip], 0.0065, 0.006, c("a_limb"), seg=8)
         ell(tip, (0.014, 0.009, 0.0075), c("a_glow"), rot=rz(sy * 18))
     bone_of(start, "front")
+    # round 2: the body's cells ahead of the opening's rear (the skirt's front) move with it
+    root_ahead(start0, RS_PIVOT[0], "front")
 
 
 # --- capgnawer · rose-mauve bark mantle (0.25 x 0.21 x 0.19 m) ------------------------------
@@ -919,6 +937,7 @@ def ripple_snail():
 # light pink sensor patches (large upper, small lower); six stout legs on pale toes.
 
 def capgnawer():
+    start0 = len(L.ORG)
     for sy in (-1, 1):
         cy, cz = sy * 0.058, 0.085
         start = len(L.ORG)
@@ -955,7 +974,8 @@ def capgnawer():
             ob.data.transform(tilt)
     ell((0.0, 0, 0.065), (0.11, 0.09, 0.055), c("a_limb"))           # the body under the mantle
     # the face under the cleft (the rig's `front` bone, FEED-ROLLOUT: face, mouth,
-    # mandibles and sensor patches; the lobes, body and legs stay on the root)
+    # mandibles and sensor patches; the lobes, body and legs stay on the root behind the
+    # face's rear, and move with the front ahead of it: `root_ahead` below)
     start = len(L.ORG)
     ell((0.105, 0, 0.062), (0.035, 0.05, 0.035), c("a_limb"))
     box((0.139, 0, 0.063), (0.006, 0.005, 0.042), c("a_dark"))       # the vertical mouth
@@ -973,6 +993,9 @@ def capgnawer():
             tube([(px, s2 * 0.06, 0.05), (px + 0.006, s2 * 0.09, 0.03), foot], 0.022, 0.018, c("a_limb"), seg=10)
             for t in range(4):
                 ell((px + 0.03, s2 * 0.105 + (t - 1.5) * 0.009, 0.007), (0.009, 0.0055, 0.007), c("a_foot"))
+    # round 2: the body's cells ahead of the face's rear (the lobes' fronts, the front
+    # toes) move with the front
+    root_ahead(start0, CG_PIVOT[0], "front")
 
 
 # --- seedporter · moss-green glider, the selected image (upright, as pictured) ---------------
