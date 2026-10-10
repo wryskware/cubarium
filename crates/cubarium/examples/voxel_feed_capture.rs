@@ -22,6 +22,10 @@
 //! hangs below the perch as in a crown) or on the ground (`seedporter-ground`, as at a
 //! vine face) — on the frondgrazer's script.
 //!
+//! `--founder bellwing`: an adult and a newborn hovering (`MobilityMode::Fly`, the mode it
+//! sips in) `BW_HOVER_M` over the floor, on the frondgrazer's script. Its model is a
+//! specimen of one bin, so the newborn draws the adult's.
+//!
 //! `--aim` (FEED-ROLLOUT round 2, loftstrider only): one adult cropping on through four
 //! staged bites (`AIM_BITES`: low ahead, high ahead, then level to each side), its last
 //! bite set on the body as the sim keeps it (`Animal::bite`), so the clip aims at each.
@@ -31,7 +35,7 @@
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
 //!     [--px N] [--heading DEG] [--flipbook PATH]
-//!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw] [--pose stand|ground]
+//!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing] [--pose stand|ground]
 //!     [--aim] [--models DIR]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
@@ -67,6 +71,8 @@ use cubarium_voxel_flora::{Flora, FloraConfig};
 
 /// The cropping script, in seconds from the start: `(from, to)` spans the bodies crop.
 const BOUTS: [(f64, f64); 2] = [(0.5, 4.5), (5.3, 6.0)];
+/// The bellwing's hover: its base this far over the floor, metres.
+const BW_HOVER_M: f64 = 0.5;
 /// The seedporter's perch: a rock post this many voxels above the floor under each body.
 const SP_POST: u32 = 4;
 /// Seconds the capture runs.
@@ -270,6 +276,10 @@ fn main() -> Result<()> {
                     "chorister" | "veilhound" => Founder::Chorister,
                     "loftstrider" => Founder::Loftstrider,
                     "lanternjaw" => Founder::Lanternjaw,
+                    "bellwing" => {
+                        mode = MobilityMode::Fly;
+                        Founder::Bellwing
+                    }
                     "seedporter" => {
                         if mode == MobilityMode::Ground {
                             mode = MobilityMode::Perched;
@@ -277,7 +287,7 @@ fn main() -> Result<()> {
                         Founder::Seedporter
                     }
                     f => bail!(
-                        "--founder frondgrazer, chorister, loftstrider, seedporter or lanternjaw, not {f}"
+                        "--founder frondgrazer, chorister, loftstrider, seedporter, lanternjaw or bellwing, not {f}"
                     ),
                 }
             }
@@ -316,6 +326,7 @@ fn main() -> Result<()> {
     let ls = founder == Founder::Loftstrider;
     let sp = founder == Founder::Seedporter;
     let lj = founder == Founder::Lanternjaw;
+    let bw = founder == Founder::Bellwing;
     let perched = sp && mode == MobilityMode::Perched;
     anyhow::ensure!(!aiming || ls, "--aim is the loftstrider's");
     let (mut w, xs, z) = match founder {
@@ -326,6 +337,8 @@ fn main() -> Result<()> {
         Founder::Seedporter => (world_of(26, 14, 9), vec![8, 18], 4),
         // 1.0 m from the blades to the tail root, the lures arching to 0.6 m
         Founder::Lanternjaw => (world_of(26, 10, 9), vec![8, 18], 4),
+        // 0.375 m across the wings, 0.4 m tall with the tendril, hovering
+        Founder::Bellwing => (world_of(14, 10, 7), vec![4, 10], 3),
         _ => (world(22, 7), vec![6, 15], 3),
     };
     if perched {
@@ -361,8 +374,15 @@ fn main() -> Result<()> {
         // the loftstrider's second is a newborn calf (its own build, its own bin); the
         // seedporter's a newborn (its pose models are one bin: the adult's); the
         // lanternjaw's a newborn, the founder's smallest bin (its larva is the rider)
-        a.body = if (ls || sp || lj) && i == 1 { newborn } else { adult };
+        a.body = if (ls || sp || lj || bw) && i == 1 { newborn } else { adult };
         a.state = State::Resting;
+        if bw {
+            // aloft, holding still: as it sips at a flower
+            a.mobility.mode = MobilityMode::Fly;
+            a.mobility.climb = None;
+            a.mobility.perch = None;
+            a.pose.y_m = 2.0 * VOXEL_M + BW_HOVER_M;
+        }
         if sp {
             a.mobility.mode = mode;
             a.mobility.climb = None;

@@ -340,14 +340,16 @@ def loft(stations, mats, zone, nring=72, nseg=20):
     return ob
 
 
-def helix(p0, axis_len, turns, radius, wire, mat, seg=6, n=48, phase=0.0):
-    """A 3D corkscrew hanging down from p0: `turns` turns over `axis_len`."""
+def helix(p0, axis_len, turns, radius, wire, mat, seg=6, n=48, phase=0.0, bone=None):
+    """A 3D corkscrew hanging down from p0: `turns` turns over `axis_len`. `bone`, when
+    given, names each segment's rig bone from the depth its start lies down the axis
+    (0 at p0, 1 at the tip)."""
     pts = []
     for k in range(n + 1):
         t = k / n
         a = phase + 2 * math.pi * turns * t
         pts.append((p0[0] + radius * math.cos(a), p0[1] + radius * math.sin(a), p0[2] - axis_len * t))
-    tube(pts, wire, wire * 0.8, mat, seg=seg)
+    tube(pts, wire, wire * 0.8, mat, seg=seg, bones=[bone(k / n) for k in range(n)] if bone else None)
 
 
 # --- chorister · CH-A2 v3 violet stalker (1.4 x 0.35 m, shoulder 0.6 m, tail 0.8 m) ----------
@@ -1491,10 +1493,78 @@ def bellwing():
         sheet([tuple(p) for p in lead_pts + trail_pts], c("a_membrane"), th=0.003)
         tube(lead_pts[1:], 0.0035, 0.0025, c("a_glow"), seg=6)
         ell(R, (0.016, 0.018, 0.016), c("a_limb"))
-    # the tendril: out of the bell's mouth, then a spindly corkscrew to its tip
+    # the tendril: out of the bell's mouth, then a spindly corkscrew to its tip (the rig,
+    # FEED-ROLLOUT: the stalk on `tendril`, the corkscrew's upper half on `coil_a`, its lower
+    # half on `coil_b`; the bell and wings on the root)
+    start = len(L.ORG)
     tube([P(385, 500), P(382, 560), P(392, 600)], 0.0025, 0.0022, c("a_tendril"), seg=6)
+    bone_of(start, "tendril")
     top = P(392, 600)
-    helix((top.x, top.y - 0.008, top.z), top.z, 3.2, 0.008, 0.002, c("a_tendril"), phase=0.0)
+    helix((top.x, top.y - 0.008, top.z), top.z, 3.2, 0.008, 0.002, c("a_tendril"), phase=0.0,
+          bone=lambda t: "coil_a" if t < BW_COIL_SPLIT else "coil_b")
+
+
+# --- the bellwing's feeding rig and clip (FEED-ROLLOUT, 2026-10-10) ------------------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Bellwing; a placeholder, Wrysk directs the
+# real clip. It sips hovering (while `State::Cropping` holds it is aloft ~96% of the time:
+# the hover-sip teacher stops in the air at a bloom; it also sips perched on a crown or a
+# face), at a flower ahead and below. Bones: the root (bell and wings), the tendril's stalk
+# out of the bell's mouth (`tendril`), the corkscrew's upper and lower halves (`coil_a`,
+# `coil_b`). The builder's axes: +x forward (the front wing pair), z up, the tendril's tip
+# on z = 0.
+#
+# As the lanternjaw's: the action is the **loop** in the reached posture, and the reach and
+# return are the renderer's clip weight. Reached: the bell tipped `BW_TIP_DEG` forward (its
+# top ahead) about `BW_PIVOT`; the tendril swung forward and down toward the flower (the
+# stalk `BW_SWING_DEG[0]` forward of hanging straight down, each corkscrew half its own
+# further forward than the bone above), the corkscrew's lower half drawn out `BW_STRAIGHTEN` along itself (straightening a
+# little). The loop: three sips of `BW_SIP_S`, each the tendril drawn back `BW_DRAW` into
+# the bell's mouth and in again, the bell bobbing up `BW_BOB` with it, eased (a sine).
+
+BW_FEED_FPS = 40  # three sips of 10 frames: the loop closes on a whole frame
+BW_PIVOT = (0.0, 0.0, 0.2)        # the bell's turn point (its middle), reference metres
+BW_MOUTH = (0.0, 0.0, 0.136)      # the stalk's root, inside the bell's mouth
+BW_COIL_TOP = (0.0, 0.0039, 0.0806)  # the stalk's end, the corkscrew's top
+BW_COIL_SPLIT = 0.5               # the share of the corkscrew's length on `coil_a`
+BW_TIP_DEG = 10.0                 # the bell's tip forward at the reach, degrees
+BW_SWING_DEG = (30.0, 10.0, 5.0)  # stalk, upper coil, lower coil: each one's swing forward
+BW_STRAIGHTEN = 0.01              # the lower coil drawn out along itself at the reach, metres
+BW_SIP_S = 0.25                   # one sip, seconds (three to the loop)
+BW_DRAW = 0.01                    # the tendril drawn back into the mouth at a sip, metres
+BW_BOB = 0.01                     # the bell's rise at a sip, metres
+
+
+def bw_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    x, y, z = BW_COIL_TOP
+    mid = (x, y, z * (1 - BW_COIL_SPLIT))
+    return [("root", None, BW_PIVOT, (0.05, 0.0, BW_PIVOT[2])),
+            ("tendril", 0, BW_MOUTH, BW_COIL_TOP),
+            ("coil_a", 1, BW_COIL_TOP, mid),
+            ("coil_b", 2, mid, (x, y, 0.0))]
+
+
+def bw_feed_clip():
+    """The bellwing's sipping loop at reference size, sampled at `BW_FEED_FPS`
+    (`sample_clip`)."""
+    bones = bw_bones()
+    n = round(3 * BW_SIP_S * BW_FEED_FPS)
+    ob = rig_armature("bw_rig", bones, BW_FEED_FPS)
+    # + about +y moves what is above the pivot forward (+x), what is below it back
+    tip = Matrix.Rotation(math.radians(BW_TIP_DEG), 3, "Y")
+    # the stalk undoes the bell's tip, then swings forward: its tip ahead (- about +y)
+    swing = [Matrix.Rotation(-math.radians(a), 3, "Y") for a in BW_SWING_DEG]
+    turns = {"root": tip, "tendril": swing[0] @ tip.inverted(), "coil_a": swing[1], "coil_b": swing[2]}
+    for f in range(n):
+        u = math.sin(math.pi * ((f / BW_FEED_FPS) % BW_SIP_S) / BW_SIP_S) ** 2
+        key_turns(ob, bones, f, turns, Vector((0.0, 0.0, BW_BOB * u)))
+        # the stalk drawn back up its own length into the mouth; the lower coil drawn out
+        for name, shift in (("tendril", -BW_DRAW * u), ("coil_b", BW_STRAIGHTEN)):
+            pb = ob.pose.bones[name]
+            pb.location = Vector((0.0, shift, 0.0))  # the bone's own +y: along it, head to tail
+            pb.keyframe_insert("location", frame=f)
+    return sample_clip(ob, bones, n, BW_FEED_FPS)
 
 
 # --- the table ------------------------------------------------------------------------------
