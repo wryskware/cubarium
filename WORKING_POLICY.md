@@ -321,7 +321,8 @@ What prompted it (2026-10-08):
 - **Approved (Wrysk, 2026-10-08, "option 1 ... 2-4 above all sounds fine"):**
   - Vulkan calls through `ash` inside `cubarium-gpu`, including new ones such as H2's model
     pass, until the renderer moves to wgpu (backlog item 11). Only the FFI call itself sits in
-    the `unsafe` block; nothing else in that crate may use `unsafe`.
+    the `unsafe` block; nothing else in that crate may use `unsafe`. Reaffirmed 2026-10-10
+    ("im fine with the unsafe ash -- that crate is exampt"), ray-tracing calls included.
   - `cubarium-godot`'s one `unsafe impl ExtensionLibrary`, which gdext requires.
   - Everything else goes: CPU pinning, perf counters and topology move to safe wrapper crates,
     and `save.rs`, `placement.rs`, `state.rs`, the web sink and `render_bench` become safe code.
