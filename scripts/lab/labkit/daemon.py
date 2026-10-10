@@ -601,10 +601,13 @@ class Daemon:
         usage = self.usage()
         live_mem = mem_available_gb()
         rows = self.store.q(
-            "SELECT t.*, j.priority AS jp FROM tasks t JOIN jobs j ON t.job=j.id "
+            "SELECT t.*, j.priority AS jp, j.kind AS jk FROM tasks t JOIN jobs j ON t.job=j.id "
             "WHERE t.state='pending' AND j.state='running' ORDER BY j.submitted, t.seq, j.id")
         # Stable sorting preserves FIFO when job + task priorities are equal.
         rows = [(row, Task.from_dict(json.loads(row["spec"]))) for row in rows]
+        # Tasks planned before kinds marked themselves (build lane) take their job's kind.
+        for row, task in rows:
+            task.meta.setdefault("kind", row["jk"])
         rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
         states = {}
         reservations = {}
