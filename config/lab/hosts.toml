@@ -1,0 +1,94 @@
+# labd host inventory (design/lab-daemon.md). Read at daemon start; restart labd to apply.
+#
+# Capacity per host: usable threads = min(floor(cpus * max_cpu_fraction), cpus - reserve_cpus);
+# each L3 group gets its share. labd never places a task that does not fit, across all jobs.
+
+[lab]
+tick_s = 2            # daemon loop period
+progress_s = 60       # kind progress cadence and liveness checks
+probe_s = 300         # remote host probes (reachability, load, L3 groups, linger)
+remote_poll_s = 30    # remote task polls
+# kind_paths = ["~/lab-kinds"]   # extra kind plugin dirs (also $LAB_KIND_PATH)
+
+[build]
+threads = 16          # cargo -j and the thread charge for build / cargo-test tasks
+mem_gb = 16           # memory charge for build / cargo-test tasks
+keep_trees = 3        # snapshot trees kept (newest first) under ~/.cache/labd/trees as seeds
+# Seed candidates for target/<profile>, relative to the built tree and to this checkout.
+# The newest existing one is reflinked (cp -a --reflink=always); failure means a cold build.
+seed_targets = ["target"]
+
+[hosts.desktop]
+# 9950X3D, 16 cores / 32 threads, two L3 groups (scripts/run-study.py --list, 2026-10-10):
+#   group 0: CPUs 0-7,16-23 (V-cache CCD), group 1: CPUs 8-15,24-31.
+# The live sysfs topology is used at start; this list documents it.
+kind = "local"
+arch = "x86_64"
+cpus = 32
+groups = "live"
+# The live world and games prefer the V-cache group: fill group 1 first.
+prefer_groups = [1, 0]
+mem_gb = 91
+max_mem_gb = 64       # Wrysk's ceiling for offline work (WORKING_POLICY.md); also each unit's MemoryMax
+max_cpu_fraction = 0.9
+reserve_cpus = 4      # Wrysk's app / desktop
+reserve_mem_gb = 12   # live MemAvailable must keep this free after a placement
+idle = true           # SCHED_IDLE + nice 19 for every task (= chrt -i 0 nice -n 19)
+external_load = true  # subtract load labd does not own (loadavg - labd's threads)
+launcher = "systemd"  # each task: systemd-run --user --collect transient unit
+speed = 1.0
+
+[hosts.eidolon]
+# 24 threads, 62 GB. Probed 2026-10-10: L3 groups 0-5,12-17 and 6-11,18-23; Python 3.14;
+# systemd-run --user works but Linger=no, so user units would die with the last session:
+# launcher "auto" falls back to setsid + pid files until linger is enabled there.
+kind = "ssh"
+address = "eidolon.local"   # login shell is fish: labd always sends `bash -s` scripts
+arch = "x86_64"
+cpus = 24
+groups = "auto"             # probed from eidolon's own sysfs, never desktop numbers
+mem_gb = 62
+max_mem_gb = 48
+max_cpu_fraction = 0.9
+reserve_cpus = 2
+idle = true
+external_load = true        # other eidolon jobs are respected via its loadavg
+launcher = "auto"
+root = "~/cubarium-train/lab"   # labd writes only here
+python = "python3"
+speed = 1.0
+enabled = true
+
+[ec2]
+# docs/graviton-training.md. A launch needs `lab approve ec2 ID --max-hours H --max-usd D`
+# every time; labd calls `down` when the queue drains or a limit is hit.
+script = "scripts/aws-graviton.sh"
+types = ["c7g.16xlarge", "c6g.16xlarge"]
+suggest_after_h = 4   # offer EC2 when the local queue estimate exceeds this many hours
+setup_h = 0.25        # boot + bootstrap + transfer allowance in the estimate
+max_mem_gb = 64
+max_cpu_fraction = 0.9
+reserve_cpus = 1
+user = "ec2-user"
+ssh_key = "~/.ssh/cubarium-aws.pem"
+root = "/home/ec2-user/cubarium-train/lab"
+python = "python3.11"
+launcher = "setsid"
+ready_file = "/var/tmp/ready"
+status_s = 60
+launch_timeout_s = 900
+
+# Spot prices are planning assumptions from the 2026-09-28 sample, not quotes.
+[ec2.instance_types."c7g.16xlarge"]
+arch = "aarch64"
+cpus = 64
+mem_gb = 128
+spot_usd_h = 0.75
+speed = 1.0
+
+[ec2.instance_types."c6g.16xlarge"]
+arch = "aarch64"
+cpus = 64
+mem_gb = 128
+spot_usd_h = 0.75
+speed = 0.9

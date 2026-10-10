@@ -15,24 +15,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ab
 
 
-class ABTests(unittest.TestCase):
-    def setUp(self):
-        # Stay in this worktree; in particular never make a target/worktree in /tmp.
-        self.temp = tempfile.TemporaryDirectory(prefix=".ab-test-", dir=Path(__file__).resolve().parents[2])
-        self.root = Path(self.temp.name)
-        self.wrapper = Path(ab.__file__).resolve().parents[1] / "run-study.py"
-        self.trees = {}
-        for name in ("main", "branch"):
-            tree = self.root / name
-            (tree / "config").mkdir(parents=True)
-            (tree / "config/input.toml").write_text('[world]\nwidth=8\n[flora]\nrate=2\n[fauna]\nrate=3\n')
-            subprocess.run(["git", "init", "-q", str(tree)], check=True)
-            subprocess.run(["git", "-C", str(tree), "add", "config/input.toml"], check=True)
-            subprocess.run(["git", "-C", str(tree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                            "commit", "-qm", "authored fixture"], check=True)
-            self.trees[name] = tree
-        self.binary = self.root / "census"
-        self.binary.write_text('''#!/bin/sh
+def make_fixture(root):
+    """Two authored Git trees and a fake census binary (shared with scripts/lab tests)."""
+    trees = {}
+    for name in ("main", "branch"):
+        tree = root / name
+        (tree / "config").mkdir(parents=True)
+        (tree / "config/input.toml").write_text('[world]\nwidth=8\n[flora]\nrate=2\n[fauna]\nrate=3\n')
+        subprocess.run(["git", "init", "-q", str(tree)], check=True)
+        subprocess.run(["git", "-C", str(tree), "add", "config/input.toml"], check=True)
+        subprocess.run(["git", "-C", str(tree), "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "authored fixture"], check=True)
+        trees[name] = tree
+    binary = root / "census"
+    binary.write_text('''#!/bin/sh
 for arg in "$@"; do
   case "$arg" in
     config=*) config=${arg#config=} ;;
@@ -62,7 +58,17 @@ else
   printf 'sim_min,count\\n0,0\\n20,%s\\n' "$count"
 fi
 ''')
-        self.binary.chmod(0o755)
+    binary.chmod(0o755)
+    return trees, binary
+
+
+class ABTests(unittest.TestCase):
+    def setUp(self):
+        # Stay in this worktree; in particular never make a target/worktree in /tmp.
+        self.temp = tempfile.TemporaryDirectory(prefix=".ab-test-", dir=Path(__file__).resolve().parents[2])
+        self.root = Path(self.temp.name)
+        self.wrapper = Path(ab.__file__).resolve().parents[1] / "run-study.py"
+        self.trees, self.binary = make_fixture(self.root)
 
     def tearDown(self):
         self.temp.cleanup()

@@ -94,3 +94,36 @@ Frame cost on the desktop GPU, before and after.
 Commits; the mechanism and why; the shadow choice and why; picture and MP4 paths
 (absolute); the new knobs and defaults; frame cost; what still looks wrong. Stop there: no
 merge, no deploy.
+
+## Round 2 (2026-10-10): a long wave, wider than a column
+
+Round 1 merged (0173107e): the cord drawn in the shader (`shaders/drape_cord.glsl`, CPU
+mirror `crates/cubarium-gpu/src/cord.rs`), each join a hash of its face, no shadow. Wrysk
+picked 2 px, eased, wander 0.5 (now the defaults, 34c0d824), and said: "the wave period
+could be much longer. could also have amplitude that crosses more than one voxel column.
+flow in the wind should be more pronouned rather than matching the tree but its okay for
+now; i think thats a later package."
+
+Today every join is hashed on its own, so a cord wiggles about once a cell. Build, as
+options he picks from:
+
+- **Long period**: the cord's sideways offset follows one smooth curve down its whole
+  strand (each strand on its own phase), with a period of several voxels: a `[drape]`
+  knob, in voxels. The joins between cells still agree (both cells read the same curve at
+  their shared face).
+- **Amplitude past the column**: the offset may swing more than one voxel column either
+  way: a `[drape]` knob, in voxels. A cord is drawn only in drape cells today, and a ray
+  through the neighbouring column never enters the drape cell, so this needs a mechanism:
+  for example the walk also testing the drape cells beside an empty cell it passes, or the
+  bake stepping strands sideways so the cells themselves follow the wave. Find what works
+  and what it costs, choose, and say why. If the bake changes, the sim's drape cells move
+  with it (shade, perch, browse): say what changes there.
+- Everything round 1 holds keeps holding: constant pixel width, joins that agree, the joins
+  holding while the tree sways, see-through beside the cord, no pops.
+
+Not in this round: the cords flowing in the wind on their own (later package, backlog).
+
+Evidence: an options sheet at 6 px with its 2× enlargement, the lone tree, period about 3,
+6 and 12 voxels by amplitude 0.5, 1 and 2 columns (state the numbers you used), plus the
+grove at the setting you think reads closest to his words; one wind MP4, today (round 1) |
+the long wave. Frame cost before and after. Return as round 1; stop before merge.

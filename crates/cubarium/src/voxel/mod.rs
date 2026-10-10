@@ -226,6 +226,8 @@ pub struct VoxelConfig {
     pub foliage_fade_s: f64,
     /// **How the GPU renderer's pack runs** (`[pack]`, H3): execution and presentation only.
     pub pack: PackConfig,
+    /// **The vaulttree's drapes as thin cords** (`[drape]`, DRAPE-CORD): GPU renderer only.
+    pub drape: DrapeConfig,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -264,6 +266,7 @@ impl Default for VoxelConfig {
             plants: plant_motion::PlantConfig::default(),
             foliage_fade_s: stand::FOLIAGE_FADE_S,
             pack: PackConfig::default(),
+            drape: DrapeConfig::default(),
             serve: None,
             sim: SimParams::default(),
         }
@@ -352,6 +355,71 @@ impl Default for PackConfig {
     fn default() -> PackConfig {
         PackConfig { pore_sweep: crate::sink::gpu::voxel::snapshot::PORE_SWEEP }
     }
+}
+
+/// **The drapes as cords** (`[drape]`, `design/handoffs/drape-cord-2026-10-10.md`): a baked
+/// model's drape cells (the vaulttree's teal filaments) drawn by the GPU renderer as one
+/// thin, continuous cord down each column instead of whole cubes, see-through beside the
+/// cord, in both lighting tiers and with textures off or on (`cubarium_gpu::cord`).
+/// Presentation only: the cells stay cells for the simulation's shade, perches and browse.
+/// The CPU presenter draws cubes.
+///
+/// ```toml
+/// [drape]
+/// cords = true        # false: drape cells are whole cubes again
+/// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
+/// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
+/// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DrapeConfig {
+    /// Draw drape cells as cords (`false`: whole cubes, as before 2026-10-10).
+    pub cords: bool,
+    /// **The cord's width in screen pixels** (at least 1): the same pixels at 6 px a voxel
+    /// as at 3 or 13, so relatively wider on a smaller scale.
+    pub cord_px: u32,
+    /// The cord's path inside a cell from the join at its top face to the join at its
+    /// bottom face (a look choice): `"straight"` or `"eased"` (plumb at each face, the
+    /// sideways step in the middle).
+    pub cord_shape: CordShapeConfig,
+    /// **How far a join may sit from the middle of its face**, as a share of the face's
+    /// width less the cord's, `0..=1`: 0 hangs every cord plumb down the middle of its
+    /// column, 1 lets a join fall anywhere across the face (a hash of the face).
+    pub cord_wander: f32,
+}
+
+impl Default for DrapeConfig {
+    fn default() -> DrapeConfig {
+        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look".
+        DrapeConfig { cords: true, cord_px: 2, cord_shape: CordShapeConfig::Eased, cord_wander: 0.5 }
+    }
+}
+
+impl DrapeConfig {
+    /// The renderer's settings: off unless `cords` is on with a width.
+    pub fn renderer(&self) -> cubarium_gpu::cord::DrapeCords {
+        if !self.cords || self.cord_px == 0 {
+            return cubarium_gpu::cord::DrapeCords::OFF;
+        }
+        cubarium_gpu::cord::DrapeCords {
+            width_px: self.cord_px,
+            shape: match self.cord_shape {
+                CordShapeConfig::Straight => cubarium_gpu::cord::CordShape::Straight,
+                CordShapeConfig::Eased => cubarium_gpu::cord::CordShape::Eased,
+            },
+            wander: self.cord_wander.clamp(0.0, 1.0),
+        }
+    }
+}
+
+/// `[drape] cord_shape`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CordShapeConfig {
+    Straight,
+    #[default]
+    Eased,
 }
 
 /// `[light]` in the config: the lit tier's numbers. New numbers with stated defaults,

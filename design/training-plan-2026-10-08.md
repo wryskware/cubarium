@@ -1063,6 +1063,20 @@ control and the reward accounting; display targets after seeing results.
    - LANTERNJAW-LIFE + diet built (09cc0be1, b8329983): adult at 0.35, rider take 2x own body per day, host bears
      0.5 of its body per day, adults count 12x in hunters' size windows, clutches of 2-7 once a world day, diet
      weights. Effect check running on eidolon.
+   - LANTERNJAW-LIFE merged 55f337ce. Eidolon check (4 wide x 5 h): riders outgrow shredders at about 0.094
+     (rider <= 0.25 x host), 37 of 39 detachments were "outgrown", seedporters killed 29 free juveniles and
+     Veilhounds 7, 2 ever adult, 0 eggs. Cause: I briefed "drop off, never switch hosts"; Wrysk (2026-10-10)
+     meant "an outgrown larva looks for a bigger host, and only goes free if none is nearby" ("yes thats what
+     i meant"). LJ-HOSTSWITCH dispatched.
+   - Shredder breeding brake (Wrysk 2026-10-10): option A, "try option A". A shredder blocked by a crowded nest
+     walks to a quieter spot to lay. The ROLES5 refusal line showed the crowded gate holding shredders about
+     80 % of ready time, and one world never bred in 5 h. SHREDDER-NEST built (4ae657a6); A/B check running.
+   - ROLES5's first check fed main's config to the branch arm (3 h wasted; Wrysk: "this keeps happening").
+     Fixes: `scripts/studies/ab.py` (merged 4e86564b) with per-arm config, a preflight diff with `--expect`,
+     and a tripwire at minute 20+ with `--expect-metric`. Then LABD, approved by Wrysk ("go with scope ...
+     generic interface so that its easily extensible"): one service owns every job across desktop, eidolon
+     and EC2 (EC2 only on his approve), with snapshot builds and one event feed. Dispatched.
+   - Library 2026-10-09 done: 8 seeds x 600 min, all exit 0 (built before the role changes).
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;

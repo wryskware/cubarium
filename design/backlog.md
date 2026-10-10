@@ -373,3 +373,9 @@ animals.
   chunk) and as animals move (every frame).
 - A cheap first study: ray-query sun shadows for the world (chunks meshed to triangles) plus
   the animals' cubes, beside today's sun march, on the 5090, with frame cost.
+
+## 19. Drape cords flow in the wind (Wrysk, 2026-10-10: "flow in the wind should be more pronouned rather than matching the tree but its okay for now; i think thats a later package")
+
+The vaulttree's drape cords (DRAPE-CORD) sway only with their tree. They should stream and
+swing in the wind more than the tree does, as loose cords would: their own lag and
+overshoot behind the tree's sway, more at the tips.
