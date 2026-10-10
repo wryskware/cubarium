@@ -278,6 +278,9 @@ fn the_four_parasite_knobs_are_serde_config_fields() {
         "parasite_take_body_per_day",
         "parasite_host_bear_per_day",
         "parasite_detach_body_fraction",
+        "parasite_switch",
+        "parasite_switch_radius_m",
+        "parasite_switch_give_up_s",
     ] {
         assert!(
             v.get(name).is_some(),
@@ -304,6 +307,8 @@ fn the_parasite_knobs_are_validated() {
     assert!(bad(&|c| c.parasite_detach_body_fraction = 0.0));
     assert!(bad(&|c| c.parasite_detach_body_fraction = 1.5));
     assert!(bad(&|c| c.parasite_detach_body_fraction = f64::NAN));
+    assert!(bad(&|c| c.parasite_switch_radius_m = -0.1));
+    assert!(bad(&|c| c.parasite_switch_give_up_s = f64::NAN));
     assert!(
         !bad(&|c| c.parasite_take_body_per_day = 0.0),
         "no take is a knob setting"
@@ -975,17 +980,14 @@ fn a_riders_take_grows_with_its_size() {
     s.assert_closes("a grown rider's take");
 }
 
-/// **A rider drops off a host it has outgrown** (Wrysk: "if the tiniest larva do attach to
-/// littershredders, they should drop off when theyre too big"): on a littershredder that
-/// bears a hatchling, a rider stays on while the shredder bears its take, and drops off once
-/// it does not — below the normal drop-off size — and takes no other host, though a grazer
-/// that would bear it stands beside it.
-#[test]
-fn a_rider_drops_off_a_host_it_has_outgrown_and_takes_no_other() {
-    let mut c = config();
+/// LJ-HOSTSWITCH's scene: a hatchling on a littershredder whose bear is set so the shredder
+/// lets go halfway between a hatchling and the detach size (`limit`, at the shredder's full
+/// body), a grazer that bears far more `grazer_dx` east of the egg (`None`: no grazer), and
+/// the rider grown just past `limit`, so it has outgrown any shredder (all at most full
+/// body) below its detach size. Hands back the scene, the shredder, the grazer and the rider.
+fn outgrown(mut c: FaunaConfig, grazer_dx: Option<f64>) -> (Scene, u64, Option<u64>, u64) {
     let lj = c.founder(Founder::Lanternjaw).core;
     let line = c.parasite_detach_body_fraction * lj.body_max;
-    // The shredder lets go halfway between a hatchling and the detach size.
     let limit = 0.5 * (lj.body_min + line);
     let shredder = c.founder(Founder::Blind).core.body_max;
     c.parasite_host_bear_per_day = c.parasite_take_body_per_day * limit / shredder;
@@ -995,31 +997,161 @@ fn a_rider_drops_off_a_host_it_has_outgrown_and_takes_no_other() {
     let riders = riders_of(&s.fauna, host);
     assert_eq!(riders.len(), 1, "the hatchling took the shredder, which bears it");
     let rider = riders[0];
-    let r = s.fauna.config.parasite_attach_radius_m;
-    let grazer = s.add(Founder::Browser, StartingStores::FULL, 0.25 * r);
-
+    let grazer = grazer_dx.map(|dx| s.add(Founder::Browser, StartingStores::FULL, dx));
+    if let Some(g) = grazer {
+        let c = s.fauna.config;
+        assert!(crate::host_bears(&c, line, animal(&s.fauna, g).body), "fixture: the grazer bears it");
+    }
+    // Borne, it stays on.
     let reserve = animal(&s.fauna, rider).reserve;
-    let host_body = animal(&s.fauna, host).body;
-    let borne = 0.97 * limit * host_body / shredder;
+    let borne = 0.97 * limit * animal(&s.fauna, host).body / shredder;
     set_stores(&mut s.fauna, rider, borne, reserve);
     s.steps(5);
     assert_eq!(animal(&s.fauna, rider).attached, Some(Attachment { host }), "still borne");
-
-    let host_body = animal(&s.fauna, host).body;
-    let outgrown = 1.03 * limit * host_body / shredder;
+    let outgrown = 1.03 * limit;
     assert!(outgrown < line, "fixture: under the normal drop-off size");
     let reserve = animal(&s.fauna, rider).reserve;
     set_stores(&mut s.fauna, rider, outgrown, reserve);
-    s.steps(3);
+    s.step();
     let a = animal(&s.fauna, rider);
-    assert_eq!(a.attached, None, "it outgrew the shredder and dropped off");
     assert!(a.body < line, "below the detach size");
-    assert_eq!(s.fauna.ledger.rider_dropoffs, 1);
-    assert_eq!(s.fauna.ledger.riders_freed, 0);
+    (s, host, grazer, rider)
+}
+
+/// LJ-HOSTSWITCH (Wrysk 2026-10-10: an outgrown larva looks for a bigger host): a rider that
+/// outgrows its shredder below its detach size, with a grazer that bears it within the
+/// hatchlings' contact radius, takes the grazer and does not go free; the grazer then feeds
+/// it, and the books close across the switch.
+#[test]
+fn an_outgrown_rider_takes_a_bearing_host_in_reach_and_the_books_close() {
+    let r = config().parasite_attach_radius_m;
+    let (mut s, host, grazer, rider) = outgrown(config(), Some(0.25 * r));
+    let grazer = grazer.expect("a grazer");
+    assert_eq!(animal(&s.fauna, rider).attached, Some(Attachment { host: grazer }), "it switched to the grazer");
+    assert!(riders_of(&s.fauna, host).is_empty(), "and let go of the shredder");
+    assert_eq!(s.fauna.ledger.rider_dropoffs, 1, "the let-go is a drop-off");
+    assert_eq!(s.fauna.ledger.riders_attached, 1, "a switch is not a hatch");
+    let t = s.fauna.host_switches();
+    assert_eq!((t.tried, t.made, t.gave_up), (1, 1, 0));
+    assert_eq!(t.by_host[Founder::Browser.index()], 1);
+    assert_eq!(s.fauna.host_seekers(), 0);
+    s.assert_closes("switched");
+    let r0 = animal(&s.fauna, rider);
+    let g0 = animal(&s.fauna, grazer);
+    s.steps(20);
+    let (r1, g1) = (animal(&s.fauna, rider), animal(&s.fauna, grazer));
+    assert_eq!(r1.attached, Some(Attachment { host: grazer }), "it rides on");
+    assert_eq!(r1.site, g1.site, "carried on the grazer");
+    assert!(r1.organic() > r0.organic(), "the grazer feeds it");
+    assert!(g1.stored_organic() < g0.stored_organic());
+    s.assert_closes("riding the new host");
+}
+
+/// The walk to a host (LJ-HOSTSWITCH): on its own heuristic, an outgrown rider with a host
+/// that bears it inside its sense radius but beyond contact walks to it and takes it.
+#[test]
+fn an_outgrown_rider_on_its_heuristic_walks_to_a_bearing_host_it_senses() {
+    let c = config();
+    let dx = 0.5 * (c.parasite_attach_radius_m + c.parasite_switch_radius_m);
+    assert!(dx > c.parasite_attach_radius_m + 0.25, "fixture: out of contact");
+    let (mut s, _host, grazer, rider) = outgrown(c, Some(dx));
+    let grazer = grazer.expect("a grazer");
+    assert_eq!(animal(&s.fauna, rider).attached, None, "out of contact, it is off its host");
+    assert_eq!(s.fauna.host_seekers(), 1, "and looking");
+    let teachers = s.fauna.config.teachers;
+    s.fauna.controllers.set(rider, crate::controller::heuristic(Founder::Lanternjaw, teachers));
+    let mut took = false;
+    for _ in 0..300 {
+        s.step();
+        if animal(&s.fauna, rider).attached == Some(Attachment { host: grazer }) {
+            took = true;
+            break;
+        }
+    }
+    assert!(took, "it walked to the grazer and took it");
+    assert_eq!(s.fauna.host_switches().made, 1);
+    s.assert_closes("walked to a host");
+}
+
+/// With no host that bears it in reach, an outgrown rider looks for the give-up time and
+/// then goes on as a free juvenile.
+#[test]
+fn with_no_bearing_host_an_outgrown_rider_goes_free_after_the_give_up_time() {
+    let c = FaunaConfig {
+        parasite_switch_give_up_s: 2.0,
+        ..config()
+    };
+    let give_up = cubarium_voxel::ticks_at_least_one(c.parasite_switch_give_up_s);
+    let (mut s, host, _, rider) = outgrown(c, None);
+    assert_eq!(animal(&s.fauna, rider).attached, None, "it outgrew the shredder");
+    assert_eq!(s.fauna.host_seekers(), 1, "and looks for another");
+    s.steps(give_up / 2);
+    assert_eq!(s.fauna.host_seekers(), 1, "still looking");
+    s.steps(give_up);
+    assert_eq!(s.fauna.host_seekers(), 0, "it gave up");
+    let t = s.fauna.host_switches();
+    assert_eq!((t.tried, t.made, t.gave_up), (1, 0, 1));
+    assert_eq!(animal(&s.fauna, rider).attached, None, "a free juvenile");
+    assert!(riders_of(&s.fauna, host).is_empty());
+    s.assert_closes("gave up");
+}
+
+/// A host too small to bear it is never taken: a second shredder at full body standing in
+/// contact with the outgrown rider is passed over, on contact and by the walk.
+#[test]
+fn an_outgrown_rider_never_takes_a_host_too_small_to_bear_it() {
+    let (mut s, host, _, rider) = outgrown(config(), None);
+    let r = s.fauna.config.parasite_attach_radius_m;
+    let (x, z) = (animal(&s.fauna, rider).pose.x, animal(&s.fauna, rider).pose.z);
+    let small = s.add(Founder::Blind, StartingStores::FULL, 0.0);
+    place(&mut s.fauna, small, x + 0.25 * r, z, EAST);
+    let c = s.fauna.config;
+    assert!(!crate::host_bears(&c, animal(&s.fauna, rider).body, animal(&s.fauna, small).body), "fixture: too small");
+    let teachers = c.teachers;
+    s.fauna.controllers.set(rider, crate::controller::heuristic(Founder::Lanternjaw, teachers));
+    s.steps(80);
+    assert!(riders_of(&s.fauna, small).is_empty(), "the small shredder is no host");
+    assert!(riders_of(&s.fauna, host).is_empty(), "nor is the one it outgrew");
+    assert_eq!(animal(&s.fauna, rider).attached, None);
+    assert_eq!(s.fauna.host_switches().made, 0);
+    s.assert_closes("passed over");
+}
+
+/// At or past its detach size a rider drops off free as before, a host that would bear it in
+/// contact or not: it does not look for another.
+#[test]
+fn a_rider_at_its_detach_size_goes_free_and_looks_for_no_host() {
+    let (mut s, host, rider) = ride(config());
+    let r = s.fauna.config.parasite_attach_radius_m;
+    let other = s.add(Founder::Browser, StartingStores::FULL, 0.25 * r);
+    let c = s.fauna.config;
+    let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, 1.001 * line, reserve);
+    s.steps(3);
+    assert_eq!(animal(&s.fauna, rider).attached, None, "dropped off");
+    assert!(crate::host_bears(&c, animal(&s.fauna, rider).body, animal(&s.fauna, other).body), "fixture: the other bears it");
+    s.steps(40);
+    assert_eq!(animal(&s.fauna, rider).attached, None, "free");
+    assert!(riders_of(&s.fauna, other).is_empty() && riders_of(&s.fauna, host).is_empty());
+    assert_eq!(s.fauna.host_switches(), crate::HostSwitchTally::default(), "no quest");
+    s.assert_closes("free at its size");
+}
+
+/// With the switch off, an outgrown rider goes free and takes no other host (the earlier rule).
+#[test]
+fn with_the_switch_off_an_outgrown_rider_takes_no_other_host() {
+    let r = config().parasite_attach_radius_m;
+    let c = FaunaConfig {
+        parasite_switch: false,
+        ..config()
+    };
+    let (mut s, _host, grazer, rider) = outgrown(c, Some(0.25 * r));
     s.steps(40);
     assert_eq!(animal(&s.fauna, rider).attached, None, "it takes no other host");
-    assert!(riders_of(&s.fauna, grazer).is_empty());
-    s.assert_closes("outgrown");
+    assert!(riders_of(&s.fauna, grazer.expect("a grazer")).is_empty());
+    assert_eq!(s.fauna.host_switches(), crate::HostSwitchTally::default());
+    s.assert_closes("outgrown, switch off");
 }
 
 /// **Seedporters eat small lanternjaw juveniles** (Wrysk: "seedporters should also eat the
