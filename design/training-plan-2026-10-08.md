@@ -1004,6 +1004,15 @@ control and the reward accounting; display targets after seeing results.
      lineage), then confirm, then the year check. Wrysk wants independent fresh-eyes plans first,
      Opus and Astra at xhigh, optimising effectiveness / total compute. The desktop CMA round is
      held (`runs/eco-screen-2026-10-09/HOLD`).
+   - Fresh-eyes proposals (Opus, Astra) are in `design/7_Research/eco-tuning-fresh-eyes-2026-10-09-*.md`.
+     Both say: roles triage first (Veilhound regulation, loftstrider births every 18 min, seedporter
+     predation, capgnawer/shredder breeding, lanternjaw maturation, woods), then pin worlds at target
+     and measure drift (thin=), fit per-lineage responses, confirm, year check. About 320 core-h
+     against about 1,150 for 12 CMA generations. Awaiting Wrysk's go.
+   - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
+     session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
+     remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;
+     an unedited world matches main row for row (tick_ms aside).
    - AUTOSAVE-SLOT (Codex) merged a73cbc8c: autosaves go to `<world> (autosave)` and never overwrite
      the player's save; launch opens the newer of the two (Wrysk: "like how other games do it").
      Display build display-73-autosave installed.
