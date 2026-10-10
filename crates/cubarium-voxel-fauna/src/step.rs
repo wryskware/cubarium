@@ -4070,7 +4070,7 @@ fn back_off_face(
 ///
 /// Decisions §3 gave the shredder its three foods; since R0 every lineage's foods are its
 /// physiology's diet list. There is no new action: `bite` still means "take what is at
-/// the mouth", and [`body::mouth_meal`] resolves which of the diet's foods that is (the
+/// the mouth", and [`body::mouth_meal_worth`] resolves which of the diet's foods that is (the
 /// richest available, ties in [`Food::ALL`] order). Since the minimal gut the bite goes
 /// raw into that food class's stomach pool ([`swallow`]); digestion ([`digest`]) applies
 /// the class's `yield` ([`crate::FounderPhysiology::yield_for`]) later.
@@ -4108,11 +4108,11 @@ fn founder_feed(
     let cols = body::mouth_columns(view, &pose, geometry);
     // Which food is at this mouth, and how much of it — the `E` the bite diminishes
     // with — before anything is withdrawn: the richest of the lineage's diet
-    // ([`body::mouth_meal`]). Its class is the source's own: a pool names it, and a
+    // ([`body::mouth_meal_worth`]). Its class is the source's own: a pool names it, and a
     // stand's is its species' income rule.
     let diet = phys.eating_diet();
     let Some((meal, stock, _)) =
-        body::mouth_meal(&flora.view(), view, &cols, site_y, geometry, diet)
+        body::mouth_meal_worth(&flora.view(), view, &cols, site_y, geometry, diet, &phys.food_worth())
     else {
         return false;
     };

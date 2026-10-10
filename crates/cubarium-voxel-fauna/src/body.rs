@@ -425,6 +425,15 @@ pub struct FounderPhysiology {
     /// seedporter; a sip visit (the bellwing's) is its own rule and needs no switch.
     #[serde(default)]
     pub pollen_by_contact: bool,
+    /// **Switch: it weighs its foods by what they build** (ROLES5, role call 5A, the
+    /// capgnawer): at a mouth holding several of its foods it takes the one **worth** most,
+    /// its offer × its [`FounderPhysiology::yield_by_food`] over the best yield in its diet
+    /// ([`FounderPhysiology::food_worth`]), and its taste reads that worth. So a weak
+    /// fallback (the capgnawer's litter) tastes weak, does not hold the forager on it, and
+    /// the scent of its main food can lead it on. Off: every food is worth its stock, the
+    /// richest-stock rule.
+    #[serde(default)]
+    pub taste_by_yield: bool,
     /// Switch: its [`FounderPhysiology::hunter`] table is the **opportunistic catch's**
     /// (the seedporter's, MIMIC), so it exists only while [`FounderPhysiology::catch_bellwings`]
     /// is on, and carrion is food only then. A dedicated predator (lanternjaw, Veilhound)
@@ -1774,6 +1783,23 @@ impl FounderPhysiology {
     /// **The diet at its mouth**: [`FounderPhysiology::diet`], less carrion for an
     /// [`opportunist`](FounderPhysiology::opportunist) whose catch is switched off
     /// (carrion is the catch's food, on the same rule as [`FounderPhysiology::active_hunter`]).
+    /// What a unit of each food is worth to this lineage's mouth, 0–1: all 1 unless
+    /// [`FounderPhysiology::taste_by_yield`], then each food's yield over the best yield
+    /// among the foods it eats ([`FounderPhysiology::eating_diet`]).
+    pub fn food_worth(&self) -> [f64; crate::Food::COUNT] {
+        let mut worth = [1.0; crate::Food::COUNT];
+        if !self.taste_by_yield {
+            return worth;
+        }
+        let best = self.eating_diet().foods().map(|f| self.yield_for(f)).fold(0.0, f64::max);
+        if best > 0.0 {
+            for f in self.eating_diet().foods() {
+                worth[f.index()] = (self.yield_for(f) / best).clamp(0.0, 1.0);
+            }
+        }
+        worth
+    }
+
     pub fn eating_diet(&self) -> crate::Diet {
         if self.opportunist && !self.catch_bellwings {
             crate::Diet::of(&self.diet.foods().filter(|&f| f != crate::Food::Carrion).collect::<Vec<_>>())
@@ -1902,6 +1928,7 @@ impl FounderPhysiology {
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
                 pollen_by_contact: false,
+                taste_by_yield: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -1994,6 +2021,7 @@ impl FounderPhysiology {
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
                 pollen_by_contact: false,
+                taste_by_yield: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -2107,6 +2135,7 @@ impl FounderPhysiology {
                 flower_ambush_m: 1.0,
                 catch_bellwings: false,
                 pollen_by_contact: false,
+                taste_by_yield: false,
                 opportunist: false,
                 catch_ceiling_m: 0.4,
                 catch_gain_min: 0.0,
@@ -2194,6 +2223,9 @@ impl FounderPhysiology {
                         FOLIAGE_YIELD,
                     ],
                     diet: crate::Diet::of(&[crate::Food::CapTissue, crate::Food::Litter]),
+                    // ROLES5 (role call 5A): caps are worth their yield, litter its own weak
+                    // one, so litter tastes weak and the fungal scent leads it to the caps.
+                    taste_by_yield: true,
                     // Caps: k 0.02, τ 120 s; the shredder's daily need (its own row).
                     gut: Gut::of(0.02, 120.0),
                     // Near glowcap stands: a face from which its mouth reaches a stocked cap
@@ -3850,6 +3882,7 @@ impl Meal {
 /// the **offer** the comparison is made on and the taste channel encodes — the stock, or
 /// for a stand `(1 − defence) ×` its stock (audit round §4: the defence is readable). A
 /// pool has no defence, so its offer is its stock.
+#[cfg(test)]
 pub(crate) fn mouth_meal(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -3857,6 +3890,22 @@ pub(crate) fn mouth_meal(
     standing_y: u32,
     body: &Body,
     diet: crate::Diet,
+) -> Option<(Meal, f64, f64)> {
+    mouth_meal_worth(fv, view, cols, standing_y, body, diet, &[1.0; crate::Food::COUNT])
+}
+
+/// `mouth_meal` with each food's offer weighed by `worth`
+/// ([`FounderPhysiology::food_worth`]): the comparison and the reported offer are
+/// `worth × offer`; the stock a bite diminishes on is unweighed. All-ones is `mouth_meal`,
+/// the richest-stock rule.
+pub(crate) fn mouth_meal_worth(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    cols: &[(i64, u32)],
+    standing_y: u32,
+    body: &Body,
+    diet: crate::Diet,
+    worth: &[f64; crate::Food::COUNT],
 ) -> Option<(Meal, f64, f64)> {
     let mut best: Option<(Meal, f64, f64)> = None;
     for food in diet.foods() {
@@ -3895,6 +3944,7 @@ pub(crate) fn mouth_meal(
                     }))
                 })
         };
+        let found = found.map(|(meal, stock, offer)| (meal, stock, offer * worth[food.index()]));
         if let Some((meal, stock, offer)) = found
             && stock > 0.0
             && best.is_none_or(|(_, _, b)| offer > b)
@@ -4312,6 +4362,7 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         FounderPhysiology::placeholder(founder).diet,
+        &FounderPhysiology::placeholder(founder).food_worth(),
         // The unit tests' bodies are the placeholder tables' (mass 1).
         FounderPhysiology::placeholder(founder).taste_reference_on(
             crate::CueConfig::default().emit_reference,
@@ -4333,6 +4384,7 @@ pub(crate) fn taste_reading_at(
     manifest: &Manifest,
     body: &Body,
     diet: crate::Diet,
+    worth: &[f64; crate::Food::COUNT],
     reference: f64,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
@@ -4344,12 +4396,12 @@ pub(crate) fn taste_reading_at(
         c / (c + sat)
     };
     let cols = mouth_columns(view, pose, body);
-    // What is at the mouth is the lineage's own diet's richest offer ([`mouth_meal`]).
+    // What is at the mouth is the lineage's own diet's richest offer ([`mouth_meal_worth`]).
     // The **channel's** class and its reading in air are the manifest's (P2 owns them):
     // the blind layout reads every food as its one soft class `litter`, and bare ground
     // as a valid zero; the lanternjaw's reads `carrion`, ground likewise; the browser's
     // reads `foliage`, and a mouth in air is no contact and no taste.
-    let offer = mouth_meal(fv, view, &cols, standing_y, body, diet).map(|(_, _, offer)| offer);
+    let offer = mouth_meal_worth(fv, view, &cols, standing_y, body, diet, worth).map(|(_, _, offer)| offer);
     // The class is the manifest's taste cue; a mouth on bare ground is a valid zero for
     // every layout but the foliage-tasting ones (the browser's and the loftstrider's).
     // The capgnawer keeps the blind layout's `litter` class: its caps and litter are both
@@ -4511,6 +4563,7 @@ fn observation_v2(
         manifest,
         &body,
         phys.diet,
+        &phys.food_worth(),
         phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config),
     );
     // A fruit taste (F3, the seedporter): the fruit in the mouth's reach — the stand it

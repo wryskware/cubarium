@@ -100,6 +100,13 @@ core.reproduction.brood_share = 0.8
 egg_site = "fungus"
 core.reproduction.egg_fungus_radius_m = 0.5
 core.reproduction.clutch_hold_max_s = 1800.0
+# Role call 5A (Wrysk 2026-10-10, ROLES5): caps are its real food. Litter yields it a
+# twentieth of a cap (0.025 against the caps' 0.5, was 0.25), so it lives at the glowcaps,
+# lays there, and its numbers follow theirs; it weighs its foods by yield
+# (`taste_by_yield`), so ordinary litter tastes under its feed gate and the fungal scent
+# leads it on.
+yield_by_food.litter = 0.025
+taste_by_yield = true
 
 [fauna.founders.loftstrider]
 founding_count = 2
