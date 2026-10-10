@@ -506,6 +506,9 @@ struct VineAux {
 #[derive(Clone, Debug, Default)]
 struct Runtime {
     built: bool,
+    /// Wall-face geometry by x column, shared by immutable queries. Invalidated only
+    /// when a face is added or removed; ownership and stocks do not change geometry.
+    wall_columns: std::sync::OnceLock<FxHashMap<u32, Vec<Face>>>,
     /// Face → slot in `Cover::faces`.
     index: FxHashMap<Face, u32>,
     extra: Vec<FaceExtra>,
@@ -584,6 +587,28 @@ impl Cover {
     /// Every covered face, in storage order (no copy, no sort).
     pub fn iter(&self) -> impl Iterator<Item = &CoveredFace> + '_ {
         self.faces.iter()
+    }
+
+    /// Covered wall faces in the x columns accepted by `keep`, in no particular order.
+    /// The geometry index is transient and built lazily, including after a load.
+    /// Queries still check their current distance, height and any nesting conditions.
+    pub fn wall_faces_in_columns<'a>(
+        &'a self,
+        keep: impl Fn(u32) -> bool + 'a,
+    ) -> impl Iterator<Item = Face> + 'a {
+        let columns = self.rt.wall_columns.get_or_init(|| {
+            let mut columns: FxHashMap<u32, Vec<Face>> = FxHashMap::default();
+            for cf in &self.faces {
+                if !cf.face.dir.is_underside() {
+                    columns.entry(cf.face.x).or_default().push(cf.face);
+                }
+            }
+            columns
+        });
+        columns
+            .iter()
+            .filter(move |(x, _)| keep(**x))
+            .flat_map(|(_, faces)| faces.iter().copied())
     }
 
     /// Every covered face, sorted by face.
@@ -675,6 +700,7 @@ impl Cover {
     }
 
     fn add_face(&mut self, cf: CoveredFace, dist: u32, parent: Option<Face>) {
+        self.rt.wall_columns.take();
         let slot = self.faces.len() as u32;
         self.rt.index.insert(cf.face, slot);
         self.faces.push(cf);
@@ -686,6 +712,7 @@ impl Cover {
 
     /// Remove the record in `slot`, swapping the last one in; returns it.
     fn remove_slot(&mut self, slot: usize) -> CoveredFace {
+        self.rt.wall_columns.take();
         let cf = self.faces.swap_remove(slot);
         self.rt.extra.swap_remove(slot);
         self.rt.index.remove(&cf.face);

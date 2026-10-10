@@ -4897,20 +4897,42 @@ pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv:
     let (lo, hi) = (a.pose.y_m - flight.band_max_m, a.pose.y_m + flight.band_max_m);
     let mut near: Vec<(f64, cubarium_voxel_flora::Face)> = fv
         .cover
-        .iter()
-        .filter(|cf| !cf.face.dir.is_underside())
-        .filter_map(|cf| {
-            let f = cf.face;
+        .wall_faces_in_columns(move |x| {
+            let (dx, _) = crate::pose::wrapped_delta(
+                a.pose.x,
+                a.pose.z,
+                (f64::from(x) + 0.5) * v,
+                a.pose.z,
+                ring,
+            );
+            // A conservative broad phase: keep a voxel of padding at the boundary,
+            // then use the original distance calculation and cutoff below.
+            dx.abs() <= reach + v
+        })
+        .filter_map(|f| {
             let y = (f64::from(f.y) + 0.5) * v;
             if y < lo || y > hi {
                 return None;
             }
-            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
+            let (dx, dz) = crate::pose::wrapped_delta(
+                a.pose.x,
+                a.pose.z,
+                (f64::from(f.x) + 0.5) * v,
+                (f64::from(f.z) + 0.5) * v,
+                ring,
+            );
             let d = (dx * dx + dz * dz).sqrt();
             (d <= reach).then_some((d, f))
         })
         .collect();
-    near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    let order = |p: &(f64, cubarium_voxel_flora::Face), q: &(f64, cubarium_voxel_flora::Face)| {
+        p.0.total_cmp(&q.0).then(p.1.cmp(&q.1))
+    };
+    if near.len() > NEST_CANDIDATES {
+        near.select_nth_unstable_by(NEST_CANDIDATES, order);
+        near.truncate(NEST_CANDIDATES);
+    }
+    near.sort_unstable_by(order);
     let air = fauna.open_air(view, &flight);
     let mut target = None;
     // The nearest few that would take the clutch; a scan past them would cost a tick.

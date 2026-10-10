@@ -1456,7 +1456,7 @@ fn ledges(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Vec<cr
     {
         return list.clone();
     }
-    let mut faces: Vec<VineFace> = fv.cover.faces().into_iter().map(|f| f.face).filter(|f| !f.dir.is_underside()).collect();
+    let mut faces: Vec<VineFace> = fv.cover.iter().map(|f| f.face).filter(|f| !f.dir.is_underside()).collect();
     faces.sort_unstable_by_key(|f| (f.x, f.z, f.dir, f.y));
     let mut out = Vec::new();
     let mut k = 0;
@@ -1775,7 +1775,7 @@ fn vine_fruit_key(view: &VoxelView<'_>, face: VineFace) -> u64 {
 }
 
 fn fruit_wall_approach(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, phys: &crate::FounderPhysiology, id: u64) -> Option<Actions> {
-    let fruit = fv.cover.faces().into_iter().find(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id)?;
+    let fruit = fv.cover.iter().find(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id)?;
     let (x, _, z) = fruit.face.front(view)?;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -1826,7 +1826,7 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
     // REACH-HEIGHTS: fruit on a vine is food too. Sight is at the bead face, while
     // the walking destination is the accessible foot of the wall it must climb.
     if range > 0.0 {
-        for fruit in fv.cover.faces().iter().filter(|f| f.fruit > 0.0 && !f.face.dir.is_underside()) {
+        for fruit in fv.cover.iter().filter(|f| f.fruit > 0.0 && !f.face.dir.is_underside()) {
             let face = fruit.face;
             let Some((x, y, z)) = face.front(view) else { continue };
             let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
@@ -1881,7 +1881,7 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
     let m = fauna.percepts.get(&a.id).map(|p| p.best[food]).unwrap_or_default();
     let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
     let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0)
-        || fv.cover.faces().iter().any(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id);
+        || fv.cover.iter().any(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id);
     if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
         return None;
     }
