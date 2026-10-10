@@ -8,7 +8,8 @@ affinity (run-study.py semantics: the whole group, so the scheduler can balance 
 Other tasks float over the host and are charged to every group in proportion to its size,
 as is load from processes labd does not own (loadavg minus labd's own threads, when
 external_load is on). Memory is charged against max_mem_gb, and on the local host also
-against live MemAvailable minus reserve_mem_gb. Nothing is placed that does not fit.
+against live MemAvailable minus reserve_mem_gb. Build and cargo-test tasks may use
+the host's build_overcommit_threads above usable; memory and L3 limits still apply.
 """
 
 from dataclasses import dataclass, field
@@ -43,6 +44,7 @@ class Host:
     up: bool = True
     external_threads: float = 0.0    # last measured load not owned by labd
     price_usd_h: float = 0.0
+    build_overcommit_threads: int = 0
 
     @property
     def usable(self):
@@ -50,6 +52,14 @@ class Host:
 
     def group_cap(self, index):
         return math.floor(len(self.groups[index]) * self.usable / self.cpus)
+
+    def thread_limit(self, task):
+        extra = self.build_overcommit_threads if task.meta.get("kind") in ("build", "cargo-test") else 0
+        return self.usable + max(0, extra)
+
+    def thread_label(self, used):
+        extra = max(0, used - self.usable)
+        return f"{min(used, self.usable):g}/{self.usable}" + (f" +{extra:g} build" if extra else "")
 
     def order(self):
         indices = list(range(len(self.groups or [])))
@@ -106,7 +116,8 @@ def fits(task, host, usage, live_mem=None):
     if live_mem is not None and task.mem_gb > live_mem - host.reserve_mem_gb:
         return None
     external = host.external_threads if host.external_load else 0
-    if usage.threads + task.threads + external > host.usable:
+    # Charge every running task: the allowance is shared across the host, not per build.
+    if usage.threads + task.threads + external > host.thread_limit(task):
         return None
     if not task.l3:
         return -1
@@ -121,7 +132,7 @@ def fits(task, host, usage, live_mem=None):
 
 def could_ever_fit(task, host):
     """Would the task fit on this host with nothing else running? (plan-time check)"""
-    if not allowed(task, host) or task.mem_gb > host.max_mem_gb or task.threads > host.usable:
+    if not allowed(task, host) or task.mem_gb > host.max_mem_gb or task.threads > host.thread_limit(task):
         return False
     if task.l3 and host.groups is not None:
         return any(task.threads <= host.group_cap(g) for g in range(len(host.groups)))

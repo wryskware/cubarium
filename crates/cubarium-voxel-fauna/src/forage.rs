@@ -90,7 +90,8 @@ pub(crate) fn offer(a: &crate::Animal, phys: &FounderPhysiology, food: Food, per
     let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
     let want = phys.gut.bite_per_body_s * speed * a.body * period_s * effort;
     let k = phys.bite_half_stock_for(food);
-    let offered = if k > 0.0 { want * stock.max(0.0) / (stock.max(0.0) + k) } else { want };
+    let stock = stock.max(0.0);
+    let offered = (if k > 0.0 { want * stock / (stock + k) } else { want }).min(stock);
     let tau = phys.gut.digestion_s[food.index()] / speed;
     let fill = phys.gut.full_tolerance * phys.gut.capacity(a.body) * period_s / tau;
     if fill > 0.0 && fill.is_finite() && offered.is_finite() { offered / fill } else { 0.0 }

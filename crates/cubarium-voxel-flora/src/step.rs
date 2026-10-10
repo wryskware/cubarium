@@ -130,6 +130,7 @@ use cubarium_voxel::{DT, Material, Materials, VoxelView, World};
 #[cfg(test)]
 use cubarium_voxel::Command as WorldCommand;
 
+use crate::layers::shade_share;
 use crate::{Crop, CropPhase, DeathCause, DeathRecord, Flora, FloraConfig, FloraLedger, Ground, Site, Species, SpeciesConfig, Stand, Taken, Trophic};
 
 /// Stream keys, so two draws in one tick cannot be the same draw. One per rule that
@@ -838,20 +839,18 @@ pub(crate) fn settle_places(config: &FloraConfig, stands: &mut [Stand], ledger: 
 /// a plant browsed down to its crown earns more light than one browsed down to its
 /// rosette, at the same total foliage.
 ///
-/// An **occluder** is any foliage-bearing layer of another stand whose band top is
-/// strictly above the receiving layer's band top and whose footprint contains the
-/// receiver's column; it attenuates by `exp(-k · (1-p) · stock / area_m2)` over its own
-/// physical area. Porosity is the layer's transmission and enters only here — the cone
-/// sees a porous canopy as leaves all the same
-/// (`design/voxel-encounter-contract-2026-09-21.md` §8).
+/// An **occluder** is any foliage-bearing layer of another stand whose band top is at or
+/// above the receiving layer's band top and whose footprint contains the receiver's
+/// column (SHADE-REAL). It attenuates by Beer–Lambert, `exp(−share · optical_depth)`:
+/// its [`crate::layers::StandLayer::optical_depth`] is `k_ext (1 − p) LAI` over its own
+/// physical area, and the share ([`shade_share`]) is the part of its band above the
+/// receiver's middle — all of it for a layer wholly above, half for two crowns of one
+/// height, which therefore shade each other symmetrically instead of letting each other
+/// off. A layer whose top is below the receiver's top shades it not at all, as before.
+/// Porosity is the layer's gap fraction and enters only here — the cone sees a porous
+/// canopy as leaves all the same (`design/voxel-encounter-contract-2026-09-21.md` §8).
 ///
-/// A stand never shades itself, and a layer level with another's top does not shade
-/// it — only a strictly higher one does, which is the pre-layer rule verbatim.
-///
-/// **On a single-layer species this is numerically what it always was**: the one layer's
-/// band top is the crown top the old model compared, its radius is the crown radius, its
-/// stock is the whole of `P`, its weight is one, and its area is the crown's. The
-/// authored porosity is the only new factor (`tests/layers.rs`).
+/// A stand never shades itself.
 pub(crate) fn founder_light(config: &FloraConfig, stands: &[Stand], world: &World) -> Vec<f64> {
     light_per_stand(config, stands, &mut Vec::new(), world, &[], 1).0
 }
@@ -950,9 +949,11 @@ fn light_per_stand(
             if !(w > 0.0) {
                 continue;
             }
-            let mut here = open;
+            // Optical depth over this layer, summed: `exp` of the sum is the product of
+            // every occluder's transmission.
+            let mut depth = 0.0;
             for c in near {
-                if c.j as usize == i || c.top <= layer.top {
+                if c.j as usize == i || c.top < layer.top {
                     continue;
                 }
                 // A face's plant and its fungus never shade each other (`FaceLayer`): the
@@ -971,7 +972,8 @@ fn light_per_stand(
                 }
                 let (from, to) = span[c.j as usize];
                 for above in &layers[from as usize..to as usize] {
-                    if above.top <= layer.top {
+                    let f = shade_share(above.band(), layer.band());
+                    if !(f > 0.0) {
                         continue;
                     }
                     let dx = wrapped_delta(above.x, layer.x, width);
@@ -979,9 +981,10 @@ fn light_per_stand(
                     if dx * dx + dz * dz > above.radius * above.radius {
                         continue;
                     }
-                    here *= above.attenuation;
+                    depth += f * above.depth;
                 }
             }
+            let here = open * (-depth).exp();
             l += w * here;
             weighed += w;
         }
@@ -1012,9 +1015,9 @@ fn light_per_stand(
         .zip(film_sky)
         .map(|(site, open)| {
             let (x, z, top) = (site.x as f64, site.z as f64, site.y as f64);
-            let mut here = open;
+            let mut depth = 0.0;
             for c in index.near(*site) {
-                if c.top <= top {
+                if c.top < top {
                     continue;
                 }
                 let sx = wrapped_delta(c.x, x, width);
@@ -1024,7 +1027,9 @@ fn light_per_stand(
                 }
                 let (from, to) = span[c.j as usize];
                 for above in &layers[from as usize..to as usize] {
-                    if above.top <= top {
+                    // The film is a sheet on the face: a band of no thickness at `y`.
+                    let f = shade_share(above.band(), [top, top]);
+                    if !(f > 0.0) {
                         continue;
                     }
                     let dx = wrapped_delta(above.x, x, width);
@@ -1032,10 +1037,10 @@ fn light_per_stand(
                     if dx * dx + dz * dz > above.radius * above.radius {
                         continue;
                     }
-                    here *= above.attenuation;
+                    depth += f * above.depth;
                 }
             }
-            here
+            open * (-depth).exp()
         })
         .collect();
     (lit, film_open)
@@ -1238,6 +1243,8 @@ fn par_map<T: Send + 'static>(k: usize, threads: usize, f: impl Fn(usize) -> T +
 struct Shade {
     x: f64,
     z: f64,
+    /// The band's **bottom**, in voxels above the world floor.
+    bottom: f64,
     /// The band's **top**, in voxels above the world floor. For a `[0, 1.0]` layer this
     /// is `site.y + crown_height(wood)`: the pre-layer crown top, unchanged.
     top: f64,
@@ -1245,10 +1252,17 @@ struct Shade {
     radius: f64,
     stock: f64,
     share: f64,
-    /// What this layer lets through to a layer under it:
-    /// `exp(-k · (1-p) · stock / area_m2)`, the one factor the sweep multiplies in, taken
-    /// once per layer rather than once per layer it shades.
-    attenuation: f64,
+    /// The layer's optical depth ([`crate::layers::StandLayer::optical_depth`]): a layer
+    /// under it gets `exp(−depth · share)`, the share by [`crate::layers::shade_share`].
+    depth: f64,
+}
+
+impl Shade {
+    /// The band, `[bottom, top]`.
+    #[inline]
+    fn band(&self) -> [f64; 2] {
+        [self.bottom, self.top]
+    }
 }
 
 /// A stand's foliage layers as the shade model sees them, appended to `out`.
@@ -1259,12 +1273,12 @@ fn shade_layers_into(config: &FloraConfig, stand: &Stand, voxel_m: f64, out: &mu
             .map(|l| Shade {
                 x: stand.site.x as f64,
                 z: stand.site.z as f64,
+                bottom: l.band_v[0],
                 top: l.band_v[1],
                 radius: l.radius_v,
                 stock: l.stock,
                 share: l.share,
-                attenuation: (-config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2)
-                    .exp(),
+                depth: l.optical_depth,
             }),
     );
 }
@@ -4451,7 +4465,8 @@ pub(crate) fn canopy_light(
     let width = view.config.width;
     let mut mine: Vec<Shade> = Vec::with_capacity(4);
     shade_layers_into(config, receiver, voxel_m, &mut mine);
-    let mut through: Vec<f64> = vec![1.0; mine.len()];
+    // Optical depth over each of the receiver's layers, summed.
+    let mut over: Vec<f64> = vec![0.0; mine.len()];
     let lowest = mine.iter().map(|l| l.top).fold(f64::INFINITY, f64::min);
     let reach = shade_reach(config, voxel_m);
     let (x0, z0) = (i64::from(receiver.site.x), i64::from(receiver.site.z));
@@ -4479,14 +4494,15 @@ pub(crate) fn canopy_light(
             let sc = config.species(s.species);
             // The envelope first: a crown whose top is not above the receiver's lowest
             // layer shades none of it.
-            if f64::from(s.site.y) + sc.crown_height(s.wood, voxel_m) <= lowest {
+            if f64::from(s.site.y) + sc.crown_height(s.wood, voxel_m) < lowest {
                 continue;
             }
             theirs.clear();
             shade_layers_into(config, s, voxel_m, &mut theirs);
             for (k, layer) in mine.iter().enumerate() {
                 for above in &theirs {
-                    if above.top <= layer.top {
+                    let f = shade_share(above.band(), layer.band());
+                    if !(f > 0.0) {
                         continue;
                     }
                     let dx = wrapped_delta(above.x, layer.x, f64::from(width));
@@ -4494,7 +4510,7 @@ pub(crate) fn canopy_light(
                     if dx * dx + dz * dz > above.radius * above.radius {
                         continue;
                     }
-                    through[k] *= above.attenuation;
+                    over[k] += f * above.depth;
                 }
             }
         }
@@ -4507,7 +4523,7 @@ pub(crate) fn canopy_light(
         if !(wgt > 0.0) {
             continue;
         }
-        l += wgt * open * through[k];
+        l += wgt * open * (-over[k]).exp();
         weighed += wgt;
     }
     let l = if weighed > 0.0 { l / weighed } else { open };
@@ -5245,12 +5261,12 @@ mod tests {
         struct Shade {
             x: f64,
             z: f64,
+            bottom: f64,
             top: f64,
             radius: f64,
             stock: f64,
             share: f64,
-            porosity: f64,
-            area_m2: f64,
+            depth: f64,
         }
         let crowns: Vec<Vec<Shade>> = stands
             .iter()
@@ -5261,12 +5277,12 @@ mod tests {
                     .map(|l| Shade {
                         x: s.site.x as f64,
                         z: s.site.z as f64,
+                        bottom: l.band_v[0],
                         top: l.band_v[1],
                         radius: l.radius_v,
                         stock: l.stock,
                         share: l.share,
-                        porosity: l.porosity,
-                        area_m2: l.area_m2,
+                        depth: l.optical_depth,
                     })
                     .collect()
             })
@@ -5299,7 +5315,7 @@ mod tests {
                 if !(w > 0.0) {
                     continue;
                 }
-                let mut here = open;
+                let mut depth = 0.0;
                 for (j, other) in crowns.iter().enumerate() {
                     // A fungus's exposure has its own face's plant over it (GLOWCAP-2).
                     let fungus = config.species(stand.species).trophic == Trophic::Saprotroph;
@@ -5307,7 +5323,7 @@ mod tests {
                         continue;
                     }
                     let (top, radius) = envelope[j];
-                    if top <= layer.top {
+                    if top < layer.top {
                         continue;
                     }
                     let sx = wrapped_delta(other.first().map_or(0.0, |o| o.x), layer.x, width);
@@ -5316,7 +5332,8 @@ mod tests {
                         continue;
                     }
                     for above in other {
-                        if above.top <= layer.top {
+                        let f = crate::layers::shade_share([above.bottom, above.top], [layer.bottom, layer.top]);
+                        if !(f > 0.0) {
                             continue;
                         }
                         let dx = wrapped_delta(above.x, layer.x, width);
@@ -5324,11 +5341,10 @@ mod tests {
                         if dx * dx + dz * dz > above.radius * above.radius {
                             continue;
                         }
-                        here *= (-config.shade_k_per_m2 * (1.0 - above.porosity) * above.stock
-                            / above.area_m2)
-                            .exp();
+                        depth += f * above.depth;
                     }
                 }
+                let here = open * (-depth).exp();
                 l += w * here;
                 weighed += w;
             }

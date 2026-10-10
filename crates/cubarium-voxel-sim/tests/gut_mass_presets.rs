@@ -1,18 +1,21 @@
 //! **GUT-MASS** (Wrysk 2026-10-09, training plan Q10; shipped 2026-10-10): each lineage is
-//! heavier against the plants by its own factor. Per-lineage masses move the org-unit size
-//! ratios the predation windows read (`Hunter::prey_max_ratio` against body), so every
-//! shipped preset must still load and keep the windows the roles were built on:
-//! - the seedporter takes adult littershredders as well as bellwings (SP-SHREDDER);
-//! - the lanternjaw, grown, takes capgnawers and bellwings (role call 7 B's guard);
+//! heavier against the plants by its own factor. Since SIZE-NOT-MASS every size comparison
+//! reads body / `mass_scale` ([`FounderPhysiology::size`]), so the masses no longer move the
+//! predation windows; every shipped preset must still load and keep the windows the roles
+//! were built on (GUT-MASS-2's confirmations):
 //! - a lone Veilhound takes an adult frondgrazer, but not an adult loftstrider, which a
 //!   pack of three can (roster R3);
-//! - a grown lanternjaw is out of a lone Veilhound's window (LANTERNJAW-LIFE: formidable
-//!   when grown).
+//! - a grown lanternjaw takes frondgrazer juveniles, capgnawers and bellwings (role call
+//!   7 B), and is out of a lone Veilhound's window (LANTERNJAW-LIFE);
+//! - a grown seedporter takes a grown littershredder (Wrysk's decision A) and bellwings;
+//! - a lanternjaw larva's hosts are the lineages that would host it were every lineage at
+//!   one mass (main's relation): its host test is energy, and the masses move no lineage
+//!   in or out of it.
 //!
 //! These are role relations, read off each preset's resolved config; no mass or ratio is
 //! pinned.
 
-use cubarium_voxel_fauna::{FaunaConfig, Founder};
+use cubarium_voxel_fauna::{FaunaConfig, Founder, FounderPhysiology};
 use cubarium_voxel_sim::params::{Layers, Params};
 
 const PRESETS: [&str; 9] = [
@@ -36,46 +39,93 @@ fn resolved(path: &str) -> Params {
 }
 
 /// A full-grown `hunter`'s reach (alone, or summed over `n` packmates): the largest prey
-/// structure its size window admits.
+/// size its window admits (`predation::is_prey_of` on physical sizes).
 fn reach(fauna: &FaunaConfig, hunter: Founder, n: f64) -> f64 {
     let p = fauna.founder(hunter);
     let h = p.hunter.as_ref().unwrap_or_else(|| panic!("{hunter:?} hunts"));
-    h.prey_max_ratio * n * p.core.body_max
+    h.prey_max_ratio * n * p.size(p.core.body_max)
 }
 
 /// The size a full-grown body of `prey` counts as in a hunter's window
-/// (`predation::window_size`: a grown body times its lineage's adult factor).
+/// (`predation::window_size`: a grown body's size times its lineage's adult factor).
 fn grown(fauna: &FaunaConfig, prey: Founder) -> f64 {
     let p = fauna.founder(prey);
-    p.core.body_max * p.adult_size_window_factor.max(1.0)
+    p.size(p.core.body_max) * p.adult_size_window_factor.max(1.0)
 }
 
 /// The size an adult (just at `birth_body`) of `prey` counts as.
 fn adult(fauna: &FaunaConfig, prey: Founder) -> f64 {
     let p = fauna.founder(prey);
-    p.core.birth_body * p.adult_size_window_factor.max(1.0)
+    p.size(p.core.birth_body) * p.adult_size_window_factor.max(1.0)
+}
+
+/// The size a newborn (`body_min`, a juvenile) of `prey` counts as.
+fn newborn(fauna: &FaunaConfig, prey: Founder) -> f64 {
+    let p = fauna.founder(prey);
+    p.size(p.core.body_min)
 }
 
 #[test]
 fn every_shipped_preset_loads_and_keeps_the_predation_windows() {
     for path in PRESETS {
         let fauna = resolved(path).fauna;
-        let sp = reach(&fauna, Founder::Seedporter, 1.0);
-        for prey in [Founder::Blind, Founder::Bellwing] {
-            assert!(sp >= grown(&fauna, prey), "{path}: a grown seedporter takes a grown {prey:?}");
-        }
-        let lj = reach(&fauna, Founder::Lanternjaw, 1.0);
-        for prey in [Founder::Capgnawer, Founder::Bellwing] {
-            assert!(lj >= grown(&fauna, prey), "{path}: a grown lanternjaw takes a grown {prey:?}");
-        }
         let vh = reach(&fauna, Founder::Chorister, 1.0);
-        assert!(vh >= grown(&fauna, Founder::Browser), "{path}: a Veilhound takes a grown frondgrazer");
+        assert!(vh >= adult(&fauna, Founder::Browser), "{path}: a lone Veilhound takes an adult frondgrazer");
+        assert!(vh >= grown(&fauna, Founder::Browser), "{path}: and a grown one");
         assert!(vh < grown(&fauna, Founder::Loftstrider), "{path}: a lone Veilhound does not take a grown loftstrider");
         assert!(
             reach(&fauna, Founder::Chorister, 3.0) >= grown(&fauna, Founder::Loftstrider),
             "{path}: a pack of three does"
         );
         assert!(vh < adult(&fauna, Founder::Lanternjaw), "{path}: a grown lanternjaw is out of a lone Veilhound's window");
+        let lj = reach(&fauna, Founder::Lanternjaw, 1.0);
+        assert!(lj >= newborn(&fauna, Founder::Browser), "{path}: a grown lanternjaw takes frondgrazer juveniles");
+        for prey in [Founder::Capgnawer, Founder::Bellwing] {
+            assert!(lj >= grown(&fauna, prey), "{path}: a grown lanternjaw takes a grown {prey:?}");
+        }
+        let sp = reach(&fauna, Founder::Seedporter, 1.0);
+        for prey in [Founder::Blind, Founder::Bellwing] {
+            assert!(sp >= grown(&fauna, prey), "{path}: a grown seedporter takes a grown {prey:?}");
+        }
+    }
+}
+
+/// `fauna` with every lineage rebuilt at the lanternjaw's mass: main's relation, where
+/// every lineage shared one `mass_scale`.
+fn at_one_mass(fauna: &FaunaConfig) -> FaunaConfig {
+    let mut one = fauna.clone();
+    let m = fauna.founder(Founder::Lanternjaw).mass_scale;
+    for f in Founder::ALL {
+        let p: &mut FounderPhysiology = &mut one.founders[f.index()];
+        let k = m / p.mass_scale;
+        p.scale_mass(k);
+    }
+    one
+}
+
+/// Whether a grown `host` bears a lanternjaw rider at `share` of the way from a hatchling
+/// (`body_min`, 0) to its drop-off size (`parasite_detach_body_fraction` x `body_max`, 1).
+fn bears(fauna: &FaunaConfig, host: Founder, share: f64) -> bool {
+    let lj = &fauna.founder(Founder::Lanternjaw).core;
+    let line = fauna.parasite_detach_body_fraction * lj.body_max;
+    let rider = lj.body_min + share * (line - lj.body_min);
+    cubarium_voxel_fauna::host_bears(fauna, rider, fauna.founder(host).core.body_max)
+}
+
+#[test]
+fn a_lanternjaw_larvas_hosts_are_the_lineages_that_host_it_at_one_mass() {
+    for path in PRESETS {
+        let fauna = resolved(path).fauna;
+        let one = at_one_mass(&fauna);
+        for host in Founder::ALL.into_iter().filter(|&f| f != Founder::Lanternjaw) {
+            for share in [0.0, 0.5, 1.0] {
+                assert_eq!(
+                    bears(&fauna, host, share),
+                    bears(&one, host, share),
+                    "{path}: a grown {host:?} bears a rider {share} of the way to drop-off as at one mass"
+                );
+            }
+        }
     }
 }
 

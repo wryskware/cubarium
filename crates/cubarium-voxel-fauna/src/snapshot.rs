@@ -164,7 +164,11 @@ use crate::{Fauna, FaunaConfig};
 //     The `FounderPhysiology::pollen_by_contact` switch is config, not a bump.
 // 76: V3-PLACES — saved per-body last-used home-place memory (state layout change).
 //     Sensed cache is skipped; PerceptionConfig::place_memory_fade_s is named config.
-pub const SCHEMA: u32 = 76;
+// 77: HUNT-ESCAPE — the ledger's `flushes_by_founder`, `flush_escapes_by_founder`,
+//     `counters_by_founder` and `counter_wound_by_founder` (a state layout change). The
+//     `Flight::flush_*` knobs and the lanternjaw's `counter` are config, not bumps; the
+//     flushes in progress are session state.
+pub const SCHEMA: u32 = 77;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

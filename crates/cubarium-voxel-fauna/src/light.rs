@@ -36,7 +36,9 @@
 //! `light_m`, at its `light_min` or above, on a clear terrain line: the brightest **still**
 //! beacon not under a failed-visit mark is its beacon, the brightest **moving** one its
 //! repellent. A body without the `nir` channel sees glowcaps and lures only. **Looming** is
-//! the nearest moving body of another lineage within `loom_m`.
+//! the nearest moving body of another lineage within `loom_m` — but not, to a body drawn to a
+//! lure, the lit lanternjaw or a strike begun on it while lured (LJ-HUNT,
+//! [`LightConfig::lure_masks_loom`]: the lure entrances).
 //!
 //! # The bellwing ([`steer_flyer`])
 //!
@@ -782,10 +784,18 @@ pub(crate) fn light_reading(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, day
     let eye = eye_of(&fauna.config, a, v)?;
     let tick = fauna.tick;
     // Looming: the nearest moving body of another lineage within `loom_m` (3D, to its middle).
+    // LJ-HUNT (`lure_masks_loom`): drawn to a lure, it sees no loom in a lit lanternjaw, nor in
+    // a strike begun on it while lured; and that lure, moving, is still its beacon (below).
+    let masks = fauna.config.light.lure_masks_loom;
+    let lured = masks && drawn_to_lure(fauna, a.id);
+    let striking_me = |o: &Animal| masks && o.strike.is_some_and(|s| s.prey == a.id && s.lure);
     let mut loom: Option<(f64, f64)> = None;
     if table.loom_m > 0.0 {
         for o in &fauna.animals {
             if o.id == a.id || o.founder == Some(founder) || o.attached.is_some() || !crate::moved_recently(&fauna.config.predation, o) {
+                continue;
+            }
+            if (lured && o.founder_state.lure > 0.0) || striking_me(o) {
                 continue;
             }
             let Some(og) = crate::body_of(&fauna.config, o) else { continue };
@@ -830,6 +840,13 @@ pub(crate) fn light_reading(fauna: &Fauna, a: &Animal, view: &VoxelView<'_>, day
             if (b.kind == BeaconKind::Lure && b.body == a.id) || (!table.nir && b.kind == BeaconKind::Flower) {
                 continue;
             }
+            // LJ-HUNT: a lure it is drawn to, or one whose strike began on it while lured, does
+            // not turn into a repellent when it moves (the lunge): it stays the still light it
+            // follows.
+            let entranced = b.kind == BeaconKind::Lure
+                && b.moving
+                && (lured || fauna.view().animal(b.body).is_some_and(|o| striking_me(o)));
+            let b = &Beacon { moving: b.moving && !entranced, ..*b };
             let (dx, dz) = crate::pose::wrapped_delta(eye.0, eye.2, b.x, b.z, ring);
             if dx.abs() > table.light_m || dz.abs() > table.light_m {
                 continue;

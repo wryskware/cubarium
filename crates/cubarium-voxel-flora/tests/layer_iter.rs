@@ -69,6 +69,9 @@ fn reference(config: &FloraConfig, stand: &Stand, voxel_m: f64) -> Vec<StandLaye
             },
             porosity: layer.porosity,
             area_m2: (std::f64::consts::PI * r_m * r_m).max(config.min_layer_area_m2),
+            optical_depth: config.depth_per_stock_m2(sc) * (1.0 - layer.porosity)
+                * fi.map_or(0.0, |i| stand.layer_stock[i])
+                / (std::f64::consts::PI * r_m * r_m).max(config.min_layer_area_m2),
         });
     }
     out
@@ -97,6 +100,7 @@ fn bits(l: &StandLayer) -> Vec<u64> {
             l.floor,
             l.porosity,
             l.area_m2,
+            l.optical_depth,
         ]
         .map(f64::to_bits),
     );

@@ -10,6 +10,7 @@ import time
 
 from .hosts import Host, Inventory
 from .store import Store, TERMINAL
+from .stops import rule_labels
 
 
 def number(value):
@@ -209,7 +210,7 @@ class Dashboard:
                 metric = f'CPU {meter}'
             else:
                 metric = f"load {load_label}/{host.cpus} cpus"
-            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {used}/{host.usable} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
+            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {host.thread_label(used)} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
         return lines
 
     def frame(self, width=80, now=None):
@@ -233,6 +234,7 @@ class Dashboard:
             if len(identifier) > room:
                 identifier = identifier[:room - 5] + '…' + identifier[-4:]
             lines.append(f'{identifier}{details} {label}')
+            lines.extend(f'  {label}' for label in rule_labels(json.loads(job['spec'])))
             for row in mine:
                 if row['state'] == 'running':
                     label = self.task(job, row, now).label()
@@ -250,6 +252,7 @@ class Dashboard:
             except OSError:
                 reason = job['reason'] or '?'
             lines.append(f"{job['id']} {job['state']} {reason}")
+            lines.extend(f'  {label}' for label in rule_labels(json.loads(job['spec'])))
         # Keep control characters from subprocess reasons out of the terminal.
         return [''.join(c if c.isprintable() else ' ' for c in line)[:width] for line in lines]
 

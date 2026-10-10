@@ -110,10 +110,10 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 // ================================================== the crown that shades is drawn
 //
 // The brief makes one crown serve two readers: the shade model attenuates by
-// `exp(-shade_k · P_j / area_j)` over the stands whose crown *covers* a site, and the
+// `exp(-share · optical_depth_j)` over the stands whose crown *covers* a site, and the
 // presenter draws a disc of `crown_radius(W)` voxels at `support.y + crown_height(W)`.
 // If the two ever disagree, the picture stops explaining the simulation. These two tests
-// pin the boundary of "covers" and the strictness of "above" against the public
+// pin the boundary of "covers" and the rule for "above" against the public
 // `SpeciesConfig::crown_radius` / `crown_height` the presenter itself calls.
 
 /// A stand exactly `crown_radius` voxels away is covered; one voxel further is not, and
@@ -127,7 +127,7 @@ fn run(flora: &mut Flora, world: &mut World, ticks: u32) {
 #[test]
 fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     let mut config = FloraConfig::default();
-    config.shade_k_per_m2 = 30.0;
+    strong_shade(&mut config, 30.0);
     config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
@@ -195,9 +195,15 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     flora.step(&mut world);
 
     // The exact attenuation the brief asks for, in the crown's published geometry: the
-    // shading stand's foliage is `α · W` as `Seed` left it, spread over `π r²`.
+    // shading stand's foliage is `α · W` as `Seed` left it, spread over `π r²`, and the
+    // share of its `[0, 1]` band above the receiver's middle counts (SHADE-REAL).
     let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
-    let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
+    let share = cubarium_voxel_flora::shade_share(
+        [0.0, uc.crown_height(0.6, 1.0)],
+        [0.0, bc.crown_height(0.1, 1.0)],
+    );
+    assert!(share > 0.5 && share <= 1.0, "the taller band covers most of the receiver: {share}");
+    let l = (-30.0 * share * (uc.alpha * 0.6) / area).exp();
     let expect = l * (1.0 + bc.light_half) / (l + bc.light_half);
     let covered = flora
         .view()
@@ -229,13 +235,16 @@ fn shade_covers_exactly_the_crown_radius_the_presenter_draws() {
     assert_residuals(&flora, "after one tick under a crown");
 }
 
-/// Only a *strictly* higher crown top shades. Two stands whose tops are equal and whose
-/// crowns cover each other both read open sky; the same crown over a lower one does
-/// shade it. Same fixture, same geometry, so the difference is the inequality alone.
+/// **Crowns level with each other shade each other by half, symmetrically** (SHADE-REAL,
+/// Wrysk's "B+C": a same-height grove shades itself). Two stands whose tops are equal and
+/// whose crowns cover each other each read the other's attenuation at half its depth; a
+/// lower crown still takes nothing from a higher one, and the higher crown shades the
+/// lower by the part of its band above the lower one's middle. Same fixture, same
+/// geometry, so the difference is the rule alone.
 #[test]
-fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
+fn level_crowns_shade_each_other_by_half_and_a_lower_crown_never_shades_a_higher() {
     let mut config = FloraConfig::default();
-    config.shade_k_per_m2 = 30.0;
+    strong_shade(&mut config, 30.0);
     config.umbrellafrond.crown_radius_m = [2.0, 2.0];
     // These two tests predate layers and are about the shade rule's **geometry** and
     // the strictness of its inequality, both of which are stated over one disc. The
@@ -290,8 +299,7 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
     ));
 
     let uc = flora.config().species(Species::Umbrellafrond).clone();
-    // The level pair covers itself — one voxel apart against a two-voxel radius — so
-    // "not shaded" can only be the strictness of the inequality on the tops.
+    // The level pair covers itself — one voxel apart against a two-voxel radius.
     assert!(
         1.0 <= uc.crown_radius(0.6, 1.0),
         "the level pair must cover each other"
@@ -303,29 +311,29 @@ fn a_crown_level_with_another_does_not_shade_it_but_a_higher_one_does() {
 
     flora.step(&mut world);
     let v = flora.view();
-    assert_eq!(
-        v.stand_at(site(4)).unwrap().light,
-        1.0,
-        "a level crown does not shade"
-    );
-    assert_eq!(
-        v.stand_at(site(5)).unwrap().light,
-        1.0,
-        "in either direction"
-    );
+    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
+    let depth = 30.0 * (uc.alpha * 0.6) / area;
+    let respond = |l: f64| l * (1.0 + uc.light_half) / (l + uc.light_half);
+    let (a, b) = (v.stand_at(site(4)).unwrap().light, v.stand_at(site(5)).unwrap().light);
+    let level = respond((-0.5 * depth).exp());
+    assert_eq!(a, b, "a level pair shades symmetrically");
+    assert!((a - level).abs() < 1e-12, "each takes half the other's depth: {a} against {level}");
+    assert!(a < 1.0, "a level crown shades");
     assert_eq!(
         v.stand_at(site(10)).unwrap().light,
         1.0,
-        "nor does a lower crown shade a higher"
+        "a lower crown does not shade a higher"
     );
-    // The lower crown is shaded, by exactly the taller crown's own attenuation.
-    let area = (std::f64::consts::PI * uc.crown_radius(0.6, 1.0).powi(2)).max(1.0);
-    let l = (-30.0 * (uc.alpha * 0.6) / area).exp();
-    let expect = l * (1.0 + uc.light_half) / (l + uc.light_half);
+    // The lower crown is shaded by the part of the taller band above its middle.
+    let share = cubarium_voxel_flora::shade_share(
+        [0.0, uc.crown_height(0.6, 1.0)],
+        [0.0, uc.crown_height(0.3, 1.0)],
+    );
+    let expect = respond((-share * depth).exp());
     let lower = v.stand_at(site(11)).unwrap().light;
     assert!(
-        (lower - expect).abs() < 1e-12 && expect < 0.4,
-        "the lower crown reads {lower}, not the taller crown's {expect}"
+        (lower - expect).abs() < 1e-12 && lower < a,
+        "the lower crown reads {lower}, not the taller crown's {expect}, and less than a level one"
     );
     assert_residuals(&flora, "after one tick beside a level crown");
 }
@@ -1031,4 +1039,17 @@ fn a_canopy_changes_no_sky_visibility_and_all_of_the_plant_s_light() {
         "the taller stand is unshaded"
     );
     assert_residuals(&flora, "after five ticks under a canopy");
+}
+
+/// The shade law with every species' leaf area per unit of stock set to one, so a layer's
+/// optical depth is `k · (1 − p) · stock / area_m2` (SHADE-REAL): the fixture's own strong
+/// shade, stated in the old per-square-metre form and independent of the shipped leaf
+/// areas.
+fn strong_shade(config: &mut FloraConfig, k: f64) {
+    config.light_extinction_k = k;
+    for sp in Species::ALL {
+        let sc = config.species_mut(sp);
+        sc.specific_leaf_area_m2_per_kg = 1.0;
+        sc.foliage_kg_per_unit = 1.0;
+    }
 }

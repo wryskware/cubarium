@@ -14,6 +14,7 @@ from .core import Context, SpecError, load_kinds
 from .top import cmd_top
 from .hosts import Inventory
 from .store import TERMINAL, Paths, Store, new_id, read_events, spool
+from .stops import rule_labels, validate_rules
 
 WAKE = set(TERMINAL) | {"approval-needed", "ec2-auth-expired", "ec2-down-failed", "ec2-limit"}
 
@@ -38,7 +39,8 @@ def cmd_submit(args, paths):
     except OSError:
         inventory = None
     # Validate now: commits are pinned at submit time, so later commits never leak in.
-    spec = kind.validate(spec, Context(paths, inventory=inventory))
+    ctx = Context(paths, inventory=inventory)
+    spec = validate_rules(kind.validate(spec, ctx), ctx, kind)
     job_id = new_id(spec["kind"], spec.get("name"))
     spool(paths, "incoming", dict(id=job_id, spec=spec, submitted=time.time()), job_id)
     print(job_id)
@@ -70,6 +72,8 @@ def cmd_status(args, paths):
         age = fmt_h((time.time() - (row["submitted"] or time.time())) / 3600)
         tasks = f"{counts['running']}/{counts['pending']}/{counts['done']}/{counts['bad']}"
         print(f"{row['id'][:34]:34} {row['kind'][:10]:10} {row['state'][:10]:10} {tasks:17} {age:>6}  {(row['reason'] or '')[:70]}")
+        for label in rule_labels(json.loads(row['spec'])):
+            print(f"  {label}")
     for stem in spooled:
         print(f"{stem[:34]:34} {'?':10} {'spooled':10} {'-':17} {'':>6}  waiting for labd")
     running = store.q("SELECT job, name, host, grp, started, spec FROM tasks WHERE state='running' ORDER BY started")
@@ -81,6 +85,12 @@ def cmd_status(args, paths):
             eta = fmt_h(max(0.0, est - elapsed)) if est else "?"
             print(f"  {row['job'][:30]}/{row['name'][:28]:28} {row['host']}:g{row['grp'] if row['grp'] is not None and row['grp'] >= 0 else '-'}"
                   f"  up {fmt_h(elapsed)}  left {eta}")
+    waiting = store.q("SELECT job, name, reason FROM tasks WHERE state='pending' AND reason IS NOT NULL "
+                      "ORDER BY job, seq")
+    if waiting:
+        print("\nwaiting tasks:")
+        for row in waiting:
+            print(f"  {row['job']}/{row['name']}: {row['reason']}")
     print_hosts(store, paths, brief=True)
     ec2 = store.kv_get("ec2", dict(state="idle"))
     line = f"ec2: {ec2.get('state')}"
@@ -125,10 +135,11 @@ def print_hosts(store, paths, brief=False):
         if not host.enabled:
             notes += "; disabled"
         state = "up" if up else "down"
+        thread_label = host.thread_label(threads)
         if brief:
-            print(f"  {name:9} {state:5} {threads}/{host.usable} threads  {mem:.0f}/{host.max_mem_gb:.0f} GB  {notes}")
+            print(f"  {name:9} {state:5} {thread_label} threads  {mem:.0f}/{host.max_mem_gb:.0f} GB  {notes}")
         else:
-            print(f"{name:10} {host.kind:6} {host.arch:8} {state:6} {f'{threads}/{host.usable}':>12} "
+            print(f"{name:10} {host.kind:6} {host.arch:8} {state:6} {thread_label:>12} "
                   f"{f'{mem:.0f}/{host.max_mem_gb:.0f}':>10}  {notes}")
     if not brief:
         for name in inventory.ec2.get("types", []):

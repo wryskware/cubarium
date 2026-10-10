@@ -725,6 +725,9 @@ pub struct BlindForager {
     chem: crate::manifest::Module,
     /// What the last answer was for (HUNGRY-SEARCH, [`Controller::seek`]).
     seek: Seek,
+    /// The taste it holds still to feed on: [`TeacherConfig::capgnawer_stay_worth`] for the
+    /// capgnawer, whose taste reads a bite's worth; 0 (any food it feeds on) for the rest.
+    stay_taste: f64,
     /// The reflexes' numbers ([`TeacherConfig`]).
     cfg: TeacherConfig,
 }
@@ -752,6 +755,7 @@ impl BlindForager {
             .find(|m| m.name.starts_with("Chem("))
             .unwrap_or_else(|| panic!("the {} manifest has no Chem module", founder.name()));
         BlindForager {
+            stay_taste: if founder == Founder::Capgnawer { cfg.capgnawer_stay_worth } else { 0.0 },
             cfg,
             turn_bias: 1.0,
             wander: Wander::over(manifest.tail_offset()),
@@ -832,8 +836,10 @@ impl Controller for BlindForager {
         }
         // **Stay on food** (the detritus web, §3.1A): tasting food, it holds still and
         // feeds; the face under its mouth falling below the gate is an exhausted patch,
-        // and it walks on with a short turn back toward where the food was.
-        if feed > 0.5 {
+        // and it walks on with a short turn back toward where the food was. Food under its
+        // stay taste (the capgnawer's litter, CAPGNAWER-CAPS) it eats on the move: the
+        // search below steers, with `feed` on.
+        if feed > 0.5 && taste_resp >= self.stay_taste {
             self.on_food = true;
             self.turn_back = 0;
             self.wander.interrupt(&cfg);
@@ -2323,7 +2329,10 @@ mod tests {
             o[chem.offset + 1] = 2.0 * cfg.chem_trend_gate;
             assert_eq!(seek(&mut c, &o), Seek::Lead, "{founder:?} up a rising scent");
             let mut o = quiet(&manifest);
-            o[taste.offset] = 2.0 * cfg.feed_gate;
+            // Food it stays on: the capgnawer's must taste of its stay worth
+            // (CAPGNAWER-CAPS); weaker food it eats on the move while it searches.
+            let stay = if founder == Founder::Capgnawer { cfg.capgnawer_stay_worth } else { 0.0 };
+            o[taste.offset] = 2.0 * cfg.feed_gate.max(stay);
             o[taste.offset + 2] = 1.0;
             assert_eq!(seek(&mut c, &o), Seek::Taste, "{founder:?} tasting food");
             let mut c = BlindForager::for_founder(founder, cfg);

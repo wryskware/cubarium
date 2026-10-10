@@ -705,6 +705,7 @@ pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool
         fauna.walk_shun.retain(|id, _| alive.contains(id));
         fauna.route_flee.retain(|id, _| alive.contains(id));
         fauna.forage.retain(|id, _| alive.contains(id));
+        fauna.nest_trips.retain(|id, _| alive.contains(id));
     }
     let stagger = fauna.config.perception.stagger_ticks();
     let tick = fauna.tick;

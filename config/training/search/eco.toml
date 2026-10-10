@@ -9,41 +9,37 @@
 #
 # GUT-MASS (2026-10-10) shipped that route as the defaults of every shipped preset, so every
 # gene here is centred on x1 = the shipped world (the wide terrarium). Shipped, against the
-# old mass_scale 30: frondgrazer and loftstrider x800, Veilhound x400, seedporter x2.5,
-# bellwing, capgnawer, littershredder, lanternjaw and ripple-snail x2; every gut ceiling at
-# 7x maintenance; a grown lanternjaw's window factor 12 x (Veilhound mass / its own). The
-# budget behind them is in the training plan (GUT-MASS). The boxes bracket Wrysk's ranges
-# (frondgrazer x25-75, loftstrider x4-12, fruit/nectar/cap eaters x2-6, ceiling 3-7x) and
-# the budget's picks, except where a size-window guard below forbids it.
+# old mass_scale 30 (GUT-MASS-2, on SIZE-NOT-MASS): frondgrazer x300 (GRAZE-CAP's ladder: x800
+# is break-even with no calves; x300 takes about 9 % of leaf growth at midday and leaves
+# assimilated 2.25x upkeep and motor), loftstrider x300 (the same demand per unit body as the
+# frondgrazer on the same leaf clock), Veilhound x150 (half the frondgrazer's, so its
+# frondgrazer kills per hour stay as on main now that frondgrazers are its whole diet),
+# seedporter, bellwing, capgnawer, littershredder, lanternjaw and ripple-snail x2; every gut
+# ceiling at 7x maintenance. The boxes bracket Wrysk's ranges (frondgrazer x25-75,
+# loftstrider x4-12, fruit/nectar/cap eaters x2-6, ceiling 3-7x) and the shipped picks.
 #
 # Genes are world numbers only: no behaviour, no score terms. x1 is the world the genome is
 # decoded over (the wide terrarium preset, or a save's own configs beside `load=`). Each
 # gene's `value` is the CMA start; `eco_search.py` reads it as the starting mean.
 #
-# Guards (the predation size windows read org-unit bodies, so per-lineage masses move them;
-# ties and box edges keep the roles' windows):
-# - mass_grazer moves the frondgrazer, the Veilhound (`chorister`) and the loftstrider. The
-#   Veilhound must take an adult frondgrazer (its prey_max_ratio 1.5x its body: vh_ratio's
-#   lower edge, 0.4 of the frondgrazer's factor at the old masses) and a lone one must not
-#   take an adult loftstrider (ls_ratio's lower edge). So Wrysk's loftstrider x4-12 is not
-#   in the box: a Veilhound heavy enough for frondgrazers would take loftstriders that light.
-# - A grown lanternjaw stays out of a lone Veilhound's window: its adult_size_window_factor
-#   follows the Veilhound's mass (mass_grazer, vh_ratio) over its own (mass_capgnawer,
-#   mass_lanternjaw, inversely).
-# - mass_capgnawer moves the capgnawer AND the lanternjaw, and mass_lanternjaw (box from 1)
-#   moves the lanternjaw alone: the lanternjaw never falls below today's reach over its
-#   main prey, capgnawers and bellwings (role call 7 B's guard).
-# - mass_shredder moves the littershredder AND the seedporter, and mass_seedporter's lower
-#   edge keeps a full-grown seedporter's window over a full-grown littershredder
-#   (SP-SHREDDER). The lanternjaw's larvae ride littershredders that bear 4x their body:
-#   moving mass_shredder far below mass_capgnawer x mass_lanternjaw would leave them few
-#   hosts (not tied; read the rider counts).
+# Sizes no longer ride on mass (SIZE-NOT-MASS, fae7f4b2): every size comparison between
+# animals (predation and pack windows, strike and counter damage, attack profitability, the
+# pack's prey choice) reads body / mass_scale, so no gene needs a size-window guard and each
+# lineage's mass is its own gene. What mass still moves is energy:
 # - mass_scale carries its seven absolute quantities (registry tie "mass"; the browser's
 #   placeholder species follows the frondgrazer). Taste references and bite half-stock
 #   stay in food units and do not follow mass_scale.
+# - A kill is worth the prey's org-unit body and costs strikes x the hunter's upkeep
+#   (`catch_worthwhile`), so a hunter many times heavier than a prey stops hunting it.
+# - A lanternjaw larva rides a host that bears its take in org units (`host_bears`): moving
+#   mass_shredder far below mass_lanternjaw leaves its larvae few littershredder hosts (not
+#   tied; read the rider counts).
+# - mass_grazer moves the Veilhound with the frondgrazer, so a Veilhound's frondgrazer kills
+#   per hour do not move with it (vh_ratio moves the Veilhound alone).
 # - gut: every lineage's bite_per_body_s x S and every digestion time / S (the webmodel's
 #   own gut-throughput knob, `web_model gut=`), so the gut ceiling y.k/tau moves by S and
-#   the bite keeps asking twice the gut's throughput.
+#   the bite keeps asking twice the gut's throughput. The bellwing's is its own gene
+#   (gut_bellwing): at 7x it does not cover its flight cost, an open question for Wrysk.
 #
 # mass_scale is a digest row (a trained brain's senses read it), so the file says
 # retrain = true. No trained brain runs in the world now (DROP-C1); a brain trained later
@@ -62,32 +58,31 @@ file = "config/desktop/terrarium-wide.toml"
 
 [[gene]]
 name = "mass_grazer"
-path = ["fauna.founders.frondgrazer.mass_scale", "fauna.founders.chorister.mass_scale",
-        "fauna.founders.loftstrider.mass_scale", "fauna.founders.lanternjaw.adult_size_window_factor"]
-range = [0.03, 3.0]
+path = ["fauna.founders.frondgrazer.mass_scale", "fauna.founders.chorister.mass_scale"]
+range = [0.083, 2.67]
 value = 1.0
-what = "frondgrazer body mass (the Veilhound and loftstrider with it): x0.03 is Wrysk's x25 of the old mass, x3 the budget's 30 % offtake at the band's top headcount on half today's leaf supply"
+what = "frondgrazer body mass, the Veilhound with it (its kill count per hour): x0.083 is Wrysk's x25 of the old mass, x2.67 the ladder's x800 (break-even, no calves)"
 
 [[gene]]
 name = "vh_ratio"
-path = ["fauna.founders.chorister.mass_scale", "fauna.founders.lanternjaw.adult_size_window_factor"]
-range = [0.8, 2.0]
+path = "fauna.founders.chorister.mass_scale"
+range = [0.5, 2.0]
 value = 1.0
-what = "Veilhound mass over its shipped tie to the frondgrazer (0.5 of its factor): 0.8 is the lightest pack that still takes an adult frondgrazer (1.5x prey cap), 2 the old equal ratio (twice the frondgrazer kills per hour)"
+what = "Veilhound mass over its shipped tie to the frondgrazer (half its factor): 0.5 halves its frondgrazer kills per hour, 2 is the old equal ratio (twice them)"
 
 [[gene]]
-name = "ls_ratio"
+name = "mass_loftstrider"
 path = "fauna.founders.loftstrider.mass_scale"
-range = [0.8, 2.5]
+range = [0.0133, 2.67]
 value = 1.0
-what = "loftstrider mass over its tie to the frondgrazer: 0.8 keeps a grown loftstrider out of a lone Veilhound's window at vh_ratio 2; it is life-history-limited, so its mass sets its leaf take and its calves' worth to the pack"
+what = "loftstrider body mass (shipped x300, the frondgrazer's demand per unit body): x0.0133 is Wrysk's x4 of the old mass; it is life-history-limited at band numbers, so its mass sets its leaf take, whether food caps its family, and its calves' worth to the pack"
 
 [[gene]]
 name = "mass_seedporter"
 path = "fauna.founders.seedporter.mass_scale"
-range = [0.85, 3.2]
+range = [0.5, 3.0]
 value = 1.0
-what = "seedporter body mass beside mass_shredder (shipped x2.5 of the old): 0.85 keeps a grown seedporter's window over a grown littershredder; 3.2 is Wrysk's x6 (with mass_shredder x1, about x8)"
+what = "seedporter body mass (shipped x2): Wrysk's x2-6 and down to x1; its catch of a grown littershredder is its window knob (hunter.prey_max_ratio), not its mass"
 
 [[gene]]
 name = "mass_bellwing"
@@ -98,26 +93,24 @@ what = "bellwing body mass (shipped x2): Wrysk's x2-6 and down to x1; nectar-lim
 
 [[gene]]
 name = "mass_capgnawer"
-path = ["fauna.founders.capgnawer.mass_scale", "fauna.founders.lanternjaw.mass_scale"]
-inverse = "fauna.founders.lanternjaw.adult_size_window_factor"
+path = "fauna.founders.capgnawer.mass_scale"
 range = [0.5, 3.0]
 value = 1.0
-what = "capgnawer body mass (shipped x2), the lanternjaw with it (its guard): Wrysk's x2-6 and down to x1"
+what = "capgnawer body mass (shipped x2): Wrysk's x2-6 and down to x1"
 
 [[gene]]
 name = "mass_lanternjaw"
 path = "fauna.founders.lanternjaw.mass_scale"
-inverse = "fauna.founders.lanternjaw.adult_size_window_factor"
-range = [1.0, 3.0]
+range = [0.5, 3.0]
 value = 1.0
-what = "lanternjaw mass over the capgnawer's: from 1 (role call 7 B's guard, its reach over capgnawers and bellwings no less than today's) to 3"
+what = "lanternjaw body mass (shipped x2): its reach over capgnawers and bellwings is a size and does not move with it (role call 7 B's guard holds at any mass); its larvae's hosts are an energy test against mass_shredder"
 
 [[gene]]
 name = "mass_shredder"
-path = ["fauna.founders.littershredder.mass_scale", "fauna.founders.seedporter.mass_scale"]
+path = "fauna.founders.littershredder.mass_scale"
 range = [0.5, 4.0]
 value = 1.0
-what = "littershredder body mass (shipped x2), the seedporter with it (its catch window); x1-8 of the old: litter supply covers need many times over at band numbers"
+what = "littershredder body mass (shipped x2); x1-8 of the old: litter supply covers need many times over at band numbers"
 
 [[gene]]
 name = "mass_snail"
@@ -130,11 +123,25 @@ what = "ripple-snail body mass (shipped x2): film-limited, so N falls about as 1
 
 [[gene]]
 name = "gut"
-path = "fauna.founders.*.gut.bite_per_body_s"
-inverse = "fauna.founders.*.gut.digestion_s.*"
+path = ["fauna.founders.frondgrazer.gut.bite_per_body_s", "fauna.founders.loftstrider.gut.bite_per_body_s",
+        "fauna.founders.chorister.gut.bite_per_body_s", "fauna.founders.seedporter.gut.bite_per_body_s",
+        "fauna.founders.capgnawer.gut.bite_per_body_s", "fauna.founders.littershredder.gut.bite_per_body_s",
+        "fauna.founders.lanternjaw.gut.bite_per_body_s", "fauna.founders.ripple-snail.gut.bite_per_body_s"]
+inverse = ["fauna.founders.frondgrazer.gut.digestion_s.*", "fauna.founders.loftstrider.gut.digestion_s.*",
+           "fauna.founders.chorister.gut.digestion_s.*", "fauna.founders.seedporter.gut.digestion_s.*",
+           "fauna.founders.capgnawer.gut.digestion_s.*", "fauna.founders.littershredder.gut.digestion_s.*",
+           "fauna.founders.lanternjaw.gut.digestion_s.*", "fauna.founders.ripple-snail.gut.digestion_s.*"]
 range = [0.43, 2.33]
 value = 1.0
-what = "gut throughput S over the shipped ceilings (every lineage at 7x maintenance): 0.43 is Wrysk's 3x; 2.33 is 16x, where a frondgrazer at its measured gut use (0.35) pays a calf per world day"
+what = "gut throughput S over the shipped ceilings, every lineage but the bellwing (each at 7x maintenance): 0.43 is Wrysk's 3x; 2.33 is 16x, where a frondgrazer at its measured gut use (0.35) pays a calf per world day"
+
+[[gene]]
+name = "gut_bellwing"
+path = "fauna.founders.bellwing.gut.bite_per_body_s"
+inverse = "fauna.founders.bellwing.gut.digestion_s.*"
+range = [0.43, 2.33]
+value = 1.0
+what = "the bellwing's gut throughput over its shipped 7x ceiling, its own gene: at 7x its assimilated intake is 0.6-1.3x its upkeep and flight in every GRAZE-CAP arm (open, Wrysk's call)"
 
 # --- Supply ---
 

@@ -934,17 +934,18 @@ fn a_lanternjaw_at_35_percent_of_body_max_is_adult_and_below_it_a_juvenile() {
     let mut fauna = Fauna::new(c);
     let id = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let core = crate::effective_config(&c, &animal(&fauna, id));
-    let factor = c.founder(Founder::Lanternjaw).adult_size_window_factor;
+    let phys = c.founder(Founder::Lanternjaw);
+    let factor = phys.adult_size_window_factor;
 
     animal_mut(&mut fauna, id).body = 0.35 * core.body_max * (1.0 + 1e-9);
     let a = animal(&fauna, id);
     assert!(a.body >= core.birth_body, "35 % of body_max is adult");
-    assert!((crate::window_size(&c, &a) - factor * a.body).abs() <= 1e-12 * a.body);
+    assert!((crate::window_size(&c, &a) - factor * phys.size(a.body)).abs() <= 1e-12 * phys.size(a.body));
 
     animal_mut(&mut fauna, id).body = 0.34 * core.body_max;
     let a = animal(&fauna, id);
     assert!(a.body < core.birth_body, "below 35 % it is a juvenile");
-    assert_eq!(crate::window_size(&c, &a), a.body, "a juvenile counts at its own size");
+    assert_eq!(crate::window_size(&c, &a), phys.size(a.body), "a juvenile counts at its own size");
 }
 
 /// **A rider takes more as it grows** (Wrysk: "they take more the bigger they get"): on a
@@ -1208,4 +1209,222 @@ fn a_lanternjaw_clutch_holds_more_than_one_egg_and_the_books_close() {
     let laid = fauna.ledger.eggs_laid_by_founder[Founder::Lanternjaw.index()];
     assert!(laid > 1, "a clutch of {laid}");
     assert_closes(&fauna, "after a lanternjaw clutch");
+}
+
+// ------------------------------------------------------------------ LJ-GROW
+
+/// The lanternjaw's physiology with its growth slowed: the growth ceiling a third and the
+/// conversion yield three quarters of `c`'s. Directions only: no tuned number is read.
+fn slower(mut c: FaunaConfig) -> FaunaConfig {
+    let p = &mut c.founders[Founder::Lanternjaw.index()];
+    p.core.growth_max_per_s /= 3.0;
+    for y in p.yield_by_food.iter_mut() {
+        *y *= 0.75;
+    }
+    c
+}
+
+/// Ticks until a rider grown to near its detach size, on a full grazer that bears it, drops
+/// off, at most `cap`.
+fn ticks_to_drop_off(config: FaunaConfig, cap: u64) -> u64 {
+    let (mut s, host, rider) = ride(config);
+    let c = s.fauna.config;
+    let lj = c.founder(Founder::Lanternjaw).core;
+    let line = c.parasite_detach_body_fraction * lj.body_max;
+    let body = 0.85 * line;
+    assert!(
+        crate::host_bears(&c, line, animal(&s.fauna, host).body),
+        "fixture: the grazer bears the rider all the way to its detach size"
+    );
+    set_stores(&mut s.fauna, rider, body, lj.reserve_cap * body);
+    for t in 0..cap {
+        if animal(&s.fauna, rider).attached.is_none() {
+            s.assert_closes("dropped off");
+            return t;
+        }
+        s.step();
+    }
+    cap
+}
+
+/// **Faster growth** (LJ-GROW, Wrysk 2026-10-10: "bugs dont take like 4 months to grow"): on
+/// the same host and from the same body and reserve, a rider with the lanternjaw's growth
+/// reaches its drop-off size sooner than one with it slowed.
+#[test]
+fn with_faster_growth_a_rider_reaches_drop_off_sooner_on_the_same_host() {
+    let cap = 40_000;
+    let fast = ticks_to_drop_off(config(), cap);
+    let slow = ticks_to_drop_off(slower(config()), cap);
+    assert!(fast < cap, "the rider dropped off at all");
+    assert!(fast < slow, "faster growth dropped off at tick {fast}, slowed at {slow}");
+}
+
+/// Ticks until a free lanternjaw juvenile standing still, fed the same carrion meal every
+/// 30 s, grows to its adult `birth_body`, at most `cap`.
+fn ticks_to_adult_on_fixed_meals(config: FaunaConfig, cap: u64) -> u64 {
+    let world = clock_off(53);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut fauna = Fauna::new(config);
+    let id = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    drive(&mut fauna, id, 0.0, false);
+    let lj = fauna.config.founder(Founder::Lanternjaw).core;
+    let body = 0.9 * lj.birth_body;
+    set_stores(&mut fauna, id, body, 0.3 * lj.reserve_cap * body);
+    let meal = 0.05 * lj.birth_body;
+    let every = (30.0 / DT).round() as u64;
+    let i = fauna.animals.iter().position(|a| a.id == id).expect("introduced");
+    for t in 0..cap {
+        if t % every == 0 {
+            let pool = &mut fauna.animals[i].stomach.pools[crate::Food::Carrion.index()];
+            pool.organic += meal;
+            pool.mineral += 0.03 * meal;
+            pool.energy += 2.0 * meal;
+            fauna.ledger.introduced_organic_in += meal;
+            fauna.ledger.introduced_mineral_in += 0.03 * meal;
+            fauna.ledger.introduced_energy_in += 2.0 * meal;
+        }
+        if animal(&fauna, id).body >= lj.birth_body {
+            assert_closes(&fauna, "grown on fixed meals");
+            return t;
+        }
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    cap
+}
+
+/// **A free juvenile grows up sooner on the same intake**: fed identical meals, a lanternjaw
+/// juvenile with the lanternjaw's conversion and growth ceiling reaches adult sooner than
+/// one with them slowed.
+#[test]
+fn a_free_juvenile_with_the_same_intake_reaches_adult_sooner() {
+    let cap = 40_000;
+    let fast = ticks_to_adult_on_fixed_meals(config(), cap);
+    let slow = ticks_to_adult_on_fixed_meals(slower(config()), cap);
+    assert!(fast < cap, "the juvenile grew up at all");
+    assert!(fast < slow, "adult at tick {fast}, slowed at {slow}");
+}
+
+/// **The take never exceeds the host's bear**: tick by tick through a ride, and for a rider
+/// grown past what its host bears, the host loses (beyond its twin out of reach)
+/// at most `parasite_host_bear_per_day` × its body per world day.
+#[test]
+fn a_riders_take_never_exceeds_what_its_host_bears() {
+    let mut s = Scene::new(config(), 1);
+    let host = s.add(Founder::Browser, StartingStores::FULL, 0.0);
+    let twin = s.add(Founder::Browser, StartingStores::FULL, 4.0);
+    s.past_next_dusk();
+    let rider = riders_of(&s.fauna, host)[0];
+    let c = s.fauna.config;
+    let bear = |host_body: f64| c.parasite_host_bear_per_day * host_body / c.life.ecological_day_s * DT;
+    for _ in 0..200 {
+        let h = animal(&s.fauna, host).body;
+        let lost = extra_drain(&mut s, host, twin);
+        assert!(lost <= bear(h) * (1.0 + 1e-9) + 1e-15, "lost {lost}, bears {}", bear(h));
+    }
+    // Grow the rider until it wants twice what its host bears (it drops off after this
+    // tick's take; the take itself is still bounded).
+    let h = animal(&s.fauna, host).body;
+    let big = 2.0 * c.parasite_host_bear_per_day * h / c.parasite_take_body_per_day;
+    assert!(!crate::host_bears(&c, big, h), "fixture: the host no longer bears it");
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, big, reserve);
+    let lost = extra_drain(&mut s, host, twin);
+    assert!(lost > 0.0, "it still took this tick");
+    assert!(lost <= bear(h) * (1.0 + 1e-9), "lost {lost}, bears {}", bear(h));
+    s.assert_closes("bounded by the bear");
+}
+
+/// Compress physiological time, preserving the daily upkeep, take and growth budget.
+/// A complete ride fits in a few hundred ticks; no tuned value is asserted.
+fn short_ride_config() -> FaunaConfig {
+    let mut c = config();
+    let day = 200.0 * DT;
+    let scale = c.life.ecological_day_s / day;
+    c.life.ecological_day_s = day;
+    for p in &mut c.founders {
+        p.core.maintenance_per_s *= scale;
+        p.core.growth_max_per_s *= scale;
+    }
+    c
+}
+
+fn ticks_to_drop_off_with_take(take_scale: f64) -> u64 {
+    let (mut s, host, rider) = ride(short_ride_config());
+    s.fauna.set_births_enabled(false);
+    // Both arms hatch with identical stores on the same host; change only the take.
+    s.fauna.config.parasite_take_body_per_day *= take_scale;
+    for t in 0..240 {
+        assert!(s.fauna.animals.iter().any(|a| a.id == host), "the host survives");
+        if animal(&s.fauna, rider).attached.is_none() {
+            s.assert_closes("take-driven drop-off");
+            return t;
+        }
+        s.step();
+    }
+    panic!("fixture: the rider must finish its ride");
+}
+
+#[test]
+fn a_faster_take_brings_a_rider_to_drop_off_sooner_on_the_same_host() {
+    let fast = ticks_to_drop_off_with_take(1.0);
+    let slow = ticks_to_drop_off_with_take(0.5);
+    assert!(fast < slow, "faster take drops off at {fast}, slower at {slow}");
+}
+
+/// Isolate one ride on each adult host, with full or empty reserves, without feeding,
+/// predators or other riders. A small host may release an outgrown rider early;
+/// its reserve pays before its structure.
+#[test]
+fn a_host_survives_a_full_ride_from_hatch_to_drop_off() {
+    for founder in Founder::ALL.into_iter().filter(|f| *f != Founder::Lanternjaw) {
+        for fullness in [0.0, 1.0] {
+            let mut s = Scene::new(config(), 1);
+            let host = s.add(founder, StartingStores::FULL, 0.0);
+            let core = s.fauna.config.founder(founder).core;
+            set_stores(&mut s.fauna, host, core.body_max, fullness * core.reserve_cap * core.body_max);
+            s.past_next_dusk();
+            let riders = riders_of(&s.fauna, host);
+            let hatch_body = s.fauna.config.founder(Founder::Lanternjaw).core.body_min;
+            if !crate::host_bears(&s.fauna.config, hatch_body, animal(&s.fauna, host).body) {
+                assert!(riders.is_empty(), "a host too small to bear a hatchling is spared");
+                continue;
+            }
+            assert_eq!(riders.len(), 1, "fixture: {} bears a hatchling", founder.name());
+            let rider = riders[0];
+            s.fauna.config = short_ride_config();
+            s.fauna.set_births_enabled(false);
+            let mut dropped = false;
+            for _ in 0..240 {
+                let h = s.fauna.animals.iter().find(|a| a.id == host).expect("one ride must not kill its host");
+                let minimum = s.fauna.config.founder(founder).core.body_min;
+                assert!(h.body > minimum, "{} stays above its death threshold", founder.name());
+                if animal(&s.fauna, rider).attached.is_none() {
+                    dropped = true;
+                    break;
+                }
+                s.step();
+            }
+            assert!(dropped, "{} finishes its ride", founder.name());
+            assert!(s.fauna.ledger.parasite_taken_organic > 0.0, "the host paid for the ride");
+            s.assert_closes("survived the full ride");
+        }
+    }
+}
+
+/// **The hatch chance raises hatches from the same egg bank**: over the same eggs and dusks,
+/// every egg a lower chance hatches a higher one hatches too, and the higher hatches more.
+#[test]
+fn a_higher_hatch_chance_hatches_more_of_the_same_egg_bank() {
+    let (lo, hi) = (0.25, 0.75);
+    let (mut n_lo, mut n_hi) = (0, 0);
+    for serial in 0..400u64 {
+        for dusk in [1_000u64, 145_000, 289_000] {
+            let a = crate::hatch_draw(lo, 7, serial, dusk);
+            let b = crate::hatch_draw(hi, 7, serial, dusk);
+            assert!(!a || b, "egg {serial} hatched at {lo} but not at {hi}");
+            n_lo += u32::from(a);
+            n_hi += u32::from(b);
+        }
+    }
+    assert!(n_hi > n_lo, "{n_hi} hatches at {hi}, {n_lo} at {lo}");
 }

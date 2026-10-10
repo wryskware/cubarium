@@ -247,7 +247,7 @@ fn a_taller_crown_lowers_the_light_and_the_income_under_it() {
     // Package L: crowns are metres; this 1 m-cell fixture keeps the crowns it was
     // written against, four times the 0.25 m-cell ladder (`FloraConfig::crowns_scaled`).
     let mut config = FloraConfig::default().crowns_scaled(4.0);
-    config.shade_k_per_m2 = 30.0;
+    strong_shade(&mut config, 30.0);
 
     let mut world = plain(16, 12, 0.6);
     let mut flora = Flora::new(config);
@@ -335,7 +335,7 @@ fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     let mut config = FloraConfig::default()
         .crowns_scaled(4.0)
         .drop_seeds_checked_each_tick();
-    config.shade_k_per_m2 = 30.0;
+    strong_shade(&mut config, 30.0);
     config.umbrellafrond.propagule_rate = 2.0;
     config.bloomcrown.maintenance = 0.0032;
     config.bloomcrown.reserve_cap = 0.001;
@@ -413,13 +413,13 @@ fn a_stand_that_cannot_pay_under_a_closed_canopy_diebacks_and_dies() {
     );
     assert_eq!(flora.view().ledger.deaths, 1);
     assert!(flora.view().ground_at(site(5)).unwrap().dead_wood > 0.0);
-    // The four crowns are level with each other, so none of them shades another.
+    // The four crowns are level with each other, so they shade each other by half
+    // (SHADE-REAL): symmetrically, the outer pair alike and the inner pair alike.
+    let light = |x: u32| flora.view().stand_at(site(x)).unwrap().light;
+    assert_eq!(light(3), light(7), "the outer pair alike");
+    assert_eq!(light(4), light(6), "the inner pair alike");
     for x in [3, 4, 6, 7] {
-        assert_eq!(
-            flora.view().stand_at(site(x)).unwrap().light,
-            1.0,
-            "crown at {x}"
-        );
+        assert!(light(x) < 1.0, "a level crown at {x} is shaded by its neighbours");
     }
     assert_residuals(&flora, "after a death under a canopy");
 }
@@ -1892,4 +1892,17 @@ fn the_three_residuals_stay_at_noise_over_two_hundred_ticks_with_rain() {
         world.view().ledger.transpiration_out
     );
     assert!(flora.view().ledger.light_in > 0.0, "nothing grew");
+}
+
+/// The shade law with every species' leaf area per unit of stock set to one, so a layer's
+/// optical depth is `k · (1 − p) · stock / area_m2` (SHADE-REAL): the fixture's own strong
+/// shade, stated in the old per-square-metre form and independent of the shipped leaf
+/// areas.
+fn strong_shade(config: &mut FloraConfig, k: f64) {
+    config.light_extinction_k = k;
+    for sp in Species::ALL {
+        let sc = config.species_mut(sp);
+        sc.specific_leaf_area_m2_per_kg = 1.0;
+        sc.foliage_kg_per_unit = 1.0;
+    }
 }

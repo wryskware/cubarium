@@ -100,9 +100,9 @@ core.reproduction.egg_fungus_radius_m = 0.5
 core.reproduction.clutch_hold_max_s = 1800.0
 # Role call 5A (Wrysk 2026-10-10, ROLES5): caps are its real food. Litter yields it a
 # twentieth of a cap (0.025 against the caps' 0.5, was 0.25), so it lives at the glowcaps,
-# lays there, and its numbers follow theirs; it weighs its foods by yield
-# (`taste_by_yield`), so ordinary litter tastes under its feed gate and the fungal scent
-# leads it on.
+# lays there, and its numbers follow theirs. It weighs its foods by the worth of a bite
+# (`taste_by_yield`): a bite saturates in stock, so litter tastes a twentieth of a cap
+# however deep the pile (CAPGNAWER-CAPS).
 yield_by_food.litter = 0.025
 taste_by_yield = true
 # GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 60.0 (x2 the old 30: the seven mass-tied quantities with it);
@@ -119,10 +119,16 @@ gut.digestion_s.nectar = 342.8571428571429
 gut.digestion_s.fruit = 342.8571428571429
 mass_scale = 60.0
 
+[fauna.teachers]
+# CAPGNAWER-CAPS: the capgnawer holds still to feed only on food worth a quarter of a full
+# cap bite (caps down to a third of their bite half-stock); its litter it eats on the move
+# while the fungal scent leads it on. Plausible, untuned.
+capgnawer_stay_worth = 0.25
+
 [fauna.founders.loftstrider]
 founding_count = 2
 # The curiosity gate's ecology (the block at the end of this file).
-core.growth_max_per_s = 1.3158814187083778
+core.growth_max_per_s = 0.4934555320156417
 core.reproduction.birth_interval_s = 1097.8253659193513
 # 0.4 of the 10 sim-hour year: longer single-calf gestation.
 core.reproduction.gestation_s = 14400.0
@@ -134,13 +140,13 @@ dispersal.enabled = true
 dispersal.group_max = 3 # 3 adults plus that year's calves: a herd of 3–6
 dispersal.at = "adult"
 core.reproduction.surplus_hold_s = 548.9126829596756
-# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 24000.0 (x800 the old 30: the seven mass-tied quantities with it);
+# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 9000.0 (x300 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
-core.birth_body = 2534.4
-core.birth_cost = 844.8000000000001
-core.body_max = 4224.0
-core.body_min = 422.40000000000003
-core.reproduction.surplus_floor = 422.40000000000003
+core.birth_body = 950.4000000000001
+core.birth_cost = 316.8
+core.body_max = 1584.0
+core.body_min = 158.4
+core.reproduction.surplus_floor = 158.4
 gut.bite_per_body_s = 0.00015555583333333334
 gut.digestion_s.litter = 642.8559949000091
 gut.digestion_s.cap_tissue = 642.8559949000091
@@ -149,7 +155,7 @@ gut.digestion_s.foliage = 642.8559949000091
 gut.digestion_s.film = 642.8559949000091
 gut.digestion_s.nectar = 642.8559949000091
 gut.digestion_s.fruit = 642.8559949000091
-mass_scale = 24000.0
+mass_scale = 9000.0
 
 # Roster R2b: glassfilm is seeded at founding and the ripple-snail (a water-bound film
 # grazer) is founded on it; both code defaults are off, so training worlds are unchanged.
@@ -236,23 +242,28 @@ mass_scale = 60.0
 # between groves, founded on the ground within its roost reach of fruit (lanternberry
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
+# SP-SHREDDER: small ground prey supplements fruit; the catch switch gates this table.
+hunter.prey = [true, false, true, false, false, false, true, false, false]
+# GUT-MASS-2 (Wrysk's decision A: seedporters eat shredders, adults included): sizes compare
+# as body / mass_scale, so the catch window, not a mass, covers a grown littershredder.
+hunter.prey_max_ratio = 1.25
 # Fruit at the mouth is 1e-4..1e-3 ou: K is about a third of a ripe vine patch.
 fruit_bite_half_stock = 0.0005
 # Leave below ~2 upkeep rates (5% of the ~45-upkeep full gut rate).
 give_up_fraction = 0.05
 founding_count = 4
 # The curiosity gate's ecology (the block at the end of this file).
-core.growth_max_per_s = 0.00027691107296051726
+core.growth_max_per_s = 0.0002215288583684138
 core.reproduction.birth_interval_s = 1097.8253659193513
 core.reproduction.gestation_s = 109.78253659193513
 core.reproduction.surplus_hold_s = 548.9126829596756
-# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 75.0 (x2.5 the old 30: the seven mass-tied quantities with it);
+# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 60.0 (x2 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
-core.birth_body = 0.5333333333333333
-core.birth_cost = 0.17777777777777778
-core.body_max = 0.888888888888889
-core.body_min = 0.08888888888888889
-core.reproduction.surplus_floor = 0.08888888888888889
+core.birth_body = 0.4266666666666667
+core.birth_cost = 0.14222222222222222
+core.body_max = 0.7111111111111111
+core.body_min = 0.07111111111111111
+core.reproduction.surplus_floor = 0.07111111111111111
 gut.bite_per_body_s = 0.00025926000000000004
 gut.digestion_s.litter = 385.71318367661803
 gut.digestion_s.cap_tissue = 385.71318367661803
@@ -261,7 +272,7 @@ gut.digestion_s.foliage = 385.71318367661803
 gut.digestion_s.film = 385.71318367661803
 gut.digestion_s.nectar = 385.71318367661803
 gut.digestion_s.fruit = 385.71318367661803
-mass_scale = 75.0
+mass_scale = 60.0
 
 # R3: the chorister, a diurnal pack hunter (frondgrazer, loftstrider, lanternjaw,
 # grounded seedporter) living as packs with a covered den, one breeder, provisioned
@@ -274,7 +285,7 @@ dispersal.at = "independent" # judged when a pup reaches independence
 dispersal.group_max = 4 # a pack of 4 adults plus up to 4 pups at the den
 founding_count = 1
 # The curiosity gate's ecology (the block at the end of this file).
-core.growth_max_per_s = 0.12854503492167166
+core.growth_max_per_s = 0.04820438809562687
 core.reproduction.birth_interval_s = 1097.8253659193513
 core.reproduction.gestation_s = 6000.0
 # LIFE-HISTORY (Wrysk 2026-10-06): the Veilhound litters once a pack a year, conceived in a
@@ -289,13 +300,13 @@ pack.breed_reserve_fraction = 0.6
 pack.litter_by_condition = true
 pack.independence_age_s = 21600.0
 core.reproduction.surplus_hold_s = 548.9126829596756
-# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 12000.0 (x400 the old 30: the seven mass-tied quantities with it);
+# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 4500.0 (x150 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
-core.birth_body = 658.5599999999998
-core.birth_cost = 213.24799999999996
-core.body_max = 1097.6
-core.body_min = 106.62399999999998
-core.reproduction.surplus_floor = 109.75999999999999
+core.birth_body = 246.95999999999995
+core.birth_cost = 79.96799999999999
+core.body_max = 411.59999999999997
+core.body_min = 39.983999999999995
+core.reproduction.surplus_floor = 41.16
 gut.bite_per_body_s = 0.0003111106666666667
 gut.digestion_s.litter = 1285.7161224516035
 gut.digestion_s.cap_tissue = 1285.7161224516035
@@ -304,7 +315,7 @@ gut.digestion_s.foliage = 1285.7161224516035
 gut.digestion_s.film = 1285.7161224516035
 gut.digestion_s.nectar = 1285.7161224516035
 gut.digestion_s.fruit = 1285.7161224516035
-mass_scale = 12000.0
+mass_scale = 4500.0
 
 # ---------------------------------------------------------------------------
 # The minimal gut (2026-10-03, design/metabolism-meals-2026-10-02.md repair 2): the
@@ -501,6 +512,14 @@ core.reproduction.surplus_floor = 0.027
 core.reproduction.clutch_max = 3
 core.reproduction.nest_radius_m = 1.0
 core.reproduction.nest_crowd_max = 8
+# SHREDDER-NEST (Wrysk 2026-10-10, option A: "a shredder that finds its spot crowded goes
+# somewhere quieter to lay, the way insects spread out their egg sites"): refused by the
+# nest brake, it walks to the nearest uncrowded litter face within 3 m (three nest radii,
+# room to clear a huddle and its rim) and lays there; a walk not ended by a clutch within
+# a minute (the retry's length, ~5x a straight 3 m walk at cruise) is given up. Untuned.
+core.reproduction.nest_seek = true
+core.reproduction.nest_seek_m = 3.0
+core.reproduction.nest_seek_give_up_s = 60.0
 # Generation time (D1b, 2026-10-05): the gut's throughput scales with body as small
 # animals' does (intake at a full stomach ~ body^0.75, Kleiber: a hatchling digests faster
 # per unit of itself), and a mature body earmarks 0.8 of its net income for its next full
@@ -526,14 +545,14 @@ gut.digestion_s.fruit = 327.77123752762157
 mass_scale = 60.0
 
 [fauna.founders.frondgrazer]
-core.growth_max_per_s = 0.2464352785717669
+core.growth_max_per_s = 0.09241322946441258
 # Wrysk 2026-10-10: ungulate-like, a birth per world day. One calf a gestation (the
 # gestation mode carries one young); the gestation takes half the 7,200 s world day, a
 # deer's share of its year, and the interval the other half, so birth to birth is a day
 # plus the surplus hold (was 1,098 s + an 84 s gestation: ~22 births a year).
 core.reproduction.birth_interval_s = 3600.0
 core.reproduction.gestation_s = 3600.0
-core.reproduction.surplus_floor = 121.70030679788182
+core.reproduction.surplus_floor = 45.637615049205685
 core.reproduction.surplus_hold_s = 548.9126829596756
 yield_by_food.litter = 0.3364781725258478
 yield_by_food.cap_tissue = 0.3364781725258478
@@ -542,12 +561,12 @@ yield_by_food.foliage = 0.3364781725258478
 yield_by_food.film = 0.3364781725258478
 yield_by_food.nectar = 0.3364781725258478
 yield_by_food.fruit = 0.3364781725258478
-# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 24000.0 (x800 the old 30: the seven mass-tied quantities with it);
+# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 9000.0 (x300 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
-core.birth_body = 719.9999999999999
-core.birth_cost = 240.0
-core.body_max = 1200.0
-core.body_min = 120.0
+core.birth_body = 270.0
+core.birth_cost = 90.0
+core.body_max = 450.0
+core.body_min = 45.0
 gut.bite_per_body_s = 0.000346706
 gut.digestion_s.litter = 346.1145754616303
 gut.digestion_s.cap_tissue = 346.1145754616303
@@ -556,12 +575,15 @@ gut.digestion_s.foliage = 346.1145754616303
 gut.digestion_s.film = 346.1145754616303
 gut.digestion_s.nectar = 346.1145754616303
 gut.digestion_s.fruit = 346.1145754616303
-mass_scale = 24000.0
+mass_scale = 9000.0
 
 [fauna.founders.lanternjaw]
 # Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
 wade.swim_out = false
-core.growth_max_per_s = 0.0002013987963031655
+# LJ-GROW (Wrysk 2026-10-10: "bugs dont take like 4 months to grow"): the ceiling
+# on structure built from the reserve, about 3x the searched 1.0e-4 (growth is this x
+# fullness, and the old ceiling held riders well under their take). Food still pays.
+core.growth_max_per_s = 0.0006
 # LANTERNJAW-LIFE (Wrysk 2026-10-10, many offspring, low survival): at most one clutch a
 # world day (the code default), not the searched egg-layers' 1098 s.
 core.reproduction.birth_interval_s = 7200.0
@@ -571,13 +593,18 @@ core.reproduction.birth_interval_s = 7200.0
 # `Reproduction::DORMANT_EGGS_PLACEHOLDER`.
 core.reproduction.surplus_floor = 0.12
 core.reproduction.surplus_hold_s = 548.9126829596756
-yield_by_food.litter = 0.46905315573017675
-yield_by_food.cap_tissue = 0.46905315573017675
-yield_by_food.carrion = 0.46905315573017675
-yield_by_food.foliage = 0.46905315573017675
-yield_by_food.film = 0.46905315573017675
-yield_by_food.nectar = 0.46905315573017675
-yield_by_food.fruit = 0.46905315573017675
+# LJ-GROW (d): three quarters of a grown body's net income saved for its next clutch
+# (the shared 0.5), so a new adult lays sooner.
+core.reproduction.brood_share = 0.75
+# LJ-GROW: a predatory insect's conversion, about 0.6 (assimilation ~0.85 less the
+# construction overhead; was the searched 0.469).
+yield_by_food.litter = 0.6
+yield_by_food.cap_tissue = 0.6
+yield_by_food.carrion = 0.6
+yield_by_food.foliage = 0.6
+yield_by_food.film = 0.6
+yield_by_food.nectar = 0.6
+yield_by_food.fruit = 0.6
 # GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 60.0 (x2 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
 core.birth_body = 0.735
@@ -585,18 +612,15 @@ core.birth_cost = 0.3
 core.body_max = 2.1
 core.body_min = 0.105
 core.reproduction.egg_organic = 0.156
-gut.bite_per_body_s = 0.000290216
-gut.digestion_s.litter = 1033.7128207955454
-gut.digestion_s.cap_tissue = 1033.7128207955454
-gut.digestion_s.carrion = 1033.7128207955454
-gut.digestion_s.foliage = 1033.7128207955454
-gut.digestion_s.film = 1033.7128207955454
-gut.digestion_s.nectar = 1033.7128207955454
-gut.digestion_s.fruit = 1033.7128207955454
+gut.bite_per_body_s = 0.000226877884
+gut.digestion_s.litter = 1322.2972407482432
+gut.digestion_s.cap_tissue = 1322.2972407482432
+gut.digestion_s.carrion = 1322.2972407482432
+gut.digestion_s.foliage = 1322.2972407482432
+gut.digestion_s.film = 1322.2972407482432
+gut.digestion_s.nectar = 1322.2972407482432
+gut.digestion_s.fruit = 1322.2972407482432
 mass_scale = 60.0
-# A grown lanternjaw stays out of the pack's window (formidable when grown, LANTERNJAW-LIFE):
-# 12 x the Veilhound's mass over its own (x400 / x2), the margin 12 gave at equal masses.
-adult_size_window_factor = 2400.0
 
 # The capgnawer package (2026-10-05): the fungal scent lasts 300 s, so a glowcap grove is
 # smelled a few metres off (the field falls by e over about 1.2 m at 0.125 m faces) and a
@@ -613,11 +637,13 @@ egg_upkeep_per_s = 0.000008198025186331102
 egg_viability_median_s = 26347.80878206443
 wound_heal_per_s = 0.00045544584368506117
 
+
 [fauna.frondgrazer]
-# GUT-MASS: the placeholder species' seven mass-tied quantities follow the frondgrazer's mass (x800).
-birth_body = 719.9999999999999
-birth_cost = 240.0
-body_max = 1200.0
-body_min = 120.0
-growth_max_per_s = 0.22799999999999998
-reproduction.surplus_floor = 120.0
+# GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): the placeholder species follows the frondgrazer's mass;
+# the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
+birth_body = 270.0
+birth_cost = 90.0
+body_max = 450.0
+body_min = 45.0
+growth_max_per_s = 0.08549999999999999
+reproduction.surplus_floor = 45.0

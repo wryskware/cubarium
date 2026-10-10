@@ -101,7 +101,7 @@ class Build(Kind):
         trees = ctx.paths.cache / "trees"
         common = dict(threads=spec["threads"], mem_gb=spec["mem_gb"], produces={key: f"artifact/{spec['target']}"},
                       est_h=spec.get("est_h", 0.25), timeout_h=spec.get("timeout_h", 2), priority=10,
-                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key))
+                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key, kind="build"))
         if spec["arch"] == ctx.arch:
             argv = [ctx.python, str(ctx.lab_dir / "snaprun.py"), "--repo", spec["repo"], "--commit", spec["commit"],
                     "--trees", str(trees), *[a for s in seeds(ctx, spec["repo"]) for a in ("--seed", s)],

@@ -126,7 +126,8 @@ fn species_rows() -> Vec<Row> {
             .search(0.01, 0.12).log().grade("A"),
         r("body_max", "org-units", nonneg, "adult structure").grade("D"),
         r("growth_max_per_s", "org-units/s", nonneg, "fastest structure grows from the reserve")
-            .search(1e-6, 1e-4).log().grade("B").prov("derived"),
+            // Includes shipped mass-scaled ceilings and cotrain's x4 maturity box.
+            .search(1e-6, 1e-2).log().grade("B").prov("derived"),
         r("body_min", "org-units", Range::positive(), "death threshold, and a newborn's body").evolve().grade("B"),
         r("birth_body", "org-units", nonneg, "structure at which it can pay for a birth").evolve().grade("B"),
         r("birth_cost", "org-units", nonneg, "a gestation's package: the newborn's body_min plus its reserve")
@@ -163,6 +164,11 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 30.0),
         r("reproduction.nest_retry_s", "s", nonneg, "a refused layer (nest site, body ceiling) waits this long before trying again")
             .search(5.0, 600.0).log(),
+        r("reproduction.nest_seek", "switch", Range::fraction(), "SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is)").optional(),
+        r("reproduction.nest_seek_m", "m", nonneg, "SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height)")
+            .search(0.5, 8.0),
+        r("reproduction.nest_seek_give_up_s", "s", nonneg, "SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry")
+            .search(10.0, 600.0).log(),
         r("reproduction.clutch_hold_max_s", "s", nonneg, "clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once)")
             .search(0.0, 7200.0),
         r("reproduction.egg_fungus_radius_m", "m", nonneg, "fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face)")
@@ -416,6 +422,11 @@ fn founder_rows() -> Vec<Row> {
         r("flight.rain_ground_m_per_s", "m/s of rain", nonneg, "at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips").optional(),
         r("flight.rain_ground_hysteresis_m_per_s", "m/s of rain", nonneg, "a rain-grounded flyer flies again once the rain is under the threshold less this").optional(),
         r("flight.nest_search_m", "m", nonneg, "VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch").optional(),
+        r("flight.flush_reaction_s", "s", nonneg, "FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after").optional(),
+        r("flight.flush_speed_factor", "x cruise speed", nonneg, "FLUSH: its escape burst's speed, off the threat's line (0: no flush)").optional(),
+        r("flight.flush_climb_fraction", "x burst speed", nonneg, "FLUSH: the burst's climb").optional(),
+        r("flight.flush_burst_s", "s", nonneg, "FLUSH: the burst's length").optional(),
+        r("flight.flush_s", "s", nonneg, "FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long").optional(),
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
@@ -478,10 +489,10 @@ fn founder_rows() -> Vec<Row> {
         r("pack.select_min_prospect", "fraction", fraction, "PACK-TUNE: a pack commits only to a prospect of at least this").optional(),
         r("pack.break_off_below", "fraction", fraction, "PACK-TUNE: in a chase, a target whose prospect falls under this is broken off").optional(),
         r("pack.shun_s", "s", nonneg, "PACK-TUNE: a target dropped alive is not taken again for this").optional(),
-        // The counter-strike seam (`Counter`): unused, `None` for every lineage.
-        r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
-        r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
-        r("counter.cost", "org-units", nonneg, "counter-strike cost (unused seam)").optional(),
+        // The counter-strike (`Counter`, HUNT-ESCAPE): the lanternjaw's only, `None` on the others.
+        r("counter.reach", "m", nonneg, "HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint").optional(),
+        r("counter.damage", "wound at equal size", nonneg, "HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour)").optional(),
+        r("counter.cost", "s of awake upkeep", nonneg, "HUNT-ESCAPE: the answer's cost to the answering body").optional(),
     ]
 }
 
@@ -649,6 +660,8 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
+        t("capgnawer_stay_worth", "fraction of a full cap bite", fraction, "the capgnawer holds still to feed only on food whose bite tastes at least this worth; weaker food it eats on the move (CAPGNAWER-CAPS)")
+            .search(0.05, 0.9),
         t("press_replan_s", "s", nonneg, "a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE)").search(1.0, 10.0),
         t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
         t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
@@ -686,7 +699,8 @@ fn knob_rows() -> Vec<Row> {
         hk("sight_m", "m", nonneg, "how far it sees a prey body ahead of it and not hidden").search(0.5, 3.0),
         hk("tremor_turn", "tremor units", nonneg, "the faintest prey tremor (left + right, size-eligible prey) it turns toward").search(1e-4, 0.05).log(),
         hk("search_memory_s", "s", pos, "e-fold time of the search image's encounter memory").search(120.0, 7200.0).log(),
-        // `share_switching` and `strike_chosen_only` (true / false) are switches: no rows.
+        // `share_switching`, `strike_chosen_only`, and LJ-HUNT's `wait_strikes` and
+        // `lunge_sweeps_band` (true / false) are switches: no rows.
         hk("switch_exponent", "exponent", pos, "share switching: the attack preference is the relative encounter share to this power").search(1.0, 4.0),
         hk("attack_prior_s", "s of contact", nonneg, "share switching: contact credited to every listed lineage before the shares are taken").search(1.0, 120.0).log(),
         hk("attack_half_s", "s of contact", pos, "D2's rule: encounter memory at which the attack preference is halfway to 1").search(5.0, 600.0).log(),
@@ -755,7 +769,8 @@ fn knob_rows() -> Vec<Row> {
         lk("near_m", "m", nonneg, "inside this of a beacon it slows to near_forward; walkers also start the no-reward inspection timer"),
         lk("near_forward", "fraction", fraction, "a flyer's forward effort near a beacon"),
         lk("glow_scent_gate", "chem response", fraction, "a hungry ground body is drawn to a still cyan light only while its food chemistry response is below this").search(0.0, 0.5),
-        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming.
+        // S3b: which light pays (`fauna.light.learn` is a switch: no row) and looming
+        // (LJ-HUNT's `fauna.light.lure_masks_loom` is a switch: no row).
         lk("nir_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a near-IR reflector (flowers); learned ones relax back to it"),
         lk("cyan_innate", "probability", fraction, "S3b: a naive flyer's reward expectation of a cyan emitter (glowcaps, lures)"),
         lk("learn_rate", "fraction", fraction, "S3b: a sip (1) or a failed visit (0) moves its class's expectation this fraction of the way").search(0.05, 1.0),

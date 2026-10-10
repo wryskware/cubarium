@@ -106,6 +106,73 @@ fn ticks(s: f64) -> u64 {
 }
 
 #[test]
+fn the_offer_never_exceeds_stock_across_body_sizes() {
+    let cfg = config(0.5);
+    let (fauna, _, _, id) = on_patch(cfg.clone(), cfg.founder(SHREDDER).core.bite_half_stock);
+    for scale in [0.01, 1.0, 100.0] {
+        let mut phys = *cfg.founder(SHREDDER);
+        phys.scale_mass(scale);
+        for size in [0.02, 0.5, 1.0, 2.0] {
+            let mut a = animal(&fauna, id);
+            a.body = size * phys.core.body_max;
+            let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
+            let period = SHREDDER.manifest().controller_period_s;
+            let fill = phys.gut.full_tolerance * phys.gut.capacity(a.body) * period
+                / (phys.gut.digestion_s[Food::Litter.index()] / speed);
+            assert!(fill > 0.0 && fill.is_finite());
+            for k in [0.0, fill * 0.001, fill * 10.0] {
+                phys.core.bite_half_stock = k;
+                for stock in [0.0, fill * 1e-6, fill * 0.1, fill, fill * 1e6] {
+                    for effort in [0.0, 0.5, 1.0] {
+                        let q = offer(&a, &phys, Food::Litter, period, effort, stock);
+                        assert!(q >= 0.0 && q <= stock / fill,
+                            "scale={scale} size={size} k={k} stock={stock} effort={effort}: {q}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_big_bite_gives_up_an_almost_empty_patch_but_keeps_a_rich_one() {
+    for rich in [false, true] {
+        let mut cfg = config(0.5);
+        cfg.teachers.give_up_window_s = 0.0;
+        let (mut fauna, world, _, id) = on_patch(cfg.clone(), cfg.founder(SHREDDER).core.bite_half_stock);
+        let i = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        let a = fauna.animals[i];
+        let mut phys = *cfg.founder(SHREDDER);
+        let period = SHREDDER.manifest().controller_period_s;
+        let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
+        let tau = phys.gut.digestion_s[Food::Litter.index()] / speed;
+        let fill = phys.gut.full_tolerance * phys.gut.capacity(a.body) * period / tau;
+        let thin = fill * cfg.teachers.give_up_fraction * 0.25;
+        phys.core.bite_half_stock = thin * 0.01;
+        phys.gut.bite_per_body_s = 20.0 * fill / (speed * a.body * period);
+        let stock = if rich { 100.0 * fill } else { thin };
+        let want = phys.gut.bite_per_body_s * speed * a.body * period;
+        if !rich {
+            assert!(want > stock, "the thin patch cannot supply the requested bite");
+        }
+        assert!(want * stock / (stock + phys.core.bite_half_stock) / fill > cfg.teachers.give_up_fraction,
+            "the uncapped offer would hide the thin patch");
+        let stop = Actions { forward: cfg.teachers.forage_stay_forward, turn: 0.0, feed: 1.0 };
+        fauna.animals[i].founder_state.held = stop;
+        fauna.tick = ticks(cfg.teachers.give_up_min_s) + SHREDDER.manifest().cadence_ticks();
+        fauna.forage.insert(id, Patch {
+            stay: Some(Stay { at: (a.pose.x, a.pose.z, a.pose.y_m), since: 0, rate: None, key: None }),
+            ..Patch::default()
+        });
+        note_bite(&mut fauna, i, &phys, Food::Litter, period, 1.0, stock, None);
+        let ring = f64::from(world.config().width) * world.config().voxel_m;
+        let leave = leave(&mut fauna, i, stop, ring);
+        assert_eq!(leave.is_some(), !rich);
+        assert_eq!(fauna.forage_tally()[SHREDDER.index()].give_ups, u64::from(!rich));
+    }
+}
+
+#[test]
 fn a_hungry_body_on_a_thin_patch_gives_it_up_after_its_least_stay() {
     let cfg = config(0.5);
     let e = thin(&cfg);
