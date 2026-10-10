@@ -391,3 +391,12 @@ renderer package about the size of a feeding rig), worth it once it serves sever
 species, not for the tendril alone. What the tendril needs from it: reach out and down
 from the bell when feeding and wiggle a little.
 
+## 21. The Blender bake is not reproducible (found 2026-10-10, FEED-ROLLOUT small feeders)
+
+Two plain bakes at the same commit (5f71bea7) gave different models: one littershredder cell
+at 125 mm changed material, and the 250 mm ripple-snail came out with 1 cell in one run and
+2 in another. Packages since have committed only the files they meant to change. Find the
+nondeterminism (set or hash ordering in the voxelizer, a float tie at a cell boundary,
+Blender's own evaluation order) before the next full rebake, so a rebake changes only what
+it should.
+
