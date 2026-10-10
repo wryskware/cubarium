@@ -83,6 +83,13 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     // on (1) or off; figMap: texels a voxel across and along z, the map's size.
     vec4 figSun;
     vec4 figMap;
+    // How the ground fog moves (FOG-MOTION, `cubarium_gpu::weather::FogMotion`): the mode
+    // (0 fixed, 1 breathing, 2 flowing), the breath's swing (a share of the density), its
+    // period (seconds), the flow (voxels a second along +x).
+    vec4 fogM;
+    // How much of each rain mode's haze hangs in the air (drizzle, shower, downpour; eased
+    // far slower than `rainK`, so the veil gathers and thins rather than switching).
+    vec4 rainH;
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The

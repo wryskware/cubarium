@@ -395,6 +395,11 @@ impl Default for PackConfig {
 /// day_sky_brightness = 1.0  # the day sky and its clouds, times this (dimmer below 1)
 /// candle_min = 0.25    # a glowcap lip's dimmest, of full (1: no candle, every lip full)
 /// candle_period_s = 8.0  # seconds a glowcap's candle takes to wander, about
+/// # FOG-MOTION trial (2026-10-10, for Wrysk to pick): "fixed", "breathing", "flowing", "deep"
+/// fog_motion = "fixed" # how the ground fog moves
+/// fog_breath = 0.5     # breathing/flowing/deep: a bank's density swings this share either way
+/// fog_breath_s = 40.0  # breathing/flowing/deep: seconds a bank takes to swell and thin
+/// fog_flow = 0.5       # flowing/deep: voxels a second the banks drift along +x
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -527,6 +532,32 @@ pub struct LightConfig {
     /// The glowcap candle's wander, seconds of the presenter's clock: each cap's
     /// brightness drifts on curves of about this period (each cap its own phase and pace).
     pub candle_period_s: f32,
+    /// How the ground fog moves (FOG-MOTION, 2026-10-10: **a trial** for Wrysk to pick
+    /// from video): `"fixed"` (its pattern evolving and drifting with the clouds, as it
+    /// was), `"breathing"` (and each fog bank's density swells and thins slowly, every bank
+    /// on its own phase), `"flowing"` (and the banks drift along +x with the air) or
+    /// `"deep"` (flowing, and less of a flat sheet: the fog's top billows and its density
+    /// varies along each ray).
+    pub fog_motion: FogMotionKind,
+    /// Breathing and flowing: how far a bank's density swings either way, a share of it
+    /// (0..1).
+    pub fog_breath: f32,
+    /// Breathing and flowing: seconds of sim time for a bank to swell, thin and swell again.
+    pub fog_breath_s: f32,
+    /// Flowing: how fast the banks drift along +x, voxels a second of sim time (on top of
+    /// the clouds' drift the pattern always has).
+    pub fog_flow: f32,
+}
+
+/// `[light] fog_motion`: [`LightConfig::fog_motion`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FogMotionKind {
+    #[default]
+    Fixed,
+    Breathing,
+    Flowing,
+    Deep,
 }
 
 /// `[light] day_sky`: [`LightConfig::day_sky`].
@@ -577,6 +608,10 @@ impl Default for LightConfig {
             day_sky_brightness: 1.0,
             candle_min: 0.25,
             candle_period_s: 8.0,
+            fog_motion: FogMotionKind::Fixed,
+            fog_breath: cubarium_gpu::weather::FOG_BREATH_DEFAULT,
+            fog_breath_s: cubarium_gpu::weather::FOG_BREATH_S_DEFAULT,
+            fog_flow: cubarium_gpu::weather::FOG_FLOW_DEFAULT,
         }
     }
 }

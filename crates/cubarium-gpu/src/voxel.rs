@@ -806,6 +806,8 @@ pub struct VoxelParams {
     pub star_bloom: f32,
     /// The day sky and its clouds by day, times this (`[light] day_sky_brightness`).
     pub day_sky_brightness: f32,
+    /// How the ground fog moves (`[light] fog_motion`, a trial).
+    pub fog_motion: crate::weather::FogMotion,
     /// **Plants as models** (`[figures] plants = "models"`, [`crate::plants`]): the walk
     /// lets its ray through the dry block plant cells and the plant pass draws them,
     /// swaying and growing in. `None` (the default) draws them in the walk as ever. Fixed
@@ -1069,6 +1071,8 @@ impl VoxelParams {
             hi_cells: [[0; 4]; HIGHLIGHT_CELLS / 4],
             fig_sun: [0.0; 4],
             fig_map: [0.0; 4],
+            fog_m: self.fog_motion.uniform(),
+            rain_h: [look.rain_haze[0], look.rain_haze[1], look.rain_haze[2], 0.0],
         }
     }
 }
@@ -1216,6 +1220,11 @@ struct VoxelUniforms {
     /// The figures' sun map ([`crate::figures::sun_map`]): `figSun`, `figMap`.
     fig_sun: [f32; 4],
     fig_map: [f32; 4],
+    /// How the fog moves ([`crate::weather::FogMotion::uniform`]): `fogM`.
+    fog_m: [f32; 4],
+    /// How much of each rain mode's haze hangs in the air (`rainH`,
+    /// [`crate::weather::Look::rain_haze`]).
+    rain_h: [f32; 4],
 }
 
 /// The most cells a highlight names one by one; a larger body is highlighted by its box.
@@ -2755,6 +2764,11 @@ impl VoxelRenderer {
         self.look
     }
 
+    /// The ground fog's floor, voxels up ([`VoxelRenderer::set_fog_floor`]).
+    pub fn fog_floor(&self) -> f32 {
+        self.fog_floor
+    }
+
     /// The unit direction toward the sun (the moon at night) this frame draws with, zero
     /// for none: `sunK`, moved by the day clock through [`VoxelRenderer::set_clock`]. The
     /// one sun path: anything keyed on the sun (shadows, volumetric light) reads this.
@@ -3861,6 +3875,7 @@ impl Backdrop {
 /// walk's own in-scatter does not already carry (volumetric on, the fog is in the march).
 fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -> bool {
     look.rain.iter().any(|&r| r > 0.0)
+        || look.rain_haze.iter().any(|&h| h > 0.0)
         || look.bolt > 0.0
         || (look.fog > 0.0 && !params.effects.volume_on(params.lit))
 }
@@ -4020,6 +4035,7 @@ pub(crate) mod tests {
             day_sky: crate::weather::DaySky::Warm,
             star_bloom: 0.0,
             day_sky_brightness: 1.0,
+            fog_motion: crate::weather::FogMotion::default(),
             plants: None,
         }
     }

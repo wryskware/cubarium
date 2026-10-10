@@ -1466,12 +1466,34 @@ float fogShape(float y) {
 const float FOG_EVOLVE = 256.0 / 3600.0;
 const float FOG_FREQ = 1.0 / 9.0;
 
-// The drifting density at ground point (x, z): 0.35 to 1.65, about 1.
+// The banks' size for the breathing (FOG-MOTION): about 32 voxels across.
+const float FOG_BANK_FREQ = 1.0 / 32.0;
+
+// The drifting density at ground point (x, z): 0.35 to 1.65, about 1, times the banks'
+// breath when the fog breathes (`fogM`, FOG-MOTION's trial):
+//   0 fixed: the pattern alone;
+//   1 breathing: two still noise fields over the ground, turned through each other on the
+//     breath's period (a cos + b sin), so each bank swells and thins in place on its own
+//     phase and the whole never pulses together;
+//   2 flowing: that, the banks and the pattern in them carried along +x at the flow;
+//   3 deep: flowing, drawn by `fogDepthDeep` (candidate d).
 float fogNoise(float x, float z) {
-    vec2 w = vec2(x - u.cloudK.y, z * 1.6);
+    int mode = int(u.fogM.x + 0.5);
+    float flow = mode >= 2 ? mod(wxTime() * wholeIn3600(u.fogM.w, float(W)), float(W)) : 0.0;
+    vec2 w = vec2(x - u.cloudK.y - flow, z * 1.6);
     float n = 0.65 * vnoiseT(w, FOG_FREQ, wxTime() * FOG_EVOLVE, 140)
             + 0.35 * vnoise(w, FOG_FREQ * 2.3, 7, 141);
-    return 0.35 + 1.3 * n;
+    float d = 0.35 + 1.3 * n;
+    if (mode >= 1) {
+        vec2 wb = vec2(x - flow, z * 1.6);
+        float a = 2.0 * vnoise(wb, FOG_BANK_FREQ, 11, 142) - 1.0;
+        float b = 2.0 * vnoise(wb, FOG_BANK_FREQ, 12, 143) - 1.0;
+        // Whole periods in the clock's 3600 s wrap.
+        float per = 3600.0 / max(1.0, floor(3600.0 / max(u.fogM.z, 1.0) + 0.5));
+        float ph = 6.2831853 * wxTime() / per;
+        d *= max(0.0, 1.0 + u.fogM.y * (a * cos(ph) + b * sin(ph)));
+    }
+    return d;
 }
 
 // The slab the pixel's ray reaches the fog's band in, and the slabs of band it crosses up
@@ -1499,6 +1521,26 @@ float fogDepth(float y0, float k, float zEnd, float noise) {
 float fogNoiseFor(float xw, float y0, float k, float zEnd) {
     vec2 span = fogSpan(y0, k, zEnd);
     return fogNoise(xw, span.x + 0.5 * span.y);
+}
+
+// FOG-MOTION candidate d (`fogM.x` 3, "deep": flowing, and less of a flat sheet): the
+// band's top billows with the noise (FOG_BILLOW voxels for each unit of it off 1, found in
+// one refinement: the flat top's crossing, then the billowed top there), and the density
+// is taken at two depths along the ray, where it reaches the band and where it ends, each
+// for half of the band it crosses. Its optical depth, as `fogDepth`'s.
+const float FOG_BILLOW = 3.0;
+float fogDepthDeep(float xw, float y0, float k, float zEnd) {
+    float base = u.fogK.y + u.fogK.z;
+    float nb = fogNoise(xw, clamp((y0 - base) / k, 0.0, zEnd));
+    float top = base + FOG_BILLOW * (nb - 1.0);
+    float zb = clamp((y0 - top) / k, 0.0, zEnd);
+    float ne = fogNoise(xw, zEnd);
+    float band = zEnd - zb;
+    float fw = max(u.fogK.w, 1e-3);
+    float above = y0 > top
+        ? (fw / k) * (exp(-(y0 - k * zb - top) / fw) - exp(-(y0 - top) / fw))
+        : 0.0;
+    return u.fogK.x * (nb * (above + 0.5 * band) + ne * 0.5 * band) * sqrt(1.0 + k * k);
 }
 
 // --- rain ---
@@ -1737,8 +1779,9 @@ vec4 weatherOver(ivec2 px) {
     float a = 0.0;
 
     if (!VOLUMETRIC && u.fogK.x > 0.0) {
-        float n = fogNoiseFor(xw, y0, k, zEnd);
-        float t = exp(-fogDepth(y0, k, zEnd, n));
+        float t = int(u.fogM.x + 0.5) == 3
+            ? exp(-fogDepthDeep(xw, y0, k, zEnd))
+            : exp(-fogDepth(y0, k, zEnd, fogNoiseFor(xw, y0, k, zEnd)));
         if (t < 0.999) {
             // The light it sends back: the ambient and the sun, and near an emitter its glow.
             vec3 fl = u.fogC.rgb + u.rainC.w * u.dayL.y * u.sunLean.rgb;
@@ -1751,9 +1794,9 @@ vec4 weatherOver(ivec2 px) {
     }
 
     float wsum = u.rainK.x + u.rainK.y + u.rainK.z;
-    if (wsum > 0.0) {
+    if (wsum > 0.0 || u.rainH.x + u.rainH.y + u.rainH.z > 0.0) {
         float depth = min(zEnd, float(D)) / float(max(D, 1));
-        float gust = u.rainK.z > 0.0 ? gustAt(xw - 0.24 * y0) : 1.0;
+        float gust = u.rainK.z > 0.0 || u.rainH.z > 0.0 ? gustAt(xw - 0.24 * y0) : 1.0;
         // Where the ray ends in a sky that is not clearly darker than the rain, the rain (its
         // haze and its streaks) darkens toward a curtain of the sky itself; over the terrain
         // and a night sky, both darker than the rain, it stays the rain's own pale colour.
@@ -1765,8 +1808,9 @@ vec4 weatherOver(ivec2 px) {
             dark = 1.0 - smoothstep(0.0, RAIN_CURTAIN_RAMP, dot(u.rainC.rgb, Y) - dot(bg, Y));
             curtain = bg * RAIN_CURTAIN;
         }
-        // The rain's own haze over the depth of the scene.
-        float veil = dot(u.rainK.xyz, RAIN_VEIL * vec3(1.0, 1.0, gust)) * depth;
+        // The rain's own haze over the depth of the scene: its own weights, which gather and
+        // thin slowly, so it lingers a while after the streaks stop.
+        float veil = dot(u.rainH.xyz, RAIN_VEIL * vec3(1.0, 1.0, gust)) * depth;
         if (veil > 0.0) { over(c, a, mix(hazed(u.rainC.rgb, 0.5), curtain, dark), veil); }
         // Splashes where the ray ended on an open solid top.
         int zi = int(zEnd);
