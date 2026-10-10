@@ -1928,6 +1928,9 @@ fn print_header() {
     // Parasite hatchlings: riders on a host now, then cumulative riders attached,
     // drop-offs at the detach size and riders freed by their host's departure.
     header.push_str(",riders_now,riders_attached,rider_dropoffs,riders_freed");
+    // LJ-HOSTSWITCH (2026-10-10): outgrown riders that set out for a bigger host, the new
+    // hosts taken and the give-ups (cumulative this session), and those looking now.
+    header.push_str(",host_switch_tried,host_switches,host_switch_gave_up,host_seekers");
     // Flowering and fruiting (plants-flowering-vines 2026-10-03): the latticevine's
     // covered faces (on walls, on undersides) and its spurs by phase, the organic matter
     // in its flowers and beads; bloomcrowns holding nectar and lanternberries hanging
@@ -2175,6 +2178,13 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
     row.push(l.rider_dropoffs.to_string());
     row.push(l.riders_freed.to_string());
     {
+        let t = sim.fauna().host_switches();
+        row.push(t.tried.to_string());
+        row.push(t.made.to_string());
+        row.push(t.gave_up.to_string());
+        row.push(sim.fauna().host_seekers().to_string());
+    }
+    {
         use cubarium_voxel_flora::SpurPhase;
         let faces = f.cover.faces();
         let phase = |p: SpurPhase| faces.iter().filter(|c| c.spur == p).count();
@@ -2406,10 +2416,13 @@ impl DeathLog {
 ///   phase (attach tick, the host's lineage, growth per hour on the host, how it let go
 ///   and at what age), its free phase (strikes begun, the lowest and last reserve as a
 ///   share of body, the largest body, whether it reached `birth_body`), and its death
-///   cause and age.
+///   cause and age. LJ-HOSTSWITCH: `host` is its last host, `first_host` its first, and
+///   `switches` the new hosts it took after outgrowing one; how it let go is of its last.
 /// - `lj_chain:` one summary per run: the summed dusk links, riders, free juveniles,
 ///   adults established, the lineage's strikes, hits, kills, intake and eggs laid over
-///   the run, and the first link with zero throughput.
+///   the run, the host switches (LJ-HOSTSWITCH: outgrown riders that set out for a bigger
+///   host, new hosts taken, give-ups, ones that grew to drop-off size while looking, and
+///   the new hosts by lineage), and the first link with zero throughput.
 struct LjChain {
     line: f64,
     clock_on: bool,
@@ -2423,6 +2436,7 @@ struct LjChain {
     bodies: std::collections::BTreeMap<u64, LjBody>,
     done: Vec<LjBody>,
     start: cubarium_voxel_fauna::FaunaLedger,
+    start_switch: cubarium_voxel_fauna::HostSwitchTally,
     last_deaths: [u64; Departure::COUNT],
 }
 
@@ -2433,6 +2447,8 @@ struct LjBody {
     rider: bool,
     host_lineage: Option<Founder>,
     host_id: Option<u64>,
+    first_host: Option<Founder>,
+    switches: u32,
     attach_body: f64,
     detach: Option<(&'static str, u64, f64)>,
     strikes: u64,
@@ -2465,6 +2481,7 @@ impl LjChain {
             bodies: Default::default(),
             done: Vec::new(),
             start: fa.ledger.clone(),
+            start_switch: sim.fauna().host_switches(),
             last_deaths: fa.ledger.deaths_by_founder_cause[Founder::Lanternjaw.index()],
         };
         lj.track(sim);
@@ -2597,11 +2614,21 @@ impl LjChain {
                     rider: a.attached.is_some(),
                     host_lineage: host.and_then(|h| h.founder),
                     host_id: host.map(|h| h.id),
+                    first_host: host.and_then(|h| h.founder),
                     attach_body: a.body,
                     min_reserve_share: f64::INFINITY,
                     ..LjBody::default()
                 }
             });
+            // LJ-HOSTSWITCH: an outgrown rider that took a new host rides again.
+            if b.rider && b.detach.is_some() && b.death.is_none() {
+                if let Some(h) = a.attached.and_then(|h| fa.animal(h.host)) {
+                    b.switches += 1;
+                    b.detach = None;
+                    b.host_lineage = h.founder;
+                    b.host_id = Some(h.id);
+                }
+            }
             if b.rider && b.detach.is_none() && a.attached.is_none() {
                 let line = fa.config.parasite_detach_body_fraction
                     * cubarium_voxel_fauna::effective_config(fa.config, a).body_max;
@@ -2680,11 +2707,13 @@ impl LjChain {
             "-".to_string()
         };
         eprintln!(
-            "lj_body: id={} born_min={:.1} host={} rider={} growth_per_h={} attach_body={:.5} \
+            "lj_body: id={} born_min={:.1} host={} first_host={} switches={} rider={} growth_per_h={} attach_body={:.5} \
              strikes={} min_reserve_share={} last_reserve_share={:.3} max_body={:.5} adult={} death={} tick={}",
             b.id,
             b.born_tick as f64 / TICKS_PER_MIN as f64,
             b.host_lineage.map_or("-", |f| f.name()),
+            b.first_host.map_or("-", |f| f.name()),
+            b.switches,
             rider,
             growth,
             b.attach_body,
@@ -2725,10 +2754,20 @@ impl LjChain {
         chain.push(("adult", adults as u64));
         chain.push(("bred", eggs_laid));
         let first = chain.iter().find(|(_, c)| *c == 0).map_or("none", |(n, _)| n);
+        let sw = sim.fauna().host_switches();
+        let hosts: Vec<String> = Founder::ALL
+            .iter()
+            .filter_map(|f| {
+                let n = sw.by_host[f.index()] - self.start_switch.by_host[f.index()];
+                (n > 0).then(|| format!("{}:{n}", f.name()))
+            })
+            .collect();
+        let switch_hosts = if hosts.is_empty() { "-".to_string() } else { hosts.join(",") };
         eprintln!(
             "lj_chain: dusks={} viable={} footfall={} unblocked={} host={} drawn={} hatched={} \
              off_dusk_hatches={} riders={} detached={} free_bodies={} adults={} strikes={} hits={} \
-             kills={} intake={:.5} carrion={:.5} eggs_laid={} eggs_died={} first_zero={}",
+             kills={} intake={:.5} carrion={:.5} eggs_laid={} eggs_died={} switch_tried={} switch_made={} \
+             switch_gave_up={} switch_grew={} switch_hosts={} first_zero={}",
             self.dusks,
             self.links[0], self.links[1], self.links[2], self.links[3], self.links[4], self.links[5],
             self.off_dusk_hatches,
@@ -2743,6 +2782,11 @@ impl LjChain {
             l.eaten_carrion_by_founder[k] - s.eaten_carrion_by_founder[k],
             eggs_laid,
             l.eggs_died - s.eggs_died,
+            sw.tried - self.start_switch.tried,
+            sw.made - self.start_switch.made,
+            sw.gave_up - self.start_switch.gave_up,
+            sw.grew - self.start_switch.grew,
+            switch_hosts,
             first,
         );
     }

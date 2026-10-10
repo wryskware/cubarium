@@ -1389,8 +1389,9 @@ pub fn rider_take_per_s(config: &FaunaConfig, rider_body: f64) -> f64 {
 /// **Whether a host bears a rider** of `rider_body` (LANTERNJAW-LIFE): the rider's take
 /// ([`FaunaConfig::parasite_take_body_per_day`] × its body) is no more than the host gives,
 /// [`FaunaConfig::parasite_host_bear_per_day`] × the host's body, both per world day. A
-/// rider its host no longer bears has outgrown it and drops off; a hatchling no host in
-/// reach bears stays in the egg.
+/// rider its host no longer bears has outgrown it and drops off (and looks for a host that
+/// does, [`FaunaConfig::parasite_switch`]); a hatchling no host in reach bears stays in
+/// the egg.
 pub fn host_bears(config: &FaunaConfig, rider_body: f64, host_body: f64) -> bool {
     config.parasite_take_body_per_day * rider_body <= config.parasite_host_bear_per_day * host_body
 }
@@ -2334,8 +2335,9 @@ pub struct FaunaConfig {
     /// **What a host can bear** (LANTERNJAW-LIFE): the host's body per world day it gives a
     /// rider at most. A rider whose take ([`FaunaConfig::parasite_take_body_per_day`] × its
     /// body) would exceed this × its host's body has **outgrown its host** and drops off,
-    /// below the normal drop-off size if need be, and does not look for another; a host that
-    /// cannot bear even a hatchling is no host. So "outgrows" is set by the take the host
+    /// below the normal drop-off size if need be, and then looks for a host that bears it
+    /// ([`FaunaConfig::parasite_switch`]); a host that cannot bear even a hatchling is no
+    /// host. So "outgrows" is set by the take the host
     /// can bear, a host-to-rider size ratio of `bear / take` (0.25 at the defaults). Default
     /// 0.5: a grown grazer (1.5) carries a rider to 0.375, past drop-off; a littershredder
     /// (0.375) lets go of it at about 0.09, a fifth of the way; a ripple-snail (0.15) can
@@ -2348,6 +2350,26 @@ pub struct FaunaConfig {
     /// `body_max` (0.074 ou at the shipped mass) in about 3 h at the 0.025 ou/h free
     /// juveniles were measured growing (`design/ecology-roles-2026-10-09.md` §1).
     pub parasite_detach_body_fraction: f64,
+    /// **Host switch** (LJ-HOSTSWITCH; Wrysk 2026-10-10: an outgrown larva looks for a
+    /// bigger host, "yes thats what i meant"): whether a rider that outgrew its host below
+    /// its drop-off size ([`FaunaConfig::parasite_detach_body_fraction`]) looks for another
+    /// that bears it ([`host_bears`] on that host's current body) before it goes free. It
+    /// walks to the nearest such host within [`FaunaConfig::parasite_switch_radius_m`]
+    /// (over its own heuristic only) and takes it on contact by the hatchlings' rule
+    /// (`parasite_attach_radius_m`); with none in reach it goes on as a free juvenile,
+    /// still taking one that comes within contact or sense, until
+    /// [`FaunaConfig::parasite_switch_give_up_s`]. A rider at or past its drop-off size
+    /// goes free as before. Default on; false is the earlier rule (outgrown means free).
+    pub parasite_switch: bool,
+    /// How far an outgrown rider senses a host that would bear it and walks to it, metres
+    /// (LJ-HOSTSWITCH). Default 3, the lanternjaw's tremor range (`senses.tremor_m`): it
+    /// feels a host's footfall that far off. Metres do not scale with mass.
+    pub parasite_switch_radius_m: f64,
+    /// How long an outgrown rider keeps looking for a bigger host, seconds (LJ-HOSTSWITCH),
+    /// after which it is a free juvenile like any other. Default 600 (ten minutes, a
+    /// twelfth of a world day): a short quest, long enough for a herd to come within its
+    /// sense range on most ground, short against the hours a free juvenile needs to grow.
+    pub parasite_switch_give_up_s: f64,
     /// Predation, threat perception, wounds and the egg bank ([`PredationConfig`]).
     pub predation: PredationConfig,
     /// The day's lines, the lifespan draw, the gut and the wall climb ([`LifeConfig`]).
@@ -2414,6 +2436,10 @@ impl Default for FaunaConfig {
             parasite_take_body_per_day: 2.0,
             parasite_host_bear_per_day: 0.5,
             parasite_detach_body_fraction: 0.28,
+            // Wrysk 2026-10-10: an outgrown larva looks for a bigger host.
+            parasite_switch: true,
+            parasite_switch_radius_m: 3.0,
+            parasite_switch_give_up_s: 600.0,
             predation: PredationConfig::default(),
             life: LifeConfig::default(),
             cue: CueConfig::default(),
@@ -4028,6 +4054,31 @@ pub struct Fauna {
     /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
     #[serde(skip)]
     pub(crate) wade_outs: [u64; Founder::COUNT],
+    /// LJ-HOSTSWITCH: per outgrown rider looking for a bigger host, by id, the tick it gives
+    /// up ([`FaunaConfig::parasite_switch_give_up_s`]). Session state, not saved: a loaded
+    /// world's seekers are free juveniles. A `BTreeMap`, so passes over it go in id order.
+    #[serde(skip)]
+    pub(crate) host_quests: std::collections::BTreeMap<u64, u64>,
+    /// LJ-HOSTSWITCH's readout ([`HostSwitchTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) host_switch: HostSwitchTally,
+}
+
+/// **LJ-HOSTSWITCH's readout** ([`Fauna::host_switches`]), since construction or load: what
+/// came of the riders that outgrew a host below their drop-off size. A diagnostic; no rule
+/// reads it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HostSwitchTally {
+    /// Outgrown riders that set out to find a host that bears them.
+    pub tried: u64,
+    /// Of those, the ones that took a new host.
+    pub made: u64,
+    /// The ones that found none within the give-up time and went free.
+    pub gave_up: u64,
+    /// The ones that grew to their drop-off size while looking, so needed no host.
+    pub grew: u64,
+    /// New hosts taken, by the host's lineage ([`Founder::index`]).
+    pub by_host: [u64; Founder::COUNT],
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -4068,11 +4119,13 @@ pub enum Steer {
     Nest,
     /// WADE-OUT: a held walker's way out through water past its wade depth.
     Wade,
+    /// LJ-HOSTSWITCH: an outgrown rider's walk to a new host.
+    Host,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 17] = [
+    pub const ALL: [Steer; 18] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4090,6 +4143,7 @@ impl Steer {
         Steer::Search,
         Steer::Nest,
         Steer::Wade,
+        Steer::Host,
     ];
 
     /// A short name for tables.
@@ -4112,6 +4166,7 @@ impl Steer {
             Steer::Search => "search",
             Steer::Nest => "nest",
             Steer::Wade => "wade",
+            Steer::Host => "host",
         }
     }
 }
@@ -4453,6 +4508,8 @@ impl Fauna {
             drop_plans: FxHashMap::default(),
             wading: FxHashMap::default(),
             wade_outs: [0; Founder::COUNT],
+            host_quests: std::collections::BTreeMap::new(),
+            host_switch: HostSwitchTally::default(),
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
@@ -4824,6 +4881,16 @@ impl Fauna {
     /// WADE-OUT's ways out walked to their end, per lineage ([`Founder::index`]), this session.
     pub fn wade_outs(&self) -> [u64; Founder::COUNT] {
         self.wade_outs
+    }
+
+    /// LJ-HOSTSWITCH's readout, this session ([`HostSwitchTally`]).
+    pub fn host_switches(&self) -> HostSwitchTally {
+        self.host_switch
+    }
+
+    /// LJ-HOSTSWITCH: the outgrown riders looking for a bigger host now.
+    pub fn host_seekers(&self) -> usize {
+        self.host_quests.len()
     }
 
     /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on

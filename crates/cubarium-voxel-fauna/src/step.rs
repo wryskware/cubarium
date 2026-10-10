@@ -586,9 +586,12 @@ fn drain_riders(fauna: &mut Fauna) {
 /// from here on, when it reaches its detach size — `parasite_detach_body_fraction` × its
 /// lineage's `body_max` — or (LANTERNJAW-LIFE, Wrysk 2026-10-10: "they should drop off when
 /// theyre too big") when it has **outgrown its host**: its host no longer bears its take
-/// ([`crate::host_bears`]), whatever its size. It does not look for another host.
+/// ([`crate::host_bears`]), whatever its size. One that outgrew its host below its detach
+/// size then looks for a host that bears it (LJ-HOSTSWITCH, [`seek_hosts`]) while
+/// `parasite_switch` is on.
 fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let fraction = fauna.config.parasite_detach_body_fraction;
+    let give_up = cubarium_voxel::ticks_at_least_one(fauna.config.parasite_switch_give_up_s);
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
             continue;
@@ -605,7 +608,89 @@ fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
         crate::release(&mut fauna.animals[r], &host);
         fauna.step_off_beside(view, r, &host);
         fauna.ledger.rider_dropoffs += 1;
+        if rider < line && fauna.config.parasite_switch {
+            fauna.host_quests.insert(fauna.animals[r].id, fauna.tick + give_up);
+            fauna.host_switch.tried += 1;
+        }
     }
+    seek_hosts(fauna, view);
+}
+
+/// Step 2, after the drop-offs: **an outgrown rider takes a new host** (LJ-HOSTSWITCH; Wrysk
+/// 2026-10-10: an outgrown larva looks for a bigger host). Each one looking, in id order,
+/// takes the nearest host that bears it within `parasite_attach_radius_m` — the hatchlings'
+/// rule, [`bearing_host`] — onto its back as a hatchling does. One at or past its detach
+/// size needs none and stops looking; one past its give-up tick goes on free. The walk to a
+/// host farther off is its heuristic's ([`host_seek`]).
+fn seek_hosts(fauna: &mut Fauna, view: &VoxelView<'_>) {
+    if fauna.host_quests.is_empty() {
+        return;
+    }
+    let tick = fauna.tick;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let fraction = fauna.config.parasite_detach_body_fraction;
+    let quests: Vec<(u64, u64)> = fauna.host_quests.iter().map(|(&id, &until)| (id, until)).collect();
+    for (id, until) in quests {
+        let Ok(r) = fauna.animals.binary_search_by_key(&id, |a| a.id) else {
+            // Gone (eaten, starved): nothing to tally.
+            fauna.host_quests.remove(&id);
+            continue;
+        };
+        let a = fauna.animals[r];
+        let Some(lineage) = a.founder else {
+            fauna.host_quests.remove(&id);
+            continue;
+        };
+        if a.attached.is_some() {
+            fauna.host_quests.remove(&id);
+            continue;
+        }
+        if a.body >= fraction * body::effective_config(&fauna.config, &a).body_max {
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.grew += 1;
+            continue;
+        }
+        let at = (a.pose.x, a.pose.z);
+        // Mid-strike or on a wall it finishes first; it takes a host from the ground.
+        let free = a.strike.is_none() && a.mobility.climb.is_none();
+        let radius = fauna.config.parasite_attach_radius_m;
+        if let Some(host) = free.then(|| bearing_host(fauna, &[], lineage, a.body, at, radius, ring)).flatten() {
+            let rider = &mut fauna.animals[r];
+            rider.attached = Some(crate::Attachment { host: host.id });
+            rider.site = host.site;
+            rider.pose = host.pose;
+            fauna.drop_plans.remove(&id);
+            fauna.wading.remove(&id);
+            fauna.trapped.remove(&id);
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.made += 1;
+            if let Some(f) = host.founder {
+                fauna.host_switch.by_host[f.index()] += 1;
+            }
+            continue;
+        }
+        if tick >= until {
+            fauna.host_quests.remove(&id);
+            fauna.host_switch.gave_up += 1;
+        }
+    }
+}
+
+/// The write side's **host seek** (LJ-HOSTSWITCH): an outgrown rider looking for a new host,
+/// over its own heuristic, walks straight at the nearest host that bears it within
+/// `parasite_switch_radius_m` ([`bearing_host`]); `None` when it is not looking or none is
+/// in reach, and its heuristic goes on (a lanternjaw is fast: it runs a host down rather
+/// than waiting for one to pass, and hunts meanwhile when none is near).
+fn host_seek(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = &fauna.animals[i];
+    if a.attached.is_some() || !fauna.host_quests.contains_key(&a.id) {
+        return None;
+    }
+    let lineage = a.founder?;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let host = bearing_host(fauna, &[], lineage, a.body, (a.pose.x, a.pose.z), fauna.config.parasite_switch_radius_m, ring)?;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, host.pose.x, host.pose.z, ring);
+    Some(glider::walk_toward(a, dx, dz, 0.0))
 }
 
 /// After the act: **every rider is carried** to its host's place (§2) — the host's face,
@@ -1888,6 +1973,15 @@ fn controllers(
                     lure = 0.0;
                     src = crate::Steer::Yield;
                 }
+            }
+        }
+        // LJ-HOSTSWITCH: an outgrown rider looking for a new host walks to the nearest one
+        // in reach that bears it, over its patrol (its own heuristic only).
+        if driven && patrol {
+            if let Some(go) = host_seek(fauna, i, view) {
+                actions = go;
+                lure = 0.0;
+                src = crate::Steer::Host;
             }
         }
         if driven && pack {
@@ -5704,19 +5798,35 @@ fn dormant_eggs(
     }
 }
 
-/// **A hatching egg's host** (parasite §1): the nearest living animal not of the egg's own
-/// lineage, and not itself riding, within `parasite_attach_radius_m` of the egg's column
-/// centre (wrapped on the ring), carrying fewer than `parasite_max_per_host` riders —
-/// this tick's hatchlings counted — and able to bear a hatchling ([`crate::host_bears`],
-/// LANTERNJAW-LIFE). A tie goes to the lower id.
+/// **A hatching egg's host** (parasite §1): [`bearing_host`] for a `body_min` hatchling of
+/// the egg's lineage within `parasite_attach_radius_m` of the egg's column centre.
 fn host_for(
     fauna: &Fauna,
     newborns: &[Animal],
     c: &crate::Clutch,
-    (ex, ez): (f64, f64),
+    at: (f64, f64),
     ring: f64,
 ) -> Option<Animal> {
-    let radius = fauna.config.parasite_attach_radius_m;
+    let body = fauna.config.founder(c.lineage).core.body_min;
+    bearing_host(fauna, newborns, c.lineage, body, at, fauna.config.parasite_attach_radius_m, ring)
+}
+
+/// **The nearest host that bears a rider** (parasite §1; the one rule both a hatching egg
+/// and an outgrown rider looking for a new host, LJ-HOSTSWITCH, take a host by): the
+/// nearest living animal not of the rider's `lineage`, and not itself riding, within
+/// `radius` of `(x, z)` (wrapped on the ring, horizontal), carrying fewer than
+/// `parasite_max_per_host` riders — `newborns` counted — and able to bear a rider of
+/// `rider_body` on its current body ([`crate::host_bears`], LANTERNJAW-LIFE). A tie goes
+/// to the lower id.
+pub(crate) fn bearing_host(
+    fauna: &Fauna,
+    newborns: &[Animal],
+    lineage: crate::Founder,
+    rider_body: f64,
+    (x, z): (f64, f64),
+    radius: f64,
+    ring: f64,
+) -> Option<Animal> {
     let most = fauna.config.parasite_max_per_host;
     let riders = |id: u64| {
         fauna
@@ -5728,19 +5838,19 @@ fn host_for(
     };
     let mut best: Option<(f64, Animal)> = None;
     for a in &fauna.animals {
-        if a.founder == Some(c.lineage) || a.attached.is_some() {
+        if a.founder == Some(lineage) || a.attached.is_some() {
             continue;
         }
-        let (dx, dz) = crate::pose::wrapped_delta(ex, ez, a.pose.x, a.pose.z, ring);
+        let (dx, dz) = crate::pose::wrapped_delta(x, z, a.pose.x, a.pose.z, ring);
         let d = (dx * dx + dz * dz).sqrt();
         if d > radius || best.is_some_and(|(b, _)| d >= b) {
             continue;
         }
-        if riders(a.id) >= most as usize {
+        // LANTERNJAW-LIFE: a host that cannot bear the rider is no host.
+        if !crate::host_bears(&fauna.config, rider_body, a.body) {
             continue;
         }
-        // LANTERNJAW-LIFE: a host that cannot bear even a hatchling is no host.
-        if !crate::host_bears(&fauna.config, fauna.config.founder(c.lineage).core.body_min, a.body) {
+        if riders(a.id) >= most as usize {
             continue;
         }
         best = Some((d, *a));
