@@ -97,7 +97,7 @@ fn a_group_over_its_limit_does_not_remove_established_adults_on_a_later_tick() {
 }
 
 #[test]
-fn simultaneous_maturations_share_the_family_they_had_before_growth() {
+fn simultaneous_maturations_a_calf_that_stays_counts_for_the_next() {
     let world = clock_off(503);
     let mut f = Fauna::new(configuration(L, 2, DispersalAt::Adult));
     let mut plants = flora();
@@ -107,41 +107,69 @@ fn simultaneous_maturations_share_the_family_they_had_before_growth() {
     let crossed = grow_and_disperse(&mut f, &world, &mut plants);
     assert_eq!(crossed, vec![one, two]);
     assert!(alive(&f, parent));
-    assert_eq!(usize::from(alive(&f, one)) + usize::from(alive(&f, two)), 1);
+    assert!(alive(&f, one), "parent plus the first calf is the limit");
+    assert!(!alive(&f, two), "the first calf now counts as established");
     assert_eq!(f.ledger.dispersed_by_founder[L.index()], 1);
 }
 
 #[test]
-fn family_assignment_is_unique_nearest_adult_with_wrapped_x_and_a_radius() {
-    let world = clock_off(504);
-    let ring = f64::from(world.config().width) * world.config().voxel_m;
-    for (parent_x, calf_x, sibling_x, should_leave) in
-        [(0.1, ring - 0.1, 0.2, true), (2.0, 2.1, 3.0, false)]
-    {
-        let mut f = Fauna::new(configuration(L, 2, DispersalAt::Adult));
+fn the_herd_is_every_adult_chained_within_comfort_and_only_adults_count() {
+    // comfort_m is 0.75. Adults at 2.0, 2.6 and 3.2 form one herd by chain although the
+    // ends are 1.2 m apart; the calf at 3.7 is beside the last only.
+    for (adults, maximum, leaves) in [(3usize, 3u32, true), (3, 4, false), (2, 3, false), (2, 2, true)] {
+        let world = clock_off(504);
+        let mut f = Fauna::new(configuration(L, maximum, DispersalAt::Adult));
         let mut plants = flora();
-        let parent = member(&mut f, &world, L, parent_x, 1.5, false);
-        let calf = member(&mut f, &world, L, calf_x, 1.5, true);
-        member(&mut f, &world, L, sibling_x, 1.5, true);
-        // Only the calf crosses; the sibling stays young.
-        let sibling = f.animals.last_mut().unwrap();
-        sibling.reserve = 0.0;
-        grow_and_disperse(&mut f, &world, &mut plants);
-        assert!(alive(&f, parent));
-        assert_eq!(!alive(&f, calf), should_leave);
+        let xs = [3.2, 2.6, 2.0];
+        let kept: Vec<u64> = xs[..adults]
+            .iter()
+            .map(|&x| member(&mut f, &world, L, x, 1.5, false))
+            .collect();
+        let calf = member(&mut f, &world, L, 3.7, 1.5, true);
+        // Dependent young in the herd never count, however many.
+        for x in [2.3, 2.9, 3.4] {
+            let y = member(&mut f, &world, L, x, 1.5, true);
+            animal_mut(&mut f, y).reserve = 0.0;
+        }
+        let crossed = grow_and_disperse(&mut f, &world, &mut plants);
+        assert_eq!(crossed, vec![calf]);
+        assert!(kept.iter().all(|&id| alive(&f, id)), "adults never leave");
+        assert_eq!(!alive(&f, calf), leaves, "{adults} adults, limit {maximum}");
+        assert_eq!(f.ledger.deaths_accounted(), 0);
     }
-    // A calf inside both radii belongs only to its nearer adult. Crowding around
-    // the other adult must not turn two separate families into one group.
+}
+
+#[test]
+fn separate_herds_are_counted_separately_and_x_wraps() {
+    let world = clock_off(505);
+    let ring = f64::from(world.config().width) * world.config().voxel_m;
     let mut f = Fauna::new(configuration(L, 2, DispersalAt::Adult));
     let mut plants = flora();
-    let nearer = member(&mut f, &world, L, 2.0, 1.5, false);
-    let farther = member(&mut f, &world, L, 2.8, 1.5, false);
-    let calf = member(&mut f, &world, L, 2.2, 1.5, true);
-    let sibling = member(&mut f, &world, L, 2.9, 1.5, true);
-    animal_mut(&mut f, sibling).reserve = 0.0;
+    // Herd one straddles the seam: adults at 0.1 and ring - 0.3, a calf at ring - 0.8.
+    let a = member(&mut f, &world, L, 0.1, 1.5, false);
+    let b = member(&mut f, &world, L, ring - 0.3, 1.5, false);
+    let seam_calf = member(&mut f, &world, L, ring - 0.8, 1.5, true);
+    // Herd two, far away: one adult and its calf.
+    let c = member(&mut f, &world, L, 6.0, 1.5, false);
+    let far_calf = member(&mut f, &world, L, 6.3, 1.5, true);
     grow_and_disperse(&mut f, &world, &mut plants);
-    assert!(alive(&f, nearer) && alive(&f, farther) && alive(&f, calf));
-    assert_eq!(f.ledger.dispersed_by_founder[L.index()], 0);
+    assert!(alive(&f, a) && alive(&f, b) && alive(&f, c));
+    assert!(!alive(&f, seam_calf), "two adults across the seam plus the calf exceed 2");
+    assert!(alive(&f, far_calf), "the far herd has one adult plus its calf");
+    assert_eq!(f.ledger.dispersed_by_founder[L.index()], 1);
+}
+
+#[test]
+fn herd_labels_join_chains_and_wrap_x() {
+    let world = clock_off(512);
+    let ring = f64::from(world.config().width) * world.config().voxel_m;
+    let mut f = Fauna::new(FaunaConfig::default());
+    for x in [0.2, ring - 0.2, 5.0, 5.5, 6.0, 9.0] {
+        member(&mut f, &world, L, x, 1.5, false);
+    }
+    let refs: Vec<&crate::Animal> = f.animals.iter().collect();
+    assert_eq!(crate::herd_labels(&refs, 0.6, ring), vec![0, 0, 2, 2, 2, 5]);
+    assert_eq!(crate::herd_labels(&refs, 0.3, ring), vec![0, 1, 2, 3, 4, 5]);
 }
 
 #[test]
@@ -312,6 +340,43 @@ fn repeated_veilhound_cohorts_keep_the_breeder_and_limit_independent_members() {
     }
     assert!(f.ledger.dispersed_by_founder[V.index()] > 0);
     assert_eq!(f.ledger.deaths_accounted(), 0);
+}
+
+#[test]
+fn dependent_pups_do_not_count_and_an_independent_pup_counts_established_plus_itself() {
+    for (maximum, leaves) in [(3u32, false), (2, true)] {
+        let world = clock_off(513);
+        let mut c = configuration(V, maximum, DispersalAt::Independent);
+        c.founders[V.index()].core.reserve_cap = 100.0;
+        let p = c.founders[V.index()].pack.as_mut().unwrap();
+        p.pack_size = 2;
+        p.independence_age_s = 0.1;
+        let mut f = Fauna::new(c);
+        assert!(f.apply(
+            &world,
+            crate::Command::FoundPack {
+                den: Site { x: 8, y: SURFACE_Y, z: 6 },
+                founder: V,
+                stores: StartingStores::FULL,
+                heading_rad: EAST
+            }
+        ));
+        let pack = f.packs()[0].id;
+        let breeder = f.pack(pack).unwrap().breeder.unwrap();
+        let adults: Vec<u64> = f.animals.iter().map(|a| a.id).collect();
+        assert_eq!(adults.len(), 2);
+        f.set_reserve_fraction(breeder, 1.0);
+        let pups = f.whelp(&world.view(), pack, 4).unwrap();
+        assert!(pups.len() > 1, "a litter larger than one");
+        let mut plants = flora();
+        // One pup reaches independence; its siblings stay dependent at the den.
+        animal_mut(&mut f, pups[0]).age_ticks = 3;
+        independence(&mut f, &world, &mut plants);
+        assert!(pups[1..].iter().all(|&id| alive(&f, id)), "dependent pups never leave");
+        assert_eq!(!alive(&f, pups[0]), leaves, "2 adults plus itself against limit {maximum}");
+        assert!(adults.iter().all(|&id| alive(&f, id)));
+        assert_eq!(f.pack(pack).unwrap().breeder, Some(breeder));
+    }
 }
 
 #[test]

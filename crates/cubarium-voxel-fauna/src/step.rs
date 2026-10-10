@@ -1204,9 +1204,15 @@ fn grow(fauna: &mut Fauna) -> Vec<u64> {
     matured
 }
 
-/// Only this tick's transition candidates can leave. For families the candidates still
-/// count as young throughout this pass, preserving their pre-growth nearest-adult group.
-/// Dependent young count toward the limit; established adults never become candidates.
+/// Only this tick's transition candidates can leave. A candidate leaves when its group's
+/// **established** members plus itself exceed `group_max`:
+/// - a pack's group is its record; established is every member past independence (not a
+///   pup), so pups at the den never count; the breeder never leaves;
+/// - a herding-young lineage's group is its herd ([`crate::herd_labels`]: chains within
+///   `herding.comfort_m`, x wrapping); established is every adult.
+///
+/// Candidates still to be judged are not established yet; one that stays counts for the
+/// candidates after it, so the order of a tick's arrivals cannot overfill a group.
 fn disperse(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
@@ -1216,7 +1222,8 @@ fn disperse(
 ) {
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let mut pack_changed = false;
-    for &id in candidates {
+    for (k, &id) in candidates.iter().enumerate() {
+        let pending = &candidates[k + 1..];
         let Some(i) = fauna.animals.iter().position(|a| a.id == id) else {
             continue;
         };
@@ -1227,7 +1234,7 @@ fn disperse(
         if !d.enabled || d.at != at {
             continue;
         }
-        let count = if let Some(m) = a.pack {
+        let established = if let Some(m) = a.pack {
             let Some(pack) = fauna.packs().iter().find(|p| p.id == m.pack) else {
                 continue;
             };
@@ -1237,7 +1244,11 @@ fn disperse(
             fauna
                 .animals
                 .iter()
-                .filter(|a| a.pack.is_some_and(|p| p.pack == m.pack))
+                .filter(|o| {
+                    o.id != id
+                        && !pending.contains(&o.id)
+                        && o.pack.is_some_and(|p| p.pack == m.pack && !p.pup)
+                })
                 .count()
         } else {
             if at != crate::DispersalAt::Adult
@@ -1246,32 +1257,22 @@ fn disperse(
             {
                 continue;
             }
-            let young = |a: &Animal| a.body < phys.core.birth_body || candidates.contains(&a.id);
-            let adults: Vec<&Animal> = fauna
-                .animals
+            let lineage: Vec<&Animal> =
+                fauna.animals.iter().filter(|o| o.founder == Some(f)).collect();
+            let herd = crate::herd_labels(&lineage, phys.herding.comfort_m, ring);
+            let Some(me) = lineage.iter().position(|o| o.id == id) else { continue };
+            lineage
                 .iter()
-                .filter(|a| a.founder == Some(f) && !young(a))
-                .collect();
-            // Match Edit::thin: x wraps, z does not, and a distance tie goes to the
-            // first adult in animal order. Each young belongs to at most one adult.
-            let family = |y: &Animal| {
-                adults
-                    .iter()
-                    .map(|a| {
-                        let dx = (a.pose.x - y.pose.x).rem_euclid(ring);
-                        (a.id, dx.min(ring - dx).hypot(a.pose.z - y.pose.z))
-                    })
-                    .filter(|(_, distance)| *distance <= phys.herding.comfort_m)
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                    .map(|(id, _)| id)
-            };
-            let Some(parent) = family(a) else { continue };
-            1 + fauna
-                .animals
-                .iter()
-                .filter(|a| a.founder == Some(f) && young(a) && family(a) == Some(parent))
+                .zip(&herd)
+                .filter(|(o, h)| {
+                    **h == herd[me]
+                        && o.id != id
+                        && !pending.contains(&o.id)
+                        && o.body >= phys.core.birth_body
+                })
                 .count()
         };
+        let count = established + 1;
         if count <= d.group_max as usize {
             continue;
         }

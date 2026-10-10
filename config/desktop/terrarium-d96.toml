@@ -109,9 +109,9 @@ core.reproduction.gestation_s = 14400.0
 core.reproduction.litters_per_year = 1 # one conception per adult per year
 core.reproduction.breeding_phase = 0.8 # +0.4 gestation births at 0.2, after the dry season
 core.reproduction.breeding_window = 0.15 # births span 0.2–0.35 of the wetter growing season
-# Wrysk's band is 2–6: only a calf just attaining adult size leaves an oversized family.
+# Role call 1 (B): a calf reaching adult size leaves when the herd's adults plus itself exceed group_max.
 dispersal.enabled = true
-dispersal.group_max = 6 # adult plus its nearest young within herding comfort_m
+dispersal.group_max = 3 # 3 adults plus that year's calves: a herd of 3–6
 dispersal.at = "adult"
 core.reproduction.surplus_hold_s = 548.9126829596756
 
@@ -182,9 +182,10 @@ core.reproduction.surplus_hold_s = 548.9126829596756
 # pups and a territory. The count is packs of pack_size (4) adults; the code default is
 # 0, so training worlds are unchanged.
 [fauna.founders.chorister]
-# Shared dispersal is available for tests; shipping waits for Wrysk's role call 2.
-dispersal.enabled = false
-dispersal.at = "independent"
+# Role call 2 (B1): young leave once grown; pups still at the den do not count.
+dispersal.enabled = true # Wrysk chose B1
+dispersal.at = "independent" # judged when a pup reaches independence
+dispersal.group_max = 4 # a pack of 4 adults plus up to 4 pups at the den
 founding_count = 1
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.00032136258730417914

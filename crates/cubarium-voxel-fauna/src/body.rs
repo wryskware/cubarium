@@ -577,7 +577,7 @@ pub struct FounderPhysiology {
     /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
     #[serde(default)]
     pub herding: crate::Herding,
-    /// Young leaving an oversized pack or nearest-adult family, with all matter returned
+    /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
     pub dispersal: crate::Dispersal,

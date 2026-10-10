@@ -361,9 +361,10 @@ impl<'a> Edit<'a> {
     // ------------------------------------------------------------ bulk helpers
 
     /// **Thin `founder` to `keep` bodies**, chosen at random by `seed`, groups kept whole:
-    /// - a pack is one group (its pups with it); a loftstrider-style family (a lineage whose
-    ///   herding pulls only its young) is an adult with the young nearest it within its
-    ///   herding `comfort_m`; every other body is its own group;
+    /// - a pack is one group (its pups with it); a loftstrider-style herd (a lineage whose
+    ///   herding pulls only its young) is every body joined by chains within its herding
+    ///   `comfort_m` ([`cubarium_voxel_fauna::herd_labels`], as dispersal counts it); every
+    ///   other body is its own group;
     /// - whole groups go, in a shuffled order, while that leaves at least `keep`;
     /// - then, to land exactly on `keep`, the next group loses members — young first (the
     ///   youngest first), then adults other than a pack's breeder — so it keeps at least one
@@ -402,34 +403,24 @@ impl<'a> Edit<'a> {
                 groups.push((format!("pack {}", p.id), m.iter().map(|a| a.id).collect()));
             }
         } else if phys.herding.young_only && phys.herding.comfort_m > 0.0 {
-            let adults: Vec<&cubarium_voxel_fauna::Animal> = bodies.iter().filter(|a| !young(a)).collect();
-            let mut fam: Vec<Vec<u64>> = adults.iter().map(|a| vec![a.id]).collect();
-            for y in bodies.iter().filter(|a| young(a)) {
-                let near = adults
-                    .iter()
-                    .enumerate()
-                    .map(|(k, a)| {
-                        let dx = (a.pose.x - y.pose.x).rem_euclid(ring);
-                        (k, dx.min(ring - dx).hypot(a.pose.z - y.pose.z))
-                    })
-                    .filter(|(_, d)| *d <= phys.herding.comfort_m)
-                    .min_by(|a, b| a.1.total_cmp(&b.1));
-                if let Some((k, _)) = near {
-                    let at = fam[k].len() - 1;
-                    fam[k].insert(at, y.id);
+            // The herd, as dispersal counts it: chains within comfort_m, x wrapping.
+            let refs: Vec<&cubarium_voxel_fauna::Animal> = bodies.iter().collect();
+            let herd = cubarium_voxel_fauna::herd_labels(&refs, phys.herding.comfort_m, ring);
+            for (k, a) in bodies.iter().enumerate() {
+                if herd[k] != k {
+                    continue;
                 }
-            }
-            let age = |id: &u64| bodies.iter().find(|a| a.id == *id).map_or((true, 0), |a| (!young(a), a.age_ticks));
-            for f in &mut fam {
-                f.sort_by_key(age);
-            }
-            for (k, f) in fam.into_iter().enumerate() {
-                if f.len() > 1 {
-                    for id in &f {
-                        grouped.insert(*id, groups.len());
-                    }
-                    groups.push((format!("family of {}", adults[k].id), f));
+                let mut h: Vec<&cubarium_voxel_fauna::Animal> =
+                    bodies.iter().zip(&herd).filter(|(_, l)| **l == k).map(|(b, _)| b).collect();
+                if h.len() < 2 {
+                    continue;
                 }
+                // Young youngest first, then adults youngest first.
+                h.sort_by_key(|b| (!young(b), b.age_ticks, b.id));
+                for b in &h {
+                    grouped.insert(b.id, groups.len());
+                }
+                groups.push((format!("herd of {}", a.id), h.iter().map(|b| b.id).collect()));
             }
         }
         for a in &bodies {
