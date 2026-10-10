@@ -204,9 +204,67 @@ flight/perch code in `cubarium-voxel-fauna`) and how the figure pass draws it th
 - **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, in the
   state it feeds in (hovering or perched), adult and the smallest bin.
 
+### The small ground feeders: capgnawer, littershredder, ripple-snail (one package)
+
+Bellwing merged (edaa8469). Lesson from the bellwing and lanternjaw: at 125 mm a small part
+owns 0–3 cells, so a clip shows mostly as the whole front moving. These three are small
+(0.2–0.3 m), so keep each clip to what can read: the front of the body. One rig and clip
+each, same pattern (`RIGS` in `bake_voxel_models.py`; all three stay specimens there,
+`AS_SPECIMEN`, unless the founder bins are already theirs: check the manifest).
+
+- **Capgnawer** (`capgnawer()`; glowcap grazer): two mantle lobes with a central cleft, six
+  mandibles in three stacked pairs round a vertical mouth under the cleft. Bones: root,
+  a front (head/mandible) bone. Clip: the front dips to the cap ahead and gnaws, a small
+  forward-back rasp 0.3 s, three times, then a lift 0.4 s; the lobes stay on the root.
+- **Littershredder** (`littershredder()`; detritus feeder): a blunt plough at the front,
+  gold plates, seven pairs of short legs, two pale feelers curling down under the plough's
+  lip. Bones: root, the plough (head) bone, the feelers if they own cells. Clip: the plough
+  pushes down and forward into the litter about 1 cm and lifts, 0.35 s each, rocking a
+  little side to side; the feelers sweep.
+- **Ripple-snail** (`ripple_snail()`; film grazer): a dome shell on a dark foot, a pale
+  mantle skirt, an open front with two palps reaching forward and down. Bones: root
+  (shell, foot), the front (opening and palps). Clip: the front lowers and the palps sweep
+  side to side over the film, 0.5 s a sweep, with a slow shell bob.
+- Report cells per bone for each, both voxel sizes; if a part owns no cell at 125 mm, say
+  so rather than enlarging it (that is Wrysk's call).
+- **Evidence** as above, one MP4 per species (`<name>-feed-px{6,12}.mp4`).
+
+### Seedporter fruit arms get a voxel (after Wrysk saw the clip)
+
+Seedporter merged (3e107bd1): at 125 mm the small fruit arms own no cells in either pose
+(the folded membrane and the chest take every cell in front of the body), so the clip
+shows only as the head moving. Wrysk: "if youre rigging them in which case sure give them
+a voxel."
+
+- In the bake, give each fruit arm's hand (and the fruit, already on `hand_l`) at least
+  one cell of its own in the rigged pose models (`seedporter-stand`, `seedporter-ground`),
+  the way the eyes are guaranteed theirs (the worker who rigged it pointed at that
+  mechanism; find it in `bake_voxel_models.py` / `animal_models.py`). The cell must sit
+  on the hand bone, in front of the chest, so the reach and pluck show. Report what the
+  pose models look like at rest after it (a still, today | after, both poses, 6 px and
+  12 px), since a new cell changes the resting silhouette.
+- Rebake the two pose models and their rigs (specimen path); report cells per bone.
+- Evidence: the feed MP4 again, today (main) | after, `seedporter-feed-r2-px{6,12}.mp4`.
+
+### Small feeders round 2: the front owns its cells
+
+Small feeders merged (f013da6d): at 125 mm the littershredder's plough and the
+ripple-snail's front own no cells (the root claims them), and the capgnawer's front owns
+one, so the clips barely show. The seedporter's hands (7d85b28b) got cells of their own by
+`own_cells` (a claimed extra cell), which made its front three cells wide, wider than the
+chest. Wrysk's rule: a rigged part gets a voxel.
+
+- Prefer **reassigning** over adding: give the front bone the body's front-most cells by
+  position (as the Veilhound's neck and the lanternjaw's head are split: cells ahead of a
+  plane), so the silhouette doesn't change and the front moves. Use `own_cells` only where
+  a part has no cell at all after that, and say where.
+- Littershredder (all 5 bins), ripple-snail, capgnawer; both voxel sizes. Report cells per
+  bone before/after, and a rest still today | after (6 px, 12 px) to show the silhouette
+  holds.
+- Evidence: the three feed MP4s again, today (main) | after, `<name>-feed-r2-px{6,12}.mp4`.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), capgnawer, littershredder,
-ripple-snail. Then sleep, idle and hunker move onto the rig.
+open look question). Then sleep, idle and hunker move onto the rig.
 
 ## Return
 

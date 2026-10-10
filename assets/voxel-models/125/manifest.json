@@ -5093,20 +5093,20 @@
    ]
   },
   "seedporter-stand": {
-   "bytes": 276,
+   "bytes": 299,
    "bins": [
     {
      "length_m": 0.31,
-     "cells": 39
+     "cells": 42
     }
    ]
   },
   "seedporter-ground": {
-   "bytes": 289,
+   "bytes": 299,
    "bins": [
     {
      "length_m": 1.14,
-     "cells": 40
+     "cells": 42
     }
    ]
   },
@@ -5148,6 +5148,10 @@
   "loftstrider": "loftstrider.rig",
   "seedporter-stand": "seedporter-stand.rig",
   "seedporter-ground": "seedporter-ground.rig",
-  "lanternjaw": "lanternjaw.rig"
+  "lanternjaw": "lanternjaw.rig",
+  "bellwing": "bellwing.rig",
+  "littershredder": "littershredder.rig",
+  "ripple-snail": "ripple-snail.rig",
+  "capgnawer": "capgnawer.rig"
  }
 }

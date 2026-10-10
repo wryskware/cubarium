@@ -1076,6 +1076,16 @@ control and the reward accounting; display targets after seeing results.
      and a tripwire at minute 20+ with `--expect-metric`. Then LABD, approved by Wrysk ("go with scope ...
      generic interface so that its easily extensible"): one service owns every job across desktop, eidolon
      and EC2 (EC2 only on his approve), with snapshot builds and one event feed. Dispatched.
+   - LABD merged 8352f2fe and runs as `labd.service`. Agent cargo builds are now -j 8 in the idle CPU and
+     IO classes (Wrysk: "my machine gets bombed with rust-lld"). LJ-HOSTSWITCH (39b9b172) is the first labd
+     effect check.
+   - ROLES5 merged eba6ded5 after the rerun with the branch's own config (wide, seeds 1-4, 5 h).
+     - Frondgrazer: births 8.0-8.4/h against 22.8-27.2, and N 55-57 against 124-138 (predicted 40-90).
+     - Capgnawer: unchanged. N was 15-42, and caps were 0-2.7 % of intake against 0-4.6 %; it still eats
+       about 97 % litter.
+     - CAPGNAWER-CAPS (Opus) is diagnosing why, keeping Wrysk's mechanism A.
+     - HUNT-ESCAPE (Opus) is building role call 8 B (bellwings react and flush, so ground hunters usually
+       miss; the lanternjaw lure must still work) and grown lanternjaws wounding attackers.
    - Library 2026-10-09 done: 8 seeds x 600 min, all exit 0 (built before the role changes).
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,

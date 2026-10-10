@@ -145,6 +145,14 @@ FOUNDER_POSES = {"frondgrazer-hunker": "frondgrazer"}
 # ratio, which its table keeps by volume).
 SPECIMEN_YOUNG = {"chorister": [0.46]}
 
+# Founders `source.json` lists (since it was regenerated, 71afcbb0) that are still baked as
+# their specimen, one adult bin at the builder's reference size, as the presenter draws them
+# today: the founder path would scale the bellwing to its sim body (0.125 x 0.125 x
+# 0.0625 m), squashing the picked model (0.375 m wingspan) to 3 cells (FEED-ROLLOUT,
+# 2026-10-10). The other four newly listed founders are committed as specimens too, so a
+# full bake keeps them as they are until each gets its own founder bins on purpose.
+AS_SPECIMEN = {"bellwing", "capgnawer", "ripple-snail", "seedporter", "chorister"}
+
 # A founder's other life stage, baked as a specimen of one bin at its built (true) size:
 # name -> `animal_models.lanternjaw_larva` kind. The lanternjaw's rider larva, the
 # leechfork (Wrysk 2026-10-09, D16), drawn while it rides a host
@@ -564,7 +572,49 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
             if bones is not None:
                 c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
                 bones[key] = A.part_bone(bone, c)
+    if bones is not None:
+        own_cells(objs, vox, cells, bones)
     return cells
+
+
+def own_cells(objs, vox, cells, bones):
+    """A rig's own-cell parts (`animal_models.own_cell`): each group left without a cell
+    of its material on its bone claims one, as an eye claims its accent cell. The cell its
+    centre is in, or, while that holds another bone's part, the next one ahead (+x, the
+    way the model faces), so the claimed cell sits in front of the body. The groups go
+    from the most central (across, y) out, and one whose cell another group has taken
+    steps sideways toward its own side, so a pair beside a middle part stays a pair."""
+    groups = {}
+    for ob in objs:
+        if "own_cell" in ob:
+            groups.setdefault(ob["own_cell"], []).append(ob)
+    if not groups:
+        return
+    centre = {}
+    for g, obs in groups.items():
+        vs = [v.co for ob in obs for v in ob.data.vertices]
+        lo = Vector(min(v[k] for v in vs) for k in range(3))
+        hi = Vector(max(v[k] for v in vs) for k in range(3))
+        centre[g] = (lo + hi) / 2
+    mid = sum((p.y for p in centre.values())) / len(centre)
+    claimed, todo = {}, []
+    for g in sorted(groups, key=lambda g: abs(centre[g].y - mid)):
+        ob, p = groups[g][0], centre[g]
+        slot, bone = A.slot_of(ob.data.materials[0].name), A.part_bone(ob, p)
+        have = [key for key in cells if cells[key] == slot and bones.get(key) == bone]
+        if have:
+            claimed.update((key, g) for key in have)
+        else:
+            todo.append((g, p, slot, bone))
+    for g, p, slot, bone in todo:
+        i, j, k = (math.floor(p[a] / vox) for a in range(3))
+        while (i, j, k) in cells and bones.get((i, j, k)) != bone and (i, j, k) not in claimed:
+            i += 1
+        side = 1 if p.y >= mid else -1
+        while (i, j, k) in claimed:
+            j += side
+        claimed[(i, j, k)] = g
+        cells[(i, j, k)], bones[(i, j, k)] = slot, bone
 
 
 def animal_cells(objs, vox, floor=0):
@@ -674,24 +724,39 @@ def build_founder_bin(f, n, vox):
 RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         "chorister": lambda: A.feed_rig(A.ch_feed_clip()),
         "lanternjaw": lambda: A.feed_rig(A.lj_feed_clip()),
+        # a specimen of one bin (its young draw the adult's)
+        "bellwing": lambda: A.feed_rig(A.bw_feed_clip()),
+        # the small ground feeders: the littershredder's founder bins, the capgnawer and
+        # ripple-snail specimens of one bin
+        "littershredder": lambda: A.feed_rig(A.lt_feed_clip()),
+        "capgnawer": lambda: A.feed_rig(A.cg_feed_clip()),
+        "ripple-snail": lambda: A.feed_rig(A.rs_feed_clip()),
         # the seedporter's pose models it crops in (specimens, one bin each)
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
-BIN_RIGS = {"loftstrider": lambda n: A.ls_rig_clips(ls_parts(n))}
+BIN_RIGS = {"loftstrider": lambda n, cells, vox: A.ls_rig_clips(ls_parts(n), cells, vox)}
 
 
 def write_rig(path, bins):
-    """`<name>.rig` (CRG2; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones and
-    clips, and per size bin its scale, its bones' heads, each clip's sampled frames and
-    each cell's bone. `bins`: (length, scale, rig, cells), every rig with the same bones
-    and clips."""
+    """`<name>.rig` (CRG3; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones,
+    the turn symmetry (`symmetry`: order and each bone's image; none when absent) and the
+    clips, and per size bin its scale, each clip's aim (`aim`, the bite height it reaches
+    for, metres; NaN when absent) and lower (`lower`, the share of the `asleep` track it
+    holds the body at; 0 when absent), its bones' heads, each clip's sampled frames and each
+    cell's bone. `bins`: (length, scale, rig, cells), every rig with the same bones and
+    clips."""
     first = bins[0][2]
-    b = bytearray(b"CRG2")
+    b = bytearray(b"CRG3")
     b += struct.pack("<B", len(first["bones"]))
     for name, parent in first["bones"]:
         enc = name.encode()
         b += struct.pack("<B", len(enc)) + enc
         b += struct.pack("<B", 255 if parent is None else parent)
+    order, image = first.get("symmetry") or (0, [])
+    b += struct.pack("<B", order)
+    if order >= 2:
+        assert len(image) == len(first["bones"])
+        b += bytes(image)
     b += struct.pack("<B", len(first["clips"]))
     for clip in first["clips"]:
         enc = clip["state"].encode()
@@ -701,6 +766,9 @@ def write_rig(path, bins):
     for length, scale, rig, cells in bins:
         assert rig["bones"] == first["bones"] and len(rig["clips"]) == len(first["clips"])
         b += struct.pack("<df", length, scale)
+        for clip in rig["clips"]:
+            aim = clip.get("aim")
+            b += struct.pack("<ff", float("nan") if aim is None else aim, clip.get("lower", 0.0))
         for h in rig["heads"]:
             b += struct.pack("<3f", *h)
         for clip, c0 in zip(rig["clips"], first["clips"]):
@@ -736,7 +804,7 @@ def bake_animal(f, vox, out_dir):
         raw = loftstrider_cells(objs, vox, bones) if name == "loftstrider" else voxelize_animal(objs, vox, 0, bones)
         if name in BIN_RIGS:
             # the bin is its own build, in metres
-            rig_bins.append((length, 1.0 / vox, raw, bones, BIN_RIGS[name](n)))
+            rig_bins.append((length, 1.0 / vox, raw, bones, BIN_RIGS[name](n, bones, vox)))
         elif rigged:
             # the bin is the reference build scaled by length / reference length
             rig_bins.append((length, length / A.REF[name][1] / vox, raw, bones, None))
@@ -844,7 +912,7 @@ def main():
                 {"states": states} if len(states) > 1 else {})
             print(f"{vox} m {sp['name']}: {len(meta)} steps, {size} bytes", flush=True)
         for f in src["founders"]:
-            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF:
+            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF or f["name"] in AS_SPECIMEN:
                 continue
             file, size, meta, rig = bake_animal(f, vox, out_dir)
             manifest["founders"][f["name"]] = file
@@ -863,8 +931,8 @@ def main():
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: {base}'s pose, {len(meta)} bins, {size} bytes", flush=True)
         for name in SPECIMENS:
-            if (ONLY and name not in ONLY) or name not in A.REF or any(
-                    f["name"] == name for f in src["founders"]):
+            if (ONLY and name not in ONLY) or name not in A.REF or (name not in AS_SPECIMEN and any(
+                    f["name"] == name for f in src["founders"])):
                 continue
             file, size, meta, rig = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
