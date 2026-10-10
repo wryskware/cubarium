@@ -2576,6 +2576,7 @@
  },
  "rigs": {
   "frondgrazer": "frondgrazer.rig",
-  "chorister": "chorister.rig"
+  "chorister": "chorister.rig",
+  "loftstrider": "loftstrider.rig"
  }
 }
