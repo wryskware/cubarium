@@ -1,6 +1,7 @@
 //! **Autosave**: every [`DEFAULT_MINUTES`] of wall time (`CUBARIUM_AUTOSAVE_MIN` minutes,
 //! fractions allowed; 0 turns it off), the running world is saved the way the signals save
-//! it ([`crate::world_save`]): into its own slot, staged and renamed, thumbnail kept.
+//! it ([`crate::world_save`]): into its autosave slot, staged and renamed, thumbnail kept.
+//! The player's explicitly saved snapshot is untouched.
 //!
 //! Skipped while no world is running, and while a save or load is already in flight (the
 //! next interval tries again). One line per autosave goes to stderr.

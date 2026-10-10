@@ -249,9 +249,13 @@ func species_label(name: String) -> String:
 func _last_slot() -> String:
 	var slots_now: Array = saves.list(session)
 	var named: String = settings.get_value("shell", "last_slot", "")
+	var suffix := " (autosave)"
+	while named.ends_with(suffix):
+		named = named.trim_suffix(suffix)
+	# The list is newest first: Continue prefers the latest loadable member of the pair.
 	for s in slots_now:
-		if s["name"] == named and s.get("loadable", false):
-			return named
+		if s["name"] in [named, named + suffix] and s.get("loadable", false):
+			return s["name"]
 	for s in slots_now:
 		if s.get("loadable", false):
 			return s["name"]

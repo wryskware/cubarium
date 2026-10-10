@@ -206,6 +206,7 @@ enum ToSim {
     Load(PathBuf, Option<Sender<Result<(), String>>>),
     Line(String),
     Save(PathBuf, Option<Sender<Result<SaveMeta, String>>>),
+    Snapshot(PathBuf, Sender<Result<SaveMeta, String>>),
     Close,
     Shutdown,
     Hook(Option<Box<dyn LoopHook>>),
@@ -449,6 +450,19 @@ impl SessionStop {
     /// [`Session::home`]; `None` also once the session is dropped.
     pub fn home(&self) -> Option<PathBuf> {
         self.shared.upgrade().and_then(|s| s.home())
+    }
+
+    /// Write a snapshot without changing the world's home. Automatic saves must not
+    /// become the destination of the player's next save, or rename a fresh world's slot.
+    pub fn save_snapshot_blocking(&self, dir: &Path, timeout: Duration) -> Result<SaveMeta, String> {
+        let threads = self.threads.upgrade().ok_or("the session is gone")?;
+        let (tx, rx) = mpsc::channel();
+        threads
+            .to_sim
+            .send(ToSim::Snapshot(dir.to_path_buf(), tx))
+            .map_err(|_| "the session has stopped".to_string())?;
+        drop(threads);
+        rx.recv_timeout(timeout).map_err(|_| "the save did not finish in time".to_string())?
     }
 
     /// [`Session::save_blocking`].
@@ -1396,6 +1410,7 @@ impl Loop {
                 }
             }
             ToSim::Save(dir, reply) => self.save(dir, reply, true),
+            ToSim::Snapshot(dir, reply) => self.save(dir, Some(reply), false),
             ToSim::Hook(hook) => {
                 self.hook = hook;
                 self.hook_installed();
