@@ -32,6 +32,15 @@
 //! its cord wherever it swings, at the cell's own depth. The walk (stamped plants) only
 //! reaches a cell by entering it, so there the swing is held inside the column
 //! ([`DrapeCords::amp`]).
+//!
+//! **Octaves** (round 3): the curve is a sum of `octaves` sines, octave `k` at about `2^k`
+//! times the base frequency ([`WaveRatios`]) and [`GAIN`]`^k` of its amplitude, each on its
+//! own phase per strand ([`octave_phase`]), the sum divided by the sum of the gains so the
+//! centre never swings past `amplitude` either way. One octave is round 2's single sine.
+//! [`WaveRatios::Octave`]: exactly 1 : 2 : 4, so every strand is one shape shifted and
+//! repeats every period; [`WaveRatios::Jittered`]: about 1 : 2.3 : 4.6, each strand's
+//! ratios moved a little by its own hash ([`DrapeCords::freq`]), so no two strands share a
+//! shape and nothing repeats.
 
 /// The path a cord takes inside its cell between its two joins: a look choice (Wrysk's).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,10 +73,59 @@ pub struct CordWave {
     /// Voxels the cord's centre swings either side of its column's centre (past 0.5 it
     /// crosses into the next column).
     pub amplitude: f32,
+    /// How many octaves the curve sums (round 3), 1..=15: 1 is a single sine.
+    pub octaves: u32,
+    /// The octaves' frequency ratios (a look choice, Wrysk's).
+    pub ratios: WaveRatios,
 }
 
+/// The octaves' frequencies over the base's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WaveRatios {
+    /// Literal octaves, exactly `2^k`: every strand's curve the same shape, shifted by its
+    /// phases, repeating every base period.
+    Octave,
+    /// Off-ratio: `2^k` times [`JITTER_MEAN`], moved up to [`JITTER_SPREAD`] either way by
+    /// a hash of the strand and octave (about 1 : 2.3 : 4.6): no two strands alike, no repeat.
+    #[default]
+    Jittered,
+}
+
+/// [`WaveRatios::Jittered`]: an octave's frequency over `2^k`, on average.
+pub const JITTER_MEAN: f32 = 1.15;
+
+/// [`WaveRatios::Jittered`]: how far a strand's hash moves that factor either way.
+pub const JITTER_SPREAD: f32 = 0.05;
+
+/// The salt of an octave's jitter hash.
+const JITTER_SALT: i32 = 79;
+
+/// Each octave's amplitude over the one below.
+pub const GAIN: f32 = 0.5;
+
 impl CordWave {
-    pub const NONE: CordWave = CordWave { period: 0.0, amplitude: 0.0 };
+    pub const NONE: CordWave = CordWave { period: 0.0, amplitude: 0.0, octaves: 1, ratios: WaveRatios::Jittered };
+
+    /// The octave count as the uniform carries it (1..=15).
+    pub fn octave_count(&self) -> u32 {
+        self.octaves.clamp(1, 15)
+    }
+
+    /// The sum of the octaves' gains: the divisor that holds the swing to `amplitude`.
+    pub fn gain_sum(&self) -> f32 {
+        (0..self.octave_count()).map(|k| GAIN.powi(k as i32)).sum()
+    }
+
+    /// The curve's steepest slope over a single sine's of the same period and amplitude
+    /// (the octaves' slopes all lined up, each at its highest frequency): 1 for one octave.
+    pub fn slope_factor(&self) -> f32 {
+        let top = match self.ratios {
+            WaveRatios::Octave => 1.0,
+            WaveRatios::Jittered => JITTER_MEAN + JITTER_SPREAD,
+        };
+        let f = |k: u32| if k == 0 { 1.0 } else { top * 2f32.powi(k as i32) };
+        (0..self.octave_count()).map(|k| GAIN.powi(k as i32) * f(k)).sum::<f32>() / self.gain_sum()
+    }
 
     /// As the uniform carries them: the period in quarter voxels, the amplitude in 32nds.
     fn quantised(&self) -> (f32, f32) {
@@ -96,8 +154,8 @@ impl DrapeCords {
         self.width_px > 0
     }
 
-    /// `u.tex.z` and `u.tex.w`: the width, and the shape (low byte) with the wander in
-    /// hundredths (second byte), the wave's period in quarter voxels (third) and its
+    /// `u.tex.z` and `u.tex.w`: the width, and the shape (bit 0) with the wave's ratios
+    /// (bit 1: jittered) and octave count (bits 4..8), the wander in hundredths (second byte), the wave's period in quarter voxels (third) and its
     /// amplitude in 32nds of a voxel (fourth).
     pub fn uniform(&self) -> [i32; 2] {
         let shape = match self.shape {
@@ -106,7 +164,9 @@ impl DrapeCords {
         };
         let (p, a) = self.wave.quantised();
         let wave = ((p * 4.0) as u32) << 16 | ((a * 32.0) as u32) << 24;
-        [self.width_px.min(255) as i32, (shape as u32 | (self.wander_pct() as u32) << 8 | wave) as i32]
+        let jit = (self.wave.ratios == WaveRatios::Jittered) as u32;
+        let low = shape as u32 | jit << 1 | self.wave.octave_count() << 4;
+        [self.width_px.min(255) as i32, (low | (self.wander_pct() as u32) << 8 | wave) as i32]
     }
 
     fn wander_pct(&self) -> i32 {
@@ -184,11 +244,29 @@ impl DrapeCords {
 
     /// `cordWaveAt`: the cord's centre on strand (column) `(x, z)` at height `yw` (voxels,
     /// continuous: a cell's top face is at its `y + 1`), face pixels from the column's left
-    /// edge, swinging `amp` voxels either side.
+    /// edge, swinging at most `amp` voxels either side: the octaves summed
+    /// (`cordWaveAt`'s loop), the sum over the gains' sum.
     pub fn wave_at(&self, s: u32, x: i32, z: i32, yw: f32, amp: f32) -> f32 {
         let p = self.wave.quantised().0.max(0.25);
-        let a = std::f32::consts::TAU * (yw / p + phase(x, z));
-        s as f32 * (0.5 + amp * a.sin())
+        let (mut sum, mut g) = (0.0f32, 1.0f32);
+        for k in 0..self.wave.octave_count() {
+            let a = std::f32::consts::TAU * (yw * self.freq(x, z, k) / p + octave_phase(x, z, k));
+            sum += g * a.sin();
+            g *= GAIN;
+        }
+        s as f32 * (0.5 + amp * sum / self.wave.gain_sum())
+    }
+
+    /// `cordFreq`: octave `k`'s frequency on strand `(x, z)` over the base's: `2^k`, or for
+    /// [`WaveRatios::Jittered`] (past the base) `2^k` times [`JITTER_MEAN`] give or take
+    /// [`JITTER_SPREAD`] by the strand's hash.
+    pub fn freq(&self, x: i32, z: i32, k: u32) -> f32 {
+        let o = (1u32 << k) as f32;
+        if k == 0 || self.wave.ratios == WaveRatios::Octave {
+            return o;
+        }
+        let u = (cell_hash(x, k as i32, z, JITTER_SALT) >> 8) as f32 / 16_777_216.0;
+        o * (JITTER_MEAN + JITTER_SPREAD * (2.0 * u - 1.0))
     }
 
     /// `cordWaveCentre`: the centre at `t` down cell `(x, y, z)`'s front face, moved by
@@ -220,7 +298,7 @@ impl DrapeCords {
             return 0.5;
         }
         let (p, a) = self.wave.quantised();
-        let px = 0.5 * self.width_px as f32 + std::f32::consts::PI * a / p + 3.0;
+        let px = 0.5 * self.width_px as f32 + std::f32::consts::PI * a * self.wave.slope_factor() / p + 3.0;
         (a + px / s as f32).max(0.5)
     }
 }
@@ -238,7 +316,13 @@ fn span(w: f32, c: f32, up: f32, down: f32, x: f32) -> bool {
 /// `cordPhase`: strand (column) `(x, z)`'s place in its wave at height 0, 0..1 of a period
 /// (`x` already round the ring).
 pub fn phase(x: i32, z: i32) -> f32 {
-    (cell_hash(x, 0, z, PHASE_SALT) >> 8) as f32 / 16_777_216.0
+    octave_phase(x, z, 0)
+}
+
+/// `cordPhase`: strand `(x, z)`'s place in octave `k`'s wave at height 0, 0..1 (octave 0 is
+/// [`phase`]).
+pub fn octave_phase(x: i32, z: i32, k: u32) -> f32 {
+    (cell_hash(x, k as i32, z, PHASE_SALT) >> 8) as f32 / 16_777_216.0
 }
 
 /// The salt of a strand's phase hash.
@@ -401,10 +485,14 @@ mod tests {
     #[test]
     fn the_uniform_carries_the_width_shape_and_wander() {
         let mut c = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave: CordWave::NONE };
-        assert_eq!(c.uniform(), [2, 1 | (50 << 8)]);
-        c.wave = CordWave { period: 6.25, amplitude: 1.5 };
+        assert_eq!(c.uniform(), [2, 1 | 2 | (1 << 4) | (50 << 8)], "one octave without the wave");
+        c.wave = CordWave { period: 6.25, amplitude: 1.5, octaves: 3, ratios: WaveRatios::Octave };
         let w = c.uniform()[1] as u32;
-        assert_eq!(w & 0xFFFF, 1 | (50 << 8), "the wave leaves the shape and wander");
+        assert_eq!(w & 0xFF0D, 1 | (50 << 8), "the wave leaves the shape and wander");
+        assert_eq!((w >> 4) & 15, 3, "the octave count");
+        assert_eq!(w & 2, 0, "literal octaves");
+        c.wave.ratios = WaveRatios::Jittered;
+        assert_eq!(c.uniform()[1] as u32 & 2, 2, "jittered ratios");
         assert_eq!(((w >> 16) & 255) as f32 / 4.0, 6.25);
         assert_eq!((w >> 24) as f32 / 32.0, 1.5);
         assert_eq!(DrapeCords::OFF.uniform()[0], 0);
@@ -415,8 +503,19 @@ mod tests {
         let mut v = Vec::new();
         for width_px in [1, 2] {
             for (period, amplitude) in [(3.0, 0.5), (6.0, 1.0), (12.0, 2.0), (3.0, 2.0), (7.5, 0.2)] {
-                let wave = CordWave { period, amplitude };
-                v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+                for octaves in [1, 3, 5] {
+                    for ratios in [WaveRatios::Octave, WaveRatios::Jittered] {
+                        let wave = CordWave { period, amplitude, octaves, ratios };
+                        v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+                    }
+                }
+            }
+            // The defaults' neighbourhood: long periods with octaves.
+            for period in [12.0, 24.0] {
+                for ratios in [WaveRatios::Octave, WaveRatios::Jittered] {
+                    let wave = CordWave { period, amplitude: 0.5, octaves: 3, ratios };
+                    v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+                }
             }
         }
         v
@@ -519,6 +618,71 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn with_octaves_the_centre_never_swings_past_the_amplitude_and_uses_its_room() {
+        for c in waves() {
+            for s in SCALES {
+                let a = c.amp(s, false);
+                let mut most = 0.0f32;
+                for (x, _, z) in positions().take(40) {
+                    for i in 0..400 {
+                        let yw = i as f32 * 0.173 - 20.0;
+                        let off = (c.wave_at(s, x, z, yw, a) - 0.5 * s as f32) / s as f32;
+                        assert!(off.abs() <= a + 1e-4, "{c:?} at {s} px: {off} past {a}");
+                        most = most.max(off.abs());
+                    }
+                }
+                // Scaled by the gains' sum, not by more: the swing comes near the amplitude.
+                assert!(most >= 0.5 * a, "{c:?} at {s} px: swings only {most} of {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn one_octave_is_the_single_sine_and_more_octaves_add_finer_waves() {
+        let s = 6;
+        let wave = CordWave { period: 12.0, amplitude: 0.5, octaves: 1, ratios: WaveRatios::Jittered };
+        let one = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave };
+        let three = DrapeCords { wave: CordWave { octaves: 3, ..one.wave }, ..one };
+        let (x, z) = (17, 4);
+        let mut differs = false;
+        for i in 0..200 {
+            let yw = i as f32 * 0.25;
+            let sine = s as f32 * (0.5 + 0.5 * (std::f32::consts::TAU * (yw / 12.0 + phase(x, z))).sin());
+            assert!((one.wave_at(s, x, z, yw, 0.5) - sine).abs() < 1e-3);
+            differs |= (three.wave_at(s, x, z, yw, 0.5) - sine).abs() > 0.1;
+        }
+        assert!(differs, "the octaves change the curve");
+        // Each strand has its own phases in every octave.
+        assert_ne!(octave_phase(x, z, 1), octave_phase(x + 1, z, 1));
+        assert_ne!(octave_phase(x, z, 1), octave_phase(x, z, 2));
+    }
+
+    #[test]
+    fn literal_octaves_repeat_every_period_and_jittered_ones_differ_strand_to_strand() {
+        let s = 6;
+        for period in [12.0, 24.0] {
+            let wave = CordWave { period, amplitude: 0.5, octaves: 3, ratios: WaveRatios::Octave };
+            let lit = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave };
+            let jit = DrapeCords { wave: CordWave { ratios: WaveRatios::Jittered, ..wave }, ..lit };
+            for (x, _, z) in positions().take(20) {
+                for i in 0..40 {
+                    let yw = i as f32 * 0.37;
+                    let (a, b) = (lit.wave_at(s, x, z, yw, 0.5), lit.wave_at(s, x, z, yw + period, 0.5));
+                    assert!((a - b).abs() < 1e-2, "literal octaves repeat: {a} vs {b}");
+                }
+                for k in 0..3 {
+                    assert_eq!(lit.freq(x, z, k), (1u32 << k) as f32);
+                    let f = jit.freq(x, z, k) / (1u32 << k) as f32;
+                    let ok = if k == 0 { f == 1.0 } else { (f - JITTER_MEAN).abs() <= JITTER_SPREAD + 1e-6 };
+                    assert!(ok, "octave {k}: {f}");
+                }
+            }
+            // Jittered: two strands' octave ratios differ.
+            assert_ne!(jit.freq(3, 1, 1), jit.freq(4, 1, 1));
         }
     }
 }
