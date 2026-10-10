@@ -234,8 +234,8 @@ pub fn probe_traced(
 
 /// The share of open light that reaches height `receiver_top_v` (voxels above the world
 /// floor) over `site`, through every foliage layer whose top is above it and whose disc
-/// covers the column — the shade model's own factor, `exp(−k (1 − p) stock / area)` per
-/// layer — skipping the stand that holds `site` itself. Terrain sky is not in it.
+/// covers the column — the shade model's own factor, `exp(−share · optical_depth)` per
+/// layer ([`crate::layers::StandLayer::optical_depth`], [`crate::layers::shade_share`]) — skipping the stand that holds `site` itself. Terrain sky is not in it.
 pub fn canopy_at(view: &FloraView<'_>, width: u32, depth: u32, site: Site, receiver_top_v: f64) -> f64 {
     let config = view.config;
     let voxel_m = config.voxel_m;
@@ -251,7 +251,9 @@ pub fn canopy_at(view: &FloraView<'_>, width: u32, depth: u32, site: Site, recei
             return;
         }
         for l in crate::layer_iter(config, s, voxel_m) {
-            if !l.kind.bears_foliage() || l.band_v[1] <= receiver_top_v {
+            // The receiver is read as a sheet at `receiver_top_v`.
+            let f = crate::layers::shade_share(l.band_v, [receiver_top_v, receiver_top_v]);
+            if !l.kind.bears_foliage() || !(f > 0.0) {
                 continue;
             }
             let dx = wrapped(s.site.x as f64, x);
@@ -259,7 +261,7 @@ pub fn canopy_at(view: &FloraView<'_>, width: u32, depth: u32, site: Site, recei
             if dx * dx + dz * dz > l.radius_v * l.radius_v {
                 continue;
             }
-            here *= (-config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+            here *= (-f * l.optical_depth).exp();
         }
     };
     match view.stands_near(site.x as i64, site.z, width, depth) {

@@ -485,7 +485,7 @@ pub fn edible(config: &FloraConfig, sp: Species, wood: f64, foliage: f64) -> f64
 }
 
 /// A crown's area in faces and its transmission (`step::light_per_stand`'s attenuation
-/// `exp(−k (1 − porosity) stock / area)`, `lib.rs:2857`), over its foliage layers.
+/// `exp(−optical_depth)`, `StandLayer::optical_depth`), over its foliage layers.
 pub fn crown_of(config: &FloraConfig, sp: Species, wood: f64, foliage: f64) -> (f64, f64) {
     let mut s: Stand = cubarium_voxel_flora::study::start_stand(config, sp, cubarium_voxel_flora::study::Start::Newborn);
     s.wood = wood.max(0.0);
@@ -498,7 +498,7 @@ pub fn crown_of(config: &FloraConfig, sp: Species, wood: f64, foliage: f64) -> (
             continue;
         }
         area = area.max(std::f64::consts::PI * l.radius_v * l.radius_v);
-        t *= (-config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+        t *= (-l.optical_depth).exp();
     }
     (area.max(1.0), t)
 }
@@ -1178,7 +1178,7 @@ impl Model {
 
     /// **Meadow lever f**: the light share a recruit standing in zone `zi`'s turf gets
     /// through it. `contest_tau < 0`: the sim's shade law (`step::shade_layers_into`) on the
-    /// turf's mat at the zone's mean turf stand, `exp(−shade_k (1 − porosity) P / area)`
+    /// turf's mat at the zone's mean turf stand, `exp(−optical_depth)`
     /// ([`crown_of`]); otherwise the scenario's `exp(−contest_tau · fill)`.
     pub fn contest_shade(&self, zi: usize) -> f64 {
         let mw = &self.p.meadow;
