@@ -28,6 +28,11 @@
 //! hunker's footprint; they keep their own colours, as the rigid shield carries its own.
 //! Coming up is the same path backwards. A body seen for the first time hunkered is drawn
 //! down, as an asleep one is drawn asleep.
+//!
+//! That is the stamped world's hunker, and the model pass's with the rig off. A rig with a
+//! `hunker` clip (RIG-STATES, the frondgrazer's) plays it instead while the rig is drawn,
+//! on the standing classes: the same end, every cell moved whole by its bone (the cut
+//! cells sunk under the ground line, the neck slid into the shield), so nothing is cut.
 
 use rustc_hash::FxHashSet;
 

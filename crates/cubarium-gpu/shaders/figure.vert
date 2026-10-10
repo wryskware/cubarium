@@ -25,7 +25,7 @@ layout(location = 1) out vec3 vNormal;
 // Across the face, 0..1, and down it from its top edge (a side), or from its far edge (a
 // top or a bottom).
 layout(location = 2) out vec2 vFace;
-// The palette entry, glyph (0: baked model), open above, local face + crease mask.
+// The palette entry, glyph (0: baked model), its top's lip open (bit 20), local face + crease mask.
 layout(location = 3) flat out ivec4 vInfo;
 layout(location = 4) flat out ivec2 vFaceSize;
 layout(location = 5) out vec3 vRimWorld;
@@ -112,5 +112,5 @@ void main() {
     vRimFace = vec2(rim.x, 1.0 - rim.z);
     vNormal = n;
     vFace = vec2(ab.x, 1.0 - ab.y);
-    vInfo = ivec4(t.orig.z + int(cell.x >> 24), glyph, int((open >> 3) & 1u), face | int(((cell[2 + face / 4] >> (8 * (face % 4))) & 255u) << 3) | int((cell.z >> 24) << 11));
+    vInfo = ivec4(t.orig.z + int(cell.x >> 24), glyph, int((cell.y >> 20) & 1u), face | int(((cell[2 + face / 4] >> (8 * (face % 4))) & 255u) << 3) | int((cell.z >> 24) << 11));
 }

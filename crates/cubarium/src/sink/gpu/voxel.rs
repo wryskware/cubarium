@@ -52,7 +52,7 @@ use crate::voxel::colour_fade::{StyleFades, VineFades};
 use crate::voxel::glow_ease::{self, Ease, GlowEase, Kind as EaseKind, Target as EaseTarget};
 use crate::voxel::sleep;
 use crate::voxel::{appearance, colours};
-use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, PlantDraw, Spec};
+use crate::voxel::figure::{self, AnimalDraw, FigureModels, FigureMotion, FigurePick, FigureTrack, PlantDraw, RigDraw, Spec};
 use crate::voxel::model::{ModelLibrary, Tag};
 use crate::voxel::present as cpu;
 use crate::voxel::project::Projection;
@@ -314,6 +314,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         packer.animals.set_condition_fade_s(cfg.light.colour_fade_s);
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
+        packer.figure_models.set_rig_drawn(cfg.figures.rig != RigDraw::Off);
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
         packer.stands.set_plant_turn(cfg.plants.turn);
         if cfg.figures.plants == PlantDraw::Models {
