@@ -104,8 +104,8 @@ pub(crate) fn is_prey_in_window(
     };
     // An opportunist's table is the catch's ([`crate::FounderPhysiology::opportunist`]):
     // `active_hunter` already holds it off with the switch; on, it takes low prey of its
-    // list worth the strikes (a bellwing, and since LANTERNJAW-LIFE a small lanternjaw
-    // juvenile for the seedporter) and nothing else.
+    // list worth the strikes (bellwings, littershredders and small lanternjaw
+    // juveniles for the seedporter) and nothing else.
     let p = config.founder(hf);
     if p.opportunist {
         if !p.catch_bellwings

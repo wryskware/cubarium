@@ -25,7 +25,7 @@ fn packs(f: &mut StyleFades, cell: u32, mut held: Style, to: Style, t0: f64, sec
     (0..=(seconds * PACK_HZ).round() as usize)
         .map(|k| {
             let now = t0 + k as f64 / PACK_HZ;
-            f.begin(now);
+            f.begin(now, usize::MAX);
             held = f.draw(cell, Some(held), to, now);
             held
         })
@@ -88,13 +88,13 @@ fn a_continuously_moving_style_is_followed_without_a_step() {
     for k in 0..=n {
         let now = k as f64 / PACK_HZ;
         let to = blend(GREEN, STRAW, k as f32 / n as f32);
-        f.begin(now);
+        f.begin(now, usize::MAX);
         let d = f.draw(3, Some(held), to, now);
         assert!(apart(d, held) <= apart(GREEN, STRAW) / n as f32 + apart(GREEN, STRAW) / (fade * PACK_HZ as f32) + 1e-5);
         held = d;
     }
     let end = 6.0 + f64::from(fade) + 0.1;
-    f.begin(end);
+    f.begin(end, usize::MAX);
     assert_eq!(f.draw(3, Some(held), STRAW, end), STRAW);
 }
 
@@ -103,11 +103,11 @@ fn a_clock_jump_or_no_fade_draws_the_target_at_once() {
     let mut f = StyleFades::new(0.0);
     assert_eq!(f.draw(9, Some(GREEN), STRAW, 1.0), STRAW, "no fade: at once");
     let mut f = StyleFades::new(2.0);
-    f.begin(0.0);
+    f.begin(0.0, usize::MAX);
     assert_eq!(f.draw(9, Some(GREEN), STRAW, 0.0), GREEN);
-    f.begin(0.0 + JUMP_S + 1.0);
+    f.begin(0.0 + JUMP_S + 1.0, usize::MAX);
     assert_eq!(f.draw(9, Some(GREEN), STRAW, JUMP_S + 1.0), GREEN, "after a jump a new swap starts afresh");
-    f.begin(-5.0);
+    f.begin(-5.0, usize::MAX);
     assert!(f.is_empty(), "a clock going back ends every ramp");
 }
 
@@ -139,12 +139,12 @@ fn a_vine_tile_swap_cross_fades_the_old_tile_out_over_frames() {
     let between = s.iter().filter(|(_, x)| *x > 0.01 && *x < 0.99).count();
     assert!(between as f64 >= 0.9 * f64::from(fade) * FPS);
     assert_eq!(s.last().unwrap().1, 0.0, "and is gone at the end");
-    v.retire(3.0 + f64::from(fade));
+    v.retire(3.0 + f64::from(fade), |_| panic!("nothing waits"));
     assert!(v.is_empty());
 }
 
 #[test]
-fn a_vine_reversal_mid_fade_runs_back_and_a_third_tile_starts_from_the_one_showing_more() {
+fn a_vine_reversal_mid_fade_runs_back() {
     let fade = 2.0;
     let mut v = VineFades::new(fade);
     v.switch(7, FULL, BARE, 0.0);
@@ -159,13 +159,113 @@ fn a_vine_reversal_mid_fade_runs_back_and_a_third_tile_starts_from_the_one_showi
     for w in back.windows(2) {
         assert!(w[0].1 >= w[1].1 - 1e-6 && w[0].1 - w[1].1 <= 1.0 / (fade * FPS as f32) + 1e-5);
     }
-    // A third tile while two show: the one showing more is the new ramp's old tile.
-    let mut v = VineFades::new(fade);
-    v.switch(8, FULL, BARE, 0.0);
-    v.switch(8, BARE, FRUIT, 0.2 * f64::from(fade));
-    assert_eq!(v.old(8, 0.2 * f64::from(fade)).unwrap().0, FULL);
     // No fade: nothing is held.
     let mut v = VineFades::new(0.0);
     v.switch(9, FULL, BARE, 0.0);
     assert!(v.old(9, 0.0).is_none());
+}
+
+/// What `cell` shows each frame: each tile's share of it, given the tile its texel
+/// carries (its own, `own`, unless one waits in its place) and its old one.
+fn showing(v: &VineFades, cell: u32, own: Tile, now: f64) -> Vec<(Tile, f32)> {
+    let texel = v.drawn(cell).unwrap_or(own);
+    match v.old(cell, now) {
+        Some((old, _)) if old == texel => vec![(texel, 1.0)],
+        Some((old, s)) => vec![(old, s), (texel, 1.0 - s)],
+        None => vec![(texel, 1.0)],
+    }
+}
+
+fn share(shows: &[(Tile, f32)], t: Tile) -> f32 {
+    shows.iter().filter(|(x, _)| *x == t).map(|(_, s)| s).sum()
+}
+
+#[test]
+fn a_third_tile_mid_fade_waits_and_then_fades_in_without_a_jump() {
+    // Round 3: full -> bare, and fruit arrives a fifth of the way through. Every frame, no
+    // tile's share moves by more than the fade allows; the cell ends on fruit alone.
+    let fade = 2.0;
+    let mut v = VineFades::new(fade);
+    let mut own = BARE;
+    v.switch(8, FULL, BARE, 0.0);
+    let allowed = 1.0 / (fade * FPS as f32) + 1e-4;
+    let mut last = showing(&v, 8, own, 0.0);
+    let mut restarted = 0;
+    for k in 1..=(3.0 * f64::from(fade) * FPS) as usize {
+        let now = k as f64 / FPS;
+        if k == (0.2 * f64::from(fade) * FPS) as usize {
+            v.switch(8, own, FRUIT, now);
+            own = FRUIT;
+            assert_eq!(v.drawn(8), Some(BARE), "the texel keeps the running ramp's tile");
+        }
+        // The packer retires once a pack.
+        if k % 3 == 0 {
+            v.retire(now, |c| {
+                assert_eq!(c, 8);
+                restarted += 1;
+            });
+        }
+        let now_shows = showing(&v, 8, own, now);
+        for t in [FULL, BARE, FRUIT] {
+            let d = (share(&now_shows, t) - share(&last, t)).abs();
+            assert!(d <= allowed + 1.0 / (fade * PACK_HZ as f32), "frame {k}: {t:?} moved {d}");
+        }
+        last = now_shows;
+    }
+    assert_eq!(restarted, 1, "the waiting tile started once");
+    assert_eq!(share(&last, FRUIT), 1.0, "it ends on the third tile");
+    assert!(v.is_empty() || v.old(8, 3.0 * f64::from(fade)).is_none());
+}
+
+#[test]
+fn a_tiny_colour_change_shows_at_once_and_a_visible_one_fades() {
+    // Round 3: a step below one visible sRGB step is drawn at once (a drifting source no
+    // longer keeps a ramp running); a larger one fades as before.
+    let mut f = StyleFades::new(2.0);
+    f.begin(0.0, usize::MAX);
+    let mut tiny = GREEN;
+    tiny.crown[1] += 0.0005;
+    assert!(close(GREEN, tiny));
+    assert_eq!(f.draw(1, Some(GREEN), tiny, 0.0), tiny);
+    assert!(!f.fading(1));
+    assert!(!close(GREEN, STRAW));
+    assert_eq!(f.draw(2, Some(GREEN), STRAW, 0.0), GREEN);
+    assert!(f.fading(2));
+}
+
+#[test]
+fn swaps_wait_for_room_in_the_style_table_and_never_step() {
+    // Round 3: with room for one group's blends, a second group (other colours) waits,
+    // its cells showing their old colours, and starts once the first has ended; nothing
+    // ever moves more in a pack than the fade allows. Cells of the first group share it.
+    let fade = 1.0;
+    let mut f = StyleFades::new(fade);
+    let other = Style { crown: [0.2, 0.2, 0.9], ..STRAW };
+    let (mut a, mut b, mut c) = (GREEN, GREEN, other);
+    let step = apart(GREEN, STRAW).max(apart(other, GREEN)) / (fade * PACK_HZ as f32) + 1e-5;
+    let mut b_waited = false;
+    for k in 0..=(4.0 * f64::from(fade) * PACK_HZ) as usize {
+        let now = k as f64 / PACK_HZ;
+        // Two slots free: one running group's blend and its next.
+        f.begin(now, 2);
+        let na = f.draw(1, Some(a), STRAW, now);
+        let nb = f.draw(2, Some(b), STRAW, now);
+        let nc = f.draw(3, Some(c), GREEN, now);
+        assert!(apart(na, a) <= step && apart(nb, b) <= step && apart(nc, c) <= step, "pack {k}");
+        assert_eq!(na, nb, "one group, one blend");
+        b_waited |= f.waiting(3) && nc == other;
+        (a, b, c) = (na, nb, nc);
+    }
+    assert!(b_waited, "the second group waited for room");
+    assert_eq!((a, c), (STRAW, GREEN), "both got there");
+    // With no room and nothing running, a swap shows at once after the wait.
+    let mut f = StyleFades::new(fade);
+    let mut shown = GREEN;
+    for k in 0..=((WAIT_FADES + 1.0) * f64::from(fade) * PACK_HZ) as usize {
+        let now = k as f64 / PACK_HZ;
+        f.begin(now, 0);
+        shown = f.draw(4, Some(shown), STRAW, now);
+    }
+    assert_eq!(shown, STRAW);
+    assert!(!f.waiting(4));
 }

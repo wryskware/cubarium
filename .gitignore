@@ -34,3 +34,4 @@ __pycache__/
 
 # Midjourney downloads: local reference images, not project source.
 /art/gen/midjourney/
+/.claude/ledgers/

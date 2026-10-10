@@ -395,10 +395,8 @@ int cellEntry(int x, int y, int z) {
 // frame (`cubarium_gpu::voxel::EmitCell`), if it gave one; `e` and `on` are left alone if
 // not. The texels then draw `e + (1 - on) x` their lit pigment, so an emitter fading in or
 // out never steps, and one at nothing is its pigment.
-bool cellEmit(int x, int y, int z, inout vec3 e, inout float on) {
-    if (!LIT) { return false; }
-    int i = cellEntry(x, y, z);
-    if (i < 0) { return false; }
+bool entryEmit(int i, inout vec3 e, inout float on) {
+    if (!LIT || i < 0) { return false; }
     uvec4 c = emitCells[i];
     if ((c.w >> 31) != 0u) { return false; }
     vec2 rg = unpackHalf2x16(c.y);
@@ -407,14 +405,17 @@ bool cellEmit(int x, int y, int z, inout vec3 e, inout float on) {
     on = clamp(bo.y, 0.0, 1.0);
     return true;
 }
+bool cellEmit(int x, int y, int z, inout vec3 e, inout float on) {
+    if (!LIT) { return false; }
+    return entryEmit(cellEntry(x, y, z), e, on);
+}
 
 // GLOW-EASE round 2: a vine cell part way through a change of tile (density, accent,
-// shape): `v` with its old tile's bytes, and the share of the old tile still shown (0: no
-// change under way, `v` left alone). Both tiers.
-float cellVineFrom(int x, int y, int z, inout uvec4 v) {
-    if ((uint(u.view.w) & EMIT_VINES) == 0u) { return 0.0; }
-    int i = cellEntry(x, y, z);
-    if (i < 0) { return 0.0; }
+// shape), from its table entry `i` (`cellEntry`, -1: none): `v` with its old tile's bytes,
+// and the share of the old tile still shown (0: no change under way, `v` left alone). Both
+// tiers.
+float entryVineFrom(int i, inout uvec4 v) {
+    if (i < 0 || (uint(u.view.w) & EMIT_VINES) == 0u) { return 0.0; }
     uint w = emitCells[i].w;
     uint s = (w >> 16) & 255u;
     if (s == 0u) { return 0.0; }

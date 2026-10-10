@@ -391,6 +391,7 @@ pub(super) fn glider_act(
                 && held.feed > 0.0
                 && fauna.animals[i].eating
                 && fauna.animals[i].strike.is_none()
+                && super::glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], &phys).is_none()
             {
                 if let Some(prey) = super::prey_in_capsule(fauna, i, view, &g, &h) {
                     super::start_strike(fauna, i, prey);
@@ -441,6 +442,7 @@ fn ground_tick(
     // the walker's existing strike/meal machinery.
     let geometry = phys.body_at(fauna.animals[i].body);
     let catch = phys.catch_bellwings
+        && super::glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], &phys).is_none()
         && phys.active_hunter().is_some_and(|h| {
             super::prey_in_capsule(fauna, i, view, &geometry, &h).is_some()
                 || crate::hunt::mouth_on_carcass(&flora.view(), view, &fauna.animals[i], &geometry)

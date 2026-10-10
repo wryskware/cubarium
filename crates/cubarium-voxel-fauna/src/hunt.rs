@@ -1133,6 +1133,10 @@ pub(crate) fn catch_step(
     {
         return None;
     }
+    // SP-SHREDDER: fruit is the staple even with a catch at the same mouth.
+    if crate::step::glider_fruit_in_reach(view, fv, &a, &phys).is_some() {
+        return None;
+    }
     if let Some(go) = meal_step(fauna, i, view, fv) {
         return Some(go);
     }
@@ -1153,7 +1157,7 @@ pub(crate) fn catch_step(
     let target = fauna
         .animals
         .iter()
-        // Any prey of its catch's list (the bellwing; LANTERNJAW-LIFE, a small lanternjaw).
+        // Any prey of its catch's list: bellwings, shredders and small lanternjaws.
         .filter(|o| crate::is_prey_of(&fauna.config, &a, o))
         .filter_map(|o| {
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
