@@ -413,6 +413,11 @@ fn founder_rows() -> Vec<Row> {
         r("flight.rain_ground_m_per_s", "m/s of rain", nonneg, "at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips").optional(),
         r("flight.rain_ground_hysteresis_m_per_s", "m/s of rain", nonneg, "a rain-grounded flyer flies again once the rain is under the threshold less this").optional(),
         r("flight.nest_search_m", "m", nonneg, "VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch").optional(),
+        r("flight.flush_reaction_s", "s", nonneg, "FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after").optional(),
+        r("flight.flush_speed_factor", "x cruise speed", nonneg, "FLUSH: its escape burst's speed, off the threat's line (0: no flush)").optional(),
+        r("flight.flush_climb_fraction", "x burst speed", nonneg, "FLUSH: the burst's climb").optional(),
+        r("flight.flush_burst_s", "s", nonneg, "FLUSH: the burst's length").optional(),
+        r("flight.flush_s", "s", nonneg, "FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long").optional(),
         // The glider's table (`Glider`, F3): the seedporter's only, optional on the others.
         r("glider.climb_min_stand_m", "m", nonneg, "the shortest stand whose stem it climbs (crown top over the support)").optional().prov("decision"),
         r("glider.glide_ratio", "m across per m down", Range::positive(), "a glide's horizontal metres per metre of descent").optional().prov("decision"),
@@ -475,10 +480,10 @@ fn founder_rows() -> Vec<Row> {
         r("pack.select_min_prospect", "fraction", fraction, "PACK-TUNE: a pack commits only to a prospect of at least this").optional(),
         r("pack.break_off_below", "fraction", fraction, "PACK-TUNE: in a chase, a target whose prospect falls under this is broken off").optional(),
         r("pack.shun_s", "s", nonneg, "PACK-TUNE: a target dropped alive is not taken again for this").optional(),
-        // The counter-strike seam (`Counter`): unused, `None` for every lineage.
-        r("counter.reach", "m", nonneg, "counter-strike reach (unused seam)").optional(),
-        r("counter.damage", "wound", nonneg, "counter-strike damage (unused seam)").optional(),
-        r("counter.cost", "org-units", nonneg, "counter-strike cost (unused seam)").optional(),
+        // The counter-strike (`Counter`, HUNT-ESCAPE): the lanternjaw's only, `None` on the others.
+        r("counter.reach", "m", nonneg, "HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint").optional(),
+        r("counter.damage", "wound at equal size", nonneg, "HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour)").optional(),
+        r("counter.cost", "s of awake upkeep", nonneg, "HUNT-ESCAPE: the answer's cost to the answering body").optional(),
     ]
 }
 

@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2744 rows)
+**`fauna.*`** (2789 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1763,6 +1763,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.littershredder.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.littershredder.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.littershredder.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.littershredder.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.littershredder.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.littershredder.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.littershredder.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -1822,9 +1827,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.littershredder.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.littershredder.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.000008333333333333334 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2044,6 +2049,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.frondgrazer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.frondgrazer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.frondgrazer.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.frondgrazer.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.frondgrazer.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.frondgrazer.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.frondgrazer.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2103,9 +2113,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.frondgrazer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.frondgrazer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000009722222222222223 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2325,6 +2335,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.lanternjaw.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.lanternjaw.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.lanternjaw.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.lanternjaw.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.lanternjaw.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.lanternjaw.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.lanternjaw.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2384,9 +2399,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.lanternjaw.counter.reach` | 0.5 | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.lanternjaw.counter.damage` | 0.7 | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.lanternjaw.counter.cost` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2606,6 +2621,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.capgnawer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.capgnawer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.capgnawer.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.capgnawer.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.capgnawer.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.capgnawer.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.capgnawer.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2665,9 +2685,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.capgnawer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.capgnawer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.loftstrider.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.loftstrider.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.loftstrider.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2887,6 +2907,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.loftstrider.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.loftstrider.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.loftstrider.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.loftstrider.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.loftstrider.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.loftstrider.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.loftstrider.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2946,9 +2971,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.loftstrider.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.loftstrider.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -3168,6 +3193,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.ripple-snail.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.ripple-snail.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.ripple-snail.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.ripple-snail.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.ripple-snail.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.ripple-snail.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.ripple-snail.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3227,9 +3257,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.ripple-snail.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.ripple-snail.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -3449,6 +3479,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.rain_ground_m_per_s` | 0.000005555555555555556 | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.bellwing.flight.rain_ground_hysteresis_m_per_s` | 0.000001388888888888889 | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.bellwing.flight.nest_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.bellwing.flight.flush_reaction_s` | 0.05 | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.bellwing.flight.flush_speed_factor` | 3.0 | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.bellwing.flight.flush_climb_fraction` | 0.5 | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.bellwing.flight.flush_burst_s` | 0.3 | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.bellwing.flight.flush_s` | 3.0 | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3508,9 +3543,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.bellwing.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.bellwing.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.seedporter.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -3730,6 +3765,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.seedporter.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.seedporter.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.seedporter.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.seedporter.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.seedporter.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.seedporter.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.seedporter.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3789,9 +3829,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.seedporter.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.seedporter.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -4011,6 +4051,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.chorister.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.chorister.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.chorister.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.chorister.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.chorister.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.chorister.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.chorister.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -4070,9 +4115,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.select_min_prospect` | 0.1 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.chorister.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.chorister.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.predation.still_after_s` | 2.0 | s | [0, inf) | 0.5–10 | - | decision | a body is still once it has not moved this long |
 | `fauna.predation.still_speed_bl_per_s` | 0.1 | body lengths/s | [0, inf) | 0.02–0.5 | - | decision | ground speed that counts as moving |
 | `fauna.predation.still_threat_near_m` | 0.5 | m | [0, inf) | 0.1–2 | - | decision | a still threat reads as a threat inside this distance |

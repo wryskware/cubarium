@@ -78,6 +78,9 @@ pub struct Hit {
     pub striker: u64,
     /// FINDINGS-FIX-2: the strike's [`Strike::lure`].
     pub lure: bool,
+    /// HUNT-ESCAPE: a counter-strike ([`crate::Counter`]): `prey` is the attacker, `striker`
+    /// the grown body answering it, `by` its lineage.
+    pub counter: bool,
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its

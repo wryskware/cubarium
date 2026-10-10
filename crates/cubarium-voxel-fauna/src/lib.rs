@@ -100,6 +100,8 @@ mod seedporter_tests;
 #[cfg(test)]
 mod roost_rain_tests;
 mod flight;
+/// FLUSH (HUNT-ESCAPE): a flyer's escape from a hunter it senses coming.
+pub(crate) mod flush;
 #[cfg(test)]
 mod slide_tests;
 
@@ -3496,6 +3498,19 @@ pub struct FaunaLedger {
     /// `assimilated_by_founder`).
     #[serde(default)]
     pub ashore_assimilated: f64,
+    /// **FLUSH** (HUNT-ESCAPE, [`crate::flush`]): escape bursts begun, by the flyer's lineage.
+    #[serde(default)]
+    pub flushes_by_founder: [u64; Founder::COUNT],
+    /// ...and strikes whose jaw closed on air because their prey had flushed from it, by
+    /// the prey's lineage.
+    #[serde(default)]
+    pub flush_escapes_by_founder: [u64; Founder::COUNT],
+    /// **The counter-strike** (HUNT-ESCAPE, [`crate::Counter`]): answers that reached the
+    /// attacker, by the answering lineage, and the wound they dealt.
+    #[serde(default)]
+    pub counters_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub counter_wound_by_founder: [f64; Founder::COUNT],
 }
 
 impl FaunaLedger {
@@ -4045,6 +4060,10 @@ pub struct Fauna {
     /// Session state: not saved.
     #[serde(skip)]
     pub(crate) wading: FxHashMap<u64, step::jump::Wade>,
+    /// FLUSH: per flyer in an escape, its flush ([`flush::Flush`]). Session state: not saved
+    /// (a loaded world's flyers are calm).
+    #[serde(skip)]
+    pub(crate) flushes: FxHashMap<u64, flush::Flush>,
     /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
     #[serde(skip)]
     pub(crate) wade_outs: [u64; Founder::COUNT],
@@ -4472,6 +4491,7 @@ impl Fauna {
             trapped: FxHashMap::default(),
             drop_plans: FxHashMap::default(),
             wading: FxHashMap::default(),
+            flushes: FxHashMap::default(),
             wade_outs: [0; Founder::COUNT],
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
@@ -4860,6 +4880,7 @@ impl Fauna {
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
         self.wading.remove(&id);
+        self.flushes.remove(&id);
         true
     }
 
