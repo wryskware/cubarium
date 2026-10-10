@@ -71,8 +71,10 @@ glowcap_lit_share_hi = 0.01 # Provisional near-zero tolerance: <=1% of caps expo
 leaf_offtake_lo = 0.10
 leaf_offtake_hi = 0.30
 hunt_lineages = ["chorister", "lanternjaw"]
-hunts_per_hour_lo = 0.5 # Provisional hunts/world-hour per d72 floor area.
-hunts_per_hour_hi = 2.0 # Provisional: scales with configured floor, not founders.
+# Adult frondgrazer shipped core.body_max = 0.05 organic units.
+# Convert the former 0.5–2 kills/hour band by multiplying by 0.05.
+hunt_biomass_per_hour_lo = 0.025 # Organic units/world-hour per d72 floor area, per hunter lineage.
+hunt_biomass_per_hour_hi = 0.1 # Same units; scales with floor, not founders.
 fullness_p10 = 0.30 # Adults only; no adult exposure is structural NA.
 
 [reproduction]
@@ -118,7 +120,7 @@ M = ['census:meadow_patch_max']
 G_b = ['census:grove_patches']
 D = ['census:glowcap_lit_share']
 O = ['census:leaf_produced', 'census:leaf_eaten']
-H = ['census:kills']
+H = ['life:prey_body']
 F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
 S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
 
@@ -152,7 +154,7 @@ M = ['census:meadow_patch_max']
 G_b = ['census:grove_patches']
 D = ['census:glowcap_lit_share']
 O = ['census:leaf_produced', 'census:leaf_eaten']
-H = ['census:kills']
+H = ['life:prey_body']
 F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
 S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
 

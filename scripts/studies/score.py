@@ -26,7 +26,8 @@ V3_COMPONENTS = ("L", "J", "A", "K", "W", "G_v", "M", "G_b", "D", "O", "H", "F",
 V3_LABELS = {'W': 'wooded floor share', 'G_v': 'second-largest vaulttree grove',
              'M': 'largest meadow floor share', 'G_b': 'lanternberry grove count',
              'D': 'glowcaps on lit faces', 'O': 'leaf offtake / leaf growth',
-             'F': 'mean lineage h(adult fullness_p10 / target)'}
+             'F': 'mean lineage h(adult fullness_p10 / target)',
+             'H': 'prey biomass rate per hunt lineage (organic units per world-hour)'}
 DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config/training/fitness-v2.toml"
 
 
@@ -96,7 +97,7 @@ def validate_config(cfg):
     if cfg['version'] == 3:
         positives = ('vaulttree_family_m2', 'lanternberry_groves', 'fullness_p10')
         bands = (('woods_share_lo', 'woods_share_hi'), ('meadow_share_lo', 'meadow_share_hi'),
-                 ('leaf_offtake_lo', 'leaf_offtake_hi'), ('hunts_per_hour_lo', 'hunts_per_hour_hi'))
+                 ('leaf_offtake_lo', 'leaf_offtake_hi'), ('hunt_biomass_per_hour_lo', 'hunt_biomass_per_hour_hi'))
         if not 0 < pop['reference_floor_m2'] or not math.isfinite(pop['reference_floor_m2']):
             raise ValueError('invalid reference floor area')
         if not 1 <= pop['peak_ratio'] or not math.isfinite(pop['peak_ratio']):
@@ -451,6 +452,7 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
         else:
             absolute_lost = lost
         result['absolute_lost'] = absolute_lost
+        result['feasible_absolute'] = not absolute_lost
         weights, targets, pop = cfg['weights'], cfg['targets'], cfg['population']
         components = result['components']
         area_scale = 1
@@ -627,11 +629,17 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                 put(term, area, h(area / targets[target]) if area is not None else None, unit='m2', voxel_m=voxel_m)
             recruits = (number(closing, 'recruits_vaulttree') - number(opening, 'recruits_vaulttree')) if opening and all(number(row, 'recruits_vaulttree') is not None for row in (opening, closing)) else None
             put('G_v', recruits, h(recruits / targets['vaulttree_recruits']) if recruits is not None else None)
-        kill_keys = [key for key in initial if any(key.startswith('kills_' + hunter + '_') for hunter in targets['hunt_lineages'])]
-        kills = sum(number(closing, key) - number(opening, key) for key in kill_keys) if kill_keys and opening else None
-        rate = kills / ((end - begin) / 60) if kills is not None else None
-        low, high = targets['hunts_per_hour_lo'] * area_scale, targets['hunts_per_hour_hi'] * area_scale
-        put('H', rate, d(rate, low, high) if rate is not None else None, unit='kills/world-hour', low=low, high=high)
+        if v3:
+            hunt = hunt_biomass(lives, targets, begin, end, area_scale)
+            put('H', hunt['rates'], hunt['penalty'], unit='organic units/world-hour per hunt lineage',
+                low=hunt['low'], high=hunt['high'], biomass=hunt['biomass'],
+                missing_data=hunt['missing_data'], source='life:prey_body at death')
+        else:
+            kill_keys = [key for key in initial if any(key.startswith('kills_' + hunter + '_') for hunter in targets['hunt_lineages'])]
+            kills = sum(number(closing, key) - number(opening, key) for key in kill_keys) if kill_keys and opening else None
+            rate = kills / ((end - begin) / 60) if kills is not None else None
+            low, high = targets['hunts_per_hour_lo'] * area_scale, targets['hunts_per_hour_hi'] * area_scale
+            put('H', rate, d(rate, low, high) if rate is not None else None, unit='kills/world-hour', low=low, high=high)
         f_exposed = (set(name for name in body_exposed if any(
             r['lineage'] == name and within(number(r, 'minute'), midpoint, end)
             and number(r, 'n_adult', 0) > 0 for r in vitals)) if v3 else body_exposed)
@@ -742,6 +750,34 @@ def leaf_offtake(opening, closing, targets, put, active):
         produced=produced, eaten=eaten, note='direct photo foliage_built / foliage_taken window deltas; no growth costs 1')
 
 
+def hunt_biomass(lives, targets, begin, end, area_scale):
+    """Exact killed tissue, never peak size or average living prey mass.
+
+    Legacy life files without prey_body cannot provide this outcome. Empty
+    prey_body is valid for living bodies and deaths unrelated to these hunters.
+    """
+    biomass = {name: 0.0 for name in targets['hunt_lineages']}
+    missing = not lives or any('prey_body' not in row for row in lives)
+    for row in lives:
+        hunter = row.get('killer_lineage') or row.get('cause', '').removeprefix('killed_by_')
+        if hunter not in biomass or not within(number(row, 'died_minute'), begin, end):
+            continue
+        body = number(row, 'prey_body')
+        if body is None:
+            missing = True
+        elif body <= 0:
+            raise ValueError('prey_body at death must be positive')
+        else:
+            biomass[hunter] += body
+    low = targets['hunt_biomass_per_hour_lo'] * area_scale
+    high = targets['hunt_biomass_per_hour_hi'] * area_scale
+    rates = {name: None if missing else value / ((end - begin) / 60)
+             for name, value in biomass.items()}
+    return dict(biomass=biomass if not missing else None, rates=rates, low=low, high=high,
+                penalty=None if missing else average([d(value, low, high) for value in rates.values()]),
+                missing_data='life:prey_body (exact prey tissue at death)' if missing else None)
+
+
 def check_required_data(spec, rows, vitals, lives, names, begin, end, targets):
     selected = [row for row in rows if begin <= number(row, 'sim_min') <= end]
     vr = [row for row in vitals if begin < number(row, 'minute') <= end and row['lineage'] in names]
@@ -766,6 +802,9 @@ def check_required_data(spec, rows, vitals, lives, names, begin, end, targets):
                     if not keys:
                         raise ValueError(f'missing lifecycle counters for {name}')
                     require_columns(selected, keys, 'census lifecycle')
+            elif source == 'life' and key == 'prey_body':
+                if hunt_biomass(lives, targets, begin, end, 1)['missing_data']:
+                    raise ValueError('missing required life:prey_body (exact prey tissue at death)')
             elif source == 'life' and key == 'adult_transitions':
                 if not lives or any('matured_minute' not in row for row in lives):
                     raise ValueError('missing life adult-transition records: matured_minute')
@@ -815,13 +854,17 @@ def arm_summary(worlds, cfg, baseline_worlds=None):
     feasibility = cfg['profile'].get('feasibility', 'relative')
     feasible = feasible_absolute if feasibility == 'absolute' else feasible_relative
     soft_rank = mean + cfg['summary']['sd_weight'] * sd if complete else None
-    total_losses = sum(len(world['lost']) for world in worlds)
+    ranked_losses = {str(world['seed']): world.get('absolute_lost', world['lost'])
+                     if feasibility == 'absolute' else world['lost'] for world in worlds}
+    total_losses = sum(len(losses) for losses in ranked_losses.values())
     rank_key = [0 if feasible else 1 if complete else 2, 0 if feasible else total_losses,
                 soft_rank if soft_rank is not None else None]
-    worst = max(worlds, key=lambda world: (len(new_losses[str(world['seed'])]), len(world['lost']),
+    worst = max(worlds, key=lambda world: (len(ranked_losses[str(world['seed'])]) if feasibility == 'absolute'
+                                          else len(new_losses[str(world['seed'])]), len(world['lost']),
                                           world['soft_P'] if world['soft_P'] is not None else math.inf)) if worlds else None
     return dict(feasible=feasible, feasible_relative=feasible_relative,
                 feasible_absolute=feasible_absolute, feasibility=feasibility, rankable=complete, loss_vector=loss_vector, new_losses=new_losses,
+                absolute_loss_vector={str(world['seed']): world.get('absolute_lost', world['lost']) for world in worlds},
                 total_losses=total_losses, mean_P=mean, sd_P=sd, rank=soft_rank, rank_key=rank_key,
                 worst_seed=worst['seed'] if worst else None,
                 invalid_seeds=sorted({world['seed'] for world in worlds if not world['rankable']}
@@ -1067,8 +1110,9 @@ def markdown(report):
     if report['mixed_binaries']:
         lines += ['Explicit mixed-binary comparison: ' + display(report['binary_hashes']), '']
     # Loss vectors precede every component score, including the baseline.
-    lines += table(['Arm', 'Feasible', 'Rankable', 'Per-seed required losses', 'Worst seed'],
-                   [[arm, report['arms'][arm]['feasible'], report['arms'][arm]['rankable'],
+    lines += table(['Arm', 'Feasible', 'Relative', 'Absolute', 'Rankable', 'Per-seed required losses', 'Worst seed'],
+                   [[arm, report['arms'][arm]['feasible'], report['arms'][arm]['feasible_relative'],
+                     report['arms'][arm]['feasible_absolute'], report['arms'][arm]['rankable'],
                      report['arms'][arm]['loss_vector'], report['arms'][arm]['worst_seed']] for arm in report['ranking']])
     for arm in report['ranking']:
         summary = report['arms'][arm]

@@ -573,7 +573,7 @@ class WideScoreTests(unittest.TestCase):
             meadow_share_lo=0.1, meadow_share_hi=0.2, vaulttree_family_m2=4,
             lanternberry_groves=2, glowcap_lit_share_hi=0.1,
             leaf_offtake_lo=0.2, leaf_offtake_hi=0.4, fullness_p10=0.5,
-            hunts_per_hour_lo=0, hunts_per_hour_hi=100)
+            hunt_biomass_per_hour_lo=0, hunt_biomass_per_hour_hi=100)
         for spec in self.document['profiles'].values():
             spec['to_minute'] = 6
 
@@ -600,7 +600,7 @@ class WideScoreTests(unittest.TestCase):
             census.append(row)
         for index, name in enumerate(self.names):
             lives.append(dict(id=index, lineage=name, native='true', origin='observed',
-                born_minute=load - 1, died_minute='', matured_minute='', cause='', last_seen_minute=load + 6))
+                born_minute=load - 1, died_minute='', matured_minute='', cause='', prey_body='', last_seen_minute=load + 6))
         write_csv(self.root / 'census.csv', census)
         write_csv(self.root / 'vitals/vitals.csv', vitals)
         write_csv(self.root / 'vitals/life.csv', lives)
@@ -639,6 +639,50 @@ class WideScoreTests(unittest.TestCase):
         self.assertEqual(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
         self.mutate('census.csv', lambda rows: [dict(r, founders_frondgrazer=inside['high'] * 2) for r in rows])
         self.assertGreater(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
+
+    def test_shared_extinction_is_rejected_only_by_absolute_profile(self):
+        self.fixture(load=0)
+        self.mutate('census.csv', lambda rows: [dict(r, founders_frondgrazer=0)
+            if float(r['sim_min']) == 6 else r for r in rows])
+        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, n=0, n_adult=0)
+            if r['lineage'] == 'frondgrazer' and float(r['minute']) == 6 else r for r in rows])
+        world = self.world(year=True)
+        self.assertIn('animal:frondgrazer', world['lost'])
+        cfg = score.profile_config(self.document, 'wide-year')
+        summary = score.arm_summary([world], cfg, {1: world})
+        self.assertTrue(summary['feasible_relative'])
+        self.assertFalse(summary['feasible_absolute'])
+        self.assertFalse(summary['feasible'])
+
+    def test_recruit_maturation_boundaries_and_resumed_snapshots(self):
+        def recruit(body_id, born_at, matured_at):
+            return dict(id=body_id, lineage='chorister', native='true', origin='born',
+                born_minute=born_at, matured_minute=matured_at, died_minute='',
+                last_seen_minute=60, segment=0)
+        early = recruit('early', 1, 2)
+        resumed = dict(early, origin='observed', born_minute=30, segment=1,
+            matured_minute='', last_seen_minute=120)
+        records = score.life_rows([early, resumed,
+            recruit('before', 1, -1), recruit('at_end', 1, 60),
+            recruit('birth_at_end', 60, 60), recruit('juvenile', 1, '')])
+        life = score.lifecycle('chorister', records, {}, {}, 0, 60, 30)
+        self.assertEqual(life['adult_recruits'], 1)
+        self.assertEqual(next(r for r in records if r['id'] == 'early')['matured_minute'], 2)
+
+    def test_hunt_boundaries_and_resumes_preserve_exact_tissue(self):
+        targets = dict(hunt_lineages=['hunter'], hunt_biomass_per_hour_lo=0,
+            hunt_biomass_per_hour_hi=10)
+        def death(body_id, minute, body):
+            return dict(id=body_id, lineage='prey', native='true', origin='observed',
+                cause='killed_by_hunter', died_minute=minute, prey_body=body,
+                last_seen_minute=60, segment=0)
+        first = death('start', 0, 2)
+        duplicate = dict(first, prey_body='', segment=1, last_seen_minute=120)
+        rows = score.life_rows([first, duplicate, death('before', -1, 20),
+            death('end', 60, 30), death('middle', 30, 3)])
+        hunt = score.hunt_biomass(rows, targets, 0, 60, 1)
+        self.assertEqual(hunt['biomass']['hunter'], 5)
+        self.assertEqual(hunt['rates']['hunter'], 5)
 
     def test_floor_doubles_bands_except_fixed_megafauna(self):
         pop = self.document['population']
@@ -753,6 +797,30 @@ class WideScoreTests(unittest.TestCase):
         young = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=1)
         self.assertFalse(young['rankable'])
         self.assertIn('year-old', young['warnings'][0])
+
+    def test_hunts_weight_prey_mass_and_keep_hunter_bands_separate(self):
+        targets = self.document['targets']
+        hunter = targets['hunt_lineages'][0]
+        def killed(body):
+            return dict(lineage='prey', killer_lineage=hunter, died_minute=1, prey_body=body)
+        large = score.hunt_biomass([killed(0.8)], targets, 0, 60, 1)
+        small = score.hunt_biomass([killed(0.02)], targets, 0, 60, 1)
+        self.assertAlmostEqual(large['rates'][hunter] / small['rates'][hunter], 0.8 / 0.02)
+        for other in targets['hunt_lineages'][1:]:
+            self.assertEqual(large['rates'][other], 0)
+        targets.update(hunt_biomass_per_hour_lo=0.1, hunt_biomass_per_hour_hi=0.2)
+        result = score.hunt_biomass([killed(0.15)], targets, 0, 60, 1)
+        self.assertGreater(result['penalty'], 0)  # A fed hunter cannot mask an unfed one.
+
+    def test_legacy_life_without_prey_mass_is_unrankable(self):
+        self.fixture()
+        self.mutate('vitals/life.csv', lambda rows: [{k: v for k, v in r.items()
+            if k != 'prey_body'} for r in rows])
+        cfg = score.profile_config(self.document, 'wide-screen-2h')
+        world = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=600)
+        self.assertFalse(world['rankable'])
+        self.assertIsNone(world['components']['H']['penalty'])
+        self.assertIn('life:prey_body', world['warnings'][-1])
 
     def test_v3_report_and_pairing_use_v3_components(self):
         self.fixture(load=0)
