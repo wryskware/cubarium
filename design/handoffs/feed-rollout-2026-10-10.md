@@ -39,26 +39,53 @@ directs from video, one species at a time.
 Each section is one package. The clip is a believable placeholder; Wrysk directs the real
 choreography from the video. Don't invent body parts, colours or new poses beyond it.
 
-### Loftstrider (first)
+### Loftstrider (first; a renderer-worker package)
 
 The tall browser (2.2 × 2.2 × 3.4 m adult, feeding 0.8–3.5 m up, "a sloppy feeder"). Its
-builder is `loftstrider()` / `loftstrider_rig(p)` / `build_loftstrider`, with the chibi
-calf blended in by `ls_blend`; the rig must hold for the calf bins too.
+builder is `loftstrider()` / `loftstrider_rig(p)` / `build_loftstrider`: a column body, a
+neck, the pink head with its mouth on top, six eyes and tusks, **six fronds** rising from
+the rim and drooping, **six spider legs** (hip bulb, thigh out and down to a bulbous knee,
+shin to the ankle, three toes). The chibi calf is blended in by `ls_blend`; the rig must
+hold for the calf bins too.
 
-- **Bones**: root (body, legs), a chain of 2–3 along the neck, a head bone (head and mouth
-  parts). Report the count per bone, calf and adult.
-- **Clip (placeholder)**: browsing a crown above it.
-  1. Reach: the neck lifts and the head goes up and forward into the browse band, 0.6 s,
+Wrysk (2026-10-10): "loftstrider feeding will be the hardest since it uses those fronds to
+reach and grab foliage and place it into its mouth. we probably want to rig them to be able
+to raise and lower their main bodies too, and lean to sides and bend the neck. their
+resting state could be them lowering down and touching their core to the ground while the
+legs bend like spiders'"
+
+- **Bones**: the body (root); each leg a thigh and a shin (toes on the shin), so the body
+  can rise, drop and lean while the feet stay planted (solve it in Blender with IK and
+  sample the result; the engine only plays bone transforms); a neck chain of 2–3 that
+  bends; the head; each frond a chain of about 3 that can reach and curl. Report the bone
+  count and cells per bone, adult and calf, and say if the engine's per-figure bone limit
+  or the tile box needs to grow.
+- **Feed clip (placeholder; Wrysk directs the real one)**: browsing a crown above and to
+  one side.
+  1. Reach: the body rises on its legs and leans toward the foliage, the neck bends that
+     way, and the two fronds facing it reach up and out into the browse band, 0.7 s,
      eased.
-  2. Strip: the head pulls back and down about 10 cm with a small sideways tug, alternating
-     sides, 0.5 s; then reaches in again, 0.4 s.
-  3. Every second strip, chew: the head draws back level with a small bob, 0.6 s.
-  4. Loop while it crops; the reach and return come from the clip weight.
-- Find whether the sim knows, per bout, how high the cell it crops is. If it is cheap to
-  reach, say how the reach could aim at it (don't build it); the placeholder reaches a fixed
-  height in the band, stated.
-- Evidence as above, at a vaulttree if `voxel_feed_capture` can place one cheaply (say if
-  not), adult and calf.
+  2. Grab and bring: those fronds curl closed on a spray and arc back over the head to the
+     mouth on top, 0.6 s; the head dips a little to meet them.
+  3. The next pair round reaches while the first returns to rest, alternating, so the
+     fronds are never all still. A small chew bob of the head after each delivery, 0.3 s.
+  4. Loop while it crops; the reach and the return come from the clip weight.
+- **Rest pose (the first back-apply of sleep to the rig)**: Wrysk's description above. The
+  body lowers until its underside touches the ground and the legs fold spider-like, knees
+  high, feet where they stood. It eases in and out with the state the sim uses for the
+  loftstrider's rest or sleep (find it, `crates/cubarium/src/voxel/sleep.rs` and the
+  animal state; say which), replacing the class-path settle for this species only. Keep
+  any breathing the sleep path has, on top.
+- **Engine**: today a species has one clip whose weight follows `State::Cropping`. This
+  needs two (feed, rest), each with its own state-driven weight, easing, never popping,
+  and blending sensibly if both are partly on. Build the smallest general form (a clip per
+  state in the `.rig` side file) so the other species and idle/hunker can use it later.
+- Find whether the sim knows, per bout, how high the cell it crops is, and which side. If
+  cheap, say how the reach could aim at it (don't build it); the placeholder reaches a
+  fixed height and side, stated.
+- **Evidence** as above, adult and calf: the feed loop (at a vaulttree if
+  `voxel_feed_capture` can place one cheaply; say if not), and the rest transition
+  (standing → lowered → standing). Side-on and three-quarter, 6 px and 12 px.
 
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
 open look question), seedporter, lanternjaw, bellwing, capgnawer, littershredder,
