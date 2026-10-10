@@ -454,7 +454,7 @@ control and the reward accounting; display targets after seeing results.
    heuristics.
    - Baseline v2 (§1a): C1 feeds about 2× better and moves half as much.
    - Baseline v3 repeats this on the fixed heuristics.
-3. **Count the digestible stomach in the reward?** Recommended yes. The side-by-side is in:
+3. **Count the digestible stomach in the reward?** **Decided yes (Wrysk, 2026-10-09: "yeah count it").** The side-by-side is in:
    it barely changes rankings (within-world rank correlation 0.95–0.96, brain pilot part 1).
 4. **Success across slow clocks:** life-cycle-aware (recommended) rather than "every 2 h run
    breeds".
@@ -996,7 +996,10 @@ control and the reward accounting; display targets after seeing results.
        - Shore searches had taken 92.5 % of it. They now start near the body, rescan within a
          bound and reject cheaply first.
        - Exact: 13,928 place records are identical, and so are the heuristic rows.
-   - P5 (reward) waits on Wrysk's answers. Asked first: count the digestible stomach.
+   - P5 (reward): the digestible stomach counts (Wrysk, 2026-10-09). Still open: pack-shared
+     reward (Q4b), then H 64 (Q5).
+   - AUTOSAVE-SLOT (Codex) running: autosaves go to `<world> (autosave)` and never overwrite
+     the player's save; launch opens the newer of the two (Wrysk: "like how other games do it").
    - P7 (stage runs) needs P5 and P6.
 
 ## 7. Work log (2026-10-08)
