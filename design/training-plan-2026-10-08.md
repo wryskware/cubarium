@@ -1057,6 +1057,9 @@ control and the reward accounting; display targets after seeing results.
      "bellwing would be able to react very quickly". Queued after LANTERNJAW-LIFE merges (shared hunt code).
      Idea, not decided: the lanternjaw lure glows cyan and IR, "or maybe one each", to draw bellwings and
      capgnawers.
+   - Wrysk (2026-10-10): grown lanternjaws fight back when attacked ("its not like attacking a grazer"), using the
+     existing wound mechanics. Venom is noted for later ("lets not add too much just yet"; it would need a new
+     status effect). Queued with the bellwing escape.
    - LANTERNJAW-LIFE + diet built (09cc0be1, b8329983): adult at 0.35, rider take 2x own body per day, host bears
      0.5 of its body per day, adults count 12x in hunters' size windows, clutches of 2-7 once a world day, diet
      weights. Effect check running on eidolon.
