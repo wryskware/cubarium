@@ -40,12 +40,16 @@ OUT = (ARGS[ARGS.index("--out") + 1] if "--out" in ARGS
        else os.path.join(A.REPO, "art", "gen", "runs", "lanternjaw-larva-2026-10-09"))
 
 VOX = 0.125
-VIEWS = {"q": (-45.0, 30.0), "side": (-90.0, 0.0)}
+VIEWS = {"q": (-45.0, 30.0), "side": (-90.0, 0.0), "front": (0.0, 20.0)}
 W, H = 520, 360          # on-host and adult-bin tiles
 WL, HL = 360, 360        # the larva alone
 # where the larva's cell (0, 0, 0) goes on the host: over the middle of its back, on the row
 # above its top (found from the host's cells)
 AT_I, AT_J = 0, 0
+# `--round 2`: the symmetric tick and grub (`animal_models.LJ_LARVA_R2`), each drawn shifted
+# across by `LJ_LARVA_SHIFT` so it is centred on the host's spine
+ROUND2 = "--round" in ARGS and ARGS[ARGS.index("--round") + 1] == "2"
+KINDS = A.LJ_LARVA_R2 if ROUND2 else A.LJ_LARVA_KINDS
 
 
 def founder(name):
@@ -101,7 +105,7 @@ def main():
     host = host_cells()
     meta = {"host": {"cells": len(host), "span": A.span(host)}}
     built = {}
-    for kind in A.LJ_LARVA_KINDS:
+    for kind in KINDS:
         objs, cells = larva(kind)
         built[kind] = cells
         bite = sorted(k for k in cells if k[2] < 0)
@@ -116,18 +120,22 @@ def main():
     top = {}
     for (i, j, k) in host:
         top[(i, j)] = max(top.get((i, j), -1), k)
-    scales = {"q": 0.0, "side": 0.0}
+    scales = {view: 0.0 for view in VIEWS}
     placed = {}
     for kind, cells in built.items():
-        under = [top[(i + AT_I, j + AT_J)] for (i, j, k) in cells if (i + AT_I, j + AT_J) in top and k >= 0]
+        sj = A.LJ_LARVA_SHIFT.get(kind, 0.0)
+        # the host rows under a cell: its own, and the one below it when drawn half across
+        rows = (0,) if sj == 0 else (0, -1)
+        under = [top[(i + AT_I, j + AT_J + r)] for (i, j, k) in cells for r in rows
+                 if (i + AT_I, j + AT_J + r) in top and k >= 0]
         dk = max(under) + 1
-        moved = {(i + AT_I, j + AT_J, k + dk) for (i, j, k) in cells}
+        moved = {(i + AT_I, j + AT_J, k + dk) for (i, j, k) in cells} if sj == 0 else set()
         placed[kind] = (dk, {key: s for key, s in host.items() if key not in moved})
         meta[kind]["host_cells_bitten"] = len(host) - len(placed[kind][1])
         # the common on-host scale: the widest framing over the four
         B.reset_scene()
         objs = A.voxel_cubes("frondgrazer", placed[kind][1], VOX) + cubes_at(
-            "lanternjaw-larva", cells, AT_I, AT_J, dk)
+            "lanternjaw-larva", cells, AT_I, AT_J + sj, dk)
         for view in scales:
             cam = camera(objs, view, W / H)
             scales[view] = max(scales[view], cam.data.ortho_scale)
@@ -144,7 +152,8 @@ def main():
         dk, rest = placed[kind]
         for view in VIEWS:
             B.reset_scene()
-            objs = A.voxel_cubes("frondgrazer", rest, VOX) + cubes_at("lanternjaw-larva", cells, AT_I, AT_J, dk)
+            objs = A.voxel_cubes("frondgrazer", rest, VOX) + cubes_at(
+                "lanternjaw-larva", cells, AT_I, AT_J + A.LJ_LARVA_SHIFT.get(kind, 0.0), dk)
             L.render(camera(objs, view, W / H, scales[view]), os.path.join(tiles, f"{kind}-host-{view}.png"), W, H)
         B.reset_scene()
         L.render(camera(A.voxel_cubes("lanternjaw-larva", cells, VOX), "q", WL / HL, lscale["vox"]),
@@ -161,6 +170,7 @@ def main():
              os.path.join(tiles, "adult-bin0-q.png"), W, H)
     meta["adult_bin0"] = {"length_m": round(length, 3), "cells": len(adult), "span": A.span(adult)}
     meta["scales"] = {"host": scales, "larva": lscale}
+    meta["kinds"] = list(KINDS)
     print(f"adult bin 0: {meta['adult_bin0']}", flush=True)
 
     with open(os.path.join(OUT, "meta.json"), "w") as fh:

@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 D = sys.argv[1]
 T = os.path.join(D, "tiles")
 META = json.load(open(os.path.join(D, "meta.json")))
-KINDS = ["tick", "grub", "nymph", "leech"]
+KINDS = META.get("kinds", ["tick", "grub", "nymph", "leech"])
 BG, INK, HEAD, DIM = (24, 20, 34), (230, 221, 248), (255, 216, 96), (160, 150, 185)
 ROW_H, PAD, LABEL_W, TOP = 300, 10, 210, 64
 LOOK = {
@@ -26,6 +26,10 @@ LOOK = {
     "grub": "4 segments arched like an inchworm, pale head, cyan tail tip",
     "nymph": "miniature adult: big head + fangs, folded arms, legs round the flanks, upright stub + bud",
     "leech": "1-wide body along the spine, pale sucker, lifted end with two lure buds",
+    "tick3": "round 2: tick, 3 wide, centred on the spine; one lure cell on the middle row",
+    "tick2": "round 2: tick, 2 wide, drawn half a voxel across to centre it; lure across both rows",
+    "grub3": "round 2: grub, 3 wide, centred on the spine; cyan tail foot across all three rows",
+    "grub2": "round 2: grub, 2 wide, drawn half a voxel across to centre it; lure across both rows",
 }
 
 
@@ -49,6 +53,7 @@ def wrap(text, n):
 
 cols = [("{k}-host-q.png", "on adult frondgrazer, three-quarter (true scale)"),
         ("{k}-host-side.png", "on adult frondgrazer, side (true scale)"),
+        ("{k}-host-front.png", "on adult frondgrazer, front (true scale)"),
         ("{k}-vox.png", "larva alone, voxels 0.125 m (enlarged)"),
         ("{k}-model.png", "larva alone, Blender model"),
         ("adult-bin0-q.png", "smallest adult bin (drop-off), true scale")]
@@ -58,7 +63,7 @@ sheet = Image.new("RGB", (LABEL_W + sum(widths) + PAD * (len(cols) + 1),
                           TOP + len(KINDS) * (ROW_H + PAD) + PAD), BG)
 d = ImageDraw.Draw(sheet)
 a = META["adult_bin0"]
-d.text((PAD, 10), "Lanternjaw larva candidates (rider stage), 2026-10-09: for Wrysk to pick", fill=HEAD)
+d.text((PAD, 10), ("Lanternjaw larva, round 2: symmetric tick and grub, 2026-10-09" if "kinds" in META and META["kinds"][0] == "tick3" else "Lanternjaw larva candidates (rider stage), 2026-10-09: for Wrysk to pick"), fill=HEAD)
 d.text((PAD, 28), f"host: adult frondgrazer, {META['host']['cells']} cells, {META['host']['span']} voxels;  "
                   f"smallest adult lanternjaw bin: {a['length_m']} m, {a['cells']} cells, {a['span']} voxels;  "
                   "voxel 0.125 m", fill=DIM)

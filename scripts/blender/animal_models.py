@@ -1148,6 +1148,18 @@ def seg_tail(pts, r0, r1):
 #          tails as two dots
 LJ_LARVA_KINDS = ("tick", "grub", "nymph", "leech")
 
+# Round 2 (Wrysk 2026-10-09: "either grub or tick. i like that tick is symmetric; thats
+# important"): the tick and the grub made symmetric about the host's spine, two ways each,
+# and nothing bites below the larva's belly (the engine can't cut a host's cells):
+#
+#   tick3, grub3  three voxels wide on rows j = -1..1, centred on the spine; the tick's one
+#                 lure cell on the middle row, the grub's cyan foot across all three
+#   tick2, grub2  two voxels wide, as in round 1, drawn half a voxel across so the pair of
+#                 rows straddles the spine (`LJ_LARVA_SHIFT`); the lure across both rows
+LJ_LARVA_R2 = ("tick3", "tick2", "grub3", "grub2")
+# The voxels across a kind is drawn shifted (by its anchor, not its cells) to centre it.
+LJ_LARVA_SHIFT = {"tick2": -0.5, "grub2": -0.5}
+
 
 def _capsules(pts, r0, r1, mat):
     """A thin limb as one long ellipsoid per segment (radius r0 -> r1): closed and convex,
@@ -1163,6 +1175,41 @@ def _capsules(pts, r0, r1, mat):
 
 
 def lanternjaw_larva(kind):
+    if kind in ("tick3", "tick2"):
+        # round 2's tick: round 1's three plates and dark body, the fangs ending on the
+        # host's back in front of the plates (a pale cell each), the tail nub and lure on
+        # the axis
+        Y, hw = (0.0, 0.13) if kind == "tick3" else (0.0625, 0.108)
+        ell((0.0, Y, 0.045), (0.165, hw - 0.005, 0.03), c("a_dark"))
+        for x, rx_, tilt in ((0.12, 0.058, -6), (0.0, 0.074, -8), (-0.12, 0.058, -10)):
+            ell((x, Y, 0.06 + (0.004 if x < 0 else 0)), (rx_, hw, 0.034), c("a_main"), rot=ry(tilt))
+        for y in ((-0.125, 0.125) if kind == "tick3" else (0.0, 0.125)):
+            tube([(0.17, y, 0.05), (0.21, y, 0.045), (0.245, y, 0.03)], 0.02, 0.016, c("a_head"), seg=8)
+            cyl((0.245, y, 0.03), (0.225, y, 0.02), 0.016, 0.004, mat=c("a_head"), seg=8)
+        tube(catmull([(-0.155, Y, 0.07), (-0.165, Y, 0.12), (-0.135, Y, 0.155)], 6),
+             0.026, 0.02, c("a_main"), seg=8)
+        ell((-0.125, Y, 0.1875), (0.04, 0.04 if kind == "tick3" else 0.1, 0.04), c("a_lure"))
+        return
+    if kind in ("grub3", "grub2"):
+        # round 2's grub: round 1's arch, its head resting on the host (no mandibles below)
+        Y, ry_ = (0.0, 0.13) if kind == "grub3" else (0.0625, 0.1)
+        segs = [((-0.25, Y, 0.125), (0.055, ry_, 0.075)), ((-0.125, Y, 0.19), (0.07, ry_, 0.052)),
+                ((0.0, Y, 0.19), (0.07, ry_, 0.052)), ((0.125, Y, 0.175), (0.058, ry_, 0.06))]
+        for centre, r in segs:
+            ell(centre, r, c("a_main"))
+        # the dark joint rings (two wide only): they take no cell at two wide, and at three
+        # wide they won stray cells above and beside the arch, unevenly
+        if kind == "grub2":
+            for x, z, tilt in ((-0.2, 0.175, -40), (-0.0625, 0.195, 0), (0.07, 0.19, 30)):
+                cyl((x - 0.005 * math.cos(math.radians(tilt)), Y, z),
+                    (x + 0.005 * math.cos(math.radians(tilt)), Y, z + 0.005 * math.sin(math.radians(tilt))),
+                    0.064, 0.064, mat=c("a_dark"), seg=12)
+        # the head capsule, short enough that the middle row takes no cell in front of it
+        ell((0.13, Y, 0.065), (0.045, ry_ - 0.008, 0.05), c("a_head"))
+        # the cyan tail foot across the whole width (a middle-row cell alone hides behind
+        # the side cells)
+        ell((-0.25, Y, 0.0625), (0.034, 0.13 if kind == "grub3" else 0.09, 0.03), c("a_lure"))
+        return
     if kind == "tick":
         Y = 0.0625
         # the dark body under the plates, showing only at their edges
