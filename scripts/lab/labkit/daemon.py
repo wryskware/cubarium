@@ -27,6 +27,7 @@ from .launch import LAUNCHERS, LocalTransport, SshTransport, systemd_user_works,
 from .store import TERMINAL, Events, Store, atomic_write, new_id
 from .ec2 import Ec2Pool, estimate
 from . import providers
+from .stops import evaluate, run_hook, validate_rules
 
 ACTIVE = ("submitted", "inputs", "preflight", "running", "aborting")
 TOOLS = ("taskwrap.py", "snaprun.py")
@@ -53,6 +54,7 @@ class Daemon:
         self.log = log or (lambda message: print(message, file=sys.__stdout__, flush=True))
         self.pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="labd")
         self.preflights = {}
+        self.stop_hooks = {}
         self.probes = {}
         self.timers = {}
         self.transports = {}
@@ -218,7 +220,7 @@ class Daemon:
         kind = self.kinds.get(spec.get("kind"))
         if kind is None:
             raise SpecError(f"unknown kind {spec.get('kind')!r}; known: {', '.join(sorted(self.kinds))}")
-        spec = kind.validate(dict(spec), self.ctx)
+        spec = validate_rules(kind.validate(dict(spec), self.ctx), self.ctx, kind)
         out = Path(spec["out"]) if spec.get("out") else self.paths.runs / job_id
         self.store.x("INSERT INTO jobs(id, kind, name, state, spec, out, priority, submitted, parent) "
                      "VALUES(?, ?, ?, 'submitted', ?, ?, ?, ?, ?)", job_id, spec["kind"], spec.get("name"),
@@ -514,7 +516,60 @@ class Daemon:
         job = self.job(job_id)
         if job.status not in ("running", "inputs", "preflight"):
             return
+        if self.check_stops(job):
+            return
         self.handle(job, self.call(job, "progress", job.tasks[name]))
+
+    def fire_stop(self, job, result):
+        job.state.setdefault("_lab_stop", {})["fired"] = result
+        self.save_kstate(job)
+        self.events.emit("stopped", job=job.id, **result)
+        self.abort(job.id, result["reason"], final="done" if result["action"] == "finish" else "aborted")
+
+    def check_stops(self, job):
+        """Evaluate mirrored census output, and schedule due local hooks off the loop."""
+        if not job.spec.get("stop"):
+            return False
+        try:
+            result = (evaluate(job, self.kinds[job.kind].census_runs(job, self.ctx))
+                      if any("when" in rule for rule in job.spec["stop"]) else None)
+        except Exception as error:  # noqa: BLE001 - bad conditions are visible job errors
+            reason = f"stop rule error: {error}"
+            self.log(f"{job.id}: {reason}")
+            self.events.emit("stop-error", job=job.id, reason=reason)
+            self.abort(job.id, reason)
+            return True
+        if result:
+            self.fire_stop(job, result)
+            return True
+        state = job.state.setdefault("_lab_stop", {}).setdefault("hooks", {})
+        now = self.clock()
+        for index, rule in enumerate(job.spec["stop"]):
+            key = (job.id, index)
+            if "hook" not in rule or key in self.stop_hooks:
+                continue
+            if str(index) in state and now - state[str(index)] < rule["every_min"] * 60:
+                continue
+            state[str(index)] = now
+            self.stop_hooks[key] = self.pool.submit(run_hook, rule, job.out)
+        self.save_kstate(job)
+        return False
+
+    def collect_stop_hooks(self):
+        for (job_id, index), future in list(self.stop_hooks.items()):
+            if not future.done():
+                continue
+            del self.stop_hooks[job_id, index]
+            job = self.job(job_id)
+            try:
+                result = future.result()
+            except Exception as error:  # noqa: BLE001 - a bad hook means continue
+                reason = f"stop hook {index}: {error}"
+                self.log(f"{job_id}: {reason}")
+                self.events.emit("stop-hook-error", job=job_id, rule=index, reason=reason)
+                continue
+            if result and job.status == "running":
+                self.fire_stop(job, dict(rule=index, action=result["action"], reason=result["reason"]))
 
     def handle(self, job, result):
         self.save_kstate(job)
@@ -560,7 +615,8 @@ class Daemon:
                     self.check_liveness(job, view)
             job = self.job(row["id"])
             if job.status == "running":
-                self.handle(job, self.call(job, "progress", None))
+                if not self.check_stops(job):
+                    self.handle(job, self.call(job, "progress", None))
 
     def check_liveness(self, job, view):
         row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
@@ -831,6 +887,8 @@ class Daemon:
         for row in self.store.q("SELECT id, state FROM jobs WHERE state IN ('running', 'aborting')"):
             if row["id"] in self.preflights:
                 continue
+            if row["state"] == "running" and any(key[0] == row["id"] for key in self.stop_hooks):
+                continue
             busy = self.store.one("SELECT COUNT(*) AS n FROM tasks WHERE job=? AND state IN ('pending', 'running')",
                                   row["id"])["n"]
             if busy:
@@ -858,13 +916,15 @@ class Daemon:
                 continue
             job = self.job(row["id"])
             summary = self.call(job, "finish")
+            self.save_kstate(job)
             if isinstance(summary, Abort):
                 summary = summary.reason
             summary = str(summary or "")
             if row["state"] == "aborting":
                 final = json.loads(self.store.one("SELECT summary FROM jobs WHERE id=?", job.id)["summary"]
                                    or "{}").get("final", "aborted")
-                reason = job.reason if final == "cancelled" else f"aborted: {job.reason}"
+                reason = (f"stopped (finish): {job.reason}" if final == "done" else
+                          job.reason if final == "cancelled" else f"aborted: {job.reason}")
             else:
                 final, reason = "done", "ok: " + (summary.splitlines()[0] if summary else "finished")
             table = "\n".join(f"{v.name}\t{v.state}\t{v.host or '-'}\t{v.rc if v.rc is not None else '-'}\t{v.reason or ''}"
@@ -872,7 +932,7 @@ class Daemon:
             atomic_write(job.out / "summary.txt", f"{reason}\n\n{summary}\n\ntask\tstate\thost\trc\treason\n{table}\n")
             atomic_write(job.out / "DONE", reason + "\n")
             self.store.update("jobs", dict(id=job.id), state=final, finished=self.clock(), reason=reason,
-                              summary=summary)
+                              summary=reason + "\n" + summary if job.state.get("_lab_stop", {}).get("fired") else summary)
             for name in {v.host for v in job.tasks.values() if v.host}:
                 host = self.host(name)
                 views = [v for v in job.tasks.values() if v.host == name]
@@ -918,6 +978,7 @@ class Daemon:
         self.collect_preflights()
         self.probe_hosts()
         self.poll_tasks()
+        self.collect_stop_hooks()
         self.cadence()
         self.schedule()
         self.ec2.tick()

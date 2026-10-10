@@ -14,6 +14,7 @@ from .core import Context, SpecError, load_kinds
 from .top import cmd_top
 from .hosts import Inventory
 from .store import TERMINAL, Paths, Store, new_id, read_events, spool
+from .stops import rule_labels, validate_rules
 
 WAKE = set(TERMINAL) | {"approval-needed", "ec2-auth-expired", "ec2-down-failed", "ec2-limit"}
 
@@ -38,7 +39,8 @@ def cmd_submit(args, paths):
     except OSError:
         inventory = None
     # Validate now: commits are pinned at submit time, so later commits never leak in.
-    spec = kind.validate(spec, Context(paths, inventory=inventory))
+    ctx = Context(paths, inventory=inventory)
+    spec = validate_rules(kind.validate(spec, ctx), ctx, kind)
     job_id = new_id(spec["kind"], spec.get("name"))
     spool(paths, "incoming", dict(id=job_id, spec=spec, submitted=time.time()), job_id)
     print(job_id)
@@ -70,6 +72,8 @@ def cmd_status(args, paths):
         age = fmt_h((time.time() - (row["submitted"] or time.time())) / 3600)
         tasks = f"{counts['running']}/{counts['pending']}/{counts['done']}/{counts['bad']}"
         print(f"{row['id'][:34]:34} {row['kind'][:10]:10} {row['state'][:10]:10} {tasks:17} {age:>6}  {(row['reason'] or '')[:70]}")
+        for label in rule_labels(json.loads(row['spec'])):
+            print(f"  {label}")
     for stem in spooled:
         print(f"{stem[:34]:34} {'?':10} {'spooled':10} {'-':17} {'':>6}  waiting for labd")
     running = store.q("SELECT job, name, host, grp, started, spec FROM tasks WHERE state='running' ORDER BY started")
