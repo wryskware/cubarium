@@ -1172,11 +1172,11 @@ pub fn specs(
             cells.len(),
             toward.map(|t| (t.as_ptr() as usize, t.len())),
         ));
-        // Its rig, when the founder has one and this is the founder's own model's bin
-        // (not another mode's), and it stands on the ground (FEED-RIG).
+        // Its rig, when the model it wears in its mode has one (the founder's own, or a
+        // pose model's: the seedporter's perched `seedporter-stand`) and these are that
+        // model's bin's cells, and it stands on the ground (FEED-RIG, FEED-ROLLOUT).
         let rigged = lib.filter(|_| ground).and_then(|lib| {
-            let r = lib.rig(founder)?;
-            let model = lib.animal(founder)?;
+            let (r, model) = lib.rig_in_mode(founder, a.mobility.mode)?;
             let bin = model.bins.iter().position(|b| std::ptr::eq(b.cells.as_ptr(), cells.as_ptr()))?;
             (bin < r.bins.len()).then(|| (r.clone(), bin))
         });

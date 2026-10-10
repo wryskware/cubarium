@@ -1,7 +1,9 @@
 //! **Rigs** (FEED-RIG, `design/handoffs/feeding-motion-rig-2026-10-09.md`; FEED-ROLLOUT,
 //! `design/handoffs/feed-rollout-2026-10-10.md`): a founder's bones and its sampled clips,
 //! one per animal state, baked beside its model, and the per-frame bone transforms the model
-//! pass draws the animal with (`[figures] rig`).
+//! pass draws the animal with (`[figures] rig`). A founder's pose model (the seedporter's
+//! `seedporter-stand`) carries its own rig, named under the manifest's `rigs` by the model's
+//! name (`ModelLibrary::rig_in_mode`).
 //!
 //! # What a rig is
 //!

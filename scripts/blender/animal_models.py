@@ -1035,6 +1035,7 @@ def seedporter():
 # pick builder's (0.5 m head to pelvis); the limbs keep their lengths in every pose (`ik`).
 
 SP_ARM, SP_SMALL, SP_LEG = (0.16, 0.16), (0.07, 0.07), (0.13, 0.13)
+SP_SIDE = {1: "l", -1: "r"}  # +y is the body's left (x forward, z up)
 SP_HEAD = 1.25  # the head's scale: the pictures' heads are as wide as the shoulders
 
 
@@ -1132,7 +1133,12 @@ def sp_head(H, F, tilt, mouth_open):
 
 
 def sp_body(spec):
-    """Draw the seedporter from a pose spec (see SP_POSES)."""
+    """Draw the seedporter from a pose spec (see SP_POSES); its rig's frame (FEED-ROLLOUT,
+    `sp_feed_clip`): the head's centre `H`, face `F` and up `U`, the neck's point (the
+    head's pivot), each small arm's shoulder, elbow, wrist and pole by side, the fruit,
+    every point where the built parts stand. Its parts are on rig bones: the head's on
+    `head`, each small arm's upper half on `arm_<side>` and its lower half and fingers on
+    `hand_<side>`, the fruit on `hand_l`, the rest on the root."""
     start = len(L.ORG)
     grip = []  # the big hands' and the hind feet's digits
     H, F = Vector(spec["head"]), _dir(*spec["face"])
@@ -1150,7 +1156,10 @@ def sp_body(spec):
         return 1 if cosb > 0.2 else (2 if cosb < -0.93 else 0)
     loft([(x, y, z, ry, rz) for x, y, z, ry, rz in st], [c("a_main"), c("a_pale"), c("a_mark")], zone,
          nring=48, nseg=20)
+    n0 = len(L.ORG)
     sp_head(H, F, spec["tilt"], spec["mouth"])
+    bone_of(n0, "head")
+    frame = {"H": H, "F": F, "U": U, "neck": nk, "arms": {}}
     for s in (-1, 1):
         def m(v):
             return Vector((v[0], s * v[1], v[2]))
@@ -1164,8 +1173,12 @@ def sp_body(spec):
         # the small middle arms, holding the fruit
         ss = m(spec["small_shoulder"])
         se, sw = ik(ss, m(spec["small_hand"]), *SP_SMALL, m(spec["small_pole"]))
-        tube([ss, se, sw], 0.011, 0.008, c("a_main"), seg=8)
+        side = SP_SIDE[s]
+        tube([ss, se, sw], 0.011, 0.008, c("a_main"), seg=8, bones=[f"arm_{side}", f"hand_{side}"])
+        n0 = len(L.ORG)
         sp_digits(sw, (spec["fruit"] - sw).normalized(), Vector((0, 0, 1)), 3, 0.022, 0.01, 0.004)
+        bone_of(n0, f"hand_{side}")
+        frame["arms"][side] = (ss, se, sw, m(spec["small_pole"]))
         # the hind legs, and their feet
         hp = m(spec["hip"])
         kn, an = ik(hp, m(spec["ankle"]), *SP_LEG, m(spec["leg_pole"]))
@@ -1180,7 +1193,12 @@ def sp_body(spec):
         edge = [wr, el, sh] + side + [hp, kn]
         free = spec["free"](kn, wr, s)
         sp_web(edge, [wr] + free + [kn])
+    # the fruit rides in the hands (FEED-ROLLOUT: on the left hand's bone; the clip moves
+    # both hands alike)
+    n0 = len(L.ORG)
     ell(spec["fruit"], (0.028, 0.028, 0.03), c("a_fruit"))
+    bone_of(n0, "hand_l")
+    frame["fruit"] = Vector(spec["fruit"])
     # the long prehensile tail, its dorsal stripe along the outside
     pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]
     n = len(pts)
@@ -1197,8 +1215,18 @@ def sp_body(spec):
         # stand that far above it, inside the ground row of cells
         low = min(v.co.z for ob in grip if ob.type == "MESH" and slot_of(ob.data.materials[0].name) != "a_claw"
                   for v in ob.data.vertices)
+        shift = Vector((0, 0, spec["feet_on_ground"] - low))
         for ob in L.ORG[start:]:
-            ob.data.transform(Matrix.Translation((0, 0, spec["feet_on_ground"] - low)))
+            ob.data.transform(Matrix.Translation(shift))
+        frame = sp_shifted(frame, shift)
+    return frame
+
+
+def sp_shifted(frame, d):
+    """`sp_body`'s frame moved by `d` (the perch's lift)."""
+    out = {k: (v + d if k in ("H", "neck", "fruit") else v) for k, v in frame.items() if k != "arms"}
+    out["arms"] = {k: (a + d, b + d, w + d, pole) for k, (a, b, w, pole) in frame["arms"].items()}
+    return out
 
 
 def _spiral(centre, plane, a0, a1, r0, r1, n=24):
@@ -1303,6 +1331,129 @@ def seedporter_ground():
 
 def seedporter_glide():
     sp_body(SP_POSES["glide"])
+
+
+# --- the seedporter's feeding rig and clip (FEED-ROLLOUT, 2026-10-10) ---------------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Seedporter; a placeholder, Wrysk directs the
+# real clip. It crops perched in a crown (`seedporter-stand`) and, at a vine face, on the
+# ground (`seedporter-ground`); both pose models carry this rig. Bones: the root (body, big
+# arms, legs, membranes, tail), the head (no jaw: the mouth is a dark patch), each small
+# fruit arm an upper and a lower bone (the hand's fingers on the lower; the fruit rides on
+# the left hand). The loop starts with the fruit at the mouth and the head dipped:
+#
+#   reach  0.4 s  both hands up and forward toward a fruit ahead and above (`SP_REACH_EL`
+#                 above the forward line, as far as the 0.14 m arms reach: they are short
+#                 of a body length), the head tipping up `SP_TIP_DEG`;
+#   bring  0.4 s  back to the mouth, the head dipping to meet them (`sp_dip`: at least
+#                 `SP_DIP_DEG`, more where the arms fall short of the mouth);
+#   chew   0.5 s  two nods of `SP_CHEW_DEG`, the arms held in.
+#
+# The fingers have no bones: the hands cannot be seen to close. The arms are each solved
+# per sampled frame (`ik`, the pose's own elbow pole) and keyed as turns.
+
+SP_FEED_FPS = 30
+SP_REACH_S, SP_BRING_S, SP_CHEW_S = 0.4, 0.4, 0.5
+SP_FEED_LOOP_S = SP_REACH_S + SP_BRING_S + SP_CHEW_S
+SP_REACH_EL = 45.0   # the reach's direction above the body's forward line, degrees
+SP_TIP_DEG = 20.0    # the head tipped up at the reach
+SP_DIP_DEG = 10.0    # the head dipped at the mouth, at least
+SP_CHEW_DEG = 10.0   # each nod of the chew, up from the dip
+SP_SLACK = 0.95      # the arm's most extension (shoulder to wrist over its two bones)
+
+
+def sp_bones(fr):
+    """The rig's bones (name, parent index, head, tail) from `sp_body`'s frame."""
+    pelvis = fr["neck"] - fr["U"] * 0.3
+    bones = [("root", None, tuple(pelvis), tuple(pelvis + Vector((0.1, 0, 0)))),
+             ("head", 0, tuple(fr["neck"]), tuple(fr["H"]))]
+    for side in ("l", "r"):
+        ss, se, sw, _ = fr["arms"][side]
+        n = len(bones)
+        bones += [(f"arm_{side}", 0, tuple(ss), tuple(se)), (f"hand_{side}", n, tuple(se), tuple(sw))]
+    return bones
+
+
+def sp_mouth(fr, deg):
+    """The point the fruit is brought to with the head pitched `deg` (+ up) about its
+    pivot: just ahead of the mouth (`sp_head`'s mouth patch)."""
+    k = SP_HEAD
+    rest = fr["H"] + fr["F"] * (0.082 * k + 0.02) - fr["U"] * 0.08 * k
+    return fr["neck"] + Matrix.Rotation(-math.radians(deg), 3, "Y") @ (rest - fr["neck"])
+
+
+def sp_wrists(fr, fruit):
+    """Each hand's wrist target with the fruit at `fruit`: the rest pose's wrist-to-fruit
+    offset kept."""
+    return {side: fruit + (sw - fr["fruit"]) for side, (_, _, sw, _) in fr["arms"].items()}
+
+
+def sp_reachable(fr, fruit):
+    return all((w - fr["arms"][side][0]).length <= SP_SLACK * sum(SP_SMALL)
+               for side, w in sp_wrists(fr, fruit).items())
+
+
+def sp_dip(fr):
+    """The head's dip at the mouth: `SP_DIP_DEG`, or the least more (to 40 degrees) at
+    which both hands reach the mouth."""
+    for d in range(int(SP_DIP_DEG), 41):
+        if sp_reachable(fr, sp_mouth(fr, -d)):
+            return float(d)
+    return 40.0
+
+
+def sp_reach_point(fr):
+    """Where the fruit is held at the reach: from between the shoulders, along the reach's
+    direction, as far as the arms go."""
+    mid = sum((a[0] for a in fr["arms"].values()), Vector()) / 2
+    el = math.radians(SP_REACH_EL)
+    d = Vector((math.cos(el), 0, math.sin(el)))
+    return mid + d * SP_SLACK * sum(SP_SMALL) + (fr["fruit"] - sum((a[2] for a in fr["arms"].values()), Vector()) / 2)
+
+
+def sp_feed_at(fr, dip, t):
+    """The fruit's place and the head's pitch (+ up, degrees) at `t` seconds into the loop."""
+    sm = lambda x: x * x * (3 - 2 * x)  # noqa: E731
+    mouth, reach = sp_mouth(fr, -dip), sp_reach_point(fr)
+    if t < SP_REACH_S:
+        u = sm(t / SP_REACH_S)
+        return mouth.lerp(reach, u), -dip + (SP_TIP_DEG + dip) * u
+    t -= SP_REACH_S
+    if t < SP_BRING_S:
+        u = sm(t / SP_BRING_S)
+        return reach.lerp(mouth, u), SP_TIP_DEG - (SP_TIP_DEG + dip) * u
+    t -= SP_BRING_S
+    return mouth, -dip + SP_CHEW_DEG * math.sin(2 * math.pi * t / SP_CHEW_S) ** 2
+
+
+def sp_arm_turns(fr, side, wrist):
+    """The small arm's two turns (armature space, each relative to its parent) putting its
+    wrist on `wrist`, the elbow toward the pose's pole."""
+    ss, se, sw, pole = fr["arms"][side]
+    e, w = ik(ss, wrist, *SP_SMALL, pole)
+    up = (se - ss).rotation_difference(e - ss)
+    low = (sw - se).rotation_difference(up.inverted() @ (w - e))
+    return up.to_matrix(), low.to_matrix()
+
+
+def sp_feed_clip(pose):
+    """The feeding loop of pose model `seedporter-<pose>` at reference size, sampled at
+    `SP_FEED_FPS` (`sample_clip`)."""
+    use(f"seedporter-{pose}")
+    fr = sp_body(SP_POSES[pose])
+    bones = sp_bones(fr)
+    dip = sp_dip(fr)
+    n = round(SP_FEED_LOOP_S * SP_FEED_FPS)
+    ob = rig_armature(f"sp_{pose}_rig", bones, SP_FEED_FPS)
+    for f in range(n):
+        fruit, pitch = sp_feed_at(fr, dip, f / SP_FEED_FPS)
+        turns = {"head": Matrix.Rotation(-math.radians(pitch), 3, "Y")}
+        for side, wrist in sp_wrists(fr, fruit).items():
+            turns[f"arm_{side}"], turns[f"hand_{side}"] = sp_arm_turns(fr, side, wrist)
+        key_turns(ob, bones, f, turns, Vector())
+    print(f"seedporter-{pose} feed: dip {dip:.0f} deg, reach {(sp_reach_point(fr) - fr['fruit']).length:.3f} m"
+          f" from the rest fruit, mouth {(sp_mouth(fr, -dip) - fr['fruit']).length:.3f} m", flush=True)
+    return sample_clip(ob, bones, n, SP_FEED_FPS)
 
 
 # --- bellwing · BW-A with the thin corkscrew tendril (wingspan 0.375 m) ---------------------
