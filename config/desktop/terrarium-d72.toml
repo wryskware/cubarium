@@ -275,7 +275,11 @@ assimilation = 0.0004426933600618795
 bud_s = 36.59417886397838
 dry_spell_s = 365.94178863978374
 flower_s = 73.18835772795676
-fruit_s = 146.3767154559135
+# Role call 3A (Wrysk 2026-10-09): ripe fruit hangs about 12 days at the 10 h year, as real
+# berries do (1-3 weeks), not 1.5 days; spur_share keeps each face flowering as often as
+# before: cycle (flower_s + fruit_s) / spur_share = 2,196 s, unchanged.
+fruit_s = 1200.0
+spur_share = 0.5799
 leaf_upkeep = 0.000016396050372662205
 regrow_rate = 0.003279210074532441
 spent_s = 36.59417886397838
