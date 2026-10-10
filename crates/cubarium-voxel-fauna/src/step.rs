@@ -3799,7 +3799,7 @@ fn strike_tick(
                         Some(am) if p.mobility.retract_ticks > 0 => 1.0 - am.retract_armour,
                         _ => 1.0,
                     };
-                    h.strike_power * (a.body / p.body) * (1.0 - armour) * closed
+                    h.strike_power * (phys.size(a.body) / pp.size(p.body)) * (1.0 - armour) * closed
                 } else {
                     1.0
                 };
@@ -3840,7 +3840,7 @@ fn counter_answer(config: &crate::FaunaConfig, view: &VoxelView<'_>, striker: &A
         return None;
     }
     let armour = config.founder(sf).armour;
-    let damage = c.damage * (prey.body / striker.body) * (1.0 - armour).clamp(0.0, 1.0);
+    let damage = c.damage * (config.founder(pf).size(prey.body) / config.founder(sf).size(striker.body)) * (1.0 - armour).clamp(0.0, 1.0);
     (damage.is_finite() && damage > 0.0).then_some(Hit { prey: striker.id, damage, by: pf, striker: prey.id, lure: false, counter: true })
 }
 
@@ -6691,3 +6691,6 @@ mod dispersal_tests;
 #[cfg(test)]
 #[path = "roles5_tests.rs"]
 mod roles5_tests;
+#[cfg(test)]
+#[path = "size_not_mass_step_tests.rs"]
+mod size_not_mass_tests;
