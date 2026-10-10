@@ -1100,6 +1100,19 @@ control and the reward accounting; display targets after seeing results.
    - Wrysk (2026-10-10) pointed to `design/handoffs/vault-spacing-2026-10-10.md`. SHADE-REAL (realistic
      Beer-Lambert shade for every plant, equal-height crowns shading each other, winged vaulttree seeds)
      will thin groves and shift the plant base the web is balanced on.
+   - SHADE-REAL built (branch `shade-real` 7fcf311c): Beer-Lambert shade from leaf area (k 0.6, SLA by growth
+     form), level crowns sharing light by half, and a vaulttree WALD samara kernel with a mean of about 10 m.
+     A static probe on the eidolon save showed vaulttrees 442 -> about 150, umbrellafrond -80 %, lanternberry
+     -30..-55 %. Checks queued (8 seeds x 1 h, 4 seeds x 6 h). Wrysk: "agree that this is the right
+     direction. for plants. the numbers were too high and didnt even match the display. also explains why
+     there was way too much plant food, partly".
+   - LJ-HUNT (09471216): lanternjaws are few, not weak. Per capita they kill 1.3-2.2/h, about like a
+     seedporter. Three bugs fixed: the lunge loomed at a lured bellwing, the lunge stepped under hovering
+     prey, and the night wait ignored prey in reach. Check queued.
+     - Wrysk (2026-10-10): "do (a), and (b). 210 is insane to get adults. bugs dont take like 4 months to
+       grow. idk if we need (c) after (a)." So the egg-bank hatch goes 1/3 -> 2/3, and hatch-to-adult targets
+       about a month (50-60 sim-min) against minute 210 now. Seedporter juvenile take is parked.
+       LJ-GROW (Opus) is building it.
    - Library 2026-10-09 done: 8 seeds x 600 min, all exit 0 (built before the role changes).
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
