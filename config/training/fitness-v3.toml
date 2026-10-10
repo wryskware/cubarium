@@ -51,10 +51,11 @@ lo = 6.0
 hi = 8.0
 [population.bands.bellwing]
 lo = 0.0 # Only extinction (L) below the ceiling: seasonal swings are allowed.
-nominal_hi = 90.0 # Approximate abundance per d72 area, a readout, not a band edge.
-hi = 900.0 # Provisional very high ceiling: 10× nominal abundance.
+nominal_hi = 90.0 # Nominal abundance per d72 floor area.
+# Wrysk 2026-10-10: seasonal swings free, sustained overshoot penalised
+median_multiple = 3.0 # Window median ceiling / nominal abundance, dimensionless.
 peak = false
-peak_disabled_reason = "Bellwing seasonal swings: no peak penalty; L and the very high A ceiling only."
+peak_disabled_reason = "Bellwing seasonal swings: no peak penalty; L and the window-median A envelope only."
 
 [targets]
 woods_share_lo = 0.20 # Provisional tolerance around the decided quarter of floor.

@@ -37,7 +37,8 @@ def component_ids(cfg):
 def population_band(name, population, floor_m2):
     band = population['bands'][name]
     scale = 1 if band.get('fixed', False) else floor_m2 / population['reference_floor_m2']
-    return band['lo'] * scale, band['hi'] * scale
+    high = band['nominal_hi'] * band['median_multiple'] if 'median_multiple' in band else band['hi']
+    return band['lo'] * scale, high * scale
 
 
 def clip(value):
@@ -101,7 +102,12 @@ def validate_config(cfg):
         if not 1 <= pop['peak_ratio'] or not math.isfinite(pop['peak_ratio']):
             raise ValueError('invalid population peak ratio')
         for name, band in pop['bands'].items():
-            if not 0 <= band['lo'] <= band['hi'] or not math.isfinite(band['hi']) or band['hi'] <= 0:
+            high = population_band(name, pop, pop['reference_floor_m2'])[1]
+            if 'median_multiple' in band and (not math.isfinite(band['median_multiple'])
+                    or band['median_multiple'] <= 0 or not math.isfinite(band['nominal_hi'])
+                    or band['nominal_hi'] <= 0):
+                raise ValueError(f'invalid median envelope: {name}')
+            if not 0 <= band['lo'] <= high or not math.isfinite(high) or high <= 0:
                 raise ValueError(f'invalid population band: {name}')
             if band.get('peak') is False and not str(band.get('peak_disabled_reason', '')).strip():
                 raise ValueError(f'population peak disabled without reason: {name}')
@@ -495,8 +501,11 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             if v3:
                 low, high = population_band(name, pop, floor_m2)
                 band = pop['bands'][name]
-                per_a[name] = dict(N_ref=reference, low=low, high=high, raw=average(counts),
-                                   penalty=average([d(n, low, high) for n in counts]))
+                median_envelope = 'median_multiple' in band
+                population_value = statistics.median([number(row, 'founders_' + name) for row in window]) if median_envelope else average(counts)
+                per_a[name] = dict(N_ref=reference, low=low, high=high, raw=population_value,
+                    aggregation='window median' if median_envelope else 'late mean band penalty',
+                    penalty=d(population_value, low, high) if median_envelope else average([d(n, low, high) for n in counts]))
                 peak = band.get('peak', True)
                 per_k[name] = dict(N_ref=reference, ceiling=high * pop['peak_ratio'], raw=max(peaks),
                     penalty=peak_penalty(peaks, high, pop['peak_ratio']) if peak else 0.0,

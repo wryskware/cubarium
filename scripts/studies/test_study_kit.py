@@ -568,7 +568,7 @@ class WideScoreTests(unittest.TestCase):
         self.document['population'].update(reference_floor_m2=100, peak_ratio=2)
         for band in self.document['population']['bands'].values():
             band.update(lo=2, hi=6)
-        self.document['population']['bands']['bellwing'].update(lo=0, hi=100)
+        self.document['population']['bands']['bellwing'].update(lo=0, nominal_hi=50, median_multiple=2)
         self.document['targets'].update(woods_share_lo=0.2, woods_share_hi=0.3,
             meadow_share_lo=0.1, meadow_share_hi=0.2, vaulttree_family_m2=4,
             lanternberry_groves=2, glowcap_lit_share_hi=0.1,
@@ -731,6 +731,18 @@ class WideScoreTests(unittest.TestCase):
         world = self.world()
         self.assertEqual(world['components']['K']['raw']['bellwing']['penalty'], 0)
         self.assertEqual(world['components']['A']['raw']['bellwing']['penalty'], 0)
+
+    def test_bellwing_window_median_allows_peaks_but_penalises_overshoot(self):
+        self.fixture(load=0)
+        cfg = score.profile_config(self.document, 'wide-year')
+        ceiling = score.population_band('bellwing', cfg['population'], 100)[1]
+        self.mutate('census.csv', lambda rows: [dict(r, founders_bellwing=ceiling *
+            (4 if float(r['sim_min']) == 2 else 0.5)) for r in rows])
+        result = self.world(year=True)['components']
+        self.assertEqual(result['A']['raw']['bellwing']['penalty'], 0)
+        self.assertEqual(result['K']['raw']['bellwing']['penalty'], 0)
+        self.mutate('census.csv', lambda rows: [dict(r, founders_bellwing=ceiling * 2) for r in rows])
+        self.assertGreater(self.world(year=True)['components']['A']['raw']['bellwing']['penalty'], 0)
 
     def test_hunt_band_scales_and_screen_requires_year_old_start(self):
         self.fixture()
