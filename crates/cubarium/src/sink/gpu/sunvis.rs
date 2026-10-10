@@ -44,6 +44,7 @@ use cubarium_voxel::VoxelView;
 use super::light::Canopy;
 use crate::voxel::animal::Animals;
 use crate::voxel::appearance;
+use crate::voxel::model::Tag;
 use crate::voxel::stand::{Part, Stands};
 
 /// A cell nothing stops the sun in.
@@ -142,12 +143,14 @@ impl Snapshot {
     /// The world's occluders as the packer draws them (`Packer::fill`): a cell inside
     /// terrain is terrain; an animal's cell stops the sun; a stand's trunk and log cells
     /// stop it, its crown and heart cells carry the pass nibble the packer gives them
-    /// (`Canopy::plant_byte`'s high nibble); sprouts and ground marks do not count.
+    /// (`Canopy::plant_byte`'s high nibble); sprouts and ground marks do not count, and
+    /// neither do drape cells drawn as cords (`cords`, `drape_cord.glsl`).
     pub(crate) fn of(
         view: &VoxelView<'_>,
         stands: &Stands,
         animals: &Animals,
         canopy: Option<&Canopy>,
+        cords: bool,
     ) -> Snapshot {
         let c = view.config;
         let (w, h, d) = (c.width, c.height, c.depth);
@@ -164,6 +167,7 @@ impl Snapshot {
             let p = stands.at(xi, i64::from(y), z);
             let byte = match appearance::plant_class(p) {
                 1 | 6 => OPAQUE,
+                2 if cords && matches!(stands.model_tag(p), Some(Tag::Drape(_))) => continue,
                 2 | 3 => {
                     let crown = matches!(p, Part::Crown { .. });
                     let pass = canopy.map_or(15, |cn| {

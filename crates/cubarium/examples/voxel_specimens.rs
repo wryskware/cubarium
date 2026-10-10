@@ -82,6 +82,15 @@
 //! (of `alpha · wood`, every layer alike, as `--states` does), in the order `--turn` reads;
 //! one value sets every listed stand. The presenter's own state choice then picks the
 //! foliage state (the vaulttree's 22, 17 or 12 shelves).
+//!
+//! DRAPE-CORD (`design/handoffs/drape-cord-2026-10-10.md`), GPU only: `--plain` draws without
+//! the face textures (the default draw; `--gpu` otherwise turns them on). `--cords N` draws
+//! the drapes as N-pixel cords (0: the cubes), `--cord-shape straight|eased` and
+//! `--cord-wander W` set their path (`[drape]`); absent, the config's defaults. `--weather
+//! SPEC` draws under a weather preview (`fixed:PHASE` for a time of day, as `light_capture
+//! --weather-preview`). `--anim N` writes N frames `1 / --anim-hz` (default 60) seconds apart
+//! from `--anim-start` seconds as `OUT-KKK.png` (the breeze sways the plants), and prints
+//! the mean GPU time of the frames.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -174,6 +183,14 @@ fn main() -> Result<()> {
     let mut view_turn = 0u8;
     let mut lean_turns = false;
     let mut foliage: Vec<f64> = Vec::new();
+    let mut plain = false;
+    let mut cords: Option<u32> = None;
+    let mut cord_shape: Option<cubarium::voxel::CordShapeConfig> = None;
+    let mut cord_wander: Option<f32> = None;
+    let mut weather: Option<cubarium::sink::gpu::weather::WeatherPreview> = None;
+    let mut anim = 0u32;
+    let mut anim_hz = 60.0f64;
+    let mut anim_start = 0.0f64;
     let species_named = |name: &str| {
         Species::ALL
             .into_iter()
@@ -184,6 +201,20 @@ fn main() -> Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--plain" => plain = true,
+            "--cords" => cords = Some(args.next().context("--cords N")?.parse()?),
+            "--cord-shape" => {
+                cord_shape = Some(match args.next().context("--cord-shape straight|eased")?.as_str() {
+                    "straight" => cubarium::voxel::CordShapeConfig::Straight,
+                    "eased" => cubarium::voxel::CordShapeConfig::Eased,
+                    other => bail!("--cord-shape straight|eased, not {other}"),
+                })
+            }
+            "--cord-wander" => cord_wander = Some(args.next().context("--cord-wander W")?.parse()?),
+            "--weather" => weather = Some(args.next().context("--weather SPEC")?.parse()?),
+            "--anim" => anim = args.next().context("--anim N")?.parse()?,
+            "--anim-hz" => anim_hz = args.next().context("--anim-hz HZ")?.parse()?,
+            "--anim-start" => anim_start = args.next().context("--anim-start S")?.parse()?,
             "--lit" => lit = true,
             "--rider" => rider = true,
             "--shared" => shared = true,
@@ -711,13 +742,23 @@ fn main() -> Result<()> {
     };
     if gpu {
         let under = layered.then(|| cfg.textures_dir.clone());
-        let cfg = VoxelConfig {
+        let mut cfg = VoxelConfig {
             px_per_voxel: px,
-            textures: true,
+            textures: !plain,
             textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
             lighting: if lit { Lighting::Lit } else { Lighting::Flat },
             ..cfg
         };
+        if let Some(n) = cords {
+            cfg.drape.cords = n > 0;
+            cfg.drape.cord_px = n.max(1);
+        }
+        if let Some(shape) = cord_shape {
+            cfg.drape.cord_shape = shape;
+        }
+        if let Some(w) = cord_wander {
+            cfg.drape.cord_wander = w;
+        }
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
         let mut sink = VoxelGpuSink::new(
             &cfg,
@@ -753,10 +794,38 @@ fn main() -> Result<()> {
             }
             println!("voxel_specimens: {} emitting voxels by colour (linear x1000): {kinds:?}", e.len());
         }
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        let tick0 = world.view().tick;
+        let at = |sink: &mut VoxelGpuSink, seconds: f64| {
+            let t = seconds * hz;
+            sink.set_clock(tick0 + t.floor() as u64, t.fract());
+        };
+        sink.set_weather_preview(weather);
+        at(&mut sink, anim_start);
         sink.render()?;
         let rgba = sink.read_raster()?;
         let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-        return write_2x(&out, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb);
+        write_2x(&out, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb)?;
+        if anim > 0 {
+            let stem = out.with_extension("");
+            let before = sink.walk_plant_gpu();
+            for k in 0..anim {
+                at(&mut sink, anim_start + f64::from(k) / anim_hz);
+                sink.render()?;
+                let rgba = sink.read_raster()?;
+                let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+                let path = PathBuf::from(format!("{}-{k:03}.png", stem.display()));
+                write_2x(&path, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb)?;
+            }
+            let after = sink.walk_plant_gpu();
+            let n = (after.2 - before.2).max(1) as f64;
+            println!(
+                "voxel_specimens: {anim} frames, GPU walk {:.3} + plant pass {:.3} ms a frame",
+                (after.0 - before.0) / n,
+                (after.1 - before.1) / n
+            );
+        }
+        return Ok(());
     }
     let proj = Projection::new(cfg.tilt_degrees, 6, 0, &world_cfg)?;
     let topology = Topology::Ring {

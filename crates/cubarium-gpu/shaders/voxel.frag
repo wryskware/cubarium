@@ -197,12 +197,25 @@ int speciesSlot(uvec4 v, bool top) {
     return int(texelFetch(styleTex, ivec2(top ? 2 : 1, int(v.a)), 0).a + 0.5) - 1;
 }
 
+// A drape cord's texel (`drape_cord.glsl`): never its cap; on its front face, the cord's
+// pixels in the walk, and every pixel in the plant pass, which tested the cord itself where
+// the swaying cell put it (`plantCordShows`). The cord is the cell's whole cutout: no drape
+// texture over it.
+bool cordShows(int x, int y, int z, bool top, int dx, int dy) {
+#if defined(PLANT_VIS) || defined(PLANT_SHADE)
+    return !top;
+#else
+    return !top && cordTexel(x, y, z, dx, dy);
+#endif
+}
+
 // A model cell's texture over its pigment. A species face (`species/<species>/`) is
 // direct colour and replaces the pigment; a generic one's `r / 128` multiplies the style
 // colour, so the colour pass still decides the hue. False where a leaf or drape cutout
 // has a hole: that texel is not this cell's, and the walk goes on to whatever is behind
 // it.
 bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout vec3 base) {
+    if (cordCell(v)) { return cordShows(x, y, z, top, dx, dy); }
     int own = speciesSlot(v, top);
     if (own >= 0) {
         vec4 t = faceTexel(own, x, y, z, top ? 1 : 0, dx, dy);
@@ -228,7 +241,7 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // still calls each glyph function from one place.
 bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out bool lum) {
     lum = false;
-    uint q = glyphTexel(partOf(v), glyphOf(v), dx, row);
+    uint q = cordGlyphTexel(v, dx, row);
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
     int tone = int(q >> 2);

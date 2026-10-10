@@ -31,7 +31,7 @@ bool plantVoxel(uvec4 c, out uvec4 v) {
 // glyph has a texel there (a front face's tone 63 is empty) and no cutout takes it, as
 // `glyphFrontAt` and `glyphCapAt` decide. A cap's row counts from its back edge.
 bool plantFaceShows(int x, int y, int z, uvec4 v, bool cap, int row, int dx) {
-    uint q = glyphTexel(partOf(v), glyphOf(v), dx, cap ? S + row : row);
+    uint q = cordGlyphTexel(v, dx, cap ? S + row : row);
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     int tone = int(q >> 2);
     if (!cap && tone == 63) { return false; }
@@ -47,6 +47,22 @@ bool plantFaceShows(int x, int y, int z, uvec4 v, bool cap, int row, int dx) {
 layout(location = 0) flat in uint vId;
 layout(location = 1) in vec2 vUV;
 
+// A drape cord's sample (`drape_cord.glsl`), at `uv` across and down the swaying cell's
+// front face: the joins move with their faces' weights (`plants::pack_faces`) while the box
+// moves with the cell's, so the two cells meeting at a face put the join at one screen
+// point (`cord::swayed_join`). A leaving cell carries no face weights: its joins move with
+// it.
+bool plantCordShows(uvec4 c, ivec3 p, vec2 uv) {
+    vec2 e = cordEnds(p.x, p.y, p.z);
+    float wc = plantWeight(c);
+    vec2 wf = vec2(wc);
+    if (!plantDying(c) && (c.w >> 31) != 0u) {
+        wf = vec2(float((c.w >> 12) & 4095u), float(c.w & 4095u)) / 4095.0;
+    }
+    e += tips[plantOf(c)] * (wf - wc) * float(S);
+    return cordCovers(e.x, e.y, uv.y, uv.x * float(S));
+}
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -61,8 +77,19 @@ void main() {
     if (!plantVoxel(c, v)) { discard; }
     ivec3 p = plantCellAt(c);
     int rows = cap ? RISE : S;
-    int dx = clamp(int(vUV.x * float(S)), 0, S - 1);
-    int row = clamp(int(vUV.y * float(rows)), 0, rows - 1);
+    vec2 uv = vUV;
+    if (cordCell(v)) {
+        if (cap) { discard; }
+        // A cord is asked at the centre of the screen pixel this sample is in, so every
+        // sample of a pixel agrees: a cord pixel is whole, as the walk draws it, never a
+        // blend of a cord and what is behind it.
+        float aa = float(pc.k.y);
+        vec2 centre = (floor(gl_FragCoord.xy / aa) + 0.5) * aa;
+        uv += (centre - gl_FragCoord.xy) / (aa * max(plantScale(c), 1e-3) * float(S));
+        if (!plantCordShows(c, p, uv)) { discard; }
+    }
+    int dx = clamp(int(uv.x * float(S)), 0, S - 1);
+    int row = clamp(int(uv.y * float(rows)), 0, rows - 1);
     if (!plantFaceShows(p.x, p.y, p.z, v, cap, row, dx)) { discard; }
     outId = (uint(inst + 1) << 9) | (cap ? 256u : 0u) | (uint(dx) << 4) | uint(row);
 }
