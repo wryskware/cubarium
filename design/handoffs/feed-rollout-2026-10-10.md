@@ -143,8 +143,11 @@ aiming is a great idea, or at least the framework for it."
     IK the fronds to it; your call) and the bearing (the frond pair nearest it does the
     work, by its six-fold symmetry, and the lean and neck turn toward it). With no bite
     recorded it reaches as today.
-- The standing pose's knees stay as they are for now (an open question to Wrysk; the parent
-  will tell you if it changes).
+- **Raise and lower** (Wrysk left it to us: "do whatever makes sense"): the standing model
+  stays as it is (legs nearly straight, so it can't rise above its stand). The body drops
+  instead: for a low bite the knees bend and the body crouches toward it; for a high one it
+  stands at full height and the fronds and neck do the reaching. The crouch comes from the
+  aim's height, eased.
 - **Evidence** as round 1, plus an aiming clip: one animal browsing bites placed low, high,
   and to each side (stage them in `voxel_feed_capture`), today | round 2.
 
