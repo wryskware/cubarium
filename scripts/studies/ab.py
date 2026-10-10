@@ -135,13 +135,22 @@ def arm_inputs(args, out):
             if commit != head:
                 raise GuardError(f"{name}: build needs the checked-out commit; supply --bin for historical commits")
             target = out / "build" / name
+            # Seed from the tree's own target so the build is incremental; reflink only, so a
+            # cross-filesystem output never turns this into a full copy.
+            if not target.exists() and (tree / "target").is_dir():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                seeded = subprocess.run(["cp", "-a", "--reflink=always", str(tree / "target"), str(target)],
+                                        stdin=subprocess.DEVNULL, capture_output=True)
+                if seeded.returncode:
+                    subprocess.run(["rm", "-rf", "--", str(target)], check=False)
             env = os.environ | {"CARGO_TARGET_DIR": str(target)}
             command = ["chrt", "-i", "0", "nice", "-n", "19", "cargo", "build", "--release",
                        "-p", "cubarium", "--example", "voxel_census"]
             print(f"build {name}: {commit} target={target}", flush=True)
             with (root / "build.log").open("w") as log:
                 subprocess.run(command, cwd=tree, env=env, stdout=log, stderr=log,
-                               stdin=subprocess.DEVNULL, check=True, timeout=240)
+                               stdin=subprocess.DEVNULL, check=True,
+                               timeout=240 if args.preflight_only else 3600)
             if git(tree, "rev-parse", "HEAD").decode().strip() != head or tree_status(tree, out) != source_status:
                 raise GuardError(f"{name}: source tree changed during build")
             binary = target / "release/examples/voxel_census"
