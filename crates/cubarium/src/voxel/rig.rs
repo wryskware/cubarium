@@ -17,7 +17,8 @@
 //!
 //! # Clips per state
 //!
-//! Each clip names the animal state it plays in (`cropping`, `asleep`) and how it plays:
+//! Each clip names the animal state it plays in (`cropping`, `asleep`, `idle`, `hunker`) and
+//! how it plays:
 //!
 //! - a **loop** ([`ClipMode::Loop`]) runs on the frame clock at the animal's own phase
 //!   ([`phase_offset_s`]); its weight eases each bone's turn from none by a slerp and its
@@ -28,9 +29,13 @@
 //!
 //! Each clip's weight eases 0 → 1 while its state holds and back after (the feeding clip's
 //! over [`FEED_EASE_S`], `Animals::feed_weight`; the rest's with the sleep blend,
-//! `Animals::sleep_weight`), drawn through a smoothstep ([`ease`]). Clips partly on at once
-//! layer: each bone's turns compose in the rig's clip order and its displacements add
-//! ([`AnimalRig::pose`]), so a clip easing out under another ends where the other alone is.
+//! `Animals::sleep_weight`; RIG-STATES' idle and hunker with theirs, `Animals::idle_weight`
+//! and `Animals::hunker_weight`), drawn through a smoothstep ([`ease`]). Clips partly on at
+//! once layer: each bone's turns compose in the rig's clip order and its displacements add
+//! ([`AnimalRig::pose`]), so a clip easing out under another ends where the other alone is
+//! (cropping → hunker: the neck's reach eases out over the feeding ease while the hunker
+//! track walks in over its own). While the rig is drawn, a state it has a clip for stands
+//! its class-path move down (`figure::RigStates`); the sleep and idle breaths stay.
 //!
 //! # Aiming (FEED-ROLLOUT round 2)
 //!
@@ -270,6 +275,36 @@ impl AnimalRig {
             .and_then(|b| b.bones.get(&offset))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Each bone's **lip bone** in bin `bin` (RIG-STATES): itself when a loop clip moves it
+    /// (a non-rest key in any frame), else its parent's lip bone, the root's at the top. A
+    /// bone only a track moves (a leg folding as the body settles, the hunker's tucks) parts
+    /// from its parent only in that transition, so at rest a cell under it keeps the body's
+    /// lip (`figure::intern_rigged`).
+    pub fn lip_bones(&self, bin: usize) -> Vec<usize> {
+        let n = self.bones.len();
+        let mut moved = vec![false; n];
+        if let Some(b) = self.bins.get(bin) {
+            for (c, clip) in self.clips.iter().enumerate() {
+                if clip.mode != ClipMode::Loop {
+                    continue;
+                }
+                for (i, key) in b.keys.get(c).map_or(&[][..], |k| &k[..]).iter().enumerate() {
+                    let still = (key.q[0].abs() - 1.0).abs() < 1e-6 && key.d.iter().all(|v| v.abs() < 1e-7);
+                    moved[i % n] |= !still;
+                }
+            }
+        }
+        let mut lip = vec![0; n];
+        for (k, bone) in self.bones.iter().enumerate() {
+            lip[k] = match bone.parent.filter(|&p| p < k) {
+                _ if moved[k] => k,
+                Some(p) => lip[p],
+                None => 0,
+            };
+        }
+        lip
     }
 
     /// The aim height of the state's first aimed clip in bin `bin` (the unaimed reach), if
@@ -945,6 +980,16 @@ mod tests {
         let b = tip(&[on(0, 0.0, 0.51), on(1, 0.0, 0.5)], &mut out);
         assert!((0..3).all(|i| (a[i] - b[i]).abs() < 0.05), "{a:?} {b:?}");
         assert!(a[1] < 0.0 && a[2] < 0.0 && a[2] > -1.0, "{a:?}");
+    }
+
+    /// RIG-STATES: a bone a loop clip moves is its own lip bone; one only a track moves
+    /// (it parts from its parent only in a state's transition) shares its parent's.
+    #[test]
+    fn a_bone_only_a_track_moves_shares_its_parents_lip() {
+        assert_eq!(rig(1.0, vec![quarter_loop()]).lip_bones(0), vec![0, 1]);
+        let still_loop = ("cropping", ClipMode::Loop, vec![[rest(), rest()]]);
+        let fold = ("hunker", ClipMode::Track, vec![[rest(), rest()], [rest(), key(quat_of(QUARTER_Y), [0.0; 3])]]);
+        assert_eq!(rig(1.0, vec![still_loop, fold]).lip_bones(0), vec![0, 0]);
     }
 
     #[test]

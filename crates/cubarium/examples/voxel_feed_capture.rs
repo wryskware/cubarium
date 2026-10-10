@@ -37,12 +37,21 @@
 //! `--models DIR` reads the baked models (and rigs) from `DIR` instead of the config's: the
 //! main checkout's `assets/voxel-models` draws what is merged there, for a before | after.
 //!
+//! `--arm stamped` draws the animals in the world's voxels (`[figures] animals = "stamped"`),
+//! the class path's grid pose, for reference.
+//!
+//! `--states` (RIG-STATES, `design/handoffs/rig-states-2026-10-10.md`): two grown bodies on
+//! the rest-states script (`STATES`): an idle bout, falling asleep, breathing and waking,
+//! hunkering in from standing, holding and standing back up, then cropping and hunkering in
+//! from the crop. `--stills S,S,…` writes only the frames at those seconds
+//! (`still-<s>.png`), every tick still staged.
+//!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
 //!     [--px N] [--heading DEG] [--flipbook PATH]
 //!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing|capgnawer|
 //!                littershredder|ripple-snail] [--pose stand|ground]
-//!     [--aim] [--models DIR]
+//!     [--aim] [--models DIR] [--states] [--stills S,S,...]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -98,6 +107,20 @@ const AIM_BITES: [(f64, f64, f64, f64); 4] = [
     (9.8, 0.0, 1.0, 2.2),
 ];
 const AIM_LENGTH_S: f64 = 13.0;
+/// The rest-states script (`--states`): from each time (seconds) the bodies' state, and
+/// whether they are hunkered (`Animal::hunkered`, its state `Resting`). Standing still,
+/// a resting body idles after `idle::HOLD_S`.
+const STATES: [(f64, State, bool); 8] = [
+    (0.0, State::Resting, false),
+    (9.0, State::Asleep, false),
+    (16.0, State::Resting, false),
+    (17.5, State::Resting, true),
+    (21.0, State::Resting, false),
+    (23.0, State::Cropping, false),
+    (26.0, State::Resting, true),
+    (29.0, State::Resting, false),
+];
+const STATES_LENGTH_S: f64 = 31.0;
 const VOXEL_M: f64 = 0.125;
 const HZ: f64 = cubarium_voxel::TICK_HZ as f64;
 
@@ -264,6 +287,8 @@ fn main() -> Result<()> {
     let mut mode = MobilityMode::Ground;
     let mut aiming = false;
     let mut models_dir = None;
+    let mut states = false;
+    let mut stills: Option<Vec<f64>> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -275,6 +300,16 @@ fn main() -> Result<()> {
             }
             "--perf" => perf = Some(args.next().context("--perf N")?.parse::<usize>()?),
             "--aim" => aiming = true,
+            "--states" => states = true,
+            "--stills" => {
+                stills = Some(
+                    args.next()
+                        .context("--stills S,S,...")?
+                        .split(',')
+                        .map(|v| v.parse::<f64>().context("a still's seconds"))
+                        .collect::<Result<_>>()?,
+                )
+            }
             "--models" => models_dir = Some(PathBuf::from(args.next().context("--models DIR")?)),
             "--founder" => {
                 founder = match args.next().context("--founder NAME")?.as_str() {
@@ -312,9 +347,9 @@ fn main() -> Result<()> {
         }
     }
     let rig_draw = match arm.as_str() {
-        "a" => RigDraw::Off,
+        "a" | "stamped" => RigDraw::Off,
         "b" => RigDraw::Turn,
-        a => bail!("--arm a or b, not {a}"),
+        a => bail!("--arm a, b or stamped, not {a}"),
     };
     let flip = match (&*arm, &flip_path) {
         ("a", Some(p)) => Some(Flipbook::load(p)?),
@@ -351,6 +386,8 @@ fn main() -> Result<()> {
         Founder::Bellwing => (world_of(14, 10, 7), vec![4, 10], 3),
         // 0.19-0.375 m long: two or three voxels each
         Founder::Capgnawer | Founder::Blind | Founder::RippleSnail => (world_of(12, 6, 5), vec![3, 8], 2),
+        // the rest-states script turns the grown body three-quarter: a deeper floor
+        _ if states => (world(22, 9), vec![6, 15], 4),
         _ => (world(22, 7), vec![6, 15], 3),
     };
     if perched {
@@ -420,6 +457,10 @@ fn main() -> Result<()> {
         ..VoxelConfig::default()
     };
     cfg.figures.rig = rig_draw;
+    if arm == "stamped" {
+        // the stamped world's animals (before H2's model pass), as the grid poses them
+        cfg.figures.animals = cubarium::voxel::figure::AnimalDraw::Stamped;
+    }
     if let Some(dir) = models_dir {
         cfg.models_dir = dir;
     }
@@ -447,10 +488,15 @@ fn main() -> Result<()> {
     )?;
 
     let length_s = match (ls, aiming) {
+        _ if states => STATES_LENGTH_S,
         (true, true) => AIM_LENGTH_S,
         (true, false) => LS_LENGTH_S,
         _ => LENGTH_S,
     };
+    // the frames `--stills` asks for, by frame number (60 a second)
+    let still_frames: Option<Vec<(u32, f64)>> = stills
+        .as_ref()
+        .map(|s| s.iter().map(|&t| (((t * 60.0).round() as u32).saturating_sub(3), t)).collect());
     let last = (length_s * HZ).round() as u64;
     let ws = weights(last);
     let mut frame = 0u32;
@@ -458,6 +504,12 @@ fn main() -> Result<()> {
     for tick in 1..=last {
         for a in &mut animals {
             a.state = state_at(tick, ls);
+            if states {
+                let t = tick as f64 / HZ;
+                let &(_, state, hunkered) = STATES.iter().rev().find(|s| t >= s.0).unwrap_or(&STATES[0]);
+                a.state = state;
+                a.hunkered = hunkered;
+            }
             if aiming {
                 let t = tick as f64 / HZ;
                 a.state = if t >= 0.5 { State::Cropping } else { State::Resting };
@@ -495,6 +547,12 @@ fn main() -> Result<()> {
             if restage {
                 stage(&mut sink, &w, &flora, fv, &animals, tick)?;
             }
+            let path = match &still_frames {
+                None => Some(frames.join(format!("f-{frame:04}.png"))),
+                Some(s) => s.iter().find(|(f, _)| *f == frame).map(|(_, t)| out.join(format!("still-{t}.png"))),
+            };
+            frame += 1;
+            let Some(path) = path else { continue };
             sink.set_clock(tick, f64::from(k) / 3.0);
             sink.render()?;
             let rgb: Vec<u8> = sink
@@ -502,8 +560,7 @@ fn main() -> Result<()> {
                 .chunks_exact(4)
                 .flat_map(|p| [p[0], p[1], p[2]])
                 .collect();
-            write_png(&frames.join(format!("f-{frame:04}.png")), rw, rh, &rgb)?;
-            frame += 1;
+            write_png(&path, rw, rh, &rgb)?;
         }
     }
     println!(
