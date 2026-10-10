@@ -620,6 +620,9 @@ impl Fauna {
             self.packs.insert(at, p);
         }
         for a in std::iter::once(animal).chain(riders.iter().copied()) {
+            if let (Some(r), Some(f)) = (&mut self.census_readout, a.founder) {
+                r.introduced[f.index()] += 1;
+            }
             self.ledger.introduced_organic_in += a.stored_organic();
             self.ledger.introduced_mineral_in += a.stored_mineral();
             self.ledger.introduced_energy_in += a.stored_energy();

@@ -3490,6 +3490,9 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
+        if let Some(r) = &mut fauna.census_readout {
+            r.predation.push(crate::CensusPredation { predator: by, prey: f, prey_body: a.body, kill: true });
+        }
         // HUNKER's readout: the kill by the prey's age class.
         if a.body < fauna.config.founder(f).core.birth_body {
             fauna.ledger.vigil.kills_juvenile[f.index()] += 1;
@@ -4334,6 +4337,9 @@ fn gestate(
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     a.reproduction.given += e.organic;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += e.organic;
+    }
     let (site, species, pose, founder, pack) = (a.site, a.species, a.pose, a.founder, a.pack);
     // A litter's parcel is split evenly; the last young takes what division left, so the
     // parcels sum to the escrow exactly.
@@ -4410,6 +4416,9 @@ pub(crate) fn whelp(fauna: &mut Fauna, view: &VoxelView<'_>, pack: u64, young: u
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     a.reproduction.given += paid.organic;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += paid.organic;
+    }
     let (species, founder, mut pose) = (a.species, a.founder, a.pose);
     let v = view.config.voxel_m;
     let (x, z) = crate::pack::centre(den, v);
@@ -4783,6 +4792,9 @@ fn lay(
     // The clutch is paid out of the brood first (D1b).
     a.reproduction.brood = (a.reproduction.brood - paid).max(0.0).min(a.reserve);
     a.reproduction.given += paid;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += paid;
+    }
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
@@ -5969,6 +5981,9 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
         if let Some(pf) = fauna.animals[j].founder {
             fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
             fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
+            if let Some(r) = &mut fauna.census_readout {
+                r.predation.push(crate::CensusPredation { predator: founder, prey: pf, prey_body: fauna.animals[j].body, kill: false });
+            }
             // D2b readout: a patroller's strike its choice did not accept.
             let choosy =
                 fauna.config.hunt.patrol && (founder == crate::Founder::Lanternjaw && fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic);

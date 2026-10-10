@@ -130,6 +130,15 @@
 //! workers (`cubarium_voxel_sim::set_overlap_split`). Every minute a `phases:` line on
 //! stderr gives that minute's milliseconds per tick by phase.
 
+//! `drift=FROM:TO` measures a run-local window in absolute sim-minutes (rounded to
+//! ticks); `drift_out=PATH` also writes JSON. Out-of-run windows are refused. An
+//! early staged stop clips and flags the window. Recruits are live births and
+//! hatchings, excluding eggs laid, independence and maturity. Energy is the ledger's
+//! organic-equivalent surplus per body-hour; fullness pools 1 Hz body samples.
+
+#[path = "support/census_drift.rs"]
+mod census_drift;
+
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::{install_founders_with, policy_args};
@@ -199,6 +208,7 @@ fn main() {
     }
     // `policy=<lineage>=<file>` explicitly replaces that lineage's default heuristic.
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
+    let drift = census_drift::Config::parse(&args).unwrap_or_else(|e| panic!("{e}"));
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse()
             .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed] [heuristic]")
@@ -232,6 +242,7 @@ fn main() {
             .expect("pin=B needs more than B physical cores");
     }
     let timing = Timing {
+        drift,
         vitals: args.iter().find_map(|a| a.strip_prefix("vitals=")).map(|dir| {
             let number = |name: &str, default: f64| {
                 args.iter().find_map(|a| a.strip_prefix(name))
@@ -601,6 +612,7 @@ fn main() {
 /// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
 #[derive(Clone)]
 struct Timing {
+    drift: Option<census_drift::Config>,
     vitals: Option<(String, VitalsOptions)>,
     policies: Vec<(Founder, std::path::PathBuf)>,
     /// `--weather-log FILE`: one row per finished rain event.
@@ -695,6 +707,12 @@ fn run(
     timing: &Timing,
     stage: Option<(staged::StageConfig, Vec<String>)>,
 ) {
+    let start_tick = minute0 * TICKS_PER_MIN;
+    let mut drift = timing.drift.clone().map(census_drift::Recorder::new);
+    if let Some(d) = &mut drift {
+        d.validate(start_tick, start_tick + (hours * 3600.0 * f64::from(TICK_HZ)) as u64).unwrap_or_else(|e| panic!("{e}"));
+        d.poll(sim, start_tick);
+    }
     // `edit=FILE.toml`: the scenario's edits, before anything reads the world.
     if let Some(path) = &timing.edit {
         let scenario = cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{e}"));
@@ -707,6 +725,7 @@ fn run(
         }
         eprintln!("edit: {} applied, {} refused, from {path}", report.applied.len(), report.refused.len());
     }
+    if let Some(d) = &mut drift { d.after_edits(sim); }
     for lineage in Founder::ALL {
         let fauna = sim.fauna();
         let source = if fauna.policy_driven(lineage) {
@@ -780,6 +799,7 @@ fn run(
     herd.minute(sim);
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
+    if let Some(d) = &drift { d.validate(tick, total_ticks).unwrap_or_else(|e| panic!("{e}")); }
     let mut window = SeedWindow::default();
     let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
@@ -801,6 +821,7 @@ fn run(
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if let Some(d) = &mut drift { d.poll(sim, tick); }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -871,6 +892,7 @@ fn run(
             vitals_time.as_secs_f64() * 1e3 / (tick - first_tick).max(1) as f64,
             tick - first_tick);
     }
+    if let Some(d) = &mut drift { d.finish(sim, tick).unwrap_or_else(|e| panic!("{e}")); }
     weather.summary(sim);
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);

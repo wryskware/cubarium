@@ -121,6 +121,9 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
         if m.pup && t.is_some_and(|t| a.age_ticks as f64 * DT >= t.independence_age_s) {
             m.pup = false;
             fauna.ledger.pups_independent += 1;
+            if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+                r.independent[f.index()] += 1;
+            }
         }
     }
     succession(fauna);

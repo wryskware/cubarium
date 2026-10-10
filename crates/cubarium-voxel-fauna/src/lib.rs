@@ -3639,6 +3639,26 @@ impl StartingStores {
 #[derive(Debug)]
 pub struct FaunaTick(step::TickStart);
 
+/// One exact strike or kill, captured only when a census requests it.
+#[derive(Clone, Debug)]
+pub struct CensusPredation {
+    pub predator: Founder,
+    pub prey: Founder,
+    /// Structural organic matter at the event, in the same units as Animal::body.
+    pub prey_body: f64,
+    /// True for a kill; false for a strike begun (the census's definition of a hunt).
+    pub kill: bool,
+}
+
+/// Run-scoped instrumentation. Skipped by saves; no rule reads it.
+#[derive(Clone, Debug, Default)]
+pub struct CensusReadout {
+    pub introduced: [u64; Founder::COUNT],
+    pub independent: [u64; Founder::COUNT],
+    pub organic_given: [f64; Founder::COUNT],
+    pub predation: Vec<CensusPredation>,
+}
+
 /// The animal layer. Owns its animals; borrows the world and the plant layer per call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
@@ -3663,6 +3683,8 @@ pub struct Fauna {
     /// Exact paid body creations since construction/load; runtime instrumentation only.
     #[serde(skip)]
     born_by_founder: [u64; Founder::COUNT],
+    #[serde(skip)]
+    census_readout: Option<CensusReadout>,
     /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
     /// rule and changes nothing. An isolated arena sets it false
     /// (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"); a fresh episode
@@ -4234,6 +4256,7 @@ impl Fauna {
             clutches: Vec::new(),
             ledger: FaunaLedger::default(),
             born_by_founder: [0; Founder::COUNT],
+            census_readout: None,
             births_enabled: true,
             controllers: FounderControllers::default(),
             grid_scratch: senses::LiveGrid::default(),
@@ -4585,6 +4608,15 @@ impl Fauna {
         self.open_air = None;
         Ok(())
     }
+    /// Begin a fresh run-scoped readout, or disable it. Loading a save disables it.
+    pub fn set_census_readout(&mut self, enabled: bool) {
+        self.census_readout = enabled.then(CensusReadout::default);
+    }
+
+    pub fn census_readout(&self) -> Option<&CensusReadout> {
+        self.census_readout.as_ref()
+    }
+
     /// Paid live births and hatchlings by lineage since construction/load. Introductions
     /// are excluded; callers take interval differences. This counter is never saved.
     pub fn born_by_founder(&self) -> [u64; Founder::COUNT] {
@@ -5198,6 +5230,9 @@ impl Fauna {
         }
         self.ledger.births += 1;
         self.ledger.introduced += 1;
+        if let (Some(r), Some(f)) = (&mut self.census_readout, founder) {
+            r.introduced[f.index()] += 1;
+        }
         let fed = animal.stomach.total();
         self.ledger.introduced_organic_in += organic + fed.organic;
         self.ledger.introduced_mineral_in += animal.mineral + fed.mineral;

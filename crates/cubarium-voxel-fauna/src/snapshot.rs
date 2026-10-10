@@ -482,6 +482,21 @@ mod tests {
     use crate::{Animal, FaunaConfig, FaunaLedger, Site, Species, State};
 
     #[test]
+    fn census_readout_does_not_change_saved_bytes_or_survive_load() {
+        let mut fauna = Fauna::new(FaunaConfig::default());
+        let before = encode(&fauna);
+        fauna.set_census_readout(true);
+        let r = fauna.census_readout.as_mut().unwrap();
+        r.introduced[0] = 2;
+        r.organic_given[0] = 0.25;
+        r.predation.push(crate::CensusPredation { predator: crate::Founder::Lanternjaw,
+            prey: crate::Founder::Browser, prey_body: 0.5, kill: true });
+        assert_eq!(before, encode(&fauna));
+        let loaded = decode(&before).unwrap();
+        assert!(loaded.census_readout().is_none());
+    }
+
+    #[test]
     fn old_light_channel_keys_load_and_round_trip_the_saved_values() {
         use cubarium_voxel::savedoc::to_doc;
         let from_doc = |doc: &[u8], base: &FaunaConfig| {
