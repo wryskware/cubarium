@@ -7,7 +7,8 @@
 //! - **What it senses** is its looming sense (`senses.loom_m`, no form vision): a body on
 //!   whose prey list it is ([`crate::is_prey_of`], the perception's threat class) whose
 //!   **strike** has begun — the crouch and the lunge, the jaw rising at it within its strike
-//!   band — with the jaw within `loom_m` of its eye; or that is **closing** on it within
+//!   band — with the jaw within `loom_m × hunter.strike_warning_scale` of its eye;
+//!   a short arm grab gives less visual warning than a whole-body lunge. Or it is **closing** within
 //!   `loom_m` fast enough to reach it within [`crate::LightConfig::loom_tau_s`] (the loom's
 //!   own rule, measured to the body's middle).
 //! - **The reaction**: `flush_reaction_s` after, it takes off (a perched one pays its
@@ -102,7 +103,11 @@ pub(crate) fn sensed_threat(fauna: &Fauna, a: &Animal, hunters: &[usize], v: f64
                 let (jx, jz) = crate::pose::wrapped_delta(eye.0, eye.2, jaw.0, jaw.1, ring);
                 let s0 = crate::perception::base_m(o, v);
                 let dy = eye.1.clamp(s0, s0 + h.strike_height_m(&og)) - eye.1;
-                (jx * jx + dy * dy + jz * jz).sqrt()
+                let d = (jx * jx + dy * dy + jz * jz).sqrt();
+                if !(h.strike_warning_scale > 0.0) || d > table.loom_m * h.strike_warning_scale {
+                    continue;
+                }
+                d
             }
             None => {
                 if !crate::moved_recently(&fauna.config.predation, o) {

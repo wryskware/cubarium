@@ -399,6 +399,7 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.jaw_band_height_fraction", "x body height", nonneg, "the jaw band's top").optional(),
         r("hunter.jaw_forward_length_fraction", "x body length", nonneg, "the jaw's point ahead of the body's centre").search(0.2, 0.8).optional(),
         r("hunter.windup_s", "s", nonneg, "the crouch").optional(),
+        r("hunter.strike_warning_scale", "x looming range", fraction, "SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged").optional(),
         r("hunter.lunge_s", "s", nonneg, "the lunge").optional(),
         r("hunter.recovery_s", "s", nonneg, "the recovery, at half speed and unable to strike").optional(),
         r("hunter.strike_cost_s", "s of awake upkeep", nonneg, "a strike's cost, hit or miss").optional(),

@@ -14,6 +14,7 @@ use cubarium_voxel_flora::{Flora, FloraConfig, Site};
 const BW: Founder = Founder::Bellwing;
 const VH: Founder = Founder::Chorister;
 const LJ: Founder = Founder::Lanternjaw;
+const SP: Founder = Founder::Seedporter;
 
 /// The clock off (every rhythm awake), and air enough over the plain to fly in.
 fn open_world() -> World {
@@ -70,9 +71,13 @@ fn in_capsule(fauna: &Fauna, id: u64, along: f64, side: f64) -> (f64, f64) {
 
 /// A bellwing perched on the ground face at `(x, z)`, still under a scripted controller.
 fn perched_bellwing(fauna: &mut Fauna, world: &World, (x, z): (f64, f64)) -> u64 {
+    perched_bellwing_with(fauna, world, (x, z), StartingStores::FULL)
+}
+
+fn perched_bellwing_with(fauna: &mut Fauna, world: &World, (x, z): (f64, f64), stores: StartingStores) -> u64 {
     assert!(fauna.apply(
         world,
-        Command::IntroduceAloft { pose: Pose { x, z, heading_rad: WEST, y_m: SURFACE_M }, founder: BW, stores: StartingStores::FULL }
+        Command::IntroduceAloft { pose: Pose { x, z, heading_rad: WEST, y_m: SURFACE_M }, founder: BW, stores }
     ));
     let id = fauna.animals.last().unwrap().id;
     drive(fauna, id, 0.0, false);
@@ -93,18 +98,23 @@ fn strike(fauna: &mut Fauna, world: &World, flora: &mut Flora, by: u64, prey: u6
     assert!(done.is_some(), "the strike resolved");
 }
 
-/// A Veilhound's strike on an awake perched bellwing at each of several places in its
-/// capsule: (bellwings killed, escapes booked, flushes booked).
-fn veilhound_on_perched(flush: bool) -> (usize, u64, u64, usize) {
+/// Strikes with fixed anatomy on the same awake perched bellwing placements:
+/// (bellwings killed, escapes booked, flushes booked, strikes).
+fn hunter_on_perched(flush: bool, founder: Founder, warning: f64) -> (usize, u64, u64, usize) {
     let mut kills = 0;
     let (mut escapes, mut flushes, mut n) = (0, 0, 0);
     for along in [0.2, 0.5, 0.8] {
         for side in [0.0, 0.1, -0.1] {
             let world = open_world();
             let mut flora = Flora::new(FloraConfig::default());
-            let mut fauna = Fauna::new(config(flush));
+            let mut c = config(flush);
+            // Hold anatomy, strike timing and prey placements fixed: only the hunter's
+            // visual warning differs. These are mechanism fixtures, not tuned defaults.
+            c.founders[founder.index()] = c.founders[VH.index()];
+            c.founders[founder.index()].hunter.as_mut().unwrap().strike_warning_scale = warning;
+            let mut fauna = Fauna::new(c);
             fauna.set_births_enabled(false);
-            let vh = striker(&mut fauna, &world, VH);
+            let vh = striker(&mut fauna, &world, founder);
             let at = in_capsule(&fauna, vh, along, side);
             let bw = perched_bellwing(&mut fauna, &world, at);
             strike(&mut fauna, &world, &mut flora, vh, bw);
@@ -116,6 +126,78 @@ fn veilhound_on_perched(flush: bool) -> (usize, u64, u64, usize) {
         }
     }
     (kills, escapes, flushes, n)
+}
+
+fn veilhound_on_perched(flush: bool) -> (usize, u64, u64, usize) {
+    hunter_on_perched(flush, VH, 1.0)
+}
+
+#[test]
+fn a_seedporters_short_grab_lands_more_often_than_a_plain_lunge_on_the_same_bellwings() {
+    let (sp, _, _, n) = hunter_on_perched(true, SP, 0.15);
+    let (vh, _, _, m) = veilhound_on_perched(true);
+    assert_eq!(n, m, "the same prey placements");
+    assert!(sp > vh, "less visual warning lands more grabs: seedporter {sp}, Veilhound {vh}");
+}
+
+#[test]
+fn a_neutral_seedporter_warning_matches_the_plain_flush() {
+    assert_eq!(hunter_on_perched(true, SP, 1.0), veilhound_on_perched(true));
+}
+
+/// Controlled capture calibration, not an ecosystem verdict: the checkpoint supplies
+/// physiology and body-size quantiles; both arms get identical capsule placements.
+/// `SP_FLUSH_CHECKPOINT` names its fauna.bin; `SP_FLUSH_SCALES` is a comma-separated
+/// sweep. No snapshot or world is changed.
+#[test]
+#[ignore = "study: run by name"]
+fn seedporter_warning_checkpoint_probe() {
+    let path = std::env::var("SP_FLUSH_CHECKPOINT").expect("SP_FLUSH_CHECKPOINT=.../fauna.bin");
+    let saved = crate::snapshot::decode(&std::fs::read(path).unwrap()).unwrap();
+    let sizes = |founder| {
+        let mut bodies: Vec<f64> = saved.animals.iter().filter(|a| a.founder == Some(founder)).map(|a| a.body).collect();
+        bodies.sort_by(f64::total_cmp);
+        assert!(!bodies.is_empty(), "checkpoint has {founder:?}");
+        [bodies[0], bodies[bodies.len() / 2], bodies[bodies.len() - 1]]
+    };
+    let world = open_world();
+    let scales = std::env::var("SP_FLUSH_SCALES").unwrap_or_else(|_| "1,0.05,0.075,0.1,0.2".into());
+    for warning in scales.split(',').map(|s| s.parse::<f64>().expect("numeric warning scale")) {
+        assert!(warning.is_finite() && (0.0..=1.0).contains(&warning), "warning fraction in [0, 1]");
+        let (mut strikes, mut kills) = (0, 0);
+        for sp_body in sizes(SP) {
+            for bw_body in sizes(BW) {
+                for along in 1..=9 {
+                    for side in [-0.25, 0.0, 0.25] {
+                        let mut c = saved.config.clone();
+                        for f in [SP, BW] { c.founders[f.index()].active = Activity::Always; }
+                        c.founders[SP.index()].hunter.as_mut().unwrap().strike_warning_scale = warning;
+                        let mut flora = Flora::new(FloraConfig::default());
+                        let mut fauna = Fauna::new(c);
+                        fauna.set_births_enabled(false);
+                        let sp = introduce(&mut fauna, &world, SP, StartingStores { body: sp_body / fauna_max(&saved, SP), reserve: 1.0 });
+                        place(&mut fauna, sp, STRIKER_X, LANE_Z, EAST);
+                        animal_mut(&mut fauna, sp).pose.y_m = SURFACE_M;
+                        animal_mut(&mut fauna, sp).eating = true;
+                        drive(&mut fauna, sp, 0.0, false);
+                        let g = fauna.config.founder(SP).body_at(animal(&fauna, sp).body);
+                        let at = in_capsule(&fauna, sp, f64::from(along) / 10.0, side * g.width_m);
+                        let bw = perched_bellwing_with(&mut fauna, &world, at, StartingStores { body: bw_body / fauna_max(&saved, BW), reserve: 1.0 });
+                        if !crate::is_prey_of(&fauna.config, &animal(&fauna, sp), &animal(&fauna, bw)) { continue; }
+                        strike(&mut fauna, &world, &mut flora, sp, bw);
+                        strikes += 1;
+                        kills += usize::from(!alive(&fauna, bw));
+                        assert_closes(&fauna, "checkpoint-sized strike probe");
+                    }
+                }
+            }
+        }
+        println!("warning_probe scale={warning} strikes={strikes} kills={kills} land_share={:.4}", kills as f64 / strikes as f64);
+    }
+}
+
+fn fauna_max(fauna: &Fauna, founder: Founder) -> f64 {
+    fauna.config.founder(founder).core.body_max
 }
 
 #[test]
