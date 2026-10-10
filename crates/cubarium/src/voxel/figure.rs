@@ -653,6 +653,8 @@ struct ModelInfo {
     drop: i32,
     /// Its rig and size bin, when its cells carry bones (FEED-RIG).
     rig: Option<(Arc<AnimalRig>, usize)>,
+    /// Loop-only cells, face masks and bounds while every track has zero weight.
+    without_tracks: Option<ModelId>,
 }
 
 /// Every model the figures have drawn with, interned: its cells in the GPU's layout, once.
@@ -697,6 +699,15 @@ impl FigureModels {
             return Some(id);
         }
         let (cells, drop) = cells();
+        self.intern_cells(key, rig, cells, drop)
+    }
+
+    fn intern_cells(
+        &mut self, key: u64, rig: Option<(Arc<AnimalRig>, usize)>, cells: Vec<Cell>, drop: i32,
+    ) -> Option<ModelId> {
+        if let Some(&id) = self.by_key.get(&key) {
+            return Some(id);
+        }
         if cells.is_empty()
             || cells.iter().any(|c| c.offset.iter().any(|&o| !(-120..=120).contains(&o)))
         {
@@ -785,9 +796,19 @@ impl FigureModels {
             radius,
             paints,
             drop,
-            rig,
+            rig: rig.clone(),
+            without_tracks: None,
         });
         self.by_key.insert(key, id);
+        if let Some((rig, bin)) = rig && let Some(rest) = rig.without_tracks(bin) {
+            let rest_cells = cells.into_iter().map(|mut c| {
+                c.bone = rest.bone_of(bin, c.offset);
+                c
+            }).collect();
+            let rest_key = hash_of(&(key, "without_tracks"));
+            let rest = self.intern_cells(rest_key, Some((Arc::new(rest), bin)), rest_cells, drop);
+            self.models[id.0 as usize].without_tracks = rest;
+        }
         Some(id)
     }
 
@@ -1814,6 +1835,10 @@ impl FigureTrack {
             let f32s = |a: [[f64; 3]; 3]| a.map(|c| c.map(|v| v as f32));
             let mut tile_of = |model: ModelId, palette: &[PaletteEntry], axes: [[f64; 3]; 3], frame: &mut FigureFrame| {
                 let info = models.info(model);
+                let drawing = match (&info.rig, info.without_tracks) {
+                    (Some((rig, bin)), Some(rest)) if !rig.tracks_playing(*bin, &clip_ats, aim) => models.info(rest),
+                    _ => info,
+                };
                 let at = frame.palette.len() as u32;
                 frame.palette.extend_from_slice(palette);
                 let rigged = match &info.rig {
@@ -1826,12 +1851,12 @@ impl FigureTrack {
                     _ => None,
                 };
                 FigureTile {
-                    first: info.first,
-                    count: info.count,
+                    first: drawing.first,
+                    count: drawing.count,
                     pos: pos.map(|v| v as f32),
                     axes: f32s(axes),
-                    centre: info.centre,
-                    radius: info.radius,
+                    centre: drawing.centre,
+                    radius: drawing.radius,
                     pose,
                     palette: at,
                     bones: rigged,

@@ -303,3 +303,136 @@ fn the_rigs_asleep_and_hunker_end_on_the_class_paths_poses() {
         }
     }
 }
+
+/// Undo only the appended sleep skeleton, then compare what the frame actually draws.
+/// No fixture hashes or tuned counts: the old feed keys, cells and class rules supply
+/// the reference. Include bounds, lip/crease bits, and each cell's transform so identity
+/// child keys cannot hide extra internal faces or a changed atlas sampling phase.
+#[test]
+fn zero_sleep_weight_draws_the_original_feed_rig_cell_for_cell() {
+    for voxel_m in [0.125, 0.25] {
+        let lib = library_at(voxel_m);
+        for founder in [
+            Founder::Chorister,
+            Founder::Lanternjaw,
+            Founder::Seedporter,
+            Founder::Bellwing,
+        ] {
+            let (rig, model) = lib
+                .rig_in_mode(founder, MobilityMode::Ground)
+                .expect("ground rig");
+            let original = Arc::new(rig.before_sleep_port());
+            for (bin, b) in model.bins.iter().enumerate() {
+                let mut models = FigureModels::default();
+                let port = models
+                    .intern_rigged(1, Some((rig.clone(), bin)), || {
+                        baked(&b.cells, None, Some((&rig, bin)))
+                    })
+                    .unwrap();
+                let reference = models
+                    .intern_rigged(2, Some((original.clone(), bin)), || {
+                        baked(&b.cells, None, Some((&original, bin)))
+                    })
+                    .unwrap();
+                for feed_weight in [0.0, 0.37, 1.0] {
+                    let draw = |model, r: &AnimalRig, sleep_weight| {
+                        let mut clips = vec![ClipSpec {
+                            clip: r.clip("cropping").unwrap() as u8,
+                            tick: 1,
+                            weight: feed_weight,
+                            rate: 0.0,
+                            phase_s: 0.37 * r.loop_s(r.clip("cropping").unwrap()),
+                        }];
+                        if let Some(clip) = r.clip("asleep") {
+                            clips.push(ClipSpec {
+                                clip: clip as u8,
+                                tick: 1,
+                                weight: sleep_weight,
+                                rate: 0.0,
+                                phase_s: 0.0,
+                            });
+                        }
+                        let s = Spec {
+                            key: (1, 0),
+                            model,
+                            pos: [10.0, 2.0, 6.0],
+                            orient: Orient::Ground(1.0),
+                            palette: vec![],
+                            pose: Some(PoseSpec {
+                                tick: 1,
+                                body: PoseEntry {
+                                    drop: models.info(model).drop as f32,
+                                    idle: 0.6,
+                                    idle_phase: 0.3,
+                                    ..PoseEntry::ZERO
+                                },
+                                head: Some(PoseEntry {
+                                    idle: 0.6,
+                                    idle_phase: 0.3,
+                                    head: HeadMove {
+                                        start: 0.0,
+                                        ticks: 3.0,
+                                        dip: 0.4,
+                                    },
+                                    ..PoseEntry::ZERO
+                                }),
+                                sleep: sleep::breath(1, DT),
+                                idle: idle::breath(1, DT),
+                                rig: RigStates::of(r),
+                            }),
+                            clips,
+                            aim: None,
+                        };
+                        let mut track = FigureTrack::new(FigureConfig::default(), 32);
+                        track.push(1, &[s], 0.0);
+                        track.frame(1.0, None, &models).0
+                    };
+                    let (a, z) = (draw(port, &rig, 0.0), draw(reference, &original, 0.0));
+                    let (a_tile, z_tile) = (a.figures[0].a, z.figures[0].a);
+                    assert_eq!(
+                        a_tile.radius, z_tile.radius,
+                        "{founder:?} bin {bin}: atlas bounds"
+                    );
+                    assert_eq!(a_tile.centre, z_tile.centre);
+                    assert_eq!(a_tile.pose, z_tile.pose);
+                    assert_eq!(a_tile.count, z_tile.count);
+                    let cells = |t: cubarium_gpu::figures::FigureTile| {
+                        &models.voxels[t.first as usize..(t.first + t.count) as usize]
+                    };
+                    for (v, old) in cells(a_tile).iter().zip(cells(z_tile)) {
+                        assert_eq!(
+                            v,
+                            old,
+                            "{founder:?} bin {bin} {:?}: cell, class, lip, faces and shade",
+                            v.offset()
+                        );
+                        if let (Some((af, _)), Some((zf, _))) = (a_tile.bones, z_tile.bones) {
+                            assert_eq!(
+                                a.bones[af as usize + v.bone() as usize],
+                                z.bones[zf as usize + old.bone() as usize]
+                            );
+                        } else {
+                            assert_eq!(a_tile.bones, z_tile.bones);
+                        }
+                    }
+                    // The alternate cells are selected at the frame's evaluated weight,
+                    // including the first positive weight and the return to exact zero.
+                    if models.info(port).without_tracks.is_some() {
+                        assert_eq!(
+                            a_tile.first,
+                            models
+                                .info(port)
+                                .without_tracks
+                                .map(|m| models.info(m).first)
+                                .unwrap()
+                        );
+                        assert_eq!(
+                            draw(port, &rig, 0.01).figures[0].a.first,
+                            models.info(port).first
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
