@@ -270,6 +270,46 @@ def animal_role(slot):
     return ANIMAL_ROLE.get(slot, "trunk") if slot in PALETTE else None
 
 
+class BakeBVH:
+    """A BVH independent of BMesh's (notably UV-sphere) face enumeration.
+
+    Sort polygons by their oriented loop (starting at its smallest vertex index)
+    and material index. Pass the original loops to Blender: coordinates, winding,
+    loop starts, normals and tessellation of nonplanar quads remain authored.
+    Only BVH insertion order changes. Returned indices address `mesh.polygons`.
+
+    Equal float32 nearest distances choose the smallest canonical face index,
+    then the lexicographically smallest hit position (two triangles of one face).
+    Across parts the existing authored build order breaks equal scores; accents
+    still overwrite in build order. Boundary rules remain: dot == 0 is outside,
+    distance == half a voxel is included, and floor assigns an accent on a grid
+    plane to the positive-side cell. No geometric epsilon or coordinate snapping.
+    """
+
+    def __init__(self, vertices, mesh):
+        faces = []
+        for p in mesh.polygons:
+            loop = tuple(p.vertices)
+            start = loop.index(min(loop))
+            faces.append((loop[start:] + loop[:start], p.material_index, loop, p.index))
+        faces.sort()
+        self.original = [f[3] for f in faces]
+        self.tree = BVHTree.FromPolygons(vertices, [f[2] for f in faces])
+
+    def find_nearest(self, point):
+        hit = self.tree.find_nearest(point)
+        if hit[0] is None:
+            return hit
+        # The API takes a float32 radius and squares it. Widen only the search
+        # radius enough to include the rounded nearest distance; selection uses
+        # exact returned distances, so this is not an occupancy tolerance.
+        radius = max(hit[3] * (1 + 2 ** -22), 2 ** -63)
+        hits = self.tree.find_nearest_range(point, radius)
+        loc, nor, index, dist = min(
+            [hit, *hits], key=lambda h: (h[3], h[2], tuple(h[0])))
+        return loc, nor, self.original[index], dist
+
+
 def voxelize(objs, vox, role_of):
     """{(i, j, k): material}: the lineup's rule, and accents as the module header says."""
     parts, accents = [], []
@@ -282,7 +322,7 @@ def voxelize(objs, vox, role_of):
         vs = [v.co.copy() for v in me.vertices]
         if not vs:
             continue
-        bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+        bvh = BakeBVH(vs, me)
         lo = Vector(min(v[k] for v in vs) for k in range(3))
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         (accents if role == "accent" else parts).append((bvh, lo, hi, mat))
@@ -514,7 +554,7 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
         slots = [A.slot_of(m.name) for m in me.materials]
         if not any(animal_role(s) for s in slots):
             continue
-        bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+        bvh = BakeBVH(vs, me)
         lo = Vector(min(v[k] for v in vs) for k in range(3))
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         face_slot = [slots[p.material_index] for p in me.polygons]
@@ -704,7 +744,7 @@ def loftstrider_cells(objs, vox, bones=None):
                 angle = math.degrees(math.atan2(mid.y, mid.x)) - az
                 if round(angle / 60) % 6 != direction:
                     continue
-                bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+                bvh = BakeBVH(vs, me)
                 lo = [math.floor(min(v[k] for v in vs) / vox) - 1 for k in range(3)]
                 hi = [math.ceil(max(v[k] for v in vs) / vox) + 1 for k in range(3)]
                 for i in range(lo[0], hi[0]):
