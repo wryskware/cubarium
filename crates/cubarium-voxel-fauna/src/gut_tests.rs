@@ -1051,7 +1051,8 @@ fn only_participants_drive_flank_and_count_in_the_window() {
     let ring = f64::from(world.view().config.width) * world.view().config.voxel_m;
     let i = fauna.animals.iter().position(|x| x.id == a).expect("A");
     let window = crate::pack::window_body(&fauna, i, ring);
-    let want = animal(&fauna, a).body + animal(&fauna, b).body;
+    let phys = fauna.config.founder(Founder::Chorister);
+    let want = phys.size(animal(&fauna, a).body) + phys.size(animal(&fauna, b).body);
     assert!((window - want).abs() < 1e-9, "the window is the participants' {want}, not {window}");
     let _ = fed;
 }
