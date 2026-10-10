@@ -435,6 +435,16 @@ impl ModelLibrary {
                 Parsed::Plant(_) => bail!("{file} is a plant model, listed as a founder"),
             }
         }
+        for (name, file) in &manifest.specimens {
+            let bytes = std::fs::read(dir.join(file))
+                .with_context(|| format!("reading {}", dir.join(file).display()))?;
+            match parse(&bytes).with_context(|| format!("parsing {file}"))? {
+                Parsed::Animal(m) => lib.insert_specimen(name, m),
+                Parsed::Plant(_) => bail!("{file} is a plant model, listed as a specimen"),
+            }
+        }
+        // after the specimens: a founder drawn with its specimen (the Veilhound's
+        // `chorister`) has its rig checked against that model's bins
         for (name, file) in &manifest.rigs {
             let Some(f) = Founder::ALL.into_iter().find(|f| f.name() == name) else {
                 bail!("{}: no founder is called {name}", manifest_path.display());
@@ -447,14 +457,6 @@ impl ModelLibrary {
                 bail!("{file}: {} bins for a model of {bins}", rig.bins.len());
             }
             lib.insert_rig(f, rig);
-        }
-        for (name, file) in &manifest.specimens {
-            let bytes = std::fs::read(dir.join(file))
-                .with_context(|| format!("reading {}", dir.join(file).display()))?;
-            match parse(&bytes).with_context(|| format!("parsing {file}"))? {
-                Parsed::Animal(m) => lib.insert_specimen(name, m),
-                Parsed::Plant(_) => bail!("{file} is a plant model, listed as a specimen"),
-            }
         }
         Ok(lib)
     }

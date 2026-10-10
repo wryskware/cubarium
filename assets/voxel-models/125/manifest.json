@@ -3099,6 +3099,7 @@
   "seedporter-glide": "seedporter-glide.cvm"
  },
  "rigs": {
-  "frondgrazer": "frondgrazer.rig"
+  "frondgrazer": "frondgrazer.rig",
+  "chorister": "chorister.rig"
  }
 }

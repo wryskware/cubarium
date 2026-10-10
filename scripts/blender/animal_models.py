@@ -213,6 +213,25 @@ def bone_of(start, name):
         ob["bone"] = name
 
 
+def bone_ahead(start, x, name):
+    """Every organism part built since `start`: what lies ahead of `x` (reference metres,
+    +x forward) belongs to rig bone `name`, what lies behind to the part's own bone. For a
+    part that is one mesh across a joint (a loft); the voxelizer reads each cell's bone,
+    and the flipbook each vertex's, by position (`part_bone`). `build` carries `x` to the
+    built size."""
+    for ob in L.ORG[start:]:
+        ob["bone_cut_x"] = x
+        ob["bone_ahead"] = name
+
+
+def part_bone(ob, p):
+    """The rig bone of part `ob` at point `p` (the part's own coordinates): its
+    `bone_ahead` bone ahead of its cut, else its own bone, else the root."""
+    if "bone_cut_x" in ob and p[0] > ob["bone_cut_x"]:
+        return ob["bone_ahead"]
+    return ob.get("bone", "root")
+
+
 def sheet(pts, mat, th=0.006):
     """A flat membrane through a polygon of 3D points: a thin slab, both faces."""
     bm = bmesh.new()
@@ -327,7 +346,11 @@ def chorister():
         (-0.50, 0, 0.435, 0.095, 0.083, 0.083), (-0.73, 0, 0.456, 0.05, 0.048, 0.048),
         (-0.99, 0, 0.475, 0.028, 0.025, 0.025), (-1.21, 0, 0.48, 0.014, 0.012, 0.012),
         (-1.38, 0, 0.49, 0.003, 0.003, 0.003)]
+    start = len(L.ORG)
     loft(spine, [c("a_main"), c("a_dark"), c("a_pale")], body_zone, nring=90, nseg=24)
+    # the rig (FEED-RIG round 2): the loft is one mesh, so its front, ahead of the
+    # shoulders, is the neck bone's by position; the rest of it is the root's
+    bone_ahead(start, CH_NECK_CUT_X, "neck")
     # rosettes: dark rings on the back and upper flanks, along the body and the tail root
     S = catmull([s[:5] for s in spine], 40)
     for idx, ang in ((6, 0.95), (8, 1.25), (10, 0.75), (12, 1.15), (14, 0.8), (16, 1.3), (18, 0.9),
@@ -341,12 +364,14 @@ def chorister():
             ell(p, (rr, rr * 0.8, 0.008), c("a_mark"), rot=rot)
             ell(p + n * 0.004, (rr * 0.45, rr * 0.36, 0.006), c("a_dark"), rot=rot)
     # head: a rounded skull, the two lilac crest lobes swept back over the neck, a large
-    # magenta eye under them each side, the cyan muzzle at the front
+    # magenta eye under them each side, the cyan muzzle at the front; all on the head bone
+    start = len(L.ORG)
     ell((0.58, 0, 0.55), (0.15, 0.1, 0.11), c("a_main"), rot=ry(8))
     for sy in (-1, 1):
         ell((0.53, sy * 0.045, 0.63), (0.27, 0.055, 0.07), c("a_head"), rot=ry(17) @ rx(sy * 8))
         ell((0.565, sy * 0.075, 0.55), (0.08, 0.022, 0.05), c("a_eye"), rot=ry(10))
     ell((0.73, 0, 0.485), (0.08, 0.06, 0.042), c("a_glow"), rot=ry(8))
+    bone_of(start, "head")
 
     def leg_zone(f, s, p):
         return 0 if f < 0.4 else 1
@@ -581,18 +606,45 @@ def fg_feed_clip():
     reference metres (anchor at the origin): each bone's name, parent and pivot (its
     head), and per frame per bone its turn about its pivot relative to its parent (a 3x3
     rotation) and the pivot's displacement (metres; zero for this armature's pure turns)."""
-    ob = fg_feed_armature()
+    return sample_clip(fg_feed_armature(), FG_BONES, round(FG_FEED_LOOP_S * FG_FEED_FPS), FG_FEED_FPS)
+
+
+def rig_armature(name, bones, fps):
+    """An armature of `bones` ((name, parent index, head, tail), reference metres, Blender
+    axes) in the current scene, with an empty action, its bones in edit order."""
     sc = bpy.context.scene
-    n = round(FG_FEED_LOOP_S * FG_FEED_FPS)
-    heads = [SWAP_YZ.to_3x3() @ Vector(h) for _, _, h, _ in FG_BONES]
+    sc.render.fps = fps
+    arm = bpy.data.armatures.new(name)
+    ob = bpy.data.objects.new(name, arm)
+    sc.collection.objects.link(ob)
+    bpy.context.view_layer.objects.active = ob
+    bpy.ops.object.mode_set(mode="EDIT")
+    for bname, parent, head, tail in bones:
+        eb = arm.edit_bones.new(bname)
+        eb.head, eb.tail = Vector(head), Vector(tail)
+        if parent is not None:
+            eb.parent = arm.edit_bones[bones[parent][0]]
+    bpy.ops.object.mode_set(mode="OBJECT")
+    ob.animation_data_create()
+    ob.animation_data.action = bpy.data.actions.new(name + "_feed")
+    return ob
+
+
+def sample_clip(ob, bones, n, fps):
+    """Armature `ob`'s action sampled at frames 0..n-1 (and removed): in the model's axes
+    and reference metres (anchor at the origin), each bone's name, parent and pivot (its
+    head), and per frame per bone its turn about its pivot relative to its parent (a 3x3
+    rotation) and the pivot's displacement (metres)."""
+    sc = bpy.context.scene
+    heads = [SWAP_YZ.to_3x3() @ Vector(h) for _, _, h, _ in bones]
     frames = []
     for f in range(n):
         sc.frame_set(f)
         bpy.context.view_layer.update()
         deform = [ob.pose.bones[name].matrix @ ob.data.bones[name].matrix_local.inverted()
-                  for name, _, _, _ in FG_BONES]
+                  for name, _, _, _ in bones]
         keys = []
-        for i, (_, parent, _, _) in enumerate(FG_BONES):
+        for i, (_, parent, _, _) in enumerate(bones):
             local = deform[i] if parent is None else deform[parent].inverted() @ deform[i]
             m = SWAP_YZ @ local @ SWAP_YZ
             r = m.to_3x3()
@@ -600,8 +652,8 @@ def fg_feed_clip():
             keys.append((r, d))
         frames.append(keys)
     bpy.data.objects.remove(ob, do_unlink=True)
-    return {"bones": [(name, parent) for name, parent, _, _ in FG_BONES], "heads": heads,
-            "fps": FG_FEED_FPS, "frames": frames}
+    return {"bones": [(name, parent) for name, parent, _, _ in bones], "heads": heads,
+            "fps": fps, "frames": frames}
 
 
 def fg_feed_pose(clip, frame, w):
@@ -618,6 +670,113 @@ def fg_feed_pose(clip, frame, w):
         local = Matrix.Translation(h + d * w) @ rw @ Matrix.Translation(-h)
         out.append(local if parent is None else out[parent] @ local)
     return out
+
+
+# --- the Veilhound's rig and feeding clip (FEED-RIG round 2, 2026-10-09) -----------------
+#
+# `design/handoffs/feeding-motion-rig-2026-10-09.md` §Round 2: the chorister (Veilhound)
+# feeding at a carcass on the ground; a placeholder, Wrysk directs the real clip. Three
+# bones: the root (body, legs, tail), the neck (the spine loft's front, ahead of the
+# shoulders, by position: `bone_ahead`), the head (skull, crest lobes, eyes, muzzle).
+#
+# As the frondgrazer's: the action is the **loop** in the reached posture, and the reach and
+# return are the renderer's clip weight (`FG_FEED_EASE_S`). The reach: the muzzle's tip on
+# the ground line about one voxel ahead of the front paws' claws. The neck and head alone
+# are 0.41 m from the shoulder to the muzzle's tip, and that point is 0.75 m from it: with
+# the root (and so the legs) still, the neck's pivot has to move. It moves the least it
+# must, straight toward the point (the neck and head then nearly in line), and holds that
+# displacement through the loop; the loop is the two turns (a two-bone reach to the tip's
+# target) and the head's twist about its own length.
+
+CH_NECK_CUT_X = 0.40                      # the shoulders: the front legs' hip joints
+CH_TIP = (0.809, 0.0, 0.474)              # the muzzle's tip (its ellipsoid's front, ry(8))
+CH_BONES = [
+    ("root", None, (0.0, 0.0, 0.45), (0.1, 0.0, 0.45)),
+    ("neck", 0, (CH_NECK_CUT_X, 0.0, 0.51), (0.50, 0.0, 0.52)),
+    ("head", 1, (0.50, 0.0, 0.52), CH_TIP),
+]
+CH_FEED_FPS = 30
+CH_FEED_LOOP_S = 1.8
+# The front paws' claws reach x 0.82 (ankle 0.68 + 0.14); the target one voxel ahead,
+# its tip 2 cm above the ground line. The reach leaves the chain 5 % short of straight so
+# the loop's targets bend it one way.
+CH_FRONT_CLAW_X = 0.82
+CH_TARGET = (CH_FRONT_CLAW_X + 0.125, 0.02)
+CH_SLACK = 0.95
+# The loop's key poses: (seconds, the tip's target moved (x back -, z up +) metres, the
+# head's twist degrees): tear (back and up 4 cm, a twist) 0.4 s, dip 0.3 s, the other
+# side's tear 0.4 s, the swallow (lifted 8 cm) 0.4 s, dip 0.3 s.
+CH_FEED_KEYS = [(0.0, 0.0, 0.0, 0.0), (0.4, -0.028, 0.028, 15.0), (0.7, 0.0, 0.0, 0.0),
+                (1.1, -0.028, 0.028, -15.0), (1.5, 0.0, 0.08, 0.0), (1.8, 0.0, 0.0, 0.0)]
+
+
+def ch_neck_shift():
+    """The neck pivot's displacement (x, z) the reach needs: toward the target, by what
+    the straight chain is short of it (with `CH_SLACK`)."""
+    pn = Vector((CH_BONES[1][2][0], CH_BONES[1][2][2]))
+    ph = Vector((CH_BONES[2][2][0], CH_BONES[2][2][2]))
+    tip = Vector((CH_TIP[0], CH_TIP[2]))
+    reach = ((ph - pn).length + (tip - ph).length) * CH_SLACK
+    to = Vector(CH_TARGET) - pn
+    return to.normalized() * max(to.length - reach, 0.0)
+
+
+def ch_feed_angles(dx, dz):
+    """The neck's and the head's turns about the side axis, radians counter-clockwise in
+    the (x, z) plane (+ lifts the nose), each relative to its parent, putting the muzzle's
+    tip on the target moved by (dx, dz), the neck's pivot shifted by `ch_neck_shift`."""
+    shift = ch_neck_shift()
+    pn = Vector((CH_BONES[1][2][0], CH_BONES[1][2][2]))
+    ph = Vector((CH_BONES[2][2][0], CH_BONES[2][2][2]))
+    tip = Vector((CH_TIP[0], CH_TIP[2]))
+    p0 = pn + shift
+    target = Vector(CH_TARGET) + Vector((dx, dz))
+    l1, l2 = (ph - pn).length, (tip - ph).length
+    to = target - p0
+    dist = min(max(to.length, abs(l1 - l2) + 1e-6), l1 + l2 - 1e-6)
+    base = math.atan2(to.y, to.x)
+    bend = math.acos(max(-1.0, min(1.0, (l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist))))
+    joints = [p0 + Vector((math.cos(base + s * bend), math.sin(base + s * bend))) * l1 for s in (1, -1)]
+    joint = max(joints, key=lambda j: j.y)  # the neck arched, its joint on the upper side
+    ang = lambda v: math.atan2(v.y, v.x)  # noqa: E731
+    a1 = ang(joint - p0) - ang(ph - pn)
+    a2 = ang(target - joint) - ang(tip - ph) - a1
+    return a1, a2
+
+
+def ch_feed_armature():
+    """The chorister's armature and its feeding action, in the current scene at reference
+    size, standing at the origin as `chorister()` draws: keyed at `CH_FEED_KEYS` (Bezier,
+    eased), the neck's pivot displaced by `ch_neck_shift` throughout."""
+    ob = rig_armature("ch_rig", CH_BONES, CH_FEED_FPS)
+    sx, sz = ch_neck_shift()
+    shift = Vector((sx, 0.0, sz))
+    head_axis = (Vector(CH_TIP) - Vector(CH_BONES[2][2])).normalized()
+    for t, dx, dz, twist in CH_FEED_KEYS:
+        frame = t * CH_FEED_FPS
+        a1, a2 = ch_feed_angles(dx, dz)
+        turns = {"root": Matrix.Identity(3),
+                 "neck": Matrix.Rotation(-a1, 3, "Y"),
+                 # the twist about the head's own length, then its pitch
+                 "head": Matrix.Rotation(-a2, 3, "Y") @ Matrix.Rotation(math.radians(twist), 3, head_axis)}
+        for name, _, _, _ in CH_BONES:
+            pb = ob.pose.bones[name]
+            pb.rotation_mode = "QUATERNION"
+            # a turn about the bone's head in armature space (relative to its parent), as
+            # the bone's own basis: Q^-1 R Q, its rest orientation Q; a displacement D as
+            # its location Q^-1 D
+            q = pb.bone.matrix_local.to_quaternion()
+            pb.rotation_quaternion = q.inverted() @ turns[name].to_quaternion() @ q
+            pb.keyframe_insert("rotation_quaternion", frame=frame)
+            if name == "neck":
+                pb.location = q.inverted() @ shift
+                pb.keyframe_insert("location", frame=frame)
+    return ob
+
+
+def ch_feed_clip():
+    """The chorister's feeding clip sampled at `CH_FEED_FPS` over its loop (`sample_clip`)."""
+    return sample_clip(ch_feed_armature(), CH_BONES, round(CH_FEED_LOOP_S * CH_FEED_FPS), CH_FEED_FPS)
 
 
 # --- littershredder · long tapered crawler (0.375 x 0.125 x 0.125 m) -----------------------
@@ -1504,6 +1663,8 @@ def build(name, x, y, length, width, height):
     for ob in objs:
         ob.data.transform(m)
         ob.data.update()
+        if "bone_cut_x" in ob:
+            ob["bone_cut_x"] = x + ob["bone_cut_x"] * length / l0
     return objs
 
 

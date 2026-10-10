@@ -458,7 +458,8 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
     the whole mesh, and takes the material of the face nearest it. A single-material accent
     part claims cells as `voxelize`'s accents do. Cells below `floor` (the ground, k = 0)
     are dropped; `floor=None` keeps a pose's parts that hang below its perch. With a dict
-    `bones`, each cell's rig bone (its part's `ob["bone"]`, the root's when it has none) is
+    `bones`, each cell's rig bone (its part's `ob["bone"]`, the root's when it has none, or
+    by the cell's position for a part split across a joint: `animal_models.part_bone`) is
     recorded there the way its material is: from the part that claimed it."""
     parts, accents = [], []
     for ob in objs:
@@ -473,7 +474,7 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
         lo = Vector(min(v[k] for v in vs) for k in range(3))
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         face_slot = [slots[p.material_index] for p in me.polygons]
-        bone = ob.get("bone", "root")
+        bone = ob
         if len(slots) == 1 and animal_role(slots[0]) == "accent":
             accents.append((bvh, lo, hi, slots[0], bone))
         else:
@@ -509,7 +510,7 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
                     if best is not None:
                         cells[(i, j, k)] = best
                         if bones is not None:
-                            bones[(i, j, k)] = best_bone
+                            bones[(i, j, k)] = A.part_bone(best_bone, c)
     for bvh, plo, phi, slot, bone in accents:
         inside = []
         for i in range(math.floor(plo[0] / vox), math.ceil(phi[0] / vox)):
@@ -528,7 +529,8 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
         for key in inside:
             cells[key] = slot
             if bones is not None:
-                bones[key] = bone
+                c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
+                bones[key] = A.part_bone(bone, c)
     return cells
 
 
@@ -626,7 +628,7 @@ def build_founder_bin(f, n, vox):
 
 # The founders with a rig (FEED-RIG): the builder's clip, sampled. Each is baked with a
 # `<name>.rig` beside its `.cvm` (`write_rig`), named under the manifest's `rigs`.
-RIGS = {"frondgrazer": A.fg_feed_clip}
+RIGS = {"frondgrazer": A.fg_feed_clip, "chorister": A.ch_feed_clip}
 
 
 def write_rig(path, clip, bins):
@@ -686,14 +688,23 @@ def bake_animal(f, vox, out_dir):
     size = write_cvm(os.path.join(out_dir, file), 1, steps)
     rig = None
     if rigged:
-        reset_scene()
-        clip = RIGS[name]()
-        rig = f"{name}.rig"
-        bins = [(length, scale, rig_cells(raw, bones, clip["bones"])) for length, scale, raw, bones in rig_bins]
-        rig_size = write_rig(os.path.join(out_dir, rig), clip, bins)
-        print(f"{vox} m {name}: rig {len(clip['bones'])} bones, {len(clip['frames'])} frames, {rig_size} bytes",
-              flush=True)
+        rig = write_rig_of(name, out_dir, rig_bins, vox)
     return file, size, meta, rig
+
+
+def write_rig_of(name, out_dir, rig_bins, vox):
+    """`<name>.rig` from its clip and its bins' (length, scale, cells, cell bones); the
+    file's name."""
+    reset_scene()
+    clip = RIGS[name]()
+    rig = f"{name}.rig"
+    bins = [(length, scale, rig_cells(raw, bones, clip["bones"])) for length, scale, raw, bones in rig_bins]
+    rig_size = write_rig(os.path.join(out_dir, rig), clip, bins)
+    counts = [{n: sum(1 for c in cells if c[3] == i) for i, (n, _) in enumerate(clip["bones"])}
+              for _, _, cells in bins]
+    print(f"{vox} m {name}: rig {len(clip['bones'])} bones, {len(clip['frames'])} frames, {rig_size} bytes,"
+          f" cells per bone by bin {counts}", flush=True)
+    return rig
 
 
 def bake_specimen(name, vox, out_dir):
@@ -702,14 +713,24 @@ def bake_specimen(name, vox, out_dir):
     _, l0, w0, h0 = A.REF[name]
     floor = None if name in A.BELOW_GROUND else 0
     steps, meta = [], []
+    rigged = name in RIGS
+    rig_bins = []
     for s in sorted(SPECIMEN_YOUNG.get(name, [])) + [1.0]:
         reset_scene()
-        cells = animal_cells(A.build(name, 0.5 * vox, 0.5 * vox, l0 * s, w0 * s, h0 * s), vox, floor)
+        objs = A.build(name, 0.5 * vox, 0.5 * vox, l0 * s, w0 * s, h0 * s)
+        bones = {} if rigged else None
+        raw = voxelize_animal(objs, vox, floor, bones)
+        cells = cells_of(raw, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
+        if rigged:
+            rig_bins.append((l0 * s, s / vox, raw, bones))
         steps.append((l0 * s, w0 * s, [cells]))
         meta.append({"length_m": round(l0 * s, 4), "cells": len(cells)})
     file = f"{name}.cvm"
     size = write_cvm(os.path.join(out_dir, file), 1, steps)
-    return file, size, meta
+    rig = None
+    if rigged:
+        rig = write_rig_of(name, out_dir, rig_bins, vox)
+    return file, size, meta, rig
 
 
 def main():
@@ -762,8 +783,10 @@ def main():
             if (ONLY and name not in ONLY) or name not in A.REF or any(
                     f["name"] == name for f in src["founders"]):
                 continue
-            file, size, meta = bake_specimen(name, vox, out_dir)
+            file, size, meta, rig = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
+            if rig:
+                manifest.setdefault("rigs", {})[name] = rig
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: specimen, {[m['cells'] for m in meta]} cells, {size} bytes", flush=True)
         with open(manifest_path, "w") as fh:

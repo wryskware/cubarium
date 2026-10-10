@@ -1,5 +1,6 @@
 //! `voxel_feed_capture`: the FEED-RIG method trial (`design/handoffs/feeding-motion-rig-2026-10-09.md`):
-//! two grown frondgrazers cropping on one bout script, headless, lit, real time, in one arm:
+//! two grown frondgrazers (or, `--founder chorister`, two adult Veilhounds: round 2) cropping
+//! on one bout script, headless, lit, real time, in one arm:
 //!
 //! - `--arm a`: the **flipbook**, the clip re-voxelized at every sampled frame by the bake's
 //!   own rule (`scripts/blender/feed_flipbook.py`, its JSON passed with `--flipbook`), drawn
@@ -9,7 +10,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
-//!     [--px N] [--heading DEG] [--flipbook PATH]
+//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -188,6 +189,7 @@ fn main() -> Result<()> {
     let mut arm = "b".to_string();
     let mut flip_path = None;
     let mut perf = None;
+    let mut founder = Founder::Browser;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -198,6 +200,13 @@ fn main() -> Result<()> {
                 flip_path = Some(PathBuf::from(args.next().context("--flipbook PATH")?))
             }
             "--perf" => perf = Some(args.next().context("--perf N")?.parse::<usize>()?),
+            "--founder" => {
+                founder = match args.next().context("--founder NAME")?.as_str() {
+                    "frondgrazer" | "browser" => Founder::Browser,
+                    "chorister" | "veilhound" => Founder::Chorister,
+                    f => bail!("--founder frondgrazer or chorister, not {f}"),
+                }
+            }
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
@@ -214,33 +223,38 @@ fn main() -> Result<()> {
         _ => None,
     };
     if let Some(n) = perf {
-        return run_perf(n, px, rig_draw);
+        return run_perf(n, px, rig_draw, founder);
     }
     let out =
         out.context("usage: voxel_feed_capture OUT_DIR --arm a|b|c [--px N] [--heading DEG]")?;
     let frames = out.join("frames");
     std::fs::create_dir_all(&frames)?;
 
-    let w = world(22, 7);
+    // the Veilhound is 2.2 m with its tail, 18 voxels: a wider and deeper floor
+    let (w, xs, z) = match founder {
+        Founder::Chorister => (world(48, 16), [15, 36], 8),
+        _ => (world(22, 7), [6, 15], 3),
+    };
     let mut fauna = Fauna::new(FaunaConfig::default());
-    for x in [6, 15] {
+    for x in xs {
         anyhow::ensure!(
             fauna.apply(
                 &w,
                 FaunaCommand::IntroduceFounder {
                     x,
-                    z: 3,
-                    founder: Founder::Browser,
+                    z,
+                    founder,
                     stores: StartingStores::FULL,
                     heading_rad: heading_deg.to_radians(),
                 }
             ),
-            "could not place a frondgrazer at x {x}"
+            "could not place a {} at x {x}",
+            founder.name()
         );
     }
     let flora = Flora::new(FloraConfig::default());
     let fv = fauna.view();
-    let adult = fv.config.founder(Founder::Browser).core.body_max;
+    let adult = fv.config.founder(founder).core.body_max;
     let mut animals = fv.animals.to_vec();
     for a in &mut animals {
         a.body = adult;
@@ -267,8 +281,8 @@ fn main() -> Result<()> {
     let models =
         Arc::new(ModelLibrary::load(&cfg.models_dir, VOXEL_M).context("the baked models")?);
     let loop_s = models
-        .rig(Founder::Browser)
-        .context("the frondgrazer has no rig: rebake it")?
+        .rig(founder)
+        .with_context(|| format!("the {} has no rig: rebake it", founder.name()))?
         .loop_s();
     let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
     let (rw, rh) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
@@ -349,9 +363,9 @@ fn stage(
     Ok(())
 }
 
-/// `n` grown frondgrazers cropping: each frame's milliseconds with the rig drawn and with it
-/// off, over the same 240 frames.
-fn run_perf(n: usize, px: u32, rig_draw: RigDraw) -> Result<()> {
+/// `n` grown frondgrazers (or `founder`s) cropping: each frame's milliseconds with the rig
+/// drawn and with it off, over the same 240 frames.
+fn run_perf(n: usize, px: u32, rig_draw: RigDraw, founder: Founder) -> Result<()> {
     let (width, depth) = (160u32, 48u32);
     let w = world(width, depth);
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -367,7 +381,7 @@ fn run_perf(n: usize, px: u32, rig_draw: RigDraw) -> Result<()> {
                 FaunaCommand::IntroduceFounder {
                     x,
                     z,
-                    founder: Founder::Browser,
+                    founder,
                     stores: StartingStores::FULL,
                     heading_rad,
                 },
@@ -376,10 +390,10 @@ fn run_perf(n: usize, px: u32, rig_draw: RigDraw) -> Result<()> {
             }
         }
     }
-    anyhow::ensure!(placed == n, "placed {placed} of {n} frondgrazers");
+    anyhow::ensure!(placed == n, "placed {placed} of {n} {}s", founder.name());
     let flora = Flora::new(FloraConfig::default());
     let fv = fauna.view();
-    let adult = fv.config.founder(Founder::Browser).core.body_max;
+    let adult = fv.config.founder(founder).core.body_max;
     let mut animals = fv.animals.to_vec();
     for a in &mut animals {
         a.body = adult;
