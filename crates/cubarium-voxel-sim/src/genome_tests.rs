@@ -338,6 +338,7 @@ fn an_unknown_path_in_a_search_file_is_an_error() {
 fn a_digest_row_named_as_a_gene_is_refused() {
     for path in [
         "fauna.founders.frondgrazer.mass_scale",
+        "fauna.founders.frondgrazer.taste_reference_food",
         "fauna.founders.frondgrazer.adult_length_m",
         "fauna.founders.*.cruise_body_lengths_per_s",
         "fauna.founders.littershredder.mouth_ceiling_fraction",

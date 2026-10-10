@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2689 rows)
+**`fauna.*`** (2698 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1731,7 +1731,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.littershredder.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2006,7 +2007,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.frondgrazer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2281,7 +2283,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.lanternjaw.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2556,7 +2559,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.capgnawer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.capgnawer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.capgnawer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.capgnawer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2831,7 +2835,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.loftstrider.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.loftstrider.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.loftstrider.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.loftstrider.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3106,7 +3111,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.ripple-snail.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.ripple-snail.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.ripple-snail.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.ripple-snail.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3381,7 +3387,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.bellwing.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.bellwing.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.bellwing.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.bellwing.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3656,7 +3663,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.seedporter.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.seedporter.hunter.strike_power` | 4.0 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.seedporter.hunter.prey_max_ratio` | 4.0 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | 0.8 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3931,7 +3939,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.chorister.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.chorister.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.chorister.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.chorister.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -4060,7 +4069,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.life.wall_friction` | 0.0 | fraction | [0, 1] | 0–1 | - | placeholder | share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops) |
 | `fauna.life.shallows_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | a heuristic walker in water deeper than it wades heads for the nearest wadeable face within this (a world query, not a sense) |
 | `fauna.life.ecological_day_s` | 7200.0 | s | (0, inf) |  | - | decision | the day per-day physiology is written in (daily need, a rider's take); fixed, not the picture clock |
-| `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
+| `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a scent source emits at full strength |
 | `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
 | `fauna.cue.fungal_half_life_s` | 2.0 | s | (0, inf) | 2–1200 log | - | placeholder | the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves |
 | `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |

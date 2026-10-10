@@ -24,6 +24,8 @@
 
 #[cfg(test)]
 mod mass_rescale_tests;
+#[cfg(test)]
+mod taste_units_tests;
 
 mod body;
 mod controller;
@@ -2423,14 +2425,26 @@ impl FaunaConfig {
     /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
     /// motor numbers of its physiology in the config — cruise (`cruise_body_lengths_per_s`
     /// × the adult length), the yaw cap, and the forward reference that follows cruise.
-    /// The sensor layout, references and tunings stay the contract's, so a default config
-    /// returns exactly [`Founder::manifest`] and a moved pace changes the digest.
+    /// The food reference follows the lineage's config; layout and tunings stay the
+    /// contract's. A default config returns exactly [`Founder::manifest`], while moved
+    /// pace or taste references change the digest.
     pub fn manifest(&self, founder: Founder) -> Manifest {
         let mut m = founder.manifest();
         let p = self.founder(founder);
         m.cruise_m_per_s = p.cruise_body_lengths_per_s * p.adult_length_m;
         m.yaw_cap_rad_per_s = p.yaw_cap_rad_per_s;
         m.forward_reference_m = m.cruise_m_per_s * m.controller_period_s;
+        let film_reference = p.taste_reference.is_none() && p.diet == Diet::only(Food::Film);
+        m.taste_reference_rule = if film_reference {
+            manifest::TASTE_REFERENCE_FILM_RULE
+        } else {
+            manifest::TASTE_REFERENCE_RULE
+        };
+        m.taste_reference = if film_reference {
+            None
+        } else {
+            Some(p.taste_reference_stock(self.cue.emit_reference))
+        };
         m
     }
 
