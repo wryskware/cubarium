@@ -522,11 +522,14 @@ VAULTTREE_STATES = [
     # thinning tree keeps losing shelves down to bare. b6 keeps every other one of the
     # pick's twelve by height (the crowning shelf first); the barest, b0-2, keeps 0, 1 and 2
     # shelves in variants 0, 1 and 2 (Wrysk 2026-10-10: "i would make the variant 0 1 2
-    # actually for shelves"; a list, one shelf_fill per variant, the bake picks by
-    # variant). A dropped shelf loses its cap, rim and drape; its limb and twigs stay, so
-    # every state holds the thinner states' cells.
+    # actually for shelves"). Its kept shelves are named per variant (`shelves`, indices
+    # into VAULT_SHELVES; a list, one per variant, the bake picks by variant): none; the
+    # crowning shelf 0; and (round 4b, Wrysk: "two medium shelves instead of the big one at
+    # the top and medium one at the side") shelves 2 and 6, medium, on opposite sides of
+    # the trunk, both in b6's set. A dropped shelf loses its cap, rim and drape; its limb
+    # and twigs stay, so every state holds the thinner states' cells.
     ("b6", {"shelf_fill": 6 / 12}),
-    ("b0-2", {"shelf_fill": [0.0, 1 / 12, 2 / 12]}),
+    ("b0-2", {"shelves": [[], [0], [2, 6]]}),
 ]
 FOLIAGE_STATES = {"bloomcrown": BLOOMCROWN_STATES, "umbrellafrond": UMBRELLAFROND_STATES,
                   "vaulttree": VAULTTREE_STATES}
@@ -767,7 +770,8 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
     the pick's twelve. Below one (VAULT-SHAPE round 4) the adult keeps n = round(12 x
     fill) of the pick's shelves, evenly through their height order (shelf round(j x 12 /
     n) for j < n, the crowning shelf first); the others are drawn bare (`vault_shelf`), so
-    the limbs stay and every shelf keeps its random draws. The juvenile's four shelves
+    the limbs stay and every shelf keeps its random draws. A spec's `shelves` (indices into
+    VAULT_SHELVES) names the kept shelves instead (round 4b). The juvenile's four shelves
     and the seedling's one are the same in every state."""
     fill = (spec or {}).get("shelf_fill", VAULT_FILL)
     if i == 0:  # seedling: one tiny shelf on a stub
@@ -806,7 +810,9 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
     crowning = []
 
     keep = None  # every shelf
-    if drape is not None and fill < 1.0:
+    if drape is not None and (spec or {}).get("shelves") is not None:
+        keep = set(spec["shelves"])  # named shelves (b0-2, picked per variant by the bake)
+    elif drape is not None and fill < 1.0:
         n = round(len(VAULT_SHELVES) * fill)
         keep = {round(j * len(VAULT_SHELVES) / n) for j in range(n)} if n > 0 else set()
 
