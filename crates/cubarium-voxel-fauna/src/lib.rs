@@ -62,6 +62,8 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+mod still;
+pub use still::{still_reason, still_reason_of};
 pub(crate) use step::places;
 #[cfg(test)]
 mod testpass3_support;
