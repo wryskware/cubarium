@@ -141,6 +141,13 @@ FOUNDER_POSES = {"frondgrazer-hunker": "frondgrazer"}
 # ratio, which its table keeps by volume).
 SPECIMEN_YOUNG = {"chorister": [0.46]}
 
+# A founder's other life stage, baked as a specimen of one bin at its built (true) size:
+# name -> `animal_models.lanternjaw_larva` kind. The lanternjaw's rider larva, the
+# leechfork (Wrysk 2026-10-09, D16), drawn while it rides a host
+# (`crates/cubarium/src/voxel/figure.rs`, the rider branch of `specs`). Its belly row is
+# k = 0, its one-voxel body on the anchor's row; `floor=None` as on the candidates' sheet.
+LARVAE = {"lanternjaw-larva": "leechfork"}
+
 KIND = {"Foliage": L.F, "Trunk": L.T, "Drape": L.D, "Mat": L.MAT}
 
 
@@ -733,6 +740,19 @@ def bake_specimen(name, vox, out_dir):
     return file, size, meta, rig
 
 
+def bake_larva(name, vox, out_dir):
+    """One bin: the larva at its built size, its length and width the built extent."""
+    reset_scene()
+    objs = A.build_larva(LARVAE[name], 0.5 * vox, 0.5 * vox, vox)
+    lo = [min((ob.matrix_world @ v.co)[k] for ob in objs for v in ob.data.vertices) for k in range(2)]
+    hi = [max((ob.matrix_world @ v.co)[k] for ob in objs for v in ob.data.vertices) for k in range(2)]
+    length, width = hi[0] - lo[0], hi[1] - lo[1]
+    cells = animal_cells(objs, vox, None)
+    file = f"{name}.cvm"
+    size = write_cvm(os.path.join(out_dir, file), 1, [(length, width, [cells])])
+    return file, size, [{"length_m": round(length, 4), "cells": len(cells)}]
+
+
 def main():
     with open(SOURCE) as fh:
         src = json.load(fh, parse_constant=float)
@@ -789,6 +809,13 @@ def main():
                 manifest.setdefault("rigs", {})[name] = rig
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: specimen, {[m['cells'] for m in meta]} cells, {size} bytes", flush=True)
+        for name in LARVAE:
+            if ONLY and name not in ONLY:
+                continue
+            file, size, meta = bake_larva(name, vox, out_dir)
+            manifest["specimens"][name] = file
+            manifest["detail"][name] = {"bytes": size, "bins": meta}
+            print(f"{vox} m {name}: larva, {meta[0]['cells']} cells, {meta[0]['length_m']} m, {size} bytes", flush=True)
         with open(manifest_path, "w") as fh:
             json.dump(manifest, fh, indent=1)
             fh.write("\n")

@@ -1009,6 +1009,34 @@ control and the reward accounting; display targets after seeing results.
      predation, capgnawer/shredder breeding, lanternjaw maturation, woods), then pin worlds at target
      and measure drift (thin=), fit per-lineage responses, confirm, year check. About 320 core-h
      against about 1,150 for 12 CMA generations. Awaiting Wrysk's go.
+   - Plan approved (Wrysk, 2026-10-09: "i like the new plan. can do some ec2 with it to accellerate").
+     Running: start-world library on main (`runs/library-2026-10-09`, 8 wide × 10 h), NEST-SPEED
+     (Codex), P2/P3 probes. DRIFT-READOUT merged 35317bcb (`drift=FROM:TO`, `scripts/studies/drift.py`).
+     Roles doc: `design/ecology-roles-2026-10-09.md` (3a24ff42).
+   - Role call 1, loftstrider (Wrysk, 2026-10-09): A+B, a breeding season plus grown young leaving an
+     over-size family, with the condition that leaving must not sink world resources: the leaver's
+     matter goes to litter where it leaves. DISPERSAL (Codex) building; Veilhound dispersal built but
+     off until role call 2.
+   - DISPERSAL merged 1270d05c (role calls 1 A+B and 2 B1): loftstrider season, herd max 3 adults; Veilhound
+     pack max 4 adults, pups don't count; leavers' matter to litter.
+   - Role call 3 (Wrysk, 2026-10-09: "do A first"): vine fruit hangs ripe about 12 days, shipped 3e3098ed
+     (fruit_s 1200 s, spur_share 0.58 keeps the flower cadence). Standing fruit rose 5-25x in the eidolon
+     check. **Correction:** "intake unchanged" (also in 3e3098ed's message) was a misreading of
+     cumulative ledger totals. Session deltas give vine intake x1.5-1.9 (shipped) and x3.8-9.7 (uncompensated).
+   - SEEDPORTER-INTAKE (Opus): the root cause is the bite half-saturation K 0.005 (turf scale, inherited)
+     against fruit at about 1e-4 at the mouth, so each bite is about 3 % of a mouthful. Juveniles also freeze
+     in 35-54 % of samples (three heuristic bugs). Fullness 0.01 is mostly juvenile growth draw, and growth to
+     adult takes about 23 h. SEEDPORTER-FIX (Codex) running: fruit-scale K, the freeze bugs, and census
+     session deltas.
+   - P2/P3 done (roles doc §3): grazer intake stops growing between x4 and x16 (O stays about 1-2.4 %), and x64
+     takes no bites. So mass alone cannot reach 10-30 % offtake.
+   - GRAZER-INTAKE (Opus) found the root cause, a units bug: the taste reference is `emit_reference x mass_scale`
+     (body.rs about L2548, rule from 31e20c81), so the feed gate (cue > 0.02) rises with mass while food
+     stocks don't. The gate is 0.031 at x1 and 1.96 at x64, against a max stand of 1.12. Reach is not the cap:
+     about 74 % of leaf growth is within the grazer band. TASTE-UNITS (Codex) running: the reference in food
+     units, with the default world unchanged. Re-derive the mass genes' boxes after it lands.
+   - 2026-10-09 21:15 the session was OOM-killed (a 24 GB target copy in tmpfs /tmp); the library and probes
+     resumed as user services.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;

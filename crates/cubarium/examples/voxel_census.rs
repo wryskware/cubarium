@@ -130,6 +130,15 @@
 //! workers (`cubarium_voxel_sim::set_overlap_split`). Every minute a `phases:` line on
 //! stderr gives that minute's milliseconds per tick by phase.
 
+//! `drift=FROM:TO` measures a run-local window in absolute sim-minutes (rounded to
+//! ticks); `drift_out=PATH` also writes JSON. Out-of-run windows are refused. An
+//! early staged stop clips and flags the window. Recruits are live births and
+//! hatchings, excluding eggs laid, independence and maturity. Energy is the ledger's
+//! organic-equivalent surplus per body-hour; fullness pools 1 Hz body samples.
+
+#[path = "support/census_drift.rs"]
+mod census_drift;
+
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
 use cubarium::voxel::{install_founders_with, policy_args};
@@ -199,6 +208,7 @@ fn main() {
     }
     // `policy=<lineage>=<file>` explicitly replaces that lineage's default heuristic.
     let policies = policy_args(&args).expect("policy=<lineage>=<file>");
+    let drift = census_drift::Config::parse(&args).unwrap_or_else(|e| panic!("{e}"));
     let hours: f64 = args.get(1).map_or(6.0, |a| {
         a.parse()
             .expect("usage: voxel_census [HOURS] [authored|generated] [open|closed] [heuristic]")
@@ -232,6 +242,7 @@ fn main() {
             .expect("pin=B needs more than B physical cores");
     }
     let timing = Timing {
+        drift,
         vitals: args.iter().find_map(|a| a.strip_prefix("vitals=")).map(|dir| {
             let number = |name: &str, default: f64| {
                 args.iter().find_map(|a| a.strip_prefix(name))
@@ -369,7 +380,7 @@ fn main() {
         params
     };
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("load=")) {
-        let (mut sim, minute0) = load_run(
+        let (mut sim, minute0, summary_start) = load_run(
             std::path::Path::new(dir),
             &args,
             &policies,
@@ -378,7 +389,7 @@ fn main() {
             expand.as_deref(),
             &write_params,
         );
-        run(&mut sim, hours, minute0, save.as_ref(), &timing, stage);
+        run(&mut sim, hours, minute0, save.as_ref(), &timing, stage, &summary_start);
         return;
     }
     let nofauna = args.iter().any(|a| a == "nofauna");
@@ -433,7 +444,7 @@ fn main() {
         install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
-        run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
+        run(&mut sim, hours, 0, save.as_ref(), &timing, stage, &SummaryStart::default());
         return;
     }
     // `config=<path>` is a landscape arm from a host TOML (the Tachyon terrarium, say),
@@ -534,7 +545,7 @@ fn main() {
         install_founders_with(&mut fauna, &policies).expect("the explicit founder policies validate");
         introduce_into(&world, &flora, &mut fauna);
         let mut sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
-        run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
+        run(&mut sim, hours, 0, save.as_ref(), &timing, stage, &SummaryStart::default());
         return;
     }
     let params = resolve(cfg.sim.world.clone());
@@ -595,12 +606,13 @@ fn main() {
     senses.settle(&world.view(), &flora.view());
     let mut sim = Sim::new(world, flora, fauna, SimConfig::experiment(), Some(senses));
 
-    run(&mut sim, hours, 0, save.as_ref(), &timing, stage);
+    run(&mut sim, hours, 0, save.as_ref(), &timing, stage, &SummaryStart::default());
 }
 
 /// How the tick is run and timed: `overlap=`, `ab=` and `modes=`.
 #[derive(Clone)]
 struct Timing {
+    drift: Option<census_drift::Config>,
     vitals: Option<(String, VitalsOptions)>,
     policies: Vec<(Founder, std::path::PathBuf)>,
     /// `--weather-log FILE`: one row per finished rain event.
@@ -687,6 +699,84 @@ impl SteerLog {
     }
 }
 
+/// Saved ledger history to exclude from stderr summaries. CSV rows deliberately retain
+/// their lifetime counters so a continuation can still be joined to its founding run.
+#[derive(Default)]
+struct SummaryStart {
+    fauna: cubarium_voxel_fauna::FaunaLedger,
+    flora: cubarium_voxel_flora::FloraLedger,
+    loaded: bool,
+}
+
+impl SummaryStart {
+    /// Only the ledger fields used by the summaries below are read from this result.
+    fn fauna(
+        &self,
+        total: &cubarium_voxel_fauna::FaunaLedger,
+    ) -> cubarium_voxel_fauna::FaunaLedger {
+        let mut delta = *total;
+        if self.loaded {
+            macro_rules! counts {
+                ($($field:ident),+ $(,)?) => { $(
+                    delta.$field = std::array::from_fn(|i| total.$field[i] - self.fauna.$field[i]);
+                )+ };
+            }
+            counts!(
+                alive_ticks_by_founder,
+                alive_day_ticks_by_founder,
+                awake_ticks_by_founder,
+                awake_day_ticks_by_founder,
+                rest_bouts_by_founder,
+                alarm_wakes_by_founder,
+                paced_ticks_by_founder,
+                paused_ticks_by_founder,
+                swallowed_by_founder,
+                fruit_eaten_by_source,
+                fruit_bites_by_source,
+                contact_visits_by_founder,
+                clutches_by_founder,
+                vine_clutches_by_founder,
+                eggs_laid_by_founder,
+                eggs_hatched_by_founder,
+                eggs_lost_by_founder,
+                nest_holds_by_founder,
+                nest_searches_by_founder,
+            );
+            delta.eaten_by_founder_food = std::array::from_fn(|f| {
+                std::array::from_fn(|i| {
+                    total.eaten_by_founder_food[f][i] - self.fauna.eaten_by_founder_food[f][i]
+                })
+            });
+        }
+        delta
+    }
+
+    fn flora(
+        &self,
+        total: &cubarium_voxel_flora::FloraLedger,
+    ) -> cubarium_voxel_flora::FloraLedger {
+        let mut delta = total.clone();
+        if self.loaded {
+            macro_rules! counts {
+                ($($field:ident),+ $(,)?) => { $(
+                    delta.$field = std::array::from_fn(|i| total.$field[i] - self.flora.$field[i]);
+                )+ };
+            }
+            counts!(
+                flower_visits,
+                seeds_germinated,
+                clonal_births,
+                seeds_landed,
+                seeds_died,
+                seeds_lost,
+                overtopped
+            );
+            delta.establishments -= self.flora.establishments;
+        }
+        delta
+    }
+}
+
 fn run(
     sim: &mut Sim,
     hours: f64,
@@ -694,7 +784,17 @@ fn run(
     save: Option<&SaveAt>,
     timing: &Timing,
     stage: Option<(staged::StageConfig, Vec<String>)>,
+    summary_start: &SummaryStart,
 ) {
+    if summary_start.loaded {
+        eprintln!("summary_scope: ledger_counters=since_load csv_counters=total");
+    }
+    let start_tick = minute0 * TICKS_PER_MIN;
+    let mut drift = timing.drift.clone().map(census_drift::Recorder::new);
+    if let Some(d) = &mut drift {
+        d.validate(start_tick, start_tick + (hours * 3600.0 * f64::from(TICK_HZ)) as u64).unwrap_or_else(|e| panic!("{e}"));
+        d.poll(sim, start_tick);
+    }
     // `edit=FILE.toml`: the scenario's edits, before anything reads the world.
     if let Some(path) = &timing.edit {
         let scenario = cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{e}"));
@@ -707,6 +807,7 @@ fn run(
         }
         eprintln!("edit: {} applied, {} refused, from {path}", report.applied.len(), report.refused.len());
     }
+    if let Some(d) = &mut drift { d.after_edits(sim); }
     for lineage in Founder::ALL {
         let fauna = sim.fauna();
         let source = if fauna.policy_driven(lineage) {
@@ -780,6 +881,7 @@ fn run(
     herd.minute(sim);
     let mut tick = minute0 * TICKS_PER_MIN;
     let total_ticks = tick + total_ticks;
+    if let Some(d) = &drift { d.validate(tick, total_ticks).unwrap_or_else(|e| panic!("{e}")); }
     let mut window = SeedWindow::default();
     let mut phases = PhaseWindow::default();
     let mut since = std::time::Instant::now();
@@ -801,6 +903,7 @@ fn run(
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if let Some(d) = &mut drift { d.poll(sim, tick); }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -814,7 +917,7 @@ fn run(
         }
         weather.poll(sim);
         deaths.poll(sim, tick);
-        vine.poll(sim, tick);
+        vine.poll(sim, tick, summary_start);
         if let Some(r) = runner.as_mut() {
             r.tick(sim);
         }
@@ -851,13 +954,13 @@ fn run(
             {
                 eprintln!("staged: {ended:?} at minute {}", tick / TICKS_PER_MIN);
                 if ended != staged::Ended::Done {
-                    window.report(tick, sim);
+                    window.report(tick, sim, summary_start);
                     break;
                 }
             }
         }
         if tick % (60 * TICKS_PER_MIN) == 0 || tick == total_ticks {
-            window.report(tick, sim);
+            window.report(tick, sim, summary_start);
         }
     }
     if let Some(v) = vitals.as_mut() {
@@ -871,14 +974,16 @@ fn run(
             vitals_time.as_secs_f64() * 1e3 / (tick - first_tick).max(1) as f64,
             tick - first_tick);
     }
+    if let Some(d) = &mut drift { d.finish(sim, tick).unwrap_or_else(|e| panic!("{e}")); }
     weather.summary(sim);
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
-    vine.summary(sim);
+    vine.summary(sim, summary_start);
     forage_summary(sim);
     herd.summary(sim);
-    rhythm_summary(sim);
-    let shredder_intake: f64 = sim.fauna().view().ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
+    rhythm_summary(sim, summary_start);
+    let ledger = summary_start.fauna(sim.fauna().view().ledger);
+    let shredder_intake: f64 = ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
     eprintln!("decay probe: shredder_intake_organic={shredder_intake:.6}");
 }
 
@@ -886,17 +991,29 @@ fn run(
 /// `rhythm:` line per lineage that lived — its awake share with the sun up and down, rest
 /// bouts begun, sleepers woken by an alarm, the organic it swallowed, and the paced seconds
 /// of its heuristic walking with their paused share.
-fn rhythm_summary(sim: &Sim) {
-    let l = sim.fauna().view().ledger;
+fn rhythm_summary(sim: &Sim, start: &SummaryStart) {
+    for line in rhythm_lines(&start.fauna(sim.fauna().view().ledger)) {
+        eprintln!("{line}");
+    }
+}
+
+fn rhythm_lines(l: &cubarium_voxel_fauna::FaunaLedger) -> Vec<String> {
+    let mut lines = Vec::new();
     for f in cubarium_voxel_fauna::Founder::ALL {
         let k = f.index();
         if l.alive_ticks_by_founder[k] == 0 {
             continue;
         }
-        let share = |a: u64, b: u64| if b > 0 { format!("{:.3}", a as f64 / b as f64) } else { "-".to_string() };
+        let share = |a: u64, b: u64| {
+            if b > 0 {
+                format!("{:.3}", a as f64 / b as f64)
+            } else {
+                "-".to_string()
+            }
+        };
         let night_alive = l.alive_ticks_by_founder[k] - l.alive_day_ticks_by_founder[k];
         let night_awake = l.awake_ticks_by_founder[k] - l.awake_day_ticks_by_founder[k];
-        eprintln!(
+        lines.push(format!(
             "rhythm: {} awake_day={} awake_night={} rest_bouts={} alarm_wakes={} swallowed={:.5} paced_s={:.0} pause_share={}",
             f.name(),
             share(l.awake_day_ticks_by_founder[k], l.alive_day_ticks_by_founder[k]),
@@ -906,8 +1023,9 @@ fn rhythm_summary(sim: &Sim) {
             l.swallowed_by_founder[k],
             l.paced_ticks_by_founder[k] as f64 / f64::from(TICK_HZ),
             share(l.paused_ticks_by_founder[k], l.paced_ticks_by_founder[k]),
-        );
+        ));
     }
+    lines
 }
 
 /// HERD-PULL's diagnostics over the run (never scored): per lineage, the mean distance from
@@ -1412,7 +1530,7 @@ fn load_run(
     genome: Option<&(String, Vec<(String, f64)>)>,
     expand: Option<&str>,
     write_params: &dyn Fn(&Params),
-) -> (Sim, u64) {
+) -> (Sim, u64, SummaryStart) {
     let shaping: Vec<&str> = args
         .iter()
         .map(String::as_str)
@@ -1429,6 +1547,12 @@ fn load_run(
     // policy refused unless this run explicitly supplies it (`policy=`).
     let driven_by_policy = cubarium::voxel::policy_founders(policies);
     let saved = cubarium_voxel_sim::saved::load(dir, &driven_by_policy).unwrap_or_else(|e| panic!("load: {e}"));
+    // Take the saved history before config overrides, policy installs or scenario edits.
+    let summary_start = SummaryStart {
+        fauna: *saved.fauna.view().ledger,
+        flora: saved.flora.view().ledger.clone(),
+        loaded: true,
+    };
     let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
     eprintln!(
         "loaded {} at minute {minute}: {}x{}x{} stands {} animals {}",
@@ -1478,7 +1602,7 @@ fn load_run(
     write_params(&loaded.params);
     install_founders_with(&mut fauna, policies).expect("the explicit founder policies validate");
     let sim = Sim::ambient(world, flora, fauna, SimConfig::experiment());
-    (sim, minute)
+    (sim, minute, summary_start)
 }
 
 /// The `phases:` line on stderr, once a simulated minute: that minute's milliseconds per
@@ -1597,9 +1721,10 @@ struct SeedWindow {
 }
 
 impl SeedWindow {
-    fn report(&mut self, tick: u64, sim: &Sim) {
+    fn report(&mut self, tick: u64, sim: &Sim, start: &SummaryStart) {
         use cubarium_voxel::profile::{Phase, calls, nanos};
         let f = sim.flora().view();
+        let ledger = start.flora(f.ledger);
         let sites = f.ground.iter().filter(|g| !g.seeds.is_empty()).count();
         let mut ms = [0.0; 3];
         for (i, p) in [Phase::SeedBank, Phase::Propagate, Phase::FloraStep]
@@ -1618,7 +1743,7 @@ impl SeedWindow {
             tick as f64 / (3600.0 * f64::from(TICK_HZ)),
             f.ground.len(),
             f.stands.len(),
-            f.ledger.establishments,
+            ledger.establishments,
             ms[0],
             ms[1],
             ms[2],
@@ -1626,7 +1751,7 @@ impl SeedWindow {
         // Package S's counters: per species, g seeds germinated, c runner/rhizome
         // daughters, l seeds landed in a bank, d seeds died in it, x spore/water seeds
         // that found no ground; and the whole seeds banked now.
-        let l = f.ledger;
+        let l = &ledger;
         let mut modes = String::new();
         for s in Plant::ALL {
             let i = s.index();
@@ -1683,7 +1808,7 @@ impl SeedWindow {
             share(pw, p),
             share(nc as f64, n as f64),
             share(pc, p),
-            overtopped(f.ledger),
+            overtopped(l),
         );
     }
 }
@@ -1713,6 +1838,7 @@ fn print_header() {
         // gone extinct yet, and the count alone could not say so.
         header.push_str(&format!(",eggs_{}", f.name()));
         header.push_str(&format!(",gestating_{}", f.name()));
+        header.push_str(&format!(",dispersed_{}", f.name()));
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
     header.push_str(",stored,atmosphere,rain_events,residual");
@@ -1857,6 +1983,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{mean:.4}"));
         row.push(a.eggs_by_founder(founder).to_string());
         row.push(a.gestating_by_founder(founder).to_string());
+        row.push(a.ledger.dispersed_by_founder[founder.index()].to_string());
     }
     row.push(f.ledger.births.to_string());
     row.push(f.ledger.deaths.to_string());
@@ -2637,7 +2764,7 @@ impl VineLog {
         }
     }
 
-    fn poll(&mut self, sim: &Sim, tick: u64) {
+    fn poll(&mut self, sim: &Sim, tick: u64, start: &SummaryStart) {
         use cubarium_voxel_flora::SpurPhase;
         if tick % u64::from(TICK_HZ) != 0 {
             return;
@@ -2737,7 +2864,7 @@ impl VineLog {
             let on_vine = a.mobility.perch.is_some_and(|p| matches!(p.anchor, cubarium_voxel_fauna::PerchAnchor::Vine(_)));
             self.sp[4] += u64::from(on_vine);
         }
-        self.sp[5] = fa.ledger.fruit_bites_by_source[1];
+        self.sp[5] = fa.ledger.fruit_bites_by_source[1] - start.fauna.fruit_bites_by_source[1];
         // VINE-C: where bellwings rest.
         for a in fa.animals.iter().filter(|a| a.founder == Some(Founder::Bellwing)) {
             self.bw_s += 1;
@@ -2749,9 +2876,9 @@ impl VineLog {
         }
     }
 
-    fn summary(&self, sim: &Sim) {
-        let l = &sim.fauna().view().ledger;
-        let fl = &sim.flora().view().ledger;
+    fn summary(&self, sim: &Sim, start: &SummaryStart) {
+        let l = start.fauna(sim.fauna().view().ledger);
+        let fl = start.flora(sim.flora().view().ledger);
         let closed = self.visits_hist.iter().sum::<u64>().max(1) as f64;
         let wall = (self.bunches[0] + self.bunches[1]).saturating_sub(self.under).max(1) as f64;
         eprintln!(
@@ -2821,5 +2948,107 @@ impl VineLog {
             self.bw_perch[2] as f64 / bs,
             self.bw_perch[3] as f64 / bs,
         );
+    }
+}
+
+#[cfg(test)]
+mod session_summary_tests {
+    use super::*;
+
+    fn carried_ledgers(n: u64, q: f64) -> SummaryStart {
+        let mut start = SummaryStart::default();
+        start.loaded = true;
+        macro_rules! fauna_counts {
+            ($($field:ident),+ $(,)?) => { $(start.fauna.$field.fill(n);)+ };
+        }
+        fauna_counts!(
+            alive_ticks_by_founder,
+            alive_day_ticks_by_founder,
+            awake_ticks_by_founder,
+            awake_day_ticks_by_founder,
+            rest_bouts_by_founder,
+            alarm_wakes_by_founder,
+            paced_ticks_by_founder,
+            paused_ticks_by_founder,
+            fruit_bites_by_source,
+            contact_visits_by_founder,
+            clutches_by_founder,
+            vine_clutches_by_founder,
+            eggs_laid_by_founder,
+            eggs_hatched_by_founder,
+            eggs_lost_by_founder,
+            nest_holds_by_founder,
+            nest_searches_by_founder,
+        );
+        start.fauna.swallowed_by_founder.fill(q);
+        start.fauna.fruit_eaten_by_source.fill(q);
+        for row in &mut start.fauna.eaten_by_founder_food {
+            row.fill(q);
+        }
+        macro_rules! flora_counts {
+            ($($field:ident),+ $(,)?) => { $(start.flora.$field.fill(n);)+ };
+        }
+        flora_counts!(
+            flower_visits,
+            seeds_germinated,
+            clonal_births,
+            seeds_landed,
+            seeds_died,
+            seeds_lost,
+            overtopped
+        );
+        start.flora.establishments = n;
+        start
+    }
+
+    #[test]
+    fn loaded_summary_counters_exclude_carried_history() {
+        let start = carried_ledgers(1_000, 12.0);
+        let total = carried_ledgers(1_003, 12.5);
+        let expected = carried_ledgers(3, 0.5);
+        assert_eq!(start.fauna(&total.fauna), expected.fauna);
+        assert_eq!(start.flora(&total.flora), expected.flora);
+        assert!(
+            rhythm_lines(&start.fauna(&start.fauna)).is_empty(),
+            "a lineage that only lived before load has no session rhythm"
+        );
+    }
+
+    #[test]
+    fn fresh_summary_preserves_ledger_values_and_rhythm_format() {
+        let start = SummaryStart::default();
+        let mut total = carried_ledgers(7, 0.25);
+        total.fauna.introduced_organic_in = 4.0;
+        total.flora.fixed_in = 9.0;
+        assert_eq!(start.fauna(&total.fauna), total.fauna);
+        assert_eq!(start.flora(&total.flora), total.flora);
+        let mut l = cubarium_voxel_fauna::FaunaLedger::default();
+        let k = Founder::Seedporter.index();
+        l.alive_ticks_by_founder[k] = 12;
+        l.alive_day_ticks_by_founder[k] = 8;
+        l.awake_ticks_by_founder[k] = 7;
+        l.awake_day_ticks_by_founder[k] = 6;
+        l.rest_bouts_by_founder[k] = 2;
+        l.alarm_wakes_by_founder[k] = 1;
+        l.swallowed_by_founder[k] = 0.125;
+        l.paced_ticks_by_founder[k] = u64::from(TICK_HZ) * 2;
+        l.paused_ticks_by_founder[k] = u64::from(TICK_HZ);
+        assert_eq!(
+            rhythm_lines(&start.fauna(&l)),
+            [
+                "rhythm: seedporter awake_day=0.750 awake_night=0.250 rest_bouts=2 alarm_wakes=1 swallowed=0.12500 paced_s=2 pause_share=0.500"
+            ]
+        );
+        let previous = carried_ledgers(1_000, 12.0);
+        let mut continuation = previous.fauna;
+        macro_rules! advance {
+            ($($field:ident),+ $(,)?) => { $(continuation.$field[k] += l.$field[k];)+ };
+        }
+        advance!(alive_ticks_by_founder, alive_day_ticks_by_founder,
+            awake_ticks_by_founder, awake_day_ticks_by_founder,
+            rest_bouts_by_founder, alarm_wakes_by_founder, swallowed_by_founder,
+            paced_ticks_by_founder, paused_ticks_by_founder);
+        assert_eq!(rhythm_lines(&previous.fauna(&continuation)), rhythm_lines(&l));
+        assert_ne!(rhythm_lines(&continuation), rhythm_lines(&l));
     }
 }

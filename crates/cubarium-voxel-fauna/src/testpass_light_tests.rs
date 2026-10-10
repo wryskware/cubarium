@@ -341,7 +341,7 @@ fn a_lure_kill_is_counted_naive_only_while_the_prey_is_naive_and_the_books_close
             p.expect_tick = now;
         }
         books_close(&fauna, &flora);
-        super::apply_hit(&mut fauna, &mut flora, bw, 1.0, LJ);
+        super::apply_hit(&mut fauna, &mut flora, bw, 1.0, LJ, None);
         assert!(fauna.view().animal(bw).is_none(), "killed");
         assert_eq!(fauna.ledger.lure_kills[BW.index()], 1, "learned {learned}: a lure kill");
         assert_eq!(fauna.ledger.naive_kills[LJ.index()][BW.index()], u64::from(!learned), "learned {learned}: naive?");

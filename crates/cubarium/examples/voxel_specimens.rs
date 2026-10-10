@@ -19,7 +19,7 @@
 //! (frondgrazer, littershredder, lanternjaw), and after them the
 //! unsimulated animals the models carry as `specimens` (model pass MP-A: chorister,
 //! ripple-snail, capgnawer, seedporter, bellwing; the loftstrider; the seedporter perched, on
-//! all fours and gliding, its pick's pose being its climbing one), drawn from the library only, never
+//! all fours and gliding, its pick's pose being its climbing one; the lanternjaw larva), drawn from the library only, never
 //! simulated. Every stand is drawn at full
 //! moisture (or at `--wilt W`, a moisture of `1 − W`), with full foliage. The picture is
 //! written at 2× nearest, the panel's own upscale.
@@ -92,7 +92,7 @@ const SLOT: i64 = 10;
 
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
-const SPECIMENS: [(&str, f64, u32); 9] = [
+const SPECIMENS: [(&str, f64, u32); 10] = [
     ("chorister", std::f64::consts::FRAC_PI_2, 0),
     ("ripple-snail", std::f64::consts::FRAC_PI_2, 0),
     ("capgnawer", std::f64::consts::PI, 0),
@@ -104,6 +104,8 @@ const SPECIMENS: [(&str, f64, u32); 9] = [
     ("seedporter-stand", std::f64::consts::PI, 2),
     ("seedporter-ground", std::f64::consts::FRAC_PI_2, 0),
     ("seedporter-glide", std::f64::consts::PI, 3),
+    // the lanternjaw's rider stage (D16, the leechfork), side-on, on the ground
+    ("lanternjaw-larva", std::f64::consts::FRAC_PI_2, 0),
 ];
 
 fn main() -> Result<()> {

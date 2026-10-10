@@ -98,3 +98,30 @@ animals feeding; the flipbook's frame and cell counts; what looks wrong in each 
 gaps, tile clipping, shadows); defaults you chose.
 
 Not in this package: other species, back-applying sleep/idle/hunker, merging, deploying.
+
+## Round 2: the Veilhound (2026-10-09)
+
+Round 1 (branch `feed-rig`, 230f8f61) built the rig path, the `.rig` side file, the trial
+switch and `voxel_feed_capture`. Its frondgrazer was too weak a test: only 5 of the adult's
+81 cells sit on moving bones (the shield claims the neck base), and at the desktop's 6 px
+a voxel the reached head hides behind the front hoof. The arms barely differ on screen.
+
+Round 2 runs the same three arms on the **Veilhound** (code name `chorister`, adult bin
+1.4 m, 142 cells): its skull, crest lobes, eyes and muzzle are a real head.
+
+- **Rig**: `chorister()` in `animal_models.py`. Bones: root (body, legs, tail), a neck
+  bone carrying the front of the spine loft (the cells ahead of the shoulders, by position:
+  the loft is one mesh), a head bone carrying the skull, crest lobes, eyes and muzzle. Every
+  head and neck cell has to land on its bone; report the count per bone.
+- **Clip (placeholder, Wrysk directs the real one)**: feeding at a carcass on the ground.
+  1. Reach: the neck drops and the head lowers until the muzzle is at the ground line about
+     one voxel ahead of the front paws, 0.4 s.
+  2. Tear: the head pulls back and up about 4 cm with a small sideways twist, alternating
+     sides, 0.4 s; then dips again, 0.3 s.
+  3. Every second tear, a swallow: the head lifts about 8 cm, 0.4 s.
+  4. Loop while the body crops. The reach and the return come from the clip weight, as in
+     round 1.
+- **Evidence**: as round 1, A | B | C side by side, side-on and three-quarter, at px 6 and
+  px 12. No carcass prop needed.
+- Same branch and worktree, on top of 230f8f61. The frondgrazer's clip stays as it is; its
+  neck is an open look question for Wrysk.

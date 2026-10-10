@@ -1129,6 +1129,17 @@ pub(crate) fn catch_step(
     }
     let h = phys.active_hunter()?;
     let geometry = phys.body_at(a.body);
+    // A vine locks heading. The ground/crown catch's turn-in-place answer cannot
+    // orient this body, and in Climb it cannot strike at all. Only hold a vine
+    // perch to feed when a prey is already in the actual strike capsule.
+    if matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
+        && a.mobility.perch.is_some_and(|p| matches!(p.anchor, crate::PerchAnchor::Vine(_)))
+    {
+        if a.mobility.mode != crate::MobilityMode::Perched { return None; }
+        let prey = crate::step::prey_in_capsule(fauna, i, view, &geometry, &h)?;
+        crate::perception::approach(fauna, a.id, prey);
+        return Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 });
+    }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let target = fauna
         .animals
@@ -1137,12 +1148,15 @@ pub(crate) fn catch_step(
         .filter_map(|o| {
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
             let d = dx.hypot(dz);
-            let prey_radius = crate::body_of(&fauna.config, o)?.footprint_radius();
+            let pg = crate::body_of(&fauna.config, o)?;
             let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)
                 * geometry.length_m
                 + geometry.footprint_radius()
-                + prey_radius;
-            (d <= reach).then_some((d, dx, dz, o.id))
+                + pg.footprint_radius();
+            // SP-FREEZE2: only a prey its strike can meet in height. A bellwing sipping in
+            // the crown overhead is within reach on the map and never strikable: the wait
+            // for it held a hungry body turning in place under the stand for minutes.
+            (d <= reach && crate::step::in_strike_band(view, &a, &geometry, &h, o, &pg)).then_some((d, dx, dz, o.id))
         })
         .min_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)));
     let Some((_, dx, dz, id)) = target else {

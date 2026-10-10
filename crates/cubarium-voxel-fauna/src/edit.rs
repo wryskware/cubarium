@@ -478,7 +478,7 @@ impl Fauna {
         let a = self.animals.remove(i);
         self.controllers.take(id);
         self.book_removed(&a);
-        self.free_riders(&a);
+        self.free_riders(&a, None);
         self.forget_body(id);
         self.percepts.remove(&id);
         self.place_memory.remove(&id);
@@ -521,6 +521,7 @@ impl Fauna {
         self.rove.remove(&id);
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
+        self.wading.remove(&id);
         self.hunt_paths.remove(&id);
         self.place_cache.remove(&id);
     }
@@ -620,6 +621,9 @@ impl Fauna {
             self.packs.insert(at, p);
         }
         for a in std::iter::once(animal).chain(riders.iter().copied()) {
+            if let (Some(r), Some(f)) = (&mut self.census_readout, a.founder) {
+                r.introduced[f.index()] += 1;
+            }
             self.ledger.introduced_organic_in += a.stored_organic();
             self.ledger.introduced_mineral_in += a.stored_mineral();
             self.ledger.introduced_energy_in += a.stored_energy();
@@ -655,6 +659,90 @@ impl Fauna {
         }
         self.forget_body(id);
         Ok(())
+    }
+}
+
+/// How far beside its host a freed rider looks for a face to stand on, metres from the
+/// host's centre: a placement reach for the drop-off's picture, not an ecological rate.
+pub(crate) const DROP_OFF_REACH_M: f64 = 1.0;
+
+impl Fauna {
+    /// **A freed rider steps off beside its host** (Wrysk, 2026-10-09): the nearest face
+    /// beside the host where the rider could stand by the edit API's own rule
+    /// ([`Fauna::check_spot`]), keeping the host's heading, so the drop-off happens in view
+    /// rather than inside the host's body. Rings out from half the host's length (clear of its
+    /// body as drawn) to [`DROP_OFF_REACH_M`], one voxel at a time; at each distance the
+    /// host's left and right first, then behind, then in front. A host off the ground (climbing, flying), or no
+    /// standable face in reach, leaves the rider on the host's place, as
+    /// [`crate::release`] put it. Returns whether it moved.
+    pub(crate) fn step_off_beside(&mut self, view: &VoxelView<'_>, r: usize, host: &Animal) -> bool {
+        let rider = self.animals[r];
+        let Some((site, pose)) = self.beside_host(view, &rider, host) else {
+            return false;
+        };
+        place_at(&mut self.animals[r], &Stance { site, pose, mode: MobilityMode::Ground, perch: None });
+        true
+    }
+
+    /// **Where `rider` would step off beside `host`** ([`Fauna::step_off_beside`]'s rule, a
+    /// read only): the face and pose, or `None` to stay on the host's place.
+    pub fn beside_host(&self, view: &VoxelView<'_>, rider: &Animal, host: &Animal) -> Option<(Site, Pose)> {
+        let rider_body = rider.body;
+        let (Some(rf), Some(hf)) = (rider.founder, host.founder) else {
+            return None;
+        };
+        if host.mobility.mode != MobilityMode::Ground || host.mobility.climb.is_some() {
+            return None;
+        }
+        let c = view.config;
+        let v = c.voxel_m;
+        let rider_phys = self.config.founder(rf);
+        let step = rider_phys.step_limits(v);
+        // Clear of the host's whole body: half its length, so the drop-off is not hidden
+        // behind a flank drawn wider than the footprint.
+        let start = 0.5 * self.config.founder(hf).body_at(host.body).length_m
+            + rider_phys.body_at(rider_body).footprint_radius();
+        let (fx, fz) = host.pose.forward();
+        // Left, right, behind, in front of the heading, as (dx, dz) unit vectors.
+        let sides = [(fz, -fx), (-fz, fx), (-fx, -fz), (fx, fz)];
+        let ring = f64::from(c.width) * v;
+        let mut d = start.max(v);
+        while d <= DROP_OFF_REACH_M.max(start) + 1e-9 {
+            for (sx, sz) in sides {
+                let x = (host.pose.x + sx * d).rem_euclid(ring);
+                let z = host.pose.z + sz * d;
+                if !(z >= 0.0) {
+                    continue;
+                }
+                let (cx, cz) = ((x / v).floor() as i64, (z / v).floor() as u32);
+                if cz >= c.depth {
+                    continue;
+                }
+                let Ok(cx) = u32::try_from(cx.rem_euclid(i64::from(c.width))) else {
+                    continue;
+                };
+                // The face in that column nearest the host's own layer, within a step.
+                let mut faces = view.supports_in_column(i64::from(cx), cz);
+                faces.sort_by_key(|&y| y.abs_diff(host.site.y));
+                for y in faces {
+                    let within = if y >= host.site.y { y - host.site.y <= step.up } else { host.site.y - y <= step.down };
+                    if !within {
+                        continue;
+                    }
+                    let site = Site { x: cx, y, z: cz };
+                    if site == host.site {
+                        continue;
+                    }
+                    if let Ok(s) = self.stance(view, rf, rider_body, Spot::Face(site), host.pose.heading_rad)
+                        && s.mode == MobilityMode::Ground
+                    {
+                        return Some((s.site, s.pose));
+                    }
+                }
+            }
+            d += v;
+        }
+        None
     }
 }
 

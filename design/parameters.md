@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2662 rows)
+**`fauna.*`** (2716 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1577,6 +1577,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.littershredder.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.littershredder.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.littershredder.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.littershredder.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.littershredder.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.littershredder.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1728,7 +1733,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.littershredder.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.littershredder.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.littershredder.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.littershredder.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.littershredder.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -1849,6 +1855,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.frondgrazer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.frondgrazer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.frondgrazer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.frondgrazer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.frondgrazer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.frondgrazer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2000,7 +2011,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.frondgrazer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.frondgrazer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.frondgrazer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.frondgrazer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.frondgrazer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2121,6 +2133,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.lanternjaw.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.lanternjaw.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.lanternjaw.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.lanternjaw.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.lanternjaw.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000009722222222222223 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2272,7 +2289,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.lanternjaw.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.lanternjaw.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.lanternjaw.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.lanternjaw.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.lanternjaw.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2393,6 +2411,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.capgnawer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.capgnawer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.capgnawer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.capgnawer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.capgnawer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.capgnawer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2544,7 +2567,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.capgnawer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.capgnawer.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.capgnawer.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.capgnawer.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.capgnawer.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2665,6 +2689,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.loftstrider.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.loftstrider.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.loftstrider.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.loftstrider.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.loftstrider.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.loftstrider.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2816,7 +2845,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.loftstrider.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.loftstrider.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.loftstrider.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.loftstrider.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.loftstrider.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -2937,6 +2967,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.ripple-snail.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.ripple-snail.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.ripple-snail.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.ripple-snail.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.ripple-snail.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.ripple-snail.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3088,7 +3123,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.ripple-snail.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.ripple-snail.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.ripple-snail.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.ripple-snail.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.ripple-snail.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3209,6 +3245,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.bellwing.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.bellwing.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.bellwing.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.bellwing.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.bellwing.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.bellwing.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3360,7 +3401,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.bellwing.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.bellwing.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.bellwing.hunter.strike_power` | (absent) | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.bellwing.hunter.prey_max_ratio` | (absent) | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.bellwing.hunter.strike_reach_length_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3481,6 +3523,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.seedporter.fruit_bite_half_stock` | 0.0005 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.seedporter.give_up_fraction` | 0.05 | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.seedporter.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3632,7 +3679,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.seedporter.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.seedporter.hunter.strike_power` | 4.0 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.seedporter.hunter.prey_max_ratio` | 4.0 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | 0.8 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -3753,6 +3801,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.breeding_phase` | 0.2 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.chorister.core.reproduction.breeding_window` | 0.15 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.chorister.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.chorister.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.chorister.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
+| `fauna.founders.chorister.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.chorister.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3904,7 +3957,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
-| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale) |
+| `fauna.founders.chorister.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
+| `fauna.founders.chorister.taste_reference` | (absent) | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.chorister.hunter.strike_power` | 0.7 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
 | `fauna.founders.chorister.hunter.prey_max_ratio` | 1.5 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.chorister.hunter.strike_reach_length_fraction` | 0.6 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
@@ -4033,7 +4087,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.life.wall_friction` | 0.0 | fraction | [0, 1] | 0–1 | - | placeholder | share of a walk's along-wall component a wall takes away (0 slides freely, 1 stops) |
 | `fauna.life.shallows_search_m` | 8.0 | m | [0, inf) |  | - | placeholder | a heuristic walker in water deeper than it wades heads for the nearest wadeable face within this (a world query, not a sense) |
 | `fauna.life.ecological_day_s` | 7200.0 | s | (0, inf) |  | - | decision | the day per-day physiology is written in (daily need, a rider's take); fixed, not the picture clock |
-| `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a source emits at full strength; the taste reference |
+| `fauna.cue.emit_reference` | 0.05 | organic units | (0, inf) |  | C | placeholder | detritus stock at which a scent source emits at full strength |
 | `fauna.cue.half_life_s` | 2.0 | s | (0, inf) | 0.5–60 log | C | placeholder | cue half-life |
 | `fauna.cue.fungal_half_life_s` | 2.0 | s | (0, inf) | 2–1200 log | - | placeholder | the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves |
 | `fauna.cue.diffuse_fraction` | 0.4 | fraction per update | [0, 1] | 0.05–0.9 | C | placeholder | convex nearest-neighbour diffusion mix |
@@ -4078,7 +4132,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind and browser foragers' forward effort while they taste food (0 stays on food, 1 walks across it) |
 | `fauna.teachers.forage_turn_back_samples` | 2 | samples | [0, inf) | 0–8 | - | placeholder | samples the blind forager turns after leaving an exhausted patch (area-restricted search) |
-| `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a reflex walk asking forward this long without moving gives its target up (EDGE) |
+| `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE) |
 | `fauna.teachers.press_shun_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | a target given up for pressing stays given up this long |
 | `fauna.teachers.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | the walking route graph a reflex walk plans on is rebuilt after this |
 | `fauna.teachers.route_detour` | 2.0 | ratio | (0, inf) | 1–4 | - | placeholder | a target is in reach when its route is at most this times the reflex's search radius |

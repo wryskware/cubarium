@@ -1349,6 +1349,46 @@ fn t14_a_snapshot_round_trip_keeps_the_cover_and_an_old_schema_is_refused() {
     );
 }
 
+#[test]
+fn wall_column_queries_track_additions_removals_and_rebuild_after_load() {
+    let plan = Plan::wall(12, 14, 1, 10);
+    let world = plan.world(1.0, false);
+    let mut flora = Flora::new(fast());
+    let id = seed(&mut flora, &world, foot(0), wf(3, 0), 2.0);
+    let query = |flora: &Flora, x| {
+        flora
+            .view()
+            .cover
+            .wall_faces_in_columns(move |col| col == x)
+            .collect::<BTreeSet<_>>()
+    };
+    let cold = snapshot::encode(&flora);
+    assert_eq!(query(&flora, 6), BTreeSet::from([wf(3, 0)]));
+    assert!(query(&flora, 5).is_empty());
+    assert_eq!(
+        snapshot::encode(&flora),
+        cold,
+        "warming the index is not saved"
+    );
+
+    assert!(flora.cover_face(&world, id, wf(4, 0), 1.0));
+    assert_eq!(query(&flora, 6), BTreeSet::from([wf(3, 0), wf(4, 0)]));
+    let back = snapshot::decode(&snapshot::encode(&flora)).expect("same schema");
+    assert_eq!(
+        query(&back, 6),
+        query(&flora, 6),
+        "a loaded cover builds its own index"
+    );
+
+    assert_eq!(flora.clear_vines_at(foot(0)), 1);
+    assert!(
+        query(&flora, 6).is_empty(),
+        "removed faces leave the warm index"
+    );
+    seed(&mut flora, &world, foot(0), wf(3, 0), 2.0);
+    assert_eq!(query(&flora, 6), BTreeSet::from([wf(3, 0)]));
+}
+
 // ------------------------------------------------------------------ 15. the view
 
 /// `FloraView` gives the presenter, per covered face, its owner, leafiness, rooted flag,

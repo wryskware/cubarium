@@ -279,6 +279,14 @@ pub struct FounderPhysiology {
     /// The numbers the ordinary animal rules run on when the body carries this
     /// founder's marker: upkeep, bite rate, assimilation, thresholds and densities.
     pub core: SpeciesConfig,
+    /// Fruit's bite half-stock, raw org-units at the mouth. `None` uses
+    /// `core.bite_half_stock`; other foods always retain that stock scale.
+    #[serde(default)]
+    pub fruit_bite_half_stock: Option<f64>,
+    /// This lineage's giving-up threshold, fraction of the gut's full fill rate.
+    /// `None` uses `teachers.give_up_fraction`; `Some(0)` disables giving up.
+    #[serde(default)]
+    pub give_up_fraction: Option<f64>,
     /// The named configurable motor respiration coefficient: organic matter respired
     /// per unit of body per second at **full cruise** (equivalent displacement equal to
     /// `cruise`). Below full cruise the cost scales with the requested equivalent
@@ -470,25 +478,23 @@ pub struct FounderPhysiology {
     /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
     /// for every lineage until the loftstrider's kick.
     pub counter: Option<Counter>,
-    /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
-    /// multiplies the seven absolute quantities of [`FounderPhysiology::core`] and records
-    /// the factor here). The senses read it: the `Self` references and taste's reference
-    /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
-    /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
-    /// "full" taste means the same share of its need. The founding gate judges a body as
-    /// a x1 one with it (`cubarium_voxel_sim::habitat`).
+    /// **The org-unit mass scale this physiology was built at**: `scale_mass`
+    /// multiplies the seven absolute quantities of `core` and records the factor here.
+    /// The `Self` senses reference a fraction of an adult at this mass
+    /// (`manifest::SELF_REFERENCE_RULE`); food references remain in food units.
+    /// The founding gate judges a body as a x1 one with it.
     #[serde(default = "one")]
     pub mass_scale: f64,
-    /// **Taste's reference stock** (roster R2b repair): the food stock per site, organic
-    /// units, that reads as a taste cue of 1 before saturation (the mouth's response is
-    /// `min(stock / this, 1)` through the chem saturation curve). `None` keeps the
-    /// manifest rule every older lineage uses, `emit_reference × mass_scale`
-    /// ([`FounderPhysiology::taste_reference_stock`], `manifest::TASTE_REFERENCE_RULE`), so
-    /// their cues and digests do not move. The ripple-snail's is the glassfilm's capacity
-    /// per 0.125 m site: a film's stock is a few thousandths of a unit, far under the
-    /// litter-scaled rule's 1.5 at x30, which no film could ever reach the feed gate on.
-    /// Not scaled by [`FounderPhysiology::scale_mass`]: the food's stock does not change
-    /// with the eater's mass.
+    /// Taste's default food reference, organic units per site: `offer / reference`
+    /// enters the cue saturation curve `c / (c + 1)`. Independent of eater mass and
+    /// scent emission. The default preserves the old reference at shipped mass:
+    /// `emit_reference` 0.05 times shipped `mass_scale` 30, giving 1.5 food units.
+    #[serde(default = "default_taste_reference_food")]
+    pub taste_reference_food: f64,
+    /// Optional food-reference override, organic units per site. Seedporter and
+    /// bellwing use their own small-food reference. With no override, a film-only
+    /// diet uses the world's film capacity per site; other diets use
+    /// `taste_reference_food`. Neither reference follows `scale_mass`.
     #[serde(default)]
     pub taste_reference: Option<f64>,
     /// **What it eats** ([`crate::Diet`]): the food classes its mouth takes, each from its
@@ -577,6 +583,10 @@ pub struct FounderPhysiology {
     /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
     #[serde(default)]
     pub herding: crate::Herding,
+    /// Young leaving an oversized pack or herd, with all matter returned
+    /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
+    #[serde(default)]
+    pub dispersal: crate::Dispersal,
     /// **Its jump down when trapped** (DROP, [`crate::DropRule`]): off its route graph with no
     /// walking way back on and no glide, it jumps down past its step, at a wound. No jump for
     /// the bellwing and the ripple-snail.
@@ -1741,6 +1751,10 @@ pub struct Counter {
     pub cost: f64,
 }
 
+fn default_taste_reference_food() -> f64 {
+    1.5
+}
+
 fn one() -> f64 {
     1.0
 }
@@ -1838,6 +1852,8 @@ impl FounderPhysiology {
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
                     lifespan_median_s: LIFE_SMALL_DAYS * DAY_S,
                 },
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 // Full cruise at its basal rate (the motor's tie to upkeep).
                 motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
@@ -1902,6 +1918,7 @@ impl FounderPhysiology {
                 agility: 0.3,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 // Litter and carrion (Wrysk, 2026-10-01: the shredder goes back to litter;
                 // the capgnawer owns the glowcap caps, roster R1). Its cap-tissue yield
@@ -1924,12 +1941,15 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
@@ -1991,6 +2011,7 @@ impl FounderPhysiology {
                 agility: 0.5,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Foliage),
                 founding: Founding::Bodies,
@@ -2010,6 +2031,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
@@ -2019,6 +2041,8 @@ impl FounderPhysiology {
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, its daily need two thirds of the grazer's (the minimal gut).
             // Numbers the note pins are its own; the others are stated where they sit.
             Founder::Lanternjaw => FounderPhysiology {
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
@@ -2099,6 +2123,7 @@ impl FounderPhysiology {
                 agility: 0.0,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Carrion),
                 // §2.9: a fresh world is founded with a buried egg bank, not adults.
@@ -2119,6 +2144,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
@@ -2409,6 +2435,12 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     glider: Some(Glider::SEEDPORTER),
                     gut_seeds: Some(GutSeeds::SEEDPORTER),
+                    // Vine fruit at the mouth is 1e-4..1e-3 ou, not foliage's 0.005:
+                    // K is about a third of a ripe patch. Carrion keeps the inherited K.
+                    fruit_bite_half_stock: Some(0.0005),
+                    // A fruit patch worth ~2 upkeep rates is still food: the full gut
+                    // rate is ~45 upkeep rates, so leave below 5%, not the grazer's 50%.
+                    give_up_fraction: Some(0.05),
                     motor_respiration_per_s: DAILY_SEEDPORTER / DAY_S,
                     // Fruit: k 0.05, τ 60 s (a few meals a day).
                     gut: Gut::of(0.05, 60.0),
@@ -2535,11 +2567,11 @@ impl FounderPhysiology {
         }
     }
 
-    /// Taste's reference stock for a world whose cue config has `emit_reference`: the
-    /// lineage's own [`FounderPhysiology::taste_reference`] when it has one, else the
-    /// manifest rule `emit_reference × mass_scale`.
-    pub fn taste_reference_stock(&self, emit_reference: f64) -> f64 {
-        self.taste_reference.unwrap_or(emit_reference * self.mass_scale)
+    /// Taste's food-unit reference: the lineage's override or its default food stock.
+    /// `emit_reference` is retained in the API for callers; scent emission does not
+    /// set the mouth's food reference (`manifest::TASTE_REFERENCE_RULE`).
+    pub fn taste_reference_stock(&self, _emit_reference: f64) -> f64 {
+        self.taste_reference.unwrap_or(self.taste_reference_food)
     }
 
     /// Taste's reference stock **on a world** of cell edge `voxel_m` under the plant layer's
@@ -2597,6 +2629,15 @@ impl FounderPhysiology {
     /// The assimilation yield this lineage gets out of one food class (decisions §3).
     pub fn yield_for(&self, food: crate::Food) -> f64 {
         self.yield_by_food[food.index()]
+    }
+
+    /// The stock scale used by both a bite and its giving-up offer, raw org-units.
+    pub fn bite_half_stock_for(&self, food: crate::Food) -> f64 {
+        if food == crate::Food::Fruit {
+            self.fruit_bite_half_stock.unwrap_or(self.core.bite_half_stock)
+        } else {
+            self.core.bite_half_stock
+        }
     }
 
     /// The sensor/organ share of a total structure stock — a view onto the one body
@@ -4282,7 +4323,7 @@ pub(crate) fn taste_reading(
 
 /// [`taste_reading`] against a reference stock `reference`
 /// ([`FounderPhysiology::taste_reference_stock`]: the lineage's own `taste_reference`, else
-/// `emit_reference × mass_scale`, `manifest::TASTE_REFERENCE_RULE`).
+/// `taste_reference_food`, `manifest::TASTE_REFERENCE_RULE`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn taste_reading_at(
     fv: &FloraView<'_>,
@@ -5339,11 +5380,12 @@ mod tests {
             &body,
             Founder::Blind,
         );
-        assert!(
-            t.cue > 0.2,
-            "contact with litter reads its stock: {}",
-            t.cue
-        );
+        let reference = FounderPhysiology::placeholder(Founder::Blind)
+            .taste_reference_stock(crate::CueConfig::default().emit_reference);
+        let c = (0.2 / reference).min(1.0);
+        let expected = c / (c + manifest.tunings.chem_saturation);
+        assert!((t.cue - expected).abs() < 1e-12,
+            "contact with litter reads its stock: {} vs {expected}", t.cue);
         assert!((t.resistance - 0.2).abs() < 1e-12, "the litter resistance");
     }
 

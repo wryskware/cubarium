@@ -24,6 +24,8 @@
 
 #[cfg(test)]
 mod mass_rescale_tests;
+#[cfg(test)]
+mod taste_units_tests;
 
 mod body;
 mod controller;
@@ -2423,14 +2425,26 @@ impl FaunaConfig {
     /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
     /// motor numbers of its physiology in the config — cruise (`cruise_body_lengths_per_s`
     /// × the adult length), the yaw cap, and the forward reference that follows cruise.
-    /// The sensor layout, references and tunings stay the contract's, so a default config
-    /// returns exactly [`Founder::manifest`] and a moved pace changes the digest.
+    /// The food reference follows the lineage's config; layout and tunings stay the
+    /// contract's. A default config returns exactly [`Founder::manifest`], while moved
+    /// pace or taste references change the digest.
     pub fn manifest(&self, founder: Founder) -> Manifest {
         let mut m = founder.manifest();
         let p = self.founder(founder);
         m.cruise_m_per_s = p.cruise_body_lengths_per_s * p.adult_length_m;
         m.yaw_cap_rad_per_s = p.yaw_cap_rad_per_s;
         m.forward_reference_m = m.cruise_m_per_s * m.controller_period_s;
+        let film_reference = p.taste_reference.is_none() && p.diet == Diet::only(Food::Film);
+        m.taste_reference_rule = if film_reference {
+            manifest::TASTE_REFERENCE_FILM_RULE
+        } else {
+            manifest::TASTE_REFERENCE_RULE
+        };
+        m.taste_reference = if film_reference {
+            None
+        } else {
+            Some(p.taste_reference_stock(self.cue.emit_reference))
+        };
         m
     }
 
@@ -2758,6 +2772,61 @@ impl From<Diet> for Vec<Food> {
     }
 }
 
+/// The existing transition at which a young animal may leave an oversized group.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispersalAt {
+    /// Growth through the lineage's breeding body size.
+    #[default]
+    Adult,
+    /// A pack pup reaching its configured independence age.
+    Independent,
+}
+
+/// Closed-world dispersal: only the young crossing its transition can leave.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Dispersal {
+    /// Switch: enable leaving an oversized group. Off for old configs and training.
+    pub enabled: bool,
+    /// Bodies: a transitioning young leaves when its group's established members plus
+    /// itself exceed this. Dependent young (pack pups, not-yet-adult young) never count.
+    /// Zero has no special meaning; while enabled it allows no arriving young to stay.
+    pub group_max: u32,
+    /// Transition: `adult` (breeding size) or `independent` (pack pup age).
+    pub at: DispersalAt,
+}
+
+/// **Herds**: the connected groups of `bodies` where two bodies belong together when a
+/// chain of bodies each within `comfort_m` of the next joins them. Distance is horizontal,
+/// x wrapping on a ring of `ring_m` metres, z not. Returns each body's herd label, the
+/// index of the herd's first body in `bodies` (so labels follow input order).
+///
+/// Shared by dispersal (a loftstrider-style lineage's group is its herd) and the editor's
+/// `thin` (herds are kept whole).
+pub fn herd_labels(bodies: &[&Animal], comfort_m: f64, ring_m: f64) -> Vec<usize> {
+    let n = bodies.len();
+    let mut label: Vec<usize> = (0..n).collect();
+    fn root(label: &mut [usize], mut i: usize) -> usize {
+        while label[i] != i {
+            label[i] = label[label[i]];
+            i = label[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in i + 1..n {
+            let dx = (bodies[i].pose.x - bodies[j].pose.x).rem_euclid(ring_m);
+            if dx.min(ring_m - dx).hypot(bodies[i].pose.z - bodies[j].pose.z) <= comfort_m {
+                let (a, b) = (root(&mut label, i), root(&mut label, j));
+                // The smaller index is the root, so a herd's label is its first body.
+                label[a.max(b)] = a.min(b);
+            }
+        }
+    }
+    (0..n).map(|i| root(&mut label, i)).collect()
+}
+
 /// Every unit of organic matter, mineral and energy that has crossed this layer's
 /// boundary, and the counters of what happened.
 ///
@@ -2773,6 +2842,11 @@ impl From<Diet> for Vec<Food> {
 /// and neither is hidden.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FaunaLedger {
+    /// Closed-world leavers per lineage, since load. A diagnostic only: skipped in the
+    /// positional save so old worlds load unchanged, with the counters reset to zero.
+    /// Their matter is counted in `deposited_*_out`, never `removed_*_out` or deaths.
+    #[serde(skip)]
+    pub dispersed_by_founder: [u64; Founder::COUNT],
     /// Organic matter, mineral and energy taken out of the plant layer by
     /// [`cubarium_voxel_flora::Flora::take_foliage`], cumulative over every bite. The
     /// sum of the [`cubarium_voxel_flora::Taken`]s the withdrawals returned, to the bit,
@@ -3639,6 +3713,26 @@ impl StartingStores {
 #[derive(Debug)]
 pub struct FaunaTick(step::TickStart);
 
+/// One exact strike or kill, captured only when a census requests it.
+#[derive(Clone, Debug)]
+pub struct CensusPredation {
+    pub predator: Founder,
+    pub prey: Founder,
+    /// Structural organic matter at the event, in the same units as Animal::body.
+    pub prey_body: f64,
+    /// True for a kill; false for a strike begun (the census's definition of a hunt).
+    pub kill: bool,
+}
+
+/// Run-scoped instrumentation. Skipped by saves; no rule reads it.
+#[derive(Clone, Debug, Default)]
+pub struct CensusReadout {
+    pub introduced: [u64; Founder::COUNT],
+    pub independent: [u64; Founder::COUNT],
+    pub organic_given: [f64; Founder::COUNT],
+    pub predation: Vec<CensusPredation>,
+}
+
 /// The animal layer. Owns its animals; borrows the world and the plant layer per call.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Fauna {
@@ -3663,6 +3757,8 @@ pub struct Fauna {
     /// Exact paid body creations since construction/load; runtime instrumentation only.
     #[serde(skip)]
     born_by_founder: [u64; Founder::COUNT],
+    #[serde(skip)]
+    census_readout: Option<CensusReadout>,
     /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
     /// rule and changes nothing. An isolated arena sets it false
     /// (`design/voxel-senses-phase1-plan.md`, "Frozen arena contract"); a fresh episode
@@ -3808,9 +3904,11 @@ pub struct Fauna {
     /// that layer is the one held ([`Fauna::walk_commit`]). Not saved.
     #[serde(skip)]
     pub(crate) walk_pending: FxHashMap<u64, (u64, Steer)>,
-    /// EDGE: per grounded founder, the ticks it has **pressed** without a break: controller
+    /// EDGE: per founder, the ticks it has **pressed** without a break: controller
     /// intervals in which it held forward and its motor delivered under
-    /// `teachers.motor_refused` of what it attempted. Session state: not saved.
+    /// `teachers.motor_refused` of what it attempted; also a fruit approach with no
+    /// displacement or a hungry vine stance with no reachable fruit or displacement.
+    /// Session state: not saved.
     #[serde(skip)]
     pub(crate) pressed: FxHashMap<u64, u64>,
     /// EDGE: per body, the targets it gave up for pressing and the tick it may try each
@@ -3852,6 +3950,13 @@ pub struct Fauna {
     /// state: not saved.
     #[serde(skip)]
     pub(crate) drop_plans: FxHashMap<u64, step::jump::DropPlan>,
+    /// WADE-OUT: per held body, its clock and the way it is wading (`step::jump::Wade`).
+    /// Session state: not saved.
+    #[serde(skip)]
+    pub(crate) wading: FxHashMap<u64, step::jump::Wade>,
+    /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
+    #[serde(skip)]
+    pub(crate) wade_outs: [u64; Founder::COUNT],
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -3890,11 +3995,13 @@ pub enum Steer {
     Search,
     /// VINE-C: a vine nester's hold at, or flight to, a nest site.
     Nest,
+    /// WADE-OUT: a held walker's way out through water past its wade depth.
+    Wade,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 16] = [
+    pub const ALL: [Steer; 17] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3911,6 +4018,7 @@ impl Steer {
         Steer::Leave,
         Steer::Search,
         Steer::Nest,
+        Steer::Wade,
     ];
 
     /// A short name for tables.
@@ -3932,6 +4040,7 @@ impl Steer {
             Steer::Leave => "leave",
             Steer::Search => "search",
             Steer::Nest => "nest",
+            Steer::Wade => "wade",
         }
     }
 }
@@ -4234,6 +4343,7 @@ impl Fauna {
             clutches: Vec::new(),
             ledger: FaunaLedger::default(),
             born_by_founder: [0; Founder::COUNT],
+            census_readout: None,
             births_enabled: true,
             controllers: FounderControllers::default(),
             grid_scratch: senses::LiveGrid::default(),
@@ -4269,6 +4379,8 @@ impl Fauna {
             pressed: FxHashMap::default(),
             trapped: FxHashMap::default(),
             drop_plans: FxHashMap::default(),
+            wading: FxHashMap::default(),
+            wade_outs: [0; Founder::COUNT],
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
@@ -4585,6 +4697,15 @@ impl Fauna {
         self.open_air = None;
         Ok(())
     }
+    /// Begin a fresh run-scoped readout, or disable it. Loading a save disables it.
+    pub fn set_census_readout(&mut self, enabled: bool) {
+        self.census_readout = enabled.then(CensusReadout::default);
+    }
+
+    pub fn census_readout(&self) -> Option<&CensusReadout> {
+        self.census_readout.as_ref()
+    }
+
     /// Paid live births and hatchlings by lineage since construction/load. Introductions
     /// are excluded; callers take interval differences. This counter is never saved.
     pub fn born_by_founder(&self) -> [u64; Founder::COUNT] {
@@ -4610,6 +4731,24 @@ impl Fauna {
         )
     }
 
+    /// WADE-OUT's readout for body `id` (`step::jump::Wade`): the tick it was first found held
+    /// (out of its depth, or on a pocket of its graph), and the way it is wading — the faces
+    /// left to its goal and its motor's wade limit on them.
+    pub fn wade_state(&self, id: u64) -> Option<(u64, Option<(usize, f64)>)> {
+        self.wading.get(&id).and_then(|w| w.since.map(|since| (since, w.way.as_ref().map(|way| (way.faces.len(), way.wade_m)))))
+    }
+
+    /// WADE-OUT's motor limit for body `id`: the deepest water on the way it is wading, while
+    /// it holds one; `None` otherwise (its own wade depth applies).
+    pub(crate) fn wade_limit(&self, id: u64) -> Option<f64> {
+        self.wading.get(&id).and_then(|w| w.way.as_ref()).map(|way| way.wade_m)
+    }
+
+    /// WADE-OUT's ways out walked to their end, per lineage ([`Founder::index`]), this session.
+    pub fn wade_outs(&self) -> [u64; Founder::COUNT] {
+        self.wade_outs
+    }
+
     /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
     /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
     /// the probe picks it. `false` when there is no such body.
@@ -4623,6 +4762,7 @@ impl Fauna {
         a.mobility = Mobility::default();
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
+        self.wading.remove(&id);
         true
     }
 
@@ -5007,7 +5147,7 @@ impl Fauna {
                     // and a table that only grows is a leak in a world that breeds.
                     self.controllers.take(a.id);
                     self.book_removed(&a);
-                    self.free_riders(&a);
+                    self.free_riders(&a, Some(&world.view()));
                 }
                 self.animals.len() != before
             }
@@ -5198,6 +5338,9 @@ impl Fauna {
         }
         self.ledger.births += 1;
         self.ledger.introduced += 1;
+        if let (Some(r), Some(f)) = (&mut self.census_readout, founder) {
+            r.introduced[f.index()] += 1;
+        }
         let fed = animal.stomach.total();
         self.ledger.introduced_organic_in += organic + fed.organic;
         self.ledger.introduced_mineral_in += animal.mineral + fed.mineral;
@@ -5292,13 +5435,18 @@ impl Fauna {
     /// A departed host's riders, all of them, whatever their size, let go where it last
     /// stood (parasite hatchlings §5), booked `riders_freed`. Every path a body leaves the
     /// world by calls this once the body is out of `animals`.
-    pub(crate) fn free_riders(&mut self, host: &Animal) {
-        for rider in self
-            .animals
-            .iter_mut()
-            .filter(|a| a.attached == Some(Attachment { host: host.id }))
-        {
-            release(rider, host);
+    ///
+    /// With `view`, each steps off beside the host ([`Fauna::step_off_beside`]); without
+    /// one (an edit's removal), it stays on the host's place.
+    pub(crate) fn free_riders(&mut self, host: &Animal, view: Option<&VoxelView<'_>>) {
+        for r in 0..self.animals.len() {
+            if self.animals[r].attached != Some(Attachment { host: host.id }) {
+                continue;
+            }
+            release(&mut self.animals[r], host);
+            if let Some(view) = view {
+                self.step_off_beside(view, r, host);
+            }
             self.ledger.riders_freed += 1;
         }
     }

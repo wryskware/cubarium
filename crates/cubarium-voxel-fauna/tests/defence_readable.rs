@@ -133,9 +133,9 @@ fn taste(log: &Arc<Mutex<Vec<Vec<f64>>>>) -> f64 {
     o[t.offset]
 }
 
-/// The taste's response to a stock: `c / (c + 1)` with `c = min(stock / 0.05, 1)`.
-fn response(stock: f64) -> f64 {
-    let c = (stock / 0.05).min(1.0);
+/// The taste's response to an offer/reference ratio: `c / (c + 1)`.
+fn response(c: f64) -> f64 {
+    let c = c.min(1.0);
     c / (c + 1.0)
 }
 
@@ -192,7 +192,10 @@ fn taste_reports_what_the_stand_would_give() {
         for _ in 0..5 {
             fauna.step(&world, &mut flora);
         }
-        let base = FaunaConfig::default().founder(Founder::Browser).mass_scale;
+        let base = fauna
+            .config()
+            .founder(Founder::Browser)
+            .taste_reference_stock(fauna.config().cue.emit_reference);
         (taste(&log), response((1.0 - d) * stock / base), d)
     };
     let (open, want_open, _) = read(0.0);
@@ -241,18 +244,19 @@ fn the_defence_shrinks_the_bite_once() {
     );
 }
 
-/// Taste's reference is `M_EMIT x mass_scale` (audit round, second package): a body k
-/// times heavier tastes a turf as a shipped one tastes a k-th of it, so "full" means the
-/// same share of its need at any mass.
+/// The same stand tastes the same to bodies of different mass: food references do
+/// not follow the eater's body budget.
 #[test]
-fn taste_reads_the_offer_against_the_bodys_mass() {
+fn taste_reads_the_same_offer_at_any_body_mass() {
     let read = |k: f64| {
         let world = flat_world();
         let mut flora = Flora::new(FloraConfig::for_voxel_size(0.25));
         turf(&mut flora, &world, 2, 3);
         let mut config = FaunaConfig::default();
         config.founders[Founder::Browser.index()].scale_mass(k);
-        let base = FaunaConfig::default().founder(Founder::Browser).mass_scale;
+        let base = config
+            .founder(Founder::Browser)
+            .taste_reference_stock(config.cue.emit_reference);
         let mut fauna = Fauna::new(config);
         let log = browser(&mut fauna, &world, StartingStores::FULL, 0.0);
         let (_, stock) = mouth(&world, &flora, &fauna).expect("on food");
@@ -269,8 +273,8 @@ fn taste_reads_the_offer_against_the_bodys_mass() {
         response(stock / base)
     );
     assert!(
-        (heavy - response(stock / (30.0 * base))).abs() < 1e-3,
+        (heavy - response(stock / base)).abs() < 1e-3,
         "x30 tastes {heavy}, want {}",
-        response(stock / (30.0 * base))
+        response(stock / base)
     );
 }

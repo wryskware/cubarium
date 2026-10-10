@@ -318,3 +318,22 @@ and grows them in voxel by voxel. Three gaps were left:
 - **Vines don't sway.** Latticevines stay still on their walls.
 - **Plants seen through water** (reflections, a fall, a pool's surface) are drawn by the walk,
   still and under the water's colour, so they don't sway or grow in.
+
+## 15. Where edited-in life comes from, and where removed life goes (Wrysk, 2026-10-09: "its important and i think might be worth implementing depending on where we want to go in the game version")
+
+The world-edit API (merged 39b02553) books every insertion as matter from outside the world
+(`introduced_*_in` for animals, `seeded_*_in` for plants) and every removal as matter leaving it
+(`removed_*_out`, no carcass). Picking up books out and setting down books back; a move books
+nothing. The ledger closes, but the world's own cycle neither pays for an insertion nor gets a
+removal back.
+
+Options, to choose when the game version's direction is clearer:
+- **Outside (today).** Free, simple; right for study scenarios.
+- **Closed world.** A removal leaves a body or litter where it stood (feeding shredders and the
+  soil); an insertion draws its organic and mineral matter from the local soil, litter or
+  detritus pool, and is refused when there isn't enough.
+- **A hidden biomass store** (Wrysk's idea): the xeno-ecologist's ship or base holds a stock.
+  Removals go into it, insertions draw from it, and it can run low. That makes the player's
+  interventions a budget with game meaning, and keeps the world itself closed.
+
+Studies can keep "outside" either way (a per-call or per-scenario source switch).

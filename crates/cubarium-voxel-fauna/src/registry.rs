@@ -51,7 +51,7 @@ pub const MASS_SCALED: [&str; 7] = [
 /// - The bite is not tied: the minimal gut's `gut.bite_per_body_s` is its own number, per
 ///   unit of body, so the mass scale does not carry it either.
 /// - The seven absolute quantities follow the lineage's mass scale (audit §1.4); the bite's
-///   half-saturation, in food units, does not.
+///   half-saturation and taste reference, in food units, do not.
 /// - The placeholder species is the browser's body: its mass and lifespan follow the
 ///   browser's.
 pub fn ties() -> Vec<Tie> {
@@ -178,6 +178,11 @@ fn founder_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     let fraction = Range::fraction();
     vec![
+        r("fruit_bite_half_stock", "org-units at the mouth", nonneg, "fruit-only K override; absent uses core.bite_half_stock, other foods retain core K").optional().prov("derived"),
+        r("give_up_fraction", "fraction of the fill rate", nonneg, "lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up").optional().prov("derived"),
+        r("dispersal.group_max", "bodies", nonneg, "closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count"),
+        r("dispersal.enabled", "switch", fraction, "closed-world dispersal switch (false by default; true enables it)").optional(),
+        r("dispersal.at", "transition", nonneg, "closed-world dispersal transition: adult (breeding size) or independent (pack pup age)").optional(),
         r("motor_respiration_per_s", "org-units/s per unit body at full cruise", nonneg, "paid motion")
             .search(2e-5, 1e-2).log().grade("B"),
         r("step_up_m", "m", nonneg, "tallest riser stepped (rounded down to voxels)")
@@ -369,7 +374,9 @@ fn founder_rows() -> Vec<Row> {
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
-        r("taste_reference", "organic units per site", Range::positive(), "food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale)")
+        r("taste_reference_food", "organic units per site", Range::positive(), "default food reference for taste saturation; independent of body mass and scent emission")
+            .digest().prov("decision"),
+        r("taste_reference", "organic units per site", Range::positive(), "food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food)")
             .optional().digest().prov("decision"),
         // The carnivore's table (`Hunter`): the lanternjaw's only, optional on the others.
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
@@ -564,7 +571,7 @@ fn knob_rows() -> Vec<Row> {
         r(&format!("fauna.cue.{path}"), unit, range, what)
     };
     rows.extend([
-        c("emit_reference", "organic units", pos, "detritus stock at which a source emits at full strength; the taste reference").grade("C"),
+        c("emit_reference", "organic units", pos, "detritus stock at which a scent source emits at full strength").grade("C"),
         c("half_life_s", "s", pos, "cue half-life").search(0.5, 60.0).log().grade("C"),
         c("fungal_half_life_s", "s", pos, "the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves")
             .search(2.0, 1200.0).log(),
@@ -622,7 +629,7 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
-        t("press_replan_s", "s", nonneg, "a reflex walk asking forward this long without moving gives its target up (EDGE)").search(1.0, 10.0),
+        t("press_replan_s", "s", nonneg, "a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE)").search(1.0, 10.0),
         t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
         t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
         t("route_detour", "ratio", pos, "a target is in reach when its route is at most this times the reflex's search radius").search(1.0, 4.0),

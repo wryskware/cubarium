@@ -291,6 +291,18 @@ pub fn hunker_model(founder: Founder) -> Option<&'static str> {
     }
 }
 
+/// **The baked model a lineage's rider stage is drawn as** (`Animal::attached`): a specimen
+/// baked as one bin at its built size, or `None` for a lineage whose rider draws as the
+/// glyph. The lanternjaw's larva is the leechfork (Wrysk 2026-10-09, D16 in
+/// `design/organism-large-animals-2026-09-23.md`); its belly row is dy = 0, its one-voxel
+/// body on the anchor's row (dz = 0).
+pub fn rider_model(founder: Founder) -> Option<&'static str> {
+    match founder {
+        Founder::Lanternjaw => Some("lanternjaw-larva"),
+        _ => None,
+    }
+}
+
 // --- the library ---------------------------------------------------------------------
 
 /// Every model the presenter can stamp: at most one per species and one per founder.

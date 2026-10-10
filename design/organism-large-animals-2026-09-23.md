@@ -198,6 +198,14 @@ plan sketch above in visual scope; niche, prey, lure cost and life history are u
 - **Colour.** Sampled from the image: the colours doc's animal table. The orbs are cyan
   pigment for now; glowing them when the lure is lit needs the lure state in the
   presenter.
+- **Larva (selected 2026-10-09, Wrysk: "lets go with leechfork").** The rider stage, while
+  it clamps on a host's back: a limbless violet body one voxel wide along the host's
+  spine. Its front end forks into two pale-tipped prongs, one cell forward and one aside
+  on the diagonals; its rear end lifts, with a cyan lure bud on each side, the twin
+  tails to come. 8 cells, 5 × 3 × 2 voxels at 0.125 m, built 0.57 m long, in the
+  lanternjaw's colour slots. Symmetric about the spine (Wrysk: "thats important").
+  Model: `lanternjaw_larva("leechfork")` in `scripts/blender/animal_models.py`; the
+  candidates and the sheets are in `art/gen/runs/lanternjaw-larva-2026-10-09/`.
 - **Voxels, 0.125 m (8 × 7 × 5).** The fangs are a pale column two cells tall at the
   face, each razor blade a pale cell at a front corner, the eyes magenta beside them.
   Each orb is one cyan cell one column behind the fangs, open on top, in front and

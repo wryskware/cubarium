@@ -1408,3 +1408,510 @@ fn the_same_body_against_the_same_square_pollinates_the_same_area_at_two_voxel_s
     assert!(got[0].1 > 0, "fixture: the body reaches the square: {got:?}");
     assert!((got[0].2 - got[1].2).abs() <= 1e-12, "the same area of flowers visited: {got:?}");
 }
+
+// ------------------------------------------------------------------ juvenile fruit-search traps
+
+fn freeze_config() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    c.founders[SP.index()].active = crate::Activity::Always;
+    // Short, explicit fixture clocks; isolate a fruit approach from hungry roaming and
+    // patch abandonment. The bounded walk/perch repair must work without those layers.
+    c.teachers.press_replan_s = 0.5;
+    c.teachers.press_shun_s = 4.0;
+    c.teachers.search_leg_bl = 0.0;
+    c.teachers.lead_give_up_bl = 0.0;
+    c.teachers.give_up_fraction = 0.0;
+    c.founders[SP.index()].give_up_fraction = Some(0.0);
+    c.perception.give_up_s = 20.0;
+    c
+}
+
+fn juvenile_stores() -> StartingStores {
+    StartingStores { body: 0.25, reserve: 0.3 }
+}
+
+fn use_teacher(fauna: &mut Fauna, id: u64) {
+    let teachers = fauna.config().teachers;
+    assert!(fauna.set_controller(id, crate::controller::heuristic(SP, teachers)));
+}
+
+fn freeze_ticks(c: &FaunaConfig) -> usize {
+    let cadence = c.manifest(SP).cadence_ticks().max(1) as f64 * DT;
+    ((4.0 * c.teachers.press_replan_s + 4.0 * cadence) / DT).ceil() as usize
+}
+
+fn remember_vine(fauna: &mut Fauna, id: u64, world: &World, face: Face) {
+    let v = world.config().voxel_m;
+    let (x, _, z) = face.front(&world.view()).expect("fixture: exposed vine");
+    let dir = match face.dir {
+        FaceDir::PosX => 0,
+        FaceDir::NegX => 1,
+        FaceDir::PosZ => 2,
+        FaceDir::NegZ => 3,
+        FaceDir::Down => 4,
+    };
+    let key = (1 << 63) | (1 << 62) | ((world.config().index(i64::from(face.x), face.y, face.z) as u64) << 3) | dir;
+    let food = crate::perception::class::FOOD;
+    let tick = fauna.tick;
+    fauna.percepts.entry(id).or_default().best[food as usize] = crate::Track {
+        known: true,
+        id: key,
+        class: food,
+        modes: crate::perception::SIGHT,
+        x: (f64::from(x) + 0.5) * v,
+        z: (f64::from(z) + 0.5) * v,
+        y_m: 3.0 * v,
+        site: (x as u32, 2, z),
+        tick,
+        ..crate::Track::default()
+    };
+}
+
+/// A wall resolved more finely than the body's radius. Its reachable cover is real,
+/// but the covered rock lies several columns beyond the centre's adjacent column.
+fn fine_vine_wall(v: f64) -> (World, Flora, Vec<Face>) {
+    let (_, stock, _) = vine_wall_in_fruit();
+    let mut flora = Flora::new(stock.view().config.clone());
+    let make_world = |rain_m_per_s| {
+        let mut world = World::empty(VoxelConfig {
+            width: 32, height: 40, depth: 8, voxel_m: v,
+            day: clock_off(), rain_m_per_s,
+            ..VoxelConfig::default()
+        });
+        soil(&mut world);
+        rock(&mut world, 16..=16, 1..=28);
+        world
+    };
+    let mut world = make_world(0.0);
+    let first = Face::new(16, 3, 4, FaceDir::NegX);
+    let vine = flora.seed_vine(&world, VineSeed {
+        root: Site { x: 15, y: 2, z: 4 }, first, reserve: 100.0, lineage: None,
+    }).expect("fixture: fine vine root");
+    let mut faces = vec![first];
+    for y in 4..=24 {
+        let f = Face::new(16, y, 4, FaceDir::NegX);
+        assert!(flora.cover_face(&world, vine, f, 1.0));
+        faces.push(f);
+    }
+    flora.step(&mut make_world(1e-6));
+    for _ in 0..40 {
+        if faces.iter().all(|&f| flora.view().cover.face(f).is_some_and(|c| c.fruit > 0.0)) {
+            return (world, flora, faces);
+        }
+        flora.step(&mut world);
+    }
+    panic!("fixture: the fine wall fruits");
+}
+
+/// The fruit reflex used to replace every refused-motor escape with another full
+/// push: `vine_ahead` looked only one column out although the footprint hit farther rock.
+#[test]
+fn juvenile_fruit_wall_press_replans_within_the_configured_bound() {
+    let c = freeze_config();
+    let body = c.founder(SP).core.body_max * juvenile_stores().body;
+    let geometry = c.founder(SP).body_at(body);
+    let r = geometry.footprint_radius();
+    let v = r / 3.0;
+    let (world, mut flora, faces) = fine_vine_wall(v);
+    for &face in &faces {
+        if f64::from(face.y) * v <= 3.0 * v + geometry.mouth_ceiling_m + v {
+            assert!(flora.take_fruit(face, 1e9).is_some());
+        }
+    }
+    let fruit = faces.iter().copied().find(|&f| flora.view().cover.face(f).is_some_and(|c| c.fruit > 0.0)).expect("high fruit remains");
+    let bound = freeze_ticks(&c);
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 12, 4, juvenile_stores());
+    let k = fauna.animals.iter().position(|a| a.id == id).unwrap();
+    fauna.animals[k].pose.x = 16.0 * v - r - 1e-9;
+    let start = animal(&fauna, id).pose;
+    remember_vine(&mut fauna, id, &world, fruit);
+    use_teacher(&mut fauna, id);
+    let mut escaped = false;
+    let mut pressed = 0;
+    for _ in 0..bound {
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        let fb = a.founder_state.feedback;
+        pressed += usize::from(a.founder_state.held.forward > 0.0 && fb.attempted_equivalent > 0.0 && fb.delivered_equivalent <= 1e-12);
+        escaped |= (a.pose.x - start.x).hypot(a.pose.z - start.z) > 0.1 * r
+            || (a.pose.y_m - start.y_m).abs() > 0.1 * r
+            || !fauna.walk_shunned(id, SP).is_empty();
+    }
+    assert!(escaped, "pressed {pressed}/{bound} ticks without moving or shunning: {:?}, {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// Standing on a ledge above remembered fruit, the old wall-centre target is exactly
+/// the body's position: no forward, no turn, and neither mouth reach nor a mount.
+#[test]
+fn juvenile_beside_unreachable_vine_replans_instead_of_holding_zero_actions() {
+    let (world, mut flora, faces) = vine_wall_in_fruit();
+    let c = freeze_config();
+    let bound = freeze_ticks(&c);
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 6, 2, juvenile_stores());
+    let start = animal(&fauna, id).pose;
+    assert!(start.y_m > f64::from(faces.last().unwrap().y + 1) * V, "fixture: below the ledge, outside the mouth");
+    remember_vine(&mut fauna, id, &world, *faces.last().unwrap());
+    use_teacher(&mut fauna, id);
+    let mut escaped = false;
+    let mut zero = 0;
+    for _ in 0..bound {
+        fauna.step(&world, &mut flora);
+        let a = animal(&fauna, id);
+        zero += usize::from(a.founder_state.held.forward == 0.0 && a.founder_state.held.turn == 0.0);
+        escaped |= (a.pose.x - start.x).hypot(a.pose.z - start.z) > 0.1 * V
+            || (a.pose.y_m - start.y_m).abs() > 0.1 * V
+            || !fauna.walk_shunned(id, SP).is_empty();
+    }
+    assert!(escaped, "held zero actions {zero}/{bound} ticks without moving or shunning: {:?}, {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// A nearby low bellwing is within the catch reflex's horizontal and height window,
+/// but behind the locked wall heading. The old catch turn overrides every
+/// escape with zero forward, although turning has no physical effect while attached.
+#[test]
+fn juvenile_clinging_escape_does_not_turn_forever_with_zero_forward() {
+    for initial in [MobilityMode::Climb, MobilityMode::Perched] {
+        let (world, mut flora, faces) = vine_wall_in_fruit();
+        for face in faces {
+            assert!(flora.take_fruit(face, 1e9).is_some());
+        }
+        let c = freeze_config();
+        let bound = freeze_ticks(&c);
+        let mut fauna = Fauna::new(c);
+        fauna.set_births_enabled(false);
+        let id = on_ground(&mut fauna, &world, SP, 5, 2, juvenile_stores());
+        let k = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        let r = fauna.config().founder(SP).body_at(fauna.animals[k].body).footprint_radius();
+        let a = &mut fauna.animals[k];
+        a.pose.x = 6.0 * V - r;
+        a.pose.y_m = 6.0 * V;
+        a.mobility.mode = initial;
+        a.mobility.falling = false;
+        a.mobility.perch = Some(crate::Perch {
+            kind: crate::PerchKind::VineFace,
+            anchor: PerchAnchor::Vine(Face::new(6, 6, 2, FaceDir::NegX)),
+        });
+        a.founder_state.held.forward = 1.0;
+        a.founder_state.feedback.attempted_equivalent = 1.0;
+        a.stomach = crate::Stomach::default();
+        a.eating = true;
+        let start = a.pose;
+        assert!(fauna.apply(&world, Command::IntroduceAloft {
+            pose: Pose { x: start.x - 0.3, z: start.z, y_m: start.y_m, heading_rad: 0.0 },
+            founder: Founder::Bellwing,
+            stores: StartingStores::FULL,
+        }));
+        let prey = fauna.view().ledger.births - 1;
+        hold(&mut fauna, prey, 0.0, 0.0);
+        assert!(crate::is_prey_of(fauna.config(), &animal(&fauna, id), &animal(&fauna, prey)), "fixture: the catch reflex considers this low bellwing");
+        let catch = crate::hunt::catch_step(&mut fauna, k, &world.view(), &flora.view());
+        assert!(catch.is_none(), "{initial:?}: a turn cannot bring this prey into a vine-locked mouth: {catch:?}");
+        use_teacher(&mut fauna, id);
+        let mut escaped = false;
+        let mut futile_turns = 0;
+        for _ in 0..bound {
+            fauna.step(&world, &mut flora);
+            let a = animal(&fauna, id);
+            futile_turns += usize::from(a.founder_state.held.forward == 0.0 && a.founder_state.held.turn != 0.0);
+            escaped |= (a.pose.x - start.x).hypot(a.pose.z - start.z) > 0.1 * V
+                || (a.pose.y_m - start.y_m).abs() > 0.1 * V;
+        }
+        assert!(fauna.view().animal(prey).is_some(), "fixture: a bellwing behind the face is not a reachable meal");
+        assert!(escaped, "{initial:?}: futile turn {futile_turns}/{bound} ticks with no displacement: {:?}, {:?}", animal(&fauna, id), fauna.steer.get(&id));
+    }
+}
+
+/// Give fruit an explicit stock scale without asserting today's tuned K. A controlled
+/// quarter-stock mouthful must be halved at E = K, in the actual bite
+/// as well as the forage offer; foliage keeps its existing core-stock formula.
+#[test]
+fn fruit_scale_bite_and_offer_use_the_configured_k_while_foliage_keeps_its_rule() {
+    let mut cfg = FaunaConfig::default();
+    let stock = 2e-4;
+    cfg.founders[SP.index()].fruit_bite_half_stock = Some(stock);
+    let period = cfg.manifest(SP).controller_period_s;
+    let body = cfg.founder(SP).core.body_max;
+    cfg.founders[SP.index()].gut.s0 = 0.0;
+    cfg.founders[SP.index()].gut.bite_per_body_s = stock / (4.0 * body * period);
+    let mut plants = fruit_flora();
+    plants.lanternberry.fruit_cap = stock;
+    plants.lanternberry.fruit_per_s = stock / DT;
+    let mut world = noon_plain(16, 20, 8);
+    let mut flora = Flora::new(plants);
+    let site = fruiting(&mut flora, &mut world, 8, 4, 60);
+    let available = stand_fruit(&flora, site);
+    assert!((available - stock).abs() <= 1e-12 * stock.max(1.0), "fixture: one K of ripe fruit");
+    let mut fauna = Fauna::new(cfg);
+    fauna.set_births_enabled(false);
+    let (x, z) = centre(8, 4);
+    let id = aloft(&mut fauna, &world, x, z, crown_top(&flora, site), HUNGRY_ADULT);
+    hold(&mut fauna, id, 0.0, 0.0);
+    steps(&mut fauna, &world, &mut flora, 1);
+    assert_eq!(perched_on(&fauna, id), Some(site));
+    hold(&mut fauna, id, 0.0, 1.0);
+    let before = fauna.ledger.eaten_by_food[Food::Fruit.index()];
+    let mut expected = 0.0;
+    let mut expected_offer = 0.0;
+    for _ in 0..fauna.config().manifest(SP).cadence_ticks().max(1) + 1 {
+        let a = animal(&fauna, id);
+        let phys = fauna.config().founder(SP);
+        let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
+        let want = phys.gut.bite_per_body_s * speed * a.body * period;
+        let saturation = available / (available + phys.bite_half_stock_for(Food::Fruit));
+        let room = (phys.gut.capacity(a.body) - a.stomach.organic()).max(0.0);
+        let reaches = (1.0 - phys.bite_spill_fraction.clamp(0.0, 1.0)).max(1e-12);
+        expected = (want * saturation).min(room / reaches).min(available);
+        let fill = phys.gut.full_tolerance * phys.gut.capacity(a.body) * period
+            / (phys.gut.digestion_s[Food::Fruit.index()] / speed);
+        expected_offer = want * saturation / fill;
+        let offered = crate::step::forage::offer(&a, phys, Food::Fruit, period, 1.0, available);
+        assert!((offered - expected_offer).abs() <= 1e-12 * expected_offer.max(1.0));
+        fauna.step(&world, &mut flora);
+        if fauna.ledger.eaten_by_food[Food::Fruit.index()] > before { break; }
+    }
+    let taken = fauna.ledger.eaten_by_food[Food::Fruit.index()] - before;
+    assert!(taken > 0.0 && expected > 0.0 && expected_offer > 0.0, "the configured mouthful is offered and bitten");
+    assert!((taken - expected).abs() <= 1e-10 * expected.max(1.0), "fruit bite {taken}, predicted {expected} from configured K");
+    assert!((available - stand_fruit(&flora, site) - taken).abs() <= 1e-12, "the bite draws that stock");
+
+    let phys = *fauna.config().founder(Founder::Browser);
+    let mut grazer = animal(&fauna, id);
+    grazer.body = phys.core.body_max;
+    let speed = phys.gut.throughput_factor(grazer.body, phys.core.body_max);
+    let want = phys.gut.bite_per_body_s * speed * grazer.body * period;
+    let tau = phys.gut.digestion_s[Food::Foliage.index()] / speed;
+    let fill = phys.gut.full_tolerance * phys.gut.capacity(grazer.body) * period / tau;
+    let predicted = want * available / (available + phys.core.bite_half_stock) / fill;
+    let got = crate::step::forage::offer(&grazer, &phys, Food::Foliage, period, 1.0, available);
+    assert!((got - predicted).abs() <= 1e-12 * predicted.max(1.0), "foliage offer {got}, existing rule {predicted}");
+}
+
+#[test]
+fn fruit_stock_override_falls_back_and_leaves_other_foods_and_lineages_alone() {
+    let mut cfg = FaunaConfig::default();
+    cfg.founders[SP.index()].fruit_bite_half_stock = None;
+    let base = cfg.clone();
+    cfg.founders[SP.index()].fruit_bite_half_stock = Some(2e-4);
+    for founder in Founder::ALL {
+        for food in Food::ALL {
+            let before = base.founder(founder).bite_half_stock_for(food);
+            let after = cfg.founder(founder).bite_half_stock_for(food);
+            if founder == SP && food == Food::Fruit {
+                assert_eq!(after, cfg.founder(SP).fruit_bite_half_stock.unwrap());
+            } else {
+                assert_eq!(after, before, "{founder:?}, {food:?}: unchanged by a fruit override");
+            }
+        }
+    }
+    assert_eq!(base.founder(SP).bite_half_stock_for(Food::Fruit), base.founder(SP).core.bite_half_stock, "an absent override inherits core K");
+    cfg.founders[SP.index()].fruit_bite_half_stock = Some(0.0);
+    assert_eq!(cfg.founder(SP).bite_half_stock_for(Food::Fruit), 0.0, "zero is an explicit unlimited-stock-scale override");
+}
+
+#[test]
+fn lineage_give_up_override_can_inherit_enable_and_disable_the_patch_rule() {
+    let world = plain(16, 20, 5);
+    for (shared, own, gives_up) in [(0.5, None, true), (0.0, None, false), (0.0, Some(0.5), true), (0.5, Some(0.0), false)] {
+        let mut cfg = freeze_config();
+        cfg.teachers.give_up_fraction = shared;
+        cfg.teachers.give_up_min_s = 0.0;
+        cfg.teachers.give_up_window_s = 0.0;
+        cfg.founders[SP.index()].give_up_fraction = own;
+        let period = cfg.manifest(SP).cadence_ticks().max(1);
+        let mut fauna = Fauna::new(cfg);
+        let id = on_ground(&mut fauna, &world, SP, 3, 2, juvenile_stores());
+        let k = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        let still_feeding = Actions { forward: 0.0, turn: 0.0, feed: 1.0 };
+        fauna.animals[k].eating = true;
+        fauna.animals[k].founder_state.held = still_feeding;
+        let phys = *fauna.config().founder(SP);
+        let ring = f64::from(world.config().width) * V;
+        let mut left = false;
+        for _ in 0..4 {
+            // A zero offer is a hand-built exhausted patch, independently of every K.
+            crate::step::forage::note_bite(&mut fauna, k, &phys, Food::Fruit, period as f64 * DT, 0.0, 1.0, None);
+            left |= crate::step::forage::leave(&mut fauna, k, still_feeding, ring).is_some();
+            fauna.tick += period;
+        }
+        assert_eq!(left, gives_up, "shared {shared}, lineage {own:?}");
+    }
+}
+
+struct StillFruitTeacher;
+
+impl crate::Controller for StillFruitTeacher {
+    fn drive(&mut self, _: &[f64]) -> crate::Response {
+        crate::Response::Bounded(Actions::REST)
+    }
+    fn reset(&mut self) {}
+    fn layer(&self) -> crate::Layer { crate::Layer::Heuristic }
+}
+
+/// An explicit zero-effort teacher isolates the fruit reflex's timer. The normal
+/// controller pipeline must count a fruitless vine hold and move out of it.
+#[test]
+fn a_hungry_vine_climber_or_perch_replans_after_the_configured_stall_clock() {
+    for initial in [MobilityMode::Climb, MobilityMode::Perched] {
+        let (world, mut flora, faces) = vine_wall_in_fruit();
+        for face in faces { assert!(flora.take_fruit(face, 1e9).is_some()); }
+        let cfg = freeze_config();
+        let threshold = cubarium_voxel::ticks_at_least_one(cfg.teachers.press_replan_s);
+        let period = cfg.manifest(SP).cadence_ticks().max(1);
+        let mut fauna = Fauna::new(cfg);
+        let id = on_ground(&mut fauna, &world, SP, 5, 2, juvenile_stores());
+        let k = fauna.animals.iter().position(|a| a.id == id).unwrap();
+        let r = fauna.config().founder(SP).body_at(fauna.animals[k].body).footprint_radius();
+        let a = &mut fauna.animals[k];
+        a.pose.x = 6.0 * V - r;
+        a.pose.y_m = 6.0 * V;
+        a.mobility.mode = initial;
+        a.mobility.perch = Some(crate::Perch {
+            kind: crate::PerchKind::VineFace,
+            anchor: PerchAnchor::Vine(Face::new(6, 6, 2, FaceDir::NegX)),
+        });
+        a.stomach = crate::Stomach::default();
+        a.eating = true;
+        let start = a.pose;
+        assert!(fauna.set_controller(id, Box::new(StillFruitTeacher)));
+        let mut replanned = None;
+        for elapsed in 1..=threshold + 3 * period {
+            fauna.step(&world, &mut flora);
+            let a = animal(&fauna, id);
+            if (a.pose.x - start.x).hypot(a.pose.z - start.z) > 1e-12 || (a.pose.y_m - start.y_m).abs() > 1e-12 {
+                replanned = Some(elapsed);
+                break;
+            }
+        }
+        let elapsed = replanned.expect("the fruit approach replans an unproductive vine hold");
+        assert!(elapsed >= threshold && elapsed <= threshold + 3 * period, "{initial:?}: elapsed {elapsed}, configured clock {threshold}");
+        if initial == MobilityMode::Climb { assert!(animal(&fauna, id).mobility.falling, "a stalled climber descends"); }
+    }
+}
+
+// ------------------------------------------------------------------ juvenile wade pockets (SP-FREEZE2)
+
+/// Standing water `depth_m` deep over column `(x, z)` of a plain (support face `y = 2`), in
+/// the cells above it. The fauna never steps the world, so it stays as laid.
+fn pool(world: &mut World, x: i64, z: u32, depth_m: f64) {
+    let c = world.config().clone();
+    let cell = c.voxel_volume();
+    let mut left = depth_m * c.voxel_m * c.voxel_m;
+    let mut y = 3;
+    while left > 1e-15 {
+        let v = left.min(cell);
+        world.apply(WorldCommand::AddWater { x, y, z, volume_m3: v });
+        left -= v;
+        y += 1;
+    }
+    let got = world.view().water_depth_m(x, 2, z);
+    assert!((got - depth_m).abs() < 1e-9, "fixture: {got} m of water at ({x}, {z}), wanted {depth_m}");
+}
+
+/// A 96 × 40 plain with a lake over columns `30..=60` (every `z`) `lake_m` deep; the columns
+/// in `spot` are `spot_m` deep instead. Dry land either side, open to any body.
+fn lake(lake_m: f64, spot: &[(i64, u32)], spot_m: f64) -> World {
+    let mut world = plain(96, 12, 40);
+    for x in 30..=60 {
+        for z in 0..40 {
+            pool(&mut world, x, z, if spot.contains(&(x, z)) { spot_m } else { lake_m });
+        }
+    }
+    world
+}
+
+/// The juvenile's wade and drown depths, and the adult's wade depth.
+fn juvenile_depths(c: &FaunaConfig) -> (f64, f64, f64) {
+    let p = c.founder(SP);
+    let g = p.body_at(p.core.body_max * juvenile_stores().body);
+    (p.wade_depth_m(&g), p.drown_depth_m(&g), p.wade_depth_m(&p.adult_body()))
+}
+
+/// Run the juvenile on its heuristic until it stands on dry land outside the lake, at most
+/// `cap` ticks; the tick it got there.
+fn walks_ashore(fauna: &mut Fauna, world: &World, flora: &mut Flora, id: u64, cap: usize) -> Option<usize> {
+    for t in 0..cap {
+        fauna.step(world, flora);
+        let a = *fauna.view().animal(id).expect("alive: it never drowns on the way");
+        if !(30..=60).contains(&a.site.x) && world.view().water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) <= 0.0 {
+            return Some(t);
+        }
+    }
+    None
+}
+
+/// WADE-OUT, a juvenile's own pocket: a shallow on a lake its adult wades, ringed by water
+/// over the juvenile's depth. The adult's route graph has it on open ground, so DROP never
+/// finds it cornered, and the shallows reflex never fires (it stands in water it wades);
+/// it wandered the shallow for good. Held its lineage's `drop.after_s`, it wades out.
+#[test]
+fn a_juvenile_on_a_shallow_ringed_by_water_over_its_depth_wades_ashore() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    let (wade, drown, adult) = juvenile_depths(&c);
+    assert!(adult > wade && drown > wade, "fixture: an adult wades deeper and it drowns deeper than it wades");
+    let lake_m = wade + 0.5 * (adult.min(drown) - wade);
+    let spot = [(45, 20), (46, 20), (45, 21), (46, 21)];
+    let world = lake(lake_m, &spot, 0.5 * wade);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let walk = 32.0 * V / (c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m);
+    let cap = ((after + 10.0 * walk + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    let t = walks_ashore(&mut fauna, &world, &mut flora, id, cap);
+    assert!(t.is_some(), "still in the lake after {cap} ticks: {:?}, steer {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// WADE-OUT, out of its depth with the shallows past deeper water: the motor lets a body
+/// out of its depth step no deeper, so the shallows reflex's straight walk to the nearest
+/// face it wades was refused at its first step and it stood there for good.
+#[test]
+fn a_juvenile_out_of_its_depth_with_deeper_water_round_it_wades_ashore() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    let (wade, drown, _) = juvenile_depths(&c);
+    let here = wade + 0.25 * (drown - wade);
+    let around = wade + 0.75 * (drown - wade);
+    assert!(around - here > crate::body::LEVEL_TOLERANCE_M, "fixture: the water round it is a real step deeper");
+    let world = lake(around, &[(45, 20)], here);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let walk = 32.0 * V / (c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m);
+    let cap = ((after + 10.0 * walk + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    let t = walks_ashore(&mut fauna, &world, &mut flora, id, cap);
+    assert!(t.is_some(), "still in the lake after {cap} ticks: {:?}, steer {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// WADE-OUT never takes a body under water it drowns in for longer than its drown clock: a
+/// shallow ringed by water over its drown depth wider than it can cross holds it, alive.
+#[test]
+fn a_juvenile_ringed_by_drowning_water_too_wide_to_cross_stays_and_lives() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    // A drown clock too short to cross the lake's half-width at cruise.
+    let (wade, drown, _) = juvenile_depths(&c);
+    let cruise = c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m;
+    c.founders[SP.index()].drown_after_s = 4.0 * V / cruise;
+    let spot = [(45, 20), (46, 20), (45, 21), (46, 21)];
+    let world = lake(drown + V, &spot, 0.5 * wade);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let cap = ((2.0 * after + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    assert_eq!(walks_ashore(&mut fauna, &world, &mut flora, id, cap), None, "no way out it survives");
+    let a = animal(&fauna, id);
+    assert!(spot.contains(&(i64::from(a.site.x), a.site.z)), "it stays on the shallow: {:?}", a.site);
+}

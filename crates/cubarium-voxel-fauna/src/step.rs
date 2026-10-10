@@ -217,12 +217,41 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
         digest(fauna);
         heal(fauna);
         egg_upkeep(fauna);
-        grow(fauna);
-        drop_off_grown(fauna);
+        let matured = grow(fauna);
+        disperse(fauna, &view, flora, &matured, crate::DispersalAt::Adult);
+        drop_off_grown(fauna, &view);
         void_guts(fauna, flora);
         glider::void_gut_seeds(fauna, flora);
         // R3: calls, pups' independence, succession and provisioning.
+        let pups: Vec<u64> = fauna
+            .animals
+            .iter()
+            .filter(|a| {
+                a.pack.is_some_and(|m| m.pup)
+                    && a.founder.is_some_and(|f| {
+                        let d = fauna.config.founder(f).dispersal;
+                        d.enabled && d.at == crate::DispersalAt::Independent
+                    })
+            })
+            .map(|a| a.id)
+            .collect();
         crate::pack::upkeep(fauna, &view);
+        let independent: Vec<u64> = pups
+            .into_iter()
+            .filter(|id| {
+                fauna
+                    .animals
+                    .iter()
+                    .any(|a| a.id == *id && a.pack.is_some_and(|m| !m.pup))
+            })
+            .collect();
+        disperse(
+            fauna,
+            &view,
+            flora,
+            &independent,
+            crate::DispersalAt::Independent,
+        );
     });
     TickStart { tick, seed, dusk, sky }
 }
@@ -313,7 +342,7 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             // books it itself while the prey is still drawn).
             let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
             let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
-            apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            apply_hit(fauna, flora, hit.prey, hit.damage, hit.by, Some(&view));
             if let (true, Some(f)) = (lure_kill, prey_founder) {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
                     fauna.ledger.lure_kills[f.index()] += 1;
@@ -403,8 +432,9 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.controllers.take(a.id);
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
+        fauna.wading.remove(&a.id);
         fauna.book_removed(a);
-        fauna.free_riders(a);
+        fauna.free_riders(a, Some(view));
     }
 }
 
@@ -550,7 +580,7 @@ fn drain_riders(fauna: &mut Fauna) {
 /// Step 2, after growth: **a rider at its detach size drops off** (§4) where its host
 /// stands — `parasite_detach_body_fraction` × its lineage's `body_max` — and is a free
 /// juvenile from here on.
-fn drop_off_grown(fauna: &mut Fauna) {
+fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let fraction = fauna.config.parasite_detach_body_fraction;
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
@@ -565,6 +595,7 @@ fn drop_off_grown(fauna: &mut Fauna) {
         };
         let host = fauna.animals[h];
         crate::release(&mut fauna.animals[r], &host);
+        fauna.step_off_beside(view, r, &host);
         fauna.ledger.rider_dropoffs += 1;
     }
 }
@@ -956,7 +987,7 @@ pub(crate) fn take_from_pool(pool: &mut Taken, organic: f64) -> Taken {
 /// than reaches the stomach's room `K − S` after the share a sloppy feeder spills. Zero
 /// unless the eating latch is on: a body that does not want food takes no bite, and a
 /// full stomach stops the mouth.
-fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: f64, stock: f64) -> f64 {
+fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, food: Food, period_s: f64, effort: f64, stock: f64) -> f64 {
     if !a.eating || !(stock > 0.0) {
         return 0.0;
     }
@@ -965,7 +996,7 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: 
     if !(want > 0.0) {
         return 0.0;
     }
-    let k = phys.core.bite_half_stock;
+    let k = phys.bite_half_stock_for(food);
     let diminished = if k > 0.0 { want * (stock / (stock + k)) } else { want };
     let room = (phys.gut.capacity(a.body) - a.stomach.organic()).max(0.0);
     let reaches = (1.0 - phys.bite_spill_fraction.clamp(0.0, 1.0)).max(1e-12);
@@ -1136,7 +1167,8 @@ fn egg_upkeep(fauna: &mut Fauna) {
 /// its growth instead of spending the reserve it lives on. Intake never builds structure
 /// directly any more: it goes to the reserve ([`assimilate`]), and this is the only way
 /// in to the body.
-fn grow(fauna: &mut Fauna) {
+fn grow(fauna: &mut Fauna) -> Vec<u64> {
+    let mut matured = Vec::new();
     for i in 0..fauna.animals.len() {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let a = &mut fauna.animals[i];
@@ -1165,10 +1197,123 @@ fn grow(fauna: &mut Fauna) {
         if let Some(f) = a.founder {
             fauna.ledger.growth_by_founder[f.index()] += a.body - before;
             if before < sc.birth_body && a.body >= sc.birth_body {
+                matured.push(a.id);
                 fauna.ledger.matured_by_founder[f.index()] += 1;
                 fauna.ledger.maturation_ticks_by_founder[f.index()] += a.age_ticks;
             }
         }
+    }
+    matured
+}
+
+/// Only this tick's transition candidates can leave. A candidate leaves when its group's
+/// **established** members plus itself exceed `group_max`:
+/// - a pack's group is its record; established is every member past independence (not a
+///   pup), so pups at the den never count; the breeder never leaves;
+/// - a herding-young lineage's group is its herd ([`crate::herd_labels`]: chains within
+///   `herding.comfort_m`, x wrapping); established is every adult.
+///
+/// Candidates still to be judged are not established yet; one that stays counts for the
+/// candidates after it, so the order of a tick's arrivals cannot overfill a group.
+fn disperse(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    candidates: &[u64],
+    at: crate::DispersalAt,
+) {
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let mut pack_changed = false;
+    for (k, &id) in candidates.iter().enumerate() {
+        let pending = &candidates[k + 1..];
+        let Some(i) = fauna.animals.iter().position(|a| a.id == id) else {
+            continue;
+        };
+        let a = &fauna.animals[i];
+        let Some(f) = a.founder else { continue };
+        let phys = fauna.config.founder(f);
+        let d = phys.dispersal;
+        if !d.enabled || d.at != at {
+            continue;
+        }
+        let established = if let Some(m) = a.pack {
+            let Some(pack) = fauna.packs().iter().find(|p| p.id == m.pack) else {
+                continue;
+            };
+            if pack.breeder == Some(id) {
+                continue;
+            }
+            fauna
+                .animals
+                .iter()
+                .filter(|o| {
+                    o.id != id
+                        && !pending.contains(&o.id)
+                        && o.pack.is_some_and(|p| p.pack == m.pack && !p.pup)
+                })
+                .count()
+        } else {
+            if at != crate::DispersalAt::Adult
+                || !phys.herding.young_only
+                || phys.herding.comfort_m <= 0.0
+            {
+                continue;
+            }
+            let lineage: Vec<&Animal> =
+                fauna.animals.iter().filter(|o| o.founder == Some(f)).collect();
+            let herd = crate::herd_labels(&lineage, phys.herding.comfort_m, ring);
+            let Some(me) = lineage.iter().position(|o| o.id == id) else { continue };
+            lineage
+                .iter()
+                .zip(&herd)
+                .filter(|(o, h)| {
+                    **h == herd[me]
+                        && o.id != id
+                        && !pending.contains(&o.id)
+                        && o.body >= phys.core.birth_body
+                })
+                .count()
+        };
+        let count = established + 1;
+        if count <= d.group_max as usize {
+            continue;
+        }
+        // Deposit first: if the parcel is refused, keep the animal and all its matter.
+        // Unlike book_deposit's other callers, this path must never fall back to export.
+        let parcel = Taken {
+            organic: a.stored_organic(),
+            mineral: a.stored_mineral(),
+            energy: a.stored_energy(),
+        };
+        if !flora.deposit_recycled(
+            a.site,
+            cubarium_voxel_flora::Deposit {
+                kind: DepositKind::Litter,
+                organic: parcel.organic,
+                mineral: parcel.mineral,
+                energy: parcel.energy,
+            },
+        ) {
+            continue;
+        }
+        fauna.ledger.deposited_organic_out += parcel.organic;
+        fauna.ledger.deposited_mineral_out += parcel.mineral;
+        fauna.ledger.deposited_energy_out += parcel.energy;
+        let fed = a.stomach.total();
+        fauna.ledger.stomach_out.organic += fed.organic;
+        fauna.ledger.stomach_out.mineral += fed.mineral;
+        fauna.ledger.stomach_out.energy += fed.energy;
+        fauna.ledger.dispersed_by_founder[f.index()] += 1;
+        let a = fauna.animals.remove(i);
+        pack_changed |= a.pack.is_some();
+        fauna.controllers.take(a.id);
+        fauna.trapped.remove(&a.id);
+        fauna.drop_plans.remove(&a.id);
+        fauna.wading.remove(&a.id);
+        fauna.free_riders(&a, Some(view));
+    }
+    if pack_changed {
+        crate::pack::succession(fauna);
     }
 }
 
@@ -1499,7 +1644,20 @@ fn controllers(
                 && a.founder_state.held.forward > 0.0
                 && fb.attempted_equivalent > 1e-12
                 && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused;
-            if pressed {
+            // A fruit approach can stall without asking forward (its aim coincides
+            // with an unreachable wall centre). Count no displacement too, so that
+            // the same target/shun clock covers this path as well as a refused walk.
+            let fruit_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
+                && a.mobility.mode == crate::MobilityMode::Ground
+                && fauna.steer.get(&id) == Some(&crate::Steer::Fruit)
+                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12;
+            let vine_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
+                && matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
+                && a.mobility.perch.is_some_and(|p| matches!(p.anchor, crate::PerchAnchor::Vine(_)))
+                && a.eating && a.strike.is_none()
+                && fb.delivered_forward <= 1e-12
+                && glider::glider_fruit_in_reach(view, &fv, a, fauna.config.founder(founder)).is_none();
+            if pressed || fruit_stalled || vine_stalled {
                 *fauna.pressed.entry(id).or_default() += manifest.cadence_ticks().max(1);
             } else {
                 fauna.pressed.remove(&id);
@@ -1793,6 +1951,13 @@ fn controllers(
                 lure = 0.0;
                 lift = 0.0;
                 src = crate::Steer::Drop;
+            } else if let Some(go) = jump::wade_reflex(fauna, i, view) {
+                // WADE-OUT: held in water it may not wade, or on a pocket of its graph, it
+                // walks out through water short of its drown depth; as DROP, a last way out.
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Wade;
             }
         }
         if lure > 0.0 && sky.clock_on && !fauna.config.founder(founder).lure_daylight {
@@ -2692,6 +2857,8 @@ fn founder_act(
     // read against the body's own height by package mobility).
     let step_limits = phys.step_limits(view.config.voxel_m);
     let wall_friction = fauna.config.life.wall_friction;
+    // WADE-OUT: a body wading its way out admits the way's water (`jump::Wade`).
+    let wade_m = fauna.wade_limit(fauna.animals[i].id).map_or(phys.wade_depth_m(&geometry), |w| w.max(phys.wade_depth_m(&geometry)));
     let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
@@ -2701,7 +2868,7 @@ fn founder_act(
             &mut standing_y,
             &manifest,
             &geometry,
-            phys.wade_depth_m(&geometry),
+            wade_m,
             step_limits,
             wall_friction,
             held,
@@ -3070,7 +3237,7 @@ fn flyer_sip(
         return false;
     };
     forage::note_bite(fauna, i, phys, Food::Nectar, manifest.controller_period_s, effort, stock, None);
-    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, Food::Nectar, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -3167,6 +3334,21 @@ fn meets_capsule(
     if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
         return false;
     }
+    in_strike_band(view, striker, geometry, h, prey, &pg)
+}
+
+/// The strike capsule's height test ([`meets_capsule`]): the band from the striker's base up
+/// its `strike_height_m` meets the prey's cylinder (`pg`, its body), its base on its support
+/// face, or at its pose off the ground.
+pub(crate) fn in_strike_band(
+    view: &VoxelView<'_>,
+    striker: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    prey: &Animal,
+    pg: &crate::Body,
+) -> bool {
+    let v = view.config.voxel_m;
     let s0 = if striker.mobility.mode == crate::MobilityMode::Perched {
         striker.pose.y_m
     } else {
@@ -3191,7 +3373,7 @@ fn meets_capsule(
 /// The prey whose cylinder meets the **strike capsule** now — forward from the jaw by
 /// `strike_reach` over the jaw band — nearest the jaw first; `None` when there is none
 /// (predation §2.3). The prey list and the size window are [`crate::is_prey_of`]'s.
-fn prey_in_capsule(
+pub(crate) fn prey_in_capsule(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
@@ -3432,7 +3614,7 @@ const GLANCE_KEY: u64 = 0x6c61_6e63_6500_0001;
 /// and keeps it up for [`crate::PredationConfig::alert_s`], and a wound of 1 kills — the whole body to
 /// carrion on its face, a carcass record on the pool, departed `Killed { by }`. A prey
 /// that is gone already is left alone: it dies once.
-pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder) {
+pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder, view: Option<&VoxelView<'_>>) {
     let Ok(j) = fauna.animals.binary_search_by_key(&prey, |a| a.id) else {
         return;
     };
@@ -3452,14 +3634,14 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
     a.rest = None;
     a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(alert_s)).unwrap_or(u32::MAX);
     if a.wound >= 1.0 {
-        kill(fauna, flora, j, Departure::Killed { by });
+        kill(fauna, flora, j, Departure::Killed { by }, view);
     }
 }
 
 /// A death by `cause` of the body at `j`, now: an open gestation is resolved first, then
 /// the whole body goes to carrion on its face and the death is booked; a kill also lays
 /// the carcass record.
-fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
+fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: Option<&VoxelView<'_>>) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
     if fauna.animals[j].pack.is_some_and(|m| m.pup) {
@@ -3486,10 +3668,14 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     fauna.controllers.take(a.id);
     fauna.trapped.remove(&a.id);
     fauna.drop_plans.remove(&a.id);
-    fauna.free_riders(&a);
+    fauna.wading.remove(&a.id);
+    fauna.free_riders(&a, view);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
+        if let Some(r) = &mut fauna.census_readout {
+            r.predation.push(crate::CensusPredation { predator: by, prey: f, prey_body: a.body, kill: true });
+        }
         // HUNKER's readout: the kill by the prey's age class.
         if a.body < fauna.config.founder(f).core.birth_body {
             fauna.ledger.vigil.kills_juvenile[f.index()] += 1;
@@ -3934,7 +4120,7 @@ fn founder_feed(
     // FORAGE-LEAVE: what this patch offers the mouth, for the giving-up rule.
     forage::note_bite(fauna, i, phys, food, manifest.controller_period_s, effort, stock, None);
     // The bite this body, this stock and this stomach's room allow.
-    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, food, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -4334,6 +4520,9 @@ fn gestate(
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     a.reproduction.given += e.organic;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += e.organic;
+    }
     let (site, species, pose, founder, pack) = (a.site, a.species, a.pose, a.founder, a.pack);
     // A litter's parcel is split evenly; the last young takes what division left, so the
     // parcels sum to the escrow exactly.
@@ -4410,6 +4599,9 @@ pub(crate) fn whelp(fauna: &mut Fauna, view: &VoxelView<'_>, pack: u64, young: u
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
     a.reproduction.given += paid.organic;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += paid.organic;
+    }
     let (species, founder, mut pose) = (a.species, a.founder, a.pose);
     let v = view.config.voxel_m;
     let (x, z) = crate::pack::centre(den, v);
@@ -4783,6 +4975,9 @@ fn lay(
     // The clutch is paid out of the brood first (D1b).
     a.reproduction.brood = (a.reproduction.brood - paid).max(0.0).min(a.reserve);
     a.reproduction.given += paid;
+    if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
+        r.organic_given[f.index()] += paid;
+    }
     a.reproduction.refractory_ticks = rule.interval_ticks();
     a.reproduction.surplus_ticks = 0;
     a.reproduction.window.reset();
@@ -4897,20 +5092,42 @@ pub(crate) fn nest_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv:
     let (lo, hi) = (a.pose.y_m - flight.band_max_m, a.pose.y_m + flight.band_max_m);
     let mut near: Vec<(f64, cubarium_voxel_flora::Face)> = fv
         .cover
-        .iter()
-        .filter(|cf| !cf.face.dir.is_underside())
-        .filter_map(|cf| {
-            let f = cf.face;
+        .wall_faces_in_columns(move |x| {
+            let (dx, _) = crate::pose::wrapped_delta(
+                a.pose.x,
+                a.pose.z,
+                (f64::from(x) + 0.5) * v,
+                a.pose.z,
+                ring,
+            );
+            // A conservative broad phase: keep a voxel of padding at the boundary,
+            // then use the original distance calculation and cutoff below.
+            dx.abs() <= reach + v
+        })
+        .filter_map(|f| {
             let y = (f64::from(f.y) + 0.5) * v;
             if y < lo || y > hi {
                 return None;
             }
-            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
+            let (dx, dz) = crate::pose::wrapped_delta(
+                a.pose.x,
+                a.pose.z,
+                (f64::from(f.x) + 0.5) * v,
+                (f64::from(f.z) + 0.5) * v,
+                ring,
+            );
             let d = (dx * dx + dz * dz).sqrt();
             (d <= reach).then_some((d, f))
         })
         .collect();
-    near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    let order = |p: &(f64, cubarium_voxel_flora::Face), q: &(f64, cubarium_voxel_flora::Face)| {
+        p.0.total_cmp(&q.0).then(p.1.cmp(&q.1))
+    };
+    if near.len() > NEST_CANDIDATES {
+        near.select_nth_unstable_by(NEST_CANDIDATES, order);
+        near.truncate(NEST_CANDIDATES);
+    }
+    near.sort_unstable_by(order);
     let air = fauna.open_air(view, &flight);
     let mut target = None;
     // The nearest few that would take the clutch; a scan past them would cost a tick.
@@ -5770,6 +5987,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.controllers.take(*id);
         fauna.trapped.remove(id);
         fauna.drop_plans.remove(id);
+        fauna.wading.remove(id);
         fauna.forage.remove(id);
         fauna.rove.remove(id);
     }
@@ -5785,7 +6003,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     }
     // A host's riders are freed where it fell, whatever their size (parasite §5).
     for (a, _) in &dead {
-        fauna.free_riders(a);
+        fauna.free_riders(a, Some(view));
     }
 }
 
@@ -5969,6 +6187,9 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
         if let Some(pf) = fauna.animals[j].founder {
             fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
             fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
+            if let Some(r) = &mut fauna.census_readout {
+                r.predation.push(crate::CensusPredation { predator: founder, prey: pf, prey_body: fauna.animals[j].body, kill: false });
+            }
             // D2b readout: a patroller's strike its choice did not accept.
             let choosy =
                 fauna.config.hunt.patrol && (founder == crate::Founder::Lanternjaw && fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic);
@@ -5987,3 +6208,7 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
     // R3: a pack member calls as it strikes.
     crate::pack::call(fauna, i);
 }
+
+#[cfg(test)]
+#[path = "dispersal_tests.rs"]
+mod dispersal_tests;
