@@ -8,6 +8,7 @@ the first poll reconciles them from their rc.json files and unit states.
 
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
+import glob
 import json
 import os
 from pathlib import Path
@@ -160,12 +161,50 @@ class Daemon:
             elif not future and (force or self._due(f"probe:{host.name}", self.inv.get("probe_s", 300))):
                 self.probes[host.name] = self.pool.submit(self.probe, host)
 
+    PROC_STAT = "/proc/stat"
+    LAB_CGROUPS = "/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/*/lab-*.service/cpu.stat"
+
     def local_load(self):
         for host in self.inv.hosts.values():
             if host.kind == "local" and host.external_load:
-                mine = sum(Task.from_dict(json.loads(r["spec"])).threads
-                           for r in self.store.q("SELECT spec FROM tasks WHERE state='running' AND host=?", host.name))
-                host.external_threads = max(0.0, os.getloadavg()[0] - mine)
+                external = self.external_cpu()
+                if external is None:
+                    # No CPU sample yet (or no cgroups): loadavg minus labd's declared threads.
+                    mine = sum(Task.from_dict(json.loads(r["spec"])).threads
+                               for r in self.store.q("SELECT spec FROM tasks WHERE state='running' AND host=?",
+                                                     host.name))
+                    external = max(0.0, os.getloadavg()[0] - mine)
+                host.external_threads = external
+
+    def external_cpu(self):
+        """Cores busy outside labd's task units, smoothed: total busy CPU (/proc/stat) minus the CPU
+        the `lab-*` units used (their cgroups' cpu.stat). Loadavg counts runnable threads, so idle-class
+        sims queueing for CPU read as outside load and starved every build (2026-10-10)."""
+        try:
+            with open(self.PROC_STAT) as f:
+                fields = [int(x) for x in f.readline().split()[1:]]
+            busy = sum(fields[:3]) + sum(fields[5:8])  # user nice system, irq softirq steal
+            units = {}
+            for path in glob.glob(self.LAB_CGROUPS.format(uid=os.getuid())):
+                with open(path) as f:
+                    for line in f:
+                        if line.startswith("usage_usec"):
+                            units[path] = int(line.split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+        now = time.monotonic()
+        prev = getattr(self, "_cpu_sample", None)
+        self._cpu_sample = (now, busy, units)
+        if prev is None or now <= prev[0]:
+            return getattr(self, "_cpu_external", None)
+        dt = now - prev[0]
+        busy_cores = (busy - prev[1]) / os.sysconf("SC_CLK_TCK") / dt
+        # A unit first seen in this interval counts its whole usage; one that ended drops out.
+        lab_usec = sum(u - prev[2].get(p, 0) for p, u in units.items() if u >= prev[2].get(p, 0))
+        sample = max(0.0, busy_cores - lab_usec / 1e6 / dt)
+        last = getattr(self, "_cpu_external", None)
+        self._cpu_external = sample if last is None else 0.8 * last + 0.2 * sample
+        return self._cpu_external
 
     # ------------------------------------------------------------------ jobs
     def job(self, job_id, inputs=None):
@@ -601,11 +640,21 @@ class Daemon:
         usage = self.usage()
         live_mem = mem_available_gb()
         rows = self.store.q(
-            "SELECT t.*, j.priority AS jp FROM tasks t JOIN jobs j ON t.job=j.id "
-            "WHERE t.state='pending' AND j.state='running' ORDER BY j.priority DESC, j.submitted, t.seq")
+            "SELECT t.*, j.priority AS jp, j.kind AS jk FROM tasks t JOIN jobs j ON t.job=j.id "
+            "WHERE t.state='pending' AND j.state='running' ORDER BY j.submitted, t.seq, j.id")
+        # Stable sorting preserves FIFO when job + task priorities are equal.
+        rows = [(row, Task.from_dict(json.loads(row["spec"]))) for row in rows]
+        # Tasks planned before kinds marked themselves (build lane) take their job's kind.
+        for row, task in rows:
+            task.meta.setdefault("kind", row["jk"])
+        rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
         states = {}
-        for row in rows:
-            task = Task.from_dict(json.loads(row["spec"]))
+        reservations = {}
+        now = self.clock()
+        for row, task in rows:
+            priority = row["jp"] + task.priority
+            key = dict(job=row["job"], name=row["name"])
+            self.store.update("tasks", key, reason=None)
             if row["job"] not in states:
                 states[row["job"]] = {r["name"]: r["state"] for r in self.store.q(
                     "SELECT name, state FROM tasks WHERE job=?", row["job"])}
@@ -617,9 +666,43 @@ class Daemon:
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
+                if host.name in reservations:
+                    if any(priority >= reserved_priority or deadline is None or task.est_h is None
+                           or task.est_h <= 0 or now + task.est_h * 3600 > deadline
+                           for reserved_priority, deadline in reservations[host.name]):
+                        continue
                 if self.launch(row, task, host, group):
                     usage[host.name].add(task, group)
                 break
+            else:
+                eligible = [h for h in candidates if h.up and could_ever_fit(task, h)
+                            and (not task.l3 or h.groups)]
+                if eligible:
+                    host = eligible[0]
+                    reservations.setdefault(host.name, []).append(
+                        (priority, self.reservation_start(task, host, live_mem, now)))
+                    self.store.update("tasks", key,
+                                      reason=f"waiting for {task.threads} threads on {host.name} (reserved)")
+
+    def reservation_start(self, task, host, live_mem, now):
+        """Earliest estimated fit; unestimated/overdue tasks and external load stay charged."""
+        running = []
+        for row in self.store.q("SELECT spec, grp, started FROM tasks WHERE state='running' AND host=?", host.name):
+            other = Task.from_dict(json.loads(row["spec"]))
+            end = row["started"] + other.est_h * 3600 if row["started"] is not None and other.est_h else None
+            running.append((other, row["grp"], end if end is not None and end > now else None))
+        for end in sorted({end for _, _, end in running if end is not None}):
+            remaining = Usage()
+            freed_mem = 0
+            for other, group, finish in running:
+                if finish is None or finish > end:
+                    remaining.add(other, group)
+                else:
+                    freed_mem += other.mem_gb
+            memory = live_mem + freed_mem if host.kind == "local" else None
+            if fits(task, host, remaining, memory) is not None:
+                return end
+        return None
 
     def ensure_tools(self, host, transport):
         if host.name in self.tools:

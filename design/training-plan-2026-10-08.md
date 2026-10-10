@@ -1086,6 +1086,33 @@ control and the reward accounting; display targets after seeing results.
      - CAPGNAWER-CAPS (Opus) is diagnosing why, keeping Wrysk's mechanism A.
      - HUNT-ESCAPE (Opus) is building role call 8 B (bellwings react and flush, so ground hunters usually
        miss; the lanternjaw lure must still work) and grown lanternjaws wounding attackers.
+   - SHREDDER-NEST check (wide, 4 h): the walk-off frees breeding. The founders laid 57 eggs in 45 min
+     (12 on main), and N reached 130-157 at 4 h, still growing about 17/h (main 21-45, target about 27-80).
+     None starved, litter grew 1.3-3.4x in every world, and lanternjaws took 0-14. Held unmerged.
+     - Wrysk (2026-10-10), option A: seedporters eat shredders ("sure, A works"). SP-SHREDDER (Codex) is
+       building it on shredder-nest.
+     - Also: "lanternjaws needa step up too though. they be slackin here. seedporters are now more
+       dangerous than they are". LJ-HUNT (Opus) is diagnosing, on lj-hostswitch: is it numbers or
+       per-capita hunting, and why adults don't lay? It fixes within the role and brings any role-shape
+       change to him.
+   - LABD-REMOTE merged 307d760e (Wrysk ran the merge and restart): ab, batch and cargo-test tasks place
+     on eidolon. HUNT-ESCAPE's check is the first to run there.
+   - Wrysk (2026-10-10) pointed to `design/handoffs/vault-spacing-2026-10-10.md`. SHADE-REAL (realistic
+     Beer-Lambert shade for every plant, equal-height crowns shading each other, winged vaulttree seeds)
+     will thin groves and shift the plant base the web is balanced on.
+   - SHADE-REAL built (branch `shade-real` 7fcf311c): Beer-Lambert shade from leaf area (k 0.6, SLA by growth
+     form), level crowns sharing light by half, and a vaulttree WALD samara kernel with a mean of about 10 m.
+     A static probe on the eidolon save showed vaulttrees 442 -> about 150, umbrellafrond -80 %, lanternberry
+     -30..-55 %. Checks queued (8 seeds x 1 h, 4 seeds x 6 h). Wrysk: "agree that this is the right
+     direction. for plants. the numbers were too high and didnt even match the display. also explains why
+     there was way too much plant food, partly".
+   - LJ-HUNT (09471216): lanternjaws are few, not weak. Per capita they kill 1.3-2.2/h, about like a
+     seedporter. Three bugs fixed: the lunge loomed at a lured bellwing, the lunge stepped under hovering
+     prey, and the night wait ignored prey in reach. Check queued.
+     - Wrysk (2026-10-10): "do (a), and (b). 210 is insane to get adults. bugs dont take like 4 months to
+       grow. idk if we need (c) after (a)." So the egg-bank hatch goes 1/3 -> 2/3, and hatch-to-adult targets
+       about a month (50-60 sim-min) against minute 210 now. Seedporter juvenile take is parked.
+       LJ-GROW (Opus) is building it.
    - Library 2026-10-09 done: 8 seeds x 600 min, all exit 0 (built before the role changes).
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,

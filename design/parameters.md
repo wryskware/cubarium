@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2774 rows)
+**`fauna.*`** (2777 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -4284,4 +4284,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.parasite_take_body_per_day` | 2.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
 | `fauna.parasite_host_bear_per_day` | 0.5 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
 | `fauna.parasite_detach_body_fraction` | 0.28 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
+| `fauna.parasite_switch` | (absent) | switch | [0, 1] |  | N | decision | LJ-HOSTSWITCH: a rider that outgrew its host below drop-off size looks for one that bears it before going free (false: it goes free) |
+| `fauna.parasite_switch_radius_m` | 3.0 | m | [0, inf) | 1–8 | N | placeholder | LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it |
+| `fauna.parasite_switch_give_up_s` | 600.0 | s | [0, inf) | 60–3600 log | N | placeholder | LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free |
 | `fauna.lineage_body_ceiling` | 2500 | bodies | [0, inf) |  | N | decision | COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off) |

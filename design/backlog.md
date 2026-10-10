@@ -400,3 +400,14 @@ nondeterminism (set or hash ordering in the voxelizer, a float tie at a cell bou
 Blender's own evaluation order) before the next full rebake, so a rebake changes only what
 it should.
 
+
+## 22. The pack oracle can't check colour fades (found 2026-10-10, PACK-ORACLE)
+
+With `light.colour_fade_s` on, `pack_oracle` fails on a day state partway through a fade:
+a glassfilm floor mark draws the same bytes with slightly different colours. The cause is
+not verified. The likely one: the change-only pack keeps its style palette, and the full
+pack builds a new one every pack. Swap waits depend on free style slots (`voxel.rs` ~1787),
+so the two packs can decide waits differently. The display uses the change-only pack, so the
+picture is not wrong, but the oracle can only check the packer with fades off
+(`--set 'light.colour_fade_s = 0.0'` passes 1200 ticks). Either the full pack carries the
+fade state, or the oracle compares fading cells by their endpoints.

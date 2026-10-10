@@ -91,9 +91,10 @@ use snapshot::{Hint, Mirror, PackSnapshot};
 /// counts remain a host override. No CPU identifiers or machine topology are assumed.
 pub const WORKER_RESERVE: usize = 4;
 
-/// GLOW-EASE round 2: style slots kept free of new colour swaps. A swap's blend takes a
-/// slot of its own while it runs; with fewer than this many free, a swap shows at once
-/// rather than push a texel onto the overflow slot.
+/// GLOW-EASE round 2: style slots kept free of colour swaps' blends, for the styles a pack
+/// makes beside them. A swap's group takes a slot while it runs (two the pack it moves
+/// on); one that does not fit waits (round 3: the cell keeps its old colours,
+/// `StyleFades::draw`) rather than push texels onto the overflow slot.
 const STYLE_FADE_ROOM: usize = 8;
 
 /// The knobs `cubarium voxel --sink gpu` takes.
@@ -310,6 +311,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         };
         packer.animals.set_hunker_s(cfg.hunker_s);
         packer.animals.set_meal_flash(cfg.meal_flash);
+        packer.animals.set_condition_fade_s(cfg.light.colour_fade_s);
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
@@ -1371,6 +1373,9 @@ struct Packer {
     /// The cells whose colour or tile swap began this pack, as voxels drawn at (a flush
     /// vine's rock face, not its air cell): for captures.
     switched: Vec<u32>,
+    /// Round 3: the vine cells whose waiting third tile began fading in this pack (their
+    /// texels go back to their own tile): packed again.
+    vine_restarted: Vec<u32>,
     /// The change-only pack's state.
     delta: Delta,
 }
@@ -1611,6 +1616,7 @@ impl Packer {
             vine_fades: VineFades::new(emission.colour_fade_s),
             fade_now: 0.0,
             switched: Vec::new(),
+            vine_restarted: Vec::new(),
             animals,
             models,
             figures: false,
@@ -1777,9 +1783,13 @@ impl Packer {
         // GLOW-EASE round 2: this pack's time on the presenter's clock.
         self.fade_now = candle_s;
         self.switched.clear();
-        self.style_fades.begin(candle_s);
+        // Round 3: the slots the swaps' blends may take this pack (`StyleFades`).
+        let free = MAX_STYLES.saturating_sub(self.palette.live() + STYLE_FADE_ROOM);
+        self.style_fades.begin(candle_s, free);
         self.vine_fades.begin(candle_s);
-        self.vine_fades.retire(candle_s);
+        let restarted = &mut self.vine_restarted;
+        restarted.clear();
+        self.vine_fades.retire(candle_s, |c| restarted.push(c));
         // The terrain first: a moved terrain (or another world) packs in full.
         let same_snapshot = hint.terrain.zip(self.roof_snapshot.as_ref())
             .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
@@ -2269,8 +2279,8 @@ impl Packer {
     /// `key`'s, unless its colours are part way through a swap ([`StyleFades`]), when its
     /// colours are the blend this pack. `held` is what it drew last pack ([`Packer::held_key`]):
     /// a swap from it begins when it differs in colour alone, between keys of the same texture
-    /// role and faces, and not while the style table is all but full (the swap then shows at
-    /// once).
+    /// role and faces by more than a visible step (`colour_fade::close`); one the style
+    /// table has no room for waits, the cell keeping what it drew (`StyleFades::draw`).
     fn faded_key(&mut self, i: usize, t: &VoxelTexel, key: Option<StyleKey>, held: Option<StyleKey>) -> Option<StyleKey> {
         if !self.style_fades.on() {
             return key;
@@ -2285,9 +2295,6 @@ impl Packer {
         } else {
             held.filter(|hk| hk.1 == k.1 && hk.2 == k.2 && hk.0 != k.0).map(|hk| hk.0)
         };
-        if held.is_some() && self.palette.live() + STYLE_FADE_ROOM >= MAX_STYLES {
-            return key;
-        }
         let style = self.style_fades.draw(cell, held, k.0, self.fade_now);
         if held.is_some() && self.style_fades.fading(cell) {
             self.switched.push(cell);
@@ -2435,11 +2442,14 @@ impl Packer {
     /// The vine's tile texel over `t`, if the vine has a cell there that nothing else
     /// claimed: an organism, a stand or a ground mark in the same voxel wins.
     #[inline]
-    fn with_vine(t: VoxelTexel, c: &VineCell) -> Option<VoxelTexel> {
+    /// `tile`: the tile its texel carries in place of its own while a third tile waits
+    /// (`VineFades::drawn`).
+    fn with_vine(t: VoxelTexel, c: &VineCell, tile: Option<(u8, u8)>) -> Option<VoxelTexel> {
         // A head's faceless cell gives way to a vine as it does to a plant.
         let soft = t.part() == PART_ANIMAL_INTERIM && t.glyph() == 0 && sleep::is_soft_mark(t.0[2]);
         if t.material() == 0 && (t.part() == PART_NONE || soft) {
             let (glyph, b, a) = c.texel_bytes();
+            let (b, a) = tile.unwrap_or((b, a));
             return Some(t.with_vine(glyph, b, a));
         }
         None
@@ -2591,7 +2601,7 @@ impl Packer {
         for c in self.vines.iter().filter(|c| c.kind.tiled()) {
             let i = VoxelStaging::index(w, h, c.x, c.y, c.z);
             self.vine_at.insert(i as u32, *c);
-            if let Some(t) = Packer::with_vine(self.delta.master[i], c) {
+            if let Some(t) = Packer::with_vine(self.delta.master[i], c, self.vine_fades.drawn(i as u32)) {
                 self.delta.master[i] = t;
             }
         }
@@ -2743,6 +2753,10 @@ impl Packer {
         for i in self.style_fades.cells() {
             delta.mark(i);
         }
+        // Round 3: a vine cell whose waiting tile began fading in carries its own again.
+        for &i in &self.vine_restarted {
+            delta.mark(i);
+        }
         lap!("plant cells");
         // The animals: where they were and where they are.
         let index = |(x, y, z): (u32, u32, u32)| VoxelStaging::index(w, h, x, y, z) as u32;
@@ -2785,7 +2799,7 @@ impl Packer {
             let base = texel_of(mats, view.material[src], view.free[src], view.pore[src], PART_NONE, 0, 0);
             let (mut t, key) = self.overlay(view, iu, w, h).unwrap_or((base, None));
             if let Some(c) = self.vine_at.get(&i)
-                && let Some(v) = Packer::with_vine(t, c)
+                && let Some(v) = Packer::with_vine(t, c, self.vine_fades.drawn(i))
             {
                 t = v;
             }

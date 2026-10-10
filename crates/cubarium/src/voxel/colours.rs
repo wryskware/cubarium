@@ -658,6 +658,20 @@ pub fn vine_emission(accent: super::vine::Accent) -> Option<Rgb> {
     accent.emissive().then_some(BELL_MOUTH)
 }
 
+/// A crown cell of a cured stand (drought dormancy) drawn from its model (GLOW-EASE round
+/// 3: the model path ignored `cured`, so model-drawn springturf never browned): the
+/// species' cured colour `straw` in place of its leaf, as deep as the cell's own body sits
+/// below the leaf ramp's lit tip (its height band and part shade kept), shaded as any
+/// foliage swatch is. The glyph path's crown is `straw` itself.
+pub fn cured(species: Species, sw: Swatch, straw: Rgb) -> Swatch {
+    let luma = |c: Rgb| {
+        let ch = |s: u32| ((c >> s) & 0xFF) as f32;
+        0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0)
+    };
+    let k = (luma(sw.body) / luma(recipe(species).leaf.1).max(1.0)).clamp(0.0, 1.0);
+    shaded(lerp(0, straw, k), None)
+}
+
 /// A body colour with its hue-shifted shadow and a glint.
 fn shaded(body: Rgb, glint: Option<Rgb>) -> Swatch {
     Swatch {
@@ -678,6 +692,28 @@ pub fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// GLOW-EASE round 3: a model crown cell of a cured stand takes the cured colour, no
+    /// brighter than it, keeping the leaf ramp's order (a lower band is no lighter).
+    #[test]
+    fn a_cured_model_crown_takes_the_cured_colour_at_its_own_depth() {
+        let straw: Rgb = 0x00C2_A15A;
+        let luma = |c: Rgb| 0.2126 * ((c >> 16) & 255) as f32 + 0.7152 * ((c >> 8) & 255) as f32 + 0.0722 * (c & 255) as f32;
+        let ch = |c: Rgb, s: u32| ((c >> s) & 255) as f32;
+        let mut last = -1.0;
+        for b in 0..BANDS {
+            let sw = plant(Species::Springturf, Tag::Foliage(0), 0, b, false);
+            let c = cured(Species::Springturf, sw, straw);
+            assert!(luma(c.body) <= luma(straw) + 1.0, "no brighter than the cured colour");
+            // Straw's hue: its channels in straw's proportions (to rounding).
+            let k = luma(c.body) / luma(straw);
+            for s in [16, 8, 0] {
+                assert!((ch(c.body, s) - k * ch(straw, s)).abs() <= 2.0, "band {b}: {:06x}", c.body);
+            }
+            assert!(luma(c.body) >= last - 1.0, "the ramp's order is kept");
+            last = luma(c.body);
+        }
+    }
 
     #[test]
     fn bands_run_from_the_base_to_the_tip() {

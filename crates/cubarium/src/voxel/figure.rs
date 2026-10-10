@@ -1055,7 +1055,7 @@ fn feet(animal: &Animal, v: f64) -> [f64; 3] {
 
 /// A glyph body (no baked model: the dev-mode bodies, a rider): its cells as
 /// [`animal::cells_of_local`] lays them, in its own frame where it has one.
-fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], models: &mut FigureModels, flash: f32) -> Option<Spec> {
+fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], models: &mut FigureModels, flash: f32, cond: f32) -> Option<Spec> {
     let placed = animal::cells_of_local(animal, fauna.config, 0, v);
     if placed.is_empty() {
         return None;
@@ -1086,7 +1086,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
         .collect();
     let key = hash_of(&cells.iter().map(|c| (c.offset, c.glyph)).collect::<Vec<_>>());
     let model = models.intern(key, || (cells, 0))?;
-    let style = animal::animal_style(animal, flash);
+    let style = animal::animal_style(animal, flash, cond);
     let (pos, orient) = if framed {
         (at, Orient::Ground(animal.pose.heading_rad))
     } else {
@@ -1112,19 +1112,17 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
 /// host's feet lifted by `rider_lift`), facing `heading`, painted as a founder's model is
 /// (`animal::model_colours`). Under the animal's body key, so its drop-off to the free
 /// juvenile's model is the track's model-swap fade.
-fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models: &mut FigureModels, flash: f32, emission: bool) -> Option<Spec> {
+fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models: &mut FigureModels, flash: f32, cond: f32, emission: bool) -> Option<Spec> {
     let cells = animal::rider_cells(lib, a)?;
     let founder = a.founder?;
     let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None, None))?;
-    let starving = animal::is_starving(a);
-    let wounded = animal::is_wounded(a) && !starving;
     let palette = models
         .info(model)
         .paints
         .iter()
         .map(|p| match *p {
             Paint::Coat { material, band, accent } => {
-                let (style, emit) = animal::model_colours(founder, material, band, accent, starving, wounded, flash);
+                let (style, emit) = animal::model_colours(founder, material, band, accent, cond, flash);
                 PaletteEntry { base: style.wood, emit: emit.filter(|_| emission).map(srgb_linear) }
             }
             Paint::Style | Paint::Flat => PaletteEntry::default(),
@@ -1159,6 +1157,9 @@ pub fn specs(
         }
         let flash_level = animals.flash_level(a);
         let flash = animals.flash_amount(flash_level);
+        // GLOW-EASE round 3: the condition its colours show, eased (continuous here: a
+        // figure's palette is its own).
+        let cond = animals.condition_of(a);
         // A rider on its host's back: its own box, at the host's place, lifted.
         if let Some(hold) = a.attached {
             let (Some(host), Some(lift)) = (fauna.animal(hold.host), animal::rider_lift(&fauna, hold.host, v)) else {
@@ -1168,11 +1169,11 @@ pub fn specs(
             at[1] += f64::from(lift);
             // Its baked larva, where the library has one: on the host's centre line, facing
             // the host's heading, in its lineage's coat. Else the glyph.
-            if let Some(s) = lib.and_then(|lib| larva_spec(a, lib, at, host.pose.heading_rad, models, flash, emission)) {
+            if let Some(s) = lib.and_then(|lib| larva_spec(a, lib, at, host.pose.heading_rad, models, flash, cond, emission)) {
                 out.push(s);
                 continue;
             }
-            if let Some(mut s) = glyph_spec(a, &fauna, v, at, models, flash) {
+            if let Some(mut s) = glyph_spec(a, &fauna, v, at, models, flash, cond) {
                 if let Orient::Ground(_) = s.orient {
                     s.orient = Orient::Ground(host.pose.heading_rad);
                     s.pos = at;
@@ -1187,7 +1188,7 @@ pub fn specs(
             .map(|c| c.as_slice())
             .or_else(|| lib.and_then(|lib| animal::model_cells(lib, fauna.config, a)));
         let (Some(cells), Some(founder)) = (baked_cells, a.founder) else {
-            if let Some(s) = glyph_spec(a, &fauna, v, at, models, flash) {
+            if let Some(s) = glyph_spec(a, &fauna, v, at, models, flash, cond) {
                 out.push(s);
             }
             continue;
@@ -1216,14 +1217,12 @@ pub fn specs(
             continue;
         };
         let info = models.info(model);
-        let starving = animal::is_starving(a);
-        let wounded = animal::is_wounded(a) && !starving;
         let palette = info
             .paints
             .iter()
             .map(|p| match *p {
                 Paint::Coat { material, band, accent } => {
-                    let (style, emit) = animal::model_colours(founder, material, band, accent, starving, wounded, flash);
+                    let (style, emit) = animal::model_colours(founder, material, band, accent, cond, flash);
                     PaletteEntry {
                         base: style.wood,
                         emit: emit.filter(|_| emission).map(srgb_linear),

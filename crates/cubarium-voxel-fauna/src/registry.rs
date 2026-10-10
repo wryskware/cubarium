@@ -506,6 +506,13 @@ fn rows() -> Vec<Row> {
             .search(0.1, 2.0).log().grade("N"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
             .search(0.15, 0.5).grade("N"),
+        // LJ-HOSTSWITCH (Wrysk 2026-10-10: an outgrown larva looks for a bigger host).
+        r("fauna.parasite_switch", "switch", Range::fraction(), "LJ-HOSTSWITCH: a rider that outgrew its host below drop-off size looks for one that bears it before going free (false: it goes free)")
+            .grade("N").prov("decision").optional(),
+        r("fauna.parasite_switch_radius_m", "m", Range::nonneg(), "LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it")
+            .search(1.0, 8.0).grade("N"),
+        r("fauna.parasite_switch_give_up_s", "s", Range::nonneg(), "LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free")
+            .search(60.0, 3600.0).log().grade("N"),
         r("fauna.lineage_body_ceiling", "bodies", Range::nonneg(), "COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off)")
             .grade("N").prov("decision"),
     ]);

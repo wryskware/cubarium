@@ -1943,8 +1943,11 @@ float vineDraw(uvec4 vv, int x, int level, int zc, int z, int dx, int r,
                inout vec3 acc, inout vec3 trans) {
     int dy = S - 1 - r;
     vec4 t = vineTexel(vv, x, level, zc, dx, dy);
+    // The cell's emitter table entry, looked up once for its old tile and its emission.
+    bool en = LIT && vineEmits(t);
+    int ent = (en || (uint(u.view.w) & EMIT_VINES) != 0u) ? cellEntry(x, level, zc) : -1;
     uvec4 o = vv;
-    float s = cellVineFrom(x, level, zc, o);
+    float s = entryVineFrom(ent, o);
     float cn = t.a >= 0.5 ? 1.0 - s : 0.0;
     vec4 p = vec4(0.0);
     float co = 0.0;
@@ -1955,29 +1958,27 @@ float vineDraw(uvec4 vv, int x, int level, int zc, int z, int dx, int r,
     float cover = cn + co;
     if (cover <= 0.0) { return 0.0; }
     float h = hazeAt(float(z));
-    vec3 col = vec3(0.0);
+    // GLOW-EASE: a flagged mouth texel draws the host's colour for the cell this frame
+    // over its pigment's share. The old tile fades out as its pigment (an emitter's glow
+    // went before its tile). Round 3: the two pigments are lit together, once: the face's
+    // light is affine in the pigment (`litBy`), so their weighted mean lit equals the
+    // weighted mean of each lit, at half the walk's lighting code.
     vec3 e = vec3(0.0);
     bool em = false;
-    if (cn > 0.0) {
-        // GLOW-EASE: a flagged mouth texel draws the host's colour for the cell this frame
-        // over its pigment's share.
-        bool en = LIT && vineEmits(t);
-        vec3 c = t.rgb;
+    float wn = cn;
+    if (cn > 0.0 && en) {
+        e = t.rgb;
         float on = 1.0;
-        if (en) { e = t.rgb; cellEmit(x, level, zc, e, on); }
-        if (LIT && (!en || on < 1.0)) {
-            c = shadeFront(t.rgb, x, level, z, dx, dy, canopyAt(x, z - 1, level));
-        }
-        if (en) {
-            c = (on < 1.0 ? c * (1.0 - on) : vec3(0.0)) + e;
-            em = any(greaterThan(e, vec3(0.0)));
-        }
-        col += cn * c;
+        entryEmit(ent, e, on);
+        wn = cn * (1.0 - on);
+        em = any(greaterThan(e, vec3(0.0)));
     }
-    if (co > 0.0) {
-        // The old tile fades out as its pigment: an emitter's glow went before its tile.
-        vec3 c = LIT ? shadeFront(p.rgb, x, level, z, dx, dy, canopyAt(x, z - 1, level)) : p.rgb;
-        col += co * c;
+    vec3 col = cn * e;
+    float wp = wn + co;
+    if (wp > 0.0) {
+        vec3 pig = (wn * t.rgb + co * p.rgb) / wp;
+        if (LIT) { pig = shadeFront(pig, x, level, z, dx, dy, canopyAt(x, z - 1, level)); }
+        col += wp * pig;
     }
     if (cover >= 0.999) {
         acc += trans * hazed(col, h);
@@ -2038,31 +2039,38 @@ void main() {
         // comes first walking front to back.
         if (level < H) {
             uvec4 v = at(x, level, z);
-            if (solidV(v)) {
-                // A covered rock face looking at the camera: its vine, carried by the air
-                // cell in front, is drawn flush on the rock, which shows through its holes.
+            bool solid = solidV(v);
+            // The vine drawn here, if any (one call site: GLOW-EASE round 3 keeps the walk's
+            // code small). A covered rock face looking at the camera: its vine, carried by
+            // the air cell in front, is drawn flush on the rock, which shows through its
+            // holes. An open cell: a plant stands in the void and the water of its own cell
+            // blends over it (a trunk in a pool is submerged, so the water is nearer than
+            // the plant), then a curtain or a sliver of vine.
+            uvec4 vc = v;
+            int vz = z;
+            bool vineHere = false;
+            if (solid) {
                 if (z > 0 && u.tex.y != 0) {
-                    uvec4 f = at(x, level, z - 1);
-                    if (isVine(f) && vineKind(f) == VINE_FLUSH
-                        && vineDraw(f, x, level, z - 1, z, dx, r, acc, trans) >= 1.0) {
-                        zHit = float(z); break;
-                    }
+                    vc = at(x, level, z - 1);
+                    vz = z - 1;
+                    vineHere = isVine(vc) && vineKind(vc) == VINE_FLUSH;
                 }
+            } else {
+                if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
+                if (isVine(v)) {
+                    int k = vineKind(v);
+                    int q = max(1, S / 4);
+                    vineHere = k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
+                        || (k == VINE_SLIVER_R && dx >= S - q);
+                }
+            }
+            if (vineHere && vineDraw(vc, x, level, vz, z, dx, r, acc, trans) >= 1.0) {
+                zHit = float(z); break;
+            }
+            if (solid) {
                 acc += trans * blockFront(x, level, z, v, r, dx);
                 trans = vec3(0.0);
                 zHit = float(z); break;
-            }
-            // A plant stands in the void and the water of its own cell blends over it: a
-            // trunk in a pool is submerged, so the water is nearer than the plant.
-            if (v.g != 0u) { waterAt(x, level, z, v, px.y, acc, trans); }
-            if (isVine(v)) {
-                int k = vineKind(v);
-                int q = max(1, S / 4);
-                if ((k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
-                    || (k == VINE_SLIVER_R && dx >= S - q))
-                    && vineDraw(v, x, level, z, z, dx, r, acc, trans) >= 1.0) {
-                    zHit = float(z); break;
-                }
             }
             int p = partOf(v);
             if (p != 0 && !walkSkipsPlant(v, trans)) {
