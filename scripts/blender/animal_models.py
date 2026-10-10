@@ -819,11 +819,14 @@ def littershredder():
 
     def Z(py):
         return (380 - py) * kz
-    # the plough: a blunt wedge, low at its front lip and highest at its rear
+    # the plough: a blunt wedge, low at its front lip and highest at its rear (the rig's
+    # `plough` bone, FEED-ROLLOUT)
+    start = len(L.ORG)
     plough = [(30, 315, 335, 0.03), (60, 270, 338, 0.045), (110, 190, 340, 0.055), (170, 120, 336, 0.06),
               (230, 98, 330, 0.0625), (285, 108, 322, 0.06)]
     loft([(X(px), 0.0, (Z(t) + Z(b)) / 2, w, (Z(t) - Z(b)) / 2) for px, t, b, w in plough],
          [c("a_main")], lambda f, s, p: 0, nring=40, nseg=20)
+    bone_of(start, "plough")
     # the plates: gold, each with a brown band across its rear third, tapering to the tail
     plates = [(330, 112, 316, 0.06), (430, 135, 313, 0.057), (525, 155, 310, 0.052),
               (622, 182, 305, 0.046), (692, 210, 297, 0.038), (735, 232, 288, 0.03)]
@@ -847,9 +850,12 @@ def littershredder():
             tube([knee, ankle], 0.0068, 0.006, c("a_pale"), seg=8)
             tube([ankle, (x0 + 0.006, sy * 0.061, 0.0)], 0.0055, 0.0015, c("a_foot"), seg=6)
     # two pale feelers curling down from under the plough's lip
+    # (the rig's `feeler_l` / `feeler_r`, +y the left)
     for sy in (-1, 1):
+        start = len(L.ORG)
         tube([(X(70), sy * 0.012, Z(330)), (X(45), sy * 0.016, Z(352)), (X(32), sy * 0.018, Z(372)),
               (X(38), sy * 0.018, Z(384))], 0.004, 0.0025, c("a_pale"), seg=6)
+        bone_of(start, f"feeler_{LJ_SIDE[sy]}")
     # one magenta sensor spot on the second plate, near its top
     ell((X(307), 0.0, Z(118)), (0.008, 0.006, 0.004), c("magenta"))
 
@@ -882,6 +888,8 @@ def ripple_snail():
                 (-0.012 + 0.0885 * rr * math.cos(a1), 0.0845 * rr * math.sin(a1), z), 0.0028,
                 mat=c("a_mark"), seg=6)
     # the open front: a dark opening under the rim, two palps reaching forward and down
+    # (the rig's `front` bone, FEED-ROLLOUT)
+    start = len(L.ORG)
     ell((0.076, 0, 0.033), (0.016, 0.034, 0.011), c("a_head"))
     for sy, reach in ((-1, 1.0), (1, 0.85)):
         root = (0.07, sy * 0.014, 0.034)
@@ -889,6 +897,7 @@ def ripple_snail():
         tip = (0.112 * reach + 0.012 * (1 - reach), sy * 0.03, 0.011)
         tube([root, mid, tip], 0.0065, 0.006, c("a_limb"), seg=8)
         ell(tip, (0.014, 0.009, 0.0075), c("a_glow"), rot=rz(sy * 18))
+    bone_of(start, "front")
 
 
 # --- capgnawer · rose-mauve bark mantle (0.25 x 0.21 x 0.19 m) ------------------------------
@@ -934,7 +943,9 @@ def capgnawer():
         for ob in L.ORG[start:]:
             ob.data.transform(tilt)
     ell((0.0, 0, 0.065), (0.11, 0.09, 0.055), c("a_limb"))           # the body under the mantle
-    # the face under the cleft
+    # the face under the cleft (the rig's `front` bone, FEED-ROLLOUT: face, mouth,
+    # mandibles and sensor patches; the lobes, body and legs stay on the root)
+    start = len(L.ORG)
     ell((0.105, 0, 0.062), (0.035, 0.05, 0.035), c("a_limb"))
     box((0.139, 0, 0.063), (0.006, 0.005, 0.042), c("a_dark"))       # the vertical mouth
     for z in (0.078, 0.064, 0.05):
@@ -943,6 +954,7 @@ def capgnawer():
     for s2 in (-1, 1):
         ell((0.13, s2 * 0.032, 0.078), (0.007, 0.012, 0.011), c("magenta"))
         ell((0.133, s2 * 0.027, 0.048), (0.005, 0.007, 0.007), c("magenta"))
+    bone_of(start, "front")
     # six short stout legs, four pale toes each
     for px in (0.07, -0.01, -0.09):
         for s2 in (-1, 1):
@@ -1565,6 +1577,142 @@ def bw_feed_clip():
             pb.location = Vector((0.0, shift, 0.0))  # the bone's own +y: along it, head to tail
             pb.keyframe_insert("location", frame=f)
     return sample_clip(ob, bones, n, BW_FEED_FPS)
+
+
+# --- the small ground feeders' rigs and clips (FEED-ROLLOUT, 2026-10-10) -----------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §The small ground feeders; placeholders,
+# Wrysk directs the real clips. At 0.2-0.4 m a small part owns 0-3 cells, so each clip is
+# the front of the body: a root and a front bone (the littershredder's feelers their own
+# bones under the plough). As the lanternjaw's: each action is the **loop** in the reached
+# posture, and the reach and return are the renderer's clip weight. Builder axes: +x
+# forward, +y the left, z up, the feet on z = 0, reference metres. A turn of + about +y
+# dips what lies ahead of its pivot.
+
+
+def small_feed_clip(name, bones, fps, n, pose_at):
+    """A small feeder's loop of `n` frames at `fps` (`sample_clip`). `pose_at(t)` gives
+    at `t` seconds ({bone: 3x3 turn relative to its parent}, the root's move, {bone: its
+    pivot's move}), armature space, metres."""
+    ob = rig_armature(name, bones, fps)
+    for f in range(n):
+        turns, root_shift, shifts = pose_at(f / fps)
+        key_turns(ob, bones, f, turns, root_shift)
+        for bname, shift in shifts.items():
+            pb = ob.pose.bones[bname]
+            pb.location = pb.bone.matrix_local.to_quaternion().inverted() @ shift
+            pb.keyframe_insert("location", frame=f)
+    return sample_clip(ob, bones, n, fps)
+
+
+def bump(u):
+    """0 -> 1 -> 0 over u in [0, 1], eased (sin^2)."""
+    return math.sin(math.pi * min(max(u, 0.0), 1.0)) ** 2
+
+
+# The capgnawer: the front (face, mouth, mandibles, sensor patches) turns about the face's
+# rear (`CG_PIVOT`). Reached: dipped `CG_DIP_DEG` and moved `CG_DIP_MOVE` toward the cap
+# ahead. The loop: three rasps of `CG_RASP_S` (the front out `CG_RASP` and back, eased),
+# then a lift of `CG_LIFT_S` (the front rising `CG_LIFT_DEG` of its dip and settling back).
+CG_FEED_FPS = 30
+CG_PIVOT = (0.08, 0.0, 0.062)
+CG_DIP_DEG = 20.0
+CG_DIP_MOVE = (0.005, -0.01)      # (forward, up), metres
+CG_RASP_S = 0.3
+CG_RASP = 0.01                    # metres forward at a rasp
+CG_LIFT_S = 0.4
+CG_LIFT_DEG = 15.0
+
+
+def cg_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    return [("root", None, (0.0, 0.0, CG_PIVOT[2]), (0.08, 0.0, CG_PIVOT[2])),
+            ("front", 0, CG_PIVOT, (0.14, 0.0, CG_PIVOT[2]))]
+
+
+def cg_feed_clip():
+    """The capgnawer's gnawing loop at reference size (`sample_clip`)."""
+    rasps = 3 * CG_RASP_S
+
+    def pose_at(t):
+        rasp = bump((t % CG_RASP_S) / CG_RASP_S) if t < rasps else 0.0
+        lift = bump((t - rasps) / CG_LIFT_S) if t >= rasps else 0.0
+        pitch = CG_DIP_DEG - CG_LIFT_DEG * lift
+        move = Vector((CG_DIP_MOVE[0] + CG_RASP * rasp, 0.0, CG_DIP_MOVE[1] * (1 - lift)))
+        return {"front": Matrix.Rotation(math.radians(pitch), 3, "Y")}, Vector(), {"front": move}
+    return small_feed_clip("cg_rig", cg_bones(), CG_FEED_FPS, round((rasps + CG_LIFT_S) * CG_FEED_FPS), pose_at)
+
+
+# The littershredder: the plough turns about its rear (`LT_PLOUGH_PIVOT`), each feeler
+# about its root under the plough's lip. Reached: the plough pitched `LT_DIP_DEG` down.
+# The loop: two pushes of `LT_PUSH_S`, each the plough driven `LT_PUSH` forward and down
+# into the litter and lifted (eased), rolled `LT_ROCK_DEG` to one side then the other;
+# the feelers sweep side to side `LT_SWEEP_DEG` once a loop.
+LT_FEED_FPS = 40
+LT_PLOUGH_PIVOT = (0.0546, 0.0, 0.0726)
+LT_FEELER_ROOT = (0.1642, 0.012, 0.022)
+LT_FEELER_TIP = (0.1805, 0.018, -0.0018)
+LT_DIP_DEG = 6.0
+LT_PUSH_S = 0.35
+LT_PUSH = 0.01                    # metres, forward and down at a push
+LT_ROCK_DEG = 4.0
+LT_SWEEP_DEG = 20.0
+
+
+def lt_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    bones = [("root", None, (0.0, 0.0, LT_PLOUGH_PIVOT[2]), (0.05, 0.0, LT_PLOUGH_PIVOT[2])),
+             ("plough", 0, LT_PLOUGH_PIVOT, (0.17, 0.0, LT_PLOUGH_PIVOT[2]))]
+    for sy in (1, -1):
+        (rx_, ry_, rz_), (tx, ty, tz) = LT_FEELER_ROOT, LT_FEELER_TIP
+        bones.append((f"feeler_{LJ_SIDE[sy]}", 1, (rx_, sy * ry_, rz_), (tx, sy * ty, tz)))
+    return bones
+
+
+def lt_feed_clip():
+    """The littershredder's ploughing loop at reference size (`sample_clip`)."""
+    loop = 2 * LT_PUSH_S
+
+    def pose_at(t):
+        k, u = divmod(t, LT_PUSH_S)
+        push = bump(u / LT_PUSH_S)
+        side = 1 if int(k) % 2 == 0 else -1
+        plough = (Matrix.Rotation(math.radians(LT_DIP_DEG), 3, "Y")
+                  @ Matrix.Rotation(math.radians(side * LT_ROCK_DEG * push), 3, "X"))
+        sweep = Matrix.Rotation(math.radians(LT_SWEEP_DEG * math.sin(2 * math.pi * t / loop)), 3, "Z")
+        turns = {"plough": plough, "feeler_l": sweep, "feeler_r": sweep}
+        return turns, Vector(), {"plough": Vector((LT_PUSH * push, 0.0, -LT_PUSH * push))}
+    return small_feed_clip("lt_rig", lt_bones(), LT_FEED_FPS, round(loop * LT_FEED_FPS), pose_at)
+
+
+# The ripple-snail: the front (the opening and both palps) turns about the opening's rear
+# under the rim (`RS_PIVOT`). Reached: lowered `RS_DIP_DEG` and `RS_DROP` toward the film.
+# The loop: the palps sweep side to side (the front yawing `RS_SWEEP_DEG` each way), one
+# sweep a `RS_SWEEP_S`, and the whole shell bobs `RS_BOB` once a loop.
+RS_FEED_FPS = 30
+RS_PIVOT = (0.06, 0.0, 0.034)
+RS_DIP_DEG = 10.0
+RS_DROP = 0.005                   # metres
+RS_SWEEP_S = 0.5
+RS_SWEEP_DEG = 15.0
+RS_LOOP_S = 2.0
+RS_BOB = 0.004                    # metres
+
+
+def rs_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    return [("root", None, (0.0, 0.0, RS_PIVOT[2]), (0.06, 0.0, RS_PIVOT[2])),
+            ("front", 0, RS_PIVOT, (0.12, 0.0, RS_PIVOT[2]))]
+
+
+def rs_feed_clip():
+    """The ripple-snail's film-grazing loop at reference size (`sample_clip`)."""
+    def pose_at(t):
+        yaw = RS_SWEEP_DEG * math.sin(math.pi * t / RS_SWEEP_S)
+        front = Matrix.Rotation(math.radians(RS_DIP_DEG), 3, "Y") @ Matrix.Rotation(math.radians(yaw), 3, "Z")
+        bob = Vector((0.0, 0.0, RS_BOB * bump(t / RS_LOOP_S)))
+        return {"front": front}, bob, {"front": Vector((0.0, 0.0, -RS_DROP))}
+    return small_feed_clip("rs_rig", rs_bones(), RS_FEED_FPS, round(RS_LOOP_S * RS_FEED_FPS), pose_at)
 
 
 # --- the table ------------------------------------------------------------------------------
