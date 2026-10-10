@@ -63,7 +63,7 @@ sheet = Image.new("RGB", (LABEL_W + sum(widths) + PAD * (len(cols) + 1),
                           TOP + len(KINDS) * (ROW_H + PAD) + PAD), BG)
 d = ImageDraw.Draw(sheet)
 a = META["adult_bin0"]
-d.text((PAD, 10), ("Lanternjaw larva, round 2: symmetric tick and grub, 2026-10-09" if "kinds" in META and META["kinds"][0] == "tick3" else "Lanternjaw larva candidates (rider stage), 2026-10-09: for Wrysk to pick"), fill=HEAD)
+d.text((PAD, 10), ("Lanternjaw larva candidates (rider stage), 2026-10-09: " + ", ".join(KINDS)), fill=HEAD)
 d.text((PAD, 28), f"host: adult frondgrazer, {META['host']['cells']} cells, {META['host']['span']} voxels;  "
                   f"smallest adult lanternjaw bin: {a['length_m']} m, {a['cells']} cells, {a['span']} voxels;  "
                   "voxel 0.125 m", fill=DIM)

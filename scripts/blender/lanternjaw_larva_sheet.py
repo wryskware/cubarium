@@ -50,6 +50,9 @@ AT_I, AT_J = 0, 0
 # across by `LJ_LARVA_SHIFT` so it is centred on the host's spine
 ROUND2 = "--round" in ARGS and ARGS[ARGS.index("--round") + 1] == "2"
 KINDS = A.LJ_LARVA_R2 if ROUND2 else A.LJ_LARVA_KINDS
+# `--kinds a,b`: just these, in this order
+if "--kinds" in ARGS:
+    KINDS = tuple(ARGS[ARGS.index("--kinds") + 1].split(","))
 
 
 def founder(name):
