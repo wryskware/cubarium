@@ -127,3 +127,21 @@ Evidence: an options sheet at 6 px with its 2× enlargement, the lone tree, peri
 6 and 12 voxels by amplitude 0.5, 1 and 2 columns (state the numbers you used), plus the
 grove at the setting you think reads closest to his words; one wind MP4, today (round 1) |
 the long wave. Frame cost before and after. Return as round 1; stop before merge.
+
+## Round 3 (2026-10-10): a wave with octaves, on by default
+
+Round 2 merged (fd22ff17): `[drape] wave_period` / `wave_amplitude`, one sine per strand,
+off by default. Wrysk, from the options sheet: "period 12 or 24 with a few higher octaves as
+well. amp 0.5 looks right. the others are all just silly sine waves lol".
+
+- Replace the single sine with a few octaves (fractal 1D noise or summed sines at
+  incommensurate ratios, each strand on its own phases): the base period the knob, each
+  higher octave at about half the period and about half the amplitude, the sum scaled so
+  `wave_amplitude` is still the swing either way. A `[drape] wave_octaves` knob (count),
+  first guess 3; state the ratios. Joins still agree by construction.
+- Defaults on: `wave_amplitude` 0.5 and `wave_period` 12 (Wrysk's "12 or 24"; he picks
+  between them from the sheet).
+- Evidence: a sheet at 6 px with its 2× copy, lone tree and grove, columns round 1 (no
+  wave) | period 12 | period 24, both at amp 0.5 with the octaves, plus the round-2 single
+  sine at 12 for comparison; one wind MP4 at the default. Frame cost. Return as before;
+  stop before merge.

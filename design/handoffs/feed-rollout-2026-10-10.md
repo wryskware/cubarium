@@ -116,6 +116,38 @@ knees; **the small fruit arms are the middle pair**.
 - **Evidence** as above (`voxel_feed_capture`): today | the clip, side-on and three-quarter,
   6 px and 12 px, adult and young, in the pose it feeds in.
 
+### Loftstrider round 2 (after Wrysk saw the first clip)
+
+Round 1 merged (e85c4499; MP4s `art/gen/runs/feed-rollout-2026-10-10/loftstrider-feed-rest-px{6,12}.mp4`).
+Wrysk: "so the loftstrider fronds should curve in bending the other direction. they can
+unfurl, reach upwards, and curl the opposite way to place food in the mouth. for the
+sitting, the feet need a separate joint so that they stay flat on the ground. implementing
+aiming is a great idea, or at least the framework for it."
+
+- **Fronds**: from their rest droop they unfurl (straighten), reach upward into the browse
+  band, and curl the **opposite** way to their droop, inward over the head, to place the
+  spray in the mouth on top. Then they relax back to the droop.
+- **Rest**: a foot bone per leg (the ankle a joint), so the toes stay flat on the ground
+  while the knees fold. Also fix the hip bulbs dipping about 5 cm into the ground: the body
+  lowers until its underside touches, no further.
+- **Aiming (the framework, and the loftstrider using it)**:
+  - Sim: when an animal takes a bite of a stand, keep the bitten cell on the animal
+    (`founder_feed`, `cubarium-voxel-fauna/src/step.rs` ~4086, from `body::mouth_meal`'s
+    `Meal::Stand` place). **Transient, out of the save** (`#[serde(skip)]` or kept beside
+    the animal), so no save schema change and no behaviour change; say how you kept the sim
+    bit-for-bit the same in what it decides.
+  - Renderer: per frame, the bite's height above the feet and its bearing from the heading,
+    eased so a new bite doesn't snap the aim. Carried in the figure `Spec` so any species'
+    clips can read it.
+  - Loftstrider: the reach follows the height (blend between a low and a high reach, or
+    IK the fronds to it; your call) and the bearing (the frond pair nearest it does the
+    work, by its six-fold symmetry, and the lean and neck turn toward it). With no bite
+    recorded it reaches as today.
+- The standing pose's knees stay as they are for now (an open question to Wrysk; the parent
+  will tell you if it changes).
+- **Evidence** as round 1, plus an aiming clip: one animal browsing bites placed low, high,
+  and to each side (stage them in `voxel_feed_capture`), today | round 2.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
 open look question), lanternjaw, bellwing, capgnawer, littershredder,
 ripple-snail. Then sleep, idle and hunker move onto the rig.
