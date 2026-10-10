@@ -472,6 +472,8 @@ struct ModelInputs {
     /// Whether the warm accents are fruit, each kept by its own share of `ripe`.
     fruit: bool,
     lip: colours::Lip,
+    /// The species' cured colour while the stand is cured (and has one), else `None`.
+    cured: Option<u32>,
     anchor: Cell,
     /// The foliage state drawn, for a species with states; `None` thins by layer.
     state: Option<StateDraw>,
@@ -508,6 +510,9 @@ struct ModelKey {
     /// A glowcap lip cell's colony state while emission is on; [`colours::Lip::None`] for
     /// every other cell, so no other style splits.
     lip: colours::Lip,
+    /// A crown cell (foliage, drape, fallen) of a cured stand whose species has a cured
+    /// colour: drawn in it ([`colours::cured`]), no wilt on top.
+    cured: bool,
 }
 
 impl ModelKey {
@@ -518,7 +523,8 @@ impl ModelKey {
         * colours::BANDS as usize
         * model::WILT_LEVELS as usize
         * 4
-        * 3;
+        * 3
+        * 2;
 
     fn index(self) -> usize {
         // The layer index does not change a colour; only the kind of cell does.
@@ -537,7 +543,8 @@ impl ModelKey {
         i = i * Self::MATERIALS + material;
         i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
         i = i * model::WILT_LEVELS as usize + usize::from(self.wilt.min(model::WILT_LEVELS - 1));
-        (i * 4 + usize::from(self.heart) * 2 + usize::from(self.ripe)) * 3 + self.lip as usize
+        ((i * 4 + usize::from(self.heart) * 2 + usize::from(self.ripe)) * 3 + self.lip as usize) * 2
+            + usize::from(self.cured)
     }
 }
 
@@ -1079,12 +1086,14 @@ impl Stands {
             y: stand.site.y + 1 + u32::from(on_log),
             z: stand.site.z,
         };
+        let cured = (stand.cured && sc.cured_srgb != 0).then_some(sc.cured_srgb);
         ModelInputs {
             foliage,
             wilt,
             ripe,
             fruit,
             lip,
+            cured,
             anchor,
             state,
         }
@@ -1166,6 +1175,7 @@ impl Stands {
             ripe,
             fruit,
             lip,
+            cured,
             anchor,
             state,
         } = self.model_inputs(lib, flora, stand);
@@ -1239,6 +1249,8 @@ impl Stands {
             };
             let (tint, shown, part) = match tag {
                 Tag::Trunk => (0, true, PartKind::Trunk),
+                // A cured crown takes no wilt on top (as the glyph path's).
+                Tag::Foliage(_) | Tag::Drape(_) | Tag::Fallen(_) if cured.is_some() => (0, true, PartKind::Crown),
                 Tag::Foliage(_) | Tag::Drape(_) | Tag::Fallen(_) => (wilt, true, PartKind::Crown),
                 Tag::Accent => {
                     let shown = m.material != model::WARM
@@ -1265,8 +1277,9 @@ impl Stands {
                 } else {
                     colours::Lip::None
                 },
+                cured: cured.is_some() && part == PartKind::Crown,
             };
-            let Some(style) = self.model_style(key) else {
+            let Some(style) = self.model_style(key, cured) else {
                 ok = false;
                 return;
             };
@@ -1286,7 +1299,8 @@ impl Stands {
     /// The style of one model cell's colour key: one per key per rebuild, shared by every
     /// stand, so a meadow is a handful of styles and not one per stand. `None` when the
     /// strip is out of styles. The colours are [`colours::plant`]'s.
-    fn model_style(&mut self, key: ModelKey) -> Option<u16> {
+    /// `cured`: the stand's cured colour, for a key with `cured` set.
+    fn model_style(&mut self, key: ModelKey, cured: Option<u32>) -> Option<u16> {
         let index = key.index();
         let cached = self.model_styles[index];
         if cached != NO_STYLE {
@@ -1295,7 +1309,12 @@ impl Stands {
         let style = u16::try_from(self.styles.len())
             .ok()
             .filter(|&s| s != NO_STYLE)?;
-        let sw = colours::plant(key.species, key.tag, key.material, key.band, key.ripe);
+        let mut sw = colours::plant(key.species, key.tag, key.material, key.band, key.ripe);
+        if key.cured
+            && let Some(straw) = cured
+        {
+            sw = colours::cured(key.species, sw, straw);
+        }
         let wilt = f32::from(key.wilt) / f32::from(model::WILT_LEVELS - 1);
         let c = |rgb| wilted(srgb_linear(rgb), wilt);
         self.styles.push(Style {

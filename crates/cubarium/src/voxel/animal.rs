@@ -240,27 +240,28 @@ struct AnimalKey {
     material: u8,
     band: u8,
     accent: bool,
-    starving: bool,
+    /// The body's condition, eased ([`Animals::condition_level`]): 0 well,
+    /// [`COND_LEVELS`] / 2 wounded, [`COND_LEVELS`] starving.
+    cond: u8,
     /// The meal flash's eased weight in [`FLASH_LEVELS`] steps, 0 for none.
     flash: u8,
-    wounded: bool,
 }
 
 impl AnimalKey {
     const MATERIALS: usize = model::PALETTE.len();
     const FLASHES: usize = FLASH_LEVELS as usize + 1;
+    const CONDS: usize = COND_LEVELS as usize + 1;
     const COUNT: usize =
-        Founder::COUNT * Self::MATERIALS * colours::BANDS as usize * 8 * Self::FLASHES;
+        Founder::COUNT * Self::MATERIALS * colours::BANDS as usize * 2 * Self::CONDS * Self::FLASHES;
 
     fn index(self) -> usize {
         let founder = self.founder.index();
         let material = usize::from(self.material).min(Self::MATERIALS - 1);
         let mut i = founder * Self::MATERIALS + material;
         i = i * colours::BANDS as usize + usize::from(self.band.min(colours::BANDS - 1));
-        let flags = usize::from(self.wounded) * 4
-            + usize::from(self.accent) * 2
-            + usize::from(self.starving);
-        (i * 8 + flags) * Self::FLASHES + usize::from(self.flash.min(FLASH_LEVELS))
+        i = i * 2 + usize::from(self.accent);
+        i = i * Self::CONDS + usize::from(self.cond.min(COND_LEVELS));
+        i * Self::FLASHES + usize::from(self.flash.min(FLASH_LEVELS))
     }
 }
 
@@ -273,29 +274,64 @@ pub fn is_wounded(animal: &Animal) -> bool {
     animal.wound > 0.0
 }
 
+/// GLOW-EASE round 3: the condition an animal's colours show, as one number: 0 well,
+/// 0.5 wounded (the starving tint at half strength), 1 starving (the full tint and the
+/// starved accent). Its colours are continuous in it, so a body that starts or stops
+/// starving, or is wounded or heals, eases between them ([`Animals::condition_of`])
+/// instead of switching in one tick.
+pub fn condition(animal: &Animal) -> f32 {
+    if is_starving(animal) {
+        1.0
+    } else if is_wounded(animal) {
+        0.5
+    } else {
+        0.0
+    }
+}
+
+/// Steps of the eased condition that voxel styles are keyed by: at 32 a step moves a
+/// starving body's colours by 1/16 of the way from wounded to starved.
+pub const COND_LEVELS: u8 = 32;
+
+/// `a` to `b` by `t`, per channel.
+fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
+}
+
 /// One animal's style this frame: distinct palettes for founders, cropping flash,
 /// starvation desaturation, or interim fallback. A wounded body that is not starving takes
 /// the starving tint at half strength. `flash` is how far the accent leans toward
 /// [`ANIMAL_CROPPING_FLASH_SRGB`] this frame (the meal flash, eased), `0..=1`.
-pub fn animal_style(animal: &Animal, flash: f32) -> Style {
-    let style = animal_style_unwounded(animal, flash);
-    if is_wounded(animal) && !is_starving(animal) {
-        Style {
-            wood: wilted(style.wood, WOUNDED_TINT),
-            crown: wilted(style.crown, WOUNDED_TINT),
-            heart: style.heart,
-        }
-    } else {
-        style
+///
+/// `cond` is the condition shown ([`condition`], eased): up to 0.5 the body and rim take
+/// the starving tint at `cond` times its strength (wounded at 0.5), and from there to 1
+/// the whole style blends into the starving palette.
+pub fn animal_style(animal: &Animal, flash: f32, cond: f32) -> Style {
+    let cond = cond.clamp(0.0, 1.0);
+    let style = animal_style_unwounded(animal, flash, false);
+    let k = cond.min(0.5) * 2.0 * WOUNDED_TINT;
+    let wounded = Style {
+        wood: wilted(style.wood, k),
+        crown: wilted(style.crown, k),
+        heart: style.heart,
+    };
+    if cond <= 0.5 || animal.founder.is_none() {
+        return wounded;
+    }
+    let starved = animal_style_unwounded(animal, flash, true);
+    let t = (cond - 0.5) * 2.0;
+    Style {
+        wood: mix3(wounded.wood, starved.wood, t),
+        crown: mix3(wounded.crown, starved.crown, t),
+        heart: mix3(wounded.heart, starved.heart, t),
     }
 }
 
-fn animal_style_unwounded(animal: &Animal, flash: f32) -> Style {
+fn animal_style_unwounded(animal: &Animal, flash: f32, is_starving: bool) -> Style {
     let Some(founder) = animal.founder else {
         return interim_style(animal.species);
     };
 
-    let is_starving = is_starving(animal);
     // The accent, leaning toward the flash colour by `flash`.
     let lean = |accent: u32| {
         let (a, f) = (srgb_linear(accent), srgb_linear(ANIMAL_CROPPING_FLASH_SRGB));
@@ -371,34 +407,28 @@ fn animal_style_unwounded(animal: &Animal, flash: f32) -> Style {
 
 /// One model cell's colours in linear light (its style: shadow, body, glint) and its
 /// emissive colour in sRGB if its material glows: the founder's coat at the cell's material
-/// and height band, a sense patch's accent leaning toward the meal flash by `flash`, a
-/// starving body wilted (its accent the starved one), a wounded one half as much.
+/// and height band, a sense patch's accent leaning toward the meal flash by `flash`, and
+/// the body's condition `cond` ([`condition`], eased): the coat wilted by `cond` times the
+/// starving tint (a wounded body, 0.5, half as much; a starving one, 1, the whole), and a
+/// sense patch past 0.5 blending into the starved accent, which it is at 1.
 pub(crate) fn model_colours(
     founder: Founder,
     material: u8,
     band: u8,
     accent: bool,
-    starving: bool,
-    wounded: bool,
+    cond: f32,
     flash: f32,
 ) -> (Style, Option<u32>) {
+    let cond = cond.clamp(0.0, 1.0);
     let sw = colours::animal(founder, material, band, accent, flash);
-    let paint = |rgb| {
-        let c = srgb_linear(rgb);
-        if starving {
-            wilted(c, STARVING_TINT)
-        } else if wounded {
-            wilted(c, WOUNDED_TINT)
-        } else {
-            c
-        }
-    };
-    let (wood, crown, heart) = if starving && accent {
+    let k = if accent { cond.min(0.5) } else { cond } * STARVING_TINT;
+    let paint = |rgb| wilted(srgb_linear(rgb), k);
+    let (mut wood, mut crown, mut heart) = (paint(sw.shadow), paint(sw.body), paint(sw.glint));
+    if accent && cond > 0.5 {
         let c = srgb_linear(colours::STARVED_ACCENT);
-        (c, c, c)
-    } else {
-        (paint(sw.shadow), paint(sw.body), paint(sw.glint))
-    };
+        let t = (cond - 0.5) * 2.0;
+        (wood, crown, heart) = (mix3(wood, c, t), mix3(crown, c, t), mix3(heart, c, t));
+    }
     (Style { wood, crown, heart }, colours::animal_emission(founder, material, accent))
 }
 
@@ -746,6 +776,12 @@ pub struct Animals {
     aim_blend: FxHashMap<u64, Aim>,
     /// `VoxelConfig::meal_flash`: how far the accent leans toward the flash at its height.
     meal_flash: f32,
+    /// GLOW-EASE round 3: each animal's shown condition ([`condition`]) by id at the last
+    /// rebuild, moving toward its condition at one per [`Animals::set_condition_fade_s`]
+    /// seconds of sim time. Every founder in the last rebuild has an entry, so a body first
+    /// seen shows its condition as it is.
+    cond_blend: FxHashMap<u64, f32>,
+    cond_fade_s: f64,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
     last_tick: Option<u64>,
     /// Every body cell this rebuild wrote and the animal that wrote it, in writing order
@@ -868,6 +904,8 @@ impl Animals {
             feed_blend: FxHashMap::default(),
             aim_blend: FxHashMap::default(),
             meal_flash: MEAL_FLASH_DEFAULT,
+            cond_blend: FxHashMap::default(),
+            cond_fade_s: 0.0,
             last_tick: None,
             owners: Vec::new(),
             owner: NO_OWNER,
@@ -883,6 +921,27 @@ impl Animals {
     /// the flash (`VoxelConfig::meal_flash`), `0..=1`; 0 turns the flash off.
     pub fn set_meal_flash(&mut self, strength: f32) {
         self.meal_flash = if strength.is_finite() { strength.clamp(0.0, 1.0) } else { 0.0 };
+    }
+
+    /// Seconds a body's colours take to go from well to starving and back
+    /// (`[light] colour_fade_s`, GLOW-EASE round 3); wounded is half way. 0: at once.
+    pub fn set_condition_fade_s(&mut self, seconds: f32) {
+        self.cond_fade_s = if seconds.is_finite() { f64::from(seconds.max(0.0)) } else { 0.0 };
+    }
+
+    /// One animal's shown condition this rebuild, `0..=1` ([`condition`], eased).
+    pub(crate) fn condition_of(&self, animal: &Animal) -> f32 {
+        self.cond_blend.get(&animal.id).copied().unwrap_or_else(|| condition(animal))
+    }
+
+    /// [`Animals::condition_of`] in [`COND_LEVELS`] steps, as voxel styles are keyed.
+    pub(crate) fn condition_level(&self, animal: &Animal) -> u8 {
+        (self.condition_of(animal) * f32::from(COND_LEVELS)).round() as u8
+    }
+
+    /// The condition a level shows.
+    pub(crate) fn condition_amount(level: u8) -> f32 {
+        f32::from(level.min(COND_LEVELS)) / f32::from(COND_LEVELS)
     }
 
     /// One animal's meal flash this rebuild in [`FLASH_LEVELS`] steps: its weight eased by
@@ -916,6 +975,8 @@ impl Animals {
         let mut idle: FxHashMap<u64, Idle> = FxHashMap::default();
         let mut hunkers: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut flashes: FxHashMap<u64, f32> = FxHashMap::default();
+        let mut conds: FxHashMap<u64, f32> = FxHashMap::default();
+        let cond_step = if self.cond_fade_s > 0.0 { (dt / self.cond_fade_s) as f32 } else { 1.0 };
         let mut feeds: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut aims: FxHashMap<u64, Aim> = FxHashMap::default();
         let aim_step = (dt / super::rig::AIM_EASE_S) as f32;
@@ -952,6 +1013,15 @@ impl Animals {
             if flash > 0.0 || cropping {
                 flashes.insert(a.id, flash.clamp(0.0, 1.0));
             }
+            // The condition the colours show: toward the body's own, never faster than
+            // the fade allows (round 3).
+            let aim = condition(a);
+            let shown = match self.cond_blend.get(&a.id) {
+                Some(&c) if c < aim => (c + cond_step).min(aim),
+                Some(&c) => (c - cond_step).max(aim),
+                None => aim,
+            };
+            conds.insert(a.id, shown);
             // The feeding clip: in while the body crops on the ground, out after, moved on at
             // the state it had at the last rebuild (as the frame clock extrapolated it).
             let feeding = cropping && a.mobility.climb.is_none();
@@ -1017,6 +1087,7 @@ impl Animals {
         self.idle_blend = idle;
         self.hunker_blend = hunkers;
         self.flash_blend = flashes;
+        self.cond_blend = conds;
         self.feed_blend = feeds;
         self.aim_blend = aims;
     }
@@ -1362,7 +1433,8 @@ impl Animals {
                     break;
                 }
                 let flash = self.flash_amount(self.flash_level(animal));
-                self.styles.push(animal_style(animal, flash));
+                let cond = Self::condition_amount(self.condition_level(animal));
+                self.styles.push(animal_style(animal, flash, cond));
                 for (cell, part, _) in cells_of_local(animal, fauna.config, style, c.voxel_m) {
                     let on_back = Cell {
                         y: cell.y + lift,
@@ -1394,7 +1466,8 @@ impl Animals {
                     break; // more than 65 535 animals in one strip: refuse to alias styles.
                 }
                 let flash = self.flash_amount(self.flash_level(animal));
-                self.styles.push(animal_style(animal, flash));
+                let cond = Self::condition_amount(self.condition_level(animal));
+                self.styles.push(animal_style(animal, flash, cond));
                 let cells = cells_of_local(animal, fauna.config, style, c.voxel_m);
                 if animal.founder == Some(Founder::Lanternjaw) {
                     self.stamp_lure(view, animal, fauna.config, c.voxel_m);
@@ -1573,9 +1646,8 @@ impl Animals {
             y: animal.sense_layer(voxel_m) + 1,
             z: (animal.pose.z / voxel_m).floor().max(0.0) as u32,
         };
-        let starving = is_starving(animal);
+        let cond = self.condition_level(animal);
         let flash = self.flash_level(animal);
-        let wounded = is_wounded(animal) && !starving;
         let Some(founder) = animal.founder else {
             return true;
         };
@@ -1591,9 +1663,8 @@ impl Animals {
                 material: m.material,
                 band: colours::band(m.offset[1], top),
                 accent: m.tag == Tag::Accent,
-                starving,
+                cond,
                 flash,
-                wounded,
             };
             let Some(style) = self.model_style(key) else {
                 ok = false;
@@ -1649,8 +1720,7 @@ impl Animals {
             key.material,
             key.band,
             key.accent,
-            key.starving,
-            key.wounded,
+            Self::condition_amount(key.cond),
             self.flash_amount(key.flash),
         );
         self.styles.push(style_colours);
@@ -2493,5 +2563,88 @@ mod tests {
         grid.rebuild(&w.view(), None);
         assert!(grid.is_empty());
         assert_eq!(grid.at(3, 3, 1), AnimalPart::None);
+    }
+
+    /// The largest channel apart of two styles.
+    fn apart(a: Style, b: Style) -> f32 {
+        [(a.wood, b.wood), (a.crown, b.crown), (a.heart, b.heart)]
+            .iter()
+            .flat_map(|(x, y)| (0..3).map(move |k| (x[k] - y[k]).abs()))
+            .fold(0.0, f32::max)
+    }
+
+    /// GLOW-EASE round 3: a body's colours are continuous in its condition and keep the
+    /// looks they had at well, wounded and starving.
+    #[test]
+    fn condition_colours_are_continuous_and_keep_the_three_looks() {
+        let founder = Founder::Browser;
+        for accent in [false, true] {
+            let at = |c: f32| model_colours(founder, 0, 1, accent, c, 0.0).0;
+            let n = 400;
+            let whole = apart(at(0.0), at(1.0)).max(1e-6);
+            for k in 0..n {
+                let (a, b) = (k as f32 / n as f32, (k + 1) as f32 / n as f32);
+                assert!(apart(at(a), at(b)) <= 4.0 * whole / n as f32 + 1e-6, "a step at {a} (accent {accent})");
+            }
+            let sw = colours::animal(founder, 0, 1, accent, 0.0);
+            let plain = |t: f32| Style {
+                wood: wilted(srgb_linear(sw.shadow), t),
+                crown: wilted(srgb_linear(sw.body), t),
+                heart: wilted(srgb_linear(sw.glint), t),
+            };
+            assert!(apart(at(0.0), plain(0.0)) < 1e-6, "well: the coat");
+            assert!(apart(at(0.5), plain(WOUNDED_TINT)) < 1e-6, "wounded: half the tint");
+            let starved = if accent {
+                let c = srgb_linear(colours::STARVED_ACCENT);
+                Style { wood: c, crown: c, heart: c }
+            } else {
+                plain(STARVING_TINT)
+            };
+            assert!(apart(at(1.0), starved) < 1e-6, "starving: the whole tint, the starved accent");
+        }
+    }
+
+    /// GLOW-EASE round 3: a body that starts starving (or heals) shows its new condition
+    /// only through intermediate ones, never faster than the fade allows; a body first seen
+    /// shows its condition as it is; with no fade it switches at once.
+    #[test]
+    fn a_change_of_condition_eases_on_the_fade() {
+        let mut soil = World::empty(VoxelConfig { width: 8, height: 2, depth: 1, voxel_m: 0.125, ..VoxelConfig::default() });
+        for x in 0..8 {
+            soil.apply(WorldCommand::SetMaterial { x, y: 0, z: 0, material: Material::Soil });
+        }
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
+        assert!(fauna.apply(
+            &soil,
+            Command::IntroduceFounder { x: 3, z: 0, founder: Founder::Browser, stores: StartingStores::FULL, heading_rad: 0.0 }
+        ));
+        let well = fauna.view().animals[0];
+        let mut starving = well;
+        (starving.reserve, starving.body) = (0.0, 0.01);
+        assert_eq!((condition(&well), condition(&starving)), (0.0, 1.0), "fixture");
+        let fade = 2.0;
+        let mut grid = Animals::empty(0, 0, 0);
+        grid.set_condition_fade_s(fade);
+        let mut shown = Vec::new();
+        for tick in 100..240u64 {
+            let a = if (110..160).contains(&tick) { starving } else { well };
+            grid.advance_poses(tick, &[a], 0.125);
+            shown.push(grid.condition_of(&a));
+        }
+        let per_tick = (DT / f64::from(fade)) as f32;
+        let biggest = shown.windows(2).map(|p| (p[1] - p[0]).abs()).fold(0.0, f32::max);
+        assert!(biggest <= per_tick + 1e-5, "a tick moved the condition {biggest}");
+        assert!(shown.iter().any(|&c| c > 0.2 && c < 0.8), "it passed through between");
+        assert_eq!(shown.iter().copied().fold(0.0, f32::max), 1.0, "it got there");
+        assert_eq!(*shown.last().unwrap(), 0.0, "and back");
+
+        let mut fresh = Animals::empty(0, 0, 0);
+        fresh.set_condition_fade_s(fade);
+        fresh.advance_poses(500, &[starving], 0.125);
+        assert_eq!(fresh.condition_of(&starving), 1.0, "first seen: as it is");
+        let mut steps = Animals::empty(0, 0, 0);
+        steps.advance_poses(1, &[well], 0.125);
+        steps.advance_poses(2, &[starving], 0.125);
+        assert_eq!(steps.condition_of(&starving), 1.0, "no fade: at once");
     }
 }
