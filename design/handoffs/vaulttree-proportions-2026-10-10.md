@@ -59,3 +59,77 @@ fits), lit, at the desktop scale (6 px a voxel) and 2×:
 
 Commits (the sheet script changes, if any); absolute picture paths; the measured stand
 spacing; the cell counts per candidate; the findings above. Stop: Wrysk picks.
+
+## Round 2 (2026-10-10): B, more shelves, a grove, four sides, lean
+
+Round 1 (branch `vault-shape`, 74055726) added `voxel_specimens --crown-radius / --scale /
+--stand`, the `vault_spacing` example and the scratch `shelf_fill`; stand spacing measured
+1.38 m in World 2. Build on it, same worktree and branch.
+
+Wrysk: "start with B, but i would experiment with more shelves. will want to see it in a
+canopy too cuz fewer shelves could be fine there. also, can we show it from other angles?
+lets at least be able to rotate on 90deg.. not sure about the lean.. maybe just rotate the
+canopies and vary lean less because in a grove trees would lean together."
+
+- **B at three shelf counts**: radius 1.85 m with 12 (the pick's), 17 and 22 shelves, by
+  round 1's gap-filling rule. Name them B12, B17, B22.
+- **Four sides**: each lone tree from the four quarter turns (0°, 90°, 180°, 270°). Find
+  how the sheet can turn a model by a quarter (a voxel model turns by quarters exactly) and
+  add it as a flag; also report whether the live plant pass can draw a plant turned by a
+  quarter today, and what it would take if not.
+- **Lean**: find the vaulttree builder's lean and its variation across the three variants
+  (`scripts/blender/organism_lineup.py`, near `vault_shelf`). Make one scratch rule where
+  every variant leans the same way and less (state the angles before and after), the
+  variety coming from turning each tree by a quarter instead.
+- **Grove**: seven B trees at 1.38 m (round 1's measure) in a loose cluster, each turned by
+  its own quarter, all leaning the same way under the new lean rule: once each for B12,
+  B17 and B22, seen from 0° and 90°. Then the same seven with today's lean variation, B17
+  only, for comparison.
+
+Same rules and outputs as round 1 (`art/gen/runs/vaulttree-proportions-2026-10-10/` in the
+main checkout, 1× and 2×, lit, with a loftstrider and seedporter for scale). Nothing in
+`assets/voxel-models/` changes yet.
+
+Return: commit; picture paths; the lean angles before and after; cells per shelf count;
+whether the live pass can turn plants by quarters. Stop: Wrysk picks.
+
+## Round 3 (2026-10-10): ship B, round crown, shelves by foliage
+
+Round 2 (9ffcc163) made B12/B17/B22, the four-side views, the shared-lean rule and groves.
+Wrysk, after opening the .glb exports in Blender: "huh, didnt realize vault trees were so
+thin. that seems unnatural that its much skinner from one angle. as for the variants, i
+think they all have a place. maybe depending on some foliage scale, the trees can vary from
+b12 to b22. and definitely keep the 0/1/2 variants of each for variety in the world. as for
+lean and canopy decisions, idk what to tell you yet. we should do the work to support
+plants at different angles. leaning all the same way may not actually matter tbh. we can
+try first without that and then decide to enforce it if it looks off."
+
+This round ships, on the same branch, for merge:
+
+1. **Round crown.** Today's crown is about 2.1 × 1.5 m on main (much thinner along z). Find
+   why in `vaulttree()` / `vault_shelf` (`scripts/blender/organism_lineup.py`; it was built
+   for a front-view lineup) and make the crown about as wide along z as along x, keeping the
+   shelf look, its count and its sizes. Measure both widths before and after.
+2. **B for real.** The vaulttree's `crown_radius_m` max becomes 1.85 m in the flora config
+   default (`cubarium-voxel-flora`, regenerate `design/parameters.md`), then source.json via
+   `voxel_model_source`, then a rebake of both voxel sizes into `assets/voxel-models/`.
+   Leave the min radius as it is unless the bake breaks; say what you did.
+3. **Shelves by foliage.** My reading of "some foliage scale" (state it in the commit; Wrysk
+   can correct it): the shelf count follows the tree's foliage, using the existing foliage
+   states (`foliage_state_below`, as the browse states do): a thin tree draws B12, a middle
+   one B17, a full one B22. Keep variants 0/1/2 for each. Say how the states interact with
+   the presenter's per-cell foliage thinning, and pick the one that doesn't double-thin.
+4. **Lean**: today's rule unchanged (drop the shared-lean scratch rule from the bake path or
+   leave it off by default). The quarter turns come from the separate PLANT-TURN package.
+
+Evidence: the lone-tree four-side strip and the 7-tree grove (both angles) from round 2's
+tooling, rebuilt from the shipped library: before (main) | after. Plus a short lit capture
+or still of a live world area with vaulttrees, if one is cheap. .glb exports of the
+shipped variants with `voxel_export` (merged on main) into
+`art/gen/runs/voxel-export-2026-10-10/` as `vaulttree-shipped-<state>-v<N>.glb`.
+
+Tests: none beyond the existing suites (this is a bake and a default), but run
+`cubarium-voxel-flora`, `cubarium-voxel-fauna` and `cubarium` tests (each under
+`timeout 270`, detached if longer) since the radius is an ecology knob; report failures,
+don't re-pin numbers. Return: commits, widths before/after, cells per state and variant,
+test results, picture and .glb paths. Stop before merge.

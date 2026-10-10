@@ -3674,7 +3674,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
         if let Some(r) = &mut fauna.census_readout {
-            r.predation.push(crate::CensusPredation { predator: by, prey: f, prey_body: a.body, kill: true });
+            r.predation.push(crate::CensusPredation { prey_id: a.id, predator: by, prey: f, prey_body: a.body, kill: true });
         }
         // HUNKER's readout: the kill by the prey's age class.
         if a.body < fauna.config.founder(f).core.birth_body {
@@ -6188,7 +6188,7 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
             fauna.ledger.strikes_on_by_founder[pf.index()] += 1;
             fauna.ledger.funnel[founder.index()][pf.index()][crate::perception::STRUCK] += 1;
             if let Some(r) = &mut fauna.census_readout {
-                r.predation.push(crate::CensusPredation { predator: founder, prey: pf, prey_body: fauna.animals[j].body, kill: false });
+                r.predation.push(crate::CensusPredation { prey_id: prey, predator: founder, prey: pf, prey_body: fauna.animals[j].body, kill: false });
             }
             // D2b readout: a patroller's strike its choice did not accept.
             let choosy =

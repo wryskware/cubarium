@@ -52,7 +52,7 @@ mod gait;
 pub use gait::Sprint;
 pub mod rhythm;
 pub use rhythm::{Cadence, Horizon, Pace, Rhythm};
-pub use step::jump::DropRule;
+pub use step::jump::{DropRule, WadeRule};
 pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
@@ -62,6 +62,8 @@ pub use registry::registry;
 mod senses;
 mod snapshot;
 mod step;
+mod still;
+pub use still::{still_reason, still_reason_of};
 pub(crate) use step::places;
 #[cfg(test)]
 mod testpass3_support;
@@ -3716,6 +3718,8 @@ pub struct FaunaTick(step::TickStart);
 /// One exact strike or kill, captured only when a census requests it.
 #[derive(Clone, Debug)]
 pub struct CensusPredation {
+    /// Identity of the struck or killed body, for exact life-record matching.
+    pub prey_id: u64,
     pub predator: Founder,
     pub prey: Founder,
     /// Structural organic matter at the event, in the same units as Animal::body.

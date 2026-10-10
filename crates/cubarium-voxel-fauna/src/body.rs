@@ -592,6 +592,10 @@ pub struct FounderPhysiology {
     /// the bellwing and the ripple-snail.
     #[serde(default)]
     pub drop: crate::DropRule,
+    /// **Its wade-out** (WADE-OUT, [`crate::WadeRule`]): held in water past its depth, it
+    /// swims the least-deep way out within its drown clock. Off for the lanternjaw.
+    #[serde(default)]
+    pub wade: crate::WadeRule,
     /// **Its daily leaning** (RHYTHMS-CADENCE, [`crate::Rhythm`]): read while
     /// [`FounderPhysiology::active`] is [`crate::Activity::Leaning`].
     #[serde(default)]
@@ -1820,6 +1824,7 @@ impl FounderPhysiology {
         p.hunker = crate::vigil::hunker_of(founder);
         p.herding = crate::herding::herding_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
+        p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
         p.cadence = crate::rhythm::cadence_of(founder);
         p
@@ -1943,6 +1948,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
+                wade: crate::WadeRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
                 pack: None,
@@ -2033,6 +2039,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
+                wade: crate::WadeRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
                 pack: None,
@@ -2146,6 +2153,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
+                wade: crate::WadeRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
                 pack: None,

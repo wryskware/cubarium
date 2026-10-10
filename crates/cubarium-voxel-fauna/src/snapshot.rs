@@ -489,7 +489,7 @@ mod tests {
         let r = fauna.census_readout.as_mut().unwrap();
         r.introduced[0] = 2;
         r.organic_given[0] = 0.25;
-        r.predation.push(crate::CensusPredation { predator: crate::Founder::Lanternjaw,
+        r.predation.push(crate::CensusPredation { prey_id: 1, predator: crate::Founder::Lanternjaw,
             prey: crate::Founder::Browser, prey_body: 0.5, kill: true });
         assert_eq!(before, encode(&fauna));
         let loaded = decode(&before).unwrap();

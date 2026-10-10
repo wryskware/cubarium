@@ -351,22 +351,25 @@ fn a_hungry_still_awake_body_is_held_and_a_fed_or_moving_one_is_not() {
     a.mobility.mode = cubarium_voxel_fauna::MobilityMode::Ground;
     a.eating = true;
     a.emergency = false;
+    a.pack = None;
+    a.mobility.retract_ticks = 0;
     a.still_ticks = u64::from(cubarium_voxel_fauna::TICK_HZ);
-    assert!(super::hungry_held(&a), "hungry, awake and still: held");
+    let held = |a: &cubarium_voxel_fauna::Animal| super::hungry_held(a, cubarium_voxel_fauna::still_reason_of(a, None, false));
+    assert!(held(&a), "hungry, awake and still: held");
     let mut b = a;
     b.eating = false;
-    assert!(!super::hungry_held(&b), "fed: a chosen stillness");
+    assert!(!held(&b), "fed: a chosen stillness");
     b.emergency = true;
-    assert!(super::hungry_held(&b), "the emergency latch is hunger too");
+    assert!(held(&b), "the emergency latch is hunger too");
     let mut c = a;
     c.still_ticks = 0;
-    assert!(!super::hungry_held(&c), "moving");
+    assert!(!held(&c), "moving");
     let mut d = a;
     d.state = cubarium_voxel_fauna::State::Asleep;
-    assert!(!super::hungry_held(&d), "asleep");
+    assert!(!held(&d), "asleep");
     let mut e = a;
     e.state = cubarium_voxel_fauna::State::Cropping;
-    assert!(!super::hungry_held(&e), "biting");
+    assert!(!held(&e), "biting");
 }
 
 /// **Resting while hungry is not idle by choice** (FROZEN-PREY): a window in which every
@@ -403,7 +406,54 @@ fn a_hungry_resting_lineage_is_frozen_not_idle() {
     assert!(light.verdict(&sim, &cfg).is_ok(), "hungry for under half the resting: still idle");
     let (id, f) = founder_bodies(sim.fauna())[0];
     let mut one = rested(&sim);
-    one.held.insert(id, (f, samples, samples));
+    one.held.insert(id, (f, samples, samples, 0));
     let why = one.verdict(&sim, &cfg).expect_err("a body hungry and held all window");
     assert!(why.contains(&format!("{} frozen", f.name())), "{why}");
+}
+
+/// **Sleeping is not frozen**: a window started at night in which every driven body of
+/// every lineage was asleep or resting with a chosen reason at each sample (a pack asleep
+/// 59 % and resting 41 %, its resting samples hungry, so not idle by the state count:
+/// the m186 failure) passes as still by choice. The same window with the bodies awake,
+/// hungry and held still (no chosen reason), or with one body exposed among chosen ones,
+/// or with the bodies undriven, is still called frozen.
+#[test]
+fn an_asleep_pack_is_still_by_choice_and_a_hungry_awake_one_is_frozen() {
+    let (world, flora, fauna, _) = seeded(64, None, 0.0);
+    let mut sim = Sim::ambient(world, flora, fauna, SimConfig::with_threads(1));
+    let dir = scratch("chosen-still");
+    let (cfg, _) = stage(&dir, &[]);
+    std::fs::remove_dir_all(&dir).ok();
+    let samples = 100u64;
+    let bodies = founder_bodies(sim.fauna());
+    let window = |sim: &Sim, held: u64, excused: u64| {
+        let mut w = Window::open(sim);
+        w.held.clear();
+        for f in Founder::ALL {
+            let s = &mut w.states[f.index()];
+            s.clear();
+            s.insert("Asleep".into(), 59);
+            s.insert("Resting".into(), 41);
+            w.awake[f.index()] = true;
+            w.resting_hungry[f.index()] = 41;
+        }
+        for &(id, f) in &bodies {
+            w.held.insert(id, (f, samples, held, excused));
+        }
+        w
+    };
+    let ok = window(&sim, 0, samples).verdict(&sim, &cfg).expect("an all-asleep pack passes");
+    assert!(ok.contains("still by choice"), "{ok}");
+    let why = window(&sim, samples, 0).verdict(&sim, &cfg).expect_err("awake, hungry and unmoving fails");
+    assert!(why.contains("frozen"), "{why}");
+    let (id, f) = bodies[0];
+    let mut one = window(&sim, 0, samples);
+    one.held.insert(id, (f, samples, samples, 0));
+    let why = one.verdict(&sim, &cfg).expect_err("an exposed body among sleepers still counts");
+    assert!(why.contains(&format!("{} frozen", f.name())), "{why}");
+    for &(id, _) in &bodies {
+        sim.fauna_mut().take_controller(id);
+    }
+    let why = window(&sim, 0, samples).verdict(&sim, &cfg).expect_err("undriven sleepers fail");
+    assert!(why.contains("frozen"), "{why}");
 }

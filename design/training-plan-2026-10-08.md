@@ -1048,6 +1048,21 @@ control and the reward accounting; display targets after seeing results.
    - Role call 6 (Wrysk, 2026-10-10: "yeah fix all four"): absolute persistence for acceptance, J counts only
      adult recruits, a bellwing seasonal envelope (median at most 3x nominal), H as prey biomass per hour.
      SCORE-FIXES (Codex) building.
+   - Role call 7 (Wrysk, 2026-10-10): B, `mass_small` split per species (seedporter, bellwing, capgnawer,
+     lanternjaw), with a guard keeping the lanternjaw big enough for its prey. Re-derive every mass box
+     after the taste fix. Lanternjaw diet (Wrysk): "bellwings and capgnawers should be the main prey. they can
+     eat shredders too. occasionally a juvenile seedporter or frondgrazer. snails can be eaten when ashore."
+     Added to LANTERNJAW-LIFE.
+   - Role call 8 (Wrysk, 2026-10-10): B. Veilhounds keep catching perched bellwings but rarely succeed, because
+     "bellwing would be able to react very quickly". Queued after LANTERNJAW-LIFE merges (shared hunt code).
+     Idea, not decided: the lanternjaw lure glows cyan and IR, "or maybe one each", to draw bellwings and
+     capgnawers.
+   - Wrysk (2026-10-10): grown lanternjaws fight back when attacked ("its not like attacking a grazer"), using the
+     existing wound mechanics. Venom is noted for later ("lets not add too much just yet"; it would need a new
+     status effect). Queued with the bellwing escape.
+   - LANTERNJAW-LIFE + diet built (09cc0be1, b8329983): adult at 0.35, rider take 2x own body per day, host bears
+     0.5 of its body per day, adults count 12x in hunters' size windows, clutches of 2-7 once a world day, diet
+     weights. Effect check running on eidolon.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;

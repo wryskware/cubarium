@@ -8,4 +8,6 @@
 base = "patch.toml"
 
 [fauna.founders.lanternjaw]
+# Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
+wade.swim_out = false
 founding_count = 3

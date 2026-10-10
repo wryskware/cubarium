@@ -346,3 +346,10 @@ grid. Held as a study, not started: it needs a skinned-mesh pass, a per-frame vo
 that matches the bake's rules (coats, open faces, glyphs), and higher-fidelity models; on
 the world grid, walking and turning would also step a whole voxel at a time, as the
 flipbook arm did. Shipped instead: the bone rig with turned cubes (B).
+
+## 16. Lanternjaw venom (Wrysk, 2026-10-10: "we might wanna consider giving them venom but lets not add too much just yet cuz like thatd invent a whole new status effect")
+
+Grown lanternjaws fight back with ordinary wounds for now. Venom would add a status effect
+(slowed, weakened or paralysed prey, recovery over time). That would give its strikes and its
+defence a distinct character, and the brains a new sense to read. Park it until the ecology
+balance settles.

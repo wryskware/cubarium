@@ -31,6 +31,8 @@ reference_land_m2 = 190.0
 # Left out on purpose (too big a range for this map; predator questions go to `range`):
 # lanternjaw (its egg bank) and chorister (Veilhound packs).
 [fauna.founders.lanternjaw]
+# Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
+wade.swim_out = false
 founding_count = 0
 
 [fauna.founders.chorister]

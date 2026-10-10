@@ -647,6 +647,7 @@ fn census_predation_matches_the_funnel_and_keeps_prey_mass() {
     let kill = kills[0];
     assert_eq!(kill.predator, animal(&fauna, lj).founder.unwrap());
     assert_eq!(kill.prey, Founder::Browser);
+    assert_eq!(kill.prey_id, prey);
     assert_eq!(kill.prey_body, before);
     for stage in [crate::perception::STRUCK, crate::perception::KILLED] {
         let count = events.iter().filter(|e| e.kill == (stage == crate::perception::KILLED)).count() as u64;

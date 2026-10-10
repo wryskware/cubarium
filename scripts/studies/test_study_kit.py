@@ -568,12 +568,12 @@ class WideScoreTests(unittest.TestCase):
         self.document['population'].update(reference_floor_m2=100, peak_ratio=2)
         for band in self.document['population']['bands'].values():
             band.update(lo=2, hi=6)
-        self.document['population']['bands']['bellwing'].update(lo=0, hi=100)
+        self.document['population']['bands']['bellwing'].update(lo=0, nominal_hi=50, median_multiple=2)
         self.document['targets'].update(woods_share_lo=0.2, woods_share_hi=0.3,
             meadow_share_lo=0.1, meadow_share_hi=0.2, vaulttree_family_m2=4,
             lanternberry_groves=2, glowcap_lit_share_hi=0.1,
             leaf_offtake_lo=0.2, leaf_offtake_hi=0.4, fullness_p10=0.5,
-            hunts_per_hour_lo=0, hunts_per_hour_hi=100)
+            hunt_biomass_per_hour_lo=0, hunt_biomass_per_hour_hi=100)
         for spec in self.document['profiles'].values():
             spec['to_minute'] = 6
 
@@ -600,7 +600,7 @@ class WideScoreTests(unittest.TestCase):
             census.append(row)
         for index, name in enumerate(self.names):
             lives.append(dict(id=index, lineage=name, native='true', origin='observed',
-                born_minute=load - 1, died_minute='', matured_minute='', cause='', last_seen_minute=load + 6))
+                born_minute=load - 1, died_minute='', matured_minute='', cause='', prey_body='', last_seen_minute=load + 6))
         write_csv(self.root / 'census.csv', census)
         write_csv(self.root / 'vitals/vitals.csv', vitals)
         write_csv(self.root / 'vitals/life.csv', lives)
@@ -616,6 +616,21 @@ class WideScoreTests(unittest.TestCase):
         self.assertTrue(world['rankable'], world['warnings'])
         return world
 
+    def test_shared_loss_is_relative_feasible_but_absolute_infeasible(self):
+        self.fixture(load=0)
+        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, n_adult=0)
+            if r['lineage'] == 'frondgrazer' else r for r in rows])
+        world = self.world(year=True)
+        cfg = score.profile_config(self.document, 'wide-year')
+        summary = score.arm_summary([world], cfg, {1: world})
+        self.assertTrue(summary['feasible_relative'])
+        self.assertFalse(summary['feasible_absolute'])
+        self.assertFalse(summary['feasible'])
+        cfg['profile']['feasibility'] = 'relative'
+        self.assertTrue(score.arm_summary([world], cfg, {1: world})['feasible'])
+        self.mutate('census.csv', lambda rows: [dict(r, eggs_frondgrazer=1) for r in rows])
+        self.assertTrue(self.world(year=True)['feasible_absolute'])
+
     def test_per_area_band_and_founder_independence(self):
         self.fixture()
         inside = self.world()['components']['A']['raw']['frondgrazer']
@@ -624,6 +639,50 @@ class WideScoreTests(unittest.TestCase):
         self.assertEqual(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
         self.mutate('census.csv', lambda rows: [dict(r, founders_frondgrazer=inside['high'] * 2) for r in rows])
         self.assertGreater(self.world()['components']['A']['raw']['frondgrazer']['penalty'], 0)
+
+    def test_shared_extinction_is_rejected_only_by_absolute_profile(self):
+        self.fixture(load=0)
+        self.mutate('census.csv', lambda rows: [dict(r, founders_frondgrazer=0)
+            if float(r['sim_min']) == 6 else r for r in rows])
+        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, n=0, n_adult=0)
+            if r['lineage'] == 'frondgrazer' and float(r['minute']) == 6 else r for r in rows])
+        world = self.world(year=True)
+        self.assertIn('animal:frondgrazer', world['lost'])
+        cfg = score.profile_config(self.document, 'wide-year')
+        summary = score.arm_summary([world], cfg, {1: world})
+        self.assertTrue(summary['feasible_relative'])
+        self.assertFalse(summary['feasible_absolute'])
+        self.assertFalse(summary['feasible'])
+
+    def test_recruit_maturation_boundaries_and_resumed_snapshots(self):
+        def recruit(body_id, born_at, matured_at):
+            return dict(id=body_id, lineage='chorister', native='true', origin='born',
+                born_minute=born_at, matured_minute=matured_at, died_minute='',
+                last_seen_minute=60, segment=0)
+        early = recruit('early', 1, 2)
+        resumed = dict(early, origin='observed', born_minute=30, segment=1,
+            matured_minute='', last_seen_minute=120)
+        records = score.life_rows([early, resumed,
+            recruit('before', 1, -1), recruit('at_end', 1, 60),
+            recruit('birth_at_end', 60, 60), recruit('juvenile', 1, '')])
+        life = score.lifecycle('chorister', records, {}, {}, 0, 60, 30)
+        self.assertEqual(life['adult_recruits'], 1)
+        self.assertEqual(next(r for r in records if r['id'] == 'early')['matured_minute'], 2)
+
+    def test_hunt_boundaries_and_resumes_preserve_exact_tissue(self):
+        targets = dict(hunt_lineages=['hunter'], hunt_biomass_per_hour_lo=0,
+            hunt_biomass_per_hour_hi=10)
+        def death(body_id, minute, body):
+            return dict(id=body_id, lineage='prey', native='true', origin='observed',
+                cause='killed_by_hunter', died_minute=minute, prey_body=body,
+                last_seen_minute=60, segment=0)
+        first = death('start', 0, 2)
+        duplicate = dict(first, prey_body='', segment=1, last_seen_minute=120)
+        rows = score.life_rows([first, duplicate, death('before', -1, 20),
+            death('end', 60, 30), death('middle', 30, 3)])
+        hunt = score.hunt_biomass(rows, targets, 0, 60, 1)
+        self.assertEqual(hunt['biomass']['hunter'], 5)
+        self.assertEqual(hunt['rates']['hunter'], 5)
 
     def test_floor_doubles_bands_except_fixed_megafauna(self):
         pop = self.document['population']
@@ -644,10 +703,24 @@ class WideScoreTests(unittest.TestCase):
         year = self.world(year=True)['components']['J']['raw']
         for name in self.document['profiles']['wide-screen-2h']['slow']:
             self.assertGreater(year[name]['penalty'], 0)
-        # A surviving recruit early in the year counts, even before the late half.
+        # An early recruit that reaches adulthood counts, even before the late half.
         self.mutate('vitals/life.csv', lambda rows: rows + [dict(rows[0], id=100,
-            lineage='chorister', origin='born', born_minute=1)])
+            lineage='chorister', origin='born', born_minute=1, matured_minute=2)])
         self.assertEqual(self.world(year=True)['components']['J']['raw']['chorister']['penalty'], 0)
+
+    def test_only_recruits_that_reach_adulthood_clear_J(self):
+        self.fixture(load=0)
+        self.mutate('vitals/life.csv', lambda rows: rows + [dict(rows[0], id=100,
+            lineage='chorister', origin='hatched', born_minute=1)])
+        life = self.world(year=True)['components']['J']['raw']['chorister']
+        self.assertEqual(life['adult_recruits'], 0)
+        self.assertGreater(life['penalty'], 0)
+        # Reaching adulthood counts even if that adult dies before the endpoint.
+        self.mutate('vitals/life.csv', lambda rows: [dict(r, matured_minute=2, died_minute=4)
+            if r['id'] == '100' else r for r in rows])
+        life = self.world(year=True)['components']['J']['raw']['chorister']
+        self.assertEqual(life['adult_recruits'], 1)
+        self.assertEqual(life['penalty'], 0)
 
     def test_inactive_component_needs_nonempty_named_reason(self):
         spec = self.document['profiles']['wide-screen-2h']
@@ -703,6 +776,18 @@ class WideScoreTests(unittest.TestCase):
         self.assertEqual(world['components']['K']['raw']['bellwing']['penalty'], 0)
         self.assertEqual(world['components']['A']['raw']['bellwing']['penalty'], 0)
 
+    def test_bellwing_window_median_allows_peaks_but_penalises_overshoot(self):
+        self.fixture(load=0)
+        cfg = score.profile_config(self.document, 'wide-year')
+        ceiling = score.population_band('bellwing', cfg['population'], 100)[1]
+        self.mutate('census.csv', lambda rows: [dict(r, founders_bellwing=ceiling *
+            (4 if float(r['sim_min']) == 2 else 0.5)) for r in rows])
+        result = self.world(year=True)['components']
+        self.assertEqual(result['A']['raw']['bellwing']['penalty'], 0)
+        self.assertEqual(result['K']['raw']['bellwing']['penalty'], 0)
+        self.mutate('census.csv', lambda rows: [dict(r, founders_bellwing=ceiling * 2) for r in rows])
+        self.assertGreater(self.world(year=True)['components']['A']['raw']['bellwing']['penalty'], 0)
+
     def test_hunt_band_scales_and_screen_requires_year_old_start(self):
         self.fixture()
         first = self.world()['components']['H']['high']
@@ -712,6 +797,30 @@ class WideScoreTests(unittest.TestCase):
         young = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=1)
         self.assertFalse(young['rankable'])
         self.assertIn('year-old', young['warnings'][0])
+
+    def test_hunts_weight_prey_mass_and_keep_hunter_bands_separate(self):
+        targets = self.document['targets']
+        hunter = targets['hunt_lineages'][0]
+        def killed(body):
+            return dict(lineage='prey', killer_lineage=hunter, died_minute=1, prey_body=body)
+        large = score.hunt_biomass([killed(0.8)], targets, 0, 60, 1)
+        small = score.hunt_biomass([killed(0.02)], targets, 0, 60, 1)
+        self.assertAlmostEqual(large['rates'][hunter] / small['rates'][hunter], 0.8 / 0.02)
+        for other in targets['hunt_lineages'][1:]:
+            self.assertEqual(large['rates'][other], 0)
+        targets.update(hunt_biomass_per_hour_lo=0.1, hunt_biomass_per_hour_hi=0.2)
+        result = score.hunt_biomass([killed(0.15)], targets, 0, 60, 1)
+        self.assertGreater(result['penalty'], 0)  # A fed hunter cannot mask an unfed one.
+
+    def test_legacy_life_without_prey_mass_is_unrankable(self):
+        self.fixture()
+        self.mutate('vitals/life.csv', lambda rows: [{k: v for k, v in r.items()
+            if k != 'prey_body'} for r in rows])
+        cfg = score.profile_config(self.document, 'wide-screen-2h')
+        world = score.score_world(self.root, 'base', 1, cfg, required=self.required, load_minute=600)
+        self.assertFalse(world['rankable'])
+        self.assertIsNone(world['components']['H']['penalty'])
+        self.assertIn('life:prey_body', world['warnings'][-1])
 
     def test_v3_report_and_pairing_use_v3_components(self):
         self.fixture(load=0)

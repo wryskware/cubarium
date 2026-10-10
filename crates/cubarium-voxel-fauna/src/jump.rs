@@ -94,6 +94,32 @@ pub fn drop_of(founder: Founder) -> DropRule {
     }
 }
 
+/// **A lineage's wade-out** (WADE-OUT, [`wade_reflex`]): whether a walker held in water past
+/// its depth, or in a pocket ringed by it, swims the least-deep way out within its drown
+/// clock.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WadeRule {
+    /// It swims out (true), or stays where it stands (false).
+    pub swim_out: bool,
+}
+
+impl Default for WadeRule {
+    /// Swims out: most animals can swim (Wrysk 2026-10-10: "deffo swim out").
+    fn default() -> WadeRule {
+        WadeRule { swim_out: true }
+    }
+}
+
+/// Each lineage's wade-out: on for every walker but the lanternjaw.
+pub fn wade_of(founder: Founder) -> WadeRule {
+    match founder {
+        // Insectoid: no swimming (Wrysk 2026-10-10).
+        Founder::Lanternjaw => WadeRule { swim_out: false },
+        _ => WadeRule::default(),
+    }
+}
+
 /// A trapped body's chosen jump ([`crate::RouteGraph::drop_way`]), held between its controller
 /// samples for the jump ([`take_off`]). Session state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,7 +310,7 @@ pub(crate) fn wade_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> 
         && a.attached.is_none()
         && phys.flight.is_none()
         && !phys.aquatic;
-    if !grounded {
+    if !grounded || !phys.wade.swim_out {
         fauna.wading.remove(&a.id);
         return None;
     }

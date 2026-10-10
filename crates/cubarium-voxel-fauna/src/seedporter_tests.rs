@@ -1915,3 +1915,54 @@ fn a_juvenile_ringed_by_drowning_water_too_wide_to_cross_stays_and_lives() {
     let a = animal(&fauna, id);
     assert!(spot.contains(&(i64::from(a.site.x), a.site.z)), "it stays on the shallow: {:?}", a.site);
 }
+
+/// WADE-OUT's per-lineage switch (`wade.swim_out`): out of its depth with deeper water
+/// round it, a juvenile seedporter wades ashore; with its switch off the same body never
+/// takes a wade way. The lanternjaw (insectoid, no swimming: Wrysk 2026-10-10) has it off
+/// in the default table, so stranded the same way it never wades; switched on, it does.
+#[test]
+fn the_wade_out_switch_lets_a_seedporter_swim_out_and_keeps_a_lanternjaw_in() {
+    const LJ: Founder = Founder::Lanternjaw;
+    assert!(FaunaConfig::default().founder(SP).wade.swim_out, "a seedporter swims out by default");
+    assert!(!FaunaConfig::default().founder(LJ).wade.swim_out, "a lanternjaw does not");
+    // Stranded out of its depth with water a real step deeper round it, every tick it is
+    // there; whether it ever steered by the wade reflex, and whether it got ashore.
+    let stranded = |founder: Founder, swim_out: Option<bool>| -> (bool, bool) {
+        let mut c = freeze_config();
+        c.teachers.press_replan_s = 3.0;
+        c.founders[founder.index()].active = crate::Activity::Always;
+        if let Some(on) = swim_out {
+            c.founders[founder.index()].wade.swim_out = on;
+        }
+        let stores = if founder == SP { juvenile_stores() } else { HUNGRY_ADULT };
+        let p = *c.founder(founder);
+        let g = p.body_at(p.core.body_max * stores.body);
+        let (wade, drown) = (p.wade_depth_m(&g), p.drown_depth_m(&g));
+        let here = wade + 0.25 * (drown - wade);
+        let around = wade + 0.75 * (drown - wade);
+        assert!(around - here > crate::body::LEVEL_TOLERANCE_M, "fixture: the water round it is a real step deeper");
+        let world = lake(around, &[(45, 20)], here);
+        let mut flora = Flora::new(barren_flora());
+        let walk = 32.0 * V / (p.cruise_body_lengths_per_s * p.adult_length_m);
+        let cap = ((p.drop.after_s + 10.0 * walk + 10.0) / DT).ceil() as usize;
+        let mut fauna = Fauna::new(c);
+        fauna.set_births_enabled(false);
+        let id = on_ground(&mut fauna, &world, founder, 45, 20, stores);
+        let teachers = fauna.config().teachers;
+        assert!(fauna.set_controller(id, crate::controller::heuristic(founder, teachers)));
+        let mut waded = false;
+        for _ in 0..cap {
+            fauna.step(&world, &mut flora);
+            let a = *fauna.view().animal(id).expect("alive: it is never under water it drowns in");
+            waded |= fauna.steer.get(&id) == Some(&crate::Steer::Wade);
+            if !(30..=60).contains(&a.site.x) && world.view().water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) <= 0.0 {
+                return (waded, true);
+            }
+        }
+        (waded, false)
+    };
+    assert_eq!(stranded(SP, None), (true, true), "a stranded seedporter swims out");
+    assert_eq!(stranded(SP, Some(false)), (false, false), "switched off, it stays");
+    assert_eq!(stranded(LJ, None), (false, false), "a stranded lanternjaw does not swim out");
+    assert!(stranded(LJ, Some(true)).0, "switched on, the same lanternjaw takes the wade reflex");
+}
