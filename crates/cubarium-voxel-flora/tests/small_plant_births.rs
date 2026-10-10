@@ -966,9 +966,9 @@ fn every_preset_validates_and_a_broken_clone_does_not() {
 
     // And the shared rates, which are not a species' own.
     let mut broken = FloraConfig::default();
-    broken.shade_k_per_m2 = f64::NEG_INFINITY;
+    broken.light_extinction_k = f64::NEG_INFINITY;
     let e = broken
         .validate()
-        .expect_err("an infinite shade_k was accepted");
-    assert!(e.contains("shade_k"), "{e}");
+        .expect_err("an infinite light_extinction_k was accepted");
+    assert!(e.contains("light_extinction_k"), "{e}");
 }

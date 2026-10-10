@@ -112,6 +112,17 @@ class Kind:
             return Abort(f"task {task.name} {task.state}: {task.reason or 'exit ' + str(task.rc)}")
         return None
 
+    def census_runs(self, job, ctx):
+        """Declare expected runs, including ones whose census has not arrived yet."""
+        from .stops import CensusRun
+        if not job.tasks:
+            if job.spec.get("outputs") and "{" not in job.spec["outputs"]:
+                return [CensusRun("", job.spec.get("task", "run"), [Path(job.spec["outputs"]) / "census.csv"])]
+            return [CensusRun("", str(path.relative_to(job.out)), [path])
+                    for path in job.out.rglob("census.csv")]
+        return [CensusRun(str(v.task.meta.get("arm", "")), str(v.task.meta.get("seed", v.name)),
+                          [v.out / "census.csv"]) for v in job.tasks.values()]
+
     def finish(self, job, ctx):
         counts = {}
         for task in job.tasks.values():

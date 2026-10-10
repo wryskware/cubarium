@@ -244,7 +244,7 @@ fn the_canopy_gate_on_the_newborns_own_light_is_the_sims() {
     // The tall stands, on a plant layer whose canopy gate has `margin`.
     let make = |world: &World, margin: f64| {
         let mut c = quiet();
-        c.shade_k_per_m2 *= SHADE;
+        c.light_extinction_k *= SHADE;
         c.species_mut(sp).assimilation *= GAIN;
         c.species_mut(sp).establish_light_margin = margin;
         let mut flora = Flora::new(c);

@@ -372,7 +372,7 @@ pub fn to_csv(f: &Face) -> String {
 struct Shade {
     /// Per column `x * depth + z`: the shading layers of the stands rooted there:
     /// `(site, species index, top, radius, optical depth)`.
-    cols: Vec<Vec<(cubarium_voxel_flora::Site, usize, f64, f64, f64)>>,
+    cols: Vec<Vec<(cubarium_voxel_flora::Site, usize, [f64; 2], f64, f64)>>,
     reach: i64,
     width: u32,
     depth: u32,
@@ -388,10 +388,10 @@ impl Shade {
                 if !l.kind.bears_foliage() {
                     continue;
                 }
-                // The shade model's own factor, `exp(−k (1 − p) stock / area)` (`lib.rs:2857`).
-                let tau = config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2;
+                // The shade model's own depth (`StandLayer::optical_depth`, SHADE-REAL).
+                let tau = l.optical_depth;
                 reach = reach.max(l.radius_v);
-                cols[(s.site.x * depth + s.site.z) as usize].push((s.site, s.species.index(), l.band_v[1], l.radius_v, tau));
+                cols[(s.site.x * depth + s.site.z) as usize].push((s.site, s.species.index(), l.band_v, l.radius_v, tau));
             }
         }
         Shade { cols, reach: reach.ceil() as i64 + 1, width, depth }
@@ -408,13 +408,15 @@ impl Shade {
                 if z < 0 || z >= i64::from(self.depth) {
                     continue;
                 }
-                for &(s, sp, top, r, tau) in &self.cols[(x * self.depth + z as u32) as usize] {
+                for &(s, sp, band, r, tau) in &self.cols[(x * self.depth + z as u32) as usize] {
                     if s == site || (dx * dx + dz * dz) as f64 > r * r {
                         continue;
                     }
                     for k in 0..8 {
-                        if top > tops[k] {
-                            out[k][sp] += tau as f32;
+                        // A receiver read as a sheet at `tops[k]` (`study::canopy_at`).
+                        let f = cubarium_voxel_flora::shade_share(band, [tops[k], tops[k]]);
+                        if f > 0.0 {
+                            out[k][sp] += (f * tau) as f32;
                         }
                     }
                 }

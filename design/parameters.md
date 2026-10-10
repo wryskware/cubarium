@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1113 rows)
+**`flora.*`** (1151 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -431,6 +431,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.bloomcrown.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.bloomcrown.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.bloomcrown.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.bloomcrown.foliage_kg_per_unit` | 0.038 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.bloomcrown.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.bloomcrown.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.bloomcrown.wilt_water` | 0.05 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -478,6 +480,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.bloomcrown.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.bloomcrown.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.bloomcrown.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.bloomcrown.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.bloomcrown.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.bloomcrown.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.bloomcrown.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -545,6 +549,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.umbrellafrond.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.umbrellafrond.light_half` | 0.15 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.umbrellafrond.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.umbrellafrond.foliage_kg_per_unit` | 0.22 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.umbrellafrond.rooting_depth` | 4 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.umbrellafrond.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.umbrellafrond.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -592,6 +598,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.umbrellafrond.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.umbrellafrond.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.umbrellafrond.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.umbrellafrond.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.umbrellafrond.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.umbrellafrond.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.umbrellafrond.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -659,6 +667,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.springturf.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.springturf.light_half` | 1.0 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.springturf.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.springturf.foliage_kg_per_unit` | 0.0021 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.springturf.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.springturf.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.springturf.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -706,6 +716,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.springturf.wald_mean_m` | 3.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.springturf.wald_shape_m` | 0.5 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.springturf.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.springturf.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.springturf.burr_pickup` | 0.1 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.springturf.burr_retention_mean_m` | 3.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.springturf.burr_retention_shape` | 0.7 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -773,6 +785,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.stonecushion.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.stonecushion.light_half` | 0.3 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.stonecushion.specific_leaf_area_m2_per_kg` | 8.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.stonecushion.foliage_kg_per_unit` | 0.026 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.stonecushion.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.stonecushion.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.stonecushion.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -820,6 +834,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.stonecushion.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.stonecushion.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.stonecushion.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.stonecushion.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.stonecushion.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.stonecushion.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.stonecushion.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -887,6 +903,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.velvetpad.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.velvetpad.light_half` | 0.1 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.velvetpad.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.velvetpad.foliage_kg_per_unit` | 0.0105 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.velvetpad.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.velvetpad.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.velvetpad.wilt_water` | 0.25 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -934,6 +952,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.velvetpad.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.velvetpad.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.velvetpad.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.velvetpad.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.velvetpad.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.velvetpad.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.velvetpad.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1001,6 +1021,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.glowcap.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.glowcap.light_half` | 0.5 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.glowcap.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.glowcap.foliage_kg_per_unit` | 0.0156 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.glowcap.rooting_depth` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.glowcap.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.glowcap.wilt_water` | 0.2 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1048,6 +1070,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.glowcap.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.glowcap.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.glowcap.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.glowcap.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.glowcap.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.glowcap.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.glowcap.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1115,6 +1139,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.vaulttree.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.vaulttree.light_half` | 0.6 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.vaulttree.specific_leaf_area_m2_per_kg` | 13.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.vaulttree.foliage_kg_per_unit` | 0.42 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.vaulttree.rooting_depth` | 6 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.vaulttree.rooting_radius` | 2 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.vaulttree.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1162,6 +1188,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.vaulttree.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.vaulttree.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.vaulttree.seed_release_share` | 0.775 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.vaulttree.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.vaulttree.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.vaulttree.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.vaulttree.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1229,6 +1257,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.lanternberry.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.lanternberry.light_half` | 0.4 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.lanternberry.specific_leaf_area_m2_per_kg` | 13.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.lanternberry.foliage_kg_per_unit` | 0.069 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.lanternberry.rooting_depth` | 3 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.lanternberry.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.lanternberry.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1276,6 +1306,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.lanternberry.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.lanternberry.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.lanternberry.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.lanternberry.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.lanternberry.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.lanternberry.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.lanternberry.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1343,6 +1375,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.siphonreed.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.siphonreed.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.siphonreed.specific_leaf_area_m2_per_kg` | 15.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.siphonreed.foliage_kg_per_unit` | 0.044 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.siphonreed.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.siphonreed.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.siphonreed.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1390,6 +1424,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.siphonreed.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.siphonreed.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.siphonreed.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.siphonreed.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.siphonreed.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.siphonreed.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.siphonreed.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1462,7 +1498,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
 | `flora.latticevine.founder_spread_m` | 3.0 | m of floor | [0, inf) | 0–8 | - | placeholder | floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off |
 | `flora.latticevine.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | C | placeholder | a banked latticevine seed (voided from a gut) older than this at its check falls to litter |
-| `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
+| `flora.light_extinction_k` | 0.6 | dimensionless | [0, inf) | 0.3–0.9 | A | literature: Monsi & Saeki 1953; Jones 1992; Campbell & Norman 1998 (broadleaf 0.5-0.7) | k_ext: Beer-Lambert light extinction, exp(-k_ext (1-porosity) LAI) per foliage layer |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.litter_fragment_boost` | 0.25 | fraction | [0, inf) |  | - | placeholder | extra local microbial decay after shredder feeding |
 | `flora.litter_fragment_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | radius of shredder fragmentation |
@@ -1478,6 +1514,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |
 | `flora.wind_shape` | 2.0 | - | (0, inf) | 1.2–4 | - | placeholder | wind kernel: Lomax shape k (larger is a thinner tail) |
 | `flora.wind_scale_hops` | 2.5 | hops | (0, inf) | 0.5–8 | - | placeholder | wind kernel: Lomax scale a, in the species' hops |
+| `flora.seed_wind_m_per_s` | 2.0 | m/s | [0, inf) | 0.5–6 | B | literature: Katul et al. 2005; Nathan et al. 2002 (canopy-top wind ~2 m/s) | Wald from the crown: mean wind U at release height |
+| `flora.seed_eddy_ratio` | 0.1 | dimensionless (K / (U H)) | (0, inf) | 0.03–0.3 log | B | derived: K = sigma_w^2 T_L, Raupach 1988 / Katul et al. 2005 | Wald from the crown: eddy diffusivity per unit wind and height; shape = H / (2a) |
 | `flora.carcass_remains_fraction` | 0.3 | fraction of the body's organic matter | [0, 1] | 0.1–0.6 | - | placeholder | carrion below this draws as remains, not the body |
 | `flora.carcass_gone_fraction` | 0.02 | fraction of the body's organic matter | [0, 1] | 0.005–0.1 log | - | placeholder | carrion at or below this drops the carcass record |
 | `flora.seed_mark_recent_s` | 120.0 | s | [0, inf) | 10–600 | - | placeholder | how long a seed landing keeps its site's mark |
@@ -1507,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2747 rows)
+**`fauna.*`** (2822 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1515,7 +1553,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.frondgrazer.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.frondgrazer.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.frondgrazer.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.frondgrazer.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.frondgrazer.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.frondgrazer.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1537,6 +1575,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.frondgrazer.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.frondgrazer.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.frondgrazer.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.frondgrazer.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.frondgrazer.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.frondgrazer.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.frondgrazer.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.frondgrazer.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -1548,7 +1589,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.littershredder.core.body_min` | 0.09375 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.littershredder.core.birth_body` | 0.375 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.littershredder.core.birth_cost` | 0.1875 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1570,6 +1611,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.littershredder.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.littershredder.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.littershredder.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.littershredder.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.littershredder.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.littershredder.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.littershredder.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.littershredder.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -1763,6 +1807,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.littershredder.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.littershredder.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.littershredder.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.littershredder.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.littershredder.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.littershredder.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.littershredder.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.littershredder.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.littershredder.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.littershredder.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -1822,14 +1871,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.littershredder.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.littershredder.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.littershredder.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.littershredder.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.000008333333333333334 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.frondgrazer.core.body_max` | 1.5 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.frondgrazer.core.growth_max_per_s` | 0.000285 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.frondgrazer.core.body_min` | 0.15 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.frondgrazer.core.birth_body` | 0.8999999999999999 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.frondgrazer.core.birth_cost` | 0.3 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -1851,6 +1900,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.frondgrazer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.frondgrazer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.frondgrazer.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.frondgrazer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.frondgrazer.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.frondgrazer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2044,6 +2096,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.frondgrazer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.frondgrazer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.frondgrazer.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.frondgrazer.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.frondgrazer.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.frondgrazer.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.frondgrazer.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.frondgrazer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.frondgrazer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.frondgrazer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2103,14 +2160,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.frondgrazer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.frondgrazer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.frondgrazer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.frondgrazer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000009722222222222223 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00030000000000000003 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.lanternjaw.core.body_min` | 0.0525 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.lanternjaw.core.birth_body` | 0.3675 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2132,9 +2189,12 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.lanternjaw.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.lanternjaw.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 1800.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
-| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.5 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.75 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
@@ -2189,7 +2249,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.lanternjaw.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (7 values) | fraction | [0, 1] | 0.05–0.9 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2325,6 +2385,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.lanternjaw.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.lanternjaw.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.lanternjaw.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.lanternjaw.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.lanternjaw.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.lanternjaw.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.lanternjaw.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.lanternjaw.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.lanternjaw.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.lanternjaw.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2384,14 +2449,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.lanternjaw.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.lanternjaw.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.lanternjaw.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.lanternjaw.counter.reach` | 0.5 | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.lanternjaw.counter.damage` | 0.7 | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.lanternjaw.counter.cost` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.capgnawer.core.body_max` | 0.6384 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.capgnawer.core.growth_max_per_s` | 0.00017364479999999998 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.capgnawer.core.growth_max_per_s` | 0.00017364479999999998 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.capgnawer.core.body_min` | 0.1596 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.capgnawer.core.birth_body` | 0.6384 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.capgnawer.core.birth_cost` | 0.3192 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2413,6 +2478,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.capgnawer.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.capgnawer.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.capgnawer.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.capgnawer.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.capgnawer.core.reproduction.egg_fungus_radius_m` | 0.5 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.capgnawer.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2606,6 +2674,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.capgnawer.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.capgnawer.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.capgnawer.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.capgnawer.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.capgnawer.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.capgnawer.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.capgnawer.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.capgnawer.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.capgnawer.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.capgnawer.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2665,14 +2738,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.capgnawer.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.capgnawer.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.capgnawer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.capgnawer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.loftstrider.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.loftstrider.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.loftstrider.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.loftstrider.core.body_max` | 5.28 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.loftstrider.core.growth_max_per_s` | 0.0010032 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.loftstrider.core.growth_max_per_s` | 0.0010032 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.loftstrider.core.body_min` | 0.528 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.loftstrider.core.birth_body` | 3.168 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.loftstrider.core.birth_cost` | 1.056 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2694,6 +2767,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.loftstrider.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.loftstrider.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.loftstrider.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.loftstrider.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.loftstrider.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.loftstrider.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -2887,6 +2963,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.loftstrider.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.loftstrider.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.loftstrider.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.loftstrider.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.loftstrider.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.loftstrider.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.loftstrider.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.loftstrider.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.loftstrider.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.loftstrider.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -2946,14 +3027,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.loftstrider.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.loftstrider.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.loftstrider.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.loftstrider.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.ripple-snail.core.body_max` | 0.1455552 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.ripple-snail.core.body_min` | 0.0363888 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.ripple-snail.core.birth_body` | 0.1455552 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.ripple-snail.core.birth_cost` | 0.0727776 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -2975,6 +3056,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.ripple-snail.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.ripple-snail.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.ripple-snail.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.ripple-snail.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.ripple-snail.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.ripple-snail.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3168,6 +3252,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.ripple-snail.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.ripple-snail.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.ripple-snail.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.ripple-snail.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.ripple-snail.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.ripple-snail.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.ripple-snail.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.ripple-snail.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.ripple-snail.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.ripple-snail.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3227,14 +3316,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.ripple-snail.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.ripple-snail.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.ripple-snail.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.ripple-snail.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.bellwing.core.body_max` | 0.03 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.bellwing.core.body_min` | 0.003 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.bellwing.core.birth_body` | 0.015 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.bellwing.core.birth_cost` | 0.015 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3256,6 +3345,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.bellwing.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.bellwing.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.bellwing.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.bellwing.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.bellwing.core.reproduction.clutch_hold_max_s` | 300.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.bellwing.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.bellwing.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3449,6 +3541,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.flight.rain_ground_m_per_s` | 0.000005555555555555556 | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.bellwing.flight.rain_ground_hysteresis_m_per_s` | 0.000001388888888888889 | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.bellwing.flight.nest_search_m` | 4.0 | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.bellwing.flight.flush_reaction_s` | 0.05 | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.bellwing.flight.flush_speed_factor` | 3.0 | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.bellwing.flight.flush_climb_fraction` | 0.5 | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.bellwing.flight.flush_burst_s` | 0.3 | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.bellwing.flight.flush_s` | 3.0 | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.bellwing.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.bellwing.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.bellwing.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3508,14 +3605,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.bellwing.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.bellwing.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.bellwing.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.bellwing.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.seedporter.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.seedporter.core.body_max` | 0.35555555555555557 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.seedporter.core.growth_max_per_s` | 0.00006755555555555557 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.seedporter.core.growth_max_per_s` | 0.00006755555555555557 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.seedporter.core.body_min` | 0.035555555555555556 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.seedporter.core.birth_body` | 0.21333333333333335 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.seedporter.core.birth_cost` | 0.07111111111111111 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3537,6 +3634,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.seedporter.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.seedporter.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.seedporter.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.seedporter.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.seedporter.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.seedporter.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.seedporter.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.seedporter.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -3730,6 +3830,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.seedporter.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.seedporter.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.seedporter.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.seedporter.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.seedporter.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.seedporter.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.seedporter.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.seedporter.glider.climb_min_stand_m` | 1.0 | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.seedporter.glider.glide_ratio` | 2.5 | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.seedporter.glider.glide_speed_fraction` | 2.0 | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -3789,14 +3894,14 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.seedporter.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.seedporter.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.seedporter.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.seedporter.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.chorister.core.body_max` | 2.7439999999999998 | org-units | [0, inf) |  | D | placeholder | adult structure |
-| `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
+| `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.chorister.core.body_min` | 0.26655999999999996 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
 | `fauna.founders.chorister.core.birth_body` | 1.6463999999999996 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.chorister.core.birth_cost` | 0.5331199999999999 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
@@ -3818,6 +3923,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.chorister.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.chorister.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
+| `fauna.founders.chorister.core.reproduction.nest_seek` | (absent) | switch | [0, 1] |  | - | placeholder | SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is) |
+| `fauna.founders.chorister.core.reproduction.nest_seek_m` | 3.0 | m | [0, inf) | 0.5–8 | - | placeholder | SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height) |
+| `fauna.founders.chorister.core.reproduction.nest_seek_give_up_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry |
 | `fauna.founders.chorister.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.chorister.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
 | `fauna.founders.chorister.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
@@ -4011,6 +4119,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.flight.rain_ground_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | at or over this rain rate a flyer comes down (under cover when it can) and neither takes off nor sips |
 | `fauna.founders.chorister.flight.rain_ground_hysteresis_m_per_s` | (absent) | m/s of rain | [0, inf) |  | - | placeholder | a rain-grounded flyer flies again once the rain is under the threshold less this |
 | `fauna.founders.chorister.flight.nest_search_m` | (absent) | m | [0, inf) |  | - | placeholder | VINE-C: a vine nester ready to lay with no vine face in reach flies to the nearest covered wall face within this that would take its clutch |
+| `fauna.founders.chorister.flight.flush_reaction_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: a hunter sensed looming (its strike begun, or closing) within loom_m sends it off this long after |
+| `fauna.founders.chorister.flight.flush_speed_factor` | (absent) | x cruise speed | [0, inf) |  | - | placeholder | FLUSH: its escape burst's speed, off the threat's line (0: no flush) |
+| `fauna.founders.chorister.flight.flush_climb_fraction` | (absent) | x burst speed | [0, inf) |  | - | placeholder | FLUSH: the burst's climb |
+| `fauna.founders.chorister.flight.flush_burst_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: the burst's length |
+| `fauna.founders.chorister.flight.flush_s` | (absent) | s | [0, inf) |  | - | placeholder | FLUSH: after the takeoff it flies on away and up, neither sipping nor landing by choice, this long |
 | `fauna.founders.chorister.glider.climb_min_stand_m` | (absent) | m | [0, inf) |  | - | decision | the shortest stand whose stem it climbs (crown top over the support) |
 | `fauna.founders.chorister.glider.glide_ratio` | (absent) | m across per m down | (0, inf) |  | - | decision | a glide's horizontal metres per metre of descent |
 | `fauna.founders.chorister.glider.glide_speed_fraction` | (absent) | x ground cruise | (0, inf) |  | - | decision | a glide's speed, a multiple of the lineage's cruise |
@@ -4070,9 +4183,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.select_min_prospect` | 0.1 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
-| `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | counter-strike reach (unused seam) |
-| `fauna.founders.chorister.counter.damage` | (absent) | wound | [0, inf) |  | - | placeholder | counter-strike damage (unused seam) |
-| `fauna.founders.chorister.counter.cost` | (absent) | org-units | [0, inf) |  | - | placeholder | counter-strike cost (unused seam) |
+| `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
+| `fauna.founders.chorister.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
+| `fauna.founders.chorister.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
 | `fauna.predation.still_after_s` | 2.0 | s | [0, inf) | 0.5–10 | - | decision | a body is still once it has not moved this long |
 | `fauna.predation.still_speed_bl_per_s` | 0.1 | body lengths/s | [0, inf) | 0.02–0.5 | - | decision | ground speed that counts as moving |
 | `fauna.predation.still_threat_near_m` | 0.5 | m | [0, inf) | 0.1–2 | - | decision | a still threat reads as a threat inside this distance |
@@ -4248,11 +4361,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founding.accept_founder_hours` | 1.0 | founder-hours | [0, inf) | 0.1–6 | - | placeholder | founder-hours of adult upkeep a component's stock must cover per founder |
 | `fauna.founding.clearance_margin_m` | 0.03 | m | [0, inf) |  | - | placeholder | slack added to the founder's disc radius when choosing where founders may be placed |
 | `fauna.founding.reference_land_m2` | 0.0 | m2 | [0, inf) |  | - | decision | dry support area the founding counts are written for; positive scales counts and plant founder caps by the world's own area (0: counts as written) |
-| `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
+| `fauna.hatch_chance_per_dusk` | 0.6666666666666666 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
-| `fauna.parasite_take_body_per_day` | 2.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
-| `fauna.parasite_host_bear_per_day` | 0.5 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
+| `fauna.parasite_take_body_per_day` | 4.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
+| `fauna.parasite_host_bear_per_day` | 1.8 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
 | `fauna.parasite_detach_body_fraction` | 0.28 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
 | `fauna.parasite_switch` | (absent) | switch | [0, 1] |  | N | decision | LJ-HOSTSWITCH: a rider that outgrew its host below drop-off size looks for one that bears it before going free (false: it goes free) |
 | `fauna.parasite_switch_radius_m` | 3.0 | m | [0, inf) | 1–8 | N | placeholder | LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it |

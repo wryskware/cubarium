@@ -154,6 +154,19 @@ pub struct StandLayer {
     /// The layer's horizontal area in m², floored at one reference cell — the divisor
     /// of the shade exponent.
     pub area_m2: f64,
+    /// **The layer's optical depth** (SHADE-REAL, Beer–Lambert): what it does to light
+    /// passing down through it is `exp(−optical_depth)`, and
+    ///
+    /// `optical_depth = k_ext · (1 − porosity) · LAI`,
+    /// `LAI = specific_leaf_area · foliage_kg_per_unit · stock / area_m2`,
+    ///
+    /// with `k_ext` [`crate::FloraConfig::light_extinction_k`] and the species'
+    /// [`crate::SpeciesConfig::specific_leaf_area_m2_per_kg`] and
+    /// [`crate::SpeciesConfig::foliage_kg_per_unit`]: the leaf area this layer's stock
+    /// spreads over its own disc. The porosity is the crown's gap fraction (a clumping
+    /// factor): the share of the disc no leaf covers. Zero on a trunk (no stock). Every
+    /// reader of shade multiplies by [`shade_share`] of it, never by a law of its own.
+    pub optical_depth: f64,
 }
 
 impl StandLayer {
@@ -170,6 +183,43 @@ impl StandLayer {
         // to the lowest layer a bite touched; that dust is not food.
         if above > EDIBLE_DUST { above } else { 0.0 }
     }
+}
+
+/// **How much of an occluding foliage layer lies above a receiving one** (SHADE-REAL,
+/// item 2): the share of the occluder's optical depth the receiver sits under, from
+/// their bands (`[bottom, top]`, any one height unit).
+///
+/// - An occluder whose top is **below** the receiver's top shades it not at all: a
+///   taller crown takes exactly the light it took before this rule.
+/// - Otherwise the occluder's foliage is spread evenly through its band and the receiver
+///   is read at its band's middle, so the share is the part of the occluder's band above
+///   that middle, `(top − mid) / (top − bottom)`, clamped to `[0, 1]`. An occluder whose
+///   whole band is above the receiver's middle gives all of its depth, as the old
+///   strictly-above rule did; two equal bands give each other **half**, symmetrically,
+///   instead of letting each other off.
+/// - A band of no thickness is a sheet at its top: all of it above the receiver's
+///   middle, half of it level with it, none below.
+///
+/// One rule for every pair of species. Who may shade whom at all (a stand never shades
+/// itself; a face's plant and its fungus never shade each other) is the caller's.
+#[inline]
+pub fn shade_share(occluder: [f64; 2], receiver: [f64; 2]) -> f64 {
+    let (bottom, top) = (occluder[0], occluder[1]);
+    if !(top >= receiver[1]) {
+        return 0.0;
+    }
+    let mid = 0.5 * (receiver[0] + receiver[1]);
+    let thick = top - bottom;
+    if !(thick > 1e-12) {
+        return if top > mid {
+            1.0
+        } else if top == mid {
+            0.5
+        } else {
+            0.0
+        };
+    }
+    ((top - mid) / thick).clamp(0.0, 1.0)
 }
 
 /// Organic matter above a grazing floor that still reads as none: the float residue of

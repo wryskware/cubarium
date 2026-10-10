@@ -78,6 +78,9 @@ pub struct Hit {
     pub striker: u64,
     /// FINDINGS-FIX-2: the strike's [`Strike::lure`].
     pub lure: bool,
+    /// HUNT-ESCAPE: a counter-strike ([`crate::Counter`]): `prey` is the attacker, `striker`
+    /// the grown body answering it, `by` its lineage.
+    pub counter: bool,
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its
@@ -104,8 +107,8 @@ pub(crate) fn is_prey_in_window(
     };
     // An opportunist's table is the catch's ([`crate::FounderPhysiology::opportunist`]):
     // `active_hunter` already holds it off with the switch; on, it takes low prey of its
-    // list worth the strikes (a bellwing, and since LANTERNJAW-LIFE a small lanternjaw
-    // juvenile for the seedporter) and nothing else.
+    // list worth the strikes (bellwings, littershredders and small lanternjaw
+    // juveniles for the seedporter) and nothing else.
     let p = config.founder(hf);
     if p.opportunist {
         if !p.catch_bellwings
