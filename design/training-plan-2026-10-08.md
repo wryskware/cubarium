@@ -998,8 +998,15 @@ control and the reward accounting; display targets after seeing results.
        - Exact: 13,928 place records are identical, and so are the heuristic rows.
    - P5 (reward): the digestible stomach counts (Wrysk, 2026-10-09). Still open: pack-shared
      reward (Q4b), then H 64 (Q5).
-   - AUTOSAVE-SLOT (Codex) running: autosaves go to `<world> (autosave)` and never overwrite
+   - Ecology search redesign (Wrysk, 2026-10-09): the 12-generation CMA screen gets little done
+     for its compute (84 settings in 9 genes on noisy 2 h windows; megafauna not judged). Proposed:
+     map first (a space-filling design over all 9 genes, few seeds each, fitted response per
+     lineage), then confirm, then the year check. Wrysk wants independent fresh-eyes plans first,
+     Opus and Astra at xhigh, optimising effectiveness / total compute. The desktop CMA round is
+     held (`runs/eco-screen-2026-10-09/HOLD`).
+   - AUTOSAVE-SLOT (Codex) merged a73cbc8c: autosaves go to `<world> (autosave)` and never overwrite
      the player's save; launch opens the newer of the two (Wrysk: "like how other games do it").
+     Display build display-73-autosave installed.
    - P7 (stage runs) needs P5 and P6.
 
 ## 7. Work log (2026-10-08)
