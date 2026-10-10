@@ -58,6 +58,14 @@ def cargo_args(spec):
     return argv, relative
 
 
+def source_key(ctx, repo, commit):
+    key = f"source:{commit}"
+    if ctx.store:
+        ctx.store.x("INSERT INTO recipes(key, spec) VALUES(?, ?) ON CONFLICT(key) DO NOTHING", key,
+                    json.dumps(dict(provider="source", repo=repo, commit=commit)))
+    return key
+
+
 class Build(Kind):
     name = "build"
     description = "cargo build at a commit into the artifact cache"
@@ -101,10 +109,7 @@ class Build(Kind):
                     "--out", "{out}", "--", *cargo]
             return [Task(name="build", argv=argv, local_only=True, arch=ctx.arch, **common)]
         # Another arch builds natively on its host from a source archive of the same commit.
-        source = f"source:{spec['commit']}"
-        if ctx.store:
-            ctx.store.x("INSERT INTO recipes(key, spec) VALUES(?, ?) ON CONFLICT(key) DO NOTHING", source,
-                        json.dumps(dict(provider="source", repo=spec["repo"], commit=spec["commit"])))
+        source = source_key(ctx, spec["repo"], spec["commit"])
         bootstrap = ('command -v cargo >/dev/null || . "$HOME/.cargo/env" 2>/dev/null || '
                      '{ curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null && . "$HOME/.cargo/env"; }; '
                      'exec "$@"')
