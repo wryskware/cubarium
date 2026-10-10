@@ -400,7 +400,8 @@ pub struct TeacherConfig {
     pub forage_turn_back_samples: u32,
     /// **EDGE, a pressed walk re-plans**: a reflex walking a body to a target (a glider's
     /// refuge, roost or fruit) that has asked it forward this long without its moving
-    /// (`Animal::still_ticks`) gives that target up, seconds.
+    /// gives that target up, seconds. A fruit approach that asks no motion, or a hungry
+    /// vine perch with no reachable fruit, also re-plans after this long with no progress.
     #[serde(default = "press_replan_s")]
     pub press_replan_s: f64,
     /// How long a target given up that way stays given up, seconds.
@@ -425,7 +426,8 @@ pub struct TeacherConfig {
     /// stomach (`full_tolerance · K / τ`, its own gut; at 1 the patch could just end a
     /// meal), a fraction. 0.5: a patch offering under half a filling rate — for a lineage
     /// on the default bite (`b = 2k/τ`) a stock under about a third of its
-    /// `bite_half_stock` — never ends a meal, and is left. 0 turns the rule off.
+    /// `bite_half_stock` — never ends a meal, and is left. A lineage's
+    /// `FounderPhysiology::give_up_fraction` overrides this. 0 turns the rule off.
     #[serde(default = "give_up_fraction")]
     pub give_up_fraction: f64,
     /// The least time on a patch before it may be given up, seconds: a just-arrived body is

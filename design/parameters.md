@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2689 rows)
+**`fauna.*`** (2707 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1577,6 +1577,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.littershredder.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.littershredder.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.littershredder.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.littershredder.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.littershredder.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.littershredder.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -1852,6 +1854,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.frondgrazer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.frondgrazer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.frondgrazer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.frondgrazer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.frondgrazer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.frondgrazer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2127,6 +2131,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.lanternjaw.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.lanternjaw.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.lanternjaw.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.lanternjaw.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.lanternjaw.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2402,6 +2408,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.capgnawer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.capgnawer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.capgnawer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.capgnawer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.capgnawer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.capgnawer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2677,6 +2685,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.loftstrider.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.loftstrider.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.loftstrider.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.loftstrider.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.loftstrider.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.loftstrider.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2952,6 +2962,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.ripple-snail.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.ripple-snail.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.ripple-snail.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.ripple-snail.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.ripple-snail.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.ripple-snail.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3227,6 +3239,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.bellwing.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.bellwing.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.bellwing.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.bellwing.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.bellwing.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.bellwing.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3502,6 +3516,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.seedporter.fruit_bite_half_stock` | 0.0005 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.seedporter.give_up_fraction` | 0.05 | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.seedporter.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3777,6 +3793,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.breeding_phase` | 0.2 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.chorister.core.reproduction.breeding_window` | 0.15 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.chorister.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.chorister.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.chorister.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.chorister.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.chorister.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -4105,7 +4123,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind and browser foragers' forward effort while they taste food (0 stays on food, 1 walks across it) |
 | `fauna.teachers.forage_turn_back_samples` | 2 | samples | [0, inf) | 0–8 | - | placeholder | samples the blind forager turns after leaving an exhausted patch (area-restricted search) |
-| `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a reflex walk asking forward this long without moving gives its target up (EDGE) |
+| `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE) |
 | `fauna.teachers.press_shun_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | a target given up for pressing stays given up this long |
 | `fauna.teachers.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | the walking route graph a reflex walk plans on is rebuilt after this |
 | `fauna.teachers.route_detour` | 2.0 | ratio | (0, inf) | 1–4 | - | placeholder | a target is in reach when its route is at most this times the reflex's search radius |

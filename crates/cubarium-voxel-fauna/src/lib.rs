@@ -3890,9 +3890,11 @@ pub struct Fauna {
     /// that layer is the one held ([`Fauna::walk_commit`]). Not saved.
     #[serde(skip)]
     pub(crate) walk_pending: FxHashMap<u64, (u64, Steer)>,
-    /// EDGE: per grounded founder, the ticks it has **pressed** without a break: controller
+    /// EDGE: per founder, the ticks it has **pressed** without a break: controller
     /// intervals in which it held forward and its motor delivered under
-    /// `teachers.motor_refused` of what it attempted. Session state: not saved.
+    /// `teachers.motor_refused` of what it attempted; also a fruit approach with no
+    /// displacement or a hungry vine stance with no reachable fruit or displacement.
+    /// Session state: not saved.
     #[serde(skip)]
     pub(crate) pressed: FxHashMap<u64, u64>,
     /// EDGE: per body, the targets it gave up for pressing and the tick it may try each

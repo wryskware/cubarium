@@ -196,26 +196,6 @@ fn vine_ahead(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, shape: Shape
     let v = c.voxel_m;
     let (cx, cz) = a.pose.column(v, c.depth)?;
     let (dir, _) = axis_of(a.pose.heading_rad);
-    let (wx, wz) = (cx + dir.0, i64::from(cz) + dir.1);
-    if wz < 0 || wz >= i64::from(c.depth) {
-        return None;
-    }
-    let wx = wx.rem_euclid(i64::from(c.width));
-    // Pressed: the centre within its radius of the plane it faces.
-    let s = if dir.0 != 0 { dir.0 } else { dir.1 };
-    let col = if dir.0 != 0 { cx } else { i64::from(cz) };
-    let plane = beside_plane(col, s, v, 0.0, 0.0);
-    let along = if dir.0 != 0 { a.pose.x } else { a.pose.z };
-    let gap = if dir.0 != 0 {
-        let w = f64::from(c.width) * v;
-        let d = (plane - along).rem_euclid(w);
-        d.min(w - d)
-    } else {
-        (plane - along).abs()
-    };
-    if gap > shape.r + PRESSED_M {
-        return None;
-    }
     let face_dir = match dir {
         (1, 0) => FaceDir::NegX,
         (-1, 0) => FaceDir::PosX,
@@ -223,13 +203,28 @@ fn vine_ahead(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, shape: Shape
         _ => FaceDir::PosZ,
     };
     let (lo, hi) = body_rows(a.pose.y_m, shape, v);
-    (lo..=hi).find_map(|y| {
-        if y < 0 || y >= i64::from(c.height) || !view.is_solid(wx, y as u32, wz as u32) {
-            return None;
+    // A footprint can span several fine voxels. Probe every plane it can touch,
+    // rather than only the neighbour of its centre column.
+    let columns = ((shape.r + PRESSED_M) / v).ceil() as i64 + 1;
+    for step in 1..=columns {
+        let (wx, wz) = (cx + step * dir.0, i64::from(cz) + step * dir.1);
+        if wz < 0 || wz >= i64::from(c.depth) { continue; }
+        let plane = if dir.0 > 0 { wx as f64 * v } else if dir.0 < 0 { (wx + 1) as f64 * v }
+            else if dir.1 > 0 { wz as f64 * v } else { (wz + 1) as f64 * v };
+        let along = if dir.0 != 0 { a.pose.x } else { a.pose.z };
+        if (plane - along).abs() > shape.r + PRESSED_M { continue; }
+        let wx = wx.rem_euclid(i64::from(c.width));
+        if let Some(face) = (lo..=hi).find_map(|y| {
+            if y < 0 || y >= i64::from(c.height) || !view.is_solid(wx, y as u32, wz as u32) {
+                return None;
+            }
+            let face = VineFace::new(wx as u32, y as u32, wz as u32, face_dir);
+            fv.cover.face(face).map(|_| face)
+        }) {
+            return Some(face);
         }
-        let face = VineFace::new(wx as u32, y as u32, wz as u32, face_dir);
-        fv.cover.face(face).map(|_| face)
-    })
+    }
+    None
 }
 
 /// The cell rows a body standing on `base` spans.
@@ -1143,7 +1138,7 @@ fn glider_feed(
         Bloom::Vine(_) => None,
     };
     super::forage::note_bite(fauna, i, phys, Food::Fruit, manifest.controller_period_s, effort, stock, key);
-    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, Food::Fruit, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -1749,7 +1744,7 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
     let glider = phys.glider?;
-    if a.mobility.mode != MobilityMode::Ground || a.state == State::Asleep {
+    if a.state == State::Asleep {
         return None;
     }
     // It searches while it wants food (the eating latch; since the minimal gut a fed
@@ -1760,6 +1755,28 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if glider_fruit_in_reach(view, fv, &a, &phys).is_some() {
         return None;
     }
+    // A hungry body with no reachable food may cling at an unmountable lip or
+    // keep asking a turn that its wall cannot deliver. After the existing
+    // re-plan clock without displacement, give this wall's food targets up and
+    // leave the perch (a glide or descent); a climber descends directly.
+    if matches!(a.mobility.mode, MobilityMode::Climb | MobilityMode::Perched)
+        && let Some(Perch { anchor: PerchAnchor::Vine(face), .. }) = a.mobility.perch
+    {
+        let tc = fauna.config.teachers;
+        let bound = if tc.press_replan_s > 0.0 && tc.press_replan_s.is_finite() {
+            cubarium_voxel::ticks_at_least_one(tc.press_replan_s)
+        } else { return None; };
+        if fauna.pressed.get(&a.id).copied().unwrap_or(0) < bound { return None; }
+        let until = fauna.tick.saturating_add(cubarium_voxel::ticks_at_least_one(tc.press_shun_s));
+        for cover in fv.cover.iter().filter(|c| same_wall(c.face, face)) {
+            fauna.shun_target(a.id, vine_fruit_key(view, cover.face), until);
+        }
+        if a.mobility.mode == MobilityMode::Climb {
+            fauna.animals[i].mobility.falling = true;
+        }
+        return Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 });
+    }
+    if a.mobility.mode != MobilityMode::Ground { return None; }
     if phys.senses.live {
         return fruit_by_sight(fauna, i, view, fv, day);
     }
@@ -1774,17 +1791,40 @@ fn vine_fruit_key(view: &VoxelView<'_>, face: VineFace) -> u64 {
     (1 << 63) | (1 << 62) | ((view.config.index(i64::from(face.x), face.y, face.z) as u64) << 3) | dir
 }
 
-fn fruit_wall_approach(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, phys: &crate::FounderPhysiology, id: u64) -> Option<Actions> {
+fn fruit_wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, id: u64) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    // Both sight and remembered-face approaches must honour the walk's shun list.
+    if fauna.walk_shunned(a.id, founder).contains(&id) { return None; }
     let fruit = fv.cover.iter().find(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id)?;
     let (x, _, z) = fruit.face.front(view)?;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, ring);
-    if dx.hypot(dz) > shape(phys, a.body).r + v { return None; }
+    let s = shape(&phys, a.body);
+    if dx.hypot(dz) > s.r + v { return None; }
+    let (low, high) = body_rows(a.pose.y_m, s, v);
+    // Above or below every covered body row, this stance cannot attach. Let the
+    // route find its accessible foot instead of aiming into an unreachable face.
+    if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(fruit.face.x, row as u32, fruit.face.z, fruit.face.dir)).is_some()) {
+        return None;
+    }
     let (wx, wz) = crate::pack::centre(Site { x: fruit.face.x, y: fruit.face.y, z: fruit.face.z }, v);
-    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, wx, wz, ring);
-    let mut into = aim_toward(a, dx, dz, 0.5 * v);
+    // Align with a point just outside the plane, where this body's footprint
+    // touches it. A wall's voxel centre is inside solid terrain, and a ledge
+    // above that centre can otherwise produce a permanent zero-length aim.
+    let (nx, nz) = match fruit.face.dir {
+        FaceDir::PosX => (1.0, 0.0), FaceDir::NegX => (-1.0, 0.0),
+        FaceDir::PosZ => (0.0, 1.0), FaceDir::NegZ => (0.0, -1.0),
+        FaceDir::Down => return None,
+    };
+    let offset = 0.5 * v + s.r;
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, wx + nx * offset, wz + nz * offset, ring);
+    let (dx, dz) = if dx.hypot(dz) <= PRESSED_M + EPS { (-nx, -nz) } else { (dx, dz) };
+    let mut into = aim_toward(&a, dx, dz, 0.5 * v);
     into.feed = 1.0;
+    fauna.walking_to(a.id, id, crate::Steer::Fruit);
     Some(into)
 }
 
@@ -1872,7 +1912,7 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
             tick: now,
             ..crate::Track::default()
         };
-        if let Some(into) = fruit_wall_approach(view, fv, &a, &phys, id) { return Some(into); }
+        if let Some(into) = fruit_wall_approach(fauna, i, view, fv, id) { return Some(into); }
         return Some(go);
     }
     // None it sees and can reach: the one it last saw, for the pursuit's memory while that
@@ -1885,7 +1925,7 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
     if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
         return None;
     }
-    if let Some(into) = fruit_wall_approach(view, fv, &a, &phys, m.id) { return Some(into); }
+    if let Some(into) = fruit_wall_approach(fauna, i, view, fv, m.id) { return Some(into); }
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.x, m.z, ring);
     let site = Site { x: m.site.0, y: m.site.1, z: m.site.2 };
     walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| go)

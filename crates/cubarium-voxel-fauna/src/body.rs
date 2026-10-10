@@ -279,6 +279,14 @@ pub struct FounderPhysiology {
     /// The numbers the ordinary animal rules run on when the body carries this
     /// founder's marker: upkeep, bite rate, assimilation, thresholds and densities.
     pub core: SpeciesConfig,
+    /// Fruit's bite half-stock, raw org-units at the mouth. `None` uses
+    /// `core.bite_half_stock`; other foods always retain that stock scale.
+    #[serde(default)]
+    pub fruit_bite_half_stock: Option<f64>,
+    /// This lineage's giving-up threshold, fraction of the gut's full fill rate.
+    /// `None` uses `teachers.give_up_fraction`; `Some(0)` disables giving up.
+    #[serde(default)]
+    pub give_up_fraction: Option<f64>,
     /// The named configurable motor respiration coefficient: organic matter respired
     /// per unit of body per second at **full cruise** (equivalent displacement equal to
     /// `cruise`). Below full cruise the cost scales with the requested equivalent
@@ -1842,6 +1850,8 @@ impl FounderPhysiology {
                     reproduction: Reproduction::EGGS_PLACEHOLDER,
                     lifespan_median_s: LIFE_SMALL_DAYS * DAY_S,
                 },
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 // Full cruise at its basal rate (the motor's tie to upkeep).
                 motor_respiration_per_s: DAILY_SHREDDER / DAY_S,
                 cruise_body_lengths_per_s: 1.0,
@@ -1935,6 +1945,8 @@ impl FounderPhysiology {
                 pack: None,
             },
             Founder::Browser => FounderPhysiology {
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 // The browser founder *is* the frondgrazer: the landed round-4 numbers
                 // stand, including their deliberately mineral-hungry tissue against
                 // foliage. Only the cost settings are new.
@@ -2025,6 +2037,8 @@ impl FounderPhysiology {
             // scorpid ambusher, 1.0 × 0.25 × 0.45 m, its daily need two thirds of the grazer's (the minimal gut).
             // Numbers the note pins are its own; the others are stated where they sit.
             Founder::Lanternjaw => FounderPhysiology {
+                fruit_bite_half_stock: None,
+                give_up_fraction: None,
                 core: SpeciesConfig {
                     maintenance_per_s: DAILY_LANTERNJAW / DAY_S,
                     // The browser's K scaled by body (0.005 × 0.035 / 0.05).
@@ -2416,6 +2430,12 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     glider: Some(Glider::SEEDPORTER),
                     gut_seeds: Some(GutSeeds::SEEDPORTER),
+                    // Vine fruit at the mouth is 1e-4..1e-3 ou, not foliage's 0.005:
+                    // K is about a third of a ripe patch. Carrion keeps the inherited K.
+                    fruit_bite_half_stock: Some(0.0005),
+                    // A fruit patch worth ~2 upkeep rates is still food: the full gut
+                    // rate is ~45 upkeep rates, so leave below 5%, not the grazer's 50%.
+                    give_up_fraction: Some(0.05),
                     motor_respiration_per_s: DAILY_SEEDPORTER / DAY_S,
                     // Fruit: k 0.05, τ 60 s (a few meals a day).
                     gut: Gut::of(0.05, 60.0),
@@ -2604,6 +2624,15 @@ impl FounderPhysiology {
     /// The assimilation yield this lineage gets out of one food class (decisions §3).
     pub fn yield_for(&self, food: crate::Food) -> f64 {
         self.yield_by_food[food.index()]
+    }
+
+    /// The stock scale used by both a bite and its giving-up offer, raw org-units.
+    pub fn bite_half_stock_for(&self, food: crate::Food) -> f64 {
+        if food == crate::Food::Fruit {
+            self.fruit_bite_half_stock.unwrap_or(self.core.bite_half_stock)
+        } else {
+            self.core.bite_half_stock
+        }
     }
 
     /// The sensor/organ share of a total structure stock — a view onto the one body
