@@ -226,6 +226,8 @@ mass_scale = 60.0
 # between groves, founded on the ground within its roost reach of fruit (lanternberry
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
+# SP-FLUSH: a short arm grab gives less visual warning than a whole-body lunge.
+hunter.strike_warning_scale = 0.065
 # SP-SHREDDER: small ground prey supplements fruit; the catch switch gates this table.
 hunter.prey = [true, false, true, false, false, false, true, false, false]
 # GUT-MASS-2 (Wrysk's decision A: seedporters eat shredders, adults included): sizes compare
