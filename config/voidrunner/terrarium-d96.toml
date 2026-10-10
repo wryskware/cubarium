@@ -85,6 +85,13 @@ core.reproduction.brood_share = 0.8
 egg_site = "fungus"
 core.reproduction.egg_fungus_radius_m = 0.5
 core.reproduction.clutch_hold_max_s = 1800.0
+# Role call 5A (Wrysk 2026-10-10, ROLES5): caps are its real food. Litter yields it a
+# twentieth of a cap (0.025 against the caps' 0.5, was 0.25), so it lives at the glowcaps,
+# lays there, and its numbers follow theirs; it weighs its foods by yield
+# (`taste_by_yield`), so ordinary litter tastes under its feed gate and the fungal scent
+# leads it on.
+yield_by_food.litter = 0.025
+taste_by_yield = true
 
 [fauna.founders.loftstrider]
 founding_count = 2
@@ -404,8 +411,12 @@ core.reproduction.clutch_hold_max_s = 1800.0
 
 [fauna.founders.frondgrazer]
 core.growth_max_per_s = 0.0003080440982147086
-core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.gestation_s = 84.27969521067645
+# Wrysk 2026-10-10: ungulate-like, a birth per world day. One calf a gestation (the
+# gestation mode carries one young); the gestation takes half the 7,200 s world day, a
+# deer's share of its year, and the interval the other half, so birth to birth is a day
+# plus the surplus hold (was 1,098 s + an 84 s gestation: ~22 births a year).
+core.reproduction.birth_interval_s = 3600.0
+core.reproduction.gestation_s = 3600.0
 core.reproduction.surplus_floor = 0.15212538349735227
 core.reproduction.surplus_hold_s = 548.9126829596756
 yield_by_food.litter = 0.3364781725258478
