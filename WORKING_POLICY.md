@@ -113,6 +113,19 @@ do not rely on the scheduler to keep a process's threads on one chiplet.
   may use both chiplets under the existing resource budget and `--pin` policy.
   The live world's existing host-profile placement remains in use.
 
+Main-versus-branch effect checks go through `scripts/studies/ab.py`, never a
+hand-written chain. Name each arm's Git tree and binary source commit; configs
+default to that arm's tree at the same relative path. The launcher records input
+hashes and commands, refuses configs from another tree, and checks the resolved
+parameter diff with `--expect KEY[,KEY...]` before any study. Use
+`--expect-metric COLUMN[,COLUMN...]` for the early identical-results tripwire
+(default minute 20; `--early-minute` / `--no-early-read` control it). All seeds
+finish that short checkpoint stage before continuation. Real runs detach through
+`systemd-run --user --unit=NAME --collect` (`--unit NAME`), retain the study-slot
+and idle-priority discipline, and write a reason in `DONE`; `--preflight-only`
+checks inputs without launching a study. External saved-start libraries and SSH
+launch orchestration are not supported by this launcher yet.
+
 Wrysk authorizes explicitly launched offline training and parameter-search runs
 to use up to 90% of the machine's logical CPUs and 64 GiB of memory. Determine
 the CPU worker ceiling from the machine at launch, leaving at least 10% and one
