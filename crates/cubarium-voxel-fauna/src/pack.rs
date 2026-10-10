@@ -14,7 +14,7 @@
 //!   gives a chase up, eats the kill, keeps near the breeder, and otherwise hunts alone
 //!   as the lanternjaw does; nothing it does paths into another pack's territory.
 //! - [`window_body`] (the strike rule): the pack seam — the size window measures prey
-//!   against the summed body of the striker's adult packmates within `pack_radius_m`.
+//!   against the summed sizes of the striker's adult packmates within `pack_radius_m`.
 //! - [`carcass_yield`] (the controller stage, the lanternjaw's heuristic): leave a carcass
 //!   to a body that hunts it, walk directly away until it is clear, resume.
 //!
@@ -74,16 +74,17 @@ pub(crate) fn call(fauna: &mut Fauna, i: usize) {
     }
 }
 
-/// **The pack seam** (Brief R3): the body a striker's size window is measured against —
+/// **The pack seam** (Brief R3): the physical size a striker's window is measured against —
 /// its own, plus every adult (not a pup) of its own pack within `pack_radius_m` of it. A
-/// body outside a pack is measured against its own body alone.
+/// body outside a pack is measured against its own size alone.
 pub(crate) fn window_body(fauna: &Fauna, i: usize, ring: f64) -> f64 {
     let a = &fauna.animals[i];
+    let size_of = |o: &Animal| o.founder.map_or(o.body, |f| fauna.config.founder(f).size(o.body));
     let (Some(m), Some(t)) = (a.pack, table(fauna, a)) else {
-        return a.body;
+        return size_of(a);
     };
     if m.pup {
-        return a.body;
+        return size_of(a);
     }
     fauna
         .animals
@@ -93,7 +94,7 @@ pub(crate) fn window_body(fauna: &Fauna, i: usize, ring: f64) -> f64 {
                 || participates(o, m.pack)
                     && distance(a, o.pose.x, o.pose.z, ring) <= t.pack_radius_m
         })
-        .map(|o| o.body)
+        .map(size_of)
         .sum()
 }
 
@@ -228,7 +229,8 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
                 // fullest reserve (lowest id on a tie); else the hungriest, the lowest reserve
                 // fraction (lowest id on a tie).
                 let key = if t.provision_scramble {
-                    (-p.body, -reserve_fraction(fauna, p))
+                    let size = p.founder.map_or(p.body, |f| fauna.config.founder(f).size(p.body));
+                    (-size, -reserve_fraction(fauna, p))
                 } else {
                     (reserve_fraction(fauna, p), 0.0)
                 };
@@ -1170,13 +1172,14 @@ fn nearest_member(fauna: &Fauna, own: u64, me: u64, x: f64, z: f64, ring: f64) -
 }
 
 /// **The choice score** (PACK-TUNE) of body `o`, known as `k`, to the member at `i` with `n`
-/// members at hand: prospect × body^`select_body_exp` / (1 + distance / `select_judge_m`),
+/// members at hand: prospect × size^`select_body_exp` / (1 + distance / `select_judge_m`),
 /// the member's own distance, × the straggler's factor ([`straggler`], HERD-PULL).
 #[allow(clippy::too_many_arguments)]
 fn score(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
     let a = &fauna.animals[i];
     let d = distance(a, k.x, k.z, ring);
-    prospect(fauna, i, o, k, n, ring) * o.body.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
+    let size = o.founder.map_or(o.body, |f| fauna.config.founder(f).size(o.body));
+    prospect(fauna, i, o, k, n, ring) * size.max(0.0).powf(t.select_body_exp) / (1.0 + d / t.select_judge_m.max(1e-9))
         * straggler(fauna, o, t, ring)
 }
 
@@ -1199,13 +1202,14 @@ fn straggler(fauna: &Fauna, o: &Animal, t: &Pack, ring: f64) -> f64 {
 }
 
 /// **The switch's worth** (CHURN2) of body `o`, known as `k`, to the pack: prospect ×
-/// body^`select_body_exp`, the prospect with the pack's `n` participants (the same count for
+/// size^`select_body_exp`, the prospect with the pack's `n` participants (the same count for
 /// the target and every other prey, so no member weighs a pair differently from another)
 /// and no awareness factor (a hunt alerts its target, and would alert any it turned to). No
 /// distance: which prey is nearest a member does not steal a hunt; distance only gates it.
 #[allow(clippy::too_many_arguments)]
 fn worth(fauna: &Fauna, i: usize, o: &Animal, k: &Track, n: u32, t: &Pack, ring: f64) -> f64 {
-    prospect_of(fauna, i, o, k, n, ring, false) * o.body.max(0.0).powf(t.select_body_exp)
+    let size = o.founder.map_or(o.body, |f| fauna.config.founder(f).size(o.body));
+    prospect_of(fauna, i, o, k, n, ring, false) * size.max(0.0).powf(t.select_body_exp)
 }
 
 /// CHURN2: how a [`choose`] weighs its candidates. `Choice` is the hunt start's score; a

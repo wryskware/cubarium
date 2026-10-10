@@ -2878,6 +2878,12 @@ impl FounderPhysiology {
         self.organ_structure_fraction * total_body.max(0.0)
     }
 
+    /// Physical size in x1 structural units, independent of the demand scale.
+    /// Cross-animal size windows and damage use this; energy budgets use organic units.
+    pub fn size(&self, body_organic: f64) -> f64 {
+        body_organic / self.mass_scale
+    }
+
     /// The adult's geometry: the authored dimensions, and the anchors as fractions of
     /// them.
     pub fn adult_body(&self) -> Body {
@@ -2887,7 +2893,7 @@ impl FounderPhysiology {
     /// The geometry of a body holding `body_organic` of structure: the adult's
     /// dimensions times `(body / body_max)^(1/3)` (decisions §1), so a newborn browser
     /// at `body_min` is 0.46 of the adult's length. Growth changes geometry only; no
-    /// rate reads this.
+    /// rate reads this. Body and body_max share the demand scale, so it cancels here.
     pub fn body_at(&self, body_organic: f64) -> Body {
         let max = self.core.body_max;
         let fraction = if max.is_finite() && max > 0.0 && body_organic.is_finite() {

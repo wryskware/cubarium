@@ -251,7 +251,8 @@ pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::
     let Some(h) = config.founder(hf).active_hunter() else {
         return 0.0;
     };
-    profitability(&h, a.body, o.body, config.founder(pf).armour)
+    let (hp, pp) = (config.founder(hf), config.founder(pf));
+    profitability(&h, hp.size(a.body), pp.size(o.body), pp.armour)
         * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
         * h.prey_weight[pf.index()].clamp(0.0, 1.0)
 }
@@ -265,16 +266,17 @@ pub fn accepts(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::Animal
     draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < attack_chance(config, a, o)
 }
 
-/// **Profitability**: the share of a kill one strike makes on a prey of `prey_body` with
+/// **Profitability**: the share of a kill one strike makes on a prey of `prey_size` with
 /// `armour`, `min(1, power × (S_pred / S_prey) × (1 − armour))` — the wound formula
 /// (predation §2.4). A prey it kills in one strike is worth 1; an adult grazer that takes
 /// three hits about a third. It scales the attack preference, so the small prey are its
 /// living and the big ones a chance (proposal §3.2: adult grazers "are not its living").
-pub fn profitability(h: &crate::Hunter, hunter_body: f64, prey_body: f64, armour: f64) -> f64 {
-    if !(prey_body > 0.0) {
+/// Both sizes are demand-independent ([`crate::FounderPhysiology::size`]).
+pub fn profitability(h: &crate::Hunter, hunter_size: f64, prey_size: f64, armour: f64) -> f64 {
+    if !(prey_size > 0.0) {
         return 1.0;
     }
-    let hit = h.strike_power * (hunter_body / prey_body) * (1.0 - armour);
+    let hit = h.strike_power * (hunter_size / prey_size) * (1.0 - armour);
     if hit.is_finite() { hit.clamp(0.0, 1.0) } else { 1.0 }
 }
 

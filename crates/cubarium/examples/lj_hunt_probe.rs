@@ -264,7 +264,7 @@ fn main() {
                     if segment_distance(jaw, tip, (o.pose.x, o.pose.z), ring) <= g.footprint_radius() + og.footprint_radius() {
                         in_capsule[pf.index()] = true;
                     }
-                } else if window_size(config, o) > h.prey_max_ratio * a.body {
+                } else if window_size(config, o) > h.prey_max_ratio * phys.size(a.body) {
                     too_big[pf.index()] = true;
                 }
             }
@@ -299,7 +299,7 @@ fn main() {
             "stage={name} samples={} body={:.3} window={:.3} lit={:.3} eat={:.3} feed={:.3} move={:.3} striking={:.3}",
             e.samples,
             e.body / n,
-            h.prey_max_ratio * e.body / n,
+            h.prey_max_ratio * config.founder(lj).size(e.body / n),
             e.lit / n,
             e.eat / n,
             e.feed / n,
