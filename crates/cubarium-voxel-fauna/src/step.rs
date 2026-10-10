@@ -219,7 +219,7 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
         egg_upkeep(fauna);
         let matured = grow(fauna);
         disperse(fauna, &view, flora, &matured, crate::DispersalAt::Adult);
-        drop_off_grown(fauna);
+        drop_off_grown(fauna, &view);
         void_guts(fauna, flora);
         glider::void_gut_seeds(fauna, flora);
         // R3: calls, pups' independence, succession and provisioning.
@@ -342,7 +342,7 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             // books it itself while the prey is still drawn).
             let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
             let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
-            apply_hit(fauna, flora, hit.prey, hit.damage, hit.by);
+            apply_hit(fauna, flora, hit.prey, hit.damage, hit.by, Some(&view));
             if let (true, Some(f)) = (lure_kill, prey_founder) {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
                     fauna.ledger.lure_kills[f.index()] += 1;
@@ -433,7 +433,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
         fauna.book_removed(a);
-        fauna.free_riders(a);
+        fauna.free_riders(a, Some(view));
     }
 }
 
@@ -579,7 +579,7 @@ fn drain_riders(fauna: &mut Fauna) {
 /// Step 2, after growth: **a rider at its detach size drops off** (§4) where its host
 /// stands — `parasite_detach_body_fraction` × its lineage's `body_max` — and is a free
 /// juvenile from here on.
-fn drop_off_grown(fauna: &mut Fauna) {
+fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let fraction = fauna.config.parasite_detach_body_fraction;
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
@@ -594,6 +594,7 @@ fn drop_off_grown(fauna: &mut Fauna) {
         };
         let host = fauna.animals[h];
         crate::release(&mut fauna.animals[r], &host);
+        fauna.step_off_beside(view, r, &host);
         fauna.ledger.rider_dropoffs += 1;
     }
 }
@@ -1307,7 +1308,7 @@ fn disperse(
         fauna.controllers.take(a.id);
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
-        fauna.free_riders(&a);
+        fauna.free_riders(&a, Some(view));
     }
     if pack_changed {
         crate::pack::succession(fauna);
@@ -3574,7 +3575,7 @@ const GLANCE_KEY: u64 = 0x6c61_6e63_6500_0001;
 /// and keeps it up for [`crate::PredationConfig::alert_s`], and a wound of 1 kills — the whole body to
 /// carrion on its face, a carcass record on the pool, departed `Killed { by }`. A prey
 /// that is gone already is left alone: it dies once.
-pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder) {
+pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder, view: Option<&VoxelView<'_>>) {
     let Ok(j) = fauna.animals.binary_search_by_key(&prey, |a| a.id) else {
         return;
     };
@@ -3594,14 +3595,14 @@ pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage:
     a.rest = None;
     a.alert_ticks = u32::try_from(cubarium_voxel::ticks_at_least_one(alert_s)).unwrap_or(u32::MAX);
     if a.wound >= 1.0 {
-        kill(fauna, flora, j, Departure::Killed { by });
+        kill(fauna, flora, j, Departure::Killed { by }, view);
     }
 }
 
 /// A death by `cause` of the body at `j`, now: an open gestation is resolved first, then
 /// the whole body goes to carrion on its face and the death is booked; a kill also lays
 /// the carcass record.
-fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
+fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: Option<&VoxelView<'_>>) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
     if fauna.animals[j].pack.is_some_and(|m| m.pup) {
@@ -3628,7 +3629,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure) {
     fauna.controllers.take(a.id);
     fauna.trapped.remove(&a.id);
     fauna.drop_plans.remove(&a.id);
-    fauna.free_riders(&a);
+    fauna.free_riders(&a, view);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
@@ -5961,7 +5962,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
     }
     // A host's riders are freed where it fell, whatever their size (parasite §5).
     for (a, _) in &dead {
-        fauna.free_riders(a);
+        fauna.free_riders(a, Some(view));
     }
 }
 

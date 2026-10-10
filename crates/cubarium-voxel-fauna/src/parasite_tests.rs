@@ -16,8 +16,11 @@
 //!   strikes nor hits one riding a host, though it hits a free one at the same spot.
 //! - **`Command::Remove`** on a host's column removes the host and frees its riders; it
 //!   does not remove them with it.
-//! - **A detached or freed rider** stands on the host's site and is driven by the
-//!   controller its lineage's factory gave it at hatching, never consulted while it rode.
+//! - **A detached or freed rider** steps off onto the nearest standable face beside its
+//!   host, keeping the host's heading (or stays on the host's site when none is in reach,
+//!   or when the release has no world to read: an edit's removal, a bare `apply_hit`), and
+//!   is driven by the controller its lineage's factory gave it at hatching, never consulted
+//!   while it rode.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -694,8 +697,9 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     }
     assert!(dropped, "a rider at its detach size drops off");
     let (h, r) = (animal(&s.fauna, host), animal(&s.fauna, rider));
-    assert_eq!(r.site, h.site, "it drops where its host stands");
-    assert!(distance(&s.fauna, host, rider) <= half_length(&s.fauna, host));
+    assert_ne!(r.site, h.site, "on open ground it steps off beside its host");
+    assert!(distance(&s.fauna, host, rider) <= crate::edit::DROP_OFF_REACH_M + VOXEL_M);
+    assert_eq!(r.pose.heading_rad, h.pose.heading_rad, "keeping its host's heading");
     assert!(
         r.body < c.founder(Founder::Lanternjaw).core.birth_body,
         "a juvenile"
@@ -720,10 +724,42 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     s.assert_closes("dropped off");
 }
 
+/// With no face it could stand on within reach beside its host (every column around the
+/// host's is rock to the world's top), a rider at its detach size drops off on the host's
+/// own place.
+#[test]
+fn with_no_standable_face_beside_it_a_rider_drops_off_on_its_hosts_place() {
+    let (mut s, host, rider) = ride(FaunaConfig {
+        parasite_take_per_day: 0.0,
+        ..config()
+    });
+    let site = animal(&s.fauna, host).site;
+    let (top, reach) = (s.world.config().height - 1, (crate::edit::DROP_OFF_REACH_M / VOXEL_M).ceil() as i64 + 2);
+    for dx in -reach..=reach {
+        for z in 0..s.world.config().depth {
+            let x = i64::from(site.x) + dx;
+            if dx == 0 && z == site.z {
+                continue;
+            }
+            for y in site.y + 1..=top {
+                s.world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: cubarium_voxel::Material::Rock });
+            }
+        }
+    }
+    let c = s.fauna.config;
+    let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, 1.001 * line, reserve);
+    s.step();
+    let (h, r) = (animal(&s.fauna, host), animal(&s.fauna, rider));
+    assert_eq!(r.attached, None, "it dropped off");
+    assert_eq!(r.site, h.site, "nowhere beside to stand: it stays on its host's place");
+}
+
 /// A host's departure of any cause — starved, aged, killed, removed — frees every rider
 /// at once, whatever its size, on the host's last face.
 #[test]
-fn a_hosts_departure_of_any_cause_frees_every_rider_on_the_spot() {
+fn a_hosts_departure_of_any_cause_frees_every_rider() {
     for cause in [
         Departure::Starved,
         Departure::Aged,
@@ -786,10 +822,13 @@ fn a_hosts_departure_of_any_cause_frees_every_rider_on_the_spot() {
                 .copied()
                 .unwrap_or_else(|| panic!("{cause:?}: rider #{id} went with its host"));
             assert_eq!(r.attached, None, "{cause:?}: rider #{id} is freed");
-            assert_eq!(
-                r.site, spot,
-                "{cause:?}: rider #{id} is freed where the host was"
-            );
+            // A bare `apply_hit` has no world to read, so its riders stay on the spot;
+            // every other departure here steps them off beside it.
+            if matches!(cause, Departure::Killed { .. }) {
+                assert_eq!(r.site, spot, "{cause:?}: rider #{id} is freed where the host was");
+            } else {
+                assert_ne!(r.site, spot, "{cause:?}: rider #{id} steps off beside the host");
+            }
         }
         assert_eq!(s.fauna.ledger.riders_freed, 2, "{cause:?}");
         assert_eq!(s.fauna.ledger.rider_dropoffs, 0, "{cause:?}");

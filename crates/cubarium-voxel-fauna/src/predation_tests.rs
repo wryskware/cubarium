@@ -636,7 +636,7 @@ fn census_predation_matches_the_funnel_and_keeps_prey_mass() {
     feed.store(true, Ordering::Relaxed);
     step_until(&mut fauna, &world, &mut flora, 40, |f| f.ledger.strikes_by_founder[Founder::Lanternjaw.index()] > 0).expect("strike begins");
     let before = animal(&fauna, prey).body;
-    crate::step::apply_hit(&mut fauna, &mut flora, prey, 1.0, Founder::Lanternjaw);
+    crate::step::apply_hit(&mut fauna, &mut flora, prey, 1.0, Founder::Lanternjaw, None);
     assert!(fauna.view().animal(prey).is_none());
     let r = fauna.census_readout().unwrap();
     assert_eq!(r.introduced[Founder::Browser.index()], 1);

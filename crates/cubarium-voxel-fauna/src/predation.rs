@@ -283,7 +283,7 @@ pub fn apply_hit(
     damage: f64,
     by: Founder,
 ) {
-    crate::step::apply_hit(fauna, flora, prey, damage, by);
+    crate::step::apply_hit(fauna, flora, prey, damage, by, None);
 }
 
 /// The tremor one body makes at a point `d` metres away: `mass × speed / d²`, its mass

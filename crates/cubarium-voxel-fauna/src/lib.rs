@@ -5099,7 +5099,7 @@ impl Fauna {
                     // and a table that only grows is a leak in a world that breeds.
                     self.controllers.take(a.id);
                     self.book_removed(&a);
-                    self.free_riders(&a);
+                    self.free_riders(&a, Some(&world.view()));
                 }
                 self.animals.len() != before
             }
@@ -5387,13 +5387,18 @@ impl Fauna {
     /// A departed host's riders, all of them, whatever their size, let go where it last
     /// stood (parasite hatchlings §5), booked `riders_freed`. Every path a body leaves the
     /// world by calls this once the body is out of `animals`.
-    pub(crate) fn free_riders(&mut self, host: &Animal) {
-        for rider in self
-            .animals
-            .iter_mut()
-            .filter(|a| a.attached == Some(Attachment { host: host.id }))
-        {
-            release(rider, host);
+    ///
+    /// With `view`, each steps off beside the host ([`Fauna::step_off_beside`]); without
+    /// one (an edit's removal), it stays on the host's place.
+    pub(crate) fn free_riders(&mut self, host: &Animal, view: Option<&VoxelView<'_>>) {
+        for r in 0..self.animals.len() {
+            if self.animals[r].attached != Some(Attachment { host: host.id }) {
+                continue;
+            }
+            release(&mut self.animals[r], host);
+            if let Some(view) = view {
+                self.step_off_beside(view, r, host);
+            }
             self.ledger.riders_freed += 1;
         }
     }
