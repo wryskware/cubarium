@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2831 rows)
+**`fauna.*`** (2832 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1697,7 +1697,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.littershredder.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.littershredder.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.littershredder.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -1987,7 +1987,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.frondgrazer.gut.stomach_k` | 0.06 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.frondgrazer.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.frondgrazer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -2277,7 +2277,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.lanternjaw.gut.stomach_k` | 0.15 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.lanternjaw.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.lanternjaw.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -2567,7 +2567,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.capgnawer.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.capgnawer.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.capgnawer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -2857,7 +2857,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.loftstrider.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.loftstrider.gut.bite_per_body_s` | 0.0008333333333333334 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.loftstrider.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3147,7 +3147,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.ripple-snail.gut.stomach_k` | 0.012 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.ripple-snail.gut.bite_per_body_s` | 0.0002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.ripple-snail.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3437,7 +3437,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.bellwing.gut.stomach_k` | 0.03 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.bellwing.gut.bite_per_body_s` | 0.002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.bellwing.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3727,7 +3727,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.seedporter.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.seedporter.gut.bite_per_body_s` | 0.0016666666666666668 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.seedporter.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -4017,7 +4017,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.chorister.gut.stomach_k` | 0.2 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.chorister.gut.bite_per_body_s` | 0.0013333333333333335 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–2000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.chorister.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -4281,6 +4281,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.teachers.bellwing_roost_ceiling` | 0.4 | fraction of band | [0, 1] | 0.1–0.8 | - | placeholder | going to rest, cover closer than this overhead is an underside to rise into |
 | `fauna.teachers.forage_stay_forward` | 0.0 | effort | [0, 1] | 0–1 | - | decision | the blind and browser foragers' forward effort while they taste food (0 stays on food, 1 walks across it) |
 | `fauna.teachers.forage_turn_back_samples` | 2 | samples | [0, inf) | 0–8 | - | placeholder | samples the blind forager turns after leaving an exhausted patch (area-restricted search) |
+| `fauna.teachers.capgnawer_stay_worth` | 0.25 | fraction of a full cap bite | [0, 1] | 0.05–0.9 | - | placeholder | the capgnawer holds still to feed only on food whose bite tastes at least this worth; weaker food it eats on the move (CAPGNAWER-CAPS) |
 | `fauna.teachers.press_replan_s` | 3.0 | s | [0, inf) | 1–10 | - | placeholder | a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE) |
 | `fauna.teachers.press_shun_s` | 60.0 | s | [0, inf) | 10–600 log | - | placeholder | a target given up for pressing stays given up this long |
 | `fauna.teachers.route_refresh_s` | 60.0 | s | (0, inf) | 10–600 log | - | placeholder | the walking route graph a reflex walk plans on is rebuilt after this |

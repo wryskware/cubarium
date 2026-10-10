@@ -1459,3 +1459,6 @@ fn a_founder_given_its_arrival_stomach_holds_share_times_capacity() {
         }
     }
 }
+
+#[path = "gut_mass_tests.rs"]
+mod gut_mass_tests;
