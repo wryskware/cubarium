@@ -84,6 +84,7 @@ consistent_fraction = 0.75
 consistent_min_seeds = 8
 
 [profiles.wide-screen-2h]
+feasibility = "relative"
 from_minute = 0
 to_minute = 120
 active = ['L', 'J', 'A', 'K', 'O', 'H', 'F', 'S']
@@ -106,7 +107,7 @@ G_b = "Landscape is judged at one year from fresh founding; the saved-world scre
 D = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
 
 [profiles.wide-screen-2h.required_data]
-L = ['census:stocks']
+L = ['census:stocks', 'vitals:n_adult']
 J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']
@@ -128,6 +129,7 @@ plant_stand_slope = 0.0
 plant_vigour_trend = 0.0
 
 [profiles.wide-year]
+feasibility = "absolute"
 from_minute = 0
 to_minute = 600
 active = ['L', 'J', 'A', 'K', 'W', 'G_v', 'M', 'G_b', 'D', 'O', 'H', 'F', 'S']
@@ -139,7 +141,7 @@ start_kind = "fresh founding"
 [profiles.wide-year.disabled]
 
 [profiles.wide-year.required_data]
-L = ['census:stocks']
+L = ['census:stocks', 'vitals:n_adult']
 J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']

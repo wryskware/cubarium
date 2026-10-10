@@ -180,6 +180,8 @@ def profile_config(document, profile='screen-2h', text=None):
     if cfg['version'] == 3:
         if any(not str(spec.get('slow_reasons', {}).get(name, '')).strip() for name in spec['slow']):
             raise ValueError('every slow lineage needs a named breeding exemption reason')
+    if spec.get('feasibility', 'relative') not in ('relative', 'absolute'):
+        raise ValueError('unsupported feasibility mode')
     validate_config(cfg)
     return cfg
 
@@ -323,6 +325,7 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
                   profile_id=cfg['profile_id'], profile_hash=cfg['profile_hash'],
                   horizon=dict(start=spec['from_minute'], end=spec['to_minute']),
                   window=dict(start=begin, end=end, midpoint=(begin + end) / 2),
+                  feasible_relative=False, feasible_absolute=False, absolute_lost=[],
                   components={}, health={}, plants={}, trends={}, stocks={}, lost=[], warnings=[])
     run = root / 'run'
     markers = [name for name in ('FAILED', 'PAUSED', 'DONE') if (run / name).exists()]
@@ -422,6 +425,22 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             lost += [f'plant:{name}' for name in sorted(required_plants) if any(
                 number(row, 'stands_' + name) == 0 for row in rows)]
         result['lost'] = lost
+        # Acceptance asks about adults (not immature bodies) and viable eggs at
+        # the endpoint. L and the screen's relative loss check remain unchanged.
+        if v3:
+            terminal = {r['lineage']: r for r in vitals if number(r, 'minute') == end}
+            absolute_lost = []
+            for name in sorted(animals):
+                adults = number(terminal.get(name, {}), 'n_adult')
+                if adults is None:
+                    raise ValueError(f'missing terminal adult count: {name}')
+                if adults + number(closing, 'eggs_' + name) == 0:
+                    absolute_lost.append(f'animal:{name}')
+            absolute_lost += [f'plant:{name}' for name in sorted(required_plants)
+                              if number(closing, 'stands_' + name) == 0]
+        else:
+            absolute_lost = lost
+        result['absolute_lost'] = absolute_lost
         weights, targets, pop = cfg['weights'], cfg['targets'], cfg['population']
         components = result['components']
         area_scale = 1
@@ -653,7 +672,8 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
         if missing:
             raise ValueError('missing active component exposure/data: ' + ', '.join(missing))
         result['soft_P'] = sum(item['contribution'] for term, item in components.items() if term != 'L')
-        result.update(P=result['soft_P'] + components['L']['contribution'], rankable=True)
+        result.update(P=result['soft_P'] + components['L']['contribution'], rankable=True,
+                      feasible_absolute=not result['absolute_lost'], feasible_relative=not lost)
     except (OSError, ValueError, TypeError, KeyError) as error:
         result.update(P=None, soft_P=None, rankable=False, state='unrankable')
         result['warnings'].append(str(error))
@@ -774,14 +794,18 @@ def arm_summary(worlds, cfg, baseline_worlds=None):
             complete = False
         allowed = set(baseline['lost']) if baseline else set()
         new_losses[str(world['seed'])] = sorted(set(world['lost']) - allowed)
-    feasible = complete and not any(new_losses.values())
+    feasible_relative = complete and not any(new_losses.values())
+    feasible_absolute = complete and all(world.get('feasible_absolute', not world['lost']) for world in worlds)
+    feasibility = cfg['profile'].get('feasibility', 'relative')
+    feasible = feasible_absolute if feasibility == 'absolute' else feasible_relative
     soft_rank = mean + cfg['summary']['sd_weight'] * sd if complete else None
     total_losses = sum(len(world['lost']) for world in worlds)
     rank_key = [0 if feasible else 1 if complete else 2, 0 if feasible else total_losses,
                 soft_rank if soft_rank is not None else None]
     worst = max(worlds, key=lambda world: (len(new_losses[str(world['seed'])]), len(world['lost']),
                                           world['soft_P'] if world['soft_P'] is not None else math.inf)) if worlds else None
-    return dict(feasible=feasible, rankable=complete, loss_vector=loss_vector, new_losses=new_losses,
+    return dict(feasible=feasible, feasible_relative=feasible_relative,
+                feasible_absolute=feasible_absolute, feasibility=feasibility, rankable=complete, loss_vector=loss_vector, new_losses=new_losses,
                 total_losses=total_losses, mean_P=mean, sd_P=sd, rank=soft_rank, rank_key=rank_key,
                 worst_seed=worst['seed'] if worst else None,
                 invalid_seeds=sorted({world['seed'] for world in worlds if not world['rankable']}
@@ -890,6 +914,11 @@ def build_report(out, cfg, baseline=None, start=None, stop=None, allow_mixed_bin
             reference = baseline_worlds.get(world['seed'])
             if reference and (world['start_identity'] != reference['start_identity'] or world['required_identity'] != reference['required_identity']):
                 raise ValueError(f"seed {world['seed']} has different start/config contents or required roster")
+    for world in worlds:
+        reference = baseline_worlds.get(world['seed']) if baseline_worlds is not None else None
+        world['feasible_relative'] = (world['rankable'] and
+            (baseline_worlds is None or reference is not None and reference['rankable']) and
+            not (set(world['lost']) - set(reference['lost'] if reference else [])))
     arms = {arm: arm_summary([world for world in worlds if world['arm'] == arm], cfg, baseline_worlds) for arm in arm_names}
     ranking = sorted(arms, key=lambda arm: (arms[arm]['rank_key'][0], arms[arm]['rank_key'][1],
                                          arms[arm]['rank'] if arms[arm]['rank'] is not None else math.inf, arm))
@@ -917,8 +946,11 @@ def records(report):
     for arm in report['ranking']:
         summary = report['arms'][arm]
         yield ('arm', arm, '', 'required_losses', summary['loss_vector'], None, None, None)
-        yield ('arm', arm, '', 'feasible', summary['feasible'], None, None, None)
+        for key in ('feasible', 'feasible_relative', 'feasible_absolute'):
+            yield ('arm', arm, '', key, summary[key], None, None, None)
     for world in report['worlds']:
+        for key in ('feasible_relative', 'feasible_absolute'):
+            yield ('world', world['arm'], world['seed'], key, world[key], None, None, None)
         for term, item in world['components'].items():
             yield ('world', world['arm'], world['seed'], term, item['raw'], item['penalty'], item['weight'], item['contribution'])
         yield ('world', world['arm'], world['seed'], 'soft_P', world['soft_P'], None, None, world['state'])

@@ -616,6 +616,21 @@ class WideScoreTests(unittest.TestCase):
         self.assertTrue(world['rankable'], world['warnings'])
         return world
 
+    def test_shared_loss_is_relative_feasible_but_absolute_infeasible(self):
+        self.fixture(load=0)
+        self.mutate('vitals/vitals.csv', lambda rows: [dict(r, n_adult=0)
+            if r['lineage'] == 'frondgrazer' else r for r in rows])
+        world = self.world(year=True)
+        cfg = score.profile_config(self.document, 'wide-year')
+        summary = score.arm_summary([world], cfg, {1: world})
+        self.assertTrue(summary['feasible_relative'])
+        self.assertFalse(summary['feasible_absolute'])
+        self.assertFalse(summary['feasible'])
+        cfg['profile']['feasibility'] = 'relative'
+        self.assertTrue(score.arm_summary([world], cfg, {1: world})['feasible'])
+        self.mutate('census.csv', lambda rows: [dict(r, eggs_frondgrazer=1) for r in rows])
+        self.assertTrue(self.world(year=True)['feasible_absolute'])
+
     def test_per_area_band_and_founder_independence(self):
         self.fixture()
         inside = self.world()['components']['A']['raw']['frondgrazer']
