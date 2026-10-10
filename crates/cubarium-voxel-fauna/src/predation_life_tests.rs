@@ -522,7 +522,10 @@ fn a_snapshot_keeps_wounds_rest_strikes_and_eggs() {
     assert!(SCHEMA >= 20, "P1 changes the animal record: schema {SCHEMA}");
     let world = at_hour(0.0, 14);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
+    let mut config = crate::rhythm::fixed_config();
+    // It strikes a grown grazer: the lanternjaw's diet rules off (LANTERNJAW-DIET).
+    no_diet(&mut config);
+    let mut fauna = Fauna::new(config);
     // Midnight: the grazer sleeps, the nocturnal lanternjaws are up.
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     place(&mut fauna, grazer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);

@@ -239,8 +239,9 @@ pub fn attack_preference(cfg: &HuntConfig, h: &crate::Hunter, image: &[f64; Foun
 }
 
 /// **The attack chance** of hunter `a` on prey `o` this decision window:
-/// [`profitability`] × [`attack_preference`] from `a`'s search image. 0 for a body that is
-/// not a hunter or not a founder.
+/// [`profitability`] × [`attack_preference`] from `a`'s search image × its taste for `o`'s
+/// lineage ([`crate::Hunter::prey_weight`], LANTERNJAW-DIET). 0 for a body that is not a
+/// hunter or not a founder.
 pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::Animal) -> f64 {
     let (Some(hf), Some(pf)) = (a.founder, o.founder) else {
         return 0.0;
@@ -248,7 +249,9 @@ pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::
     let Some(h) = config.founder(hf).active_hunter() else {
         return 0.0;
     };
-    profitability(&h, a.body, o.body, config.founder(pf).armour) * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
+    profitability(&h, a.body, o.body, config.founder(pf).armour)
+        * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
+        * h.prey_weight[pf.index()].clamp(0.0, 1.0)
 }
 
 /// **Whether hunter `a` takes on prey `o`** at `tick`: one draw per pair per

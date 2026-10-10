@@ -253,6 +253,10 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
             prey: h.prey,
             lure_power: h.lure_power,
             vertical_reach_m: h.vertical_reach_m,
+            // LANTERNJAW-DIET: the lanternjaw's diet is its own.
+            prey_weight: h.prey_weight,
+            prey_juveniles_only: h.prey_juveniles_only,
+            prey_ashore_only: h.prey_ashore_only,
             ..Hunter::LANTERNJAW
         },
         h,

@@ -946,6 +946,11 @@ impl FaunaModel {
                         if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, &pp, c.b.body) {
                             continue;
                         }
+                        // LANTERNJAW-DIET: a young-only lineage's grown cohort is out of range
+                        // (the ashore-only rule is not modelled: cohorts carry no place).
+                        if h.prey_juveniles_only[pf.index()] && c.b.body >= pp.core.birth_body {
+                            continue;
+                        }
                         if hp.opportunist {
                             let damage = h.strike_power * hb / c.b.body.max(f64::MIN_POSITIVE)
                                 * (1.0 - pp.armour);
@@ -958,7 +963,7 @@ impl FaunaModel {
                             }
                         }
                         let share = laws::strike_share(&hp, hb, &pp, c.b.body);
-                        let hazard = alpha / area * hn * share * share;
+                        let hazard = alpha / area * hn * share * share * h.prey_weight[pf.index()].clamp(0.0, 1.0);
                         let p = 1.0 - (-hazard * dt).exp();
                         let dead = self.draws.of(c.n, p).min(c.n);
                         if !(dead > 0.0) {

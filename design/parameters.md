@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2726 rows)
+**`fauna.*`** (2735 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1747,6 +1747,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.littershredder.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.littershredder.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.littershredder.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.littershredder.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.littershredder.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.littershredder.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -2026,6 +2027,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.frondgrazer.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.frondgrazer.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.frondgrazer.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.frondgrazer.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.frondgrazer.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.frondgrazer.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -2305,6 +2307,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.lanternjaw.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.lanternjaw.hunter.lure_power` | 1.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.lanternjaw.hunter.prey_weight.*` | 0.5, 0.25, 1.0, 1.0 … (9 values) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.lanternjaw.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.lanternjaw.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.lanternjaw.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -2584,6 +2587,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.capgnawer.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.capgnawer.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.capgnawer.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.capgnawer.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.capgnawer.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.capgnawer.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -2863,6 +2867,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.loftstrider.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.loftstrider.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.loftstrider.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.loftstrider.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.loftstrider.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.loftstrider.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -3142,6 +3147,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.ripple-snail.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.ripple-snail.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.ripple-snail.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.ripple-snail.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.ripple-snail.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.ripple-snail.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -3421,6 +3427,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.bellwing.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.bellwing.hunter.lure_power` | (absent) | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.bellwing.hunter.prey_weight.*` | (absent) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.bellwing.flight.span_m` | 0.375 | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.bellwing.flight.band_max_m` | 2.5 | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.bellwing.flight.flight_factor` | 4.0 | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -3700,6 +3707,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.hunter.recovery_s` | 1.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.seedporter.hunter.strike_cost_s` | 2.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.seedporter.hunter.lure_power` | 0.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.seedporter.hunter.prey_weight.*` | 1.0, 1.0, 1.0, 1.0 … (9 values) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.seedporter.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.seedporter.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.seedporter.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |
@@ -3979,6 +3987,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.chorister.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
 | `fauna.founders.chorister.hunter.lure_power` | 0.0 | x awake upkeep | [0, inf) |  | - | placeholder | a lit lure's cost |
+| `fauna.founders.chorister.hunter.prey_weight.*` | 1.0, 1.0, 1.0, 1.0 … (9 values) | fraction | [0, 1] |  | - | placeholder | LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image) |
 | `fauna.founders.chorister.flight.span_m` | (absent) | m | (0, inf) |  | - | decision | wingspan: the collision sphere's diameter |
 | `fauna.founders.chorister.flight.band_max_m` | (absent) | m | [0, inf) |  | - | decision | the ceiling: the base's most height over the support face below |
 | `fauna.founders.chorister.flight.flight_factor` | (absent) | x basal upkeep | [0, inf) |  | - | decision | a second airborne at cruise |

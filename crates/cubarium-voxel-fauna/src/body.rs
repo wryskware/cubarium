@@ -1619,6 +1619,27 @@ pub struct Hunter {
     pub strike_cost_s: f64,
     /// A lit lure's cost, × its awake upkeep (§2.12: "doubles its burn").
     pub lure_power: f64,
+    /// **Its taste in prey** (LANTERNJAW-DIET, Wrysk 2026-10-10: "bellwings and capgnawers
+    /// should be the main prey"), by [`Founder::index`]: the attack chance on a prey of that
+    /// lineage is multiplied by this ([`crate::attack_chance`]), dimensionless in `[0, 1]`.
+    /// All 1: no preference beyond profitability and the search image.
+    #[serde(default = "ones_by_founder")]
+    pub prey_weight: [f64; Founder::COUNT],
+    /// **Young only**, by [`Founder::index`] (LANTERNJAW-DIET: "occasionally a juvenile
+    /// seedporter or frondgrazer"): a prey of that lineage at or past its `birth_body` is
+    /// out of range, whatever the size window says. Switches, so no registry row.
+    #[serde(default)]
+    pub prey_juveniles_only: [bool; Founder::COUNT],
+    /// **Ashore only**, by [`Founder::index`] (LANTERNJAW-DIET: "snails can be eaten when
+    /// ashore"): a prey of that lineage is taken only while it is out of water
+    /// ([`crate::Mobility::ashore`], an amphibious body's last tick), never in it.
+    /// Switches, so no registry row.
+    #[serde(default)]
+    pub prey_ashore_only: [bool; Founder::COUNT],
+}
+
+fn ones_by_founder() -> [f64; Founder::COUNT] {
+    [1.0; Founder::COUNT]
 }
 
 impl Hunter {
@@ -1638,6 +1659,12 @@ impl Hunter {
         // ground or in reach"): the bellwing only at rest ([`crate::is_prey_of`]).
         // The seedporter (7, F3) is on it, but only while grounded ([`crate::is_prey_of`]).
         // The chorister (8, roster R3) is on no lanternjaw's list.
+        //
+        // LANTERNJAW-DIET (Wrysk 2026-10-10: "bellwings and capgnawers should be the main
+        // prey. they can eat shredders too. occasionally a juvenile seedporter or frondgrazer.
+        // snails can be eaten when ashore."): the list stays; the grazer and the seedporter
+        // only young (`prey_juveniles_only`), the snail only ashore (`prey_ashore_only`), and
+        // `prey_weight` makes the bellwing and the capgnawer its main prey.
         prey: [true, true, false, true, false, true, true, true, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
@@ -1650,6 +1677,13 @@ impl Hunter {
         recovery_s: 3.0,
         strike_cost_s: 100.0,
         lure_power: 1.0,
+        // Main prey (bellwing, capgnawer) at 1; the littershredder and an ashore snail at
+        // half; a young grazer or seedporter a quarter ("occasionally"). Not-listed lineages
+        // carry 1, unread. Order: shredder, grazer, lanternjaw, capgnawer, loftstrider,
+        // ripple-snail, bellwing, seedporter, chorister.
+        prey_weight: [0.5, 0.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.25, 1.0],
+        prey_juveniles_only: [false, true, false, false, false, false, false, true, false],
+        prey_ashore_only: [false, false, false, false, false, true, false, false, false],
     };
 
     /// Whether `prey`'s lineage is on its list.
@@ -2452,6 +2486,9 @@ impl FounderPhysiology {
                         recovery_s: 1.0,
                         strike_cost_s: 2.0,
                         lure_power: 0.0,
+                        prey_weight: [1.0; Founder::COUNT],
+                        prey_juveniles_only: [false; Founder::COUNT],
+                        prey_ashore_only: [false; Founder::COUNT],
                     }),
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -2538,6 +2575,10 @@ impl FounderPhysiology {
                         prey: [false, true, true, false, true, false, true, true, false],
                         lure_power: 0.0,
                         vertical_reach_m: 2.25,
+                        // The lanternjaw's strike, not its diet (LANTERNJAW-DIET).
+                        prey_weight: [1.0; Founder::COUNT],
+                        prey_juveniles_only: [false; Founder::COUNT],
+                        prey_ashore_only: [false; Founder::COUNT],
                         ..Hunter::LANTERNJAW
                     }),
                     diet: crate::Diet::only(crate::Food::Carrion),

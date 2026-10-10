@@ -896,15 +896,17 @@ fn the_cone_reads_fruit_and_not_plain_foliage() {
 // ------------------------------------------------------------------ predation
 
 /// **A grounded seedporter is lanternjaw prey; a climbing one isn't** (nor a perched or a
-/// gliding one). A lanternjaw and a seedporter, both adults: [`crate::is_prey_of`] holds
-/// while the seedporter is in [`MobilityMode::Ground`] and not in `Climb`, `Perched` or
-/// `Glide`.
+/// gliding one). A grown lanternjaw and a young seedporter (LANTERNJAW-DIET: only young
+/// ones): [`crate::is_prey_of`] holds while the seedporter is in [`MobilityMode::Ground`]
+/// and not in `Climb`, `Perched` or `Glide`.
 #[test]
 fn a_grounded_seedporter_is_lanternjaw_prey_and_a_climbing_one_is_not() {
     let world = plain(24, 20, 8);
     let mut fauna = Fauna::new(FaunaConfig::default());
     let lj = on_ground(&mut fauna, &world, Founder::Lanternjaw, 4, 4, StartingStores::FULL);
-    let sp = on_ground(&mut fauna, &world, SP, 12, 4, StartingStores::FULL);
+    let core = fauna.config().founder(SP).core;
+    let young = StartingStores { body: 0.5 * core.birth_body / core.body_max, reserve: 1.0 };
+    let sp = on_ground(&mut fauna, &world, SP, 12, 4, young);
     let (hunter, prey) = (animal(&fauna, lj), animal(&fauna, sp));
     assert_eq!(prey.mobility.mode, MobilityMode::Ground);
     assert!(crate::is_prey_of(fauna.config(), &hunter, &prey), "a grounded seedporter is prey");

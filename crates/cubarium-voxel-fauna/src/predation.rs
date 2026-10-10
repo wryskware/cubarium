@@ -131,6 +131,14 @@ pub(crate) fn is_prey_in_window(
     if !flyer_takeable(config, hunter, &h, pf, prey) {
         return false;
     }
+    // LANTERNJAW-DIET: a young-only lineage's grown body, and an ashore-only lineage's body
+    // in water, are out of range.
+    if h.prey_juveniles_only[pf.index()] && prey.body >= crate::effective_config(config, prey).birth_body {
+        return false;
+    }
+    if h.prey_ashore_only[pf.index()] && !prey.mobility.ashore {
+        return false;
+    }
     h.hunts(pf) && window_size(config, prey) <= h.prey_max_ratio * window_body
 }
 

@@ -22,7 +22,10 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods.clone() },
                 Alias { pattern: "fauna.founders.*.gut.digestion_s".into(), names: foods },
-                Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders },
+                Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_juveniles_only".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_ashore_only".into(), names: founders },
             ],
             Vec::new(),
         )
@@ -392,6 +395,7 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.recovery_s", "s", nonneg, "the recovery, at half speed and unable to strike").optional(),
         r("hunter.strike_cost_s", "s of awake upkeep", nonneg, "a strike's cost, hit or miss").optional(),
         r("hunter.lure_power", "x awake upkeep", nonneg, "a lit lure's cost").optional(),
+        r("hunter.prey_weight.*", "fraction", fraction, "LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image)").optional(),
         // The flyer's table (`Flight`, F1): the bellwing's only, optional on the others.
         r("flight.span_m", "m", Range::positive(), "wingspan: the collision sphere's diameter").optional().prov("decision"),
         r("flight.band_max_m", "m", nonneg, "the ceiling: the base's most height over the support face below").optional().prov("decision"),

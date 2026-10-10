@@ -6058,6 +6058,9 @@ mod predation_life_tests;
 #[path = "parasite_tests.rs"]
 mod parasite_tests;
 #[cfg(test)]
+#[path = "diet_tests.rs"]
+mod diet_tests;
+#[cfg(test)]
 #[path = "chorister_tests.rs"]
 mod chorister_tests;
 #[cfg(test)]

@@ -329,7 +329,12 @@ fn gestating(cfg: &FaunaConfig, n: f64, body: f64, reserve: f64) -> (Cohort, f64
 /// the killed bodies from every ledger line: matter vanishes.
 #[test]
 fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
-    let cfg = FaunaConfig::default();
+    // It kills a grown grazer: the lanternjaw's diet rules off (LANTERNJAW-DIET).
+    let mut cfg = FaunaConfig::default();
+    if let Some(h) = cfg.founders[Founder::Lanternjaw.index()].hunter.as_mut() {
+        h.prey_weight = [1.0; Founder::COUNT];
+        h.prey_juveniles_only = [false; Founder::COUNT];
+    }
     let mut fits = Fits::unfitted();
     fits.kill_reach = 0.5;
     fits.of_mut(Founder::Browser).kill_rate = 2e-3;
