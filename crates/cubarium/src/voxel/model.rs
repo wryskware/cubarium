@@ -733,6 +733,16 @@ pub const FRUIT_LAYER: u8 = 0xff;
 // --- thinning ------------------------------------------------------------------------
 
 const VARIANT_SALT: u64 = 0x5EED_0F_A11_7A_11E5;
+/// Apart from [`VARIANT_SALT`], so a stand's turn does not follow its variant.
+const TURN_SALT: u64 = 0x7E57_0F_7A_C1_0C_45;
+
+/// The quarter turn (0–3, [`turn`]) a plant stand is drawn at: a pure hash of its id, as
+/// its variant is, so a stand keeps it for life and every stand of a species does not
+/// face the same way.
+#[inline]
+pub fn plant_quarter(stand_id: u64) -> u8 {
+    (mix64(stand_id ^ TURN_SALT) & 3) as u8
+}
 
 /// A 64-bit finaliser (splitmix64's): every input bit reaches every output bit.
 #[inline]
@@ -897,7 +907,7 @@ pub fn fade_cells(from: &[ModelCell], to: &[ModelCell], stand_id: u64, blend: f6
 /// is unwrapped), a `y` or `z` outside the world is dropped, a cell in solid terrain is
 /// dropped. A `Foliage(i)` or `Drape(i)` cell is kept iff `keeps(stand_id, offset, i,
 /// foliage[i])`, a layer past the end of `foliage` counting as full. Trunk and accent
-/// cells are never thinned by foliage.
+/// cells are never thinned by foliage. Unturned: [`stamp_plant_turned`] at quarter 0.
 pub fn stamp_plant(
     cells: &[ModelCell],
     anchor: Cell,
@@ -905,19 +915,36 @@ pub fn stamp_plant(
     foliage: &[f64],
     view: &VoxelView<'_>,
 ) -> Vec<(Cell, ModelCell)> {
+    stamp_plant_turned(cells, anchor, stand_id, 0, foliage, view)
+}
+
+/// [`stamp_plant`] with the model turned `quarter` quarter turns about its anchor: a cell
+/// goes to `anchor + turn(quarter, offset)` ([`turn`] on `(dx, dz)`; `dy` is kept). The
+/// returned [`ModelCell`] keeps its **unturned** offset, and thinning hashes that, so a
+/// turn never changes which cells show. The presenter turns each stand by
+/// [`plant_quarter`].
+pub fn stamp_plant_turned(
+    cells: &[ModelCell],
+    anchor: Cell,
+    stand_id: u64,
+    quarter: u8,
+    foliage: &[f64],
+    view: &VoxelView<'_>,
+) -> Vec<(Cell, ModelCell)> {
     let mut out = Vec::with_capacity(cells.len());
-    each_plant_cell(cells, anchor, stand_id, foliage, view, |c, m| {
+    each_plant_cell(cells, anchor, stand_id, quarter, foliage, view, |c, m| {
         out.push((c, m))
     });
     out
 }
 
-/// [`stamp_plant`] without the allocation: what the presenter calls every tick.
+/// [`stamp_plant_turned`] without the allocation: what the presenter calls every tick.
 #[inline]
 pub(crate) fn each_plant_cell(
     cells: &[ModelCell],
     anchor: Cell,
     stand_id: u64,
+    quarter: u8,
     foliage: &[f64],
     view: &VoxelView<'_>,
     mut f: impl FnMut(Cell, ModelCell),
@@ -926,8 +953,9 @@ pub(crate) fn each_plant_cell(
     let (h, d) = (i64::from(c.height), i64::from(c.depth));
     let (ay, az) = (i64::from(anchor.y), i64::from(anchor.z));
     for m in cells {
+        let (dx, dz) = turn(quarter, m.offset[0], m.offset[2]);
         let y = ay + i64::from(m.offset[1]);
-        let z = az + i64::from(m.offset[2]);
+        let z = az + i64::from(dz);
         if y < 0 || y >= h || z < 0 || z >= d {
             continue;
         }
@@ -937,7 +965,7 @@ pub(crate) fn each_plant_cell(
                 continue;
             }
         }
-        let x = anchor.x + i64::from(m.offset[0]);
+        let x = anchor.x + i64::from(dx);
         let (y, z) = (y as u32, z as u32);
         if view.material_at(x, y, z).is_solid() {
             continue;

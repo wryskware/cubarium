@@ -22,6 +22,14 @@ const W: u32 = 24;
 const H: u32 = 16;
 const D: u32 = 6;
 
+/// An empty grid that draws models unturned (`Stands::set_plant_turn`), so the drawn cells
+/// read back as the model's own offsets. The turn has its own tests (`voxel_models`).
+fn unturned() -> Stands {
+    let mut stands = Stands::empty(W, H, D);
+    stands.set_plant_turn(false);
+    stands
+}
+
 fn world() -> World {
     let mut world = World::empty(Config {
         width: W,
@@ -225,7 +233,7 @@ fn marker(k: usize) -> [i32; 3] {
 fn the_state_follows_the_total_foliage_fraction() {
     let rig = Rig::new(FloraConfig::default());
     for k in 0..rig.n {
-        let mut stands = Stands::empty(W, H, D);
+        let mut stands = unturned();
         rig.draw(&mut stands, rig.inside(k), Instant::now());
         assert_eq!(rig.drawn(&stands), rig.state_cells(k), "state {k} at {}", rig.inside(k));
         for j in (0..rig.n).filter(|&j| j != k) {
@@ -248,7 +256,7 @@ fn hysteresis_holds_a_state_until_the_fraction_clears_its_threshold() {
     let (below, h) = (rig.below(), rig.hysteresis());
     assert!(h > 0.0, "the config's hysteresis is a positive band");
     let t = below[0];
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     stands.set_foliage_fade_s(0.0);
     let t0 = Instant::now();
     let mut frame = 0u64;
@@ -277,7 +285,7 @@ fn hysteresis_holds_a_state_until_the_fraction_clears_its_threshold() {
 fn a_state_change_cross_fades_monotonically_on_the_frame_clock() {
     let rig = Rig::new(FloraConfig::default());
     let fade_s = 1.5;
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     stands.set_foliage_fade_s(fade_s);
     let t0 = Instant::now();
     rig.draw(&mut stands, 1.0, t0);
@@ -321,7 +329,7 @@ fn a_state_change_cross_fades_monotonically_on_the_frame_clock() {
 fn a_fade_reversed_midway_runs_back_to_where_it_started() {
     let rig = Rig::new(FloraConfig::default());
     let fade_s = 1.0;
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     stands.set_foliage_fade_s(fade_s);
     let t0 = Instant::now();
     let at = |s: f64| t0 + Duration::from_secs_f64(s);
@@ -351,7 +359,7 @@ fn a_state_species_is_never_thinned_by_layer() {
     let mut lopsided = vec![0.0; rig.even_shares().len()];
     lopsided[1] = 1.0;
     let rosette: BTreeSet<[i32; 3]> = [[1, 1, 0], [-1, 1, 0], [0, 1, 1], [0, 1, -1]].into();
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     rig.draw_stand(&mut stands, rig.stand_at(1.0, &lopsided), Instant::now());
     assert!(rosette.is_subset(&rig.drawn(&stands)), "every rosette cell, layer 0 empty or not");
 
@@ -368,7 +376,7 @@ fn a_state_species_is_never_thinned_by_layer() {
         lib: rig.lib.clone(),
         n: rig.n,
     };
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     plain.draw_stand(&mut stands, plain.stand_at(1.0, &lopsided), Instant::now());
     assert!(
         rosette.is_disjoint(&plain.drawn(&stands)),
@@ -406,7 +414,7 @@ fn fallen_foliage_paints_at_the_top_of_its_layers_ramp() {
         },
     );
     rig.lib = lib;
-    let mut stands = Stands::empty(W, H, D);
+    let mut stands = unturned();
     rig.draw(&mut stands, 1.0, Instant::now());
     let site = rig.flora.view().stands[0].site;
     let (x, y0, z) = (i64::from(site.x), i64::from(site.y) + 1, site.z);
@@ -420,8 +428,8 @@ fn fallen_foliage_paints_at_the_top_of_its_layers_ramp() {
 #[test]
 fn the_change_only_rebuild_matches_the_full_one_through_a_fade() {
     let rig = Rig::new(FloraConfig::default());
-    let mut full = Stands::empty(W, H, D);
-    let mut inc = Stands::empty(W, H, D);
+    let mut full = unturned();
+    let mut inc = unturned();
     inc.set_incremental(true);
     let t0 = Instant::now();
     let script = [1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, rig.inside(1), rig.inside(1), 0.0];

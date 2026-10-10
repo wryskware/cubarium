@@ -304,6 +304,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         let models_on = cfg.figures.animals == AnimalDraw::Models;
         packer.figures = models_on;
         packer.stands.set_foliage_fade_s(cfg.foliage_fade_s);
+        packer.stands.set_plant_turn(cfg.plants.turn);
         if cfg.figures.plants == PlantDraw::Models {
             // The stamp switches foliage states at once; the plant pass grows the change in
             // over `foliage_fade_s` instead of the stamp's cell-by-cell swap.
