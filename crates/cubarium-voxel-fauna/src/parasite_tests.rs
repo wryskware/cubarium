@@ -934,17 +934,18 @@ fn a_lanternjaw_at_35_percent_of_body_max_is_adult_and_below_it_a_juvenile() {
     let mut fauna = Fauna::new(c);
     let id = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let core = crate::effective_config(&c, &animal(&fauna, id));
-    let factor = c.founder(Founder::Lanternjaw).adult_size_window_factor;
+    let phys = c.founder(Founder::Lanternjaw);
+    let factor = phys.adult_size_window_factor;
 
     animal_mut(&mut fauna, id).body = 0.35 * core.body_max * (1.0 + 1e-9);
     let a = animal(&fauna, id);
     assert!(a.body >= core.birth_body, "35 % of body_max is adult");
-    assert!((crate::window_size(&c, &a) - factor * a.body).abs() <= 1e-12 * a.body);
+    assert!((crate::window_size(&c, &a) - factor * phys.size(a.body)).abs() <= 1e-12 * phys.size(a.body));
 
     animal_mut(&mut fauna, id).body = 0.34 * core.body_max;
     let a = animal(&fauna, id);
     assert!(a.body < core.birth_body, "below 35 % it is a juvenile");
-    assert_eq!(crate::window_size(&c, &a), a.body, "a juvenile counts at its own size");
+    assert_eq!(crate::window_size(&c, &a), phys.size(a.body), "a juvenile counts at its own size");
 }
 
 /// **A rider takes more as it grows** (Wrysk: "they take more the bigger they get"): on a

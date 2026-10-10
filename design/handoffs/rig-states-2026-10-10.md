@@ -90,3 +90,64 @@ eases in and out like the cropping clip, and the parts move as the animal would.
   defensive pose today, and which parts would move.
 
 Don't merge.
+
+## Round 1 result (merged 79c8a9a0)
+
+The frondgrazer's idle, asleep and hunker clips are on the rig (`fg_state_rig`,
+`scripts/blender/animal_models.py` ~879). The engine is in `crates/cubarium/src/voxel/figure.rs`:
+- state weights at ~1363;
+- `RigStates` and the stand-down at ~916–933;
+- the hunker swap skipped while the rig is drawn at ~1273;
+- the lip fix: `figures.rs:142` `with_lip`, `rig.rs:285` `lip_bones`.
+
+The bake's `STATE_RIGS` reads the committed pose `.cvm`. Tests are in `rig_states_tests.rs`,
+and evidence in `art/gen/runs/rig-states-2026-10-10/frondgrazer-states-px{6,12}.mp4`.
+
+The class-path settle draws badly at full weight. Cut cells collapse into flat lids left at
+their standing rows, and covered faces open into see-through holes. The rig track avoids
+both: legs fold on leg bones, and cut cells sink under the ground line on tuck bones.
+
+## Round 2: today's sleep settle on the rig for the other rigged species (Codex, xhigh)
+
+Port round 1's `asleep` track to each rigged species whose class-path sleep settle is more
+than 0 rows. Find each species' settle rows the way round 1 did, from `sleep::classify` per
+bin. Expected from round 1's survey:
+- **Veilhound** (`chorister`) and **lanternjaw:** port both.
+- **Seedporter:** port its ground pose (`seedporter-ground`). Sleep while perched only if the
+  same pattern fits; otherwise say why.
+- **Bellwing:** port it only if it settles when grounded.
+- **Capgnawer, littershredder and ripple-snail:** settle is 0 rows (breath only), so they
+  have nothing to port. Confirm that.
+- **Loftstrider:** it already has its own `asleep` track (Wrysk's rest pose). Leave it.
+
+Each track follows `fg_state_rig`'s asleep:
+- The body comes down today's settle rows.
+- The legs fold under the ground line on leg bones; add the bones the species needs.
+- Cut cells sink on tuck bones.
+- The breath stays on the class path.
+
+Hard constraints:
+- **No new looks.** No lying-down poses, head drops, tail curls or arm tucks. Those are
+  Wrysk's to direct later; list them in the return. The end pose must show exactly the faces
+  the class-path settle shows at full weight. Extend round 1's test and its bake-time check
+  to every ported species.
+- **Unchanged resting look.** The resting silhouette and the lip tones stay byte-identical,
+  checked as round 1 did (`cmp` on rest frames at px 6 and 12, side-on and three-quarter).
+  No `.cvm` is rewritten. Commit only the `.rig` files and the code you meant to change (the
+  bake isn't reproducible, backlog 21).
+- **No idle loops.** Add no idle clip; keep the `.rig` files small.
+- **Feeding unchanged.** Each species' feeding clip plays exactly as on main. Check the
+  existing feed tests and one feed capture per species.
+
+Evidence: for each ported species, two grown animals falling asleep, breathing and waking,
+today | rig, side-on and three-quarter, at px 6 and 12. Use round 1's state scripting in
+`voxel_feed_capture`. Write to `art/gen/runs/rig-states-2026-10-10/<species>-asleep-px{6,12}.mp4`.
+
+Return (40 lines or fewer):
+- per species, ported or skipped, and why;
+- cells per bone;
+- the silhouette and end-pose checks, with raw evidence;
+- MP4 paths;
+- tests;
+- commits, signed `Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`;
+- the list of looks left for Wrysk.

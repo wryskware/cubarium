@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2822 rows)
+**`fauna.*`** (2831 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1788,6 +1788,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.littershredder.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.littershredder.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.littershredder.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.littershredder.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.littershredder.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.littershredder.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -2077,6 +2078,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.frondgrazer.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.frondgrazer.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.frondgrazer.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.frondgrazer.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.frondgrazer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.frondgrazer.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -2366,6 +2368,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.hunter.jaw_band_height_fraction` | 0.6 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.lanternjaw.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.lanternjaw.hunter.windup_s` | 0.15 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.lanternjaw.hunter.strike_warning_scale` | 1.0 | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.lanternjaw.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.lanternjaw.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.lanternjaw.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -2655,6 +2658,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.capgnawer.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.capgnawer.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.capgnawer.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.capgnawer.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.capgnawer.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.capgnawer.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -2944,6 +2948,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.loftstrider.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.loftstrider.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.loftstrider.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.loftstrider.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.loftstrider.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.loftstrider.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -3233,6 +3238,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.ripple-snail.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.ripple-snail.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.ripple-snail.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.ripple-snail.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.ripple-snail.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.ripple-snail.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -3522,6 +3528,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.hunter.jaw_band_height_fraction` | (absent) | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.bellwing.hunter.jaw_forward_length_fraction` | (absent) | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.bellwing.hunter.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.bellwing.hunter.strike_warning_scale` | (absent) | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.bellwing.hunter.lunge_s` | (absent) | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.bellwing.hunter.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.bellwing.hunter.strike_cost_s` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -3811,6 +3818,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.hunter.jaw_band_height_fraction` | 2.0 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.seedporter.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.seedporter.hunter.windup_s` | 0.1 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.seedporter.hunter.strike_warning_scale` | 1.0 | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.seedporter.hunter.lunge_s` | 0.15 | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.seedporter.hunter.recovery_s` | 1.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.seedporter.hunter.strike_cost_s` | 2.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |
@@ -4100,6 +4108,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.hunter.jaw_band_height_fraction` | 0.6 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
 | `fauna.founders.chorister.hunter.jaw_forward_length_fraction` | 0.5 | x body length | [0, inf) | 0.2–0.8 | - | placeholder | the jaw's point ahead of the body's centre |
 | `fauna.founders.chorister.hunter.windup_s` | 0.15 | s | [0, inf) |  | - | placeholder | the crouch |
+| `fauna.founders.chorister.hunter.strike_warning_scale` | 1.0 | x looming range | [0, 1] |  | - | placeholder | SP-FLUSH: visual warning range of this hunter's strike (1: whole-body lunge; smaller: short arm grab); closing-body looming is unchanged |
 | `fauna.founders.chorister.hunter.lunge_s` | 0.25 | s | [0, inf) |  | - | placeholder | the lunge |
 | `fauna.founders.chorister.hunter.recovery_s` | 3.0 | s | [0, inf) |  | - | placeholder | the recovery, at half speed and unable to strike |
 | `fauna.founders.chorister.hunter.strike_cost_s` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | a strike's cost, hit or miss |

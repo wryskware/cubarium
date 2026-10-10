@@ -45,13 +45,15 @@
 //! hunkering in from standing, holding and standing back up, then cropping and hunkering in
 //! from the crop. `--stills S,S,…` writes only the frames at those seconds
 //! (`still-<s>.png`), every tick still staged.
+//! `--asleep`: two grown animals standing, asleep and breathing, then awake; bellwing
+//! is grounded. `--voxel-m 0.25` shows the coarse bin (default 0.125).
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
 //!     [--px N] [--heading DEG] [--flipbook PATH]
 //!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing|capgnawer|
 //!                littershredder|ripple-snail] [--pose stand|ground]
-//!     [--aim] [--models DIR] [--states] [--stills S,S,...]
+//!     [--aim] [--models DIR] [--states|--asleep] [--voxel-m N] [--stills S,S,...]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -121,6 +123,8 @@ const STATES: [(f64, State, bool); 8] = [
     (29.0, State::Resting, false),
 ];
 const STATES_LENGTH_S: f64 = 31.0;
+const ASLEEP_BOUT: (f64, f64) = (2.0, 8.0);
+const ASLEEP_LENGTH_S: f64 = 11.0;
 const VOXEL_M: f64 = 0.125;
 const HZ: f64 = cubarium_voxel::TICK_HZ as f64;
 
@@ -129,11 +133,15 @@ fn world(width: u32, depth: u32) -> World {
 }
 
 fn world_of(width: u32, height: u32, depth: u32) -> World {
+    world_of_at(width, height, depth, VOXEL_M)
+}
+
+fn world_of_at(width: u32, height: u32, depth: u32, voxel_m: f64) -> World {
     let cfg = Config {
         width,
         height,
         depth,
-        voxel_m: VOXEL_M,
+        voxel_m,
         ..Config::default()
     };
     let mut w = World::empty(cfg.clone());
@@ -161,7 +169,11 @@ fn eating(tick: u64) -> bool {
 fn state_at(tick: u64, ls: bool) -> State {
     let t = tick as f64 / HZ;
     if !ls {
-        return if eating(tick) { State::Cropping } else { State::Resting };
+        return if eating(tick) {
+            State::Cropping
+        } else {
+            State::Resting
+        };
     }
     if LS_BOUTS.iter().any(|&(from, to)| t >= from && t < to) {
         State::Cropping
@@ -288,6 +300,9 @@ fn main() -> Result<()> {
     let mut aiming = false;
     let mut models_dir = None;
     let mut states = false;
+    let mut asleep_only = false;
+    let mut voxel_m = VOXEL_M;
+    let mut pose_set = false;
     let mut stills: Option<Vec<f64>> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -301,6 +316,8 @@ fn main() -> Result<()> {
             "--perf" => perf = Some(args.next().context("--perf N")?.parse::<usize>()?),
             "--aim" => aiming = true,
             "--states" => states = true,
+            "--asleep" => asleep_only = true,
+            "--voxel-m" => voxel_m = args.next().context("--voxel-m N")?.parse()?,
             "--stills" => {
                 stills = Some(
                     args.next()
@@ -336,6 +353,7 @@ fn main() -> Result<()> {
                 }
             }
             "--pose" => {
+                pose_set = true;
                 mode = match args.next().context("--pose stand|ground")?.as_str() {
                     "stand" => MobilityMode::Perched,
                     "ground" => MobilityMode::Ground,
@@ -345,6 +363,10 @@ fn main() -> Result<()> {
             _ if out.is_none() => out = Some(PathBuf::from(a)),
             _ => bail!("unexpected argument {a}"),
         }
+    }
+    anyhow::ensure!(!(states && asleep_only), "choose --states or --asleep");
+    if asleep_only && founder == Founder::Bellwing && !pose_set {
+        mode = MobilityMode::Ground;
     }
     let rig_draw = match arm.as_str() {
         "a" | "stamped" => RigDraw::Off,
@@ -371,9 +393,14 @@ fn main() -> Result<()> {
     let sp = founder == Founder::Seedporter;
     let lj = founder == Founder::Lanternjaw;
     let bw = founder == Founder::Bellwing;
-    let small = matches!(founder, Founder::Capgnawer | Founder::Blind | Founder::RippleSnail);
+    let small = matches!(
+        founder,
+        Founder::Capgnawer | Founder::Blind | Founder::RippleSnail
+    );
     let perched = sp && mode == MobilityMode::Perched;
     anyhow::ensure!(!aiming || ls, "--aim is the loftstrider's");
+    let world_of = |width, height, depth| world_of_at(width, height, depth, voxel_m);
+    let world = |width, depth| world_of(width, 8, depth);
     let (mut w, xs, z) = match founder {
         Founder::Chorister => (world(48, 16), vec![15, 36], 8),
         Founder::Loftstrider if aiming => (world_of(52, 36, 20), vec![26], 10),
@@ -385,7 +412,9 @@ fn main() -> Result<()> {
         // 0.375 m across the wings, 0.4 m tall with the tendril, hovering
         Founder::Bellwing => (world_of(14, 10, 7), vec![4, 10], 3),
         // 0.19-0.375 m long: two or three voxels each
-        Founder::Capgnawer | Founder::Blind | Founder::RippleSnail => (world_of(12, 6, 5), vec![3, 8], 2),
+        Founder::Capgnawer | Founder::Blind | Founder::RippleSnail => {
+            (world_of(12, 6, 5), vec![3, 8], 2)
+        }
         // the rest-states script turns the grown body three-quarter: a deeper floor
         _ if states => (world(22, 9), vec![6, 15], 4),
         _ => (world(22, 7), vec![6, 15], 3),
@@ -393,7 +422,12 @@ fn main() -> Result<()> {
     if perched {
         for &x in &xs {
             for y in 2..2 + SP_POST {
-                w.apply(VoxelCommand::SetMaterial { x, y, z, material: Material::Rock });
+                w.apply(VoxelCommand::SetMaterial {
+                    x,
+                    y,
+                    z,
+                    material: Material::Rock,
+                });
             }
         }
     }
@@ -423,14 +457,22 @@ fn main() -> Result<()> {
         // the loftstrider's second is a newborn calf (its own build, its own bin); the
         // seedporter's a newborn (its pose models are one bin: the adult's); the
         // lanternjaw's a newborn, the founder's smallest bin (its larva is the rider)
-        a.body = if (ls || sp || lj || bw || small) && i == 1 { newborn } else { adult };
+        a.body = if !states && !asleep_only && (ls || sp || lj || bw || small) && i == 1 {
+            newborn
+        } else {
+            adult
+        };
         a.state = State::Resting;
-        if bw {
+        if bw && mode == MobilityMode::Fly {
             // aloft, holding still: as it sips at a flower
             a.mobility.mode = MobilityMode::Fly;
             a.mobility.climb = None;
             a.mobility.perch = None;
-            a.pose.y_m = 2.0 * VOXEL_M + BW_HOVER_M;
+            a.pose.y_m = 2.0 * voxel_m + BW_HOVER_M;
+        } else if bw {
+            a.mobility.mode = mode;
+            a.mobility.climb = None;
+            a.mobility.perch = None;
         }
         if sp {
             a.mobility.mode = mode;
@@ -439,7 +481,7 @@ fn main() -> Result<()> {
             if perched {
                 // on the post's top
                 a.site.y = 1 + SP_POST;
-                a.pose.y_m = f64::from(2 + SP_POST) * VOXEL_M;
+                a.pose.y_m = f64::from(2 + SP_POST) * voxel_m;
             }
         }
     }
@@ -469,7 +511,7 @@ fn main() -> Result<()> {
         cfg.figures.swap_s = 0.0;
     }
     let models =
-        Arc::new(ModelLibrary::load(&cfg.models_dir, VOXEL_M).context("the baked models")?);
+        Arc::new(ModelLibrary::load(&cfg.models_dir, voxel_m).context("the baked models")?);
     let loop_s = {
         let (r, _) = models
             .rig_in_mode(founder, mode)
@@ -489,14 +531,17 @@ fn main() -> Result<()> {
 
     let length_s = match (ls, aiming) {
         _ if states => STATES_LENGTH_S,
+        _ if asleep_only => ASLEEP_LENGTH_S,
         (true, true) => AIM_LENGTH_S,
         (true, false) => LS_LENGTH_S,
         _ => LENGTH_S,
     };
     // the frames `--stills` asks for, by frame number (60 a second)
-    let still_frames: Option<Vec<(u32, f64)>> = stills
-        .as_ref()
-        .map(|s| s.iter().map(|&t| (((t * 60.0).round() as u32).saturating_sub(3), t)).collect());
+    let still_frames: Option<Vec<(u32, f64)>> = stills.as_ref().map(|s| {
+        s.iter()
+            .map(|&t| (((t * 60.0).round() as u32).saturating_sub(3), t))
+            .collect()
+    });
     let last = (length_s * HZ).round() as u64;
     let ws = weights(last);
     let mut frame = 0u32;
@@ -504,25 +549,42 @@ fn main() -> Result<()> {
     for tick in 1..=last {
         for a in &mut animals {
             a.state = state_at(tick, ls);
+            if asleep_only {
+                let t = tick as f64 / HZ;
+                a.state = if t >= ASLEEP_BOUT.0 && t < ASLEEP_BOUT.1 {
+                    State::Asleep
+                } else {
+                    State::Resting
+                };
+            }
             if states {
                 let t = tick as f64 / HZ;
-                let &(_, state, hunkered) = STATES.iter().rev().find(|s| t >= s.0).unwrap_or(&STATES[0]);
+                let &(_, state, hunkered) =
+                    STATES.iter().rev().find(|s| t >= s.0).unwrap_or(&STATES[0]);
                 a.state = state;
                 a.hunkered = hunkered;
             }
             if aiming {
                 let t = tick as f64 / HZ;
-                a.state = if t >= 0.5 { State::Cropping } else { State::Resting };
-                let &(_, ahead, side, up) = AIM_BITES.iter().rev().find(|b| t >= b.0).unwrap_or(&AIM_BITES[0]);
+                a.state = if t >= 0.5 {
+                    State::Cropping
+                } else {
+                    State::Resting
+                };
+                let &(_, ahead, side, up) = AIM_BITES
+                    .iter()
+                    .rev()
+                    .find(|b| t >= b.0)
+                    .unwrap_or(&AIM_BITES[0]);
                 // the body's forward (sin h, cos h) and its model +z (−cos h, sin h)
                 let (sh, ch) = a.pose.heading_rad.sin_cos();
                 let x = a.pose.x + ahead * sh - side * ch;
                 let z = a.pose.z + ahead * ch + side * sh;
-                let y = f64::from(a.site.y) + 1.0 + up / VOXEL_M;
+                let y = f64::from(a.site.y) + 1.0 + up / voxel_m;
                 a.bite = cubarium_voxel_fauna::LastBite(Some(cubarium_voxel_flora::Site {
-                    x: (x / VOXEL_M).floor() as u32,
+                    x: (x / voxel_m).floor() as u32,
                     y: y.floor() as u32,
-                    z: (z / VOXEL_M).floor() as u32,
+                    z: (z / voxel_m).floor() as u32,
                 }));
             }
         }
@@ -549,7 +611,10 @@ fn main() -> Result<()> {
             }
             let path = match &still_frames {
                 None => Some(frames.join(format!("f-{frame:04}.png"))),
-                Some(s) => s.iter().find(|(f, _)| *f == frame).map(|(_, t)| out.join(format!("still-{t}.png"))),
+                Some(s) => s
+                    .iter()
+                    .find(|(f, _)| *f == frame)
+                    .map(|(_, t)| out.join(format!("still-{t}.png"))),
             };
             frame += 1;
             let Some(path) = path else { continue };

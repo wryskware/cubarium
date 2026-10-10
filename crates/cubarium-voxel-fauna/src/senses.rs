@@ -982,6 +982,69 @@ pub(crate) trait CellOccupancy {
     fn pool_top(&self, cell: usize) -> Option<f64>;
 }
 
+/// Observer-specific crown classes over shared geometry. Resolve only crown hits through
+/// the plant layer's nearby-stand index, in the same first-claim order as the grid lay.
+pub(crate) struct FeedingCone<'a, O> {
+    occupancy: &'a O,
+    flora: &'a FloraView<'a>,
+    width: u32,
+    depth: u32,
+    threshold: f64,
+}
+
+impl<'a, O: CellOccupancy> FeedingCone<'a, O> {
+    pub(crate) fn new(
+        view: &VoxelView<'_>,
+        flora: &'a FloraView<'a>,
+        occupancy: &'a O,
+        phys: &crate::FounderPhysiology,
+        gate: f64,
+        emit_reference: f64,
+    ) -> Self {
+        let reference = phys.taste_reference_on(emit_reference, view.config.voxel_m, flora.config);
+        // E/reference / (E/reference + 1) > gate, solved once for this observer.
+        let threshold = if gate >= 1.0 { f64::INFINITY } else { reference * gate / (1.0 - gate) };
+        Self { occupancy, flora, width: view.config.width, depth: view.config.depth, threshold }
+    }
+}
+
+impl<O: CellOccupancy> CellOccupancy for FeedingCone<'_, O> {
+    fn any(&self, cell: usize) -> bool {
+        self.occupancy.any(cell)
+    }
+
+    fn other_body(&self, cell: usize, observer_id: u64) -> bool {
+        self.occupancy.other_body(cell, observer_id)
+    }
+
+    fn environment(&self, cell: usize) -> Option<Fine> {
+        let class = self.occupancy.environment(cell)?;
+        if class != Fine::FoliageCrown || self.threshold == 0.0 {
+            return Some(class);
+        }
+        let (w, d) = (self.width as usize, self.depth as usize);
+        let (x, rest) = (cell % w, cell / w);
+        let (z, y) = ((rest % d) as u32, (rest / d) as i64);
+        let at_stand = |stand: &cubarium_voxel_flora::Stand| {
+            self.flora.layers(stand).find(|layer| {
+                layer.cell == y && crate::body::disc_covers(
+                    i64::from(stand.site.x), i64::from(stand.site.z), layer.radius_v.ceil() as i64,
+                    layer.radius_v * layer.radius_v, i64::from(self.width), i64::from(self.depth), x as i64, z,
+                )
+            }).map(|layer| layer_class(&layer, self.threshold))
+        };
+        // A hand-built flora view may have no index; it uses the identical ordered scan.
+        match self.flora.stands_near(x as i64, z, self.width, self.depth) {
+            Some(near) => near.iter().find_map(|&i| at_stand(&self.flora.stands[i as usize])),
+            None => self.flora.stands.iter().find_map(at_stand),
+        }.or(Some(class))
+    }
+
+    fn pool_top(&self, cell: usize) -> Option<f64> {
+        self.occupancy.pool_top(cell)
+    }
+}
+
 /// The two low bits of a [`ConeOccupancy`] cell: which stand class claims it.
 const ENV_MASK: u8 = 0b0011;
 const ENV_FOLIAGE: u8 = 1;
@@ -1177,7 +1240,7 @@ impl LayerDisc {
             rows: layer.cells,
             span: layer.radius_v.ceil() as i64,
             r2: layer.radius_v * layer.radius_v,
-            code: env_code(layer_class(layer)),
+            code: env_code(layer_class(layer, 0.0)),
             stand: si as u32,
             layer: li as u32,
         }
@@ -1417,10 +1480,10 @@ impl<'a> Band<'a> {
 }
 
 /// The stand class a profile layer shows an eye.
-fn layer_class(layer: &StandLayer) -> Fine {
+fn layer_class(layer: &StandLayer, feeding_threshold: f64) -> Fine {
     if !layer.kind.bears_foliage() {
         Fine::Trunk
-    } else if layer.edible() > 0.0 {
+    } else if layer.edible() > feeding_threshold {
         Fine::FoliageCrown
     } else {
         Fine::StrippedCrown
@@ -1826,7 +1889,7 @@ impl HeldCone {
                 if !layer.kind.bears_foliage() {
                     continue;
                 }
-                let (code, claim) = (env_code(layer_class(layer)), claim_code(si, li));
+                let (code, claim) = (env_code(layer_class(layer, 0.0)), claim_code(si, li));
                 let (cells, claims) = (&mut self.occ.cells, &self.claims);
                 let disc = LayerDisc::of(stand.site, layer, si, li);
                 for_each_disc_cell(view.config, &disc, None, &every_layer, |cell, _| {
@@ -2786,6 +2849,68 @@ mod tests {
         // Glowcap emission is not modeled: the light channel is sky visibility alone, so a
         // bright fungal source to the side cannot change a receptor that is underground.
         assert_eq!(covered, 0.0, "no emissive contribution exists to read");
+    }
+
+    #[test]
+    fn a_crown_is_foliage_only_above_the_observers_feed_gate() {
+        let world = flat_world();
+        let view = world.view();
+        let mut flora = Flora::new(FloraConfig::for_voxel_size(view.config.voxel_m));
+        let species = cubarium_voxel_flora::Species::Springturf;
+        let wood = flora.config().species(species).wood_max;
+        assert!(flora.apply(&world, cubarium_voxel_flora::Command::Seed { x: 5, z: 2, species, wood }));
+        let original = flora.view();
+        let mut stands = original.stands.to_vec();
+        let layer = original.layers(&stands[0]).next().unwrap();
+        let threshold = layer.edible() * 0.25;
+        assert!(threshold > 0.0);
+        let mut cfg = crate::FaunaConfig::default();
+        cfg.teachers.feed_gate = 0.25;
+        let reference = threshold * (1.0 - cfg.teachers.feed_gate) / cfg.teachers.feed_gate;
+        let phys = &mut cfg.founders[Founder::Browser.index()];
+        phys.taste_reference_food = reference * 100.0;
+        phys.taste_reference = Some(reference);
+        let mut fauna = crate::Fauna::new(cfg);
+        assert!(fauna.apply(&world, crate::Command::IntroduceFounder {
+            x: 2, z: 2, founder: Founder::Browser, stores: crate::StartingStores::FULL,
+            heading_rad: std::f64::consts::FRAC_PI_2,
+        }));
+        let manifest = fauna.config.manifest(Founder::Browser);
+        let cn = manifest.modules.iter().find(|m| m.name == "Cone(3, foliage/body)").unwrap();
+        let phys = fauna.config.founder(Founder::Browser);
+        let cell = view.config.index(5, layer.cell as u32, 2);
+        let mut held = HeldCone::default();
+        let mut live = LiveGrid::default();
+        for (stock, expected) in [(threshold * 0.5, Fine::StrippedCrown), (threshold * 2.0, Fine::FoliageCrown), (threshold * 0.5, Fine::StrippedCrown)] {
+            stands[0].layer_stock[layer.foliage_index.unwrap()] = layer.floor + stock;
+            stands[0].foliage = stands[0].layer_stock.iter().sum();
+            let fv = FloraView { stands: &stands, ..flora.view() };
+            let resolved = fv.layers(&stands[0]).next().unwrap();
+            let cue = resolved.edible() / reference;
+            assert_eq!(cue / (cue + 1.0) > fauna.config.teachers.feed_gate, expected == Fine::FoliageCrown);
+            assert_eq!(layer_class(&resolved, threshold), expected);
+            let av = fauna.view();
+            let grid = cone_occupancy(&view, &fv, &av);
+            let cone = FeedingCone::new(&view, &fv, &grid, phys, fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference);
+            assert_eq!(cone.environment(cell), Some(expected));
+            let cached = held.refresh(&view, &fv, &av);
+            let cone = FeedingCone::new(&view, &fv, cached, phys, fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference);
+            assert_eq!(cone.environment(cell), Some(expected), "held geometry reads the current stock");
+            live.refresh(&view, &fv, &av, 1, (true, false));
+            let live_view = live.view(&view, Flavour::Flat);
+            let cone = FeedingCone::new(&view, &fv, &live_view, phys, fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference);
+            assert_eq!(cone.environment(cell), Some(expected), "live geometry reads the current stock");
+            let obs = crate::body::observation(&fauna, 0, &view, &fv, &manifest, None, Some(Occ::Live(live_view)));
+            assert_eq!(obs[cn.offset + 6 + 2] > 0.0, expected == Fine::FoliageCrown, "brain cone input agrees");
+            let mut discerning = *phys;
+            discerning.taste_reference = Some(reference * 4.0);
+            let cone = FeedingCone::new(&view, &fv, &grid, &discerning, fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference);
+            assert_eq!(cone.environment(cell), Some(Fine::StrippedCrown), "another observer has its own reference");
+            let gate = fauna.config.teachers.feed_gate;
+            let stricter_gate = gate + (1.0 - gate) * 0.5;
+            let cone = FeedingCone::new(&view, &fv, &grid, phys, stricter_gate, fauna.config.cue.emit_reference);
+            assert_eq!(cone.environment(cell), Some(Fine::StrippedCrown), "the gate also belongs to the observer");
+        }
     }
 
     /// Cone: the centre sector sees a stand dead ahead, a foreground rock occludes the

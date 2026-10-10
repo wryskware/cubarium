@@ -25,6 +25,8 @@
 #[cfg(test)]
 mod mass_rescale_tests;
 #[cfg(test)]
+mod size_not_mass_tests;
+#[cfg(test)]
 mod taste_units_tests;
 
 mod body;
@@ -167,6 +169,10 @@ pub fn browser_cone_readings(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -198,6 +204,10 @@ pub fn browser_cone_observation(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -402,6 +412,10 @@ pub fn browser_cone_census(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let geometry = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let origin = senses::cone_origin(view, &animal.pose, animal.site.y, &geometry);
     let heading = animal.pose.heading_rad;
     let range = manifest.cone_range_m;
@@ -1416,6 +1430,7 @@ pub fn rider_take_per_s(config: &FaunaConfig, rider_body: f64) -> f64 {
 /// rider its host no longer bears has outgrown it and drops off (and looks for a host that
 /// does, [`FaunaConfig::parasite_switch`]); a hatchling no host in reach bears stays in
 /// the egg.
+/// This is an energy eligibility test: daily organic demand must fit daily organic supply.
 pub fn host_bears(config: &FaunaConfig, rider_body: f64, host_body: f64) -> bool {
     config.parasite_take_body_per_day * rider_body <= config.parasite_host_bear_per_day * host_body
 }

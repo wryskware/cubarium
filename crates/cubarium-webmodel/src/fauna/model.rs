@@ -686,7 +686,7 @@ impl FaunaModel {
             // Size-weighted crowding (`crowd_size_exponent` θ): a body of structure B counts each
             // other body of structure B' as (B'/B)^θ; θ = 0 is every body 1.
             let theta = fit.crowd_size_exponent;
-            let free: Vec<(f64, f64)> = self.pops[f.index()].iter().filter(|c| c.host.is_none()).map(|c| (c.n, c.b.body)).collect();
+            let free: Vec<(f64, f64)> = self.pops[f.index()].iter().filter(|c| c.host.is_none()).map(|c| (c.n, phys.size(c.b.body))).collect();
             let n_free: f64 = free.iter().map(|x| x.0).sum();
             let extra = self.extra_bodies[f.index()];
             let mean_body = if n_free > 0.0 { free.iter().map(|x| x.0 * x.1).sum::<f64>() / n_free } else { 0.0 };
@@ -697,7 +697,7 @@ impl FaunaModel {
                 if !c.b.eating || !(a > 0.0) || c.host.is_some() || !(c.n > 0.0) || pup_of[k] {
                     continue;
                 }
-                let own = if theta == 0.0 { s_theta } else { s_theta / c.b.body.max(1e-12).powf(theta) } / area;
+                let own = if theta == 0.0 { s_theta } else { s_theta / phys.size(c.b.body).max(1e-12).powf(theta) } / area;
                 let want = laws::bite_want(&phys, &c.b, dt) * a * (1.0-c.response.hunker-c.response.flight).max(0.0);
                 if !(want > 0.0) {
                     continue;
@@ -952,7 +952,7 @@ impl FaunaModel {
                             continue;
                         }
                         if hp.opportunist {
-                            let damage = h.strike_power * hb / c.b.body.max(f64::MIN_POSITIVE)
+                            let damage = h.strike_power * hp.size(hb) / pp.size(c.b.body).max(f64::MIN_POSITIVE)
                                 * (1.0 - pp.armour);
                             let strikes = (1.0 / damage.max(f64::MIN_POSITIVE)).ceil().max(1.0);
                             let cost = strikes * h.strike_cost_s * hp.core.maintenance_per_s * hb;
