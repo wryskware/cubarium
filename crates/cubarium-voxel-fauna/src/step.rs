@@ -11,10 +11,12 @@
 //!    to the gut** by the same fraction, and every `GUT_VOID_S` the gut is voided onto
 //!    the ground as litter (dung). Ages
 //!    advance here, so `age_ticks` is the number of maintenance payments it has made.
-//!    A parasite rider then **takes** from its host (`parasite_take_per_day` × the
-//!    host's body per ecological day, by the same pro-rata rule). Then **growth**: the reserve pays
+//!    A parasite rider then **takes** from its host (`parasite_take_body_per_day` × its
+//!    own body per ecological day, at most what the host bears, by the same pro-rata rule).
+//!    Then **growth**: the reserve pays
 //!    for new structure at no more than `growth_max_per_s`, scaled by how full it is,
-//!    until `body_max`; a rider grown to its detach size **drops off**.
+//!    until `body_max`; a rider grown to its detach size, or past what its host bears,
+//!    **drops off**.
 //! 3. **Cue field.** On due ticks, update emission, decay and diffusion after maintenance
 //!    and before any controller samples.
 //! 4. **Controllers** — the sampling point, explicit and shared. Every founder whose
@@ -541,18 +543,19 @@ pub(crate) fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
 }
 
 /// Step 2: **the parasites' take** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`
-/// §3, re-tied by the minimal gut's repair 2 item 9). Each rider takes
-/// `parasite_take_per_day` × its host's body per ecological day out of the host by
-/// [`withdraw`]'s pro-rata rule, into its own reserve, mineral and energy. A transfer
-/// inside this layer, so no boundary flow moves; the host's structural share is its
-/// `Self` channel's loss, as an upkeep's is. Nothing protects the host: one drained below
-/// `body_min` starves as any other.
+/// §3, re-tied by LANTERNJAW-LIFE). Each rider takes [`crate::rider_take_per_s`] — its own
+/// body × `parasite_take_body_per_day` per ecological day, so more the bigger it is — out of
+/// its host by [`withdraw`]'s pro-rata rule, into its own reserve, mineral and energy, never
+/// more than the host bears (`parasite_host_bear_per_day` × the host's body; one that wants
+/// more drops off this tick, [`drop_off_grown`]). A transfer inside this layer, so no
+/// boundary flow moves; the host's structural share is its `Self` channel's loss, as an
+/// upkeep's is. Nothing protects the host: one drained below `body_min` starves as any other.
 fn drain_riders(fauna: &mut Fauna) {
     let day = fauna.config.life.ecological_day_s;
-    let per_s = if day > 0.0 { fauna.config.parasite_take_per_day / day } else { 0.0 };
-    if !(per_s > 0.0) {
+    if !(day > 0.0) || !(fauna.config.parasite_take_body_per_day > 0.0) {
         return;
     }
+    let bear_per_s = fauna.config.parasite_host_bear_per_day / day;
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
             continue;
@@ -560,7 +563,9 @@ fn drain_riders(fauna: &mut Fauna) {
         let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
             continue;
         };
-        let want = per_s * fauna.animals[h].body * DT;
+        let rate = crate::rider_take_per_s(&fauna.config, fauna.animals[r].body)
+            .min(bear_per_s * fauna.animals[h].body);
+        let want = rate * DT;
         let host = &mut fauna.animals[h];
         let (taken, from_body) = withdraw(host, want);
         if host.founder.is_some() && from_body > 0.0 {
@@ -577,23 +582,26 @@ fn drain_riders(fauna: &mut Fauna) {
     }
 }
 
-/// Step 2, after growth: **a rider at its detach size drops off** (§4) where its host
-/// stands — `parasite_detach_body_fraction` × its lineage's `body_max` — and is a free
-/// juvenile from here on.
+/// Step 2, after growth: **a rider drops off** (§4) where its host stands, a free juvenile
+/// from here on, when it reaches its detach size — `parasite_detach_body_fraction` × its
+/// lineage's `body_max` — or (LANTERNJAW-LIFE, Wrysk 2026-10-10: "they should drop off when
+/// theyre too big") when it has **outgrown its host**: its host no longer bears its take
+/// ([`crate::host_bears`]), whatever its size. It does not look for another host.
 fn drop_off_grown(fauna: &mut Fauna, view: &VoxelView<'_>) {
     let fraction = fauna.config.parasite_detach_body_fraction;
     for r in 0..fauna.animals.len() {
         let Some(hold) = fauna.animals[r].attached else {
             continue;
         };
-        let line = fraction * body::effective_config(&fauna.config, &fauna.animals[r]).body_max;
-        if fauna.animals[r].body < line {
-            continue;
-        }
         let Ok(h) = fauna.animals.binary_search_by_key(&hold.host, |a| a.id) else {
             continue;
         };
         let host = fauna.animals[h];
+        let line = fraction * body::effective_config(&fauna.config, &fauna.animals[r]).body_max;
+        let rider = fauna.animals[r].body;
+        if rider < line && crate::host_bears(&fauna.config, rider, host.body) {
+            continue;
+        }
         crate::release(&mut fauna.animals[r], &host);
         fauna.step_off_beside(view, r, &host);
         fauna.ledger.rider_dropoffs += 1;
@@ -4842,6 +4850,25 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// for a lineage whose [`crate::EggSite`] is film, film; a vine nester's clutch goes on a
 /// latticevine face instead ([`vine_egg_site`], VINE-C); and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
+/// [`crate::LAY_GATES`]' indices.
+const LAY_SURPLUS: usize = 0;
+const LAY_INTERVAL: usize = 1;
+const LAY_CLUTCH_WAIT: usize = 2;
+const LAY_WALL: usize = 3;
+const LAY_SITE: usize = 4;
+const LAY_CROWDED: usize = 5;
+
+/// ROLES5: one body-tick held at `gate`, for a founder body of breeding size (a juvenile
+/// is not yet held by any gate). Instrumentation only.
+fn lay_held(fauna: &mut Fauna, i: usize, sc: &SpeciesConfig, gate: usize) {
+    let a = &fauna.animals[i];
+    if let Some(f) = a.founder
+        && a.body >= sc.birth_body
+    {
+        fauna.lay_refusals_by_founder[f.index()][gate] += 1;
+    }
+}
+
 fn lay(
     fauna: &mut Fauna,
     i: usize,
@@ -4851,7 +4878,14 @@ fn lay(
     rule: &crate::Reproduction,
 ) {
     let seed = view.config.seed;
-    if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
+    // ROLES5: which gate held a breeding-size body back, counted per tick (`LAY_GATES`).
+    if fauna.animals[i].reproduction.retry_ticks > 0 {
+        lay_held(fauna, i, sc, LAY_CROWDED);
+        return;
+    }
+    if !rule.hold_met(&fauna.animals[i].reproduction) {
+        let gate = if fauna.animals[i].reproduction.refractory_ticks > 0 { LAY_INTERVAL } else { LAY_SURPLUS };
+        lay_held(fauna, i, sc, gate);
         return;
     }
     // LIFE-HISTORY: a layer with a breeding season lays only inside its window. Gated before
@@ -4871,11 +4905,13 @@ fn lay(
         let full = rule.full_clutch(sc.reserve_of(a.body));
         if wait > 0 && rule.clutch_for(a.reserve) < full && a.reproduction.clutch_wait_ticks < wait {
             a.reproduction.clutch_wait_ticks += 1;
+            lay_held(fauna, i, sc, LAY_CLUTCH_WAIT);
             return;
         }
     }
     // Not on a wall: a clutch goes on the litter the body is standing in.
     if fauna.animals[i].mobility.climb.is_some() {
+        lay_held(fauna, i, sc, LAY_WALL);
         return;
     }
     let Some(lineage) = fauna.animals[i].founder else {
@@ -4888,6 +4924,7 @@ fn lay(
     let vine = if egg_site == crate::EggSite::Vine && !rule.dormant {
         let found = vine_egg_site(fauna, i, view, flora, sc.body_min);
         if found.is_none() {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
         found
@@ -4920,6 +4957,7 @@ fn lay(
             crate::EggSite::Vine => false,
         };
         if !fits {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
     }
@@ -4933,9 +4971,11 @@ fn lay(
         let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
         let room = crate::flight::overhead_clear(view, shape, x, z, crate::surface_m(site.y, v), flight.egg_headroom_m);
         if room + crate::flight::EPS < flight.egg_headroom_m {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
         if !fauna.open_air(view, &flight).over_face_is_open(site) {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
     }
@@ -4958,6 +4998,7 @@ fn lay(
     if !rule.dormant && nest_crowded(fauna, i, view, rule) {
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
+        lay_held(fauna, i, sc, LAY_CROWDED);
         return;
     }
     // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
@@ -5666,7 +5707,8 @@ fn dormant_eggs(
 /// **A hatching egg's host** (parasite §1): the nearest living animal not of the egg's own
 /// lineage, and not itself riding, within `parasite_attach_radius_m` of the egg's column
 /// centre (wrapped on the ring), carrying fewer than `parasite_max_per_host` riders —
-/// this tick's hatchlings counted. A tie goes to the lower id.
+/// this tick's hatchlings counted — and able to bear a hatchling ([`crate::host_bears`],
+/// LANTERNJAW-LIFE). A tie goes to the lower id.
 fn host_for(
     fauna: &Fauna,
     newborns: &[Animal],
@@ -5695,6 +5737,10 @@ fn host_for(
             continue;
         }
         if riders(a.id) >= most as usize {
+            continue;
+        }
+        // LANTERNJAW-LIFE: a host that cannot bear even a hatchling is no host.
+        if !crate::host_bears(&fauna.config, fauna.config.founder(c.lineage).core.body_min, a.body) {
             continue;
         }
         best = Some((d, *a));
@@ -6044,6 +6090,9 @@ mod predation_life_tests;
 #[cfg(test)]
 #[path = "parasite_tests.rs"]
 mod parasite_tests;
+#[cfg(test)]
+#[path = "diet_tests.rs"]
+mod diet_tests;
 #[cfg(test)]
 #[path = "chorister_tests.rs"]
 mod chorister_tests;

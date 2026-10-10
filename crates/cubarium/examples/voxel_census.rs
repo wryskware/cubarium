@@ -741,6 +741,7 @@ impl SummaryStart {
                 eggs_lost_by_founder,
                 nest_holds_by_founder,
                 nest_searches_by_founder,
+                nest_refusals_by_founder,
             );
             delta.eaten_by_founder_food = std::array::from_fn(|f| {
                 std::array::from_fn(|i| {
@@ -989,6 +990,35 @@ fn run(
     let ledger = summary_start.fauna(sim.fauna().view().ledger);
     let shredder_intake: f64 = ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
     eprintln!("decay probe: shredder_intake_organic={shredder_intake:.6}");
+    // ROLES5: the egg-laying refusals, last in err.log.
+    eprintln!("{}", lay_refusal_line(sim.fauna().lay_refusals_by_founder(), &ledger.nest_refusals_by_founder));
+}
+
+/// ROLES5's readout of why egg-layers did not lay (never scored), one line: per lineage
+/// held at any gate since load, the body-seconds a breeding-size body was held at each of
+/// `lay`'s gates ([`cubarium_voxel_fauna::LAY_GATES`]: surplus hold, interval, clutch wait,
+/// wall, egg site, crowded nest with its retry wait) and the crowded-nest refusals, events.
+fn lay_refusal_line(
+    held: &[[u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT],
+    refusals: &[u64; Founder::COUNT],
+) -> String {
+    let mut parts = Vec::new();
+    for f in Founder::ALL {
+        let k = f.index();
+        if held[k].iter().all(|&t| t == 0) && refusals[k] == 0 {
+            continue;
+        }
+        let gates: Vec<String> = cubarium_voxel_fauna::LAY_GATES
+            .iter()
+            .zip(held[k])
+            .map(|(name, ticks)| format!("{name}={:.0}", ticks as f64 / f64::from(TICK_HZ)))
+            .collect();
+        parts.push(format!("{} {} refused={}", f.name(), gates.join(" "), refusals[k]));
+    }
+    if parts.is_empty() {
+        parts.push("none".to_string());
+    }
+    format!("lay refusals (body-s held by gate since load; refused = crowded-nest events): {}", parts.join("; "))
 }
 
 /// RHYTHMS-CADENCE's readout over the run (the ledger's counters; never scored): one
@@ -2402,6 +2432,7 @@ struct LjBody {
     born_tick: u64,
     rider: bool,
     host_lineage: Option<Founder>,
+    host_id: Option<u64>,
     attach_body: f64,
     detach: Option<(&'static str, u64, f64)>,
     strikes: u64,
@@ -2528,6 +2559,7 @@ impl LjChain {
                     && a.attached.is_none()
                     && wrap(ex, ez, a) <= fa.config.parasite_attach_radius_m
                     && self.pre_riders.get(&a.id).copied().unwrap_or(0) < fa.config.parasite_max_per_host
+                    && cubarium_voxel_fauna::host_bears(fa.config, phys.core.body_min, a.body)
             });
             if !host {
                 continue;
@@ -2564,6 +2596,7 @@ impl LjChain {
                     born_tick: fa.tick.saturating_sub(a.age_ticks),
                     rider: a.attached.is_some(),
                     host_lineage: host.and_then(|h| h.founder),
+                    host_id: host.map(|h| h.id),
                     attach_body: a.body,
                     min_reserve_share: f64::INFINITY,
                     ..LjBody::default()
@@ -2572,7 +2605,15 @@ impl LjChain {
             if b.rider && b.detach.is_none() && a.attached.is_none() {
                 let line = fa.config.parasite_detach_body_fraction
                     * cubarium_voxel_fauna::effective_config(fa.config, a).body_max;
-                let cause = if a.body >= line { "dropoff" } else { "freed" };
+                // LANTERNJAW-LIFE: below the line, a rider whose host still stands let go of
+                // it because it outgrew it; one whose host left was freed.
+                let cause = if a.body >= line {
+                    "dropoff"
+                } else if b.host_id.is_some_and(|h| fa.animal(h).is_some()) {
+                    "outgrown"
+                } else {
+                    "freed"
+                };
                 b.detach = Some((cause, a.age_ticks, a.body));
             }
             if a.attached.is_none() {
@@ -2983,6 +3024,7 @@ mod session_summary_tests {
             eggs_lost_by_founder,
             nest_holds_by_founder,
             nest_searches_by_founder,
+            nest_refusals_by_founder,
         );
         start.fauna.swallowed_by_founder.fill(q);
         start.fauna.fruit_eaten_by_source.fill(q);
@@ -3003,6 +3045,24 @@ mod session_summary_tests {
         );
         start.flora.establishments = n;
         start
+    }
+
+    #[test]
+    fn the_census_prints_lay_refusals_by_lineage_and_gate() {
+        let mut held = [[0u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT];
+        let mut refused = [0u64; Founder::COUNT];
+        let k = Founder::Blind.index();
+        held[k] = [1, 2, 3, 4, 5, 6].map(|s| s * u64::from(TICK_HZ));
+        refused[k] = 7;
+        let line = lay_refusal_line(&held, &refused);
+        assert!(line.starts_with("lay refusals"), "{line}");
+        let name = Founder::Blind.name();
+        assert!(
+            line.contains(&format!("{name} surplus=1 interval=2 clutch_wait=3 wall=4 site=5 crowded=6 refused=7")),
+            "{line}"
+        );
+        assert!(!line.contains(Founder::Capgnawer.name()), "a lineage held nowhere is left out: {line}");
+        assert!(lay_refusal_line(&[[0; 6]; Founder::COUNT], &[0; Founder::COUNT]).ends_with("none"));
     }
 
     #[test]

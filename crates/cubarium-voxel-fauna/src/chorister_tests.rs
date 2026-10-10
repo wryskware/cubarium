@@ -45,6 +45,16 @@ use cubarium_voxel_flora::{Flora, FloraConfig, Site};
 
 const C: Founder = Founder::Chorister;
 
+/// A lanternjaw **juvenile**, half its lineage's adult size (LANTERNJAW-LIFE: a grown one is
+/// formidable, out of a lone chorister's window), with `reserve` of its cap.
+fn lj_juvenile(config: &FaunaConfig, reserve: f64) -> StartingStores {
+    let core = config.founder(Founder::Lanternjaw).core;
+    StartingStores {
+        body: 0.5 * core.birth_body / core.body_max,
+        reserve,
+    }
+}
+
 /// A chorister hungry enough to strike and not full enough to lie down.
 const HUNTING_CHORISTER: StartingStores = HUNTING;
 
@@ -203,10 +213,12 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     let r = (ch.adult_length_m * ch.adult_width_m * ch.adult_height_m)
         / (lj.adult_length_m * lj.adult_width_m * lj.adult_height_m);
     let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1e-12);
+    // LANTERNJAW-LIFE gave the lanternjaw its own smaller hatchling and earlier adulthood;
+    // the chorister keeps the P1 lanternjaw's (0.0034 and 0.021 at mass 1) it was built on.
     for (what, got, base) in [
         ("body_max", ch.core.body_max, lj.core.body_max),
-        ("body_min", ch.core.body_min, lj.core.body_min),
-        ("birth_body", ch.core.birth_body, lj.core.birth_body),
+        ("body_min", ch.core.body_min, 0.0034),
+        ("birth_body", ch.core.birth_body, 0.021),
         (
             "growth_max_per_s",
             ch.core.growth_max_per_s,
@@ -241,6 +253,10 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
             prey: h.prey,
             lure_power: h.lure_power,
             vertical_reach_m: h.vertical_reach_m,
+            // LANTERNJAW-DIET: the lanternjaw's diet is its own.
+            prey_weight: h.prey_weight,
+            prey_juveniles_only: h.prey_juveniles_only,
+            prey_ashore_only: h.prey_ashore_only,
             ..Hunter::LANTERNJAW
         },
         h,
@@ -492,18 +508,14 @@ fn two_choristers_wounds_on_a_loftstrider_add() {
 // ------------------------------------------------------------------ threat
 
 /// The chorister hunts the lanternjaw (§2.14), so a moving chorister is a threat to a
-/// lanternjaw and a lanternjaw is prey to a chorister.
+/// lanternjaw juvenile and a juvenile is prey to a chorister.
 #[test]
 fn a_lanternjaw_reads_a_chorister_as_a_threat_and_is_its_prey() {
     let world = lane(48, 5);
     let mut fauna = Fauna::new(FaunaConfig::default());
     let ch = introduce(&mut fauna, &world, C, StartingStores::FULL);
-    let lj = introduce(
-        &mut fauna,
-        &world,
-        Founder::Lanternjaw,
-        StartingStores::FULL,
-    );
+    let young = lj_juvenile(&fauna.config, 1.0);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, young);
     animal_mut(&mut fauna, ch).still_ticks = 0;
     let (a, b) = (animal(&fauna, lj), animal(&fauna, ch));
     assert_eq!(
@@ -518,25 +530,18 @@ fn a_lanternjaw_reads_a_chorister_as_a_threat_and_is_its_prey() {
     );
 }
 
-/// A lanternjaw eating a carcass under its own heuristic, and a chorister walking at it from
-/// 2.5 m ahead (Toggle forward, no feed). Without the chorister the lanternjaw stays at the
-/// carcass for 200 ticks; with it, it leaves (its centre gets at least 1 m from where it
-/// was eating).
+/// A lanternjaw juvenile eating a carcass under its own heuristic, and a chorister walking at
+/// it from 2.5 m ahead (Toggle forward, no feed). Without the chorister the lanternjaw stays
+/// at the carcass for 200 ticks; with it, it leaves (its centre gets at least 1 m from where
+/// it was eating).
 #[test]
 fn a_lanternjaw_leaves_a_carcass_a_chorister_approaches() {
     let run = |with_chorister: bool| -> (f64, f64) {
         let world = lane(48, 6);
         let mut flora = Flora::new(FloraConfig::default());
         let mut fauna = Fauna::new(config_with(|_| {}));
-        let lj = introduce(
-            &mut fauna,
-            &world,
-            Founder::Lanternjaw,
-            StartingStores {
-                body: 1.0,
-                reserve: 0.3,
-            },
-        );
+        let young = lj_juvenile(&fauna.config, 0.3);
+        let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, young);
         place(&mut fauna, lj, STRIKER_X, LANE_Z, EAST);
         let site = animal(&fauna, lj).site;
         assert!(flora.deposit(
@@ -585,19 +590,15 @@ fn a_lanternjaw_leaves_a_carcass_a_chorister_approaches() {
     );
 }
 
-/// A lone chorister (no pack) can kill a lanternjaw: one in its capsule with no dodge dies
-/// to its strikes, `Killed { by: chorister }`, and the books close.
+/// A lone chorister (no pack) can kill a lanternjaw juvenile: one in its capsule with no
+/// dodge dies to its strikes, `Killed { by: chorister }`, and the books close.
 #[test]
 fn a_chorister_can_kill_a_lanternjaw() {
     let world = lane(48, 7);
     let mut flora = Flora::new(FloraConfig::default());
     let mut fauna = Fauna::new(config_with(|_| {}));
-    let lj = introduce(
-        &mut fauna,
-        &world,
-        Founder::Lanternjaw,
-        StartingStores::FULL,
-    );
+    let young = lj_juvenile(&fauna.config, 1.0);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, young);
     place(&mut fauna, lj, STRIKER_X + 1.2, LANE_Z, WEST);
     let ch = introduce(&mut fauna, &world, C, HUNTING_CHORISTER);
     place(&mut fauna, ch, STRIKER_X, LANE_Z, EAST);

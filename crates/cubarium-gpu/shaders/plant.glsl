@@ -7,7 +7,7 @@ layout(push_constant) uniform PlantPush {
     ivec4 k;     // cells drawn, layer samples per raster pixel axis, the view's turn (raster
                  // columns), the world's depth (voxels)
     vec4 t;      // seconds since the cell list's epoch, a voxel's grow time (s), the depth
-                 // test's bias (voxels), -
+                 // test's bias (voxels), a drape cell's front quad's reach (voxels, vis only)
     vec4 layer;  // the layer's width and height (texels), the raster's width and height
 } pc;
 

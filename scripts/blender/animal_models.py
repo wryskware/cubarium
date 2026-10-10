@@ -224,9 +224,33 @@ def bone_ahead(start, x, name):
         ob["bone_ahead"] = name
 
 
+def bone_nearest(start, segs):
+    """Every organism part built since `start` (one mesh across several bones: a loft up a
+    neck, a frond's blade): each point belongs to the bone of `segs` ((name, (head, tail)),
+    metres) whose segment is nearest it. The voxelizer reads each cell's bone by position
+    (`part_bone`); `build_loftstrider` carries the segments to the anchor."""
+    for ob in L.ORG[start:]:
+        ob["bone_names"] = ",".join(n for n, _ in segs)
+        ob["bone_segs"] = [v for _, (h, t) in segs for v in (*h, *t)]
+
+
+def seg_dist(p, h, t):
+    """Distance from point `p` to the segment `h`–`t`."""
+    p, h, t = Vector(p), Vector(h), Vector(t)
+    d = t - h
+    u = 0.0 if d.length_squared < 1e-12 else max(0.0, min(1.0, (p - h).dot(d) / d.length_squared))
+    return (p - (h + d * u)).length
+
+
 def part_bone(ob, p):
-    """The rig bone of part `ob` at point `p` (the part's own coordinates): its
-    `bone_ahead` bone ahead of its cut, else its own bone, else the root."""
+    """The rig bone of part `ob` at point `p` (the part's own coordinates): the nearest of
+    its `bone_nearest` segments, else its `bone_ahead` bone ahead of its cut, else its own
+    bone, else the root."""
+    if "bone_segs" in ob:
+        names = ob["bone_names"].split(",")
+        v = list(ob["bone_segs"])
+        return min(names, key=lambda n: seg_dist(p, v[6 * names.index(n):6 * names.index(n) + 3],
+                                                 v[6 * names.index(n) + 3:6 * names.index(n) + 6]))
     if "bone_cut_x" in ob and p[0] > ob["bone_cut_x"]:
         return ob["bone_ahead"]
     return ob.get("bone", "root")
@@ -1011,6 +1035,7 @@ def seedporter():
 # pick builder's (0.5 m head to pelvis); the limbs keep their lengths in every pose (`ik`).
 
 SP_ARM, SP_SMALL, SP_LEG = (0.16, 0.16), (0.07, 0.07), (0.13, 0.13)
+SP_SIDE = {1: "l", -1: "r"}  # +y is the body's left (x forward, z up)
 SP_HEAD = 1.25  # the head's scale: the pictures' heads are as wide as the shoulders
 
 
@@ -1108,7 +1133,12 @@ def sp_head(H, F, tilt, mouth_open):
 
 
 def sp_body(spec):
-    """Draw the seedporter from a pose spec (see SP_POSES)."""
+    """Draw the seedporter from a pose spec (see SP_POSES); its rig's frame (FEED-ROLLOUT,
+    `sp_feed_clip`): the head's centre `H`, face `F` and up `U`, the neck's point (the
+    head's pivot), each small arm's shoulder, elbow, wrist and pole by side, the fruit,
+    every point where the built parts stand. Its parts are on rig bones: the head's on
+    `head`, each small arm's upper half on `arm_<side>` and its lower half and fingers on
+    `hand_<side>`, the fruit on `hand_l`, the rest on the root."""
     start = len(L.ORG)
     grip = []  # the big hands' and the hind feet's digits
     H, F = Vector(spec["head"]), _dir(*spec["face"])
@@ -1126,7 +1156,10 @@ def sp_body(spec):
         return 1 if cosb > 0.2 else (2 if cosb < -0.93 else 0)
     loft([(x, y, z, ry, rz) for x, y, z, ry, rz in st], [c("a_main"), c("a_pale"), c("a_mark")], zone,
          nring=48, nseg=20)
+    n0 = len(L.ORG)
     sp_head(H, F, spec["tilt"], spec["mouth"])
+    bone_of(n0, "head")
+    frame = {"H": H, "F": F, "U": U, "neck": nk, "arms": {}}
     for s in (-1, 1):
         def m(v):
             return Vector((v[0], s * v[1], v[2]))
@@ -1140,8 +1173,12 @@ def sp_body(spec):
         # the small middle arms, holding the fruit
         ss = m(spec["small_shoulder"])
         se, sw = ik(ss, m(spec["small_hand"]), *SP_SMALL, m(spec["small_pole"]))
-        tube([ss, se, sw], 0.011, 0.008, c("a_main"), seg=8)
+        side = SP_SIDE[s]
+        tube([ss, se, sw], 0.011, 0.008, c("a_main"), seg=8, bones=[f"arm_{side}", f"hand_{side}"])
+        n0 = len(L.ORG)
         sp_digits(sw, (spec["fruit"] - sw).normalized(), Vector((0, 0, 1)), 3, 0.022, 0.01, 0.004)
+        bone_of(n0, f"hand_{side}")
+        frame["arms"][side] = (ss, se, sw, m(spec["small_pole"]))
         # the hind legs, and their feet
         hp = m(spec["hip"])
         kn, an = ik(hp, m(spec["ankle"]), *SP_LEG, m(spec["leg_pole"]))
@@ -1156,7 +1193,12 @@ def sp_body(spec):
         edge = [wr, el, sh] + side + [hp, kn]
         free = spec["free"](kn, wr, s)
         sp_web(edge, [wr] + free + [kn])
+    # the fruit rides in the hands (FEED-ROLLOUT: on the left hand's bone; the clip moves
+    # both hands alike)
+    n0 = len(L.ORG)
     ell(spec["fruit"], (0.028, 0.028, 0.03), c("a_fruit"))
+    bone_of(n0, "hand_l")
+    frame["fruit"] = Vector(spec["fruit"])
     # the long prehensile tail, its dorsal stripe along the outside
     pts = [Vector(p) for p in catmull([st[0][:3]] + spec["tail"], 70)]
     n = len(pts)
@@ -1173,8 +1215,18 @@ def sp_body(spec):
         # stand that far above it, inside the ground row of cells
         low = min(v.co.z for ob in grip if ob.type == "MESH" and slot_of(ob.data.materials[0].name) != "a_claw"
                   for v in ob.data.vertices)
+        shift = Vector((0, 0, spec["feet_on_ground"] - low))
         for ob in L.ORG[start:]:
-            ob.data.transform(Matrix.Translation((0, 0, spec["feet_on_ground"] - low)))
+            ob.data.transform(Matrix.Translation(shift))
+        frame = sp_shifted(frame, shift)
+    return frame
+
+
+def sp_shifted(frame, d):
+    """`sp_body`'s frame moved by `d` (the perch's lift)."""
+    out = {k: (v + d if k in ("H", "neck", "fruit") else v) for k, v in frame.items() if k != "arms"}
+    out["arms"] = {k: (a + d, b + d, w + d, pole) for k, (a, b, w, pole) in frame["arms"].items()}
+    return out
 
 
 def _spiral(centre, plane, a0, a1, r0, r1, n=24):
@@ -1281,6 +1333,129 @@ def seedporter_glide():
     sp_body(SP_POSES["glide"])
 
 
+# --- the seedporter's feeding rig and clip (FEED-ROLLOUT, 2026-10-10) ---------------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Seedporter; a placeholder, Wrysk directs the
+# real clip. It crops perched in a crown (`seedporter-stand`) and, at a vine face, on the
+# ground (`seedporter-ground`); both pose models carry this rig. Bones: the root (body, big
+# arms, legs, membranes, tail), the head (no jaw: the mouth is a dark patch), each small
+# fruit arm an upper and a lower bone (the hand's fingers on the lower; the fruit rides on
+# the left hand). The loop starts with the fruit at the mouth and the head dipped:
+#
+#   reach  0.4 s  both hands up and forward toward a fruit ahead and above (`SP_REACH_EL`
+#                 above the forward line, as far as the 0.14 m arms reach: they are short
+#                 of a body length), the head tipping up `SP_TIP_DEG`;
+#   bring  0.4 s  back to the mouth, the head dipping to meet them (`sp_dip`: at least
+#                 `SP_DIP_DEG`, more where the arms fall short of the mouth);
+#   chew   0.5 s  two nods of `SP_CHEW_DEG`, the arms held in.
+#
+# The fingers have no bones: the hands cannot be seen to close. The arms are each solved
+# per sampled frame (`ik`, the pose's own elbow pole) and keyed as turns.
+
+SP_FEED_FPS = 30
+SP_REACH_S, SP_BRING_S, SP_CHEW_S = 0.4, 0.4, 0.5
+SP_FEED_LOOP_S = SP_REACH_S + SP_BRING_S + SP_CHEW_S
+SP_REACH_EL = 45.0   # the reach's direction above the body's forward line, degrees
+SP_TIP_DEG = 20.0    # the head tipped up at the reach
+SP_DIP_DEG = 10.0    # the head dipped at the mouth, at least
+SP_CHEW_DEG = 10.0   # each nod of the chew, up from the dip
+SP_SLACK = 0.95      # the arm's most extension (shoulder to wrist over its two bones)
+
+
+def sp_bones(fr):
+    """The rig's bones (name, parent index, head, tail) from `sp_body`'s frame."""
+    pelvis = fr["neck"] - fr["U"] * 0.3
+    bones = [("root", None, tuple(pelvis), tuple(pelvis + Vector((0.1, 0, 0)))),
+             ("head", 0, tuple(fr["neck"]), tuple(fr["H"]))]
+    for side in ("l", "r"):
+        ss, se, sw, _ = fr["arms"][side]
+        n = len(bones)
+        bones += [(f"arm_{side}", 0, tuple(ss), tuple(se)), (f"hand_{side}", n, tuple(se), tuple(sw))]
+    return bones
+
+
+def sp_mouth(fr, deg):
+    """The point the fruit is brought to with the head pitched `deg` (+ up) about its
+    pivot: just ahead of the mouth (`sp_head`'s mouth patch)."""
+    k = SP_HEAD
+    rest = fr["H"] + fr["F"] * (0.082 * k + 0.02) - fr["U"] * 0.08 * k
+    return fr["neck"] + Matrix.Rotation(-math.radians(deg), 3, "Y") @ (rest - fr["neck"])
+
+
+def sp_wrists(fr, fruit):
+    """Each hand's wrist target with the fruit at `fruit`: the rest pose's wrist-to-fruit
+    offset kept."""
+    return {side: fruit + (sw - fr["fruit"]) for side, (_, _, sw, _) in fr["arms"].items()}
+
+
+def sp_reachable(fr, fruit):
+    return all((w - fr["arms"][side][0]).length <= SP_SLACK * sum(SP_SMALL)
+               for side, w in sp_wrists(fr, fruit).items())
+
+
+def sp_dip(fr):
+    """The head's dip at the mouth: `SP_DIP_DEG`, or the least more (to 40 degrees) at
+    which both hands reach the mouth."""
+    for d in range(int(SP_DIP_DEG), 41):
+        if sp_reachable(fr, sp_mouth(fr, -d)):
+            return float(d)
+    return 40.0
+
+
+def sp_reach_point(fr):
+    """Where the fruit is held at the reach: from between the shoulders, along the reach's
+    direction, as far as the arms go."""
+    mid = sum((a[0] for a in fr["arms"].values()), Vector()) / 2
+    el = math.radians(SP_REACH_EL)
+    d = Vector((math.cos(el), 0, math.sin(el)))
+    return mid + d * SP_SLACK * sum(SP_SMALL) + (fr["fruit"] - sum((a[2] for a in fr["arms"].values()), Vector()) / 2)
+
+
+def sp_feed_at(fr, dip, t):
+    """The fruit's place and the head's pitch (+ up, degrees) at `t` seconds into the loop."""
+    sm = lambda x: x * x * (3 - 2 * x)  # noqa: E731
+    mouth, reach = sp_mouth(fr, -dip), sp_reach_point(fr)
+    if t < SP_REACH_S:
+        u = sm(t / SP_REACH_S)
+        return mouth.lerp(reach, u), -dip + (SP_TIP_DEG + dip) * u
+    t -= SP_REACH_S
+    if t < SP_BRING_S:
+        u = sm(t / SP_BRING_S)
+        return reach.lerp(mouth, u), SP_TIP_DEG - (SP_TIP_DEG + dip) * u
+    t -= SP_BRING_S
+    return mouth, -dip + SP_CHEW_DEG * math.sin(2 * math.pi * t / SP_CHEW_S) ** 2
+
+
+def sp_arm_turns(fr, side, wrist):
+    """The small arm's two turns (armature space, each relative to its parent) putting its
+    wrist on `wrist`, the elbow toward the pose's pole."""
+    ss, se, sw, pole = fr["arms"][side]
+    e, w = ik(ss, wrist, *SP_SMALL, pole)
+    up = (se - ss).rotation_difference(e - ss)
+    low = (sw - se).rotation_difference(up.inverted() @ (w - e))
+    return up.to_matrix(), low.to_matrix()
+
+
+def sp_feed_clip(pose):
+    """The feeding loop of pose model `seedporter-<pose>` at reference size, sampled at
+    `SP_FEED_FPS` (`sample_clip`)."""
+    use(f"seedporter-{pose}")
+    fr = sp_body(SP_POSES[pose])
+    bones = sp_bones(fr)
+    dip = sp_dip(fr)
+    n = round(SP_FEED_LOOP_S * SP_FEED_FPS)
+    ob = rig_armature(f"sp_{pose}_rig", bones, SP_FEED_FPS)
+    for f in range(n):
+        fruit, pitch = sp_feed_at(fr, dip, f / SP_FEED_FPS)
+        turns = {"head": Matrix.Rotation(-math.radians(pitch), 3, "Y")}
+        for side, wrist in sp_wrists(fr, fruit).items():
+            turns[f"arm_{side}"], turns[f"hand_{side}"] = sp_arm_turns(fr, side, wrist)
+        key_turns(ob, bones, f, turns, Vector())
+    print(f"seedporter-{pose} feed: dip {dip:.0f} deg, reach {(sp_reach_point(fr) - fr['fruit']).length:.3f} m"
+          f" from the rest fruit, mouth {(sp_mouth(fr, -dip) - fr['fruit']).length:.3f} m", flush=True)
+    return sample_clip(ob, bones, n, SP_FEED_FPS)
+
+
 # --- bellwing · BW-A with the thin corkscrew tendril (wingspan 0.375 m) ---------------------
 #
 # Pick: art/gen/artbook/bellwing.png, front view: the hanging plum bell with its magenta
@@ -1344,6 +1519,21 @@ def bellwing():
 # behind (the variant he asked to see). `LJ_ORB_CELL=2` in the environment picks it.
 LJ_ORB_CELL = int(os.environ.get("LJ_ORB_CELL", "3"))
 
+# The rig's joints (reference metres, the left (+y) side; `lj_mirror` gives the right): the
+# head's cut and pivot (the helmet joins the body at the striking arms' hips), each striking
+# arm's hip, knee and blade tip (the hook's point, on the ground at rest).
+LJ_NECK_CUT_X = 0.30
+LJ_HEAD_PIVOT = (LJ_NECK_CUT_X, 0.0, 0.15)
+LJ_FANG_TIP = (0.49, 0.0, 0.0)
+LJ_HIP = (0.30, 0.10, 0.10)
+LJ_KNEE = (0.39, 0.25, 0.29)
+LJ_BLADE_TIP = (0.49, 0.24, 0.0)
+LJ_SIDE = {1: "l", -1: "r"}  # +y is the body's left (x forward, z up)
+
+
+def lj_mirror(p, sy):
+    return (p[0], sy * p[1], p[2])
+
 
 def lanternjaw():
     # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
@@ -1359,12 +1549,17 @@ def lanternjaw():
         (0.14, 0, 0.145, 0.135, 0.08, 0.06), (0.02, 0, 0.15, 0.13, 0.08, 0.062),
         (-0.10, 0, 0.16, 0.112, 0.074, 0.058), (-0.20, 0, 0.18, 0.09, 0.066, 0.052),
         (-0.28, 0, 0.21, 0.07, 0.058, 0.048), (-0.33, 0, 0.25, 0.058, 0.052, 0.045)]
+    start = len(L.ORG)
     loft(body, [c("a_main"), c("a_dark")], body_zone, nring=60, nseg=20)
+    # the rig (FEED-ROLLOUT): the loft is one mesh, so its helmet, ahead of the striking
+    # arms' hips, is the head bone's by position; the rest of it is the root's
+    bone_ahead(start, LJ_NECK_CUT_X, "head")
     # six overlapping back plates, narrowing and climbing with the body
     for x, hw, z, tilt in ((0.15, 0.15, 0.21, -14), (0.06, 0.152, 0.215, -14), (-0.03, 0.14, 0.222, -16),
                            (-0.12, 0.12, 0.232, -20), (-0.20, 0.098, 0.25, -26), (-0.27, 0.078, 0.278, -34)):
         ell((x, 0, z), (0.058, hw, 0.036), c("a_main"), rot=ry(tilt))
     # head: a central ridge, two large magenta eyes, two small ones
+    start = len(L.ORG)
     ell((0.35, 0, 0.215), (0.1, 0.018, 0.026), c("a_main"), rot=ry(8))
     for sy in (-1, 1):
         ell((0.395, sy * 0.085, 0.18), (0.036, 0.03, 0.04), c("a_eye"))
@@ -1373,6 +1568,7 @@ def lanternjaw():
         tube([(0.47, sy * 0.022, 0.24), (0.497, sy * 0.022, 0.135), (0.505, sy * 0.02, 0.035)], 0.04, 0.025,
              c("a_head"), seg=10)
         cyl((0.505, sy * 0.02, 0.035), (0.475, sy * 0.006, -0.005), 0.025, 0.003, mat=c("a_head"), seg=8)
+    bone_of(start, "head")
 
     def jointed(pts, r0, r1, tip_r):
         """A thick armoured limb: straight segments with dark joint balls; the last segment
@@ -1385,9 +1581,13 @@ def lanternjaw():
     for sy in (-1, 1):
         # striking arm: coxa under the head, a thick femur raised high and out, a tibia curving
         # down and forward into a pale razor blade with a hooked tip; pale razor spines inside
-        hip, knee = (0.30, sy * 0.10, 0.10), (0.39, sy * 0.25, 0.29)
+        side = LJ_SIDE[sy]
+        hip, knee = lj_mirror(LJ_HIP, sy), lj_mirror(LJ_KNEE, sy)
         tib = [knee, (0.47, sy * 0.275, 0.24), (0.52, sy * 0.268, 0.16)]
+        start = len(L.ORG)
         tube([hip, knee], 0.056, 0.048, c("a_limb"), seg=10)
+        bone_of(start, f"femur_{side}")
+        start = len(L.ORG)
         ell(knee, (0.042,) * 3, c("a_dark"))
         tube(tib, 0.044, 0.034, c("a_limb"), seg=10)
         ell((0.515, sy * 0.255, 0.085), (0.035, 0.028, 0.085), c("a_head"), rot=ry(-10))
@@ -1396,6 +1596,7 @@ def lanternjaw():
         for t in (0.2, 0.45, 0.7, 0.95):
             p = Vector(T[round(t * 20)])
             cyl(tuple(p), tuple(p + Vector((-0.024, -sy * 0.06, -0.014))), 0.016, 0.001, mat=c("a_head"), seg=6)
+        bone_of(start, f"tibia_{side}")  # the knee ball, the tibia, the blade and its spines
         # six walking legs: thick, knees above the plates, long dark claws splayed outward and
         # toward their own end
         for hx, dx in ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085)):
@@ -1434,6 +1635,97 @@ def seg_tail(pts, r0, r1):
         if k:
             d = (b - a).normalized() * 0.008
             cyl(tuple(a - d), tuple(a + d), ra * 1.06, ra * 1.06, mat=c("a_dark"), seg=12)
+
+
+# --- the lanternjaw's feeding rig and clip (FEED-ROLLOUT, 2026-10-10) --------------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Lanternjaw; a placeholder, Wrysk directs the
+# real clip. At a carcass on the ground ahead. Bones: the root (body, plates, walking legs,
+# tail and lures), the head (the helmet ahead of `LJ_NECK_CUT_X` by position, the ridge,
+# eyes and fangs), each striking arm a femur (hip to knee) and a tibia (the knee ball, the
+# tibia, the blade and its spines; the blade's hook point its tip).
+#
+# As the Veilhound's: the action is the **loop** in the pinned posture, and the reach and
+# return are the renderer's clip weight. Pinned: both blade tips on the ground `LJ_PIN_AHEAD`
+# ahead of where they rest (one voxel), each arm a two-bone reach (`ik`, the knee toward its
+# rest side); the head's pivot moved `LJ_HEAD_REACH` forward and pitched `LJ_HEAD_DIP` down,
+# lowered toward the same spot (it has no neck: the move is the least that leans the fangs
+# into the cell ahead without putting their tips in the ground). The loop (`LJ_FEED_KEYS`,
+# eased between keys): a tear (the head back and up ~4 cm with a twist, the blades pressing
+# down and back), the dip again, the other side's tear, a swallow (the head up 6 cm, the
+# blades eased up), the dip.
+
+LJ_FEED_FPS = 30
+LJ_PIN_AHEAD = 0.125             # the blade tips' reach ahead of their rest place, metres
+LJ_HEAD_REACH = (0.05, 0.0)      # the head pivot's move (forward, up) when pinned, metres
+LJ_HEAD_DIP = -6.0               # the head's pitch when pinned (+ lifts the nose), degrees
+LJ_PRESS = (-0.01, -0.012)       # a full press: the blade tips' move (forward, up), metres
+LJ_EASE_UP = 0.03                # the blade tips' lift at the swallow, metres
+# The loop's key poses: (seconds, the head pivot moved (x back -, z up +) metres from the
+# pinned pose, its pitch from the pinned pitch (+ up) and twist about its length, degrees,
+# the arms' press and their ease up, 0..1): tear 0.4 s, dip 0.3 s, the other side's tear
+# 0.4 s, the swallow 0.4 s, dip 0.3 s.
+LJ_FEED_KEYS = [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (0.4, -0.028, 0.028, 6.0, 12.0, 1.0, 0.0),
+                (0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (1.1, -0.028, 0.028, 6.0, -12.0, 1.0, 0.0),
+                (1.5, 0.0, 0.06, 8.0, 0.0, 0.0, 1.0), (1.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)]
+
+
+def lj_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    hx, _, hz = LJ_HEAD_PIVOT
+    bones = [("root", None, (0.0, 0.0, hz), (0.1, 0.0, hz)),
+             ("head", 0, LJ_HEAD_PIVOT, (LJ_FANG_TIP[0], 0.0, hz))]
+    for sy in (1, -1):
+        side, n = LJ_SIDE[sy], len(bones)
+        hip, knee, tip = (lj_mirror(p, sy) for p in (LJ_HIP, LJ_KNEE, LJ_BLADE_TIP))
+        bones += [(f"femur_{side}", 0, hip, knee), (f"tibia_{side}", n, knee, tip)]
+    return bones
+
+
+def lj_feed_at(t):
+    """The loop's pose at `t` seconds: (head pivot move (x, z), pitch, twist, press, ease
+    up), eased (smoothstep) between neighbouring keys, from the pinned pose."""
+    keys = LJ_FEED_KEYS
+    for k0, k1 in zip(keys, keys[1:]):
+        if k0[0] <= t <= k1[0]:
+            u = smooth((t - k0[0]) / (k1[0] - k0[0]))
+            v = [a + (b - a) * u for a, b in zip(k0[1:], k1[1:])]
+            return (v[0], v[1]), v[2], v[3], v[4], v[5]
+    return (0.0, 0.0), 0.0, 0.0, 0.0, 0.0
+
+
+def lj_arm_turns(sy, tip):
+    """The striking arm's two turns (armature space, each relative to its parent) putting
+    its blade tip on `tip`, the knee toward its rest side."""
+    hip, knee, rest = (Vector(lj_mirror(p, sy)) for p in (LJ_HIP, LJ_KNEE, LJ_BLADE_TIP))
+    e, w = ik(hip, tip, (knee - hip).length, (rest - knee).length, knee - hip)
+    up = (knee - hip).rotation_difference(e - hip)
+    low = (rest - knee).rotation_difference(up.inverted() @ (w - e))
+    return up.to_matrix(), low.to_matrix()
+
+
+def lj_feed_clip():
+    """The lanternjaw's feeding loop at reference size, sampled at `LJ_FEED_FPS`
+    (`sample_clip`)."""
+    bones = lj_bones()
+    n = round(LJ_FEED_KEYS[-1][0] * LJ_FEED_FPS)
+    ob = rig_armature("lj_rig", bones, LJ_FEED_FPS)
+    head_axis = Vector((1.0, 0.0, 0.0))
+    for f in range(n):
+        (dx, dz), pitch, twist, press, ease = lj_feed_at(f / LJ_FEED_FPS)
+        turns = {"head": Matrix.Rotation(-math.radians(LJ_HEAD_DIP + pitch), 3, "Y")
+                 @ Matrix.Rotation(math.radians(twist), 3, head_axis)}
+        for sy in (1, -1):
+            tip = (Vector(lj_mirror(LJ_BLADE_TIP, sy)) + Vector((LJ_PIN_AHEAD, 0.0, 0.0))
+                   + Vector((LJ_PRESS[0], 0.0, LJ_PRESS[1])) * press + Vector((0.0, 0.0, LJ_EASE_UP)) * ease)
+            side = LJ_SIDE[sy]
+            turns[f"femur_{side}"], turns[f"tibia_{side}"] = lj_arm_turns(sy, tip)
+        key_turns(ob, bones, f, turns, Vector())
+        pb = ob.pose.bones["head"]
+        shift = Vector((LJ_HEAD_REACH[0] + dx, 0.0, LJ_HEAD_REACH[1] + dz))
+        pb.location = pb.bone.matrix_local.to_quaternion().inverted() @ shift
+        pb.keyframe_insert("location", frame=f)
+    return sample_clip(ob, bones, n, LJ_FEED_FPS)
 
 
 # --- lanternjaw larva · the rider stage: four candidates (2026-10-09) ---------------------------
@@ -1764,9 +2056,12 @@ def loftstrider():
     loftstrider_rig(LS_ADULT)
 
 
-def loftstrider_rig(p):
-    """The loftstrider at the part sizes `p` (`LS_ADULT`'s keys), in metres, standing on
-    z = 0: the adult at `LS_ADULT`, a calf at its own sizes."""
+def ls_frame(p):
+    """The loftstrider's landmarks at the part sizes `p` (`LS_ADULT`'s keys), metres,
+    anchor at the origin, standing on z = 0: the heights of the body, neck and head, the
+    head's height map, and per leg and frond (k = 0..5, at 30 + 60 k degrees) its hip,
+    knee and ankle and its centreline. `loftstrider_rig` builds on them and the rig's bones
+    (`ls_bones`) are placed by them."""
     B, Lg, Lr, N, Nr, Hd, F, T, E = (p[k] for k in ("body", "leg", "leg_r", "neck", "neck_r",
                                                       "head", "frond", "tusk", "eye"))
     zb = 1.22 * Lg - 0.07 * B          # the body's underside: the hips sit 0.07 above it
@@ -1774,11 +2069,41 @@ def loftstrider_rig(p):
     zn = zt + (2.62 - 1.96) * N        # the neck's top, where the pink head starts
     z_neck = zb + (1.98 - 1.15) * B
 
-    def zone(f, s, q):
-        return 0 if q.z < z_neck else (1 if q.z < zn else 2)   # body, neck, pink head
-
     def head_z(z):                     # an adult head height (2.62 up) on this head
         return zn + (z - 2.62) * Hd
+    # optional (round 3 comparisons, absent = 1): `splay` scales the knee's and ankle's
+    # reach beyond the hip, `toe` the toes' length from the ankle
+    Sp = p.get("splay", 1.0)
+    rh = 0.40 * B
+    rk, ra = rh + 0.32 * Lg * Sp, rh + 0.52 * Lg * Sp
+    legs, fronds = [], []
+    for k in range(6):
+        b = math.radians(30 + 60 * k)
+        cb, sb = math.cos(b), math.sin(b)
+        legs.append(((rh * cb, rh * sb, 1.22 * Lg), (rk * cb, rk * sb, 0.80 * Lg),
+                     (ra * cb, ra * sb, 0.16 * Lg)))
+        prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
+                (1.2, 2.78), (1.14, 2.6)]
+        fs = LS_FROND[k] * F
+        prof = [(0.22 * Hd + (r - 0.22) * fs, head_z(2.76) + (z - 2.76) * fs) for r, z in prof]
+        fronds.append([(r * cb, r * sb, z) for r, z in catmull(prof, 16)])
+    return dict(zb=zb, zt=zt, zn=zn, z_neck=z_neck, head_z=head_z, legs=legs, fronds=fronds,
+                mouth_z=head_z(2.835))
+
+
+def loftstrider_rig(p):
+    """The loftstrider at the part sizes `p` (`LS_ADULT`'s keys), in metres, standing on
+    z = 0: the adult at `LS_ADULT`, a calf at its own sizes. Every part is on its rig bone
+    (`ls_bones`; FEED-ROLLOUT): the column loft and each frond's blade by the nearest
+    bone's segment (`bone_nearest`), the rest whole."""
+    B, Lg, Lr, N, Nr, Hd, F, T, E = (p[k] for k in ("body", "leg", "leg_r", "neck", "neck_r",
+                                                      "head", "frond", "tusk", "eye"))
+    fr = ls_frame(p)
+    zb, zt, zn, z_neck, head_z = fr["zb"], fr["zt"], fr["zn"], fr["z_neck"], fr["head_z"]
+    segs = {name: (head, tail) for name, _, head, tail in ls_bones(p)}
+
+    def zone(f, s, q):
+        return 0 if q.z < z_neck else (1 if q.z < zn else 2)   # body, neck, pink head
     body = [(1.15, 0.05), (1.19, 0.30), (1.29, 0.47), (1.43, 0.555), (1.57, 0.56), (1.71, 0.50),
             (1.84, 0.38), (1.96, 0.26)]
     neck = [(2.14, 0.19), (2.40, 0.155), (2.60, 0.16)]
@@ -1786,10 +2111,14 @@ def loftstrider_rig(p):
     column = ([(zb + (z - 1.15) * B, r * B) for z, r in body]       # one loft up the axis
               + [(zt + (z - 1.96) * N, r * Nr) for z, r in neck]
               + [(head_z(z), r * Hd) for z, r in head])
+    start = len(L.ORG)
     loft([(0, 0, z, r, r, r) for z, r in column], [c("a_main"), c("a_pale"), c("a_mark")], zone,
          nring=90, nseg=36)
+    bone_nearest(start, [(n, segs[n]) for n in ("root", "neck_a", "neck_b", "head")])
     # the mouth hole on top
+    start = len(L.ORG)
     ell((0, 0, head_z(2.835)), (0.07 * Hd, 0.07 * Hd, 0.025 * Hd), c("a_dark"))
+    bone_of(start, "head")
     z_eye = zb + (1.52 - 1.15) * B
     for k in range(6):
         a = math.radians(60 * k)            # eyes and tusks
@@ -1803,38 +2132,39 @@ def loftstrider_rig(p):
         tk = [(0.19, 2.73), (0.25, 2.83), (0.29, 2.95), (0.28, 3.06), (0.24, 3.12)]
         r0, z0 = tk[0]
         tk = [(Hd * (r0 + (r - r0) * T), head_z(z0 + (z - z0) * T)) for r, z in tk]
+        start = len(L.ORG)
         tube([(r * ca, r * sa, z) for r, z in tk], 0.05 * Hd, 0.008 * Hd, c("a_head"), seg=10)
+        bone_of(start, "head")
         # frond: rises from the rim, arcs outward and droops, its edges frilled cyan
-        prof = [(0.22, 2.76), (0.36, 3.02), (0.56, 3.27), (0.82, 3.37), (1.04, 3.27), (1.17, 3.03),
-                (1.2, 2.78), (1.14, 2.6)]
-        fs = LS_FROND[k] * F
-        prof = [(0.22 * Hd + (r - 0.22) * fs, head_z(2.76) + (z - 2.76) * fs) for r, z in prof]
-        path = [(r * cb, r * sb, z) for r, z in catmull(prof, 16)]
+        path = fr["fronds"][k]
         widths = [F * (0.07 + 0.3 * LS_FROND[k] * math.sin(math.pi * min(1.0, t / 15 * 1.12)))
                   for t in range(16)]
         side = Vector((-sb, cb, 0))
+        start = len(L.ORG)
         ribbon(path, widths, side, c("a_membrane"), th=0.035 * F)
         for sgn in (-1, 1):
             edge = [tuple(Vector(q) + side * (sgn * w / 2)) for q, w in zip(path, widths)]
             tube(edge[1:], 0.025 * F, 0.016 * F, c("a_glow"), seg=6)
+        bone_nearest(start, [(n, segs[n]) for n in (f"f{k}_a", f"f{k}_b", f"f{k}_c")])
         # leg: a hip bulb under the body, the thigh out and down to a bulbous knee, the shin
-        # down to the ankle, three splayed toes
-        # optional (round 3 comparisons, absent = 1): `splay` scales the knee's and ankle's
-        # reach beyond the hip, `toe` the toes' length from the ankle
-        Sp, Tl = p.get("splay", 1.0), p.get("toe", 1.0)
-        rh = 0.40 * B
-        rk, ra = rh + 0.32 * Lg * Sp, rh + 0.52 * Lg * Sp
-        hip, knee, ankle = (rh * cb, rh * sb, 1.22 * Lg), (rk * cb, rk * sb, 0.80 * Lg), (ra * cb, ra * sb, 0.16 * Lg)
+        # down to the ankle, three splayed toes (`toe`, optional, absent = 1: the toes'
+        # length from the ankle); the hip and thigh on the thigh bone, the rest on the shin
+        Tl = p.get("toe", 1.0)
+        hip, knee, ankle = fr["legs"][k]
+        start = len(L.ORG)
         ell(hip, (0.12 * Lr,) * 3, c("a_limb"))
         tube([hip, knee], 0.088 * Lr, 0.072 * Lr, c("a_limb"), seg=12)
+        bone_of(start, f"thigh{k}")
+        start = len(L.ORG)
         ell(knee, (0.1 * Lr,) * 3, c("a_mark"))
         tube([knee, ankle], 0.07 * Lr, 0.06 * Lr, c("a_limb"), seg=12)
         ell(ankle, (0.075 * Lr,) * 3, c("a_mark"))
         for dt in (-30, 0, 30):
             d = math.radians(30 + 60 * k + dt)
-            toe = (ra * cb + 0.17 * Lr * Tl * math.cos(d), ra * sb + 0.17 * Lr * Tl * math.sin(d), 0.05 * Lr)
+            toe = (ankle[0] + 0.17 * Lr * Tl * math.cos(d), ankle[1] + 0.17 * Lr * Tl * math.sin(d), 0.05 * Lr)
             cyl(ankle, toe, 0.06 * Lr, 0.05 * Lr, mat=c("a_foot"), seg=8)
             ell(toe, (0.1 * Lr, 0.07 * Lr, 0.05 * Lr), c("a_foot"), rot=rz(30 + 60 * k + dt))
+        bone_of(start, f"shin{k}")
 
 
 def build_loftstrider(p, x, y):
@@ -1847,7 +2177,267 @@ def build_loftstrider(p, x, y):
     for ob in objs:
         ob.data.transform(Matrix.Translation((x, y, 0)))
         ob.data.update()
+        if "bone_segs" in ob:
+            pts = list(ob["bone_segs"])
+            ob["bone_segs"] = [v + (x, y, 0.0)[i % 3] for i, v in enumerate(pts)]
     return objs
+
+
+# --- the loftstrider's rig, feeding clip and rest pose (FEED-ROLLOUT, 2026-10-10) ---------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Loftstrider; placeholders, Wrysk directs the
+# real ones. 34 bones (`ls_bones`): the root (the body and its eyes), a neck of two, the
+# head (mouth and tusks), each frond a chain of three (its centreline in thirds), each leg
+# a thigh (hip bulb and thigh) and a shin (knee, shin, ankle and toes). Every size bin is
+# its own build (`ls_blend`), so the bake samples both clips per bin from that bin's
+# landmarks (`ls_rig_clips`).
+#
+# The legs are solved here, every sampled frame, by a two-bone IK: the ankle planted where
+# it stood, the knee on the upper side of the hip-ankle line in the vertical plane through
+# them (as it stands); the result is keyed as plain turns, so the engine only plays bone
+# transforms.
+#
+# **Feed** (state `cropping`, a loop; the reach and return are the clip weight): browsing a
+# crown above the heading (+x), a fixed height and side. Held through the loop, the body
+# leans `LS_LEAN_DEG` toward it about the far hips (which stay put) and rises as far as the
+# legs allow (`LS_STRETCH`; the standing legs are already near straight, so it is a few
+# cm), and the neck bends that way. Pair A (fronds 0 and 5, at 30 and 330 degrees, facing
+# the crown) swings toward it and reaches up and out (`LS_REACH_S`), curls closed
+# (`LS_CURL_S`) and arcs back over the head to the mouth (`LS_BRING_S`) while the head dips
+# to meet it, then returns to rest (`LS_RETURN_S`) during the head's chew nod (`LS_CHEW_S`)
+# while pair B (fronds 1 and 4, the next pair round) reaches; then B brings, A reaches.
+#
+# **Rest** (state `asleep`, a track: the clip weight walks its frames, first to last): the
+# body lowers until its underside is on the ground, the legs folding spider-like, knees
+# high, feet where they stood.
+
+LS_FEED_FPS = 15
+LS_REACH_S, LS_CURL_S, LS_BRING_S, LS_RETURN_S, LS_CHEW_S = 0.7, 0.2, 0.4, 0.7, 0.3
+LS_PAIR_S = LS_REACH_S + LS_CURL_S + LS_BRING_S     # one pair's reach, grab and bring
+LS_FEED_LOOP_S = 2 * LS_PAIR_S
+LS_PAIRS = ((0, 5), (1, 4))
+LS_LEAN_DEG = 6.0
+LS_NECK_DEG = 6.0           # each neck bone, toward the crown
+LS_DIP_DEG = 3.0            # each neck bone more as a frond delivers
+LS_CHEW_DEG = 4.0           # the head's nod after a delivery
+LS_STRETCH = 0.995          # the legs' most extension (hip to ankle over thigh + shin)
+# each frond bone's elevation (degrees above level, the head's frame): reached, curled
+LS_REACH = (50.0, 40.0, 25.0)
+LS_CURL = (55.0, 5.0, -45.0)
+LS_BRING_A = 100.0          # the frond's first bone, brought: just past upright
+LS_REST_FRAMES = 12
+# clip modes in the `.rig` (`crates/cubarium/src/voxel/rig.rs`)
+CLIP_LOOP, CLIP_TRACK = 0, 1
+
+
+def ls_bones(p):
+    """The loftstrider's bones at part sizes `p`: (name, parent index, head, tail), metres,
+    Blender axes, anchor at the origin, parents first."""
+    fr = ls_frame(p)
+    z_mid = (fr["z_neck"] + fr["zn"]) / 2
+    out = [("root", None, (0, 0, fr["zb"]), (0, 0, fr["z_neck"])),
+           ("neck_a", 0, (0, 0, fr["z_neck"]), (0, 0, z_mid)),
+           ("neck_b", 1, (0, 0, z_mid), (0, 0, fr["zn"])),
+           ("head", 2, (0, 0, fr["zn"]), (0, 0, fr["head_z"](2.84)))]
+    for k, path in enumerate(fr["fronds"]):
+        for i, part in enumerate("abc"):
+            out.append((f"f{k}_{part}", 3 if i == 0 else len(out) - 1, path[5 * i], path[5 * i + 5]))
+    for k, (hip, knee, ankle) in enumerate(fr["legs"]):
+        out.append((f"thigh{k}", 0, hip, knee))
+        out.append((f"shin{k}", len(out) - 1, knee, ankle))
+    return out
+
+
+def smooth(u):
+    u = max(0.0, min(1.0, u))
+    return u * u * (3 - 2 * u)
+
+
+def ls_legs(bones, turn, shift, out):
+    """Each leg's thigh and shin turns (relative to the parent, rest armature space) into
+    `out`, the root turned by `turn` about its head and its head moved by `shift`: the
+    ankle stays where it stood, the knee on the upper side of the hip-ankle line."""
+    h0 = Vector(bones[0][2])
+    by = {name: (Vector(h), Vector(t)) for name, _, h, t in bones}
+    up = Vector((0, 0, 1))
+    for k in range(6):
+        hip0, knee0 = by[f"thigh{k}"]
+        _, ankle = by[f"shin{k}"]
+        l1, l2 = (knee0 - hip0).length, (ankle - knee0).length
+        hip = h0 + shift + turn @ (hip0 - h0)
+        to = ankle - hip
+        d = min(max(to.length, abs(l1 - l2) + 1e-6), l1 + l2 - 1e-6)
+        u = to.normalized()
+        w = (up - u * up.dot(u)).normalized()
+        a = math.acos(max(-1.0, min(1.0, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))))
+        knee = hip + (u * math.cos(a) + w * math.sin(a)) * l1
+        thigh_w = (turn @ (knee0 - hip0)).rotation_difference(knee - hip).to_matrix() @ turn
+        shin_w = (thigh_w @ (ankle - knee0)).rotation_difference(ankle - knee).to_matrix() @ thigh_w
+        out[f"thigh{k}"] = turn.transposed() @ thigh_w
+        out[f"shin{k}"] = thigh_w.transposed() @ shin_w
+
+
+def ls_lean(bones):
+    """The feed's held root turn and the root head's shift: `LS_LEAN_DEG` toward +x about
+    the far hips' line (legs 2 and 3, which stay put), then up as far as every leg allows
+    (`LS_STRETCH`), or down if leaning stretched one past it. Also the rise, metres."""
+    h0 = Vector(bones[0][2])
+    by = {name: (Vector(h), Vector(t)) for name, _, h, t in bones}
+    turn = Matrix.Rotation(math.radians(LS_LEAN_DEG), 3, "Y")
+    far = (by["thigh2"][0] + by["thigh3"][0]) / 2
+    far.y = 0.0
+    rise = 1e9
+    for k in range(6):
+        hip0, knee0 = by[f"thigh{k}"]
+        _, ankle = by[f"shin{k}"]
+        lmax = LS_STRETCH * ((knee0 - hip0).length + (ankle - knee0).length)
+        v = far + turn @ (hip0 - far) - ankle
+        rise = min(rise, -v.z + math.sqrt(max(0.0, v.z * v.z - (v.length_squared - lmax * lmax))))
+    shift = far + turn @ (h0 - far) + Vector((0, 0, rise)) - h0
+    return turn, shift, rise
+
+
+def ls_frond_keys(bones, k, mouth_z):
+    """Frond `k`'s key poses (swing about z degrees, each bone's elevation degrees): rest,
+    reached, curled, brought (its tip just over the mouth, a two-bone reach for its outer
+    bones, the joint on the upper side)."""
+    names = [f"f{k}_{x}" for x in "abc"]
+    by = {name: (Vector(h), Vector(t)) for name, _, h, t in bones}
+
+    def rz_(v):                         # (radius, height) in the frond's own plane
+        return Vector((math.hypot(v.x, v.y), v.z))
+    segs = [(rz_(by[n][0]), rz_(by[n][1])) for n in names]
+    lens = [(t - h).length for h, t in segs]
+    elev = [math.degrees(math.atan2((t - h).y, (t - h).x)) for h, t in segs]
+    b = 30 + 60 * k
+    b = b - 360 if b > 180 else b
+    swing = -0.5 * b
+    root = segs[0][0]
+    a = math.radians(LS_BRING_A)
+    j1 = root + Vector((math.cos(a), math.sin(a))) * lens[0]
+    target = Vector((0.0, mouth_z + 0.02))
+    to = target - j1
+    lb, lc = lens[1], lens[2]
+    d = min(max(to.length, abs(lb - lc) + 1e-6), lb + lc - 1e-6)
+    base = math.atan2(to.y, to.x)
+    bend = math.acos(max(-1.0, min(1.0, (lb * lb + d * d - lc * lc) / (2 * lb * d))))
+    joint = max((j1 + Vector((math.cos(base + s * bend), math.sin(base + s * bend))) * lb for s in (1, -1)),
+                key=lambda j: j.y)
+    bring = (0.0, LS_BRING_A, math.degrees(math.atan2((joint - j1).y, (joint - j1).x)),
+             math.degrees(math.atan2((target - joint).y, (target - joint).x)))
+    return elev, {"rest": (0.0, *elev), "reach": (swing, *LS_REACH), "curl": (swing, *LS_CURL),
+                  "bring": bring}
+
+
+def ls_frond_at(keys, u):
+    """A frond's pose `u` seconds into its pair's cycle (`LS_FEED_LOOP_S` long)."""
+    lerp = lambda a, b, w: tuple(x + (y - x) * smooth(w) for x, y in zip(a, b))  # noqa: E731
+    t1 = LS_REACH_S
+    t2 = t1 + LS_CURL_S
+    t3 = t2 + LS_BRING_S
+    t4 = t3 + LS_RETURN_S
+    if u < t1:
+        return lerp(keys["rest"], keys["reach"], u / LS_REACH_S)
+    if u < t2:
+        return lerp(keys["reach"], keys["curl"], (u - t1) / LS_CURL_S)
+    if u < t3:
+        return lerp(keys["curl"], keys["bring"], (u - t2) / LS_BRING_S)
+    if u < t4:
+        return lerp(keys["bring"], keys["rest"], (u - t3) / LS_RETURN_S)
+    return keys["rest"]
+
+
+def ls_dip_chew(u):
+    """The neck's extra bend (dip, degrees) and the head's nod (degrees) `u` seconds into a
+    pair's cycle: the dip comes in as the fronds arc to the mouth and goes during the chew."""
+    t2 = LS_REACH_S + LS_CURL_S
+    t3 = t2 + LS_BRING_S
+    if t2 <= u < t3:
+        return LS_DIP_DEG * smooth((u - t2) / LS_BRING_S), 0.0
+    if t3 <= u < t3 + LS_CHEW_S:
+        x = (u - t3) / LS_CHEW_S
+        return LS_DIP_DEG * (1 - smooth(x)), LS_CHEW_DEG * math.sin(math.pi * x)
+    return 0.0, 0.0
+
+
+def key_turns(ob, bones, frame, turns, shift):
+    """Key `turns` ({bone: 3x3, relative to its parent, rest armature space}; absent: none)
+    at `frame`, the root's head moved by `shift`."""
+    for name, _, _, _ in bones:
+        pb = ob.pose.bones[name]
+        pb.rotation_mode = "QUATERNION"
+        q = pb.bone.matrix_local.to_quaternion()
+        r = turns.get(name, Matrix.Identity(3)).to_quaternion()
+        pb.rotation_quaternion = q.inverted() @ r @ q
+        pb.keyframe_insert("rotation_quaternion", frame=frame)
+        if name == "root":
+            pb.location = q.inverted() @ shift
+            pb.keyframe_insert("location", frame=frame)
+
+
+def ls_feed_clip(p):
+    """The feeding loop at part sizes `p`, sampled at `LS_FEED_FPS` (`sample_clip`)."""
+    bones = ls_bones(p)
+    fr = ls_frame(p)
+    n = round(LS_FEED_LOOP_S * LS_FEED_FPS)
+    ob = rig_armature("ls_rig", bones, LS_FEED_FPS)
+    turn, shift, _ = ls_lean(bones)
+    keys = {k: ls_frond_keys(bones, k, fr["mouth_z"]) for pair in LS_PAIRS for k in pair}
+    for f in range(n):
+        t = f / LS_FEED_FPS
+        turns = {"root": turn}
+        ls_legs(bones, turn, shift, turns)
+        dip, chew = 0.0, 0.0
+        for i, pair in enumerate(LS_PAIRS):
+            u = (t - i * LS_PAIR_S) % LS_FEED_LOOP_S
+            d, c_ = ls_dip_chew(u)
+            dip, chew = dip + d, chew + c_
+            for k in pair:
+                elev, kk = keys[k]
+                swing, *th = ls_frond_at(kk, u)
+                b = math.radians(30 + 60 * k)
+                s_ = Vector((-math.sin(b), math.cos(b), 0))
+                dth = [math.radians(x - e) for x, e in zip(th, elev)]
+                rel = [dth[0], dth[1] - dth[0], dth[2] - dth[1]]
+                # + about the frond's side axis lowers it: a lift is a negative turn
+                for x, a in zip("abc", rel):
+                    turns[f"f{k}_{x}"] = Matrix.Rotation(-a, 3, s_)
+                turns[f"f{k}_a"] = Matrix.Rotation(math.radians(swing), 3, "Z") @ turns[f"f{k}_a"]
+        neck = Matrix.Rotation(math.radians(LS_NECK_DEG + dip), 3, "Y")
+        turns["neck_a"], turns["neck_b"] = neck, neck
+        turns["head"] = Matrix.Rotation(math.radians(chew), 3, "Y")
+        key_turns(ob, bones, f, turns, shift)
+    return sample_clip(ob, bones, n, LS_FEED_FPS)
+
+
+def ls_rest_clip(p):
+    """The rest pose at part sizes `p` as a track of `LS_REST_FRAMES`: standing (frame 0)
+    to the body's underside on the ground (the last), evenly (the weight's ease shapes it)."""
+    bones = ls_bones(p)
+    drop = ls_frame(p)["zb"]
+    ob = rig_armature("ls_rest", bones, LS_FEED_FPS)
+    for f in range(LS_REST_FRAMES):
+        shift = Vector((0, 0, -drop * f / (LS_REST_FRAMES - 1)))
+        turns = {}
+        ls_legs(bones, Matrix.Identity(3), shift, turns)
+        key_turns(ob, bones, f, turns, shift)
+    return sample_clip(ob, bones, LS_REST_FRAMES, LS_FEED_FPS)
+
+
+def ls_rig_clips(p):
+    """The loftstrider's rig at part sizes `p`: its bones, their heads (the model's axes,
+    metres), and its clips by the state each plays in (`write_rig`'s input)."""
+    feed, rest = ls_feed_clip(p), ls_rest_clip(p)
+    return {"bones": feed["bones"], "heads": feed["heads"],
+            "clips": [dict(state="cropping", mode=CLIP_LOOP, fps=feed["fps"], frames=feed["frames"]),
+                      dict(state="asleep", mode=CLIP_TRACK, fps=rest["fps"], frames=rest["frames"])]}
+
+
+def feed_rig(clip):
+    """A one-clip rig (the frondgrazer's, the chorister's feeding loop) as `write_rig` reads
+    a rig: its clip plays while the body crops."""
+    return {"bones": clip["bones"], "heads": clip["heads"],
+            "clips": [dict(state="cropping", mode=CLIP_LOOP, fps=clip["fps"], frames=clip["frames"])]}
 
 
 # Models whose parts hang below their z = 0 (the perch under the stand pose's feet): the

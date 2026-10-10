@@ -73,15 +73,28 @@
 //! seven full-grown stands in a loose cluster (a centre and six round it at 1.0–1.2
 //! spacings), base variants 0 1 2 0 1 2 0 unless `--pick I,J,…` names them. `--view-turn
 //! Q` turns the whole grove (its layout and every tree) by Q more quarters: the grove seen
-//! from another side. `--lean-turns` says the library's full-grown step holds four lean
-//! copies of each variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean
-//! turned by j quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
+//! from another side. `--grove SPECIES:SPACING_M:N` (round 4) draws N trees: the first
+//! seven as above (or fewer), the rest on a loose outer ring about two spacings out.
+//! `--lean-turns` says the library's full-grown step holds four lean copies of each
+//! variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean turned by j
+//! quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
 //! leans the same way in the world whatever its turn.
 //!
 //! VAULT-SHAPE round 3: `--foliage F,F,…` sets each listed stand's total foliage fraction
 //! (of `alpha · wood`, every layer alike, as `--states` does), in the order `--turn` reads;
 //! one value sets every listed stand. The presenter's own state choice then picks the
 //! foliage state (the vaulttree's 22, 17 or 12 shelves).
+//!
+//! DRAPE-CORD (`design/handoffs/drape-cord-2026-10-10.md`), GPU only: `--plain` draws without
+//! the face textures (the default draw; `--gpu` otherwise turns them on). `--cords N` draws
+//! the drapes as N-pixel cords (0: the cubes), `--cord-shape straight|eased` and
+//! `--cord-wander W` set their path (`[drape]`), `--cord-wave P,A[,N]` the long wave's period and
+//! amplitude in voxels (round 2) and its octaves (round 3; `0,0` turns it off), `--wave-ratios octave|jittered`
+//! the octaves' frequency ratios; absent, the config's defaults. `--weather
+//! SPEC` draws under a weather preview (`fixed:PHASE` for a time of day, as `light_capture
+//! --weather-preview`). `--anim N` writes N frames `1 / --anim-hz` (default 60) seconds apart
+//! from `--anim-start` seconds as `OUT-KKK.png` (the breeze sways the plants), and prints
+//! the mean GPU time of the frames.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -129,6 +142,18 @@ const GROVE: [(f64, f64); 7] = [
     (300.0, 1.1),
 ];
 
+/// `--grove SPECIES:SPACING_M:N` with N over seven: tree k ≥ 7 of the grove, (bearing in
+/// degrees, distance in spacings) on an outer ring round the seven (VAULT-SHAPE round 4),
+/// its bearings evenly spread from a quarter step past north, the distances alternating
+/// 1.9 and 2.1 spacings so the ring is loose too.
+fn grove_at(k: usize, n: usize) -> (f64, f64) {
+    if k < GROVE.len() {
+        return GROVE[k];
+    }
+    let (j, m) = ((k - GROVE.len()) as f64, (n - GROVE.len()) as f64);
+    (360.0 * (j + 0.25) / m, if (k - GROVE.len()) % 2 == 0 { 1.9 } else { 2.1 })
+}
+
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
 const SPECIMENS: [(&str, f64, u32); 10] = [
@@ -168,12 +193,22 @@ fn main() -> Result<()> {
     let mut radius_override: Option<(Species, f64)> = None;
     let mut scale = false;
     let mut stand: Option<(Species, usize, f64)> = None;
-    let mut grove: Option<(Species, f64)> = None;
+    let mut grove: Option<(Species, f64, usize)> = None;
     let mut turns: Vec<u8> = Vec::new();
     let mut picks: Option<Vec<usize>> = None;
     let mut view_turn = 0u8;
     let mut lean_turns = false;
     let mut foliage: Vec<f64> = Vec::new();
+    let mut plain = false;
+    let mut cords: Option<u32> = None;
+    let mut cord_shape: Option<cubarium::voxel::CordShapeConfig> = None;
+    let mut cord_wander: Option<f32> = None;
+    let mut cord_wave: Option<(f32, f32, Option<u32>)> = None;
+    let mut wave_ratios: Option<cubarium::voxel::WaveRatiosConfig> = None;
+    let mut weather: Option<cubarium::sink::gpu::weather::WeatherPreview> = None;
+    let mut anim = 0u32;
+    let mut anim_hz = 60.0f64;
+    let mut anim_start = 0.0f64;
     let species_named = |name: &str| {
         Species::ALL
             .into_iter()
@@ -184,6 +219,36 @@ fn main() -> Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--glyphs" => glyphs = true,
+            "--plain" => plain = true,
+            "--cords" => cords = Some(args.next().context("--cords N")?.parse()?),
+            "--cord-shape" => {
+                cord_shape = Some(match args.next().context("--cord-shape straight|eased")?.as_str() {
+                    "straight" => cubarium::voxel::CordShapeConfig::Straight,
+                    "eased" => cubarium::voxel::CordShapeConfig::Eased,
+                    other => bail!("--cord-shape straight|eased, not {other}"),
+                })
+            }
+            "--cord-wander" => cord_wander = Some(args.next().context("--cord-wander W")?.parse()?),
+            "--cord-wave" => {
+                let v = args.next().context("--cord-wave PERIOD,AMPLITUDE[,OCTAVES]")?;
+                let f: Vec<&str> = v.split(',').collect();
+                if !(2..=3).contains(&f.len()) {
+                    bail!("--cord-wave PERIOD,AMPLITUDE[,OCTAVES], not {v}");
+                }
+                let n = f.get(2).map(|n| n.parse()).transpose()?;
+                cord_wave = Some((f[0].parse()?, f[1].parse()?, n));
+            }
+            "--wave-ratios" => {
+                wave_ratios = Some(match args.next().context("--wave-ratios octave|jittered")?.as_str() {
+                    "octave" => cubarium::voxel::WaveRatiosConfig::Octave,
+                    "jittered" => cubarium::voxel::WaveRatiosConfig::Jittered,
+                    other => bail!("--wave-ratios octave|jittered, not {other}"),
+                })
+            }
+            "--weather" => weather = Some(args.next().context("--weather SPEC")?.parse()?),
+            "--anim" => anim = args.next().context("--anim N")?.parse()?,
+            "--anim-hz" => anim_hz = args.next().context("--anim-hz HZ")?.parse()?,
+            "--anim-start" => anim_start = args.next().context("--anim-start S")?.parse()?,
             "--lit" => lit = true,
             "--rider" => rider = true,
             "--shared" => shared = true,
@@ -205,9 +270,11 @@ fn main() -> Result<()> {
                 stand = Some((species_named(name)?, n, d));
             }
             "--grove" => {
-                let v = args.next().context("--grove SPECIES:SPACING_M")?;
-                let (name, d) = v.split_once(':').context("--grove SPECIES:SPACING_M")?;
-                grove = Some((species_named(name)?, d.parse()?));
+                let v = args.next().context("--grove SPECIES:SPACING_M[:N]")?;
+                let (name, d) = v.split_once(':').context("--grove SPECIES:SPACING_M[:N]")?;
+                let (d, n) = d.split_once(':').map_or(Ok((d, GROVE.len())), |(d, n)| n.parse().map(|n| (d, n)))?;
+                anyhow::ensure!(n >= 1, "--grove needs at least one tree");
+                grove = Some((species_named(name)?, d.parse()?, n));
             }
             "--turn" => {
                 let v = args.next().context("--turn Q,Q,...")?;
@@ -291,8 +358,8 @@ fn main() -> Result<()> {
     if let Some((species, n, _)) = stand {
         plan.extend((0..n).map(|_| (species, 1.0, false)));
     }
-    if let Some((species, _)) = grove {
-        plan.extend((0..GROVE.len()).map(|_| (species, 1.0, false)));
+    if let Some((species, _, n)) = grove {
+        plan.extend((0..n).map(|_| (species, 1.0, false)));
     }
     let solo = candidates.is_some()
         || states_of.is_some()
@@ -327,13 +394,13 @@ fn main() -> Result<()> {
             x = x.max(cx + r + 1 + GAP);
         }
     }
-    if let Some((species, d)) = grove {
+    if let Some((species, d, n)) = grove {
         // The cluster's cells about its centre, turned with the view.
         let r = (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
         let step = d / voxel_m;
-        let at: Vec<(i64, i64)> = GROVE
-            .iter()
-            .map(|&(a, k)| {
+        let at: Vec<(i64, i64)> = (0..n)
+            .map(|i| grove_at(i, n))
+            .map(|(a, k)| {
                 let a = a.to_radians();
                 let (dx, dz) = ((k * a.cos() * step).round() as i32, (k * a.sin() * step).round() as i32);
                 let (dx, dz) = model::turn(view_turn, dx, dz);
@@ -711,13 +778,33 @@ fn main() -> Result<()> {
     };
     if gpu {
         let under = layered.then(|| cfg.textures_dir.clone());
-        let cfg = VoxelConfig {
+        let mut cfg = VoxelConfig {
             px_per_voxel: px,
-            textures: true,
+            textures: !plain,
             textures_dir: textures.unwrap_or_else(|| cfg.textures_dir.clone()),
             lighting: if lit { Lighting::Lit } else { Lighting::Flat },
             ..cfg
         };
+        if let Some(n) = cords {
+            cfg.drape.cords = n > 0;
+            cfg.drape.cord_px = n.max(1);
+        }
+        if let Some(shape) = cord_shape {
+            cfg.drape.cord_shape = shape;
+        }
+        if let Some(w) = cord_wander {
+            cfg.drape.cord_wander = w;
+        }
+        if let Some((p, a, n)) = cord_wave {
+            cfg.drape.wave_period = p;
+            cfg.drape.wave_amplitude = a;
+            if let Some(n) = n {
+                cfg.drape.wave_octaves = n;
+            }
+        }
+        if let Some(r) = wave_ratios {
+            cfg.drape.wave_ratios = r;
+        }
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
         let mut sink = VoxelGpuSink::new(
             &cfg,
@@ -753,10 +840,38 @@ fn main() -> Result<()> {
             }
             println!("voxel_specimens: {} emitting voxels by colour (linear x1000): {kinds:?}", e.len());
         }
+        let hz = f64::from(cubarium_voxel::TICK_HZ);
+        let tick0 = world.view().tick;
+        let at = |sink: &mut VoxelGpuSink, seconds: f64| {
+            let t = seconds * hz;
+            sink.set_clock(tick0 + t.floor() as u64, t.fract());
+        };
+        sink.set_weather_preview(weather);
+        at(&mut sink, anim_start);
         sink.render()?;
         let rgba = sink.read_raster()?;
         let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
-        return write_2x(&out, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb);
+        write_2x(&out, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb)?;
+        if anim > 0 {
+            let stem = out.with_extension("");
+            let before = sink.walk_plant_gpu();
+            for k in 0..anim {
+                at(&mut sink, anim_start + f64::from(k) / anim_hz);
+                sink.render()?;
+                let rgba = sink.read_raster()?;
+                let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+                let path = PathBuf::from(format!("{}-{k:03}.png", stem.display()));
+                write_2x(&path, u32::from(proj.raster_w), u32::from(proj.raster_h), &rgb)?;
+            }
+            let after = sink.walk_plant_gpu();
+            let n = (after.2 - before.2).max(1) as f64;
+            println!(
+                "voxel_specimens: {anim} frames, GPU walk {:.3} + plant pass {:.3} ms a frame",
+                (after.0 - before.0) / n,
+                (after.1 - before.1) / n
+            );
+        }
+        return Ok(());
     }
     let proj = Projection::new(cfg.tilt_degrees, 6, 0, &world_cfg)?;
     let topology = Topology::Ring {

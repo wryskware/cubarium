@@ -269,9 +269,15 @@ pub fn strike_share(hunter: &FounderPhysiology, hunter_body: f64, prey: &Founder
 }
 
 /// Whether a prey of `prey_body` is inside a hunter's size window (`Hunter::prey_max_ratio`,
-/// `body.rs:806-831`): at most `ratio ×` the hunter's own body.
-pub fn in_size_window(hunter: &FounderPhysiology, hunter_body: f64, prey_body: f64) -> bool {
-    hunter.active_hunter().is_some_and(|h| prey_body <= h.prey_max_ratio * hunter_body)
+/// `predation::window_size`): at most `ratio ×` the hunter's own body, a grown prey counting
+/// as its `adult_size_window_factor` × its body (LANTERNJAW-LIFE).
+pub fn in_size_window(hunter: &FounderPhysiology, hunter_body: f64, prey: &FounderPhysiology, prey_body: f64) -> bool {
+    let size = if prey_body >= prey.core.birth_body {
+        prey_body * prey.adult_size_window_factor.max(1.0)
+    } else {
+        prey_body
+    };
+    hunter.active_hunter().is_some_and(|h| size <= h.prey_max_ratio * hunter_body)
 }
 
 /// **A lifespan draw's survival** at age `age_s` (`draw_lifespan_ticks`, `lib.rs:2210-2233`):

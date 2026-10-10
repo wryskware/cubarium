@@ -329,7 +329,12 @@ fn gestating(cfg: &FaunaConfig, n: f64, body: f64, reserve: f64) -> (Cohort, f64
 /// the killed bodies from every ledger line: matter vanishes.
 #[test]
 fn a_killed_parents_escrow_goes_as_the_sim_sends_it() {
-    let cfg = FaunaConfig::default();
+    // It kills a grown grazer: the lanternjaw's diet rules off (LANTERNJAW-DIET).
+    let mut cfg = FaunaConfig::default();
+    if let Some(h) = cfg.founders[Founder::Lanternjaw.index()].hunter.as_mut() {
+        h.prey_weight = [1.0; Founder::COUNT];
+        h.prey_juveniles_only = [false; Founder::COUNT];
+    }
     let mut fits = Fits::unfitted();
     fits.kill_reach = 0.5;
     fits.of_mut(Founder::Browser).kill_rate = 2e-3;
@@ -883,9 +888,9 @@ fn config_flow_incubation_sets_the_hatch() {
     assert!((b - 2.0 * inc).abs() <= 1.0, "hatched at {b} s, incubation {}", 2.0 * inc);
 }
 
-/// **`parasite_take_per_day`** (`drain_riders`, `step.rs:456`: each rider takes
-/// `take / ecological_day_s × host body` per second): doubling it doubles what a rider
-/// drains from a host over a minute.
+/// **`parasite_take_body_per_day`** (`drain_riders`: each rider takes
+/// `take / ecological_day_s × its own body` per second, under what the host bears): doubling
+/// it doubles what a rider drains from a host over a minute.
 #[test]
 fn config_flow_parasite_take_is_linear() {
     let base = FaunaConfig::default();
@@ -905,7 +910,7 @@ fn config_flow_parasite_take_is_linear() {
         m.ledger[Founder::Browser.index()].rider_loss
     };
     let mut twice = base.clone();
-    twice.parasite_take_per_day *= 2.0;
+    twice.parasite_take_body_per_day *= 2.0;
     let (a, b) = (drained(&base), drained(&twice));
     assert!(a > 0.0);
     assert!(close(b, 2.0 * a, 1e-3), "drained {b} vs 2 × {a}");

@@ -541,8 +541,8 @@ fn roster_decode_touches_exactly_the_listed_paths() {
     }
     want.insert("fauna.founders.chorister.pack.pack_size".into());
     // The parasite hatchling's knobs (lanternjaw recruitment, 2026-10-02; the take per
-    // host body since the minimal gut).
-    for q in ["parasite_take_per_day", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
+    // rider body since LANTERNJAW-LIFE).
+    for q in ["parasite_take_body_per_day", "parasite_attach_radius_m", "parasite_detach_body_fraction"] {
         want.insert(format!("fauna.{q}"));
     }
     let group = |names: &[Species]| names.iter().map(|s| s.name()).collect::<Vec<_>>();

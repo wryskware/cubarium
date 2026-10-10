@@ -13,7 +13,12 @@ use cubarium_voxel_flora::{Flora, FloraConfig};
 #[test]
 fn kind_of_reads_prey_threat_and_other_per_observer() {
     let world = clock_off(11);
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    let mut fauna = Fauna::new({
+        // The reading on grown grazers: the lanternjaw's diet rules off (LANTERNJAW-DIET).
+        let mut c = FaunaConfig::default();
+        no_diet(&mut c);
+        c
+    });
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let lj2 = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
     let young = introduce(

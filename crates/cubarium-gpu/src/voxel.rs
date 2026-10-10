@@ -886,6 +886,12 @@ pub struct VoxelParams {
     /// swaying and growing in. `None` (the default) draws them in the walk as ever. Fixed
     /// for a renderer's life.
     pub plants: Option<crate::plants::PlantMotion>,
+    /// **Drape cords** (`[drape]`, [`crate::cord`]): a baked model's drape cells drawn as a
+    /// thin cord of this many screen pixels instead of a cube; [`DrapeCords::OFF`] draws
+    /// the cubes. Read every frame from the uniform.
+    ///
+    /// [`DrapeCords::OFF`]: crate::cord::DrapeCords::OFF
+    pub drape_cords: crate::cord::DrapeCords,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -1062,7 +1068,10 @@ impl VoxelParams {
                 self.trunk_shade[1],
                 self.trunk_light_at,
             ],
-            tex: [tex_mask as i32, i32::from(vine_on), 0, 0],
+            tex: {
+                let [width, shape] = self.drape_cords.uniform();
+                [tex_mask as i32, i32::from(vine_on), width, shape]
+            },
             light_k: [
                 self.ambient_gain,
                 self.ambient_floor,
@@ -1217,8 +1226,8 @@ struct VoxelUniforms {
     water: [f32; 4],
     plant_a: [f32; 4],
     plant_b: [f32; 4],
-    /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, then
-    /// padding.
+    /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, and
+    /// the drape cords ([`crate::cord::DrapeCords::uniform`]).
     tex: [i32; 4],
     /// The lit tier: ambient gain, ambient floor, ladder rungs, AO strength.
     light_k: [f32; 4],
@@ -3422,7 +3431,7 @@ impl VoxelRenderer {
                 let offset = (self.uniform_stride * frame.slot as u64) as u32;
                 let geom = (p.s, p.rise, p.base);
                 if let Some(pl) = &self.plants {
-                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x);
+                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x, p.drape_cords.reach(p.s));
                 }
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_PLANT_VIS);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_START);
@@ -4163,6 +4172,7 @@ pub(crate) mod tests {
             day_sky_brightness: 1.0,
             fog_motion: crate::weather::FogMotion::default(),
             plants: None,
+            drape_cords: crate::cord::DrapeCords::OFF,
         }
     }
 

@@ -87,7 +87,7 @@ pub const MAX_PALETTE: usize = 16384;
 /// Bone transforms a frame can carry (FEED-RIG): eight for each of [`MAX_TILES`].
 pub const MAX_BONES: usize = 8 * MAX_TILES;
 /// The bones a model's cells can name: [`FigureVoxel::bone`]'s bits.
-pub const BONE_LIMIT: u8 = 32;
+pub const BONE_LIMIT: u8 = 64;
 /// The most model voxels the pass holds, every model of a run.
 pub const MAX_VOXELS: usize = 1 << 18;
 const MODEL_BYTES: u64 = (MAX_VOXELS * std::mem::size_of::<FigureVoxel>()) as u64;
@@ -136,12 +136,12 @@ impl FigureVoxel {
     /// This cell on rig bone `bone` (below [`BONE_LIMIT`]): a rigged figure moves it by the
     /// frame's transform of that bone ([`FigureTile::bones`]).
     pub fn with_bone(mut self, bone: u8) -> Self {
-        self.bits = (self.bits & !(31 << 14)) | u32::from(bone.min(BONE_LIMIT - 1)) << 14;
+        self.bits = (self.bits & !(63 << 14)) | u32::from(bone.min(BONE_LIMIT - 1)) << 14;
         self
     }
 
     pub fn bone(self) -> u8 {
-        ((self.bits >> 14) & 31) as u8
+        ((self.bits >> 14) & 63) as u8
     }
 
     pub fn with_creases(mut self, faces: [u8; 6]) -> Self {

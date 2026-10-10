@@ -344,9 +344,13 @@ fn the_nest_site_brake_refuses_a_crowded_clutch_and_allows_one_at_the_limit() {
     let crowded = run(limit + 1);
     assert!(crowded.clutches.is_empty(), "above the limit the clutch is refused");
     assert_eq!(crowded.ledger.nest_refusals_by_founder[SHREDDER.index()], 1);
+    // ROLES5: the refusal is also a tick held at the crowded gate.
+    let crowded_gate = crate::LAY_GATES.iter().position(|&g| g == "crowded").unwrap();
+    assert!(crowded.lay_refusals_by_founder()[SHREDDER.index()][crowded_gate] >= 1);
     let at_limit = run(limit);
     assert_eq!(at_limit.clutches.len(), 1, "at the limit it lays");
     assert_eq!(at_limit.ledger.nest_refusals_by_founder[SHREDDER.index()], 0);
+    assert_eq!(at_limit.lay_refusals_by_founder()[SHREDDER.index()][crowded_gate], 0);
 }
 
 // --------------------------------------------------------- the body ceiling guard

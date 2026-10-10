@@ -229,6 +229,22 @@ pub fn pack_cell(cell: [u32; 3], plant: u32, weight: f32, dying: bool, time: f32
     ]
 }
 
+/// A settled or arriving cell's fourth word (in place of a leaving cell's texel): the
+/// weights of its top and bottom faces, 12 bits each, and the top bit set to say so. The
+/// plant pass moves a drape cord's joins by these ([`crate::cord`]), so two cells meeting at
+/// a face, given the same weight for it, put the join at the same screen point. Bit 30 says
+/// the cell is a drape cell, whose front quad `plant.vert` widens for the cord's long wave
+/// ([`crate::cord::DrapeCords::reach`]).
+pub fn pack_faces(top: f32, bottom: f32, drape: bool) -> u32 {
+    let q = |w: f32| (w.clamp(0.0, 1.0) * 4095.0).round() as u32;
+    1 << 31 | u32::from(drape) << 30 | q(top) << 12 | q(bottom)
+}
+
+/// The top and bottom face weights of [`pack_faces`], or `None` for a word without them.
+pub fn unpack_faces(w: u32) -> Option<(f32, f32)> {
+    (w >> 31 != 0).then(|| (((w >> 12) & 4095) as f32 / 4095.0, (w & 4095) as f32 / 4095.0))
+}
+
 /// The voxel, plant, weight, leaving flag and time of a packed cell ([`pack_cell`]).
 pub fn unpack_cell(c: [u32; 4]) -> ([u32; 3], u32, f32, bool, f32) {
     (
@@ -746,6 +762,7 @@ impl PlantPass {
         offset: u32,
         (s, rise, base): (u32, u32, i32),
         view_x: i32,
+        cord_reach: f32,
     ) {
         // The last frame's shade read the layer this pass clears.
         let m = [vk::MemoryBarrier::default()];
@@ -787,7 +804,8 @@ impl PlantPass {
             unsafe { d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, self.vis_pipeline) };
             let sets = [walk_set, self.data_sets[slot]];
             unsafe { d.cmd_bind_descriptor_sets(cb, vk::PipelineBindPoint::GRAPHICS, self.layout, 0, &sets, &[offset]) };
-            let push = self.push(s, rise, base, view_x, crate::figures::DEPTH_BIAS);
+            let mut push = self.push(s, rise, base, view_x, crate::figures::DEPTH_BIAS);
+            push.t[3] = cord_reach;
             unsafe { d.cmd_push_constants(cb, self.layout, vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT, 0, bytemuck::bytes_of(&push)) };
             // Twelve vertices a cell (front and cap), every cell twice: the second range
             // draws the cells crossing the raster's right edge a ring to the left.
@@ -924,6 +942,18 @@ mod tests {
         assert!(b.strength(0.0, t, [0.0, 0.0, 1.0]) > b.strength(0.0, t, DRY));
         let calm = b.rise_s + b.hold_s + b.fall_s + 1.0;
         assert_eq!(b.strength(0.0, calm, [0.0, 0.0, 1.0]), 0.0, "a calm stays calm in the rain");
+    }
+
+    #[test]
+    fn face_weights_round_trip_and_a_shared_face_packs_alike_from_both_cells() {
+        assert_eq!(unpack_faces(0), None, "a word without face weights");
+        let (t, b) = unpack_faces(pack_faces(0.75, 0.25, true)).unwrap();
+        assert!((t - 0.75).abs() < 1e-3 && (b - 0.25).abs() < 1e-3);
+        // The face between a lower and an upper cell: the lower's top, the upper's bottom.
+        let face = 0.4321;
+        let lower = unpack_faces(pack_faces(face, 0.3, false)).unwrap().0;
+        let upper = unpack_faces(pack_faces(0.6, face, true)).unwrap().1;
+        assert_eq!(lower, upper);
     }
 
     #[test]

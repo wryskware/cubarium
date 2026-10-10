@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""labd: the lab daemon (foreground; run by labd.service). Same as `lab daemon`."""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from labkit.cli import main  # noqa: E402
+
+sys.exit(main([*sys.argv[1:], "daemon"] if "daemon" not in sys.argv[1:] else sys.argv[1:]))

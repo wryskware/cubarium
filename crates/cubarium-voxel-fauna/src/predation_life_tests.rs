@@ -185,9 +185,14 @@ fn a_lanternjaw_in_surplus_lays_its_clutch_of_dormant_eggs() {
     let mut fauna = Fauna::new(crate::rhythm::fixed_config());
     let rule = fauna.config.founder(Founder::Lanternjaw).core.reproduction;
     assert_eq!(rule.mode, crate::BirthMode::Eggs);
-    let n = rule.clutch_size as usize;
-    assert!(n > 0, "the fixture needs a clutch");
     let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    // The clutch from surplus (LANTERNJAW-LIFE's many offspring): what a full reserve pays.
+    let n = if rule.clutch_max > 0 {
+        rule.clutch_for(animal(&fauna, lj).reserve)
+    } else {
+        rule.clutch_size
+    } as usize;
+    assert!(n > 0, "the fixture needs a clutch");
     // Main's breeding window (schema 20) reads the hold off the surplus history, so the
     // history is filled rather than the counter set.
     for _ in 0..rule.hold_ticks() {
@@ -491,7 +496,9 @@ fn an_egg_hatches_at_dusk_once_its_footfall_reaches_its_threshold() {
         .expect("the hatchling");
     let phys = fauna.config.founder(Founder::Lanternjaw);
     let length = phys.body_at(young.body).length_m / phys.adult_length_m;
-    assert!((length - 0.46).abs() < 0.03, "a hatchling {length} of the adult's length");
+    // A `body_min` hatchling: its length the cube root of its share of the adult body.
+    let want = (phys.core.body_min / phys.core.body_max).cbrt();
+    assert!((length - want).abs() < 0.03, "a hatchling {length} of the adult's length, not {want}");
     assert_closes(&fauna, "hatched");
 
     let (hatched, _, fauna) = afternoon(2, None);
@@ -515,7 +522,10 @@ fn a_snapshot_keeps_wounds_rest_strikes_and_eggs() {
     assert!(SCHEMA >= 20, "P1 changes the animal record: schema {SCHEMA}");
     let world = at_hour(0.0, 14);
     let mut flora = Flora::new(FloraConfig::default());
-    let mut fauna = Fauna::new(crate::rhythm::fixed_config());
+    let mut config = crate::rhythm::fixed_config();
+    // It strikes a grown grazer: the lanternjaw's diet rules off (LANTERNJAW-DIET).
+    no_diet(&mut config);
+    let mut fauna = Fauna::new(config);
     // Midnight: the grazer sleeps, the nocturnal lanternjaws are up.
     let grazer = introduce(&mut fauna, &world, Founder::Browser, StartingStores::FULL);
     place(&mut fauna, grazer, STRIKER_X + IN_CAPSULE_M, LANE_Z, WEST);

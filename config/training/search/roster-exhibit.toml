@@ -343,7 +343,7 @@ what = "litter decay (dead wood and carrion follow)"
 
 [[gene]]
 name = "rider_take"
-path = "fauna.parasite_take_per_day"
+path = "fauna.parasite_take_body_per_day"
 range = [0.25, 4.0]
 value = 1.0
 

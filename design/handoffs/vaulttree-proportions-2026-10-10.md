@@ -133,3 +133,63 @@ Tests: none beyond the existing suites (this is a bake and a default), but run
 `timeout 270`, detached if longer) since the radius is an ecology knob; report failures,
 don't re-pin numbers. Return: commits, widths before/after, cells per state and variant,
 test results, picture and .glb paths. Stop before merge.
+
+## Round 4 (2026-10-10): two thinner states, down to bare
+
+Round 3 merged (16684755): shelves follow foliage, b22 / b17 / b12 by
+`foliage_state_below` [0.66, 0.33], variants 0/1/2. A dying vaulttree still draws 12
+shelves, so the crown never thins past b12. Wrysk: "yah probably need to add like a 6L and
+0-1L for continuity on the trees."
+
+My reading (state it in the commit; he can correct it): two more foliage states below b12,
+so a thinning tree keeps losing shelves down to bare:
+- **b6**: 6 shelves (`shelf_fill` 6/12).
+- **b0–1**: the barest. Some variants draw one shelf and others none, so a dying grove
+  isn't uniform; say which variant draws which. With no shelf there is no drape.
+
+Five states then need four thresholds in the flora config's vaulttree
+`foliage_state_below` (`cubarium-voxel-flora`, regenerate `design/parameters.md`), then
+source.json via `voxel_model_source`, then a rebake of both voxel sizes into
+`assets/voxel-models/`. Space the thresholds evenly unless the stand's foliage range says
+otherwise, and state the numbers and why. Check the presenter takes five states without
+change (`stand.rs` near line 1109) and fix it if not.
+
+Also say, without changing it, whether the juvenile bins draw the same model in every
+state, and why.
+
+Evidence: the lone tree in all five states (variants 0/1/2), and the 7-tree grove from
+round 2's tooling with mixed states, from main | after. Also .glb exports of the new
+states into `art/gen/runs/voxel-export-2026-10-10/` as `vaulttree-shipped-<state>-v<N>.glb`,
+and add them as a row to the vaulttree .blend scene (`scripts/blender/glb_scene.py`).
+
+Tests: none new (a bake and a default); run `cubarium-voxel-flora` and `cubarium` tests
+(each under `timeout 270`, detached if longer) and report failures without re-pinning.
+Return: commits, thresholds, cells per state and variant, picture and .glb paths. Stop
+before merge.
+
+## Round 4b (2026-10-10): the 2-shelf barest variant, two medium shelves
+
+Round 4 is on branch `vault-states` (1d7a02c5, unmerged; its full rebake was stopped by
+the parent before it finished, so `assets/` is not rebaked yet). Wrysk kept the 0/1/2
+barest variants and asked: "can the 2S tree be like two medium shelves instead of the big
+one at the top and medium one at the side? choose like a different branch for a medium or
+small shelf."
+
+Today b0-2 variant 2 keeps shelves {0, 6} of `VAULT_SHELVES` (0 is the big crowning shelf,
+ph 190; 6 is medium, ph 115, right side). My pick: **{2, 6}**: shelf 2 (ph 140, left, high)
+and shelf 6 (ph 115, right, mid), two medium shelves on opposite sides of the trunk. Both
+are in b6's set {0, 2, 4, 6, 8, 10}, so every state still contains the thinner states'
+cells. Variants 0 (none) and 1 (the crowning shelf) stay.
+
+Make the barest state's kept shelves explicit per variant (e.g. a `shelves` list per
+variant in the state's spec, picked by variant in the bake as `shelf_fill` lists are),
+rather than the evenly spaced rule. Check in the picture that 2 and 6 hang from different
+limbs; if they share one, pick the nearest medium pair from b6's set that doesn't, and say
+which.
+
+Then: merge main into the branch first (main has the drape cords now, so the pictures show
+cords; `voxel_specimens.rs` may conflict with the drape tooling, keep both), re-run the
+round-4 pictures for the barest state (lone v0/v1/v2, the barest groves, the 15-tree mixed
+grove), re-export `vaulttree-shipped-b0-2-v2.glb` and rebuild the .blend, then relaunch
+the full rebake and its checks detached (`runs/bake.sh` then `runs/after-bake.sh`, which
+writes `runs/after-bake-DONE`) and hand back. Return as round 4.

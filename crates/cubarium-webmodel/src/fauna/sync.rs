@@ -191,7 +191,7 @@ impl FaunaModel {
                     for (j, c) in self.pops[pf.index()].iter_mut().enumerate() {
                         if c.host.is_some()
                             || c.n <= 0.0
-                            || !laws::in_size_window(&hp, hb * members.max(1.0), c.b.body)
+                            || !laws::in_size_window(&hp, hb * members.max(1.0), &pp, c.b.body)
                         {
                             continue;
                         }

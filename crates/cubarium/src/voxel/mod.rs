@@ -227,6 +227,8 @@ pub struct VoxelConfig {
     pub foliage_fade_s: f64,
     /// **How the GPU renderer's pack runs** (`[pack]`, H3): execution and presentation only.
     pub pack: PackConfig,
+    /// **The vaulttree's drapes as thin cords** (`[drape]`, DRAPE-CORD): GPU renderer only.
+    pub drape: DrapeConfig,
     /// **The observatory** (`crates/cubarium-observatory`): serve the running world's
     /// stats and the companion dashboard over HTTP at this address, e.g.
     /// `"127.0.0.1:7878"` (this machine only) or `"0.0.0.0:7878"` (the LAN; no auth).
@@ -265,6 +267,7 @@ impl Default for VoxelConfig {
             plants: plant_motion::PlantConfig::default(),
             foliage_fade_s: stand::FOLIAGE_FADE_S,
             pack: PackConfig::default(),
+            drape: DrapeConfig::default(),
             serve: None,
             sim: SimParams::default(),
         }
@@ -353,6 +356,124 @@ impl Default for PackConfig {
     fn default() -> PackConfig {
         PackConfig { pore_sweep: crate::sink::gpu::voxel::snapshot::PORE_SWEEP }
     }
+}
+
+/// **The drapes as cords** (`[drape]`, `design/handoffs/drape-cord-2026-10-10.md`): a baked
+/// model's drape cells (the vaulttree's teal filaments) drawn by the GPU renderer as one
+/// thin, continuous cord down each column instead of whole cubes, see-through beside the
+/// cord, in both lighting tiers and with textures off or on (`cubarium_gpu::cord`).
+/// Presentation only: the cells stay cells for the simulation's shade, perches and browse.
+/// The CPU presenter draws cubes.
+///
+/// ```toml
+/// [drape]
+/// cords = true        # false: drape cells are whole cubes again
+/// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
+/// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
+/// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
+/// wave_period = 24.0  # voxels a wave down the strand; 0: the hashed joins above
+/// wave_amplitude = 0.5 # voxels the wave swings either side of the column's centre
+/// wave_octaves = 3    # sines summed, each ~half the period and half the amplitude
+/// wave_ratios = "jittered" # "octave": exactly 1:2:4; "jittered": ~1:2.3:4.6, per strand
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DrapeConfig {
+    /// Draw drape cells as cords (`false`: whole cubes, as before 2026-10-10).
+    pub cords: bool,
+    /// **The cord's width in screen pixels** (at least 1): the same pixels at 6 px a voxel
+    /// as at 3 or 13, so relatively wider on a smaller scale.
+    pub cord_px: u32,
+    /// The cord's path inside a cell from the join at its top face to the join at its
+    /// bottom face (a look choice): `"straight"` or `"eased"` (plumb at each face, the
+    /// sideways step in the middle).
+    pub cord_shape: CordShapeConfig,
+    /// **How far a join may sit from the middle of its face**, as a share of the face's
+    /// width less the cord's, `0..=1`: 0 hangs every cord plumb down the middle of its
+    /// column, 1 lets a join fall anywhere across the face (a hash of the face).
+    pub cord_wander: f32,
+    /// **The long wave's period** (round 2), voxels from crest to crest down a strand: with
+    /// a period the cord's centre is one sine down its whole strand, each strand on its own
+    /// phase, and `cord_shape` and `cord_wander` are not read. 0: no wave (the hashed
+    /// joins). Up to 63.75, in quarter voxels.
+    pub wave_period: f32,
+    /// **The long wave's amplitude**, voxels the cord's centre swings either side of its
+    /// column's centre; past 0.5 it crosses into the next columns (the plant pass draws it
+    /// there; stamped plants keep it inside the column). Up to 7.97, in 32nds. With
+    /// octaves it is still the most the summed curve swings either way.
+    pub wave_amplitude: f32,
+    /// **The long wave's octaves** (round 3), how many sines the curve sums, 1..=15: octave
+    /// `k` at about 2^k times the base frequency (about half the period each) and 0.5^k of
+    /// the amplitude, each strand on its own phases, the sum scaled back to
+    /// `wave_amplitude`. 1: round 2's single sine.
+    pub wave_octaves: u32,
+    /// **The octaves' frequency ratios** (a look choice): `"octave"`, exactly 1 : 2 : 4, so
+    /// every strand is the same shape shifted, repeating every period; `"jittered"`, about
+    /// 1 : 2.3 : 4.6 (2^k x 1.15), each strand's ratios moved up to ±0.05 x 2^k by its hash,
+    /// so no two strands share a shape and nothing repeats.
+    pub wave_ratios: WaveRatiosConfig,
+}
+
+/// `[drape] wave_ratios`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaveRatiosConfig {
+    Octave,
+    #[default]
+    Jittered,
+}
+
+impl Default for DrapeConfig {
+    fn default() -> DrapeConfig {
+        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look"; the long wave
+        // "period 12 or 24 with a few higher octaves as well. amp 0.5 looks right" (round 3;
+        // 12 until he picks between them).
+        DrapeConfig {
+            cords: true,
+            cord_px: 2,
+            cord_shape: CordShapeConfig::Eased,
+            cord_wander: 0.5,
+            wave_period: 24.0, // Wrysk 2026-10-10: "jitter, 24p looks best"
+            wave_amplitude: 0.5,
+            wave_octaves: 3,
+            wave_ratios: WaveRatiosConfig::Jittered,
+        }
+    }
+}
+
+impl DrapeConfig {
+    /// The renderer's settings: off unless `cords` is on with a width.
+    pub fn renderer(&self) -> cubarium_gpu::cord::DrapeCords {
+        if !self.cords || self.cord_px == 0 {
+            return cubarium_gpu::cord::DrapeCords::OFF;
+        }
+        cubarium_gpu::cord::DrapeCords {
+            width_px: self.cord_px,
+            shape: match self.cord_shape {
+                CordShapeConfig::Straight => cubarium_gpu::cord::CordShape::Straight,
+                CordShapeConfig::Eased => cubarium_gpu::cord::CordShape::Eased,
+            },
+            wander: self.cord_wander.clamp(0.0, 1.0),
+            wave: cubarium_gpu::cord::CordWave {
+                period: self.wave_period.max(0.0),
+                amplitude: self.wave_amplitude.max(0.0),
+                octaves: self.wave_octaves.clamp(1, 15),
+                ratios: match self.wave_ratios {
+                    WaveRatiosConfig::Octave => cubarium_gpu::cord::WaveRatios::Octave,
+                    WaveRatiosConfig::Jittered => cubarium_gpu::cord::WaveRatios::Jittered,
+                },
+            },
+        }
+    }
+}
+
+/// `[drape] cord_shape`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CordShapeConfig {
+    Straight,
+    #[default]
+    Eased,
 }
 
 /// `[light]` in the config: the lit tier's numbers. New numbers with stated defaults,

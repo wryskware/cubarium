@@ -22,11 +22,12 @@
 
 use rustc_hash::FxHashMap;
 
-use cubarium_gpu::plants::{PlantList, PlantRec, SETTLED, cell_scale, pack_cell, unsmooth};
+use cubarium_gpu::plants::{PlantList, PlantRec, SETTLED, cell_scale, pack_cell, pack_faces, unsmooth};
 use cubarium_gpu::voxel::{VoxelStaging, VoxelTexel};
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::FloraView;
 
+use crate::voxel::model::Tag;
 use crate::voxel::plant_motion::{GrowOrder, PlantConfig};
 use crate::voxel::stand::{Part, Stands, drawn_site};
 
@@ -44,6 +45,10 @@ struct Cell {
     plant: u32,
     stand: Option<u64>,
     weight: f32,
+    /// Its top and bottom faces' weights ([`pack_faces`]): where a drape cord's joins move.
+    faces: u32,
+    /// A baked model's drape cell (a cord's front quad widens for the long wave).
+    drape: bool,
     /// Its place in the plant's order, 0..1 (0 first to arrive).
     rank: f32,
 }
@@ -356,7 +361,8 @@ impl PlantTracker {
                 p.radius = p.radius.max(((dx * dx + dz * dz) as f64).sqrt());
             }
             set_bit(&mut self.now_bits, index, true);
-            self.cur.push(Cell { index, xyz: [x, y, z], plant, stand, weight: 0.0, rank: 0.0 });
+            let drape = matches!(stands.model_tag(stands.at_index(g)), Some(Tag::Drape(_)));
+            self.cur.push(Cell { index, xyz: [x, y, z], plant, stand, weight: 0.0, faces: pack_faces(0.0, 0.0, drape), drape, rank: 0.0 });
         }
         // Each plant's sway, each cell's share and place in the order.
         for p in self.plants.iter_mut().skip(1) {
@@ -371,6 +377,11 @@ impl PlantTracker {
             let p = &self.plants[c.plant as usize];
             let hgt = i64::from(c.xyz[1]) - p.root[1];
             c.weight = self.cfg.weight(hgt, p.top);
+            c.faces = pack_faces(
+                self.cfg.face_weight(hgt as f64 + 0.5, p.top),
+                self.cfg.face_weight(hgt as f64 - 0.5, p.top),
+                c.drape,
+            );
             c.rank = match self.cfg.order {
                 GrowOrder::RootUp => {
                     if p.top > 0 { (hgt.clamp(0, p.top) as f64 / p.top as f64) as f32 } else { 0.0 }
@@ -407,8 +418,9 @@ impl PlantTracker {
                 }
                 _ => SETTLED,
             };
-            // A cell in the volume draws the volume's texel; only a leaving one carries its own.
-            list.cells.push(pack_cell(c.xyz, c.plant, c.weight, false, time, 0));
+            // A cell in the volume draws the volume's texel; only a leaving one carries its
+            // own. The others carry their faces' weights in its place.
+            list.cells.push(pack_cell(c.xyz, c.plant, c.weight, false, time, c.faces));
         }
         let mut ghosts: FxHashMap<u64, u32> = FxHashMap::default();
         for ch in self.changes.values_mut().filter(|ch| ch.dying) {
