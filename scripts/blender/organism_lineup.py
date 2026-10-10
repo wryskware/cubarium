@@ -713,9 +713,15 @@ VAULT_FILL = 1.0
 # the trunk's split, instead of the pick's 0.07 x height in a direction drawn per variant.
 VAULT_LEAN = None
 VAULT_GOLDEN = math.pi * (3 - math.sqrt(5))  # the golden angle: shelf k's azimuth step
+# Drape strands (Wrysk 2026-10-10: "all the drapes are the same length. should make that
+# random in some range ... random length relative from where they start"): each cluster
+# hangs a length drawn uniformly from DRAPE_LENGTH x the tree's height below its shelf,
+# and ends no lower than DRAPE_FLOOR x height (the pick's longest strands reach ~0.1).
+DRAPE_LENGTH = (0.15, 0.5)
+DRAPE_FLOOR = 0.1
 
 
-def vault_shelf(c, rs, rng, drape_to=None, bare=False):
+def vault_shelf(c, rs, rng, drape_to=None, bare=False, h=None):
     """One canopy shelf: a domed dark-teal cap (p1) over a drooping mint rim (p2), a fan
     of fine twigs under it, and cyan tendril clusters (teal, the drape) hanging from it.
     `bare`: the twigs only (a shelf a thinning tree has lost), with the same random draws,
@@ -735,13 +741,16 @@ def vault_shelf(c, rs, rng, drape_to=None, bare=False):
         for _ in range(rng.randint(1, 2)):
             a, dd = rng.uniform(0, 2 * math.pi), rs * rng.uniform(0.35, 0.9)
             bx, by = cx + math.cos(a) * dd, cy + math.sin(a) * dd
-            # the pick's strands end in the lower part of the drape band (bulk ~0.25-0.35)
-            z1 = rng.uniform(drape_to[0], drape_to[0] + 0.4 * (drape_to[1] - drape_to[0]))
+            # Each cluster hangs a random length from where it starts (Wrysk 2026-10-10:
+            # "random length relative from where they start"), so a high shelf's strands
+            # end high; never below DRAPE_FLOOR of the tree's height. One draw, as before.
+            z0 = ztop - d * 0.8
+            z1 = max(z0 - h * rng.uniform(*DRAPE_LENGTH), h * DRAPE_FLOOR)
             for _ in range(rng.randint(2, 4)):
                 ox, oy = rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02)
                 z2 = z1 + rng.uniform(0, 0.12)
                 if not bare:
-                    cyl((bx + ox, by + oy, ztop - d * 0.8), (bx + ox, by + oy, z2), 0.006, mat="teal", seg=4)
+                    cyl((bx + ox, by + oy, z0), (bx + ox, by + oy, z2), 0.006, mat="teal", seg=4)
     if not bare:
         join(drapes, "drapes")
 
@@ -835,7 +844,7 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
         mid = o.lerp(base, 0.55) + Vector((0, 0, 0.05 * h))
         tube(bezier(o, mid, base, 5), 0.06 if k < 2 or ph > 150 else 0.045, 0.02, "violet", seg=6)
         vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h),
-                    bare=keep is not None and k not in keep)
+                    bare=keep is not None and k not in keep, h=h)
     for k, (px, py, ph) in enumerate(shelves):
         place(k, px, py, ph)
     if drape is not None and fill > 1.0:
