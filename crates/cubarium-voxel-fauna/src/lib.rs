@@ -110,6 +110,8 @@ pub use body::{
 };
 mod den;
 pub use den::{DenQuality, den_quality};
+mod edit;
+pub use edit::{BodySpec, BodyStage, Group, Lifted, Placed, Spot};
 
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,

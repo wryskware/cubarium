@@ -210,6 +210,9 @@ enum ToSim {
     Close,
     Shutdown,
     Hook(Option<Box<dyn LoopHook>>),
+    /// A world edit (`cubarium_voxel_sim::edit::command`); its JSON reply to the sender, or
+    /// as an `edit` notice when there is none.
+    Edit(Value, Option<Sender<Value>>),
 }
 
 enum ToReader {
@@ -895,8 +898,19 @@ impl Session {
     }
 
     /// A console line ([`crate::COMMANDS`]); its reply comes back as a `console` notice.
+    /// `edit {json}` is a world edit; its JSON reply comes back as an `edit` notice.
     pub fn console(&self, line: &str) {
         self.send(ToSim::Line(line.to_string()));
+    }
+
+    /// **A world edit** (WORLD-EDIT, `cubarium_voxel_sim::edit::command`: place, remove,
+    /// lift, set down and move animals and plants, paint and clear cover, thin, populate,
+    /// pick), applied at the loop's next command point, waiting up to `timeout` for its JSON
+    /// reply: `{"ok": true, …ids}` or `{"ok": false, "refused": reason}`.
+    pub fn edit(&self, cmd: &Value, timeout: Duration) -> Result<Value, String> {
+        let (tx, rx) = mpsc::channel();
+        self.send(ToSim::Edit(cmd.clone(), Some(tx)));
+        rx.recv_timeout(timeout).map_err(|_| "the edit did not finish in time".to_string())
     }
 
     // --- Reading --------------------------------------------------------------------
@@ -969,6 +983,19 @@ impl Session {
                 let dir = args.get("dir").and_then(Value::as_str).ok_or("`saves` wants {\"dir\": path}")?;
                 return Ok(to(&store::list_saves(Path::new(dir))));
             }
+            // The live world, not the snapshot: what stands near a point, for picking.
+            "pick" => {
+                let mut cmd = args.clone();
+                if !cmd.is_object() {
+                    return Err("`pick` wants {\"x_m\", \"y_m\", \"z_m\", \"radius_m\"?}".into());
+                }
+                cmd["op"] = json!("pick");
+                let out = self.edit(&cmd, Duration::from_secs(5))?;
+                return match out.get("picked") {
+                    Some(p) => Ok(p.clone()),
+                    None => Err(out.get("refused").and_then(Value::as_str).unwrap_or("pick failed").to_string()),
+                };
+            }
             _ => {}
         }
         let h = self.shared.hub.lock().map_err(|_| "the session hub is poisoned")?;
@@ -1006,7 +1033,7 @@ impl Session {
             other => {
                 return Err(format!(
                     "unknown query `{other}`; known: summary clock environment populations run \
-                     snapshot animals animal history vitals guide species status candidates founding spec saves presets"
+                     snapshot animals animal history vitals guide species status candidates founding spec saves presets pick"
                 ));
             }
         })
@@ -1149,6 +1176,9 @@ struct Run {
     feed_updates: u64,
     /// The study recorder, when `[vitals] enabled`.
     vitals: Option<VitalsRun>,
+    /// What world edits hold off this world (WORLD-EDIT); a save writes copies back at
+    /// their lift spots. Dropped with the world.
+    held: cubarium_voxel_sim::edit::HeldTable,
 }
 
 struct Loop {
@@ -1424,6 +1454,14 @@ impl Loop {
                 self.notice(Notice::say("closed", "closed"));
                 self.store_status();
             }
+            ToSim::Edit(cmd, reply) => self.edit(&cmd, reply),
+            ToSim::Line(line) if line.trim_start().starts_with("edit ") => {
+                let text = line.trim_start()["edit ".len()..].trim();
+                match serde_json::from_str::<Value>(text) {
+                    Ok(cmd) => self.edit(&cmd, None),
+                    Err(e) => self.notice(Notice::say("edit", json!({ "ok": false, "refused": format!("not JSON: {e}") }).to_string())),
+                }
+            }
             ToSim::Line(line) => {
                 let Some(r) = self.run.as_mut() else {
                     self.notice(Notice::say("console", "no world is running"));
@@ -1454,6 +1492,27 @@ impl Loop {
             }
         }
         true
+    }
+
+    /// A world edit at this command point: the reply to `reply`, or an `edit` notice.
+    fn edit(&mut self, cmd: &Value, reply: Option<Sender<Value>>) {
+        let out = match self.run.as_mut() {
+            None => json!({ "ok": false, "refused": "no world is running" }),
+            Some(r) => {
+                let Run { sim, held, observer, .. } = r;
+                let out = sim.edit(|e| cubarium_voxel_sim::edit::command(e, held, cmd));
+                observer.request();
+                r.moved = true;
+                self.hook_moved = true;
+                out
+            }
+        };
+        match reply {
+            Some(tx) => {
+                let _ = tx.send(out);
+            }
+            None => self.notice(Notice::say("edit", out.to_string())),
+        }
     }
 
     /// Run `p`; `segment` is the vitals rows' (0 for a world made here, 1 for a load).
@@ -1522,6 +1581,7 @@ impl Loop {
             feed_ns: 0,
             feed_updates: 0,
             vitals,
+            held: Default::default(),
         });
         self.shared.generation.store(self.generation, Ordering::SeqCst);
         self.hook_installed();
@@ -1552,7 +1612,9 @@ impl Loop {
             let _ = w.join();
         }
         let (world, flora, fauna) = r.sim.layers();
-        let (world, flora, fauna) = (world.clone(), flora.clone(), fauna.clone());
+        let (world, mut flora, mut fauna) = (world.clone(), flora.clone(), fauna.clone());
+        // Held things are not saved off the world: copies go back at their lift spots.
+        r.held.restore_copies(&mut flora, &mut fauna);
         let out = self.out.clone();
         let (shared, generation) = (self.shared.clone(), self.generation);
         self.writer = Some(std::thread::spawn(move || {

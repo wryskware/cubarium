@@ -45,6 +45,8 @@
 #![forbid(unsafe_code)]
 
 pub mod cover;
+mod edit;
+pub use edit::{LiftedStand, PlantPlaced, PlantStage};
 mod registry;
 pub use registry::registry;
 mod layers;

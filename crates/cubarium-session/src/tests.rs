@@ -950,3 +950,39 @@ fn vitals_rows_cover_every_column_and_live_lineage() {
     let refused = session.query("no-such-query", &json!({})).unwrap_err();
     assert!(refused.contains("vitals"), "the unknown-query error lists vitals: {refused}");
 }
+
+/// WORLD-EDIT through the session: an edit's JSON reply, an `edit` line's notice, a body
+/// held over a save is saved at its lift spot, and `pick` finds what an edit set down.
+#[test]
+fn edits_reply_as_json_and_a_save_keeps_what_is_held() {
+    let (session, dir) = running("edit");
+    pause(&session);
+    let t = Duration::from_secs(10);
+    let r = session.edit(&json!({"op": "populate", "lineage": "frondgrazer", "count": 1, "seed": 3}), t).unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let id = r["populated"]["placed"][0]["body"]["id"].as_u64().expect("an id");
+    let r = session.edit(&json!({"op": "remove_animal", "id": u64::MAX}), t).unwrap();
+    assert_eq!(r["ok"], false);
+    assert!(r["refused"].as_str().is_some_and(|s| !s.is_empty()));
+    let r = session.edit(&json!({"op": "lift_animal", "id": id}), t).unwrap();
+    let token = r["held"].as_u64().expect("a token");
+    session.console(r#"edit {"op": "held"}"#);
+    let deadline = Instant::now() + t;
+    let said = loop {
+        if let Some(n) = session.take_notices().into_iter().find(|n| n.kind == "edit") {
+            break n.text;
+        }
+        assert!(Instant::now() < deadline, "no edit notice");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    let said: Value = serde_json::from_str(&said).unwrap();
+    assert_eq!(said["held"][0]["id"].as_u64(), Some(id));
+    let save = dir.0.join("slot");
+    session.save_blocking(&save, Duration::from_secs(30)).expect("saves");
+    let fauna = store::load_save(&save).map_err(|e| format!("{e:?}")).expect("reads back").fauna;
+    let a = *fauna.view().animal(id).expect("a held body is saved at its lift spot");
+    let r = session.edit(&json!({"op": "set_down", "held": token, "at": {"x": a.site.x, "y": a.site.y, "z": a.site.z}}), t).unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let picked = session.query("pick", &json!({"x_m": a.pose.x, "y_m": a.pose.y_m, "z_m": a.pose.z, "radius_m": 0.5})).unwrap();
+    assert!(picked["animals"].as_array().unwrap().iter().any(|p| p["id"].as_u64() == Some(id)), "{picked}");
+}

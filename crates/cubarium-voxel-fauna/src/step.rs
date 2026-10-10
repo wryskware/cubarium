@@ -5085,7 +5085,7 @@ fn shore_eggs(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
 /// **A fungal egg site** ([`crate::EggSite::Fungus`]): whether a fungus holding cap tissue
 /// stands on a support face within `radius_m` of `site` — around the ring, across the
 /// strip, and on `site`'s own row or one up or down.
-fn fungus_near(view: &VoxelView<'_>, flora: &Flora, site: Site, radius_m: f64) -> bool {
+pub(crate) fn fungus_near(view: &VoxelView<'_>, flora: &Flora, site: Site, radius_m: f64) -> bool {
     let fv = flora.view();
     let v = view.config.voxel_m;
     let r = if radius_m.is_finite() && radius_m > 0.0 { radius_m } else { 0.0 };

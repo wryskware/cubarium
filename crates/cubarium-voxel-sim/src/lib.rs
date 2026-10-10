@@ -77,6 +77,9 @@ use cubarium_voxel_fauna::{Fauna, Senses};
 use cubarium_voxel_flora::Flora;
 
 mod arena;
+pub mod edit;
+#[cfg(test)]
+mod edit_tests;
 pub mod found;
 #[cfg(test)]
 mod genome_tests;
