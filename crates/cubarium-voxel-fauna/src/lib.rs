@@ -52,7 +52,7 @@ mod gait;
 pub use gait::Sprint;
 pub mod rhythm;
 pub use rhythm::{Cadence, Horizon, Pace, Rhythm};
-pub use step::jump::DropRule;
+pub use step::jump::{DropRule, WadeRule};
 pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;

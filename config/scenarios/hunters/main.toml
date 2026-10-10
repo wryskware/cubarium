@@ -8,6 +8,8 @@ base = "../patch-hunters.toml"
 patrol = false
 
 [fauna.founders.lanternjaw]
+# Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
+wade.swim_out = false
 hunter.prey = [true, true, false, true, false, false, false, true, false]
 core.maintenance_per_s = 5.555555555555556e-6
 motor_respiration_per_s = 5.555555555555556e-6

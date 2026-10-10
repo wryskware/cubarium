@@ -371,6 +371,8 @@ fn founder_rows() -> Vec<Row> {
         r("drop.after_s", "s", nonneg, "DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down"),
         r("drop.max_m", "m", nonneg, "DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump)"),
         r("drop.wound_per_m", "wound per m", nonneg, "DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills)"),
+        // WADE-OUT (`WadeRule`).
+        r("wade.swim_out", "switch", fraction, "WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays)").optional(),
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),

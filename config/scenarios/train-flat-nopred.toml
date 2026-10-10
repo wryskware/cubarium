@@ -13,4 +13,6 @@ founding_count = 0
 # of 0 is the no-egg-bank control (the same thing `eggbank=off` does on the census line,
 # FaunaConfig::founder_counts_without_egg_bank), so no census flag is needed.
 [fauna.founders.lanternjaw]
+# Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
+wade.swim_out = false
 founding_count = 0

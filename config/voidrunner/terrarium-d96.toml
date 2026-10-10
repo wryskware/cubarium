@@ -417,6 +417,8 @@ yield_by_food.nectar = 0.3364781725258478
 yield_by_food.fruit = 0.3364781725258478
 
 [fauna.founders.lanternjaw]
+# Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
+wade.swim_out = false
 core.growth_max_per_s = 0.00010069939815158275
 core.reproduction.birth_interval_s = 1097.8253659193513
 # The detritus web D2: the lanternjaw's floor revised with its metabolism and clutch (two

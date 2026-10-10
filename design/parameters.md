@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2716 rows)
+**`fauna.*`** (2725 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1731,6 +1731,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.littershredder.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.littershredder.drop.wound_per_m` | 0.02 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.littershredder.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.littershredder.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.littershredder.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.littershredder.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -2009,6 +2010,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.frondgrazer.drop.max_m` | 1.1 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.frondgrazer.drop.wound_per_m` | 0.15 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.frondgrazer.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.frondgrazer.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.frondgrazer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.frondgrazer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -2287,6 +2289,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.lanternjaw.drop.max_m` | 1.8 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.lanternjaw.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.lanternjaw.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.lanternjaw.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.lanternjaw.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.lanternjaw.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -2565,6 +2568,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.capgnawer.drop.max_m` | 1.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.capgnawer.drop.wound_per_m` | 0.03 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.capgnawer.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.capgnawer.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.capgnawer.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.capgnawer.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -2843,6 +2847,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.loftstrider.drop.max_m` | 2.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.loftstrider.drop.wound_per_m` | 0.3 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.loftstrider.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.loftstrider.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.loftstrider.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.loftstrider.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -3121,6 +3126,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.ripple-snail.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.ripple-snail.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.ripple-snail.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.ripple-snail.agility` | 0.3 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.ripple-snail.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.ripple-snail.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -3399,6 +3405,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.bellwing.drop.max_m` | 0.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.bellwing.drop.wound_per_m` | 0.0 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.bellwing.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.bellwing.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.bellwing.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.bellwing.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -3677,6 +3684,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.seedporter.drop.max_m` | 1.6 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.seedporter.drop.wound_per_m` | 0.1 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.seedporter.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.seedporter.agility` | 0.5 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.seedporter.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.seedporter.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
@@ -3955,6 +3963,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.drop.after_s` | 30.0 | s | [0, inf) |  | - | placeholder | DROP: trapped this long (off its route graph, no walking way back on, no glide) it jumps down |
 | `fauna.founders.chorister.drop.max_m` | 3.0 | m | [0, inf) |  | - | placeholder | DROP: deepest jump down an adult takes (a smaller body: x its height / the adult's; at or under the step: no jump) |
 | `fauna.founders.chorister.drop.wound_per_m` | 0.08 | wound per m | [0, inf) |  | - | placeholder | DROP: wound a landing adds per metre dropped beyond step_down_m (1 kills) |
+| `fauna.founders.chorister.wade.swim_out` | (absent) | switch | [0, 1] |  | - | placeholder | WADE-OUT: held in water past its depth (or in a pocket ringed by it), it swims the least-deep way out within its drown clock (false: it stays) |
 | `fauna.founders.chorister.agility` | 0.0 | fraction | [0, 1] |  | - | placeholder | the dodge's species factor |
 | `fauna.founders.chorister.mass_scale` | 30.0 | x placeholder mass | (0, inf) |  | - | decision, digest | the org-unit mass scale the body was built at |
 | `fauna.founders.chorister.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
