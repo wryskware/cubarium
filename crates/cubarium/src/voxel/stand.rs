@@ -434,6 +434,9 @@ pub struct Stands {
     fade_dt: f64,
     /// Seconds a fade between two foliage states takes ([`Stands::set_foliage_fade_s`]).
     fade_s: f64,
+    /// Whether each plant model is drawn turned by its stand's quarter
+    /// ([`Stands::set_plant_turn`]); on by default.
+    turn: bool,
 }
 
 /// [`Stands::set_foliage_fade_s`]'s default: `VoxelConfig::foliage_fade_s`'s.
@@ -576,16 +579,18 @@ pub(crate) fn as_drawn(view: &VoxelView<'_>, flora: FloraView<'_>, stand: &Stand
 
 /// The model cells of the plant **over** `stand`, when `stand` is the plant beneath on its
 /// face ([`FaceLayer::Under`]) and the top plant has a model: the trunk [`stamp_model`]
-/// draws the cover in front of ([`in_front_of_trunk`]).
+/// draws the cover in front of ([`in_front_of_trunk`]), and the top plant's id (its turn,
+/// [`model::plant_quarter`]).
 pub(crate) fn over_cells<'l>(
     lib: &'l ModelLibrary,
     flora: FloraView<'_>,
     stand: &Stand,
-) -> Option<&'l [ModelCell]> {
+) -> Option<(&'l [ModelCell], u64)> {
     if stand.place != FaceLayer::Under {
         return None;
     }
-    model_cells(lib, flora, flora.stand_at(stand.site)?)
+    let top = flora.stand_at(stand.site)?;
+    Some((model_cells(lib, flora, top)?, top.id))
 }
 
 /// Where a cell of the plant beneath is drawn when the top plant's trunk stands in it
@@ -643,7 +648,21 @@ impl Stands {
             fade_clock: None,
             fade_dt: 0.0,
             fade_s: FOLIAGE_FADE_S,
+            turn: true,
         }
+    }
+
+    /// Whether plant models are drawn turned (the default): each stand by the quarter its
+    /// id hashes to ([`model::plant_quarter`]), so stands of one species do not all face
+    /// the same way. Off, every model faces as baked. Drawing only.
+    pub fn set_plant_turn(&mut self, on: bool) {
+        self.turn = on;
+    }
+
+    /// The quarter turn a stand's model is drawn at: [`model::plant_quarter`] of its id,
+    /// or 0 with turning off.
+    pub(crate) fn plant_quarter(&self, stand_id: u64) -> u8 {
+        if self.turn { model::plant_quarter(stand_id) } else { 0 }
     }
 
     /// Seconds a stand takes to cross-fade between two foliage states (`0`: at once). A
@@ -830,9 +849,10 @@ impl Stands {
             let owners = !self.owner.is_empty();
             let emission = self.emission;
             let (incremental, film_now) = (self.inc.is_some(), self.film_now);
-            let fade_s = self.fade_s;
+            let (fade_s, turn) = (self.fade_s, self.turn);
             *self = Stands::empty(c.width, c.height, c.depth);
             self.fade_s = fade_s;
+            self.turn = turn;
             self.vine_cells = vine_cells;
             self.emission = emission;
             self.cover_override = cover_override;
@@ -1138,7 +1158,7 @@ impl Stands {
         flora: FloraView<'_>,
         stand: &Stand,
         cells: &[ModelCell],
-        over: Option<&[ModelCell]>,
+        over: Option<(&[ModelCell], u64)>,
     ) -> bool {
         let ModelInputs {
             foliage,
@@ -1152,6 +1172,9 @@ impl Stands {
         // The model's highest cell: each cell's colour comes from its height in the model.
         // Read off the full state, so a cell keeps its colour across the states.
         let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
+        // Turned about the anchor; the callbacks get each cell's unturned offset, so its
+        // band, thinning and fruit hash do not move with the turn.
+        let quarter = self.plant_quarter(stand.id);
         let faded;
         let (cells, foliage): (&[ModelCell], &[f64]) = match state {
             None => (cells, &foliage[..]),
@@ -1171,15 +1194,16 @@ impl Stands {
         // never lands on one the model already draws.
         let mut trunk = Vec::new();
         let mut own = Vec::new();
-        if let Some(over) = over {
-            model::each_plant_cell(over, anchor, stand.id, &[], view, |c, m| {
+        if let Some((over, over_id)) = over {
+            let over_quarter = self.plant_quarter(over_id);
+            model::each_plant_cell(over, anchor, stand.id, over_quarter, &[], view, |c, m| {
                 if m.tag == Tag::Trunk {
                     trunk.push((c.x, c.y, c.z));
                 }
             });
             trunk.sort_unstable();
             if !trunk.is_empty() {
-                model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |c, _| {
+                model::each_plant_cell(cells, anchor, stand.id, quarter, foliage, view, |c, _| {
                     if trunk.binary_search(&(c.x, c.y, c.z)).is_err() {
                         own.push((c.x, c.y, c.z));
                     }
@@ -1188,7 +1212,7 @@ impl Stands {
             }
         }
         let mut ok = true;
-        model::each_plant_cell(cells, anchor, stand.id, &foliage, view, |cell, m| {
+        model::each_plant_cell(cells, anchor, stand.id, quarter, foliage, view, |cell, m| {
             if !ok {
                 return;
             }
@@ -2627,8 +2651,11 @@ mod tests {
         assert!(flora.apply(world, Command::Seed { x, z: 2, species: Species::Vaulttree, wood }));
     }
 
+    /// The grid of `flora`'s stands, drawn unturned so the hand-placed cells below are
+    /// where the assertions name them; [`a_cover_follows_the_turned_trunk_over_it`] turns.
     fn grid(lib: &ModelLibrary, world: &World, flora: &Flora, incremental: bool) -> Stands {
         let mut stands = Stands::empty(32, 16, 4);
+        stands.set_plant_turn(false);
         stands.set_incremental(incremental);
         stands.rebuild_with(&world.view(), flora.view(), lib);
         stands
@@ -2683,5 +2710,87 @@ mod tests {
         assert!(matches!(stands.at(9, 4, 2), Part::Crown { .. }));
         assert!(matches!(stands.at(9, 4, 3), Part::Crown { .. }));
         assert_eq!(stands.at(10, 4, 1), Part::None, "nothing drawn in front of the trunk");
+    }
+
+    // --- PLANT-TURN: each stand's model turned by its quarter -------------------------
+
+    /// The grid as `(cell, part)` in cell order.
+    fn snapshot(stands: &Stands) -> Vec<((u32, u32, u32), Part)> {
+        stands
+            .cells()
+            .map(|(x, y, z)| ((x, y, z), stands.at(i64::from(x), i64::from(y), z)))
+            .collect()
+    }
+
+    /// A stand's quarter is a pure function of its id: the presenter draws each tree at
+    /// [`model::plant_quarter`] of its id, with its foot on its anchor, the same frame
+    /// after frame and in a presenter built afresh.
+    #[test]
+    fn a_stands_quarter_is_a_pure_function_of_its_id() {
+        let (world, lib) = (world(), under_lib());
+        let mut flora = Flora::new(FloraConfig::default());
+        for x in [3, 9, 15, 21, 27] {
+            tree(&mut flora, &world, x);
+        }
+        let draw = |stands: &mut Stands| stands.rebuild_with(&world.view(), flora.view(), &lib);
+        let mut a = Stands::empty(32, 16, 4);
+        draw(&mut a);
+        let first = snapshot(&a);
+        for _ in 0..3 {
+            draw(&mut a);
+            assert_eq!(snapshot(&a), first, "the same drawing frame after frame");
+        }
+        let mut b = Stands::empty(32, 16, 4);
+        draw(&mut b);
+        assert_eq!(snapshot(&b), first, "the same drawing from a rebuilt presenter");
+
+        let stands = flora.view().stands;
+        assert_eq!(stands.len(), 5);
+        for stand in stands {
+            let q = model::plant_quarter(stand.id);
+            let (x, y, z) = (i64::from(stand.site.x), i64::from(stand.site.y) + 1, stand.site.z);
+            assert!(matches!(a.at(x, y, z), Part::Trunk(_)), "the foot on its anchor");
+            // The trunk's one cell off the column, `(0, 0, 1)`, goes where the quarter says
+            // and nowhere else.
+            for k in 0..4u8 {
+                let (dx, dz) = model::turn(k, 0, 1);
+                let cell = a.at(x + i64::from(dx), y, (i64::from(z) + i64::from(dz)) as u32);
+                assert_eq!(matches!(cell, Part::Trunk(_)), k == q, "stand {} quarter {q}, probe {k}", stand.id);
+            }
+        }
+    }
+
+    /// The plant beneath reads the trunk over it at the **top** plant's quarter: with
+    /// turning on, the top plant's trunk is drawn exactly as with no cover, in the full
+    /// and the change-only rebuild.
+    #[test]
+    fn a_cover_follows_the_turned_trunk_over_it() {
+        let (world, lib) = (world(), under_lib());
+        let turned = |flora: &Flora, incremental: bool| {
+            let mut stands = Stands::empty(32, 16, 4);
+            stands.set_incremental(incremental);
+            stands.rebuild_with(&world.view(), flora.view(), &lib);
+            stands
+        };
+        let mut bare = Flora::new(FloraConfig::default());
+        tree(&mut bare, &world, 10);
+        let mut shared = Flora::new(FloraConfig::default());
+        tree(&mut shared, &world, 10);
+        let turf = shared.config().species(Species::Springturf).wood_max;
+        let site = Site { x: 10, y: 3, z: 2 };
+        assert!(shared.apply(&world, Command::SeedBeneath { site, species: Species::Springturf, wood: turf }));
+        for incremental in [false, true] {
+            let before = turned(&bare, incremental);
+            let after = turned(&shared, incremental);
+            let trunk: Vec<_> = before
+                .cells()
+                .filter(|&(x, y, z)| matches!(before.at(i64::from(x), i64::from(y), z), Part::Trunk(_)))
+                .collect();
+            assert_eq!(trunk.len(), 4, "the whole trunk is drawn");
+            for (x, y, z) in trunk {
+                let (x, y) = (i64::from(x), i64::from(y));
+                assert_eq!(after.at(x, y, z), before.at(x, y, z), "the trunk is unchanged at {x},{y},{z}");
+            }
+        }
     }
 }

@@ -88,7 +88,7 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 use cubarium::voxel::animal::{AnimalPart, Animals, cells_of};
 use cubarium::voxel::model::{
     AnimalBin, AnimalModel, ModelCell, ModelLibrary, PlantModel, PlantStep, Tag, keeps,
-    stamp_animal, stamp_plant,
+    plant_quarter, stamp_animal, stamp_plant, stamp_plant_turned, turn,
 };
 use cubarium::voxel::stand::{Cell, Part, Stands, Style, parts_of, style_of};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
@@ -278,6 +278,8 @@ fn a_stand_stamps_its_model_on_the_cell_above_its_support_face() {
 
     let view = w.view();
     let mut stands = Stands::empty(32, 16, 4);
+    // Unturned, so the trunk reads up its own column; the turn has its own tests (8.).
+    stands.set_plant_turn(false);
     stands.rebuild_with(&view, flora.view(), &lib);
 
     let fv = flora.view();
@@ -1060,4 +1062,129 @@ fn animals_stamp_their_founder_model_by_size_bin_and_fall_back_to_cells_of() {
     assert_eq!(bins[0], 4, "a full-grown browser draws the adult bin");
     assert!(bins[1] < 4, "a hungry browser is smaller: {bins:?}");
     assert_eq!(new.cells().count(), expected_cells, "nothing else is drawn");
+}
+
+// --- 8. plants turned by quarters (PLANT-TURN) ---------------------------------------
+
+/// An asymmetric plant: a trunk on the anchor and up, a foliage square off to one side,
+/// a drape and an accent elsewhere, all within ±3 of the anchor horizontally.
+fn lopsided() -> Vec<ModelCell> {
+    let mut model = vec![
+        mc([0, 0, 0], 1, Tag::Trunk),
+        mc([0, 1, 0], 1, Tag::Trunk),
+        mc([1, 1, 0], 1, Tag::Trunk),
+        mc([2, 3, -1], 4, Tag::Drape(1)),
+        mc([-1, 4, 2], 5, Tag::Accent),
+    ];
+    for dx in 0..=3 {
+        for dz in -1..=2 {
+            model.push(mc([dx, 2, dz], 2, Tag::Foliage(0)));
+        }
+    }
+    model
+}
+
+/// A model drawn at quarter `q` has exactly the cells of the unturned model, each at
+/// `anchor + turn(q, offset)` with `dy` kept, and each carries its unturned model cell.
+/// Quarter 0 is the unturned stamp.
+#[test]
+fn a_model_drawn_at_a_quarter_has_the_unturned_cells_each_turned() {
+    let w = world(32, 12, 12, 1);
+    let view = w.view();
+    let model = lopsided();
+    let anchor = Cell { x: 10, y: 2, z: 6 };
+    let id = 9;
+    assert_eq!(
+        stamp_plant_turned(&model, anchor, id, 0, &[1.0, 1.0], &view),
+        stamp_plant(&model, anchor, id, &[1.0, 1.0], &view),
+        "quarter 0 is the unturned model"
+    );
+    for q in 0..4u8 {
+        let out = stamp_plant_turned(&model, anchor, id, q, &[1.0, 1.0], &view);
+        assert_eq!(out.len(), model.len(), "one cell per model cell at quarter {q}");
+        let want: BTreeMap<(u32, u32, u32), ModelCell> = model
+            .iter()
+            .map(|&m| {
+                let (dx, dz) = turn(q, m.offset[0], m.offset[2]);
+                let c = Cell {
+                    x: anchor.x + i64::from(dx),
+                    y: (i64::from(anchor.y) + i64::from(m.offset[1])) as u32,
+                    z: (i64::from(anchor.z) + i64::from(dz)) as u32,
+                };
+                (key(c, 32), m)
+            })
+            .collect();
+        assert_eq!(placed(&out, 32), want, "quarter {q}");
+    }
+    // The four quarters are four different drawings of a lopsided model.
+    let drawn: BTreeSet<Vec<(u32, u32, u32)>> = (0..4u8)
+        .map(|q| placed(&stamp_plant_turned(&model, anchor, id, q, &[1.0, 1.0], &view), 32).into_keys().collect())
+        .collect();
+    assert_eq!(drawn.len(), 4, "each quarter draws the model a different way");
+}
+
+/// Thinning hashes a cell's unturned offset: for a fixed foliage fill, the cells shown
+/// (as unturned offsets) are the same at every quarter, and are exactly what `keeps`
+/// names.
+#[test]
+fn thinning_shows_the_same_cells_at_every_quarter() {
+    let w = world(32, 12, 12, 1);
+    let view = w.view();
+    let model = lopsided();
+    let anchor = Cell { x: 10, y: 2, z: 6 };
+    let id = 77;
+    for fill in [0.0, 0.3, 0.5, 0.8, 1.0] {
+        let foliage = [fill, fill];
+        let want: BTreeSet<[i32; 3]> = model
+            .iter()
+            .filter(|m| match m.tag {
+                Tag::Foliage(l) | Tag::Drape(l) => keeps(id, m.offset, l, fill),
+                _ => true,
+            })
+            .map(|m| m.offset)
+            .collect();
+        for q in 0..4u8 {
+            let shown: BTreeSet<[i32; 3]> = stamp_plant_turned(&model, anchor, id, q, &foliage, &view)
+                .into_iter()
+                .map(|(_, m)| m.offset)
+                .collect();
+            assert_eq!(shown, want, "fill {fill} at quarter {q}");
+        }
+    }
+}
+
+/// The anchor cell (offset 0) sits at the anchor at every quarter, and so does every
+/// cell straight above it: the turn is about the trunk's foot.
+#[test]
+fn the_anchor_cell_stays_on_its_site_at_every_quarter() {
+    let w = world(32, 12, 12, 1);
+    let view = w.view();
+    let model = lopsided();
+    let anchor = Cell { x: 10, y: 2, z: 6 };
+    for q in 0..4u8 {
+        let out = stamp_plant_turned(&model, anchor, 3, q, &[1.0, 1.0], &view);
+        let at = |offset: [i32; 3]| {
+            out.iter()
+                .find(|(_, m)| m.offset == offset)
+                .map(|&(c, _)| key(c, 32))
+                .expect("the cell is drawn")
+        };
+        assert_eq!(at([0, 0, 0]), (10, 2, 6), "the anchor at quarter {q}");
+        assert_eq!(at([0, 1, 0]), (10, 3, 6), "the trunk above it at quarter {q}");
+    }
+}
+
+/// A stand's quarter is a hash of its id alone: the same on every call, and across many
+/// ids all four quarters occur.
+#[test]
+fn stand_quarters_cover_all_four_turns() {
+    let ids: Vec<u64> = (0..256).chain((0..64).map(|k| k * 1_000_003 + 17)).collect();
+    let mut seen = BTreeSet::new();
+    for &id in &ids {
+        let q = plant_quarter(id);
+        assert!(q < 4, "a quarter is 0..4, not {q}");
+        assert_eq!(plant_quarter(id), q, "the same quarter for id {id} every time");
+        seen.insert(q);
+    }
+    assert_eq!(seen, BTreeSet::from([0, 1, 2, 3]), "all four quarters occur");
 }

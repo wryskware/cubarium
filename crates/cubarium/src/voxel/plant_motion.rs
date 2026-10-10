@@ -1,6 +1,7 @@
 //! `[plants]`: how plants move when the GPU renderer draws them as models
 //! (`[figures] plants = "models"`, `cubarium_gpu::plants`). Presentation only: nothing here
-//! reaches the simulation, and with `plants = "stamped"` (the default) none of it is read.
+//! reaches the simulation, and with `plants = "stamped"` (the default) none of it is read
+//! but `turn`.
 //!
 //! - **Sway**: each plant's top moves sideways in a shared, travelling, gusty breeze
 //!   ([`WindConfig`]); a cell moves by its plant's tip times `(height / plant height)^p`,
@@ -120,6 +121,10 @@ pub struct PlantConfig {
     /// Per-species multipliers on the sway, by species name (missing: 1).
     pub species: BTreeMap<String, f64>,
     pub wind: WindConfig,
+    /// Whether each plant model is drawn turned by a quarter its stand's id picks
+    /// (`model::plant_quarter`), so stands of one species do not all face one way. Read
+    /// by the stamp whichever way plants are drawn. Startup only.
+    pub turn: bool,
 }
 
 impl Default for PlantConfig {
@@ -137,6 +142,7 @@ impl Default for PlantConfig {
             // A glowcap is a fungus in a cave: no breeze reaches it.
             species: BTreeMap::from([("glowcap".to_string(), 0.0)]),
             wind: WindConfig::default(),
+            turn: true,
         }
     }
 }

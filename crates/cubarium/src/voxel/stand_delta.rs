@@ -123,8 +123,11 @@ struct ModelSig {
     ripe_at: bool,
     foliage: [Band; MAX_FOLIAGE_LAYERS],
     fruit: Band,
-    /// The model of the plant over a plant beneath, whose trunk it is drawn in front of.
-    over: Option<(usize, usize)>,
+    /// The quarter turn the model is drawn at ([`Stands::plant_quarter`]).
+    quarter: u8,
+    /// The model of the plant over a plant beneath, whose trunk it is drawn in front of,
+    /// and its quarter turn.
+    over: Option<((usize, usize), u8)>,
     /// A species with foliage states: the state drawn and its fade. Its foliage bands
     /// are then [`Band::ANY`] (the state model is drawn whole), and a fade restamps every
     /// rebuild its blend moves.
@@ -137,7 +140,7 @@ fn model_id(cells: &[ModelCell]) -> (usize, usize) {
 }
 
 impl ModelSig {
-    fn of(cells: &[ModelCell], id: u64, inp: &ModelInputs, over: Option<&[ModelCell]>) -> ModelSig {
+    fn of(cells: &[ModelCell], id: u64, quarter: u8, inp: &ModelInputs, over: Option<(&[ModelCell], u8)>) -> ModelSig {
         let mut foliage = [Band::ANY; MAX_FOLIAGE_LAYERS];
         let thinned = if inp.state.is_some() { 0 } else { MAX_FOLIAGE_LAYERS };
         for (i, band) in foliage.iter_mut().enumerate().take(thinned) {
@@ -171,15 +174,17 @@ impl ModelSig {
             ripe_at: inp.ripe >= model::RIPE_AT,
             foliage,
             fruit,
-            over: over.map(model_id),
+            quarter,
+            over: over.map(|(c, q)| (model_id(c), q)),
             state: inp.state.map(|s| s.track),
         }
     }
 
     /// Whether a stamp of `cells` from `inp` would place what this one did.
-    fn holds(&self, cells: &[ModelCell], inp: &ModelInputs, over: Option<&[ModelCell]>) -> bool {
+    fn holds(&self, cells: &[ModelCell], quarter: u8, inp: &ModelInputs, over: Option<(&[ModelCell], u8)>) -> bool {
         self.model == model_id(cells)
-            && self.over == over.map(model_id)
+            && self.quarter == quarter
+            && self.over == over.map(|(c, q)| (model_id(c), q))
             && self.anchor == (inp.anchor.x, inp.anchor.y, inp.anchor.z)
             && self.wilt == inp.wilt
             && self.lip == inp.lip
@@ -370,10 +375,12 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
             Some((lib, cells)) => {
                 let inp = s.model_inputs(lib, flora, stand);
                 let over = over_cells(lib, flora, stand);
+                let quarter = s.plant_quarter(stand.id);
+                let over_turned = over.map(|(c, id)| (c, s.plant_quarter(id)));
                 let held = inc(s).claimants[slot as usize]
                     .sig
                     .as_ref()
-                    .is_some_and(|sig| sig.holds(cells, &inp, over));
+                    .is_some_and(|sig| sig.holds(cells, quarter, &inp, over_turned));
                 if held {
                     continue;
                 }
@@ -381,7 +388,7 @@ fn stands(s: &mut Stands, view: &VoxelView<'_>, flora: FloraView<'_>, lib: Optio
                     s.stamp_model(view, lib, flora, stand, cells, over);
                 });
                 let i = inc(s);
-                i.claimants[slot as usize].sig = Some(ModelSig::of(cells, stand.id, &inp, over));
+                i.claimants[slot as usize].sig = Some(ModelSig::of(cells, stand.id, quarter, &inp, over_turned));
                 set_claims(i, slot, claims, false);
             }
             None => {
