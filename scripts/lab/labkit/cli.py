@@ -1,4 +1,4 @@
-"""lab: submit, status, hosts, cancel, approve, wait, events, kinds, install, daemon."""
+"""lab: submit, status, top, hosts, cancel, approve, wait, events, kinds, install, daemon."""
 
 import argparse
 import json
@@ -11,6 +11,7 @@ import time
 import tomllib
 
 from .core import Context, SpecError, load_kinds
+from .top import cmd_top
 from .hosts import Inventory
 from .store import TERMINAL, Paths, Store, new_id, read_events, spool
 
@@ -257,6 +258,8 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument("--recent", type=int, default=8)
+    p = sub.add_parser("top", help="live read-only dashboard (q quits)")
+    p.add_argument("--once", action="store_true", help="print one plain-text frame and exit")
     sub.add_parser("hosts")
     p = sub.add_parser("cancel")
     p.add_argument("job")
