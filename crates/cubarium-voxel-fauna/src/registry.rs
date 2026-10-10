@@ -126,7 +126,8 @@ fn species_rows() -> Vec<Row> {
             .search(0.01, 0.12).log().grade("A"),
         r("body_max", "org-units", nonneg, "adult structure").grade("D"),
         r("growth_max_per_s", "org-units/s", nonneg, "fastest structure grows from the reserve")
-            .search(1e-6, 1e-4).log().grade("B").prov("derived"),
+            // Includes shipped mass-scaled ceilings and cotrain's x4 maturity box.
+            .search(1e-6, 1e-2).log().grade("B").prov("derived"),
         r("body_min", "org-units", Range::positive(), "death threshold, and a newborn's body").evolve().grade("B"),
         r("birth_body", "org-units", nonneg, "structure at which it can pay for a birth").evolve().grade("B"),
         r("birth_cost", "org-units", nonneg, "a gestation's package: the newborn's body_min plus its reserve")

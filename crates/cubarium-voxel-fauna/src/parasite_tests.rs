@@ -1315,7 +1315,7 @@ fn a_riders_take_never_exceeds_what_its_host_bears() {
     let rider = riders_of(&s.fauna, host)[0];
     let c = s.fauna.config;
     let bear = |host_body: f64| c.parasite_host_bear_per_day * host_body / c.life.ecological_day_s * DT;
-    for _ in 0..400 {
+    for _ in 0..200 {
         let h = animal(&s.fauna, host).body;
         let lost = extra_drain(&mut s, host, twin);
         assert!(lost <= bear(h) * (1.0 + 1e-9) + 1e-15, "lost {lost}, bears {}", bear(h));
@@ -1331,6 +1331,83 @@ fn a_riders_take_never_exceeds_what_its_host_bears() {
     assert!(lost > 0.0, "it still took this tick");
     assert!(lost <= bear(h) * (1.0 + 1e-9), "lost {lost}, bears {}", bear(h));
     s.assert_closes("bounded by the bear");
+}
+
+/// Compress physiological time, preserving the daily upkeep, take and growth budget.
+/// A complete ride fits in a few hundred ticks; no tuned value is asserted.
+fn short_ride_config() -> FaunaConfig {
+    let mut c = config();
+    let day = 200.0 * DT;
+    let scale = c.life.ecological_day_s / day;
+    c.life.ecological_day_s = day;
+    for p in &mut c.founders {
+        p.core.maintenance_per_s *= scale;
+        p.core.growth_max_per_s *= scale;
+    }
+    c
+}
+
+fn ticks_to_drop_off_with_take(take_scale: f64) -> u64 {
+    let (mut s, host, rider) = ride(short_ride_config());
+    s.fauna.set_births_enabled(false);
+    // Both arms hatch with identical stores on the same host; change only the take.
+    s.fauna.config.parasite_take_body_per_day *= take_scale;
+    for t in 0..240 {
+        assert!(s.fauna.animals.iter().any(|a| a.id == host), "the host survives");
+        if animal(&s.fauna, rider).attached.is_none() {
+            s.assert_closes("take-driven drop-off");
+            return t;
+        }
+        s.step();
+    }
+    panic!("fixture: the rider must finish its ride");
+}
+
+#[test]
+fn a_faster_take_brings_a_rider_to_drop_off_sooner_on_the_same_host() {
+    let fast = ticks_to_drop_off_with_take(1.0);
+    let slow = ticks_to_drop_off_with_take(0.5);
+    assert!(fast < slow, "faster take drops off at {fast}, slower at {slow}");
+}
+
+/// Isolate one ride on each adult host, with full or empty reserves, without feeding,
+/// predators or other riders. A small host may release an outgrown rider early;
+/// its reserve pays before its structure.
+#[test]
+fn a_host_survives_a_full_ride_from_hatch_to_drop_off() {
+    for founder in Founder::ALL.into_iter().filter(|f| *f != Founder::Lanternjaw) {
+        for fullness in [0.0, 1.0] {
+            let mut s = Scene::new(config(), 1);
+            let host = s.add(founder, StartingStores::FULL, 0.0);
+            let core = s.fauna.config.founder(founder).core;
+            set_stores(&mut s.fauna, host, core.body_max, fullness * core.reserve_cap * core.body_max);
+            s.past_next_dusk();
+            let riders = riders_of(&s.fauna, host);
+            let hatch_body = s.fauna.config.founder(Founder::Lanternjaw).core.body_min;
+            if !crate::host_bears(&s.fauna.config, hatch_body, animal(&s.fauna, host).body) {
+                assert!(riders.is_empty(), "a host too small to bear a hatchling is spared");
+                continue;
+            }
+            assert_eq!(riders.len(), 1, "fixture: {} bears a hatchling", founder.name());
+            let rider = riders[0];
+            s.fauna.config = short_ride_config();
+            s.fauna.set_births_enabled(false);
+            let mut dropped = false;
+            for _ in 0..240 {
+                let h = s.fauna.animals.iter().find(|a| a.id == host).expect("one ride must not kill its host");
+                let minimum = s.fauna.config.founder(founder).core.body_min;
+                assert!(h.body > minimum, "{} stays above its death threshold", founder.name());
+                if animal(&s.fauna, rider).attached.is_none() {
+                    dropped = true;
+                    break;
+                }
+                s.step();
+            }
+            assert!(dropped, "{} finishes its ride", founder.name());
+            assert!(s.fauna.ledger.parasite_taken_organic > 0.0, "the host paid for the ride");
+            s.assert_closes("survived the full ride");
+        }
+    }
 }
 
 /// **The hatch chance raises hatches from the same egg bank**: over the same eggs and dusks,

@@ -2349,9 +2349,9 @@ pub struct FaunaConfig {
     /// it takes out of its host — reserve first, then structure, all three currencies at the
     /// host's density — straight into its own reserve. Replaces the fixed share of the
     /// host (`parasite_take_per_day`, 0.09 of the host a day), which left a rider on a small
-    /// host sitting under drop-off for hours. Default 2: about twice its own body a world
-    /// day, so a hatchling grows about 1.9 e-folds a world day after its upkeep and goes
-    /// from hatchling to drop-off (×5.6) on a grazer in about 0.9 world days (1.8 h).
+    /// host sitting under drop-off for hours. LJ-GROW-B: default 4, four times its own
+    /// body per world day; the shipped growth budget predicts about 54 min attached
+    /// and 73 min from hatch to adult on a mid-size grazer.
     pub parasite_take_body_per_day: f64,
     /// **What a host can bear** (LANTERNJAW-LIFE): the host's body per world day it gives a
     /// rider at most. A rider whose take ([`FaunaConfig::parasite_take_body_per_day`] × its
@@ -2359,11 +2359,10 @@ pub struct FaunaConfig {
     /// below the normal drop-off size if need be, and then looks for a host that bears it
     /// ([`FaunaConfig::parasite_switch`]); a host that cannot bear even a hatchling is no
     /// host. So "outgrows" is set by the take the host
-    /// can bear, a host-to-rider size ratio of `bear / take` (0.25 at the defaults). Default
-    /// 0.5: a grown grazer (1.5) carries a rider to 0.375, past drop-off; a littershredder
-    /// (0.375) lets go of it at about 0.09, a fifth of the way; a ripple-snail (0.15) can
-    /// carry no hatchling. Half its body a day at the end of a ride is about eight times a
-    /// grazer's own daily need, which its intake (about 29 times its upkeep) covers.
+    /// can bear, a rider-to-host size ratio of `bear / take` (0.45 at the defaults).
+    /// LJ-GROW-B: default 1.8. A mid-size grazer (0.67 org-units) bears the rider to
+    /// its normal drop-off (0.294); smaller hosts release it sooner. The faster drain
+    /// is a parasite cost, paid from the host's reserve before its structure.
     pub parasite_host_bear_per_day: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
     /// `body_max`, dimensionless within `(0, 1]`. Default 0.28 (LANTERNJAW-LIFE, was 0.24):
@@ -2454,8 +2453,8 @@ impl Default for FaunaConfig {
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_take_body_per_day: 2.0,
-            parasite_host_bear_per_day: 0.5,
+            parasite_take_body_per_day: 4.0,
+            parasite_host_bear_per_day: 1.8,
             parasite_detach_body_fraction: 0.28,
             // Wrysk 2026-10-10: an outgrown larva looks for a bigger host.
             parasite_switch: true,
