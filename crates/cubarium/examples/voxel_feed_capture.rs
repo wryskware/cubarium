@@ -7,9 +7,16 @@
 //!   by swapping the model at 30 frames a second (`VoxelGpuSink::set_figure_cells`);
 //! - `--arm b`: the bone rig, each cube turned with its bone (`[figures] rig = "turn"`, shipped).
 //!
+//! `--arm a` without `--flipbook` is today's drawing: the rig off, the baked model standing
+//! as it crops (and, asleep, the class-path settle).
+//!
+//! `--founder loftstrider` (FEED-ROLLOUT, `design/handoffs/feed-rollout-2026-10-10.md`): an
+//! adult and a newborn calf side by side, on a longer script — a feeding bout, a short one,
+//! then asleep (`State::Asleep`, the rest clip) and awake again.
+//!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
-//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister]
+//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -45,13 +52,22 @@ use cubarium_voxel_flora::{Flora, FloraConfig};
 const BOUTS: [(f64, f64); 2] = [(0.5, 4.5), (5.3, 6.0)];
 /// Seconds the capture runs.
 const LENGTH_S: f64 = 7.5;
+/// The loftstrider's script: two loops of its 2.6 s feeding clip, a short bout, then asleep
+/// (standing → lowered → standing).
+const LS_BOUTS: [(f64, f64); 2] = [(0.5, 6.0), (7.0, 8.0)];
+const LS_SLEEP: (f64, f64) = (9.0, 12.5);
+const LS_LENGTH_S: f64 = 14.5;
 const VOXEL_M: f64 = 0.125;
 const HZ: f64 = cubarium_voxel::TICK_HZ as f64;
 
 fn world(width: u32, depth: u32) -> World {
+    world_of(width, 8, depth)
+}
+
+fn world_of(width: u32, height: u32, depth: u32) -> World {
     let cfg = Config {
         width,
-        height: 8,
+        height,
         depth,
         voxel_m: VOXEL_M,
         ..Config::default()
@@ -75,6 +91,21 @@ fn world(width: u32, depth: u32) -> World {
 fn eating(tick: u64) -> bool {
     let t = tick as f64 / HZ;
     BOUTS.iter().any(|&(from, to)| t >= from && t < to)
+}
+
+/// The script's state at `tick`: the loftstrider's (`ls`) or the others'.
+fn state_at(tick: u64, ls: bool) -> State {
+    let t = tick as f64 / HZ;
+    if !ls {
+        return if eating(tick) { State::Cropping } else { State::Resting };
+    }
+    if LS_BOUTS.iter().any(|&(from, to)| t >= from && t < to) {
+        State::Cropping
+    } else if t >= LS_SLEEP.0 && t < LS_SLEEP.1 {
+        State::Asleep
+    } else {
+        State::Resting
+    }
 }
 
 /// The flipbook (`feed_flipbook.py`'s JSON): distinct frames, and per weight step `k` and
@@ -203,7 +234,8 @@ fn main() -> Result<()> {
                 founder = match args.next().context("--founder NAME")?.as_str() {
                     "frondgrazer" | "browser" => Founder::Browser,
                     "chorister" | "veilhound" => Founder::Chorister,
-                    f => bail!("--founder frondgrazer or chorister, not {f}"),
+                    "loftstrider" => Founder::Loftstrider,
+                    f => bail!("--founder frondgrazer, chorister or loftstrider, not {f}"),
                 }
             }
             _ if out.is_none() => out = Some(PathBuf::from(a)),
@@ -217,7 +249,8 @@ fn main() -> Result<()> {
     };
     let flip = match (&*arm, &flip_path) {
         ("a", Some(p)) => Some(Flipbook::load(p)?),
-        ("a", None) => bail!("arm a needs --flipbook PATH (scripts/blender/feed_flipbook.py)"),
+        // today's drawing: the rig off, no flipbook
+        ("a", None) => None,
         _ => None,
     };
     if let Some(n) = perf {
@@ -228,9 +261,12 @@ fn main() -> Result<()> {
     let frames = out.join("frames");
     std::fs::create_dir_all(&frames)?;
 
-    // the Veilhound is 2.2 m with its tail, 18 voxels: a wider and deeper floor
+    // the Veilhound is 2.2 m with its tail, 18 voxels: a wider and deeper floor; the
+    // loftstrider 3.4 m tall and 2.4 m across its fronds, reaching further: taller still
+    let ls = founder == Founder::Loftstrider;
     let (w, xs, z) = match founder {
         Founder::Chorister => (world(48, 16), [15, 36], 8),
+        Founder::Loftstrider => (world_of(52, 36, 20), [16, 38], 10),
         _ => (world(22, 7), [6, 15], 3),
     };
     let mut fauna = Fauna::new(FaunaConfig::default());
@@ -252,10 +288,12 @@ fn main() -> Result<()> {
     }
     let flora = Flora::new(FloraConfig::default());
     let fv = fauna.view();
-    let adult = fv.config.founder(founder).core.body_max;
+    let core = &fv.config.founder(founder).core;
+    let (adult, newborn) = (core.body_max, core.body_min);
     let mut animals = fv.animals.to_vec();
-    for a in &mut animals {
-        a.body = adult;
+    for (i, a) in animals.iter_mut().enumerate() {
+        // the loftstrider's second is a newborn calf (its own build, its own bin)
+        a.body = if ls && i == 1 { newborn } else { adult };
         a.state = State::Resting;
     }
 
@@ -278,10 +316,12 @@ fn main() -> Result<()> {
     }
     let models =
         Arc::new(ModelLibrary::load(&cfg.models_dir, VOXEL_M).context("the baked models")?);
-    let loop_s = models
-        .rig(founder)
-        .with_context(|| format!("the {} has no rig: rebake it", founder.name()))?
-        .loop_s();
+    let loop_s = {
+        let r = models
+            .rig(founder)
+            .with_context(|| format!("the {} has no rig: rebake it", founder.name()))?;
+        r.loop_s(r.clip("cropping").context("the rig has no feeding clip")?)
+    };
     let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
     let (rw, rh) = (u32::from(proj.raster_w), u32::from(proj.raster_h));
     let mut sink = VoxelGpuSink::new(
@@ -293,17 +333,13 @@ fn main() -> Result<()> {
         },
     )?;
 
-    let last = (LENGTH_S * HZ).round() as u64;
+    let last = ((if ls { LS_LENGTH_S } else { LENGTH_S }) * HZ).round() as u64;
     let ws = weights(last);
     let mut frame = 0u32;
     let mut shown: Vec<Option<*const Vec<ModelCell>>> = vec![None; animals.len()];
     for tick in 1..=last {
         for a in &mut animals {
-            a.state = if eating(tick) {
-                State::Cropping
-            } else {
-                State::Resting
-            };
+            a.state = state_at(tick, ls);
         }
         for k in 0..3 {
             let t = tick as f64 + f64::from(k) / 3.0;
