@@ -131,10 +131,11 @@ def print_hosts(store, paths, brief=False):
         if not host.enabled:
             notes += "; disabled"
         state = "up" if up else "down"
+        thread_label = host.thread_label(threads)
         if brief:
-            print(f"  {name:9} {state:5} {threads}/{host.usable} threads  {mem:.0f}/{host.max_mem_gb:.0f} GB  {notes}")
+            print(f"  {name:9} {state:5} {thread_label} threads  {mem:.0f}/{host.max_mem_gb:.0f} GB  {notes}")
         else:
-            print(f"{name:10} {host.kind:6} {host.arch:8} {state:6} {f'{threads}/{host.usable}':>12} "
+            print(f"{name:10} {host.kind:6} {host.arch:8} {state:6} {thread_label:>12} "
                   f"{f'{mem:.0f}/{host.max_mem_gb:.0f}':>10}  {notes}")
     if not brief:
         for name in inventory.ec2.get("types", []):
