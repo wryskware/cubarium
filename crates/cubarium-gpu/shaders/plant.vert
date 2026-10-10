@@ -64,13 +64,27 @@ void main() {
         d1 = zf;
     }
     float width = 2.0 * h * S;
+    // A drape cord's long wave (`drape_cord.glsl`): a drape cell's front quad (host flag, bit
+    // 30 of its faces word; a leaving cell's in case) reaches `pc.t.w` voxels either side of
+    // its centre, so the cord shows where it swings into the next columns.
+    vec2 span = vec2(0.0, 1.0);
+    if (face == 0 && pc.t.w > 0.5 && (plantDying(c) || (c.w & 0xC0000000u) == 0xC0000000u)) {
+        span = vec2(0.5 - pc.t.w, 0.5 + pc.t.w);
+    }
     float rw = pc.layer.z;
     float rel = (ctr.x - h) * S - float(pc.k.z);
     float left = rel - rw * floor(rel / rw);
     if (copy) {
-        if (left + width <= rw) { cull(); return; }
-        left -= rw;
+        if (left + span.y * width > rw) {
+            left -= rw;
+        } else if (left + span.x * width < 0.0) {
+            left += rw;
+        } else {
+            cull();
+            return;
+        }
     }
+    ab.x = mix(span.x, span.y, ab.x);
     vec2 px = vec2(left + ab.x * width, mix(top, bottom, ab.y));
     float aa = float(pc.k.y);
     gl_Position = vec4(px * aa / pc.layer.xy * 2.0 - 1.0, plantDepth(mix(d0, d1, ab.y)), 1.0);

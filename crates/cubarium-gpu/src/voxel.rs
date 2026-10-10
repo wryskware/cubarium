@@ -3306,7 +3306,7 @@ impl VoxelRenderer {
                 let offset = (self.uniform_stride * frame.slot as u64) as u32;
                 let geom = (p.s, p.rise, p.base);
                 if let Some(pl) = &self.plants {
-                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x);
+                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x, p.drape_cords.reach(p.s));
                 }
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_PLANT_VIS);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_START);

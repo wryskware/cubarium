@@ -86,7 +86,8 @@
 //! DRAPE-CORD (`design/handoffs/drape-cord-2026-10-10.md`), GPU only: `--plain` draws without
 //! the face textures (the default draw; `--gpu` otherwise turns them on). `--cords N` draws
 //! the drapes as N-pixel cords (0: the cubes), `--cord-shape straight|eased` and
-//! `--cord-wander W` set their path (`[drape]`); absent, the config's defaults. `--weather
+//! `--cord-wander W` set their path (`[drape]`), `--cord-wave P,A` the long wave's period and
+//! amplitude in voxels (round 2); absent, the config's defaults. `--weather
 //! SPEC` draws under a weather preview (`fixed:PHASE` for a time of day, as `light_capture
 //! --weather-preview`). `--anim N` writes N frames `1 / --anim-hz` (default 60) seconds apart
 //! from `--anim-start` seconds as `OUT-KKK.png` (the breeze sways the plants), and prints
@@ -187,6 +188,7 @@ fn main() -> Result<()> {
     let mut cords: Option<u32> = None;
     let mut cord_shape: Option<cubarium::voxel::CordShapeConfig> = None;
     let mut cord_wander: Option<f32> = None;
+    let mut cord_wave: Option<(f32, f32)> = None;
     let mut weather: Option<cubarium::sink::gpu::weather::WeatherPreview> = None;
     let mut anim = 0u32;
     let mut anim_hz = 60.0f64;
@@ -211,6 +213,11 @@ fn main() -> Result<()> {
                 })
             }
             "--cord-wander" => cord_wander = Some(args.next().context("--cord-wander W")?.parse()?),
+            "--cord-wave" => {
+                let v = args.next().context("--cord-wave PERIOD,AMPLITUDE")?;
+                let (p, a) = v.split_once(',').context("--cord-wave PERIOD,AMPLITUDE")?;
+                cord_wave = Some((p.parse()?, a.parse()?));
+            }
             "--weather" => weather = Some(args.next().context("--weather SPEC")?.parse()?),
             "--anim" => anim = args.next().context("--anim N")?.parse()?,
             "--anim-hz" => anim_hz = args.next().context("--anim-hz HZ")?.parse()?,
@@ -758,6 +765,10 @@ fn main() -> Result<()> {
         }
         if let Some(w) = cord_wander {
             cfg.drape.cord_wander = w;
+        }
+        if let Some((p, a)) = cord_wave {
+            cfg.drape.wave_period = p;
+            cfg.drape.wave_amplitude = a;
         }
         let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;
         let mut sink = VoxelGpuSink::new(
