@@ -83,6 +83,14 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
 
 ## Training resources — correction, 2026-09-18
 
+### Agent Rust builds are gentle — Wrysk, 2026-10-10
+
+"can our rust builds maybe not run at like -j 32? my machine gets bombed with rust-lld and it
+hammers IO and gets less responsive." `~/.local/bin/cargo` wraps cargo for agent shells (CLAUDECODE,
+CODEX_*, labd's LABD_TASK): at most 8 jobs (`CARGO_BUILD_JOBS`, unless set), SCHED_IDLE, nice 19 and
+the idle IO class, all inherited by rustc and rust-lld. labd's `[build] threads` is 8. Don't pass a
+larger `-j`. A human shell gets plain cargo.
+
 ### Simulation study CPU placement — Wrysk, 2026-10-06
 
 Keep each multithreaded simulation study (censuses, probes, staged arms and soaks)

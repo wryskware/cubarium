@@ -11,7 +11,7 @@ remote_poll_s = 30    # remote task polls
 # kind_paths = ["~/lab-kinds"]   # extra kind plugin dirs (also $LAB_KIND_PATH)
 
 [build]
-threads = 16          # cargo -j and the thread charge for build / cargo-test tasks
+threads = 8           # cargo -j and the thread charge for build / cargo-test tasks (Wrysk 2026-10-10: not -j 32; rust-lld hammers IO)
 mem_gb = 16           # memory charge for build / cargo-test tasks
 keep_trees = 3        # snapshot trees kept (newest first) under ~/.cache/labd/trees as seeds
 # Seed candidates for target/<profile>, relative to the built tree and to this checkout.
