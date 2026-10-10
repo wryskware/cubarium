@@ -149,8 +149,9 @@ SPECIMEN_YOUNG = {"chorister": [0.46]}
 # their specimen, one adult bin at the builder's reference size, as the presenter draws them
 # today: the founder path would scale the bellwing to its sim body (0.125 x 0.125 x
 # 0.0625 m), squashing the picked model (0.375 m wingspan) to 3 cells (FEED-ROLLOUT,
-# 2026-10-10).
-AS_SPECIMEN = {"bellwing"}
+# 2026-10-10). The other four newly listed founders are committed as specimens too, so a
+# full bake keeps them as they are until each gets its own founder bins on purpose.
+AS_SPECIMEN = {"bellwing", "capgnawer", "ripple-snail", "seedporter", "chorister"}
 
 # A founder's other life stage, baked as a specimen of one bin at its built (true) size:
 # name -> `animal_models.lanternjaw_larva` kind. The lanternjaw's rider larva, the
