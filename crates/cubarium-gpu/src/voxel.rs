@@ -107,18 +107,41 @@ pub struct EmitCell {
     /// shown (`0..=1`): the shader draws both tiles, the old one this share of coverage and
     /// colour.
     pub vine: Option<((u8, u8), f32)>,
+    /// CELL-SHRINK: a plant cell's grow-in size (`0..=1`) while it arrives or leaves through
+    /// the plant pass, which weights the light it casts on the rest of the world: its AO
+    /// crease and its sun shadow (`world.glsl`'s `plantSize`). `None` casts it whole.
+    pub plant: Option<f32>,
+    /// CELL-SHRINK: on a crown cell beside a cell of its crown that is arriving or leaving,
+    /// the share (`0..=1`) of its outline edge on that side (left, right) drawn: one less
+    /// the neighbour's size (`world.glsl`'s `crownEdge`). `None` draws the edge as the
+    /// cell's glyph has it. Not carried beside a vine cell's old tile.
+    pub edge: [Option<f32>; 2],
 }
 
 impl EmitCell {
     /// An emitter's colour and on share alone.
     pub fn emitter(cell: u32, rgb: [f32; 3], on: f32) -> EmitCell {
-        EmitCell { cell, rgb, on, emits: true, vine: None }
+        EmitCell { cell, rgb, on, emits: true, vine: None, plant: None, edge: [None; 2] }
+    }
+
+    /// A cell with nothing to carry yet: no emission, no old tile, a whole plant cell.
+    pub fn none(cell: u32) -> EmitCell {
+        EmitCell { cell, rgb: [0.0; 3], on: 0.0, emits: false, vine: None, plant: None, edge: [None; 2] }
     }
 }
 
+/// A plant size's code in an emitter table entry's fourth word (bits 24..31): 0 for none (a
+/// whole cell), else `1 + size × PLANT_STEPS`.
+pub const PLANT_STEPS: f32 = 125.0;
+
+/// A crown edge share's code in an emitter table entry's fourth word (bits 0..8 left, 8..16
+/// right, where a vine cell keeps its old tile): 0 for none, else `1 + share × EDGE_STEPS`.
+pub const EDGE_STEPS: f32 = 254.0;
+
 /// An emitter table entry's fourth word: bit 31 set when the entry carries no emission;
 /// a vine cell's old tile in bits 0..16 (`b`, then `a`) and its share, `1..=255` of 255, in
-/// bits 16..24 (0: no old tile). `world.glsl`'s `cellEmit` and `cellVineFrom` read it.
+/// bits 16..24 (0: no old tile); a plant cell's size in bits 24..31 ([`PLANT_STEPS`]).
+/// `world.glsl`'s `cellEmit`, `cellVineFrom` and `plantSize` read it.
 pub fn emit_word(c: &EmitCell) -> u32 {
     let mut w = if c.emits { 0 } else { 1 << 31 };
     if let Some(((b, a), share)) = c.vine {
@@ -127,12 +150,46 @@ pub fn emit_word(c: &EmitCell) -> u32 {
             w |= u32::from(b) | u32::from(a) << 8 | s << 16;
         }
     }
+    if w & 0xff_0000 == 0 {
+        for (k, e) in c.edge.iter().enumerate() {
+            if let Some(e) = e {
+                w |= (1 + (e.clamp(0.0, 1.0) * EDGE_STEPS).round() as u32) << (8 * k);
+            }
+        }
+    }
+    if let Some(size) = c.plant {
+        w |= (1 + (size.clamp(0.0, 1.0) * PLANT_STEPS).round() as u32) << 24;
+    }
     w
+}
+
+/// The share of a crown cell's edge (`side` 0 left, 1 right) [`emit_word`] carries, as the
+/// shader reads it back (1: the glyph's own edge).
+pub fn edge_share_of(word: u32, side: usize) -> f32 {
+    if word & 0xff_0000 != 0 {
+        return 1.0;
+    }
+    match (word >> (8 * side)) & 255 {
+        0 => 1.0,
+        e => (e - 1) as f32 / EDGE_STEPS,
+    }
+}
+
+/// The size [`emit_word`] gives a plant cell, as the shader reads it back (1: whole).
+pub fn plant_size_of(word: u32) -> f32 {
+    match (word >> 24) & 127 {
+        0 => 1.0,
+        p => (p - 1) as f32 / PLANT_STEPS,
+    }
 }
 
 /// The bit of `view.w` (the emitter table's size) saying some entry carries a vine cell's
 /// old tile, so the shader looks vine cells up only then.
 pub const EMIT_VINES: u32 = 1 << 20;
+
+/// The bit of `view.w` saying some entry carries a plant cell's size (CELL-SHRINK), so the
+/// shader looks plant cells up only then.
+pub const EMIT_PLANTS: u32 = 1 << 21;
 
 /// The emitter table's hash of `key` (a texture index plus one) into `cap` entries, a power
 /// of two: `world.glsl`'s `emitHash`.
@@ -3244,7 +3301,10 @@ impl VoxelRenderer {
         }
         block.view[2] = (EMIT_TABLE * frame.slot) as i32;
         let vines = self.emit_cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
-        block.view[3] = (cap | if vines && cap > 0 { EMIT_VINES } else { 0 }) as i32;
+        let plants = self.emit_cells.iter().any(|c| c.plant.is_some());
+        block.view[3] = (cap
+            | if vines && cap > 0 { EMIT_VINES } else { 0 }
+            | if plants && cap > 0 { EMIT_PLANTS } else { 0 }) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
         let p = &self.params;
         let sun_map = if redraw {
@@ -4636,6 +4696,8 @@ pub(crate) mod tests {
                 on: (k % 11) as f32 / 10.0,
                 emits: k % 3 != 0,
                 vine: (k % 2 == 0).then(|| ((k as u8, (k >> 3) as u8), (k % 7) as f32 / 6.0)),
+                plant: (k % 5 != 0).then(|| (k % 13) as f32 / 12.0),
+                edge: [(k % 3 == 1).then(|| (k % 9) as f32 / 8.0), (k % 4 == 1).then(|| (k % 5) as f32 / 4.0)],
             })
             .collect();
         let mut out = Vec::new();
@@ -4676,6 +4738,22 @@ pub(crate) mod tests {
                     assert!((share - s).abs() <= 0.5 / 255.0 + 1e-6, "its share {share} for {s}");
                 }
                 _ => assert_eq!(share, 0.0, "no old tile"),
+            }
+            // CELL-SHRINK: the plant size as `plantSize` reads it, whole when none was given;
+            // the emission bit and the old tile are left as they were.
+            let size = plant_size_of(word);
+            match c.plant {
+                Some(p) => assert!((size - p).abs() <= 0.5 / PLANT_STEPS + 1e-6, "size {size} for {p}"),
+                None => assert_eq!(size, 1.0, "a cell given no size is whole"),
+            }
+            // Its crown edges, unless an old vine tile holds those bits.
+            let tile = matches!(c.vine, Some((_, s)) if s > 0.5 / 255.0);
+            for side in 0..2 {
+                let got = edge_share_of(word, side);
+                match c.edge[side] {
+                    Some(e) if !tile => assert!((got - e).abs() <= 0.5 / EDGE_STEPS + 1e-6, "edge {got} for {e}"),
+                    _ => assert_eq!(got, 1.0, "no edge given (or a vine tile's) draws the glyph's"),
+                }
             }
         }
         assert!(find(100_004).is_none());

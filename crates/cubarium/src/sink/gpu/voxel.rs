@@ -2229,21 +2229,58 @@ impl Packer {
             self.vine_fades.each(now, |cell, tile, share| match out[..emitters].binary_search_by_key(&cell, |c| c.cell) {
                 Ok(at) => out[at].vine = Some((tile, share)),
                 Err(_) => out.push(cubarium_gpu::voxel::EmitCell {
-                    cell,
-                    rgb: [0.0; 3],
-                    on: 0.0,
-                    emits: false,
                     vine: Some((tile, share)),
+                    ..cubarium_gpu::voxel::EmitCell::none(cell)
                 }),
             });
             out.sort_unstable_by_key(|c| c.cell);
         }
+        // CELL-SHRINK: each plant cell part way through arriving or leaving, its size (the
+        // weight of the light it casts), and the share of its crown neighbours' edges toward
+        // it drawn (one less its size).
+        if let Some(t) = self.plants.as_ref().filter(|t| t.changing()) {
+            // (cell, what: 0 its size, 1 its left edge, 2 its right edge, value)
+            let mut adds: Vec<(u32, u8, f32)> = Vec::new();
+            t.lights(now, |cell, size, [left, right]| {
+                if size < 1.0 {
+                    adds.push((cell, 0, size));
+                }
+                if left != u32::MAX {
+                    adds.push((left, 2, 1.0 - size));
+                }
+                if right != u32::MAX {
+                    adds.push((right, 1, 1.0 - size));
+                }
+            });
+            adds.sort_unstable_by_key(|a| a.0);
+            let listed = out.len();
+            let mut k = 0;
+            while k < adds.len() {
+                let cell = adds[k].0;
+                let found = out[..listed].binary_search_by_key(&cell, |c| c.cell).ok();
+                let mut c = found.map_or(cubarium_gpu::voxel::EmitCell::none(cell), |at| out[at]);
+                while k < adds.len() && adds[k].0 == cell {
+                    let (_, what, v) = adds[k];
+                    match what {
+                        0 => c.plant = Some(v),
+                        1 => c.edge[0] = Some(c.edge[0].map_or(v, |e: f32| e.min(v))),
+                        _ => c.edge[1] = Some(c.edge[1].map_or(v, |e: f32| e.min(v))),
+                    }
+                    k += 1;
+                }
+                match found {
+                    Some(at) => out[at] = c,
+                    None => out.push(c),
+                }
+            }
+            out.sort_unstable_by_key(|c| c.cell);
+        }
     }
 
-    /// Whether the renderer's emitter table has anything to carry: an eased emitter or a
-    /// vine cell part way through a tile swap.
+    /// Whether the renderer's emitter table has anything to carry: an eased emitter, a
+    /// vine cell part way through a tile swap, or a plant cell arriving or leaving.
     fn emit_table_live(&self) -> bool {
-        self.ease.is_some() || !self.vine_fades.is_empty()
+        self.ease.is_some() || !self.vine_fades.is_empty() || self.plants.as_ref().is_some_and(|t| t.changing())
     }
 
     /// GLOW-EASE round 2: the vines were put together again (`old` the cells they had): a
@@ -2402,13 +2439,33 @@ impl Packer {
                 t.0[2] = g.0[2];
                 return Some((t, key));
             }
+            // CELL-SHRINK: a plant cell leaving through the plant pass's grow-in stays in the
+            // volume while it shrinks (the walk passes it; the plant pass draws it), so the
+            // AO crease and the shadow it casts fade with its size (`world.glsl`'s
+            // `plantSize`). Only in dry air nothing else claims: water would have the walk
+            // draw it, and a vine cell takes the air.
+            if let Some(t) = &self.plants
+                && let Some((g, key)) = t.ghost(i as u32)
+                && !self.vine_at.contains_key(&(i as u32))
+            {
+                let mut t = texel_of(mats, m, view.free[src], view.pore[src], g.part(), g.glyph(), 0);
+                t.0[2] = g.0[2];
+                return t.dry().then_some((t, key));
+            }
             return None;
         }
         let stands = &self.stands;
+        // CELL-SHRINK: an edge toward a crown cell still growing in stays drawn, faded by its
+        // size (`world.glsl`'s `crownEdge`), until it has grown.
+        let arriving = |dx: u32| {
+            self.plants
+                .as_ref()
+                .is_some_and(|t| t.arriving(VoxelStaging::index(w, h, (x + dx) % w, y, z) as u32))
+        };
         let mut glyph = appearance::plant_glyph(
             p,
-            !stands.crown_continues(p, xi - 1, y, z),
-            !stands.crown_continues(p, xi + 1, y, z),
+            !stands.crown_continues(p, xi - 1, y, z) || arriving(w - 1),
+            !stands.crown_continues(p, xi + 1, y, z) || arriving(1),
         );
         // An emitting crown or heart cell draws the atlas's emissive variant (only the lit
         // tier with emission gives a style one).
@@ -2586,6 +2643,10 @@ impl Packer {
         self.overlay.extend(
             self.ease_holds.iter().filter(|(_, h)| matches!(h, Hold::Ghost(..))).map(|(&c, _)| c),
         );
+        if let Some(t) = &mut self.plants {
+            self.overlay.extend(t.ghost_cells());
+            t.take_held(|_| {});
+        }
         self.ease_dirty.clear();
         self.overlay.sort_unstable();
         self.overlay.dedup();
@@ -2754,6 +2815,10 @@ impl Packer {
         // GLOW-EASE's held cells, where a hold began or ended.
         for &i in &self.ease_dirty {
             delta.mark(i);
+        }
+        // CELL-SHRINK: the plant cells leaving, where a hold began or ended.
+        if let Some(t) = &mut self.plants {
+            t.take_held(|i| delta.mark(i));
         }
         self.ease_dirty.clear();
         // GLOW-EASE round 2: every cell part way through a colour swap moves on this pack.
