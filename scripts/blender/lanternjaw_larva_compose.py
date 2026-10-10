@@ -26,6 +26,7 @@ LOOK = {
     "grub": "4 segments arched like an inchworm, pale head, cyan tail tip",
     "nymph": "miniature adult: big head + fangs, folded arms, legs round the flanks, upright stub + bud",
     "leech": "1-wide body along the spine, pale sucker, lifted end with two lure buds",
+    "leechfork": "the leech, its front end forked: two pale-tipped prongs on the diagonals",
     "tick3": "round 2: tick, 3 wide, centred on the spine; one lure cell on the middle row",
     "tick2": "round 2: tick, 2 wide, drawn half a voxel across to centre it; lure across both rows",
     "grub3": "round 2: grub, 3 wide, centred on the spine; cyan tail foot across all three rows",

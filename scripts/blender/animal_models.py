@@ -1281,6 +1281,23 @@ def lanternjaw_larva(kind):
         seg_tail([(-0.15, 0.0, 0.08), (-0.14, 0.0, 0.17), (-0.13, 0.0, 0.255)], 0.03, 0.025)
         ell((-0.125, 0.0, 0.3), (0.035, 0.035, 0.035), c("a_lure"))
         return
+    if kind == "leechfork":
+        # Wrysk 2026-10-09, a sketch on the leech: "leech but forked at the end like this".
+        # The front end forks: the body runs one cell further, to where the sucker was, and
+        # two prongs reach on the diagonals from there, one cell forward and one aside, their
+        # tips pale (the mouth moved out to the two tips). The lifted rear and its two buds as
+        # the leech's.
+        tube([(0.11, 0.0, 0.06), (0.0, 0.0, 0.06), (-0.125, 0.0, 0.062)], 0.044, 0.04, c("a_main"), seg=12)
+        cyl((-0.125, 0.0, 0.062), (-0.25, 0.0, 0.1875), 0.024, 0.022, mat=c("a_main"), seg=10)
+        ell((-0.25, 0.0, 0.1875), (0.04, 0.04, 0.04), c("a_main"))
+        for sy in (-1, 1):
+            # thin enough, and from far enough back, to take neither the cell in front of the
+            # fork nor the ones beside it: only the tip's cell
+            tube([(0.14, 0.0, 0.06), (0.25, sy * 0.125, 0.06)], 0.014, 0.014, c("a_main"), seg=8)
+            ell((0.25, sy * 0.125, 0.06), (0.03, 0.03, 0.03), c("a_head"))
+            cyl((-0.25, 0.0, 0.19), (-0.25, sy * 0.1, 0.19), 0.012, 0.01, mat=c("a_mark"), seg=6)
+            ell((-0.25, sy * 0.125, 0.1875), (0.03, 0.03, 0.03), c("a_lure"))
+        return
     if kind == "leech":
         # one voxel wide along the spine: the body lying flat for two cells behind the
         # mouth, then lifting off the host at the back
