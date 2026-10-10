@@ -2333,8 +2333,9 @@ pub struct FaunaConfig {
     /// species'; [`effective_config`] is the one lookup every rule uses.
     pub founders: [FounderPhysiology; Founder::COUNT],
     /// The chance a dormant egg past its footfall gate hatches at one dusk
-    /// ([`hatch_draw`]; default a third: the bank bet-hedges
-    /// across nights).
+    /// ([`hatch_draw`]; default two thirds, LJ-GROW (Wrysk 2026-10-10, was a third): the
+    /// bank still bet-hedges across nights, and an egg left unhatched mostly dies of its
+    /// viability (median ~7.3 h shipped) before a later dusk.
     pub hatch_chance_per_dusk: f64,
     /// **Parasite hatchlings** (`design/handoffs/voxel-predation-parasite-2026-10-01.md`):
     /// metres from a hatching egg's column centre within which the nearest living
@@ -2449,7 +2450,7 @@ impl Default for FaunaConfig {
         FaunaConfig {
             frondgrazer,
             founders: Founder::ALL.map(FounderPhysiology::frozen),
-            hatch_chance_per_dusk: 1.0 / 3.0,
+            hatch_chance_per_dusk: 2.0 / 3.0,
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,

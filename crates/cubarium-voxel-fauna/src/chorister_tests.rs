@@ -215,15 +215,14 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
     let near = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1e-12);
     // LANTERNJAW-LIFE gave the lanternjaw its own smaller hatchling and earlier adulthood;
     // the chorister keeps the P1 lanternjaw's (0.0034 and 0.021 at mass 1) it was built on.
+    // These are the build's own inputs, not tuned numbers.
     for (what, got, base) in [
         ("body_max", ch.core.body_max, lj.core.body_max),
         ("body_min", ch.core.body_min, 0.0034),
         ("birth_body", ch.core.birth_body, 0.021),
-        (
-            "growth_max_per_s",
-            ch.core.growth_max_per_s,
-            lj.core.growth_max_per_s,
-        ),
+        // LJ-GROW raised the lanternjaw's growth ceiling; the chorister keeps the one it was
+        // built on (2.5e-6 at mass 1).
+        ("growth_max_per_s", ch.core.growth_max_per_s, 2.5e-6),
     ] {
         assert!(
             near(got, base * r),

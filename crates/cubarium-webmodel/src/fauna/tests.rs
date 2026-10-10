@@ -569,9 +569,10 @@ fn an_abandoned_carcass_goes_to_the_carrion_pool() {
         let (mut m, p) = lone_hunter(fits);
         let lj = Founder::Lanternjaw;
         let sc = p.fauna.founder(lj).core;
-        // Sated: a full reserve and stomach, so it neither eats nor hunts.
-        let mut c = Cohort::new(1.0, sc.birth_body, sc.reserve_of(sc.birth_body));
-        c.b.stomach[Food::Carrion.index()] = p.fauna.founder(lj).gut.capacity(sc.birth_body);
+        // Sated: full-grown with a full reserve and stomach, so it neither eats nor hunts
+        // (a growing one spends its reserve on structure and gets hungry again).
+        let mut c = Cohort::new(1.0, sc.body_max, sc.reserve_of(sc.body_max));
+        c.b.stomach[Food::Carrion.index()] = p.fauna.founder(lj).gut.capacity(sc.body_max);
         c.carcass = 1.0;
         m.add(lj, c);
         let mut back = 0.0;
