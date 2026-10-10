@@ -502,7 +502,7 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
     `bones`, each cell's rig bone (its part's `ob["bone"]`, the root's when it has none, or
     by the cell's position for a part split across a joint: `animal_models.part_bone`) is
     recorded there the way its material is: from the part that claimed it."""
-    parts, accents = [], []
+    parts, accents, nested = [], [], []
     for ob in objs:
         me = ob.data
         vs = [v.co.copy() for v in me.vertices]
@@ -516,7 +516,9 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         face_slot = [slots[p.material_index] for p in me.polygons]
         bone = ob
-        if len(slots) == 1 and animal_role(slots[0]) == "accent":
+        if ob.get("nested"):
+            nested.append((bvh, lo, hi, slots[0], bone))
+        elif len(slots) == 1 and animal_role(slots[0]) == "accent":
             accents.append((bvh, lo, hi, slots[0], bone))
         else:
             parts.append((bvh, lo, hi, face_slot, bone))
@@ -572,9 +574,36 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
             if bones is not None:
                 c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
                 bones[key] = A.part_bone(bone, c)
+    nested_cells(nested, vox, cells, bones)
     if bones is not None:
         own_cells(objs, vox, cells, bones)
     return cells
+
+
+def nested_cells(nested, vox, cells, bones):
+    """The nested parts (`animal_models.nested`: a retractable neck's segment inside the
+    body at rest): each held cell hidden inside the body (all six faces against held cells)
+    whose centre is inside a nested part takes the part's material and, with a dict `bones`,
+    its bone. Nothing is added or removed and no outer cell changes, so the resting body
+    draws as it did; the clip slides those cells out with their bone."""
+    if not nested:
+        return
+    held = set(cells)
+    half = vox / 2
+    hidden = [key for key in cells
+              if all((key[0] + di, key[1] + dj, key[2] + dk) in held
+                     for di, dj, dk in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)))]
+    for key in hidden:
+        c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
+        for bvh, plo, phi, slot, ob in nested:
+            if any(c[a] < plo[a] - half or c[a] > phi[a] + half for a in range(3)):
+                continue
+            loc, nor, _, _ = bvh.find_nearest(c)
+            if loc is not None and (c - loc).dot(nor) < 0:
+                cells[key] = slot
+                if bones is not None:
+                    bones[key] = A.part_bone(ob, c)
+                break
 
 
 def own_cells(objs, vox, cells, bones):

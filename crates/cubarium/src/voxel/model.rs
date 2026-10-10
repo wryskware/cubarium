@@ -1359,6 +1359,44 @@ mod tests {
         assert!(super::super::colours::specimen_coat("ripple_snail").is_some(), "the coat too");
     }
 
+    /// FEED-ROLLOUT frondgrazer: the retractable neck's cells nested in the shield (the rig's
+    /// `neck_in` bone) are hidden at rest, every face against a held cell, so the resting
+    /// body draws as it did; the cropping clip at full weight carries each out of the shield,
+    /// to a place no root cell holds.
+    #[test]
+    fn a_nested_neck_cell_is_hidden_at_rest_and_the_cropping_clip_brings_it_out() {
+        use super::super::rig::ClipAt;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        let lib = ModelLibrary::load(&root, 0.125).unwrap();
+        let f = Founder::Browser;
+        let (model, rig) = (lib.animal(f).unwrap(), lib.rig(f).expect("the frondgrazer's rig"));
+        let nested = rig.bones.iter().position(|b| b.name == "neck_in").expect("a nested neck bone");
+        let crop = rig.clip("cropping").expect("a cropping clip");
+        let (mut seen, mut pose) = (0, Vec::new());
+        for (bin, b) in model.bins.iter().enumerate() {
+            let held: std::collections::HashSet<[i32; 3]> = b.cells.iter().map(|c| c.offset).collect();
+            rig.pose(bin, &[ClipAt { clip: crop, time_s: 0.0, weight: 1.0 }], &mut pose);
+            for c in b.cells.iter().filter(|c| usize::from(rig.bone_of(bin, c.offset)) == nested) {
+                seen += 1;
+                let o = c.offset;
+                for d in [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]] {
+                    assert!(held.contains(&[o[0] + d[0], o[1] + d[1], o[2] + d[2]]), "bin {bin} {o:?} shows at rest");
+                }
+                // the cell's centre in the bin's voxels (a cell spans dy .. dy + 1)
+                let m = &pose[nested];
+                let p = [f64::from(o[0]), f64::from(o[1]) + 0.5, f64::from(o[2])];
+                let q: [f64; 3] = [0, 1, 2]
+                    .map(|i| (0..3).map(|j| f64::from(m[i][j]) * p[j]).sum::<f64>() + f64::from(m[i][3]));
+                let at = [q[0].round() as i32, q[1].floor() as i32, q[2].round() as i32];
+                assert!(
+                    !held.contains(&at) || rig.bone_of(bin, at) != 0,
+                    "bin {bin} {o:?} stays in the shield at {at:?}"
+                );
+            }
+        }
+        assert!(seen > 0, "no nested neck cell in any bin");
+    }
+
     /// FEED-ROLLOUT: a founder in a mode with a pose model wears that model's own rig, and
     /// none when the pose model has none (its bins are not the founder's); a mode without a
     /// pose model wears the founder's.
