@@ -412,6 +412,11 @@ class Daemon:
                     self.task_ended(row, rc)
                 elif not alive:
                     self.task_lost(row, "unit/process gone without rc.json")
+                elif host.kind != "local":
+                    try:
+                        self.fetch_task(row)
+                    except Exception as error:  # noqa: BLE001
+                        self.log(f"progress fetch {row['job']}/{row['name']}: {error}")
 
     def task_ended(self, row, rc):
         job = self.job(row["job"])
@@ -421,9 +426,10 @@ class Daemon:
         reason = None
         if host and host.kind != "local":
             try:
-                self.transports[host.name].get(self.remote_out(host, job, view), view.out)
+                self.fetch_task(row, final=True)
             except Exception as error:  # noqa: BLE001
-                reason = f"fetch failed: {error}"
+                self.log(f"fetch {job.id}/{view.name}: {error}; will retry")
+                return  # Keep the rc and remote outputs until a complete fetch succeeds.
         code = rc.get("rc", 1)
         state = "done" if code == 0 else ("cancelled" if rc.get("cancelled") else "failed")
         if state == "done" and task.done_marker and not (view.out / task.done_marker).exists():
@@ -438,12 +444,21 @@ class Daemon:
             reason = f"exit {code}"
         self.store.update("tasks", dict(job=row["job"], name=row["name"]), state=state, rc=code,
                           finished=rc.get("ended", self.clock()), reason=reason)
+        if host and host.kind != "local":
+            self.cleanup_task(row)
         self.events.emit("task-done" if state == "done" else "task-failed", job=job.id, task=row["name"],
                          host=row["host"], rc=code, reason=reason)
         self.after_task(job.id, row["name"])
 
     def task_lost(self, row, reason):
         task = Task.from_dict(json.loads(row["spec"]))
+        host = self.host(row["host"])
+        if host and host.kind != "local" and host.up:
+            try:
+                self.fetch_task(row)  # Retain the latest checkpoint before a retry changes hosts.
+                self.cleanup_task(row)
+            except Exception as error:  # noqa: BLE001
+                self.log(f"lost task fetch {row['job']}/{row['name']}: {error}")
         if row["attempts"] <= task.retries:
             if task.resume_argv:
                 task.argv = task.resume_argv
@@ -513,7 +528,7 @@ class Daemon:
         spec = view.task.liveness
         host = self.host(row["host"])
         out = view.out
-        if host and host.kind != "local":
+        if host and host.kind != "local" and not spec.get("minute_file"):
             script = (f"find {shlex.quote(self.remote_out(host, job, view))} -type f -printf '%s %T@\\n' 2>/dev/null"
                       " | awk '{n++; s+=$1; if ($2>m) m=$2} END {print n+0, s+0, m+0}'\n")
             done = self.transports[host.name].run(script, timeout=30)
@@ -543,6 +558,37 @@ class Daemon:
         relative = view.out.relative_to(job.out)
         return f"{host.root}/jobs/{job.id}/{relative.as_posix()}"
 
+    def fetch_task(self, row, final=False):
+        """Mirror outputs before hooks read them; rsync transfers only changed files."""
+        host = self.host(row["host"])
+        if not host or host.kind == "local":
+            return
+        job = self.job(row["job"])
+        view = job.tasks[row["name"]]
+        remote = self.remote_out(host, job, view)
+        transport = self.transports[host.name]
+        transport.get(remote, view.out)
+        if view.task.meta.get("batch") and (view.out / "batch/batch.json").is_file():
+            manifest_path = view.out / "batch/batch.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["lab_paths"] = view.task.meta.get("remote_paths", {})
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+        if final:
+            lab = self.lab_dir(row)
+            transport.get(lab, job.out / ".lab" / view.name)
+
+    def cleanup_task(self, row):
+        host = self.host(row["host"])
+        job = self.job(row["job"])
+        remote = self.remote_out(host, job, job.tasks[row["name"]])
+        try:
+            done = self.transports[host.name].run(
+                f"rm -rf -- {shlex.quote(remote)} {shlex.quote(self.lab_dir(row))}\n")
+            if done.returncode:
+                self.log(f"remote cleanup {job.id}/{row['name']}: {done.stderr.strip()}")
+        except Exception as error:  # noqa: BLE001
+            self.log(f"remote cleanup {job.id}/{row['name']}: {error}")
+
     def usage(self):
         usage = {h.name: Usage() for h in self.hosts()}
         for row in self.store.q("SELECT host, grp, spec FROM tasks WHERE state='running'"):
@@ -565,7 +611,9 @@ class Daemon:
                     "SELECT name, state FROM tasks WHERE job=?", row["job"])}
             if any(states[row["job"]].get(d) != "done" for d in task.deps):
                 continue
-            for host in self.hosts():
+            candidates = sorted(self.hosts(), key=lambda h: h.usable - usage[h.name].threads -
+                                (h.external_threads if h.external_load else 0), reverse=True)
+            for host in candidates:
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
@@ -579,6 +627,8 @@ class Daemon:
         for name in TOOLS:
             transport.put(self.ctx.lab_dir / name, f"{host.root}/tools/{name}")
         transport.put(self.ctx.run_study, f"{host.root}/tools/run-study.py")
+        for name in ("batch.py", "study_contract.py"):
+            transport.put(self.ctx.repo / "scripts/studies" / name, f"{host.root}/tools/studies/{name}")
         self.tools.add(host.name)
 
     def launch(self, row, task, host, group):
@@ -609,21 +659,64 @@ class Daemon:
                         transport.put(source, remote)
                         self.store.kv_set(mark, host.root)
                     inputs[key] = remote
-                if row["attempts"] and any(local_out.iterdir()):
-                    transport.put_dir(local_out, out)  # resume: earlier outputs, checkpoints first
+                if any(local_out.iterdir()):
+                    transport.put_dir(local_out, out)  # retries and an explicit resume both carry checkpoints
             lab = f"{jobdir}/.lab/{task.name}"
 
+            replacements = {}
+            if host.kind != "local":
+                replacements[str(job.out)] = jobdir
+                replacements[str(self.ctx.repo / "scripts/studies/batch.py")] = f"{tools}/studies/batch.py"
+                replacements.update({str(self.ctx.artifact(k)): v for k, v in inputs.items()})
+
             def subst(value):
+                value = str(value)
+                for source in sorted(replacements, key=len, reverse=True):
+                    value = value.replace(source, replacements[source])
                 value = str(value).replace("{out}", out).replace("{job}", jobdir).replace("{lab}", tools)
                 value = value.replace("{python}", launcher.python)
                 return re.sub(r"\{input:([^}]+)\}", lambda m: inputs[m[1]], value)
+
+            if host.kind != "local":
+                for source, destination in task.files.items():
+                    remote = os.path.normpath(subst(destination))
+                    if not Path(remote).is_relative_to(Path(jobdir)):
+                        raise ValueError(f"staged input escapes remote job root: {destination}")
+                    if Path(source).is_dir():
+                        transport.put_dir(source, remote)
+                    else:
+                        transport.put(source, remote)
+                    replacements[str(source)] = remote
+            # Saved batch commands/identities contain absolute paths from the previous host.
+            manifest_path = local_out / "batch/batch.json"
+            current_paths = dict(replacements)
+            if task.meta.get("batch") and manifest_path.is_file():
+                manifest = json.loads(manifest_path.read_text())
+                for source, previous in manifest.get("lab_paths", task.meta.get("remote_paths", {})).items():
+                    replacements[previous] = current_paths.get(source, source)
+
+                def relocate(value):
+                    if isinstance(value, str):
+                        return subst(value)
+                    if isinstance(value, list):
+                        return [relocate(v) for v in value]
+                    if isinstance(value, dict):
+                        return {subst(k): relocate(v) for k, v in value.items()}
+                    return value
+
+                manifest = relocate(manifest)
+                manifest["lab_paths"] = current_paths
+                write_file(transport, f"{out}/batch/batch.json", json.dumps(manifest, indent=2))
+            if task.meta.get("batch"):
+                task.meta["remote_paths"] = current_paths
 
             env = {}
             if host.kind == "local":
                 env = {k: os.environ[k] for k in ("PATH", "HOME", "USER", "LANG", "CARGO_HOME", "RUSTUP_HOME")
                        if k in os.environ}
             env.update({k: subst(v) for k, v in task.env.items()})
-            spec = dict(argv=[subst(a) for a in task.argv], cwd=subst(task.cwd) if task.cwd else out,
+            argv = task.remote_argv if host.kind != "local" and task.remote_argv else task.argv
+            spec = dict(argv=[subst(a) for a in argv], cwd=subst(task.cwd) if task.cwd else out,
                         env=env, stdout=subst(task.stdout or "{out}/stdout.log"),
                         stderr=subst(task.stderr or "{out}/stderr.log"), lab_dir=lab,
                         group=group if group >= 0 else None,
@@ -637,7 +730,8 @@ class Daemon:
             unit = unit_name(job.id, task.name)
             self.store.update("tasks", dict(job=job.id, name=task.name), state="running", host=host.name,
                               grp=group, unit=unit, launcher=launcher.name, started=self.clock(),
-                              attempts=row["attempts"] + 1, live=json.dumps(dict(since=self.clock())))
+                              attempts=row["attempts"] + 1, live=json.dumps(dict(since=self.clock())),
+                              spec=json.dumps(task.to_dict()))
             launcher.start(unit, f"{lab}/launch.json", lab, spec["cwd"], mem_gb=host.max_mem_gb,
                            timeout_h=task.timeout_h, taskwrap=f"{tools}/taskwrap.py")
         except Exception as error:  # noqa: BLE001
@@ -659,6 +753,27 @@ class Daemon:
             if busy:
                 continue
             job = self.job(row["id"])
+            fetching = False
+            for view in job.tasks.values():
+                host = self.host(view.host)
+                stopped = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
+                if not host or host.kind == "local" or not host.up or not stopped["unit"] \
+                        or view.state not in ("cancelled", "stalled") or view.rc is not None:
+                    continue
+                try:
+                    rc, alive = self.launchers[host.name].poll([(stopped["unit"], self.lab_dir(stopped))])[stopped["unit"]]
+                    if rc is None and alive:
+                        fetching = True
+                        continue
+                    self.fetch_task(stopped, final=True)
+                    self.store.update("tasks", dict(job=job.id, name=view.name), rc=(rc or {}).get("rc", 1))
+                    self.cleanup_task(stopped)
+                except Exception as error:  # noqa: BLE001
+                    self.log(f"stopped task fetch {job.id}/{view.name}: {error}")
+                    fetching = True
+            if fetching:
+                continue
+            job = self.job(row["id"])
             summary = self.call(job, "finish")
             if isinstance(summary, Abort):
                 summary = summary.reason
@@ -675,6 +790,15 @@ class Daemon:
             atomic_write(job.out / "DONE", reason + "\n")
             self.store.update("jobs", dict(id=job.id), state=final, finished=self.clock(), reason=reason,
                               summary=summary)
+            for name in {v.host for v in job.tasks.values() if v.host}:
+                host = self.host(name)
+                views = [v for v in job.tasks.values() if v.host == name]
+                if host and host.kind != "local" and all(v.rc is not None for v in views):
+                    try:
+                        # Shared config/checkpoint inputs outlive individual tasks, until all hooks finish.
+                        self.transports[name].run(f"rm -rf -- {shlex.quote(host.root + '/jobs/' + job.id)}\n")
+                    except Exception as error:  # noqa: BLE001
+                        self.log(f"remote job cleanup {job.id}: {error}")
             self.events.emit(final, job=job.id, kind=job.kind, reason=reason, out=str(job.out))
 
     # ------------------------------------------------------------------ janitor
