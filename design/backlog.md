@@ -271,6 +271,10 @@ without dropping to `wgpu-hal`; the panel no longer constrains the renderer (D-0
 - The frame bridge into Godot stays a CPU readback (wgpu can't share Godot's device).
 - Order question with H2 (the model pass for smooth rotating animals, which adds new GPU code):
   write H2 on `ash` now and port it later, or migrate first and write H2 on wgpu.
+- Wrysk, 2026-10-10: "moving to wgpu would still be better, but i dont think it gets us anywhere
+  we cant just do as a all-in-one rewrite later". It stays a later all-in-one rewrite. Meanwhile
+  `unsafe` for the `ash` calls in `cubarium-gpu` is exempt from the no-unsafe rule ("im fine
+  with the unsafe ash -- that crate is exampt").
 
 ## 12. Seedporter night roosts and rain-grounded bellwings (Wrysk, 2026-10-08: one behaviour package after the foliage/calf work)
 
@@ -347,9 +351,52 @@ that matches the bake's rules (coats, open faces, glyphs), and higher-fidelity m
 the world grid, walking and turning would also step a whole voxel at a time, as the
 flipbook arm did. Shipped instead: the bone rig with turned cubes (B).
 
-## 16. Lanternjaw venom (Wrysk, 2026-10-10: "we might wanna consider giving them venom but lets not add too much just yet cuz like thatd invent a whole new status effect")
+## 17. Lanternjaw venom (Wrysk, 2026-10-10: "we might wanna consider giving them venom but lets not add too much just yet cuz like thatd invent a whole new status effect")
 
 Grown lanternjaws fight back with ordinary wounds for now. Venom would add a status effect
 (slowed, weakened or paralysed prey, recovery over time). That would give its strikes and its
 defence a distinct character, and the brains a new sense to read. Park it until the ecology
 balance settles.
+
+## 18. Hardware ray tracing on the desktop (Wrysk, 2026-10-10: "its not exactly the most useful thing i could have you spend tokens on currently but it does intrigue me")
+
+The desktop has an RTX 5090 and a 5080, and Vulkan's ray query is reachable through `ash`.
+It would not make the main picture faster: the walk already costs about 2.4 ms a frame at
+6 px, because a fixed tilted orthographic camera over a regular grid is the best case for a
+grid march, and voxel boxes need custom intersection code that runs on ordinary shader
+cores. It could make the secondary light better by letting shadow, reflection, glow and fog
+rays see the world and the animals together. Today those are separate approximations: the
+animals' sun map casts nothing below about 12° of sun, and fog is not blocked by plants or
+animals.
+- Costs: desktop only (the Tachyon's mobile GPU almost certainly lacks it), so it would be a
+  second lighting path. The acceleration structures need rebuilding as plants grow (per
+  chunk) and as animals move (every frame).
+- A cheap first study: ray-query sun shadows for the world (chunks meshed to triangles) plus
+  the animals' cubes, beside today's sun march, on the 5090, with frame cost.
+
+## 19. Drape cords flow in the wind (Wrysk, 2026-10-10: "flow in the wind should be more pronouned rather than matching the tree but its okay for now; i think thats a later package")
+
+The vaulttree's drape cords (DRAPE-CORD) sway only with their tree. They should stream and
+swing in the wind more than the tree does, as loose cords would: their own lag and
+overshoot behind the tree's sway, more at the tips.
+
+## 20. Thin animal parts drawn as lines (Wrysk, 2026-10-10: "technically we could do the same thing we just did for drapes for the bellwing's tendril.. but idk how much effort thats worth")
+
+At 125 mm the bellwing's whole tendril is one voxel, and other thin parts (the
+littershredder's feelers, the lanternjaw's lure stalks, frond tips, the seedporter's
+fingers) own few or none. The drape cords' trick, a 1–2 screen-pixel line, could draw them
+in the figure pass: each frame the posed bone points of a thin part become a short
+polyline, drawn depth-tested against the walk. That is a new figure-pass primitive (a
+renderer package about the size of a feeding rig), worth it once it serves several
+species, not for the tendril alone. What the tendril needs from it: reach out and down
+from the bell when feeding and wiggle a little.
+
+## 21. The Blender bake is not reproducible (found 2026-10-10, FEED-ROLLOUT small feeders)
+
+Two plain bakes at the same commit (5f71bea7) gave different models: one littershredder cell
+at 125 mm changed material, and the 250 mm ripple-snail came out with 1 cell in one run and
+2 in another. Packages since have committed only the files they meant to change. Find the
+nondeterminism (set or hash ordering in the voxelizer, a float tie at a cell boundary,
+Blender's own evaluation order) before the next full rebake, so a rebake changes only what
+it should.
+

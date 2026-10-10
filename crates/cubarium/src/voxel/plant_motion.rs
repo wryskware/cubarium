@@ -212,6 +212,16 @@ impl PlantConfig {
         ((h.min(top) as f64 / top as f64).powf(self.bend_exponent.max(0.0))) as f32
     }
 
+    /// [`Self::weight`] at a height between cells: a horizontal face's, `h` the face's
+    /// height over the root (a cell's top face is at its height plus a half). A drape
+    /// cord's join moves by it (`cubarium_gpu::cord`).
+    pub fn face_weight(&self, h: f64, top: i64) -> f32 {
+        if h <= 0.0 || top <= 0 {
+            return 0.0;
+        }
+        ((h.min(top as f64) / top as f64).powf(self.bend_exponent.max(0.0))) as f32
+    }
+
     /// The pass's fixed settings for the renderer.
     pub fn motion(&self) -> cubarium_gpu::plants::PlantMotion {
         cubarium_gpu::plants::PlantMotion {
@@ -225,6 +235,17 @@ impl PlantConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_face_weighs_between_the_two_cells_it_parts() {
+        let cfg = PlantConfig::default();
+        let top = 20;
+        for h in 1..top {
+            let face = cfg.face_weight(h as f64 + 0.5, top);
+            assert!(cfg.weight(h, top) <= face && face <= cfg.weight(h + 1, top), "h {h}");
+        }
+        assert_eq!(cfg.face_weight(-0.5, top), 0.0, "under the root");
+    }
 
     #[test]
     fn a_root_never_moves_and_the_bend_grows_with_height() {

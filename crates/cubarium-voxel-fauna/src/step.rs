@@ -4088,7 +4088,7 @@ fn back_off_face(
 ///
 /// Decisions §3 gave the shredder its three foods; since R0 every lineage's foods are its
 /// physiology's diet list. There is no new action: `bite` still means "take what is at
-/// the mouth", and [`body::mouth_meal`] resolves which of the diet's foods that is (the
+/// the mouth", and [`body::mouth_meal_worth`] resolves which of the diet's foods that is (the
 /// richest available, ties in [`Food::ALL`] order). Since the minimal gut the bite goes
 /// raw into that food class's stomach pool ([`swallow`]); digestion ([`digest`]) applies
 /// the class's `yield` ([`crate::FounderPhysiology::yield_for`]) later.
@@ -4126,11 +4126,11 @@ fn founder_feed(
     let cols = body::mouth_columns(view, &pose, geometry);
     // Which food is at this mouth, and how much of it — the `E` the bite diminishes
     // with — before anything is withdrawn: the richest of the lineage's diet
-    // ([`body::mouth_meal`]). Its class is the source's own: a pool names it, and a
+    // ([`body::mouth_meal_worth`]). Its class is the source's own: a pool names it, and a
     // stand's is its species' income rule.
     let diet = phys.eating_diet();
     let Some((meal, stock, _)) =
-        body::mouth_meal(&flora.view(), view, &cols, site_y, geometry, diet)
+        body::mouth_meal_worth(&flora.view(), view, &cols, site_y, geometry, diet, &phys.food_worth())
     else {
         return false;
     };
@@ -4158,6 +4158,14 @@ fn founder_feed(
     let carcass_of = match meal {
         body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| (usize::from(c.lineage), site)),
         _ => None,
+    };
+    // The aim's cell (FEED-ROLLOUT round 2): where this bite comes from, read before the
+    // withdrawal and kept on the body only if the bite is taken. Presentation memory: no
+    // rule reads it ([`crate::LastBite`]).
+    let bitten = match meal {
+        body::Meal::Stand { root, place, .. } => body::bitten_cell(&flora.view(), view, root, place, &cols, &layers),
+        body::Meal::Mycelium { root } => Some(Site { y: root.y + 1, ..root }),
+        body::Meal::Pool { site, .. } => Some(Site { y: site.y + 1, ..site }),
     };
     let mut mycelium = 0.0;
     let taken = match meal {
@@ -4190,6 +4198,7 @@ fn founder_feed(
     let Some(taken) = taken else {
         return false;
     };
+    fauna.animals[i].bite = crate::LastBite(bitten);
     fauna.ledger.eaten_mycelium_by_founder[founder.index()] += mycelium;
     fauna.ledger.eaten_by_founder_food[founder.index()][food.index()] += taken.organic;
     let taken = fauna.book_eaten(taken, food);
@@ -4807,6 +4816,7 @@ fn newborn(
         emergency: false,
         bout: None,
         hunt: crate::HuntMemory::default(),
+        bite: crate::LastBite::default(),
     }
 }
 
@@ -6407,3 +6417,6 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
 #[cfg(test)]
 #[path = "dispersal_tests.rs"]
 mod dispersal_tests;
+#[cfg(test)]
+#[path = "roles5_tests.rs"]
+mod roles5_tests;

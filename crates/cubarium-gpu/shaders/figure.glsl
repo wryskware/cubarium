@@ -36,7 +36,7 @@ layout(std430, set = 1, binding = 4) readonly buffer FigureBones { vec4 bones[];
 // The bone a rigged tile's cell (`FigureVoxel.bits` 14..19) moves by, as an index of its
 // first row in `bones`; -1 for a tile drawn as baked.
 int boneRow(Tile t, uint bits) {
-    return t.rig.x < 0 ? -1 : 3 * (t.rig.x + int((bits >> 14) & 31u));
+    return t.rig.x < 0 ? -1 : 3 * (t.rig.x + int((bits >> 14) & 63u));
 }
 
 vec3 boneMove(int row, vec3 p) {

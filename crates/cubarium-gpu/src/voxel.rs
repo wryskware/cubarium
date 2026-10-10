@@ -77,6 +77,114 @@ const Q_SHADE_START: u32 = 9;
 /// together. The CPU presenter's own cap is 65 535 stands; a frame that really needs more
 /// than this many distinct styles reuses style 0 for the rest and the sink says so.
 pub const MAX_STYLES: usize = 256;
+
+/// The most entries one frame's **emitter table** holds ([`VoxelRenderer::set_emit_cells`],
+/// GLOW-EASE): an open-addressed hash of cells, at most half full, so up to half this many
+/// emitting cells draw their own colour each frame. A cell past that draws its style's.
+pub const EMIT_TABLE: usize = 1 << 15;
+
+/// The longest probe the shader makes in the emitter table; a cell the host cannot place
+/// within it is left out (it draws its style's emission).
+pub const EMIT_PROBE: usize = 32;
+
+/// One emitting cell's colour this frame (GLOW-EASE): what its emitting texels draw
+/// instead of their style's emissive colour (or, for a latticevine tile, the tile's own),
+/// in linear light, and its **on** share: the texel draws `rgb + (1 − on) × its lit
+/// pigment`, so one fading out ends on its pigment. `cell` is its texture index,
+/// `(z · height + y) · width + x`.
+///
+/// The same table carries a latticevine cell's **old tile** while it cross-fades into a new
+/// one (GLOW-EASE round 2, `vine`): a cell may be in it for either or both; `emits` false
+/// leaves its emission to its tile.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EmitCell {
+    pub cell: u32,
+    pub rgb: [f32; 3],
+    pub on: f32,
+    /// Whether `rgb` and `on` apply (the cell is an emitter the host eases).
+    pub emits: bool,
+    /// A vine cell's old tile, `(b, a)` as its texel carried it, and the share of it still
+    /// shown (`0..=1`): the shader draws both tiles, the old one this share of coverage and
+    /// colour.
+    pub vine: Option<((u8, u8), f32)>,
+}
+
+impl EmitCell {
+    /// An emitter's colour and on share alone.
+    pub fn emitter(cell: u32, rgb: [f32; 3], on: f32) -> EmitCell {
+        EmitCell { cell, rgb, on, emits: true, vine: None }
+    }
+}
+
+/// An emitter table entry's fourth word: bit 31 set when the entry carries no emission;
+/// a vine cell's old tile in bits 0..16 (`b`, then `a`) and its share, `1..=255` of 255, in
+/// bits 16..24 (0: no old tile). `world.glsl`'s `cellEmit` and `cellVineFrom` read it.
+pub fn emit_word(c: &EmitCell) -> u32 {
+    let mut w = if c.emits { 0 } else { 1 << 31 };
+    if let Some(((b, a), share)) = c.vine {
+        let s = (share.clamp(0.0, 1.0) * 255.0).round() as u32;
+        if s > 0 {
+            w |= u32::from(b) | u32::from(a) << 8 | s << 16;
+        }
+    }
+    w
+}
+
+/// The bit of `view.w` (the emitter table's size) saying some entry carries a vine cell's
+/// old tile, so the shader looks vine cells up only then.
+pub const EMIT_VINES: u32 = 1 << 20;
+
+/// The emitter table's hash of `key` (a texture index plus one) into `cap` entries, a power
+/// of two: `world.glsl`'s `emitHash`.
+#[inline]
+pub fn emit_hash(key: u32, cap: u32) -> u32 {
+    key.wrapping_mul(0x9E37_79B1) >> (32 - cap.trailing_zeros()).min(31) & (cap - 1)
+}
+
+/// Lay `cells` out as the shader reads them: `cap` entries (the smallest power of two at
+/// least twice their number, at least 64, at most [`EMIT_TABLE`]), each `(key, rg, b·on, 0)`
+/// with `key` the texture index plus one (0: empty) and the colour as half floats. A cell
+/// that finds no free entry within [`EMIT_PROBE`] is left out. Returns `cap` (0: none).
+pub fn emit_table(cells: &[EmitCell], out: &mut Vec<[u32; 4]>) -> u32 {
+    out.clear();
+    if cells.is_empty() {
+        return 0;
+    }
+    let cap = (cells.len() * 2).next_power_of_two().clamp(64, EMIT_TABLE);
+    out.resize(cap, [0; 4]);
+    let half = |a: f32, b: f32| u32::from(half_bits(a)) | u32::from(half_bits(b)) << 16;
+    for c in cells {
+        let key = c.cell.wrapping_add(1);
+        let mut h = emit_hash(key, cap as u32) as usize;
+        for _ in 0..EMIT_PROBE {
+            if out[h][0] == 0 || out[h][0] == key {
+                out[h] = [key, half(c.rgb[0], c.rgb[1]), half(c.rgb[2], c.on), emit_word(c)];
+                break;
+            }
+            h = (h + 1) & (cap - 1);
+        }
+    }
+    cap as u32
+}
+
+/// An f32 as IEEE half bits (round to nearest, clamped to the half range; NaN to 0), as
+/// GLSL's `unpackHalf2x16` reads them.
+fn half_bits(v: f32) -> u16 {
+    let v = if v.is_nan() { 0.0 } else { v.clamp(-65504.0, 65504.0) };
+    let b = v.to_bits();
+    let sign = ((b >> 16) & 0x8000) as u16;
+    let exp = ((b >> 23) & 0xff) as i32 - 127 + 15;
+    let man = b & 0x7f_ffff;
+    if exp <= 0 {
+        if exp < -10 {
+            return sign;
+        }
+        let m = (man | 0x80_0000) >> (1 - exp);
+        return sign | ((m + 0x1000) >> 13) as u16;
+    }
+    let r = ((exp as u32) << 10 | man >> 13) + ((man >> 12) & 1);
+    sign | r.min(0x7bff) as u16
+}
 /// Slots in the generic organism face-glyph atlas. Glyph zero is the empty/default tile.
 pub const MAX_GLYPHS: usize = 64;
 
@@ -813,6 +921,12 @@ pub struct VoxelParams {
     /// swaying and growing in. `None` (the default) draws them in the walk as ever. Fixed
     /// for a renderer's life.
     pub plants: Option<crate::plants::PlantMotion>,
+    /// **Drape cords** (`[drape]`, [`crate::cord`]): a baked model's drape cells drawn as a
+    /// thin cord of this many screen pixels instead of a cube; [`DrapeCords::OFF`] draws
+    /// the cubes. Read every frame from the uniform.
+    ///
+    /// [`DrapeCords::OFF`]: crate::cord::DrapeCords::OFF
+    pub drape_cords: crate::cord::DrapeCords,
 }
 
 /// Texels per style in the style texture: wood, crown, heart, emit.
@@ -989,7 +1103,10 @@ impl VoxelParams {
                 self.trunk_shade[1],
                 self.trunk_light_at,
             ],
-            tex: [tex_mask as i32, i32::from(vine_on), 0, 0],
+            tex: {
+                let [width, shape] = self.drape_cords.uniform();
+                [tex_mask as i32, i32::from(vine_on), width, shape]
+            },
             light_k: [
                 self.ambient_gain,
                 self.ambient_floor,
@@ -1144,8 +1261,8 @@ struct VoxelUniforms {
     water: [f32; 4],
     plant_a: [f32; 4],
     plant_b: [f32; 4],
-    /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, then
-    /// padding.
+    /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, and
+    /// the drape cords ([`crate::cord::DrapeCords::uniform`]).
     tex: [i32; 4],
     /// The lit tier: ambient gain, ambient floor, ladder rungs, AO strength.
     light_k: [f32; 4],
@@ -1987,6 +2104,12 @@ pub struct VoxelRenderer {
     /// Each emission curve's gain this frame ([`VoxelRenderer::set_emit_gains`]); curve 0
     /// and any past the end are 1.
     curve_gain: Vec<f32>,
+    /// The emitter table (GLOW-EASE, [`VoxelRenderer::set_emit_cells`]): [`EMIT_TABLE`]
+    /// entries a ring slot, the frame's own slot written as it is recorded (binding 14).
+    emit_buffer: HostBuffer,
+    /// This frame's emitting cells, and the scratch their table is laid out in.
+    emit_cells: Vec<EmitCell>,
+    emit_scratch: Vec<[u32; 4]>,
     /// The view's turn round the ring, raster columns ([`VoxelRenderer::set_view_x`]).
     view_x: i32,
     /// The highlighted animal ([`VoxelRenderer::set_highlight`]).
@@ -2354,6 +2477,13 @@ impl VoxelRenderer {
             sampled(11),
             sampled(12),
             sampled(13),
+            // The emitter table (GLOW-EASE): not dynamic, every ring slot's region in one
+            // descriptor, the frame's own chosen by its uniform block (`view.z`).
+            vk::DescriptorSetLayoutBinding::default()
+                .binding(14)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ];
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
@@ -2368,6 +2498,9 @@ impl VoxelRenderer {
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
                 .descriptor_count(13),
+            vk::DescriptorPoolSize::default()
+                .ty(vk::DescriptorType::STORAGE_BUFFER)
+                .descriptor_count(1),
         ];
         let pool = unsafe {
             d.create_descriptor_pool(
@@ -2388,6 +2521,13 @@ impl VoxelRenderer {
         let buffer_info = [vk::DescriptorBufferInfo::default()
             .buffer(uniforms.buffer)
             .range(std::mem::size_of::<VoxelUniforms>() as u64)];
+        let emit_buffer = gpu.host_buffer(
+            (EMIT_TABLE * 16 * STAGING_RING) as u64,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+        )?;
+        let emit_info = [vk::DescriptorBufferInfo::default()
+            .buffer(emit_buffer.buffer)
+            .range(vk::WHOLE_SIZE)];
         let image_info = |view: vk::ImageView| {
             [vk::DescriptorImageInfo::default()
                 .sampler(nearest)
@@ -2445,6 +2585,11 @@ impl VoxelRenderer {
                     sampled_write(set, 10, &isv),
                     sampled_write(set, 11, &ibd),
                     sampled_write(set, 12, &idp),
+                    vk::WriteDescriptorSet::default()
+                        .dst_set(set)
+                        .dst_binding(14)
+                        .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                        .buffer_info(&emit_info),
                 ],
                 &[],
             )
@@ -2614,6 +2759,9 @@ impl VoxelRenderer {
             drawn_emit_curves: [0; MAX_STYLES],
             curving: false,
             curve_gain: Vec::new(),
+            emit_buffer,
+            emit_cells: Vec::new(),
+            emit_scratch: Vec::new(),
             view_x: 0,
             highlight: None,
             last_done: None,
@@ -2785,6 +2933,20 @@ impl VoxelRenderer {
             self.curve_gain.clear();
             self.curve_gain.extend_from_slice(gains);
             if self.params.lit && self.curving {
+                self.raster_current = false;
+                self.version += 1;
+            }
+        }
+    }
+
+    /// This frame's emitting cells (GLOW-EASE, [`EmitCell`]): each draws its own colour and
+    /// on share instead of its style's emission, from this frame on, until the next call.
+    /// A change redraws the lit tier. An empty list draws every emitter from its style.
+    pub fn set_emit_cells(&mut self, cells: &[EmitCell]) {
+        if cells != self.emit_cells.as_slice() {
+            self.emit_cells.clear();
+            self.emit_cells.extend_from_slice(cells);
+            if self.params.lit {
                 self.raster_current = false;
                 self.version += 1;
             }
@@ -3075,6 +3237,14 @@ impl VoxelRenderer {
             block.hi_cells = cells;
         }
         block.fog_k[1] = self.fog_floor;
+        // The emitter table into this frame's own region (GLOW-EASE).
+        let cap = emit_table(&self.emit_cells, &mut self.emit_scratch);
+        if cap > 0 {
+            self.emit_buffer.write_bytes_at((EMIT_TABLE * 16 * frame.slot) as u64, &self.emit_scratch);
+        }
+        block.view[2] = (EMIT_TABLE * frame.slot) as i32;
+        let vines = self.emit_cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
+        block.view[3] = (cap | if vines && cap > 0 { EMIT_VINES } else { 0 }) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
         let p = &self.params;
         let sun_map = if redraw {
@@ -3297,7 +3467,7 @@ impl VoxelRenderer {
                 let offset = (self.uniform_stride * frame.slot as u64) as u32;
                 let geom = (p.s, p.rise, p.base);
                 if let Some(pl) = &self.plants {
-                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x);
+                    pl.record_vis(d, cb, frame.slot, self.set, offset, geom, self.view_x, p.drape_cords.reach(p.s));
                 }
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_PLANT_VIS);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_START);
@@ -3515,6 +3685,7 @@ impl VoxelRenderer {
                 buffer.destroy(gpu);
             }
             self.uniforms.destroy(gpu);
+            self.emit_buffer.destroy(gpu);
             self.sunvis.destroy(gpu);
             for (view, image, memory) in [
                 (self.voxel_view, self.voxel_image, self.voxel_memory),
@@ -4037,6 +4208,7 @@ pub(crate) mod tests {
             day_sky_brightness: 1.0,
             fog_motion: crate::weather::FogMotion::default(),
             plants: None,
+            drape_cords: crate::cord::DrapeCords::OFF,
         }
     }
 
@@ -4445,5 +4617,63 @@ pub(crate) mod tests {
         assert_eq!(t.mask(), 0);
         let (aw, _) = t.atlas_size();
         assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
+    }
+
+    /// The emitter table as `world.glsl`'s `cellEmit` reads it: every cell given is found
+    /// by its own probe with its colour and on share (to half precision), a cell not given
+    /// is not, and an empty list is no table.
+    #[test]
+    fn the_emitter_table_finds_each_cell_the_shader_way() {
+        let cells: Vec<EmitCell> = (0..500u32)
+            .map(|k| EmitCell {
+                cell: k * 7919 % 100_003,
+                rgb: [k as f32 / 500.0, 0.25, 1.0 - k as f32 / 1000.0],
+                on: (k % 11) as f32 / 10.0,
+                emits: k % 3 != 0,
+                vine: (k % 2 == 0).then(|| ((k as u8, (k >> 3) as u8), (k % 7) as f32 / 6.0)),
+            })
+            .collect();
+        let mut out = Vec::new();
+        let cap = emit_table(&cells, &mut out);
+        assert!(cap.is_power_of_two() && cap as usize >= 2 * cells.len());
+        let unhalf = |h: u32| {
+            let (sign, exp, man) = ((h >> 15) & 1, (h >> 10) & 31, h & 1023);
+            let v = if exp == 0 { man as f32 / 1024.0 * 2f32.powi(-14) } else { (1.0 + man as f32 / 1024.0) * 2f32.powi(exp as i32 - 15) };
+            if sign == 1 { -v } else { v }
+        };
+        let find = |cell: u32| -> Option<([f32; 4], u32)> {
+            let key = cell + 1;
+            let mut h = emit_hash(key, cap);
+            for _ in 0..EMIT_PROBE {
+                let e = out[h as usize];
+                if e[0] == key {
+                    return Some(([unhalf(e[1] & 0xffff), unhalf(e[1] >> 16), unhalf(e[2] & 0xffff), unhalf(e[2] >> 16)], e[3]));
+                }
+                if e[0] == 0 {
+                    return None;
+                }
+                h = (h + 1) & (cap - 1);
+            }
+            None
+        };
+        for c in &cells {
+            let (got, word) = find(c.cell).expect("every cell is found");
+            let want = [c.rgb[0], c.rgb[1], c.rgb[2], c.on];
+            for k in 0..4 {
+                assert!((got[k] - want[k]).abs() <= want[k].abs() / 1000.0 + 1e-6, "{got:?} for {want:?}");
+            }
+            // The fourth word as `cellEmit` and `cellVineFrom` read it.
+            assert_eq!(word >> 31 == 0, c.emits, "the emission bit");
+            let share = ((word >> 16) & 255) as f32 / 255.0;
+            match c.vine {
+                Some(((b, a), s)) if s > 0.5 / 255.0 => {
+                    assert_eq!(((word & 255) as u8, ((word >> 8) & 255) as u8), (b, a), "the old tile");
+                    assert!((share - s).abs() <= 0.5 / 255.0 + 1e-6, "its share {share} for {s}");
+                }
+                _ => assert_eq!(share, 0.0, "no old tile"),
+            }
+        }
+        assert!(find(100_004).is_none());
+        assert_eq!(emit_table(&[], &mut out), 0);
     }
 }
