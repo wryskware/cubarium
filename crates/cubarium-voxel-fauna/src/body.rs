@@ -415,7 +415,8 @@ pub struct FounderPhysiology {
     /// Metres from a flower at which a daytime mimic holds its ambush.
     #[serde(default)]
     pub flower_ambush_m: f64,
-    /// Switch: an opportunistic fruit eater also catches bellwings within reach.
+    /// Switch: a fruit eater also catches profitable small prey within reach
+    /// (bellwings, littershredders and small lanternjaw juveniles for the seedporter).
     #[serde(default)]
     pub catch_bellwings: bool,
     /// **Switch: its body carries pollen** (SEEDPORTER-POLLEN, Wrysk 2026-10-09:
@@ -442,7 +443,7 @@ pub struct FounderPhysiology {
     /// [`FounderPhysiology::eating_diet`].
     #[serde(default)]
     pub opportunist: bool,
-    /// Metres above the hunter's base: maximum bellwing base height for a catch.
+    /// Metres above the hunter's base: maximum prey base height for a catch.
     #[serde(default)]
     pub catch_ceiling_m: f64,
     /// Organic units: minimum carrion yield less the expected strikes' upkeep cost.
@@ -2513,8 +2514,10 @@ impl FounderPhysiology {
                     // largest bellwing, 0.03, is under its smallest body, 0.036, so every
                     // bellwing it took it still takes). A grown lanternjaw is formidable
                     // (`adult_size_window_factor`) and never in it.
+                    // SP-SHREDDER (Wrysk 2026-10-10): littershredders are also
+                    // opportunistic prey; the same size, reach and gain gates apply.
                     hunter: Some(Hunter {
-                        prey: [false, false, true, false, false, false, true, false, false],
+                        prey: [true, false, true, false, false, false, true, false, false],
                         strike_power: 4.0,
                         prey_max_ratio: 1.0,
                         strike_reach_length_fraction: 0.8,

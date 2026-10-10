@@ -138,6 +138,8 @@
 
 #[path = "support/census_drift.rs"]
 mod census_drift;
+#[path = "support/sp_shredder_probe.rs"]
+mod sp_shredder_probe;
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -898,6 +900,7 @@ fn run(
     let mut vitals_time = std::time::Duration::ZERO;
     let first_tick = tick;
     let mut steer_log = SteerLog::from_env(sim);
+    let mut shredder_probe = sp_shredder_probe::Probe::new(sim);
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
@@ -908,6 +911,9 @@ fn run(
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if tick % u64::from(TICK_HZ) == 0 {
+            if let Some(p) = shredder_probe.as_mut() { p.sample(sim); }
+        }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -981,6 +987,7 @@ fn run(
     }
     if let Some(d) = &mut drift { d.finish(sim, tick).unwrap_or_else(|e| panic!("{e}")); }
     weather.summary(sim);
+    if let Some(p) = shredder_probe { p.report(sim); }
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
     vine.summary(sim, summary_start);

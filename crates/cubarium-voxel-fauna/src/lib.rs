@@ -98,6 +98,8 @@ mod flight_tests;
 #[cfg(test)]
 mod seedporter_tests;
 #[cfg(test)]
+mod sp_shredder_tests;
+#[cfg(test)]
 mod roost_rain_tests;
 mod flight;
 #[cfg(test)]
