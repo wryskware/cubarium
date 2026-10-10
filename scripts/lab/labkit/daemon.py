@@ -8,6 +8,7 @@ the first poll reconciles them from their rc.json files and unit states.
 
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
+import glob
 import json
 import os
 from pathlib import Path
@@ -160,12 +161,50 @@ class Daemon:
             elif not future and (force or self._due(f"probe:{host.name}", self.inv.get("probe_s", 300))):
                 self.probes[host.name] = self.pool.submit(self.probe, host)
 
+    PROC_STAT = "/proc/stat"
+    LAB_CGROUPS = "/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/*/lab-*.service/cpu.stat"
+
     def local_load(self):
         for host in self.inv.hosts.values():
             if host.kind == "local" and host.external_load:
-                mine = sum(Task.from_dict(json.loads(r["spec"])).threads
-                           for r in self.store.q("SELECT spec FROM tasks WHERE state='running' AND host=?", host.name))
-                host.external_threads = max(0.0, os.getloadavg()[0] - mine)
+                external = self.external_cpu()
+                if external is None:
+                    # No CPU sample yet (or no cgroups): loadavg minus labd's declared threads.
+                    mine = sum(Task.from_dict(json.loads(r["spec"])).threads
+                               for r in self.store.q("SELECT spec FROM tasks WHERE state='running' AND host=?",
+                                                     host.name))
+                    external = max(0.0, os.getloadavg()[0] - mine)
+                host.external_threads = external
+
+    def external_cpu(self):
+        """Cores busy outside labd's task units, smoothed: total busy CPU (/proc/stat) minus the CPU
+        the `lab-*` units used (their cgroups' cpu.stat). Loadavg counts runnable threads, so idle-class
+        sims queueing for CPU read as outside load and starved every build (2026-10-10)."""
+        try:
+            with open(self.PROC_STAT) as f:
+                fields = [int(x) for x in f.readline().split()[1:]]
+            busy = sum(fields[:3]) + sum(fields[5:8])  # user nice system, irq softirq steal
+            units = {}
+            for path in glob.glob(self.LAB_CGROUPS.format(uid=os.getuid())):
+                with open(path) as f:
+                    for line in f:
+                        if line.startswith("usage_usec"):
+                            units[path] = int(line.split()[1])
+        except (OSError, ValueError, IndexError):
+            return None
+        now = time.monotonic()
+        prev = getattr(self, "_cpu_sample", None)
+        self._cpu_sample = (now, busy, units)
+        if prev is None or now <= prev[0]:
+            return getattr(self, "_cpu_external", None)
+        dt = now - prev[0]
+        busy_cores = (busy - prev[1]) / os.sysconf("SC_CLK_TCK") / dt
+        # A unit first seen in this interval counts its whole usage; one that ended drops out.
+        lab_usec = sum(u - prev[2].get(p, 0) for p, u in units.items() if u >= prev[2].get(p, 0))
+        sample = max(0.0, busy_cores - lab_usec / 1e6 / dt)
+        last = getattr(self, "_cpu_external", None)
+        self._cpu_external = sample if last is None else 0.8 * last + 0.2 * sample
+        return self._cpu_external
 
     # ------------------------------------------------------------------ jobs
     def job(self, job_id, inputs=None):
