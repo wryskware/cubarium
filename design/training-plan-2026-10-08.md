@@ -1020,9 +1020,16 @@ control and the reward accounting; display targets after seeing results.
    - DISPERSAL merged 1270d05c (role calls 1 A+B and 2 B1): loftstrider season, herd max 3 adults; Veilhound
      pack max 4 adults, pups don't count; leavers' matter to litter.
    - Role call 3 (Wrysk, 2026-10-09: "do A first"): vine fruit hangs ripe about 12 days, shipped 3e3098ed
-     (fruit_s 1200 s, spur_share 0.58 keeps the flower cadence). The eidolon check showed standing fruit up
-     5-25x but seedporter vine intake unchanged, so fruit is not their limit. SEEDPORTER-INTAKE (Opus)
-     diagnoses what is.
+     (fruit_s 1200 s, spur_share 0.58 keeps the flower cadence). Standing fruit rose 5-25x in the eidolon
+     check. **Correction:** "intake unchanged" (also in 3e3098ed's message) was a misreading of
+     cumulative ledger totals. Session deltas give vine intake x1.5-1.9 (shipped) and x3.8-9.7 (uncompensated).
+   - SEEDPORTER-INTAKE (Opus): the root cause is the bite half-saturation K 0.005 (turf scale, inherited)
+     against fruit at about 1e-4 at the mouth, so each bite is about 3 % of a mouthful. Juveniles also freeze
+     in 35-54 % of samples (three heuristic bugs). Fullness 0.01 is mostly juvenile growth draw, and growth to
+     adult takes about 23 h. SEEDPORTER-FIX (Codex) running: fruit-scale K, the freeze bugs, and census
+     session deltas.
+   - P2/P3 done (roles doc §3): grazer intake stops growing between x4 and x16 (O stays about 1-2.4 %), and x64
+     takes no bites. So mass alone cannot reach 10-30 % offtake. GRAZER-INTAKE (Opus) diagnosing.
    - 2026-10-09 21:15 the session was OOM-killed (a 24 GB target copy in tmpfs /tmp); the library and probes
      resumed as user services.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
