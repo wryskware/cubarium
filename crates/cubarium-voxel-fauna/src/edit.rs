@@ -525,6 +525,7 @@ impl Fauna {
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
         self.wading.remove(&id);
+        self.flushes.remove(&id);
         self.nest_trips.remove(&id);
         self.hunt_paths.remove(&id);
         self.place_cache.remove(&id);

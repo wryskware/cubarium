@@ -1941,6 +1941,12 @@ fn print_header() {
             f.name()
         ));
     }
+    // HUNT-ESCAPE (2026-10-10): strikes begun on bellwings by each ground hunter (the kills
+    // are `kills_*_bellwing`), the bellwings' escape bursts and the snaps that closed on air
+    // because of one, and the grown lanternjaws' counter-strikes on their attackers and the
+    // wound they dealt, all cumulative.
+    header.push_str(",struck_chorister_bellwing,struck_seedporter_bellwing,struck_lanternjaw_bellwing");
+    header.push_str(",flushes_bellwing,escapes_bellwing,counters_lanternjaw,counter_wound_lanternjaw");
     for killer in Founder::ALL {
         for prey in Founder::ALL {
             header.push_str(&format!(",kills_{}_{}", killer.name(), prey.name()));
@@ -2177,6 +2183,18 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", l.eaten_carrion_by_founder[i]));
         row.push(l.eggs_laid_by_founder[i].to_string());
         row.push(l.eggs_hatched_by_founder[i].to_string());
+    }
+    {
+        let bw = Founder::Bellwing.index();
+        let struck = cubarium_voxel_fauna::perception::STRUCK;
+        for by in [Founder::Chorister, Founder::Seedporter, Founder::Lanternjaw] {
+            row.push(l.funnel[by.index()][bw][struck].to_string());
+        }
+        row.push(l.flushes_by_founder[bw].to_string());
+        row.push(l.flush_escapes_by_founder[bw].to_string());
+        let lj = Founder::Lanternjaw.index();
+        row.push(l.counters_by_founder[lj].to_string());
+        row.push(format!("{:.6}", l.counter_wound_by_founder[lj]));
     }
     for killer in Founder::ALL {
         for prey in Founder::ALL {

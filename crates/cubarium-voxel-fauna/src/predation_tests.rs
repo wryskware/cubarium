@@ -76,8 +76,9 @@ fn the_lanternjaw_and_its_prey_have_the_notes_shape() {
 
     let (grazer, shredder) = (c.founder(Founder::Browser), c.founder(Founder::Blind));
     assert!(grazer.hunter.is_none() && shredder.hunter.is_none());
+    // HUNT-ESCAPE: the lanternjaw alone answers a strike.
     for f in Founder::ALL {
-        assert!(c.founder(f).counter.is_none(), "{}: the Counter seam is unused", f.name());
+        assert_eq!(c.founder(f).counter.is_some(), f == Founder::Lanternjaw, "{}: the counter-strike", f.name());
     }
 }
 

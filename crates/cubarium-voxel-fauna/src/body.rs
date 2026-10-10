@@ -501,8 +501,8 @@ pub struct FounderPhysiology {
     /// The species factor of the dodge (§2.3's table): frondgrazer 0.5, littershredder
     /// 0.3. The lanternjaw is in nobody's prey list yet, so its 0 is never read.
     pub agility: f64,
-    /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
-    /// for every lineage until the loftstrider's kick.
+    /// The counter-strike (§2.7, [`Counter`]): a grown body a strike reaches wounds its
+    /// attacker. `None` but for the lanternjaw (HUNT-ESCAPE).
     pub counter: Option<Counter>,
     /// **Formidable when grown** (LANTERNJAW-LIFE, Wrysk 2026-10-10: "super vulnerable up
     /// to a size, then its formidable"): a body at or past its `birth_body` counts as this ×
@@ -1506,6 +1506,48 @@ pub struct Flight {
     /// flower's near-IR at (`SenseTable::light_m`), a wall of vine being no harder to see.
     #[serde(default = "nest_search")]
     pub nest_search_m: f64,
+    /// **FLUSH** (HUNT-ESCAPE, Wrysk 2026-10-10, role call 8 B: "bellwing would be able to
+    /// react very quickly, so catching one shouldnt be all that easy"; [`crate::flush`]): an
+    /// awake flyer that senses a body that hunts it looming — a strike begun on it within its
+    /// `senses.loom_m`, or a hunter closing on it there — takes off this long after, seconds.
+    /// Bellwing 0.05 (one tick): an insect's startle escape is tens of milliseconds. 0: at once.
+    #[serde(default = "flush_reaction")]
+    pub flush_reaction_s: f64,
+    /// ...and bursts away from the threat's line at this × its cruise speed. Bellwing 3 (3 m/s,
+    /// 24 body lengths a second, a moth's dash). 0: no flush at all.
+    #[serde(default = "flush_speed")]
+    pub flush_speed_factor: f64,
+    /// ...rising at this × the burst's speed, × its speed. Bellwing 0.5.
+    #[serde(default = "flush_climb")]
+    pub flush_climb_fraction: f64,
+    /// ...for this long, seconds. Bellwing 0.3: about a metre.
+    #[serde(default = "flush_burst")]
+    pub flush_burst_s: f64,
+    /// After the burst it flies on away from the threat, climbing, neither sipping nor
+    /// landing by choice, until this long after the takeoff, seconds. Bellwing 3: three metres
+    /// at cruise, out of a Veilhound's reach before it may come down again.
+    #[serde(default = "flush_hold")]
+    pub flush_s: f64,
+}
+
+fn flush_reaction() -> f64 {
+    Flight::BELLWING.flush_reaction_s
+}
+
+fn flush_speed() -> f64 {
+    Flight::BELLWING.flush_speed_factor
+}
+
+fn flush_climb() -> f64 {
+    Flight::BELLWING.flush_climb_fraction
+}
+
+fn flush_burst() -> f64 {
+    Flight::BELLWING.flush_burst_s
+}
+
+fn flush_hold() -> f64 {
+    Flight::BELLWING.flush_s
 }
 
 fn nest_search() -> f64 {
@@ -1554,6 +1596,11 @@ impl Flight {
         rain_ground_m_per_s: 20.0 / 1000.0 / 3600.0,
         rain_ground_hysteresis_m_per_s: 5.0 / 1000.0 / 3600.0,
         nest_search_m: 4.0,
+        flush_reaction_s: 0.05,
+        flush_speed_factor: 3.0,
+        flush_climb_fraction: 0.5,
+        flush_burst_s: 0.3,
+        flush_s: 3.0,
     };
 }
 
@@ -1814,12 +1861,26 @@ impl Gut {
     }
 }
 
-/// The counter-strike seam (§2.7): a struck animal's answer, wounding its attacker. Unused.
+/// **The counter-strike** (§2.7's seam; HUNT-ESCAPE, Wrysk 2026-10-10: grown lanternjaws
+/// fight back, "its not like attacking a grazer"): a grown body (at or past its `birth_body`)
+/// a strike reaches answers it, wounding the attacker through the hit path ([`crate::Hit`]),
+/// `damage × (S_self / S_attacker) × (1 − the attacker's armour)`, the strike's own rule
+/// turned round. Whether the strike wounds or kills it is unchanged. A juvenile and a rider
+/// do not answer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Counter {
+    /// The answer reaches the attacker's jaw within this of its own footprint, metres.
     pub reach: f64,
+    /// Wound per answer at equal size.
     pub damage: f64,
+    /// Its cost, in seconds of its own awake upkeep.
     pub cost: f64,
+}
+
+impl Counter {
+    /// The lanternjaw's answer: its own strike turned on the attacker — power 0.7, the cost of
+    /// a strike (100 s of awake upkeep) — and its claws' reach, half a metre. Placeholders.
+    pub const LANTERNJAW: Counter = Counter { reach: 0.5, damage: Hunter::LANTERNJAW.strike_power, cost: Hunter::LANTERNJAW.strike_cost_s };
 }
 
 fn default_taste_reference_food() -> f64 {
@@ -2232,7 +2293,8 @@ impl FounderPhysiology {
                 hunter: Some(Hunter::LANTERNJAW),
                 armour: 0.0,
                 agility: 0.0,
-                counter: None,
+                // HUNT-ESCAPE (Wrysk 2026-10-10): a grown lanternjaw fights back.
+                counter: Some(Counter::LANTERNJAW),
                 // LANTERNJAW-LIFE: a grown lanternjaw counts as twelve times its body in a
                 // hunter's window. A lone Veilhound's window (1.5 × its 2.74) is 4.1, under
                 // a new adult's 12 × 0.3675 = 4.4, so a hound takes one only with packmates
@@ -2659,8 +2721,10 @@ impl FounderPhysiology {
                     founding_count: 0,
                     founding_per_world: true,
                     pack: Some(Pack::CHORISTER),
-                    // Built on the lanternjaw, but no formidable adult (LANTERNJAW-LIFE).
+                    // Built on the lanternjaw, but no formidable adult (LANTERNJAW-LIFE)
+                    // and no counter-strike (HUNT-ESCAPE).
                     adult_size_window_factor: 1.0,
+                    counter: None,
                     // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,
                     // Meat: k 0.20, τ 300 s (Wrysk: one big meal every one or two days).

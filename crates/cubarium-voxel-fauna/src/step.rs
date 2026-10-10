@@ -334,6 +334,10 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
         // HUNKER: the pack's work on its hunkered prey, before this tick's strikes land.
         crate::vigil::pry(fauna, ring);
         for hit in hits {
+            if hit.counter {
+                apply_counter(fauna, flora, &hit, Some(&view));
+                continue;
+            }
             let stood = fauna
                 .animals
                 .binary_search_by_key(&hit.prey, |a| a.id)
@@ -435,6 +439,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
         fauna.wading.remove(&a.id);
+        fauna.flushes.remove(&a.id);
         fauna.book_removed(a);
         fauna.free_riders(a, Some(view));
     }
@@ -1403,6 +1408,7 @@ fn disperse(
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
         fauna.wading.remove(&a.id);
+        fauna.flushes.remove(&a.id);
         fauna.free_riders(&a, Some(view));
     }
     if pack_changed {
@@ -2751,6 +2757,14 @@ fn act(
 ) {
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
+    // FLUSH: the bodies a flyer may sense coming at it, the hunters (indices: no body leaves
+    // during the act).
+    let hunters: Vec<usize> = (0..fauna.animals.len())
+        .filter(|&k| {
+            let o = &fauna.animals[k];
+            o.attached.is_none() && o.founder.is_some_and(|f| fauna.config.founder(f).active_hunter().is_some())
+        })
+        .collect();
     for i in 0..fauna.animals.len() {
         // A rider has no motion, feeding or strike of its own (parasite §2): it is alive
         // this tick and still, and is carried below.
@@ -2768,7 +2782,7 @@ fn act(
             .founder
             .map_or((None, None), |f| (fauna.config.founder(f).flight, fauna.config.founder(f).glider));
         match (flyer, glider) {
-            (Some(flight), _) => flyer_act(fauna, view, flora, sky, flight, i),
+            (Some(flight), _) => flyer_act(fauna, view, flora, sky, flight, i, &hunters),
             (None, Some(g)) => glider::glider_act(fauna, view, flora, seed, tick, sky, hits, g, i),
             (None, None) => {
                 act_one(fauna, view, flora, seed, tick, hits, i);
@@ -3118,6 +3132,7 @@ fn flyer_act(
     sky: &Sky,
     flight: crate::Flight,
     i: usize,
+    hunters: &[usize],
 ) {
     use crate::flight;
     use crate::{MobilityMode, PerchKind};
@@ -3155,6 +3170,23 @@ fn flyer_act(
     // eating latch and emergency on, stomach empty, lift up, never airborne).
     let can_pay = |a: &Animal| a.reserve + (a.body - sc.body_min).max(0.0) >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
+    // FLUSH (HUNT-ESCAPE, `crate::flush`): a hunter sensed coming sends it off in a burst.
+    let escape = {
+        let v = view.config.voxel_m;
+        let ring = f64::from(view.config.width) * v;
+        let calm = asleep || grounded || fauna.animals[i].mobility.falling;
+        let mut escape = crate::flush::step(fauna, i, &flight, hunters, calm, v, ring);
+        if escape.is_some_and(|e| e.takeoff) && fauna.animals[i].mobility.mode == crate::MobilityMode::Perched {
+            if can_pay(&fauna.animals[i]) {
+                flyer_takeoff(fauna, i, takeoff_cost);
+            } else {
+                // Too spent to take off: it stays where the strike finds it.
+                fauna.flushes.remove(&fauna.animals[i].id);
+                escape = None;
+            }
+        }
+        escape
+    };
 
     // 1. The perch.
     if fauna.animals[i].mobility.mode == MobilityMode::Perched {
@@ -3181,6 +3213,14 @@ fn flyer_act(
 
     // 2. The controls, and what the sky and the hour force.
     let (mut forward, mut turn, mut lift) = (held.forward.max(0.0), held.turn, lift_held);
+    // A flush's burst moves at its own speed and climb (× cruise); otherwise 1 and the lift's.
+    let (mut speed, mut climb) = (1.0, flight.lift_speed_fraction);
+    if let Some(e) = escape {
+        (forward, turn, lift) = (1.0, 0.0, 1.0);
+        (speed, climb) = (e.speed, e.climb);
+        held.feed = 0.0;
+        fauna.animals[i].pose.heading_rad = e.heading;
+    }
     if falling {
         (forward, turn, lift) = (0.0, 0.0, -1.0);
     } else if grounded {
@@ -3239,7 +3279,7 @@ fn flyer_act(
         } else {
             1.0
         };
-        let cost = (factor - 1.0).max(0.0) * basal * DT * shower;
+        let cost = (factor - 1.0).max(0.0) * basal * DT * shower * speed;
         let (paid, body) = respire(fauna, i, cost, Respiration::Motor);
         fauna.ledger.respired_flight_out += paid;
         motor_paid += paid;
@@ -3256,8 +3296,8 @@ fn flyer_act(
         } else {
             1.0
         };
-        let distance = forward * cruise * slow * DT;
-        let dy = lift * flight.lift_speed_fraction * cruise * DT;
+        let distance = forward * speed * cruise * slow * DT;
+        let dy = lift * climb * cruise * DT;
         let moved = flight::move_through_air(view, &fv, shape, flight.band_max_m, puddle, &mut a.pose, distance, dy);
         if let Some(site) = flight::support_below(view, a.pose.x, a.pose.z, a.pose.y_m) {
             a.site = site;
@@ -3275,6 +3315,10 @@ fn flyer_act(
     };
     if let Some(p) = moved.landed {
         fauna.ledger.landings_by_perch[p.kind.index()] += 1;
+        // A flush that runs into a face ends there.
+        if escape.is_some() {
+            fauna.flushes.remove(&fauna.animals[i].id);
+        }
     }
     if !falling && moved.rise_m > 0.0 {
         let work = flight.climb_work_per_m * fauna.animals[i].body * moved.rise_m;
@@ -3403,7 +3447,7 @@ fn flyer_sip(
 
 /// The jaw's point: the body's nose, `jaw_forward_length_fraction` of its length ahead of
 /// its centre (half, for the lanternjaw).
-fn jaw_of(x: f64, z: f64, heading: f64, length_m: f64, forward_fraction: f64) -> (f64, f64) {
+pub(crate) fn jaw_of(x: f64, z: f64, heading: f64, length_m: f64, forward_fraction: f64) -> (f64, f64) {
     (
         x + forward_fraction * length_m * heading.sin(),
         z + forward_fraction * length_m * heading.cos(),
@@ -3683,8 +3727,21 @@ fn strike_tick(
         .ok()
         .map(|j| fauna.animals[j]);
     if let Some(p) = prey {
-        if meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p) && (founder != crate::Founder::Seedporter || crate::is_prey_of(&fauna.config, &a, &p))
-        {
+        let contact = meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p)
+            && (founder != crate::Founder::Seedporter || crate::is_prey_of(&fauna.config, &a, &p));
+        // FLUSH: a jaw that closed on air because its prey had burst away from it.
+        if !contact && crate::flush::fled(fauna, p.id) {
+            if let Some(pf) = p.founder {
+                fauna.ledger.flush_escapes_by_founder[pf.index()] += 1;
+            }
+        }
+        // HUNT-ESCAPE: a grown body with a counter-strike answers the strike that reached it.
+        if contact {
+            if let Some(answer) = counter_answer(&fauna.config, view, &a, jaw_to, &p) {
+                hits.push(answer);
+            }
+        }
+        if contact {
             let pf = p.founder.expect("a prey has a lineage");
             let pp = fauna.config.founder(pf);
             let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -3752,6 +3809,7 @@ fn strike_tick(
                     by: founder,
                     striker: a.id,
                     lure: s.lure,
+                    counter: false,
                 });
             }
         }
@@ -3763,6 +3821,29 @@ fn strike_tick(
     });
 }
 
+/// **The counter-strike** ([`crate::Counter`], HUNT-ESCAPE): the answer of a grown `prey`
+/// with a counter to the strike of `striker` that reached it, its jaw ending at `jaw_to` —
+/// a [`Hit`] on the striker, `damage × (S_prey / S_striker) × (1 − the striker's armour)`,
+/// when that jaw is within the counter's reach of the prey's footprint. `None` for a
+/// juvenile, a rider, a lineage with no counter, or a jaw out of its reach.
+fn counter_answer(config: &crate::FaunaConfig, view: &VoxelView<'_>, striker: &Animal, jaw_to: (f64, f64), prey: &Animal) -> Option<Hit> {
+    let pf = prey.founder?;
+    let c = config.founder(pf).counter?;
+    let sf = striker.founder?;
+    if prey.attached.is_some() || prey.body < crate::effective_config(config, prey).birth_body || !(striker.body > 0.0) {
+        return None;
+    }
+    let pg = crate::body_of(config, prey)?;
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let (dx, dz) = crate::pose::wrapped_delta(prey.pose.x, prey.pose.z, jaw_to.0, jaw_to.1, ring);
+    if (dx * dx + dz * dz).sqrt() > pg.footprint_radius() + c.reach {
+        return None;
+    }
+    let armour = config.founder(sf).armour;
+    let damage = c.damage * (prey.body / striker.body) * (1.0 - armour).clamp(0.0, 1.0);
+    (damage.is_finite() && damage > 0.0).then_some(Hit { prey: striker.id, damage, by: pf, striker: prey.id, lure: false, counter: true })
+}
+
 /// The key the shield's glance draw is salted with, apart from the dodge's (a pure numeric).
 const GLANCE_KEY: u64 = 0x6c61_6e63_6500_0001;
 
@@ -3771,11 +3852,38 @@ const GLANCE_KEY: u64 = 0x6c61_6e63_6500_0001;
 /// carrion on its face, a carcass record on the pool, departed `Killed { by }`. A prey
 /// that is gone already is left alone: it dies once.
 pub(crate) fn apply_hit(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder, view: Option<&VoxelView<'_>>) {
+    if fauna.animals.binary_search_by_key(&prey, |a| a.id).is_err() {
+        return;
+    }
+    // A hit is counted where it lands: on a prey still alive.
+    fauna.ledger.hits_by_founder[by.index()] += 1;
+    wound(fauna, flora, prey, damage, by, view);
+}
+
+/// **A counter-strike applied** ([`counter_answer`], HUNT-ESCAPE): the attacker `hit.prey`
+/// takes the wound by the hit path ([`wound`]); the answering body `hit.striker`, if it
+/// still lives, pays its counter's cost. Booked as a counter, not a hit.
+fn apply_counter(fauna: &mut Fauna, flora: &mut Flora, hit: &Hit, view: Option<&VoxelView<'_>>) {
+    if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
+        return;
+    }
+    fauna.ledger.counters_by_founder[hit.by.index()] += 1;
+    fauna.ledger.counter_wound_by_founder[hit.by.index()] += hit.damage;
+    if let Ok(k) = fauna.animals.binary_search_by_key(&hit.striker, |a| a.id) {
+        let phys = *fauna.config.founder(hit.by);
+        if let Some(c) = phys.counter {
+            let cost = c.cost * phys.core.maintenance_per_s * fauna.animals[k].body;
+            respire(fauna, k, cost, Respiration::Hunt);
+        }
+    }
+    wound(fauna, flora, hit.prey, hit.damage, hit.by, view);
+}
+
+/// The wound of a hit on the live body `prey` ([`apply_hit`]'s, less its booking).
+fn wound(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Founder, view: Option<&VoxelView<'_>>) {
     let Ok(j) = fauna.animals.binary_search_by_key(&prey, |a| a.id) else {
         return;
     };
-    // A hit is counted where it lands: on a prey still alive.
-    fauna.ledger.hits_by_founder[by.index()] += 1;
     let alert_s = fauna.config.predation.alert_s;
     let a = &mut fauna.animals[j];
     if damage.is_finite() && damage > 0.0 {
@@ -3825,6 +3933,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
     fauna.trapped.remove(&a.id);
     fauna.drop_plans.remove(&a.id);
     fauna.wading.remove(&a.id);
+    fauna.flushes.remove(&a.id);
     fauna.free_riders(&a, view);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
@@ -6340,6 +6449,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.trapped.remove(id);
         fauna.drop_plans.remove(id);
         fauna.wading.remove(id);
+        fauna.flushes.remove(id);
         fauna.forage.remove(id);
         fauna.rove.remove(id);
         fauna.nest_trips.remove(id);
@@ -6523,6 +6633,10 @@ mod testpass4_glowcap_tests;
 #[cfg(test)]
 #[path = "mimic_tests.rs"]
 mod mimic_tests;
+
+#[cfg(test)]
+#[path = "hunt_escape_tests.rs"]
+mod hunt_escape_tests;
 
 #[cfg(test)]
 #[path = "traps_tests.rs"]
