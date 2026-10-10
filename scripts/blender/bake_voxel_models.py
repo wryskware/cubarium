@@ -677,21 +677,29 @@ RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         # the seedporter's pose models it crops in (specimens, one bin each)
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
-BIN_RIGS = {"loftstrider": lambda n: A.ls_rig_clips(ls_parts(n))}
+BIN_RIGS = {"loftstrider": lambda n, cells, vox: A.ls_rig_clips(ls_parts(n), cells, vox)}
 
 
 def write_rig(path, bins):
-    """`<name>.rig` (CRG2; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones and
-    clips, and per size bin its scale, its bones' heads, each clip's sampled frames and
-    each cell's bone. `bins`: (length, scale, rig, cells), every rig with the same bones
-    and clips."""
+    """`<name>.rig` (CRG3; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones,
+    the turn symmetry (`symmetry`: order and each bone's image; none when absent) and the
+    clips, and per size bin its scale, each clip's aim (`aim`, the bite height it reaches
+    for, metres; NaN when absent) and lower (`lower`, the share of the `asleep` track it
+    holds the body at; 0 when absent), its bones' heads, each clip's sampled frames and each
+    cell's bone. `bins`: (length, scale, rig, cells), every rig with the same bones and
+    clips."""
     first = bins[0][2]
-    b = bytearray(b"CRG2")
+    b = bytearray(b"CRG3")
     b += struct.pack("<B", len(first["bones"]))
     for name, parent in first["bones"]:
         enc = name.encode()
         b += struct.pack("<B", len(enc)) + enc
         b += struct.pack("<B", 255 if parent is None else parent)
+    order, image = first.get("symmetry") or (0, [])
+    b += struct.pack("<B", order)
+    if order >= 2:
+        assert len(image) == len(first["bones"])
+        b += bytes(image)
     b += struct.pack("<B", len(first["clips"]))
     for clip in first["clips"]:
         enc = clip["state"].encode()
@@ -701,6 +709,9 @@ def write_rig(path, bins):
     for length, scale, rig, cells in bins:
         assert rig["bones"] == first["bones"] and len(rig["clips"]) == len(first["clips"])
         b += struct.pack("<df", length, scale)
+        for clip in rig["clips"]:
+            aim = clip.get("aim")
+            b += struct.pack("<ff", float("nan") if aim is None else aim, clip.get("lower", 0.0))
         for h in rig["heads"]:
             b += struct.pack("<3f", *h)
         for clip, c0 in zip(rig["clips"], first["clips"]):
@@ -736,7 +747,7 @@ def bake_animal(f, vox, out_dir):
         raw = loftstrider_cells(objs, vox, bones) if name == "loftstrider" else voxelize_animal(objs, vox, 0, bones)
         if name in BIN_RIGS:
             # the bin is its own build, in metres
-            rig_bins.append((length, 1.0 / vox, raw, bones, BIN_RIGS[name](n)))
+            rig_bins.append((length, 1.0 / vox, raw, bones, BIN_RIGS[name](n, bones, vox)))
         elif rigged:
             # the bin is the reference build scaled by length / reference length
             rig_bins.append((length, length / A.REF[name][1] / vox, raw, bones, None))

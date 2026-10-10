@@ -912,8 +912,12 @@ pub struct Spec {
     pub palette: Vec<PaletteEntry>,
     pub pose: Option<PoseSpec>,
     /// Its rig's clips this tick, each while its state holds or it eases out of it
-    /// (FEED-RIG, FEED-ROLLOUT): at most one per clip of the rig.
+    /// (FEED-RIG, FEED-ROLLOUT): at most one per state of the rig (an aimed state's first
+    /// clip; the rig blends the rest by the aim).
     pub clips: Vec<ClipSpec>,
+    /// Where its aimed clips reach (FEED-ROLLOUT round 2, [`rig::AimTrack`]): its last
+    /// bite's height and bearing, eased; `None` with no bite or no aimed clip.
+    pub aim: Option<rig::AimTrack>,
 }
 
 /// One of a figure's rig clips at a tick: which clip of its rig, its weight (before the
@@ -937,12 +941,30 @@ impl ClipSpec {
 
 /// How far any cell of a rigged model reaches from `centre` over its clips, voxels: each
 /// clip alone at every sampled frame, at the full weight and on the way to it, and each
-/// loop over the others' last frames.
+/// loop over the others' last frames; an aimed clip also at each of its state's aims, at
+/// every step of the rig's symmetry.
 fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f32 {
     let mut bones = Vec::new();
     let mut reach = 0.0f32;
-    let mut poses: Vec<Vec<rig::ClipAt>> = Vec::new();
+    let mut poses: Vec<(Vec<rig::ClipAt>, Option<rig::Aim>)> = Vec::new();
+    let aims_of = |c: usize| -> Vec<Option<rig::Aim>> {
+        let Some(b) = rig.bins.get(bin) else { return vec![None] };
+        if b.aims.get(c).copied().flatten().is_none() {
+            return vec![None];
+        }
+        let steps = rig.symmetry.as_ref().map_or(1, |s| s.order);
+        let step = rig.symmetry.as_ref().map_or(0.0, |s| s.step());
+        let state = &rig.clips[c].state;
+        let heights = rig.clips.iter().enumerate().filter(|(_, k)| &k.state == state).filter_map(|(o, _)| b.aims[o]);
+        heights
+            .flat_map(|h| (0..steps).map(move |m| Some(rig::Aim { weight: 1.0, height_m: h, bearing_rad: m as f64 * step })))
+            .collect()
+    };
     for (c, clip) in rig.clips.iter().enumerate() {
+        if rig.clip(&clip.state) != Some(c) {
+            continue;
+        }
+        let aims = aims_of(c);
         for f in 0..clip.frames {
             let t = f as f64 / clip.fps;
             for w in [0.25, 0.5, 0.75, 1.0] {
@@ -952,22 +974,28 @@ fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f
                     rig::ClipMode::Track if w < 1.0 => continue,
                     rig::ClipMode::Track => f as f64 / (clip.frames.max(2) - 1) as f64,
                 };
-                poses.push(vec![rig::ClipAt { clip: c, time_s: t, weight: w }]);
+                let at = vec![rig::ClipAt { clip: c, time_s: t, weight: w }];
+                if w < 1.0 {
+                    poses.push((at, None));
+                } else {
+                    poses.extend(aims.iter().map(|&aim| (at.clone(), aim)));
+                }
             }
             if clip.mode == rig::ClipMode::Loop {
-                let others = (0..rig.clips.len()).filter(|&o| o != c);
-                poses.push(
+                let others = (0..rig.clips.len()).filter(|&o| o != c && rig.clip(&rig.clips[o].state) == Some(o));
+                poses.push((
                     others
                         .map(|o| rig::ClipAt { clip: o, time_s: 0.0, weight: 1.0 })
                         .chain([rig::ClipAt { clip: c, time_s: t, weight: 1.0 }])
                         .collect(),
-                );
+                    None,
+                ));
             }
         }
     }
-    for pose in &poses {
+    for (pose, aim) in &poses {
         {
-            rig.pose(bin, pose, &mut bones);
+            rig.pose_aimed(bin, pose, *aim, &mut bones);
             for c in cells {
                 let Some(b) = bones.get(usize::from(c.bone)) else { continue };
                 for corner in 0..8 {
@@ -1007,6 +1035,7 @@ fn lure_spec(animal: &Animal, fauna: &FaunaView<'_>, voxel_m: f64, body: &Spec, 
         palette: vec![PaletteEntry { base: c, emit: emission.then_some(c) }],
         pose: None,
         clips: Vec::new(),
+        aim: None,
     })
 }
 
@@ -1075,6 +1104,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
         palette: [style.wood, style.crown, style.heart].map(|base| PaletteEntry { base, emit: None }).to_vec(),
         pose: None,
         clips: Vec::new(),
+        aim: None,
     })
 }
 
@@ -1100,7 +1130,7 @@ fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models
             Paint::Style | Paint::Flat => PaletteEntry::default(),
         })
         .collect();
-    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None, clips: Vec::new() })
+    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None, clips: Vec::new(), aim: None })
 }
 
 /// Every animal of `fauna` as figures, after [`Animals::rebuild_without_living`] moved the
@@ -1255,6 +1285,8 @@ pub fn specs(
             r.clips
                 .iter()
                 .enumerate()
+                // one per state: an aimed state's other clips are blended in by the aim
+                .filter(|(c, clip)| r.clip(&clip.state) == Some(*c))
                 .filter_map(|(c, clip)| {
                     let (weight, rate) = match clip.state.as_str() {
                         "cropping" => animals.feed_weight(a),
@@ -1269,7 +1301,12 @@ pub fn specs(
                 })
                 .collect()
         });
-        let body = Spec { key: (a.id, 0), model, pos, orient, palette, pose, clips };
+        // Where its aimed clips reach: its last bite, eased (FEED-ROLLOUT round 2).
+        let aim = rigged
+            .as_ref()
+            .filter(|(r, b)| r.bins.get(*b).is_some_and(|b| b.aims.iter().any(Option::is_some)))
+            .and_then(|_| animals.aim(a, view.tick));
+        let body = Spec { key: (a.id, 0), model, pos, orient, palette, pose, clips, aim };
         if founder == Founder::Lanternjaw
             && let Some(l) = lure_spec(a, &fauna, v, &body, models, emission)
         {
@@ -1661,6 +1698,9 @@ impl FigureTrack {
                 // layered in the rig's clip order, whichever tick each came from
                 clip_ats.sort_by_key(|c| c.clip);
             }
+            // The aim at the drawn time: the newest tick's track (it starts where the older
+            // one was at its tick, so it runs on from it).
+            let aim = spec.aim.map(|a| a.at(td, f64::from(cubarium_voxel::TICK_HZ)));
             let heading = match spec.orient {
                 Orient::Ground(_) => Some(axes[0][0].atan2(axes[0][2])),
                 Orient::Axes(_) => None,
@@ -1702,7 +1742,7 @@ impl FigureTrack {
                 frame.palette.extend_from_slice(palette);
                 let rigged = match &info.rig {
                     Some((rig, bin)) if !clip_ats.is_empty() => {
-                        rig.pose(*bin, &clip_ats, &mut bones);
+                        rig.pose_aimed(*bin, &clip_ats, aim, &mut bones);
                         let first = frame.bones.len() as u32;
                         frame.bones.extend_from_slice(&bones);
                         Some((first, bones.len() as u32))
@@ -1866,7 +1906,7 @@ mod tests {
     use super::*;
 
     fn spec(id: u64, model: ModelId, pos: [f64; 3], h: f64) -> Spec {
-        Spec { key: (id, 0), model, pos, orient: Orient::Ground(h), palette: vec![PaletteEntry::default()], pose: None, clips: Vec::new() }
+        Spec { key: (id, 0), model, pos, orient: Orient::Ground(h), palette: vec![PaletteEntry::default()], pose: None, clips: Vec::new(), aim: None }
     }
 
     fn one_cell(models: &mut FigureModels, key: u64) -> ModelId {

@@ -22,10 +22,17 @@
 //! hangs below the perch as in a crown) or on the ground (`seedporter-ground`, as at a
 //! vine face) — on the frondgrazer's script.
 //!
+//! `--aim` (FEED-ROLLOUT round 2, loftstrider only): one adult cropping on through four
+//! staged bites (`AIM_BITES`: low ahead, high ahead, then level to each side), its last
+//! bite set on the body as the sim keeps it (`Animal::bite`), so the clip aims at each.
+//! `--models DIR` reads the baked models (and rigs) from `DIR` instead of the config's: the
+//! main checkout's `assets/voxel-models` draws what is merged there, for a before | after.
+//!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
-//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw]
-//!     [--pose stand|ground]
+//!     [--px N] [--heading DEG] [--flipbook PATH]
+//!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw] [--pose stand|ground]
+//!     [--aim] [--models DIR]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -69,6 +76,16 @@ const LENGTH_S: f64 = 7.5;
 const LS_BOUTS: [(f64, f64); 2] = [(0.5, 6.0), (7.0, 8.0)];
 const LS_SLEEP: (f64, f64) = (9.0, 12.5);
 const LS_LENGTH_S: f64 = 14.5;
+/// The aiming script (`--aim`): from each time (seconds) the body's last bite is the cell
+/// this far ahead of it, to its side (the body's model +z: right when it faces the
+/// viewer side-on) and above its feet, metres. It crops from 0.5 s to the end.
+const AIM_BITES: [(f64, f64, f64, f64); 4] = [
+    (0.0, 0.75, 0.0, 0.9),
+    (3.6, 0.75, 0.0, 3.4),
+    (6.7, 0.0, -1.0, 2.2),
+    (9.8, 0.0, 1.0, 2.2),
+];
+const AIM_LENGTH_S: f64 = 13.0;
 const VOXEL_M: f64 = 0.125;
 const HZ: f64 = cubarium_voxel::TICK_HZ as f64;
 
@@ -233,6 +250,8 @@ fn main() -> Result<()> {
     let mut perf = None;
     let mut founder = Founder::Browser;
     let mut mode = MobilityMode::Ground;
+    let mut aiming = false;
+    let mut models_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -243,6 +262,8 @@ fn main() -> Result<()> {
                 flip_path = Some(PathBuf::from(args.next().context("--flipbook PATH")?))
             }
             "--perf" => perf = Some(args.next().context("--perf N")?.parse::<usize>()?),
+            "--aim" => aiming = true,
+            "--models" => models_dir = Some(PathBuf::from(args.next().context("--models DIR")?)),
             "--founder" => {
                 founder = match args.next().context("--founder NAME")?.as_str() {
                     "frondgrazer" | "browser" => Founder::Browser,
@@ -296,17 +317,19 @@ fn main() -> Result<()> {
     let sp = founder == Founder::Seedporter;
     let lj = founder == Founder::Lanternjaw;
     let perched = sp && mode == MobilityMode::Perched;
+    anyhow::ensure!(!aiming || ls, "--aim is the loftstrider's");
     let (mut w, xs, z) = match founder {
-        Founder::Chorister => (world(48, 16), [15, 36], 8),
-        Founder::Loftstrider => (world_of(52, 36, 20), [16, 38], 10),
+        Founder::Chorister => (world(48, 16), vec![15, 36], 8),
+        Founder::Loftstrider if aiming => (world_of(52, 36, 20), vec![26], 10),
+        Founder::Loftstrider => (world_of(52, 36, 20), vec![16, 38], 10),
         // the ground pose is 1.14 m long with its tail; the perched one 1.04 m tall
-        Founder::Seedporter => (world_of(26, 14, 9), [8, 18], 4),
+        Founder::Seedporter => (world_of(26, 14, 9), vec![8, 18], 4),
         // 1.0 m from the blades to the tail root, the lures arching to 0.6 m
-        Founder::Lanternjaw => (world_of(26, 10, 9), [8, 18], 4),
-        _ => (world(22, 7), [6, 15], 3),
+        Founder::Lanternjaw => (world_of(26, 10, 9), vec![8, 18], 4),
+        _ => (world(22, 7), vec![6, 15], 3),
     };
     if perched {
-        for x in xs {
+        for &x in &xs {
             for y in 2..2 + SP_POST {
                 w.apply(VoxelCommand::SetMaterial { x, y, z, material: Material::Rock });
             }
@@ -365,6 +388,9 @@ fn main() -> Result<()> {
         ..VoxelConfig::default()
     };
     cfg.figures.rig = rig_draw;
+    if let Some(dir) = models_dir {
+        cfg.models_dir = dir;
+    }
     if flip.is_some() {
         // the flipbook swaps its model outright, as a flipbook does
         cfg.figures.swap_s = 0.0;
@@ -388,13 +414,33 @@ fn main() -> Result<()> {
         },
     )?;
 
-    let last = ((if ls { LS_LENGTH_S } else { LENGTH_S }) * HZ).round() as u64;
+    let length_s = match (ls, aiming) {
+        (true, true) => AIM_LENGTH_S,
+        (true, false) => LS_LENGTH_S,
+        _ => LENGTH_S,
+    };
+    let last = (length_s * HZ).round() as u64;
     let ws = weights(last);
     let mut frame = 0u32;
     let mut shown: Vec<Option<*const Vec<ModelCell>>> = vec![None; animals.len()];
     for tick in 1..=last {
         for a in &mut animals {
             a.state = state_at(tick, ls);
+            if aiming {
+                let t = tick as f64 / HZ;
+                a.state = if t >= 0.5 { State::Cropping } else { State::Resting };
+                let &(_, ahead, side, up) = AIM_BITES.iter().rev().find(|b| t >= b.0).unwrap_or(&AIM_BITES[0]);
+                // the body's forward (sin h, cos h) and its model +z (−cos h, sin h)
+                let (sh, ch) = a.pose.heading_rad.sin_cos();
+                let x = a.pose.x + ahead * sh - side * ch;
+                let z = a.pose.z + ahead * ch + side * sh;
+                let y = f64::from(a.site.y) + 1.0 + up / VOXEL_M;
+                a.bite = cubarium_voxel_fauna::LastBite(Some(cubarium_voxel_flora::Site {
+                    x: (x / VOXEL_M).floor() as u32,
+                    y: y.floor() as u32,
+                    z: (z / VOXEL_M).floor() as u32,
+                }));
+            }
         }
         for k in 0..3 {
             let t = tick as f64 + f64::from(k) / 3.0;
