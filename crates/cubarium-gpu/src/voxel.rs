@@ -3583,6 +3583,11 @@ impl VoxelRenderer {
         self.plants.as_ref().map(|p| p.stats())
     }
 
+    /// The plant pass's drawn list and the clock it was last drawn at ([`crate::plants::PlantPass::drawn`]).
+    pub fn plant_drawn(&self) -> Option<(&crate::plants::PlantList, f64)> {
+        self.plants.as_ref().map(|p| p.drawn())
+    }
+
     /// The figures the next frame draws (H2's model pass). A change redraws.
     pub fn set_figures(&mut self, frame: crate::figures::FigureFrame) {
         if frame != self.figure_frame {

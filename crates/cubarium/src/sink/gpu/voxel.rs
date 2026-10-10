@@ -705,6 +705,12 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.renderer.plant_stats()
     }
 
+    /// The plant pass's drawn cell list and the frame clock it was last drawn at: for
+    /// captures that follow single plant cells.
+    pub fn plant_drawn(&self) -> Option<(&cubarium_gpu::plants::PlantList, f64)> {
+        self.renderer.plant_drawn()
+    }
+
     /// Capture-only: draw the lit tier's derived water flow field over the water instead
     /// of the water (`VoxelParams::debug_flow`). Never set by the live display.
     pub fn set_debug_flow(&mut self, on: bool) -> Result<()> {

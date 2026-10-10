@@ -697,6 +697,12 @@ impl PlantPass {
         self.stats
     }
 
+    /// The list the frames draw, and the frame clock (seconds) the last frame drew it at:
+    /// for captures that follow single cells.
+    pub fn drawn(&self) -> (&PlantList, f64) {
+        (&self.drawn, self.seconds)
+    }
+
     /// Take the plants' tips at `seconds` (the frame clock, sim seconds) under `rain`. True
     /// when the picture moves: a tip moved since the last frame drawn, or a cell is still
     /// arriving or leaving.
