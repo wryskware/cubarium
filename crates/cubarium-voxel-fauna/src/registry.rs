@@ -163,6 +163,11 @@ fn species_rows() -> Vec<Row> {
             .search(1.0, 30.0),
         r("reproduction.nest_retry_s", "s", nonneg, "a refused layer (nest site, body ceiling) waits this long before trying again")
             .search(5.0, 600.0).log(),
+        r("reproduction.nest_seek", "switch", Range::fraction(), "SHREDDER-NEST: refused by a crowded nest, it walks to the nearest free egg face within nest_seek_m and lays there (false: it waits out its retry where it is)").optional(),
+        r("reproduction.nest_seek_m", "m", nonneg, "SHREDDER-NEST: how far a refused layer looks for an uncrowded egg face (level distance, within one step of its height)")
+            .search(0.5, 8.0),
+        r("reproduction.nest_seek_give_up_s", "s", nonneg, "SHREDDER-NEST: a walk off a crowded nest not ended by a clutch is given up after this; the body then waits out its retry")
+            .search(10.0, 600.0).log(),
         r("reproduction.clutch_hold_max_s", "s", nonneg, "clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once)")
             .search(0.0, 7200.0),
         r("reproduction.egg_fungus_radius_m", "m", nonneg, "fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face)")

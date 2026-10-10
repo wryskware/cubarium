@@ -98,6 +98,8 @@ mod flight_tests;
 #[cfg(test)]
 mod seedporter_tests;
 #[cfg(test)]
+mod sp_shredder_tests;
+#[cfg(test)]
 mod roost_rain_tests;
 mod flight;
 #[cfg(test)]
@@ -1724,6 +1726,26 @@ pub struct Reproduction {
     /// waits before it tries to lay again; its surplus keeps standing.
     #[serde(default = "default_nest_retry_s")]
     pub nest_retry_s: f64,
+    /// **Walking off a crowded nest** (SHREDDER-NEST, Wrysk 2026-10-10: "a shredder that finds
+    /// its spot crowded goes somewhere quieter to lay, the way insects spread out their egg
+    /// sites"), a switch: a body the nest-site brake refuses, ready on every other gate,
+    /// takes the nearest face within [`Reproduction::nest_seek_m`] that is not crowded and
+    /// holds its lineage's egg-site rule as a goal, walks there and lays if it is still
+    /// uncrowded, instead of waiting out [`Reproduction::nest_retry_s`] in the crowd. With no
+    /// such face, or after [`Reproduction::nest_seek_give_up_s`], it drops the goal and waits
+    /// out its retry. **false** (the default): refused, it stays put. Never for a vine nester
+    /// (its own nest reflex looks) or a shore layer (its trip ashore already passes over a
+    /// crowded nest).
+    #[serde(default)]
+    pub nest_seek: bool,
+    /// How far, metres, a body walking off a crowded nest looks for a free egg face (level
+    /// distance, faces within one step of its own height).
+    #[serde(default = "default_nest_seek_m")]
+    pub nest_seek_m: f64,
+    /// Seconds a body walking off a crowded nest keeps its goal before giving up (its walk
+    /// blocked, or the face never reached); it then waits out its retry.
+    #[serde(default = "default_nest_seek_give_up_s")]
+    pub nest_seek_give_up_s: f64,
     /// **A full clutch first** (the capgnawer package, 2026-10-05), seconds: with a clutch
     /// from surplus ([`Reproduction::clutch_max`] above 0), a body whose hold is met waits
     /// up to this long for its reserve to pay for its **full clutch** and lays it the tick
@@ -1784,6 +1806,18 @@ fn default_surplus_share() -> f64 {
 }
 
 fn default_nest_retry_s() -> f64 {
+    NEST_RETRY_S
+}
+
+/// The default [`Reproduction::nest_seek_m`]: three of the shipped 1 m nest radii, room to
+/// clear a crowd and its rim. Plausible, untuned.
+fn default_nest_seek_m() -> f64 {
+    3.0
+}
+
+/// The default [`Reproduction::nest_seek_give_up_s`]: the retry's minute, so a walk that
+/// fails costs no more time than one refusal. Plausible, untuned.
+fn default_nest_seek_give_up_s() -> f64 {
     NEST_RETRY_S
 }
 
@@ -1902,6 +1936,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
@@ -1943,6 +1980,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 0.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.0,
@@ -1989,6 +2029,9 @@ impl Reproduction {
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
+        nest_seek: false,
+        nest_seek_m: 3.0,
+        nest_seek_give_up_s: NEST_RETRY_S,
         clutch_hold_max_s: 1800.0,
         egg_fungus_radius_m: 0.0,
         brood_share: 0.5,
@@ -2067,6 +2110,11 @@ impl Reproduction {
     /// Ticks a refused laying waits ([`Reproduction::nest_retry_s`]).
     pub fn retry_ticks(&self) -> u64 {
         cubarium_voxel::ticks_at_least_one(self.nest_retry_s)
+    }
+
+    /// [`Reproduction::nest_seek_give_up_s`] in ticks, at least one.
+    pub fn nest_seek_give_up_ticks(&self) -> u64 {
+        cubarium_voxel::ticks_at_least_one(self.nest_seek_give_up_s)
     }
 
     /// The reserve a body has to hold to be in surplus: the package plus the floor.
@@ -3833,8 +3881,29 @@ pub struct CensusPredation {
 /// - `wall`: climbing, not on the litter;
 /// - `site`: no egg site where it stands (litter, film, fungus, shore, vine; a flyer's
 ///   headroom);
-/// - `crowded`: the nest-site brake, its refusal and the retry wait after it.
-pub const LAY_GATES: [&str; 6] = ["surplus", "interval", "clutch_wait", "wall", "site", "crowded"];
+/// - `crowded`: the nest-site brake, its refusal and the retry wait after it;
+/// - `seeking`: on its way off a crowded nest to a free egg face (SHREDDER-NEST,
+///   [`Reproduction::nest_seek`]), the crowd still refusing it where it stands.
+pub const LAY_GATES: [&str; 7] = ["surplus", "interval", "clutch_wait", "wall", "site", "crowded", "seeking"];
+
+/// **A walk off a crowded nest** (SHREDDER-NEST, [`Reproduction::nest_seek`]): the free egg
+/// face a refused layer is walking to and the tick it set out. Session state, never saved:
+/// after a load the body is refused again at its next laying and looks again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct NestTrip {
+    pub(crate) target: Site,
+    pub(crate) since: u64,
+}
+
+/// SHREDDER-NEST's readout per lineage, since construction or load (never saved, never
+/// scored): walks off a crowded nest begun, clutches laid on one, and walks given up (the
+/// give-up time ran out, or the face was crowded or unfit on arrival).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NestSeekTally {
+    pub walk_offs: u64,
+    pub walk_lays: u64,
+    pub give_ups: u64,
+}
 
 /// Run-scoped instrumentation. Skipped by saves; no rule reads it.
 #[derive(Clone, Debug, Default)]
@@ -4074,6 +4143,13 @@ pub struct Fauna {
     /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
     #[serde(skip)]
     pub(crate) wade_outs: [u64; Founder::COUNT],
+    /// SHREDDER-NEST: per body, the walk off a crowded nest it is on ([`NestTrip`]). Session
+    /// state: not saved.
+    #[serde(skip)]
+    pub(crate) nest_trips: FxHashMap<u64, NestTrip>,
+    /// SHREDDER-NEST's readout per lineage ([`NestSeekTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) nest_seek_tally: [NestSeekTally; Founder::COUNT],
     /// LJ-HOSTSWITCH: per outgrown rider looking for a bigger host, by id, the tick it gives
     /// up ([`FaunaConfig::parasite_switch_give_up_s`]). Session state, not saved: a loaded
     /// world's seekers are free juveniles. A `BTreeMap`, so passes over it go in id order.
@@ -4528,6 +4604,8 @@ impl Fauna {
             drop_plans: FxHashMap::default(),
             wading: FxHashMap::default(),
             wade_outs: [0; Founder::COUNT],
+            nest_trips: FxHashMap::default(),
+            nest_seek_tally: [NestSeekTally::default(); Founder::COUNT],
             host_quests: std::collections::BTreeMap::new(),
             host_switch: HostSwitchTally::default(),
             walk_shun: FxHashMap::default(),
@@ -4903,6 +4981,11 @@ impl Fauna {
         self.wade_outs
     }
 
+    /// SHREDDER-NEST's walks off a crowded nest by lineage since construction or load.
+    pub fn nest_seek_tally(&self) -> [NestSeekTally; Founder::COUNT] {
+        self.nest_seek_tally
+    }
+
     /// LJ-HOSTSWITCH's readout, this session ([`HostSwitchTally`]).
     pub fn host_switches(&self) -> HostSwitchTally {
         self.host_switch
@@ -4927,6 +5010,7 @@ impl Fauna {
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
         self.wading.remove(&id);
+        self.nest_trips.remove(&id);
         true
     }
 
