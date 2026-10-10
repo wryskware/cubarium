@@ -150,6 +150,22 @@ const LIFE_LOFTSTRIDER_DAYS: f64 = 16.0;
 
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
+
+/// LJ-GROW (Wrysk 2026-10-10): the lanternjaw's assimilation yield, every food class. A
+/// predatory insect assimilates about 0.8-0.9 of the prey it eats (Slansky & Scriber 1985,
+/// carnivorous insects' approximate digestibility), and here the reserve then pays upkeep
+/// and builds structure at par, so the yield stands for assimilation less construction
+/// overhead (~0.7 of it): about 0.6. The shipped presets carried 0.469 (searched).
+pub const LANTERNJAW_YIELD: f64 = 0.6;
+
+/// LJ-GROW: the lanternjaw's growth ceiling before mass scaling, org-units/s (×30 shipped:
+/// 3.0e-4, 1.08 ou/h at a full reserve). See its row in the lanternjaw's physiology.
+pub const LANTERNJAW_GROWTH_MAX_PER_S: f64 = 1.0e-5;
+
+/// LJ-GROW (d), Wrysk 2026-10-10 ("im not opposed to adjusting the breeding rate"): the
+/// lanternjaw's brood share, the fraction of a grown body's net income saved for its next
+/// clutch (the shared rule's 0.5 elsewhere).
+pub const LANTERNJAW_BROOD_SHARE: f64 = 0.75;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
@@ -2131,10 +2147,13 @@ impl FounderPhysiology {
                     // 0.05), so 0.02 never binds the budget.
                     n_tissue: 0.02,
                     body_max: 0.035,
-                    // The ceiling only: at it a full reserve builds 0.27 ou/h at the shipped
-                    // mass, above a rider's or a free juvenile's growth (LANTERNJAW-LIFE), so
-                    // what it eats, not this, sets how fast it grows.
-                    growth_max_per_s: 2.5e-6,
+                    // LJ-GROW (Wrysk 2026-10-10: "bugs dont take like 4 months to grow"):
+                    // 1.0e-5, 3.0e-4 ou/s at the shipped mass (1.08 ou/h at a full
+                    // reserve). Growth is this × fullness, so the old 2.5e-6 (and the
+                    // presets' 1.0e-4 shipped) held riders at ~0.3 fullness, ~25-35 % under
+                    // their take, and kept a free juvenile's meal in the reserve. It still
+                    // builds only out of the reserve, which only food fills.
+                    growth_max_per_s: LANTERNJAW_GROWTH_MAX_PER_S,
                     // LANTERNJAW-LIFE (many offspring, low survival): a hatchling is 0.05 of
                     // the adult's body (0.37 of its length; was 0.0034, 0.46 of its length),
                     // so its egg is cheap and a clutch large.
@@ -2152,7 +2171,13 @@ impl FounderPhysiology {
                     reserve_cap: 0.6,
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
-                    reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
+                    // LJ-GROW (d): a new adult earmarks three quarters of its net income for
+                    // its next clutch ([`LANTERNJAW_BROOD_SHARE`]), not half, so its first
+                    // clutch comes sooner and it grows on toward body_max on the rest.
+                    reproduction: Reproduction {
+                        brood_share: LANTERNJAW_BROOD_SHARE,
+                        ..Reproduction::DORMANT_EGGS_PLACEHOLDER
+                    },
                     // Repair 2 item 5: the predators' twelve world days.
                     lifespan_median_s: LIFE_PREDATOR_DAYS * DAY_S,
                 },
@@ -2179,8 +2204,9 @@ impl FounderPhysiology {
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Carrion is the one food its mouth takes; every class carries the same
-                // number so none is a silent zero.
-                yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
+                // number so none is a silent zero. LJ-GROW: a predatory insect's
+                // conversion ([`LANTERNJAW_YIELD`]), not the litter feeders' 0.5.
+                yield_by_food: [LANTERNJAW_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
                 // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
                 // day in caves and deep shade with the daylight-mimic switch off.
@@ -2583,6 +2609,9 @@ impl FounderPhysiology {
                 // The P1 lanternjaw's reserve cap, which the chorister was built on: the
                 // detritus web's smaller lanternjaw cap is the lanternjaw's alone.
                 core.reserve_cap = 1.0;
+                // The lanternjaw's growth ceiling before LJ-GROW, which the chorister was
+                // built on: LJ-GROW's faster juvenile growth is the lanternjaw's alone.
+                core.growth_max_per_s = 2.5e-6;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 // LIFE-HISTORY: one litter a pack a year, conceived just after the dry season,
@@ -2636,6 +2665,9 @@ impl FounderPhysiology {
                     sleep_upkeep: SLEEP_UPKEEP,
                     // Meat: k 0.20, τ 300 s (Wrysk: one big meal every one or two days).
                     gut: Gut::of(0.20, 300.0),
+                    // The litter yield it was built on; LJ-GROW's conversion is the
+                    // lanternjaw's alone.
+                    yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                     ..lj
                 }
             }

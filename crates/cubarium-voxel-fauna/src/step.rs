@@ -3446,7 +3446,51 @@ fn meets_capsule(
     if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
         return false;
     }
-    in_strike_band(view, striker, geometry, h, prey, &pg)
+    in_strike_band(view, striker, geometry, h, prey, &pg) || lunge_start_band(config, view, striker, geometry, h, prey, &pg)
+}
+
+/// **The lunge sweeps its band** (LJ-HUNT, [`crate::HuntConfig::lunge_sweeps_band`]): a
+/// lanternjaw's lunge that stepped up or down a ledge on the way also meets a prey in the band
+/// over the face it began on — the support face of its start column nearest the one it stands
+/// on now, within its step limits. False off the switch, for another lineage, a perched
+/// striker, or no lunge.
+fn lunge_start_band(
+    config: &crate::FaunaConfig,
+    view: &VoxelView<'_>,
+    striker: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    prey: &Animal,
+    pg: &crate::Body,
+) -> bool {
+    let Some(s) = striker.strike else { return false };
+    if !config.hunt.lunge_sweeps_band
+        || striker.founder != Some(crate::Founder::Lanternjaw)
+        || s.phase != StrikePhase::Lunge
+        || striker.mobility.mode == crate::MobilityMode::Perched
+    {
+        return false;
+    }
+    let v = view.config.voxel_m;
+    let Some((cx, cz)) = (crate::Pose { x: s.from_x, z: s.from_z, ..striker.pose }).column(v, view.config.depth) else {
+        return false;
+    };
+    let limits = config.founder(crate::Founder::Lanternjaw).step_limits(v);
+    // It stepped down at most `limits.down` from where it began, or up at most `limits.up`.
+    match view.nearest_support(cx.rem_euclid(i64::from(view.config.width)), cz, striker.site.y, limits.up, limits.down) {
+        Some(y) if y != striker.site.y => band_meets(view, crate::surface_m(y, v) + striker.wall_offset_m(), geometry, h, prey, pg),
+        _ => false,
+    }
+}
+
+/// The base of `striker`'s jaw band, metres: a perched body's pose height, a walker's
+/// support face's top (plus its wall offset).
+fn band_base(view: &VoxelView<'_>, striker: &Animal) -> f64 {
+    if striker.mobility.mode == crate::MobilityMode::Perched {
+        striker.pose.y_m
+    } else {
+        crate::surface_m(striker.site.y, view.config.voxel_m) + striker.wall_offset_m()
+    }
 }
 
 /// The strike capsule's height test ([`meets_capsule`]): the band from the striker's base up
@@ -3460,12 +3504,12 @@ pub(crate) fn in_strike_band(
     prey: &Animal,
     pg: &crate::Body,
 ) -> bool {
+    band_meets(view, band_base(view, striker), geometry, h, prey, pg)
+}
+
+/// Whether the jaw band over the base `s0` (metres) meets `prey`'s cylinder (`pg`, its body).
+fn band_meets(view: &VoxelView<'_>, s0: f64, geometry: &crate::Body, h: &crate::Hunter, prey: &Animal, pg: &crate::Body) -> bool {
     let v = view.config.voxel_m;
-    let s0 = if striker.mobility.mode == crate::MobilityMode::Perched {
-        striker.pose.y_m
-    } else {
-        crate::surface_m(striker.site.y, v) + striker.wall_offset_m()
-    };
     let band = (s0, s0 + h.strike_height_m(geometry));
     // A body off the ground (perched, flying, climbing, gliding) has its base at its
     // pose's height; a walker's is its support face's top.
@@ -6380,6 +6424,9 @@ mod hunt_tests;
 #[cfg(test)]
 #[path = "hunt_meal_tests.rs"]
 mod hunt_meal_tests;
+#[cfg(test)]
+#[path = "lj_hunt_tests.rs"]
+mod lj_hunt_tests;
 #[cfg(test)]
 #[path = "pack_search_tests.rs"]
 mod pack_search_tests;
