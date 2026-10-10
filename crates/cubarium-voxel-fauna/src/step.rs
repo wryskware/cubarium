@@ -217,12 +217,41 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
         digest(fauna);
         heal(fauna);
         egg_upkeep(fauna);
-        grow(fauna);
+        let matured = grow(fauna);
+        disperse(fauna, &view, flora, &matured, crate::DispersalAt::Adult);
         drop_off_grown(fauna);
         void_guts(fauna, flora);
         glider::void_gut_seeds(fauna, flora);
         // R3: calls, pups' independence, succession and provisioning.
+        let pups: Vec<u64> = fauna
+            .animals
+            .iter()
+            .filter(|a| {
+                a.pack.is_some_and(|m| m.pup)
+                    && a.founder.is_some_and(|f| {
+                        let d = fauna.config.founder(f).dispersal;
+                        d.enabled && d.at == crate::DispersalAt::Independent
+                    })
+            })
+            .map(|a| a.id)
+            .collect();
         crate::pack::upkeep(fauna, &view);
+        let independent: Vec<u64> = pups
+            .into_iter()
+            .filter(|id| {
+                fauna
+                    .animals
+                    .iter()
+                    .any(|a| a.id == *id && a.pack.is_some_and(|m| !m.pup))
+            })
+            .collect();
+        disperse(
+            fauna,
+            &view,
+            flora,
+            &independent,
+            crate::DispersalAt::Independent,
+        );
     });
     TickStart { tick, seed, dusk, sky }
 }
@@ -1136,7 +1165,8 @@ fn egg_upkeep(fauna: &mut Fauna) {
 /// its growth instead of spending the reserve it lives on. Intake never builds structure
 /// directly any more: it goes to the reserve ([`assimilate`]), and this is the only way
 /// in to the body.
-fn grow(fauna: &mut Fauna) {
+fn grow(fauna: &mut Fauna) -> Vec<u64> {
+    let mut matured = Vec::new();
     for i in 0..fauna.animals.len() {
         let sc = body::effective_config(&fauna.config, &fauna.animals[i]);
         let a = &mut fauna.animals[i];
@@ -1165,10 +1195,121 @@ fn grow(fauna: &mut Fauna) {
         if let Some(f) = a.founder {
             fauna.ledger.growth_by_founder[f.index()] += a.body - before;
             if before < sc.birth_body && a.body >= sc.birth_body {
+                matured.push(a.id);
                 fauna.ledger.matured_by_founder[f.index()] += 1;
                 fauna.ledger.maturation_ticks_by_founder[f.index()] += a.age_ticks;
             }
         }
+    }
+    matured
+}
+
+/// Only this tick's transition candidates can leave. For families the candidates still
+/// count as young throughout this pass, preserving their pre-growth nearest-adult group.
+/// Dependent young count toward the limit; established adults never become candidates.
+fn disperse(
+    fauna: &mut Fauna,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    candidates: &[u64],
+    at: crate::DispersalAt,
+) {
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let mut pack_changed = false;
+    for &id in candidates {
+        let Some(i) = fauna.animals.iter().position(|a| a.id == id) else {
+            continue;
+        };
+        let a = &fauna.animals[i];
+        let Some(f) = a.founder else { continue };
+        let phys = fauna.config.founder(f);
+        let d = phys.dispersal;
+        if !d.enabled || d.at != at {
+            continue;
+        }
+        let count = if let Some(m) = a.pack {
+            let Some(pack) = fauna.packs().iter().find(|p| p.id == m.pack) else {
+                continue;
+            };
+            if pack.breeder == Some(id) {
+                continue;
+            }
+            fauna
+                .animals
+                .iter()
+                .filter(|a| a.pack.is_some_and(|p| p.pack == m.pack))
+                .count()
+        } else {
+            if at != crate::DispersalAt::Adult
+                || !phys.herding.young_only
+                || phys.herding.comfort_m <= 0.0
+            {
+                continue;
+            }
+            let young = |a: &Animal| a.body < phys.core.birth_body || candidates.contains(&a.id);
+            let adults: Vec<&Animal> = fauna
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(f) && !young(a))
+                .collect();
+            // Match Edit::thin: x wraps, z does not, and a distance tie goes to the
+            // first adult in animal order. Each young belongs to at most one adult.
+            let family = |y: &Animal| {
+                adults
+                    .iter()
+                    .map(|a| {
+                        let dx = (a.pose.x - y.pose.x).rem_euclid(ring);
+                        (a.id, dx.min(ring - dx).hypot(a.pose.z - y.pose.z))
+                    })
+                    .filter(|(_, distance)| *distance <= phys.herding.comfort_m)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .map(|(id, _)| id)
+            };
+            let Some(parent) = family(a) else { continue };
+            1 + fauna
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(f) && young(a) && family(a) == Some(parent))
+                .count()
+        };
+        if count <= d.group_max as usize {
+            continue;
+        }
+        // Deposit first: if the parcel is refused, keep the animal and all its matter.
+        // Unlike book_deposit's other callers, this path must never fall back to export.
+        let parcel = Taken {
+            organic: a.stored_organic(),
+            mineral: a.stored_mineral(),
+            energy: a.stored_energy(),
+        };
+        if !flora.deposit_recycled(
+            a.site,
+            cubarium_voxel_flora::Deposit {
+                kind: DepositKind::Litter,
+                organic: parcel.organic,
+                mineral: parcel.mineral,
+                energy: parcel.energy,
+            },
+        ) {
+            continue;
+        }
+        fauna.ledger.deposited_organic_out += parcel.organic;
+        fauna.ledger.deposited_mineral_out += parcel.mineral;
+        fauna.ledger.deposited_energy_out += parcel.energy;
+        let fed = a.stomach.total();
+        fauna.ledger.stomach_out.organic += fed.organic;
+        fauna.ledger.stomach_out.mineral += fed.mineral;
+        fauna.ledger.stomach_out.energy += fed.energy;
+        fauna.ledger.dispersed_by_founder[f.index()] += 1;
+        let a = fauna.animals.remove(i);
+        pack_changed |= a.pack.is_some();
+        fauna.controllers.take(a.id);
+        fauna.trapped.remove(&a.id);
+        fauna.drop_plans.remove(&a.id);
+        fauna.free_riders(&a);
+    }
+    if pack_changed {
+        crate::pack::succession(fauna);
     }
 }
 
@@ -6002,3 +6143,7 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
     // R3: a pack member calls as it strikes.
     crate::pack::call(fauna, i);
 }
+
+#[cfg(test)]
+#[path = "dispersal_tests.rs"]
+mod dispersal_tests;

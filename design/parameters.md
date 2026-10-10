@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2662 rows)
+**`fauna.*`** (2689 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1577,6 +1577,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.littershredder.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.littershredder.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.littershredder.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.littershredder.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.littershredder.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.littershredder.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.littershredder.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -1849,6 +1852,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.frondgrazer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.frondgrazer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.frondgrazer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.frondgrazer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.frondgrazer.motor_respiration_per_s` | 0.000008333333333333334 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.frondgrazer.step_up_m` | 0.375 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.frondgrazer.step_down_m` | 0.375 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2121,6 +2127,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.lanternjaw.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.lanternjaw.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.lanternjaw.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.lanternjaw.motor_respiration_per_s` | 0.000009722222222222223 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.lanternjaw.step_up_m` | 0.45 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.lanternjaw.step_down_m` | 0.45 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2393,6 +2402,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.capgnawer.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.capgnawer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.capgnawer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.capgnawer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.capgnawer.motor_respiration_per_s` | 0.000004166666666666667 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.capgnawer.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.capgnawer.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2665,6 +2677,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.loftstrider.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.loftstrider.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.loftstrider.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.loftstrider.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.loftstrider.motor_respiration_per_s` | 0.000005555555555555556 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.loftstrider.step_up_m` | 1.15 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.loftstrider.step_down_m` | 1.15 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -2937,6 +2952,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.ripple-snail.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.ripple-snail.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.ripple-snail.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.ripple-snail.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.ripple-snail.motor_respiration_per_s` | 0.000002777777777777778 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.ripple-snail.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.ripple-snail.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3209,6 +3227,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.bellwing.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.bellwing.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.bellwing.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.bellwing.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.bellwing.motor_respiration_per_s` | 0.000020833333333333333 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.bellwing.step_up_m` | 0.0 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.bellwing.step_down_m` | 0.0 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3481,6 +3502,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.seedporter.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.seedporter.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.seedporter.step_up_m` | 0.25 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.seedporter.step_down_m` | 0.25 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |
@@ -3753,6 +3777,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.breeding_phase` | 0.2 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.chorister.core.reproduction.breeding_window` | 0.15 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
+| `fauna.founders.chorister.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves only above this pack or nearest-adult family size, dependent young included |
+| `fauna.founders.chorister.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
+| `fauna.founders.chorister.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
 | `fauna.founders.chorister.motor_respiration_per_s` | 0.000011111111111111112 | org-units/s per unit body at full cruise | [0, inf) | 0.00002–0.01 log | B | placeholder | paid motion |
 | `fauna.founders.chorister.step_up_m` | 0.6 | m | [0, inf) | 0.1–1.5 | B | measured, digest | tallest riser stepped (rounded down to voxels) |
 | `fauna.founders.chorister.step_down_m` | 0.6 | m | [0, inf) | yes | C | measured, digest | deepest drop stepped |

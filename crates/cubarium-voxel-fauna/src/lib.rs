@@ -2758,6 +2758,30 @@ impl From<Diet> for Vec<Food> {
     }
 }
 
+/// The existing transition at which a young animal may leave an oversized group.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DispersalAt {
+    /// Growth through the lineage's breeding body size.
+    #[default]
+    Adult,
+    /// A pack pup reaching its configured independence age.
+    Independent,
+}
+
+/// Closed-world dispersal: only the young crossing its transition can leave.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Dispersal {
+    /// Switch: enable leaving an oversized group. Off for old configs and training.
+    pub enabled: bool,
+    /// Bodies: leave only above this group size, dependent young included.
+    /// Zero has no special meaning; while enabled it allows no arriving young to stay.
+    pub group_max: u32,
+    /// Transition: `adult` (breeding size) or `independent` (pack pup age).
+    pub at: DispersalAt,
+}
+
 /// Every unit of organic matter, mineral and energy that has crossed this layer's
 /// boundary, and the counters of what happened.
 ///
@@ -2773,6 +2797,11 @@ impl From<Diet> for Vec<Food> {
 /// and neither is hidden.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FaunaLedger {
+    /// Closed-world leavers per lineage, since load. A diagnostic only: skipped in the
+    /// positional save so old worlds load unchanged, with the counters reset to zero.
+    /// Their matter is counted in `deposited_*_out`, never `removed_*_out` or deaths.
+    #[serde(skip)]
+    pub dispersed_by_founder: [u64; Founder::COUNT],
     /// Organic matter, mineral and energy taken out of the plant layer by
     /// [`cubarium_voxel_flora::Flora::take_foliage`], cumulative over every bite. The
     /// sum of the [`cubarium_voxel_flora::Taken`]s the withdrawals returned, to the bit,

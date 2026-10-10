@@ -6398,6 +6398,17 @@ impl Flora {
     /// **sooner** than what this tick's own senescence sheds: that waits for the step after
     /// it, because it is not in this one's snapshot.
     pub fn deposit(&mut self, site: Site, deposit: Deposit) -> bool {
+        self.deposit_with_mineral(site, deposit, self.config.initial_mineral)
+    }
+
+    /// An internal world's transfer into the existing detritus channels. A new face
+    /// starts with no seeded mineral: the transferred parcel supplies its whole stock.
+    /// Litter's energy cap still releases excess as heat, just as for other deposits.
+    pub fn deposit_recycled(&mut self, site: Site, deposit: Deposit) -> bool {
+        self.deposit_with_mineral(site, deposit, 0.0)
+    }
+
+    fn deposit_with_mineral(&mut self, site: Site, deposit: Deposit, initial_mineral: f64) -> bool {
         let Deposit {
             kind,
             organic,
@@ -6415,9 +6426,9 @@ impl Flora {
         let gi = match self.ground.binary_search_by_key(&site, |g| g.site) {
             Ok(i) => i,
             Err(i) => {
-                self.ledger.seeded_mineral_in += self.config.initial_mineral;
+                self.ledger.seeded_mineral_in += initial_mineral;
                 self.ground
-                    .insert(i, Ground::new(site, self.config.initial_mineral));
+                    .insert(i, Ground::new(site, initial_mineral));
                 i
             }
         };
