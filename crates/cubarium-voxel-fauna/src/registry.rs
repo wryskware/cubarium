@@ -178,6 +178,8 @@ fn founder_rows() -> Vec<Row> {
     let nonneg = Range::nonneg();
     let fraction = Range::fraction();
     vec![
+        r("fruit_bite_half_stock", "org-units at the mouth", nonneg, "fruit-only K override; absent uses core.bite_half_stock, other foods retain core K").optional().prov("derived"),
+        r("give_up_fraction", "fraction of the fill rate", nonneg, "lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up").optional().prov("derived"),
         r("dispersal.group_max", "bodies", nonneg, "closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count"),
         r("dispersal.enabled", "switch", fraction, "closed-world dispersal switch (false by default; true enables it)").optional(),
         r("dispersal.at", "transition", nonneg, "closed-world dispersal transition: adult (breeding size) or independent (pack pup age)").optional(),
@@ -625,7 +627,7 @@ fn knob_rows() -> Vec<Row> {
             .search(0.0, 1.0).prov("decision"),
         t("forage_turn_back_samples", "samples", count, "samples the blind forager turns after leaving an exhausted patch (area-restricted search)")
             .search(0.0, 8.0),
-        t("press_replan_s", "s", nonneg, "a reflex walk asking forward this long without moving gives its target up (EDGE)").search(1.0, 10.0),
+        t("press_replan_s", "s", nonneg, "a refused reflex walk, stalled fruit approach or hungry vine stance without reachable fruit re-plans after this long without progress (EDGE)").search(1.0, 10.0),
         t("press_shun_s", "s", nonneg, "a target given up for pressing stays given up this long").search(10.0, 600.0).log(),
         t("route_refresh_s", "s", pos, "the walking route graph a reflex walk plans on is rebuilt after this").search(10.0, 600.0).log(),
         t("route_detour", "ratio", pos, "a target is in reach when its route is at most this times the reflex's search radius").search(1.0, 4.0),

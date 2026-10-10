@@ -89,7 +89,7 @@ pub struct ForageTally {
 pub(crate) fn offer(a: &crate::Animal, phys: &FounderPhysiology, food: Food, period_s: f64, effort: f64, stock: f64) -> f64 {
     let speed = phys.gut.throughput_factor(a.body, phys.core.body_max);
     let want = phys.gut.bite_per_body_s * speed * a.body * period_s * effort;
-    let k = phys.core.bite_half_stock;
+    let k = phys.bite_half_stock_for(food);
     let offered = if k > 0.0 { want * stock.max(0.0) / (stock.max(0.0) + k) } else { want };
     let tau = phys.gut.digestion_s[food.index()] / speed;
     let fill = phys.gut.full_tolerance * phys.gut.capacity(a.body) * period_s / tau;
@@ -123,7 +123,8 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
     let founder = a.founder?;
     let id = a.id;
     let now = fauna.tick;
-    let on = tc.give_up_fraction > 0.0;
+    let fraction = fauna.config.founder(founder).give_up_fraction.unwrap_or(tc.give_up_fraction);
+    let on = fraction > 0.0;
     // A stop to feed: still, not turning (an escape's stop turns away from what refused it,
     // and is never walked on), feeding.
     let stopping = actions.feed > 0.5 && actions.forward <= tc.forage_stay_forward && actions.turn == 0.0;
@@ -191,7 +192,7 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
                     let rate = s.rate.map_or(sample, |r| r + alpha * (sample - r));
                     tally.offer_samples += 1;
                     tally.offer_sum += sample;
-                    if sample < tc.give_up_fraction {
+                    if sample < fraction {
                         tally.offer_low += 1;
                     }
                     Stay { rate: Some(rate), key: key.or(s.key), ..s }
@@ -207,7 +208,7 @@ pub(crate) fn leave(fauna: &mut Fauna, i: usize, actions: Actions, ring: f64) ->
             tally.stay_samples += 1;
             tally.stay_s += period_s;
             let on_patch_s = now.saturating_sub(stay.since) as f64 * DT;
-            if on && on_patch_s >= tc.give_up_min_s && stay.rate.is_some_and(|r| r < tc.give_up_fraction) {
+            if on && on_patch_s >= tc.give_up_min_s && stay.rate.is_some_and(|r| r < fraction) {
                 end(stay, &mut tally);
                 p.stay = None;
                 p.shun = Some((stay.at, now.saturating_add(ticks(tc.give_up_shun_s))));

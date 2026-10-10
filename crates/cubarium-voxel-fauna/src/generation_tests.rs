@@ -119,7 +119,7 @@ fn a_small_body_digests_and_bites_more_per_unit_body_by_the_configured_exponent(
             let (fauna, _, _, id) = one(config.clone(), frac, 0.5, 0.0, false);
             let mut a = animal(&fauna, id);
             a.eating = true;
-            super::gut_bite(&a, &phys, 0.25, 1.0, 1.0e3) / a.body
+            super::gut_bite(&a, &phys, crate::Food::Litter, 0.25, 1.0, 1.0e3) / a.body
         };
         let ratio = bite(small) / bite(1.0);
         assert!((ratio - want).abs() <= 1e-9 * want, "e {e}: bite per body small / adult {ratio}, want {want}");

@@ -986,7 +986,7 @@ pub(crate) fn take_from_pool(pool: &mut Taken, organic: f64) -> Taken {
 /// than reaches the stomach's room `K − S` after the share a sloppy feeder spills. Zero
 /// unless the eating latch is on: a body that does not want food takes no bite, and a
 /// full stomach stops the mouth.
-fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: f64, stock: f64) -> f64 {
+fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, food: Food, period_s: f64, effort: f64, stock: f64) -> f64 {
     if !a.eating || !(stock > 0.0) {
         return 0.0;
     }
@@ -995,7 +995,7 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, period_s: f64, effort: 
     if !(want > 0.0) {
         return 0.0;
     }
-    let k = phys.core.bite_half_stock;
+    let k = phys.bite_half_stock_for(food);
     let diminished = if k > 0.0 { want * (stock / (stock + k)) } else { want };
     let room = (phys.gut.capacity(a.body) - a.stomach.organic()).max(0.0);
     let reaches = (1.0 - phys.bite_spill_fraction.clamp(0.0, 1.0)).max(1e-12);
@@ -1642,7 +1642,20 @@ fn controllers(
                 && a.founder_state.held.forward > 0.0
                 && fb.attempted_equivalent > 1e-12
                 && fb.delivered_equivalent / fb.attempted_equivalent < fauna.config.teachers.motor_refused;
-            if pressed {
+            // A fruit approach can stall without asking forward (its aim coincides
+            // with an unreachable wall centre). Count no displacement too, so that
+            // the same target/shun clock covers this path as well as a refused walk.
+            let fruit_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
+                && a.mobility.mode == crate::MobilityMode::Ground
+                && fauna.steer.get(&id) == Some(&crate::Steer::Fruit)
+                && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12;
+            let vine_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
+                && matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
+                && a.mobility.perch.is_some_and(|p| matches!(p.anchor, crate::PerchAnchor::Vine(_)))
+                && a.eating && a.strike.is_none()
+                && fb.delivered_forward <= 1e-12
+                && glider::glider_fruit_in_reach(view, &fv, a, fauna.config.founder(founder)).is_none();
+            if pressed || fruit_stalled || vine_stalled {
                 *fauna.pressed.entry(id).or_default() += manifest.cadence_ticks().max(1);
             } else {
                 fauna.pressed.remove(&id);
@@ -3213,7 +3226,7 @@ fn flyer_sip(
         return false;
     };
     forage::note_bite(fauna, i, phys, Food::Nectar, manifest.controller_period_s, effort, stock, None);
-    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, Food::Nectar, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
@@ -3334,7 +3347,7 @@ fn meets_capsule(
 /// The prey whose cylinder meets the **strike capsule** now — forward from the jaw by
 /// `strike_reach` over the jaw band — nearest the jaw first; `None` when there is none
 /// (predation §2.3). The prey list and the size window are [`crate::is_prey_of`]'s.
-fn prey_in_capsule(
+pub(crate) fn prey_in_capsule(
     fauna: &Fauna,
     i: usize,
     view: &VoxelView<'_>,
@@ -4080,7 +4093,7 @@ fn founder_feed(
     // FORAGE-LEAVE: what this patch offers the mouth, for the giving-up rule.
     forage::note_bite(fauna, i, phys, food, manifest.controller_period_s, effort, stock, None);
     // The bite this body, this stock and this stomach's room allow.
-    let bite = gut_bite(&fauna.animals[i], phys, manifest.controller_period_s, effort, stock);
+    let bite = gut_bite(&fauna.animals[i], phys, food, manifest.controller_period_s, effort, stock);
     if !(bite > 0.0) {
         return false;
     }
