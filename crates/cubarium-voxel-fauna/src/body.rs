@@ -4240,6 +4240,48 @@ fn each_reachable_layer(
     }
 }
 
+/// **The cell a stand's bite comes from** (FEED-ROLLOUT round 2, the aim, [`Animal::bite`]):
+/// the lowest of the stand's foliage layers the mouth reaches by [`each_reachable_layer`]'s
+/// rule (edible, inside the band `layers`, its disc over a mouth column), at the mouth
+/// column it covers nearest the stand's root. A read of the plant layer as it stands, for
+/// the presenter only; `None` when the mouth reaches none of it.
+pub(crate) fn bitten_cell(
+    fv: &FloraView<'_>,
+    view: &VoxelView<'_>,
+    root: Site,
+    place: cubarium_voxel_flora::FaceLayer,
+    cols: &[(i64, u32)],
+    layers: &std::ops::RangeInclusive<i64>,
+) -> Option<Site> {
+    let stand = fv.stand_in(root, place)?;
+    let width = i64::from(view.config.width);
+    let depth = i64::from(view.config.depth);
+    let (sx, sz) = (i64::from(stand.site.x), i64::from(stand.site.z));
+    let every = match fv.cached_crown(stand) {
+        Some(c) => c.layers(fv.config, stand),
+        None => cubarium_voxel_flora::layer_iter(fv.config, stand, fv.config.voxel_m),
+    };
+    let mut best: Option<((i64, i64), Site)> = None;
+    for layer in every.filter(|l| l.kind.bears_foliage()) {
+        if !(layer.edible() > 0.0) || !layers.contains(&layer.cell) || layer.cell < 0 {
+            continue;
+        }
+        let span = layer.radius_v.floor() as i64;
+        let r2 = layer.radius_v * layer.radius_v;
+        for &(cx, cz) in cols {
+            if !disc_covers(sx, sz, span, r2, width, depth, cx, cz) {
+                continue;
+            }
+            let Some((dx, dz)) = nearest_offset(sx, sz, width, depth, cx, cz) else { continue };
+            let key = (layer.cell, dx * dx + dz * dz);
+            if best.is_none_or(|(k, _)| key < k) {
+                best = Some((key, Site { x: cx as u32, y: layer.cell as u32, z: cz }));
+            }
+        }
+    }
+    best.map(|(_, s)| s)
+}
+
 /// Whether the integer disc of cells a layer of radius² `r2` covers around the column
 /// `(sx, sz)` — every offset `(dx, dz)` within `±span` whose `dx² + dz²` is not over
 /// `r2`, `x` wrapped, `z` inside the strip — holds the column `(cx, cz)`.

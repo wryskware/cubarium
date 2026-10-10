@@ -609,7 +609,19 @@ mod tests {
             emergency: false,
             bout: None,
             hunt: crate::HuntMemory::default(),
+            bite: crate::LastBite::default(),
         }
+    }
+
+    /// The last bite (FEED-ROLLOUT round 2's aim) is presentation memory: a body that has
+    /// one is the same body to every comparison, and its save is the same bytes.
+    #[test]
+    fn the_last_bite_is_neither_saved_nor_compared() {
+        let plain = animal(1, 1.0);
+        let mut bitten = plain;
+        bitten.bite = crate::LastBite(Some(Site { x: 3, y: 4, z: 0 }));
+        assert_eq!(bitten, plain);
+        assert_eq!(encode(&layer(vec![bitten], 2)), encode(&layer(vec![plain], 2)));
     }
 
     /// **Schema 6 carries the founder bodies and refuses an older world.**

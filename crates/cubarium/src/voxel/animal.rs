@@ -740,6 +740,10 @@ pub struct Animals {
     /// rises over [`super::rig::FEED_EASE_S`] while the animal crops (the reach) and falls
     /// after (the return), on the ground only. Kept the same way as the meal flash.
     feed_blend: FxHashMap<u64, (f32, bool)>,
+    /// Each animal's aim memory by id at the last rebuild ([`Aim`], FEED-ROLLOUT round 2):
+    /// where its last bite is from its feet and heading, eased, so a new bite never snaps
+    /// the reach. Kept the same way as the feeding clip.
+    aim_blend: FxHashMap<u64, Aim>,
     /// `VoxelConfig::meal_flash`: how far the accent leans toward the flash at its height.
     meal_flash: f32,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
@@ -755,6 +759,65 @@ pub struct Animals {
 /// No animal: what carcasses, specimens and marks are stamped under.
 const NO_OWNER: u64 = u64::MAX;
 
+
+/// One animal's aim memory (FEED-ROLLOUT round 2, [`super::rig::AimTrack`]): the aim's
+/// weight (before its ease) and whether it had a bite in reach, at the last rebuild; the
+/// height above the feet (metres) and bearing from the heading (radians) it moves from, at
+/// tick `start`, to the bite's.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Aim {
+    weight: f32,
+    aimed: bool,
+    from: [f32; 2],
+    to: [f32; 2],
+    start: u64,
+}
+
+impl Aim {
+    /// The height and bearing at `tick`, eased from `from` to `to` since `start`.
+    fn value_at(&self, tick: u64) -> [f32; 2] {
+        let ease_ticks = super::rig::AIM_EASE_S / DT;
+        let u = super::rig::ease((tick as f64 - self.start as f64) / ease_ticks) as f32;
+        [0, 1].map(|i| self.from[i] + (self.to[i] - self.from[i]) * u)
+    }
+}
+
+/// Metres beyond which a body's last bite is an old one, from somewhere it has walked away
+/// from, and does not aim its reach.
+const AIM_REACH_M: f64 = 4.0;
+
+/// Where animal `a`'s last bite is (FEED-ROLLOUT round 2): the bitten cell's centre's
+/// height above its feet (metres) and bearing from its heading (radians, the turn about up
+/// that carries the heading onto it: the model's +x onto the bite), or `None` with no bite
+/// in reach. A bite straight over the body has bearing 0.
+fn bite_aim(a: &Animal, voxel_m: f64, width: u32) -> Option<[f32; 2]> {
+    let s = a.bite.0?;
+    if a.mobility.climb.is_some() || !(voxel_m > 0.0) {
+        return None;
+    }
+    let ring = f64::from(width) * voxel_m;
+    let feet_m = if a.pose.y_m.is_finite() && a.pose.y_m > 0.0 {
+        a.pose.y_m
+    } else {
+        (f64::from(a.site.y) + 1.0) * voxel_m
+    };
+    let mut dx = (f64::from(s.x) + 0.5) * voxel_m - a.pose.x;
+    if ring > 0.0 {
+        dx -= ring * (dx / ring).round();
+    }
+    let dz = (f64::from(s.z) + 0.5) * voxel_m - a.pose.z;
+    let dy = (f64::from(s.y) + 0.5) * voxel_m - feet_m;
+    let across = dx.hypot(dz);
+    if !(across <= AIM_REACH_M) {
+        return None;
+    }
+    // the model's +x (forward) and +z (side) on the ground (`figure::Orient::axes`)
+    let (sh, ch) = a.pose.heading_rad.sin_cos();
+    let ahead = dx * sh + dz * ch;
+    let side = -dx * ch + dz * sh;
+    let bearing = if across < 0.5 * voxel_m { 0.0 } else { (-side).atan2(ahead) };
+    Some([dy as f32, bearing as f32])
+}
 
 /// One animal's idle memory ([`idle`]): its idle weight (0 moving to 1 idling) and whether
 /// it was idling, at the last rebuild; the ticks it has stood still; where it stood.
@@ -803,6 +866,7 @@ impl Animals {
             hunker_s: hunker::DEFAULT_S,
             flash_blend: FxHashMap::default(),
             feed_blend: FxHashMap::default(),
+            aim_blend: FxHashMap::default(),
             meal_flash: MEAL_FLASH_DEFAULT,
             last_tick: None,
             owners: Vec::new(),
@@ -844,7 +908,7 @@ impl Animals {
     /// A body seen for the first time is drawn as it is: one that is asleep when the world
     /// loads is not lowered by a blend nobody watched (and one standing still starts to
     /// idle after [`idle::HOLD_S`], as any other).
-    fn advance_poses(&mut self, tick: u64, animals: &[Animal]) {
+    fn advance_poses(&mut self, tick: u64, animals: &[Animal], voxel_m: f64) {
         let dt_ticks = self.last_tick.map_or(0, |t| tick.saturating_sub(t));
         let dt = dt_ticks as f64 * DT;
         self.last_tick = Some(tick);
@@ -853,6 +917,8 @@ impl Animals {
         let mut hunkers: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut flashes: FxHashMap<u64, f32> = FxHashMap::default();
         let mut feeds: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
+        let mut aims: FxHashMap<u64, Aim> = FxHashMap::default();
+        let aim_step = (dt / super::rig::AIM_EASE_S) as f32;
         let flash_step = if MEAL_FLASH_FADE_S > 0.0 {
             (dt / MEAL_FLASH_FADE_S) as f32
         } else {
@@ -896,6 +962,35 @@ impl Animals {
             if feed > 0.0 || feeding {
                 feeds.insert(a.id, (feed, feeding));
             }
+            // The aim (FEED-ROLLOUT round 2): toward the last bite while it is in reach,
+            // its weight moved on at the state it had (as the frame clock extrapolated
+            // it); a new place eases over from where the aim is at this tick.
+            let target = bite_aim(a, voxel_m, self.width);
+            let last = self.aim_blend.get(&a.id);
+            let weight = last.map_or(0.0, |m| {
+                (if m.aimed { m.weight + aim_step } else { m.weight - aim_step }).clamp(0.0, 1.0)
+            });
+            let aim = match (target, last) {
+                (Some(t), Some(m)) if m.weight > 0.0 || m.aimed => {
+                    let now = m.value_at(tick);
+                    let mut t = t;
+                    // the short way round to the new bearing
+                    t[1] = now[1] + (t[1] - now[1] + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+                        - std::f32::consts::PI;
+                    let moved = (t[0] - m.to[0]).abs() > 0.02 || (t[1] - m.to[1]).abs() > 0.01;
+                    if moved {
+                        Some(Aim { weight, aimed: true, from: now, to: t, start: tick })
+                    } else {
+                        Some(Aim { weight, aimed: true, ..*m })
+                    }
+                }
+                (Some(t), _) => Some(Aim { weight, aimed: true, from: t, to: t, start: tick }),
+                (None, Some(m)) if weight > 0.0 => Some(Aim { weight, aimed: false, ..*m }),
+                (None, _) => None,
+            };
+            if let Some(aim) = aim {
+                aims.insert(a.id, aim);
+            }
             // Idle: awake, standing (not walking, feeding or climbing), where it stood at
             // the last rebuild, fully woken, and so for the hold.
             let at = [a.pose.x, a.pose.z, a.pose.heading_rad];
@@ -923,6 +1018,23 @@ impl Animals {
         self.hunker_blend = hunkers;
         self.flash_blend = flashes;
         self.feed_blend = feeds;
+        self.aim_blend = aims;
+    }
+
+    /// One animal's aim at this rebuild ([`super::rig::AimTrack`], FEED-ROLLOUT round 2):
+    /// its weight and change per tick from here, and the height and bearing it is easing
+    /// between; `None` for a body with no bite in reach and no aim easing out.
+    pub(crate) fn aim(&self, animal: &Animal, tick: u64) -> Option<super::rig::AimTrack> {
+        let m = self.aim_blend.get(&animal.id)?;
+        let r = (DT / super::rig::AIM_EASE_S) as f32;
+        let rate = if m.aimed && m.weight < 1.0 {
+            r
+        } else if !m.aimed && m.weight > 0.0 {
+            -r
+        } else {
+            0.0
+        };
+        Some(super::rig::AimTrack { tick, weight: m.weight, rate, from: m.from, to: m.to, start: m.start })
     }
 
     /// One animal's feeding-clip weight at this rebuild (before its ease) and its change per
@@ -1229,7 +1341,7 @@ impl Animals {
             self.hunker_blend.clear();
             return;
         };
-        self.advance_poses(view.tick, fauna.animals);
+        self.advance_poses(view.tick, fauna.animals, view.config.voxel_m);
         if !living {
             return;
         }
@@ -2012,7 +2124,7 @@ mod tests {
         let mut frames = Vec::new();
         for tick in 100..180u64 {
             a.state = if (110..140).contains(&tick) { State::Asleep } else { State::Resting };
-            grid.advance_poses(tick, &[a]);
+            grid.advance_poses(tick, &[a], 0.125);
             let (w, rate) = grid.sleep_weight(&a).unwrap_or((0.0, 0.0));
             for k in 0..3 {
                 frames.push((w + rate * k as f32 / 3.0).clamp(0.0, 1.0));
@@ -2026,10 +2138,85 @@ mod tests {
 
         let mut fresh = Animals::empty(0, 0, 0);
         a.state = State::Asleep;
-        fresh.advance_poses(500, &[a]);
+        fresh.advance_poses(500, &[a], 0.125);
         assert_eq!(fresh.sleep_weight(&a), Some((1.0, 0.0)));
-        fresh.advance_poses(501, &[]);
+        fresh.advance_poses(501, &[], 0.125);
         assert!(fresh.sleep_blend.is_empty());
+    }
+
+    /// A browser standing at the centre of cell (8, 0, 8) of 0.125 m voxels, heading
+    /// `heading_rad`, its last bite the cell `bite`.
+    fn biting(heading_rad: f64, bite: Option<cubarium_voxel_flora::Site>) -> Animal {
+        let mut fauna = Fauna::new(FaunaConfig::placeholder());
+        let mut w = World::empty(VoxelConfig { voxel_m: 0.125, ..VoxelConfig::default() });
+        for x in 0..16 {
+            for z in 0..16 {
+                w.apply(WorldCommand::SetMaterial { x, y: 0, z, material: Material::Soil });
+            }
+        }
+        assert!(fauna.apply(
+            &w,
+            Command::IntroduceFounder { x: 8, z: 8, founder: Founder::Browser, stores: StartingStores::FULL, heading_rad }
+        ));
+        let mut a = fauna.view().animals[0];
+        a.pose.x = 8.5 * 0.125;
+        a.pose.z = 8.5 * 0.125;
+        a.pose.heading_rad = heading_rad;
+        a.bite = cubarium_voxel_fauna::LastBite(bite);
+        a
+    }
+
+    #[test]
+    fn a_bite_aims_by_its_height_over_the_feet_and_its_bearing_from_the_heading() {
+        use cubarium_voxel_flora::Site;
+        use std::f32::consts::FRAC_PI_2;
+        let at = |heading: f64, x: u32, y: u32, z: u32| {
+            let a = biting(heading, Some(Site { x, y, z }));
+            let feet = a.site.y + 1;
+            bite_aim(&a, 0.125, 0).map(|[h, b]| (h - (y as f32 + 0.5 - feet as f32) * 0.125, b))
+        };
+        let close = |v: Option<(f32, f32)>, b: f32| v.is_some_and(|(dh, got)| dh.abs() < 1e-5 && (got - b).abs() < 1e-5);
+        // heading 0 faces +z; heading a quarter faces +x
+        assert!(close(at(0.0, 8, 12, 14), 0.0), "straight ahead");
+        assert!(close(at(f64::from(FRAC_PI_2), 14, 12, 8), 0.0), "ahead, turned with the heading");
+        // the model's side (+z of the body, the turn about up the other way) and behind
+        assert!(close(at(f64::from(FRAC_PI_2), 8, 3, 14), -FRAC_PI_2));
+        assert!(close(at(f64::from(FRAC_PI_2), 2, 3, 8), std::f32::consts::PI));
+        // straight over the body: ahead; no bite, or one walked away from: none
+        assert!(close(at(0.0, 8, 20, 8), 0.0));
+        assert_eq!(bite_aim(&biting(0.0, None), 0.125, 0), None);
+        assert_eq!(bite_aim(&biting(0.0, Some(Site { x: 8, y: 2, z: 8 + 64 })), 0.125, 0), None);
+    }
+
+    #[test]
+    fn the_aim_eases_in_and_moves_to_a_new_bite_from_where_it_is() {
+        use cubarium_voxel_flora::Site;
+        let hz = 1.0 / DT;
+        let mut a = biting(0.0, Some(Site { x: 8, y: 4, z: 12 }));
+        let mut grid = Animals::empty(0, 0, 0);
+        grid.advance_poses(100, &[a], 0.125);
+        let first = grid.aim(&a, 100).expect("a bite in reach aims");
+        assert_eq!(first.at(100.0, hz).weight, 0.0, "from the unaimed reach");
+        let ease_ticks = (super::super::rig::AIM_EASE_S * hz).ceil() as u64;
+        for t in 101..=100 + ease_ticks {
+            grid.advance_poses(t, &[a], 0.125);
+        }
+        let t0 = 100 + ease_ticks;
+        let settled = grid.aim(&a, t0).unwrap().at(t0 as f64, hz);
+        assert!((settled.weight - 1.0).abs() < 1e-6, "eased fully in");
+        // a new bite, higher and to one side: the aim starts where it was and gets there
+        a.bite = cubarium_voxel_fauna::LastBite(Some(Site { x: 4, y: 20, z: 12 }));
+        grid.advance_poses(t0 + 1, &[a], 0.125);
+        let track = grid.aim(&a, t0 + 1).unwrap();
+        let start = track.at((t0 + 1) as f64, hz);
+        assert!((start.height_m - settled.height_m).abs() < 1e-6 && (start.bearing_rad - settled.bearing_rad).abs() < 1e-6);
+        let target = bite_aim(&a, 0.125, 0).unwrap();
+        let end = track.at((t0 + 1 + ease_ticks) as f64, hz);
+        assert!((end.height_m - f64::from(target[0])).abs() < 1e-5 && (end.bearing_rad - f64::from(target[1])).abs() < 1e-5);
+        // no bite any more: the weight eases back out, the place held
+        a.bite = cubarium_voxel_fauna::LastBite(None);
+        grid.advance_poses(t0 + 2, &[a], 0.125);
+        assert!(grid.aim(&a, t0 + 2).unwrap().rate < 0.0);
     }
 
     /// A browser on soil, and a world to stamp it in.
@@ -2165,7 +2352,7 @@ mod tests {
             if walking {
                 a.pose.x += 0.01;
             }
-            grid.advance_poses(tick, &[a]);
+            grid.advance_poses(tick, &[a], 0.125);
             let (wt, rate) = grid.idle_weight(&a).unwrap_or((0.0, 0.0));
             for k in 0..3 {
                 frames.push((wt + rate * k as f32 / 3.0).clamp(0.0, 1.0));

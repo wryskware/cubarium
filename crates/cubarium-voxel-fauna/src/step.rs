@@ -4149,6 +4149,14 @@ fn founder_feed(
         body::Meal::Pool { site, food: Food::Carrion } => flora.view().ground_at(site).and_then(|g| g.carcass).map(|c| (usize::from(c.lineage), site)),
         _ => None,
     };
+    // The aim's cell (FEED-ROLLOUT round 2): where this bite comes from, read before the
+    // withdrawal and kept on the body only if the bite is taken. Presentation memory: no
+    // rule reads it ([`crate::LastBite`]).
+    let bitten = match meal {
+        body::Meal::Stand { root, place, .. } => body::bitten_cell(&flora.view(), view, root, place, &cols, &layers),
+        body::Meal::Mycelium { root } => Some(Site { y: root.y + 1, ..root }),
+        body::Meal::Pool { site, .. } => Some(Site { y: site.y + 1, ..site }),
+    };
     let mut mycelium = 0.0;
     let taken = match meal {
         body::Meal::Stand { root, place, .. } => {
@@ -4180,6 +4188,7 @@ fn founder_feed(
     let Some(taken) = taken else {
         return false;
     };
+    fauna.animals[i].bite = crate::LastBite(bitten);
     fauna.ledger.eaten_mycelium_by_founder[founder.index()] += mycelium;
     fauna.ledger.eaten_by_founder_food[founder.index()][food.index()] += taken.organic;
     let taken = fauna.book_eaten(taken, food);
@@ -4797,6 +4806,7 @@ fn newborn(
         emergency: false,
         bout: None,
         hunt: crate::HuntMemory::default(),
+        bite: crate::LastBite::default(),
     }
 }
 
