@@ -1,16 +1,15 @@
 //! **Saving the running world from outside the app**: `SIGUSR1` saves it and keeps
 //! running; `SIGTERM` and `SIGINT` save it, then end the process as the signal would have.
 //!
-//! - **Where:** into the world's own slot, the one its session last loaded it from or saved
-//!   it into ([`cubarium_session::Session::home`]), so the app's start-up reopens it where
-//!   it was. The shell saves into `<root>.staging/<name>` and renames that into
-//!   `<root>/<name>` (`game/ui/saves.gd`), so a staging directory maps back to its slot. A
-//!   world never loaded or saved (freshly founded) goes to [`FRESH_SLOT`] under the
-//!   default root, `user://saves` globalized on Godot's thread when the first session is
-//!   made ([`init`]).
-//! - **How:** like the shell, into `<root>.staging/<slot>` first, with the slot's
-//!   `thumb.png` copied in, then renamed over the slot: an overwritten slot never mixes two
-//!   worlds' files, and a failed save leaves it as it was.
+//! - **Where:** into the world's autosave slot: `<name> (autosave)` beside its home
+//!   ([`cubarium_session::Session::home`]). An autosave home reuses that same slot; the
+//!   player's explicitly saved snapshot stays untouched. A shell staging home maps back
+//!   to its slot before choosing the autosave. A world never loaded or saved goes to
+//!   [`FRESH_SLOT`] under the default root, `user://saves` globalized on Godot's thread
+//!   when the first session is made ([`init`]). Automatic saves keep the session's home.
+//! - **How:** like the shell, into `<root>.staging/<slot>` first, with the autosave slot's
+//!   own `thumb.png` copied in (or the home's if it has none), then renamed over the slot:
+//!   an overwritten slot never mixes two worlds' files, and a failed save leaves it as it was.
 //! - **Which world:** the newest session with a world running; with none, nothing is saved.
 //! - **Bounded:** a terminating signal gives up after [`QUIT_SAVE_TIMEOUT`] (waiting out a
 //!   save or load already in flight counts) and ends the process anyway, so `kill` still
@@ -32,6 +31,9 @@ use signal_hook::iterator::{Handle, Signals};
 
 /// The slot a world never loaded or saved goes to. It passes `saves.gd`'s `name_problem`.
 pub const FRESH_SLOT: &str = "Autosave";
+
+/// The suffix shared with the shell's Continue selection (`game/main.gd`).
+const AUTOSAVE_SUFFIX: &str = " (autosave)";
 
 /// How long a terminating signal waits for its save before ending the process anyway.
 pub const QUIT_SAVE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -131,7 +133,7 @@ pub(crate) enum Outcome {
     Failed { slot: PathBuf, why: String },
 }
 
-/// Save the newest session with a world running into its slot, waiting out a save or load
+/// Save the newest session with a world running into its autosave slot, waiting out a save or load
 /// already in flight; everything within `timeout`.
 pub(crate) fn save_running(sessions: &[SessionStop], timeout: Duration) -> Outcome {
     let started = Instant::now();
@@ -153,12 +155,14 @@ pub(crate) fn save_running(sessions: &[SessionStop], timeout: Duration) -> Outco
             Some(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     }
-    let slot = slot_of(session.home(), ROOT.get().map(PathBuf::as_path));
+    let home = session.home();
+    let slot = autosave_slot_of(home.clone(), ROOT.get().map(PathBuf::as_path));
     let Some(slot) = slot else {
         return Outcome::Nothing("the slots' root is unknown".into());
     };
     let remaining = deadline.saturating_duration_since(Instant::now());
-    match save_into(session, &slot, remaining) {
+    let home = slot_of(home, None);
+    match save_into(session, &slot, home.as_deref(), remaining) {
         Ok(meta) => Outcome::Saved { slot, meta, took: started.elapsed() },
         Err(why) => Outcome::Failed { slot, why },
     }
@@ -178,6 +182,21 @@ pub(crate) fn slot_of(home: Option<PathBuf>, root: Option<&Path>) -> Option<Path
     }
 }
 
+/// One automatic snapshot per world, beside its home; an autosave home reuses itself.
+/// Fresh worlds keep [`FRESH_SLOT`]. Normalize the shell's staging home first.
+pub(crate) fn autosave_slot_of(home: Option<PathBuf>, root: Option<&Path>) -> Option<PathBuf> {
+    let fresh = home.is_none();
+    let slot = slot_of(home, root)?;
+    if fresh {
+        return Some(slot);
+    }
+    let mut name = slot.file_name()?.to_os_string();
+    if !name.to_string_lossy().ends_with(AUTOSAVE_SUFFIX) {
+        name.push(AUTOSAVE_SUFFIX);
+    }
+    Some(slot.with_file_name(name))
+}
+
 /// `<root>.staging/<name>` for the slot `<root>/<name>`, as `saves.gd` stages it.
 pub(crate) fn staging_of(slot: &Path) -> Option<PathBuf> {
     let name = slot.file_name()?;
@@ -187,18 +206,19 @@ pub(crate) fn staging_of(slot: &Path) -> Option<PathBuf> {
     Some(PathBuf::from(staging).join(name))
 }
 
-/// Save `session`'s world into a clean staging directory, copy the slot's thumbnail in, and
-/// rename it over `slot`.
-fn save_into(session: &SessionStop, slot: &Path, timeout: Duration) -> Result<SaveMeta, String> {
+/// Save without changing the session's home, keeping the slot's thumbnail or falling back
+/// to the home's, then rename the clean staging directory over `slot`.
+fn save_into(session: &SessionStop, slot: &Path, home: Option<&Path>, timeout: Duration) -> Result<SaveMeta, String> {
     let staging = staging_of(slot).ok_or("the slot has no name")?;
     if staging.exists() {
         std::fs::remove_dir_all(&staging).map_err(|e| format!("clearing {}: {e}", staging.display()))?;
     }
     std::fs::create_dir_all(&staging).map_err(|e| format!("making {}: {e}", staging.display()))?;
-    let meta = session.save_blocking(&staging, timeout)?;
+    let meta = session.save_snapshot_blocking(&staging, timeout)?;
     let thumb = slot.join(THUMB);
-    if thumb.is_file() {
-        let _ = std::fs::copy(&thumb, staging.join(THUMB));
+    let thumb = if thumb.is_file() { Some(thumb) } else { home.map(|h| h.join(THUMB)).filter(|p| p.is_file()) };
+    if let Some(thumb) = thumb {
+        std::fs::copy(&thumb, staging.join(THUMB)).map_err(|e| format!("copying {}: {e}", thumb.display()))?;
     }
     if slot.exists() {
         std::fs::remove_dir_all(slot).map_err(|e| format!("clearing the old slot: {e}"))?;
@@ -240,4 +260,121 @@ mod tests {
         assert_eq!(slot_of(None, None), None);
         assert_eq!(staging_of(Path::new("/u/saves/World 3")), Some("/u/saves.staging/World 3".into()));
     }
+
+    #[test]
+    fn autosaves_use_a_sibling_of_the_players_slot() {
+        assert_eq!(autosave_slot_of(Some("/r/World 2".into()), None), Some("/r/World 2 (autosave)".into()));
+    }
+
+    #[test]
+    fn an_autosave_home_reuses_the_same_slot() {
+        assert_eq!(autosave_slot_of(Some("/r/World 2 (autosave)".into()), None), Some("/r/World 2 (autosave)".into()));
+    }
+
+    #[test]
+    fn autosaves_map_staging_homes_back_first() {
+        assert_eq!(autosave_slot_of(Some("/r.staging/World 2".into()), None), Some("/r/World 2 (autosave)".into()));
+        assert_eq!(autosave_slot_of(Some("/r.staging/World 2 (autosave)".into()), None), Some("/r/World 2 (autosave)".into()));
+    }
+
+    #[test]
+    fn a_fresh_world_uses_the_fresh_slot() {
+        assert_eq!(autosave_slot_of(None, Some(Path::new("/r"))), Some("/r/Autosave".into()));
+        assert_eq!(autosave_slot_of(None, None), None);
+    }
+
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn files(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {
+        let mut out = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                for (name, bytes) in files(&path) {
+                    out.insert(PathBuf::from(path.file_name().unwrap()).join(name), bytes);
+                }
+            } else {
+                out.insert(path.file_name().unwrap().into(), std::fs::read(&path).unwrap());
+            }
+        }
+        out
+    }
+
+    fn idle(session: &cubarium_session::Session) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !session.status().running || !session.status().paused || session.status().saving {
+            assert!(Instant::now() < deadline, "the tiny world did not become idle");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn automatic_saves_preserve_player_files_and_keep_the_right_thumbnail() {
+        use cubarium_session::{Session, SessionOptions, SimParams, WorldSpec, prepare_new, store};
+        let scratch = Scratch(std::env::temp_dir().join(format!(
+            "cubarium-autosave-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        )));
+        std::fs::create_dir_all(&scratch.0).unwrap();
+        // The same tiny founding fixture as cubarium-session's tests.
+        let config = scratch.0.join("tiny.toml");
+        std::fs::write(&config,
+            "threads = 2\n[world]\nwidth = 32\nheight = 24\ndepth = 4\nvoxel_m = 0.25\n\
+             [world.landform]\npreset = \"default\"\n\
+             [world.landform.water]\nmin_lake_m2 = 0.0\nmin_tier_pools = 0\n\
+             [world.climate]\nopening_min_s = 1.0\n"
+        ).unwrap();
+        let spec = WorldSpec { config: Some(config), seed: Some(5), ..WorldSpec::default() };
+        let session = Session::new(SessionOptions { exec: SimParams { threads: 2, ..SimParams::default() }, ..SessionOptions::default() });
+        session.install(prepare_new(&spec.sim_params().unwrap(), &spec).unwrap());
+        session.command(cubarium_observatory::Command::Pause);
+        idle(&session);
+        let stop = session.stopper();
+        let timeout = Duration::from_secs(10);
+        let root = scratch.0.join("saves");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // A fresh world's repeated automatic snapshots must stay in Autosave.
+        for _ in 0..2 {
+            let target = autosave_slot_of(session.home(), Some(&root)).unwrap();
+            assert_eq!(target, root.join(FRESH_SLOT));
+            save_into(&stop, &target, None, timeout).unwrap();
+            idle(&session);
+            assert_eq!(session.home(), None);
+            assert!(store::read_meta(&target).unwrap().loadable());
+        }
+
+        // Mimic an explicit shell save: the session remembers its staging path.
+        let home = root.join("World 2");
+        let staging = staging_of(&home).unwrap();
+        session.save_blocking(&staging, timeout).unwrap();
+        std::fs::write(staging.join(THUMB), b"player thumbnail").unwrap();
+        std::fs::rename(&staging, &home).unwrap();
+        idle(&session);
+        let before = files(&home);
+        let target = root.join("World 2 (autosave)");
+        for own_thumbnail in [false, true] {
+            if own_thumbnail {
+                std::fs::write(target.join(THUMB), b"autosave thumbnail").unwrap();
+            }
+            let outcome = save_running(std::slice::from_ref(&stop), timeout);
+            assert!(matches!(outcome, Outcome::Saved { slot, .. } if slot == target));
+            idle(&session);
+            assert_eq!(files(&home), before, "all player files stay byte for byte unchanged");
+            assert_eq!(session.home(), Some(staging.clone()));
+            assert!(store::read_meta(&target).unwrap().loadable());
+            let want: &[u8] = if own_thumbnail { b"autosave thumbnail" } else { b"player thumbnail" };
+            assert_eq!(std::fs::read(target.join(THUMB)).unwrap(), want);
+        }
+        assert!(!root.join("World 2 (autosave) (autosave)").exists());
+        stop.shutdown();
+    }
+
 }
