@@ -1146,7 +1146,7 @@ impl Stager<'_> {
             let packer = &*self.packer;
             let snapshot = || {
                 let canopy = packer.light.as_ref().map(|l| &l.canopy);
-                Snapshot::of(view, &packer.stands, &packer.animals, canopy)
+                Snapshot::of(view, &packer.stands, &packer.animals, canopy, p.drape_cords.on())
             };
             sv.after_pack(self.clock_s, p.sun, snapshot, self.renderer);
         }
@@ -2711,6 +2711,7 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
             flow: cfg.light.fog_flow,
         },
         plants: (cfg.figures.plants == PlantDraw::Models).then(|| cfg.plants.motion()),
+        drape_cords: cfg.drape.renderer(),
     }
 }
 

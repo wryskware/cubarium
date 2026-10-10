@@ -36,6 +36,7 @@
 pub mod adapter;
 pub mod atlas;
 pub mod bloom;
+pub mod cord;
 pub mod palette;
 pub mod present;
 pub mod render;
@@ -46,6 +47,8 @@ pub mod target;
 pub mod vk;
 pub mod figures;
 pub mod plants;
+#[cfg(test)]
+mod cord_tests;
 #[cfg(test)]
 mod figures_order_tests;
 pub mod voxel;

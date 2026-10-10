@@ -26,7 +26,8 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 waterK;        // SKIN_ALPHA_GAIN, WATER_TOP_ALPHA, -, -
     vec4 plantA;        // PLANT_TOP_GAIN, PLANT_TOP_TINT, PLANT_RIM, CROWN_EDGE
     vec4 plantB;        // CROWN_UNDER, TRUNK_SHADE[0], TRUNK_SHADE[1], TRUNK_LIGHT_AT
-    ivec4 tex;          // the face textures present, one bit per slot; vine tiles present; -, -
+    ivec4 tex;          // the face textures present, one bit per slot; vine tiles present;
+                        // the drape cords' width (px, 0 off) and shape (`drape_cord.glsl`)
     vec4 lightK;        // lit: ambient gain, ambient floor, ladder rungs, AO strength
     vec4 ambientC;      // lit: the ambient light's colour, the sky's hue at unit luminance
     vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
@@ -315,6 +316,8 @@ vec4 vineTexel(uvec4 v, int x, int y, int z, int dx, int dy) {
     return vec4(srgbToLinear(t.rgb), t.a);
 }
 
+#include "drape_cord.glsl"
+
 // --- colour ---------------------------------------------------------------------------
 
 vec3 strataOf(int m) {
@@ -424,7 +427,7 @@ vec3 blockLit(vec3 body, float shade) {
 float occluder(int x, int y, int z) {
     if (!inY(y) || z < 0 || z >= D) { return 0.0; }
     uvec4 v = at(x, y, z);
-    return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v))) ? 1.0 : 0.0;
+    return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v) && !cordCell(v))) ? 1.0 : 0.0;
 }
 
 // The AO is a **crease line** (Wrysk, checkpoint 2): a face stays flat, and only a thin
@@ -635,7 +638,7 @@ float sunReaches(vec3 p, ivec3 c) {
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
         if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
-        if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c)) {
+        if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v)) {
             return 0.0;
         }
         if (axis == 0) { c.x += dir.x; next.x += inv.x; }
