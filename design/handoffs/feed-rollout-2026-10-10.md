@@ -246,6 +246,23 @@ a voxel."
 - Rebake the two pose models and their rigs (specimen path); report cells per bone.
 - Evidence: the feed MP4 again, today (main) | after, `seedporter-feed-r2-px{6,12}.mp4`.
 
+### Small feeders round 2: the front owns its cells
+
+Small feeders merged (f013da6d): at 125 mm the littershredder's plough and the
+ripple-snail's front own no cells (the root claims them), and the capgnawer's front owns
+one, so the clips barely show. The seedporter's hands (7d85b28b) got cells of their own by
+`own_cells` (a claimed extra cell), which made its front three cells wide, wider than the
+chest. Wrysk's rule: a rigged part gets a voxel.
+
+- Prefer **reassigning** over adding: give the front bone the body's front-most cells by
+  position (as the Veilhound's neck and the lanternjaw's head are split: cells ahead of a
+  plane), so the silhouette doesn't change and the front moves. Use `own_cells` only where
+  a part has no cell at all after that, and say where.
+- Littershredder (all 5 bins), ripple-snail, capgnawer; both voxel sizes. Report cells per
+  bone before/after, and a rest still today | after (6 px, 12 px) to show the silhouette
+  holds.
+- Evidence: the three feed MP4s again, today (main) | after, `<name>-feed-r2-px{6,12}.mp4`.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
 open look question). Then sleep, idle and hunker move onto the rig.
 
