@@ -370,7 +370,7 @@ impl Default for PackConfig {
 /// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
 /// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
 /// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
-/// wave_period = 12.0  # voxels a wave down the strand; 0: the hashed joins above
+/// wave_period = 24.0  # voxels a wave down the strand; 0: the hashed joins above
 /// wave_amplitude = 0.5 # voxels the wave swings either side of the column's centre
 /// wave_octaves = 3    # sines summed, each ~half the period and half the amplitude
 /// wave_ratios = "jittered" # "octave": exactly 1:2:4; "jittered": ~1:2.3:4.6, per strand
@@ -432,7 +432,7 @@ impl Default for DrapeConfig {
             cord_px: 2,
             cord_shape: CordShapeConfig::Eased,
             cord_wander: 0.5,
-            wave_period: 12.0,
+            wave_period: 24.0, // Wrysk 2026-10-10: "jitter, 24p looks best"
             wave_amplitude: 0.5,
             wave_octaves: 3,
             wave_ratios: WaveRatiosConfig::Jittered,
