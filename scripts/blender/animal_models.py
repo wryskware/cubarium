@@ -1519,6 +1519,21 @@ def bellwing():
 # behind (the variant he asked to see). `LJ_ORB_CELL=2` in the environment picks it.
 LJ_ORB_CELL = int(os.environ.get("LJ_ORB_CELL", "3"))
 
+# The rig's joints (reference metres, the left (+y) side; `lj_mirror` gives the right): the
+# head's cut and pivot (the helmet joins the body at the striking arms' hips), each striking
+# arm's hip, knee and blade tip (the hook's point, on the ground at rest).
+LJ_NECK_CUT_X = 0.30
+LJ_HEAD_PIVOT = (LJ_NECK_CUT_X, 0.0, 0.15)
+LJ_FANG_TIP = (0.49, 0.0, 0.0)
+LJ_HIP = (0.30, 0.10, 0.10)
+LJ_KNEE = (0.39, 0.25, 0.29)
+LJ_BLADE_TIP = (0.49, 0.24, 0.0)
+LJ_SIDE = {1: "l", -1: "r"}  # +y is the body's left (x forward, z up)
+
+
+def lj_mirror(p, sy):
+    return (p[0], sy * p[1], p[2])
+
 
 def lanternjaw():
     # Voxel placement (the bake anchors the origin on a cell centre: cell (i, j, k) centres at
@@ -1534,12 +1549,17 @@ def lanternjaw():
         (0.14, 0, 0.145, 0.135, 0.08, 0.06), (0.02, 0, 0.15, 0.13, 0.08, 0.062),
         (-0.10, 0, 0.16, 0.112, 0.074, 0.058), (-0.20, 0, 0.18, 0.09, 0.066, 0.052),
         (-0.28, 0, 0.21, 0.07, 0.058, 0.048), (-0.33, 0, 0.25, 0.058, 0.052, 0.045)]
+    start = len(L.ORG)
     loft(body, [c("a_main"), c("a_dark")], body_zone, nring=60, nseg=20)
+    # the rig (FEED-ROLLOUT): the loft is one mesh, so its helmet, ahead of the striking
+    # arms' hips, is the head bone's by position; the rest of it is the root's
+    bone_ahead(start, LJ_NECK_CUT_X, "head")
     # six overlapping back plates, narrowing and climbing with the body
     for x, hw, z, tilt in ((0.15, 0.15, 0.21, -14), (0.06, 0.152, 0.215, -14), (-0.03, 0.14, 0.222, -16),
                            (-0.12, 0.12, 0.232, -20), (-0.20, 0.098, 0.25, -26), (-0.27, 0.078, 0.278, -34)):
         ell((x, 0, z), (0.058, hw, 0.036), c("a_main"), rot=ry(tilt))
     # head: a central ridge, two large magenta eyes, two small ones
+    start = len(L.ORG)
     ell((0.35, 0, 0.215), (0.1, 0.018, 0.026), c("a_main"), rot=ry(8))
     for sy in (-1, 1):
         ell((0.395, sy * 0.085, 0.18), (0.036, 0.03, 0.04), c("a_eye"))
@@ -1548,6 +1568,7 @@ def lanternjaw():
         tube([(0.47, sy * 0.022, 0.24), (0.497, sy * 0.022, 0.135), (0.505, sy * 0.02, 0.035)], 0.04, 0.025,
              c("a_head"), seg=10)
         cyl((0.505, sy * 0.02, 0.035), (0.475, sy * 0.006, -0.005), 0.025, 0.003, mat=c("a_head"), seg=8)
+    bone_of(start, "head")
 
     def jointed(pts, r0, r1, tip_r):
         """A thick armoured limb: straight segments with dark joint balls; the last segment
@@ -1560,9 +1581,13 @@ def lanternjaw():
     for sy in (-1, 1):
         # striking arm: coxa under the head, a thick femur raised high and out, a tibia curving
         # down and forward into a pale razor blade with a hooked tip; pale razor spines inside
-        hip, knee = (0.30, sy * 0.10, 0.10), (0.39, sy * 0.25, 0.29)
+        side = LJ_SIDE[sy]
+        hip, knee = lj_mirror(LJ_HIP, sy), lj_mirror(LJ_KNEE, sy)
         tib = [knee, (0.47, sy * 0.275, 0.24), (0.52, sy * 0.268, 0.16)]
+        start = len(L.ORG)
         tube([hip, knee], 0.056, 0.048, c("a_limb"), seg=10)
+        bone_of(start, f"femur_{side}")
+        start = len(L.ORG)
         ell(knee, (0.042,) * 3, c("a_dark"))
         tube(tib, 0.044, 0.034, c("a_limb"), seg=10)
         ell((0.515, sy * 0.255, 0.085), (0.035, 0.028, 0.085), c("a_head"), rot=ry(-10))
@@ -1571,6 +1596,7 @@ def lanternjaw():
         for t in (0.2, 0.45, 0.7, 0.95):
             p = Vector(T[round(t * 20)])
             cyl(tuple(p), tuple(p + Vector((-0.024, -sy * 0.06, -0.014))), 0.016, 0.001, mat=c("a_head"), seg=6)
+        bone_of(start, f"tibia_{side}")  # the knee ball, the tibia, the blade and its spines
         # six walking legs: thick, knees above the plates, long dark claws splayed outward and
         # toward their own end
         for hx, dx in ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085)):
@@ -1609,6 +1635,97 @@ def seg_tail(pts, r0, r1):
         if k:
             d = (b - a).normalized() * 0.008
             cyl(tuple(a - d), tuple(a + d), ra * 1.06, ra * 1.06, mat=c("a_dark"), seg=12)
+
+
+# --- the lanternjaw's feeding rig and clip (FEED-ROLLOUT, 2026-10-10) --------------------
+#
+# `design/handoffs/feed-rollout-2026-10-10.md` §Lanternjaw; a placeholder, Wrysk directs the
+# real clip. At a carcass on the ground ahead. Bones: the root (body, plates, walking legs,
+# tail and lures), the head (the helmet ahead of `LJ_NECK_CUT_X` by position, the ridge,
+# eyes and fangs), each striking arm a femur (hip to knee) and a tibia (the knee ball, the
+# tibia, the blade and its spines; the blade's hook point its tip).
+#
+# As the Veilhound's: the action is the **loop** in the pinned posture, and the reach and
+# return are the renderer's clip weight. Pinned: both blade tips on the ground `LJ_PIN_AHEAD`
+# ahead of where they rest (one voxel), each arm a two-bone reach (`ik`, the knee toward its
+# rest side); the head's pivot moved `LJ_HEAD_REACH` forward and pitched `LJ_HEAD_DIP` down,
+# lowered toward the same spot (it has no neck: the move is the least that leans the fangs
+# into the cell ahead without putting their tips in the ground). The loop (`LJ_FEED_KEYS`,
+# eased between keys): a tear (the head back and up ~4 cm with a twist, the blades pressing
+# down and back), the dip again, the other side's tear, a swallow (the head up 6 cm, the
+# blades eased up), the dip.
+
+LJ_FEED_FPS = 30
+LJ_PIN_AHEAD = 0.125             # the blade tips' reach ahead of their rest place, metres
+LJ_HEAD_REACH = (0.05, 0.0)      # the head pivot's move (forward, up) when pinned, metres
+LJ_HEAD_DIP = -6.0               # the head's pitch when pinned (+ lifts the nose), degrees
+LJ_PRESS = (-0.01, -0.012)       # a full press: the blade tips' move (forward, up), metres
+LJ_EASE_UP = 0.03                # the blade tips' lift at the swallow, metres
+# The loop's key poses: (seconds, the head pivot moved (x back -, z up +) metres from the
+# pinned pose, its pitch from the pinned pitch (+ up) and twist about its length, degrees,
+# the arms' press and their ease up, 0..1): tear 0.4 s, dip 0.3 s, the other side's tear
+# 0.4 s, the swallow 0.4 s, dip 0.3 s.
+LJ_FEED_KEYS = [(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (0.4, -0.028, 0.028, 6.0, 12.0, 1.0, 0.0),
+                (0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), (1.1, -0.028, 0.028, 6.0, -12.0, 1.0, 0.0),
+                (1.5, 0.0, 0.06, 8.0, 0.0, 0.0, 1.0), (1.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)]
+
+
+def lj_bones():
+    """The rig's bones (name, parent index, head, tail), reference metres, Blender axes."""
+    hx, _, hz = LJ_HEAD_PIVOT
+    bones = [("root", None, (0.0, 0.0, hz), (0.1, 0.0, hz)),
+             ("head", 0, LJ_HEAD_PIVOT, (LJ_FANG_TIP[0], 0.0, hz))]
+    for sy in (1, -1):
+        side, n = LJ_SIDE[sy], len(bones)
+        hip, knee, tip = (lj_mirror(p, sy) for p in (LJ_HIP, LJ_KNEE, LJ_BLADE_TIP))
+        bones += [(f"femur_{side}", 0, hip, knee), (f"tibia_{side}", n, knee, tip)]
+    return bones
+
+
+def lj_feed_at(t):
+    """The loop's pose at `t` seconds: (head pivot move (x, z), pitch, twist, press, ease
+    up), eased (smoothstep) between neighbouring keys, from the pinned pose."""
+    keys = LJ_FEED_KEYS
+    for k0, k1 in zip(keys, keys[1:]):
+        if k0[0] <= t <= k1[0]:
+            u = smooth((t - k0[0]) / (k1[0] - k0[0]))
+            v = [a + (b - a) * u for a, b in zip(k0[1:], k1[1:])]
+            return (v[0], v[1]), v[2], v[3], v[4], v[5]
+    return (0.0, 0.0), 0.0, 0.0, 0.0, 0.0
+
+
+def lj_arm_turns(sy, tip):
+    """The striking arm's two turns (armature space, each relative to its parent) putting
+    its blade tip on `tip`, the knee toward its rest side."""
+    hip, knee, rest = (Vector(lj_mirror(p, sy)) for p in (LJ_HIP, LJ_KNEE, LJ_BLADE_TIP))
+    e, w = ik(hip, tip, (knee - hip).length, (rest - knee).length, knee - hip)
+    up = (knee - hip).rotation_difference(e - hip)
+    low = (rest - knee).rotation_difference(up.inverted() @ (w - e))
+    return up.to_matrix(), low.to_matrix()
+
+
+def lj_feed_clip():
+    """The lanternjaw's feeding loop at reference size, sampled at `LJ_FEED_FPS`
+    (`sample_clip`)."""
+    bones = lj_bones()
+    n = round(LJ_FEED_KEYS[-1][0] * LJ_FEED_FPS)
+    ob = rig_armature("lj_rig", bones, LJ_FEED_FPS)
+    head_axis = Vector((1.0, 0.0, 0.0))
+    for f in range(n):
+        (dx, dz), pitch, twist, press, ease = lj_feed_at(f / LJ_FEED_FPS)
+        turns = {"head": Matrix.Rotation(-math.radians(LJ_HEAD_DIP + pitch), 3, "Y")
+                 @ Matrix.Rotation(math.radians(twist), 3, head_axis)}
+        for sy in (1, -1):
+            tip = (Vector(lj_mirror(LJ_BLADE_TIP, sy)) + Vector((LJ_PIN_AHEAD, 0.0, 0.0))
+                   + Vector((LJ_PRESS[0], 0.0, LJ_PRESS[1])) * press + Vector((0.0, 0.0, LJ_EASE_UP)) * ease)
+            side = LJ_SIDE[sy]
+            turns[f"femur_{side}"], turns[f"tibia_{side}"] = lj_arm_turns(sy, tip)
+        key_turns(ob, bones, f, turns, Vector())
+        pb = ob.pose.bones["head"]
+        shift = Vector((LJ_HEAD_REACH[0] + dx, 0.0, LJ_HEAD_REACH[1] + dz))
+        pb.location = pb.bone.matrix_local.to_quaternion().inverted() @ shift
+        pb.keyframe_insert("location", frame=f)
+    return sample_clip(ob, bones, n, LJ_FEED_FPS)
 
 
 # --- lanternjaw larva · the rider stage: four candidates (2026-10-09) ---------------------------
