@@ -14,6 +14,9 @@
 //! adult and a newborn calf side by side, on a longer script — a feeding bout, a short one,
 //! then asleep (`State::Asleep`, the rest clip) and awake again.
 //!
+//! `--founder lanternjaw`: an adult and the smallest bin past the larva (the founder's
+//! newborn body, `body_min`, drawn by bin 0), on the frondgrazer's script.
+//!
 //! `--founder seedporter [--pose stand|ground]`: an adult and a newborn in the pose model
 //! it crops in — perched (`seedporter-stand`, each on a one-voxel rock post so its tail
 //! hangs below the perch as in a crown) or on the ground (`seedporter-ground`, as at a
@@ -21,7 +24,7 @@
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
-//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider|seedporter]
+//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw]
 //!     [--pose stand|ground]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
@@ -245,13 +248,16 @@ fn main() -> Result<()> {
                     "frondgrazer" | "browser" => Founder::Browser,
                     "chorister" | "veilhound" => Founder::Chorister,
                     "loftstrider" => Founder::Loftstrider,
+                    "lanternjaw" => Founder::Lanternjaw,
                     "seedporter" => {
                         if mode == MobilityMode::Ground {
                             mode = MobilityMode::Perched;
                         }
                         Founder::Seedporter
                     }
-                    f => bail!("--founder frondgrazer, chorister, loftstrider or seedporter, not {f}"),
+                    f => bail!(
+                        "--founder frondgrazer, chorister, loftstrider, seedporter or lanternjaw, not {f}"
+                    ),
                 }
             }
             "--pose" => {
@@ -288,12 +294,15 @@ fn main() -> Result<()> {
     // loftstrider 3.4 m tall and 2.4 m across its fronds, reaching further: taller still
     let ls = founder == Founder::Loftstrider;
     let sp = founder == Founder::Seedporter;
+    let lj = founder == Founder::Lanternjaw;
     let perched = sp && mode == MobilityMode::Perched;
     let (mut w, xs, z) = match founder {
         Founder::Chorister => (world(48, 16), [15, 36], 8),
         Founder::Loftstrider => (world_of(52, 36, 20), [16, 38], 10),
         // the ground pose is 1.14 m long with its tail; the perched one 1.04 m tall
         Founder::Seedporter => (world_of(26, 14, 9), [8, 18], 4),
+        // 1.0 m from the blades to the tail root, the lures arching to 0.6 m
+        Founder::Lanternjaw => (world_of(26, 10, 9), [8, 18], 4),
         _ => (world(22, 7), [6, 15], 3),
     };
     if perched {
@@ -327,8 +336,9 @@ fn main() -> Result<()> {
     let mut animals = fv.animals.to_vec();
     for (i, a) in animals.iter_mut().enumerate() {
         // the loftstrider's second is a newborn calf (its own build, its own bin); the
-        // seedporter's a newborn (its pose models are one bin: the adult's)
-        a.body = if (ls || sp) && i == 1 { newborn } else { adult };
+        // seedporter's a newborn (its pose models are one bin: the adult's); the
+        // lanternjaw's a newborn, the founder's smallest bin (its larva is the rider)
+        a.body = if (ls || sp || lj) && i == 1 { newborn } else { adult };
         a.state = State::Resting;
         if sp {
             a.mobility.mode = mode;
