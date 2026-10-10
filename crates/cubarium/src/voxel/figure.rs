@@ -52,17 +52,14 @@ use super::sleep;
 
 // --- the config ---------------------------------------------------------------------------
 
-/// **FEED-RIG trial setting** (`design/handoffs/feeding-motion-rig-2026-10-09.md`): how a
-/// rigged animal's feeding clip moves its cubes. Wrysk picks one of the two from the
-/// method trial's video; the other then goes.
+/// FEED-RIG (`design/handoffs/feeding-motion-rig-2026-10-09.md`): whether a rigged animal's
+/// clip is drawn. Each cube turns with its bone (Wrysk picked the turned cubes, 2026-10-10).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RigDraw {
     /// Each cube turns with its bone (its corners transformed): a bent neck's cubes tilt.
     #[default]
     Turn,
-    /// Each cube's centre moves with its bone, the cube kept square to the body's frame.
-    Upright,
     /// The clip is not drawn: rigged animals stand as baked while they crop.
     Off,
 }
@@ -224,8 +221,8 @@ pub struct FigureConfig {
     /// by the plant pass, swaying and growing in (`[plants]`), or in the world's voxels, still.
     /// Startup only.
     pub plants: PlantDraw,
-    /// A trial setting (FEED-RIG): `"turn"` (the default), `"upright"` or `"off"`
-    /// ([`RigDraw`]): how a rigged animal's feeding clip moves its cubes.
+    /// `"turn"` (the default) or `"off"` ([`RigDraw`]): whether a rigged animal's clip is
+    /// drawn, each cube turned with its bone.
     pub rig: RigDraw,
 }
 
@@ -412,7 +409,7 @@ mod preset_tests {
             subpixel: false,
             supersample: 3,
             plants: PlantDraw::Models,
-            rig: super::RigDraw::Upright,
+            rig: super::RigDraw::Off,
         }
     }
 
@@ -1045,7 +1042,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
 fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models: &mut FigureModels, flash: f32, emission: bool) -> Option<Spec> {
     let cells = animal::rider_cells(lib, a)?;
     let founder = a.founder?;
-    let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None))?;
+    let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None, None))?;
     let starving = animal::is_starving(a);
     let wounded = animal::is_wounded(a) && !starving;
     let palette = models
@@ -1060,7 +1057,7 @@ fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models
             Paint::Style | Paint::Flat => PaletteEntry::default(),
         })
         .collect();
-    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None })
+    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None, feed: None })
 }
 
 /// Every animal of `fauna` as figures, after [`Animals::rebuild_without_living`] moved the
@@ -1515,7 +1512,6 @@ impl FigureTrack {
         let mut frame = FigureFrame {
             whole_pixels: stepped || !self.cfg.subpixel,
             supersample: self.cfg.supersample,
-            rig_upright: self.cfg.rig == RigDraw::Upright,
             ..FigureFrame::default()
         };
         let mut bones = Vec::new();

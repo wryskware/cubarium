@@ -336,10 +336,6 @@ pub struct FigureFrame {
     /// Every rigged tile's bone transforms (FEED-RIG), in the model's own frame (voxels):
     /// three rows of `[m0, m1, m2, t]`, a rest point `p` going to `M p + t`.
     pub bones: Vec<[[f32; 4]; 3]>,
-    /// The trial switch `[figures] rig` (FEED-RIG): `false` turns each cube with its bone
-    /// (`"turn"`), `true` moves only its centre and keeps it square to the body
-    /// (`"upright"`).
-    pub rig_upright: bool,
 }
 
 impl Default for FigureFrame {
@@ -350,7 +346,6 @@ impl Default for FigureFrame {
             whole_pixels: false,
             supersample: 1,
             bones: Vec::new(),
-            rig_upright: false,
         }
     }
 }
@@ -433,8 +428,7 @@ struct TileGpu {
     orig: [i32; 4],
     depth: [f32; 4],
     face_size: [i32; 4],
-    /// FEED-RIG: the first of its bones in the slot's bone buffer (-1: none), upright (1)
-    /// or turned (0), -, -.
+    /// FEED-RIG: the first of its bones in the slot's bone buffer (-1: none), -, -, -.
     rig: [i32; 4],
 }
 
@@ -617,7 +611,7 @@ fn pack_at(
             {
                 let at = out.bones.len() as i32;
                 out.bones.extend_from_slice(&frame.bones[first as usize..(first + n) as usize]);
-                [at, i32::from(frame.rig_upright), 0, 0]
+                [at, 0, 0, 0]
             }
             _ => [-1, 0, 0, 0],
         };
@@ -1860,13 +1854,12 @@ mod tests {
             ],
             palette: vec![PaletteEntry::default()],
             bones: vec![rows(0.0), rows(1.0), rows(2.0)],
-            rig_upright: true,
             ..FigureFrame::default()
         };
         let p = pack(&frame, 4, 2, 60, 256, 0);
         assert_eq!(p.bones, vec![rows(1.0), rows(2.0)], "only the rigged tile's bones, from its first");
         let rigs: Vec<[i32; 4]> = p.tiles.iter().map(|t| t.rig).collect();
-        assert!(rigs.contains(&[-1, 0, 0, 0]) && rigs.contains(&[0, 1, 0, 0]));
+        assert!(rigs.contains(&[-1, 0, 0, 0]) && rigs.contains(&[0, 0, 0, 0]));
         // bones the frame does not hold: drawn as baked
         frame.figures[1].a.bones = Some((2, 5));
         assert!(pack(&frame, 4, 2, 60, 256, 0).tiles.iter().all(|t| t.rig[0] == -1));

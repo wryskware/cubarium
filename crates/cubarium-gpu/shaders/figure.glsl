@@ -17,7 +17,7 @@ struct Tile {
                  // palette entry; -
     vec4 depth;  // the in-tile depth: z at depth 0.5 (P's), 1 / span; the head's breath; -
     ivec4 faceSize; // projected lengths of local x/y/z axes in raster pixels; samples per axis
-    ivec4 rig;   // FEED-RIG: its first bone in `bones` (-1: none), upright (1) or turned (0)
+    ivec4 rig;   // FEED-RIG: its first bone in `bones` (-1: none); -, -, -
 };
 
 struct Fig {
@@ -48,13 +48,10 @@ vec3 boneTurn(int row, vec3 v) {
     return vec3(dot(bones[row].xyz, v), dot(bones[row + 1].xyz, v), dot(bones[row + 2].xyz, v));
 }
 
-// A point p of a cell centred at mid, posed: the whole bone transform (the cube turns with
-// its part, `[figures] rig = "turn"`), or the centre's move alone (it stays square to the
-// body, `"upright"`); unmoved for a tile drawn as baked.
-vec3 bonePose(Tile t, int row, vec3 p, vec3 mid) {
-    if (row < 0) { return p; }
-    if (t.rig.y == 0) { return boneMove(row, p); }
-    return p + boneMove(row, mid) - mid;
+// A point p of a rigged cell, posed: the whole bone transform, so the cube turns with its
+// part; unmoved for a tile drawn as baked.
+vec3 bonePose(int row, vec3 p) {
+    return row < 0 ? p : boneMove(row, p);
 }
 
 // Local face axes, also used when baking each face's open-plane crease neighbours.

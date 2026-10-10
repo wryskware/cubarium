@@ -5,8 +5,7 @@
 //! - `--arm a`: the **flipbook**, the clip re-voxelized at every sampled frame by the bake's
 //!   own rule (`scripts/blender/feed_flipbook.py`, its JSON passed with `--flipbook`), drawn
 //!   by swapping the model at 30 frames a second (`VoxelGpuSink::set_figure_cells`);
-//! - `--arm b`: the bone rig, each cube turned with its bone (`[figures] rig = "turn"`);
-//! - `--arm c`: the bone rig, each cube upright (`rig = "upright"`).
+//! - `--arm b`: the bone rig, each cube turned with its bone (`[figures] rig = "turn"`, shipped).
 //!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
@@ -195,7 +194,7 @@ fn main() -> Result<()> {
         match a.as_str() {
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--heading" => heading_deg = args.next().context("--heading DEG")?.parse()?,
-            "--arm" => arm = args.next().context("--arm a|b|c")?,
+            "--arm" => arm = args.next().context("--arm a|b")?,
             "--flipbook" => {
                 flip_path = Some(PathBuf::from(args.next().context("--flipbook PATH")?))
             }
@@ -214,8 +213,7 @@ fn main() -> Result<()> {
     let rig_draw = match arm.as_str() {
         "a" => RigDraw::Off,
         "b" => RigDraw::Turn,
-        "c" => RigDraw::Upright,
-        a => bail!("--arm a, b or c, not {a}"),
+        a => bail!("--arm a or b, not {a}"),
     };
     let flip = match (&*arm, &flip_path) {
         ("a", Some(p)) => Some(Flipbook::load(p)?),
@@ -226,7 +224,7 @@ fn main() -> Result<()> {
         return run_perf(n, px, rig_draw, founder);
     }
     let out =
-        out.context("usage: voxel_feed_capture OUT_DIR --arm a|b|c [--px N] [--heading DEG]")?;
+        out.context("usage: voxel_feed_capture OUT_DIR --arm a|b [--px N] [--heading DEG]")?;
     let frames = out.join("frames");
     std::fs::create_dir_all(&frames)?;
 

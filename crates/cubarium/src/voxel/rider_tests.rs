@@ -57,7 +57,7 @@ fn rider_spec(lib: Option<&ModelLibrary>, models: &mut FigureModels, heading: f6
     let c = view.config;
     let grid = Animals::empty(c.width, c.height, c.depth);
     let mut out = Vec::new();
-    specs(&grid, &view, fv, lib, models, &mut out);
+    specs(&grid, &view, fv, lib, &Default::default(), models, &mut out);
     let s = out.into_iter().find(|s| s.key == (rider.id, 0)).expect("the rider's figure");
     let lift = animal::rider_lift(&fv, host.id, c.voxel_m).expect("the host's lift");
     (s, host, lift)
