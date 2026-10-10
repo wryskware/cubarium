@@ -1118,6 +1118,158 @@ def seg_tail(pts, r0, r1):
             cyl(tuple(a - d), tuple(a + d), ra * 1.06, ra * 1.06, mat=c("a_dark"), seg=12)
 
 
+# --- lanternjaw larva · the rider stage: four candidates (2026-10-09) ---------------------------
+#
+# Brief: design/handoffs/lanternjaw-larva-candidates-2026-10-09.md. Candidates for Wrysk to
+# pick from, not a decided look: the larva hatches from a buried egg, clamps onto a host's
+# back and drinks from it, and drops off at about a quarter of adult body, from then on drawn
+# as the adult's smallest bins. Today a rider draws as an interim block (`glyph_spec` in
+# crates/cubarium/src/voxel/figure.rs).
+#
+# Each kind is built at its own true size (no `REF` scaling; how big to draw a rider is
+# Wrysk's call), facing +x, its belly on z = 0 = the host's back, in the lanternjaw's slots.
+# Voxel placement as in `lanternjaw()`: cell (i, j, k) centres at x = 0.125 i, y = 0.125 j,
+# z = 0.125 k + 0.0625, and the bake's rule claims every cell whose centre is inside a part
+# or within half a voxel (0.0625) of it, so each part is kept that far clear of the cells it
+# must not take. A two-wide body is centred on y = 0.0625, between rows j = 0 and 1. Parts
+# that bite into the host go below z = 0 on purpose: voxelized with `floor=None`, their
+# cells (k = -1) stand in for the host's top cells. Every other part stays above z = 0.
+#
+#   tick   flat round-backed clamp of three overlapping plates, one voxel tall; two pale
+#          hooked fangs dug in at the front; one short tail nub curling up at the back
+#          under a single cyan lure dot (the twin tails not yet forked)
+#   grub   four segments arched like an inchworm mid-step, head and tail on the host, the
+#          middle raised; a pale head capsule biting in; a cyan glow at the tail tip
+#   nymph  a miniature adult: oversized head and fangs, the striking arms folded tight,
+#          legs clamped round the host's flanks, one unforked upright tail stub with a
+#          small lure bud
+#   leech  a limbless body along the host's spine, one voxel wide and four long; a pale
+#          sucker mouth at the front; the back end lifted with two tiny lure buds, the twin
+#          tails as two dots
+LJ_LARVA_KINDS = ("tick", "grub", "nymph", "leech")
+
+
+def _capsules(pts, r0, r1, mat):
+    """A thin limb as one long ellipsoid per segment (radius r0 -> r1): closed and convex,
+    with no end caps, whose rims can pass the bake's inside test from a cell beside a bend
+    (a `tube` leg over the host's edge took a cell off its far side that way)."""
+    n = len(pts) - 1
+    for k in range(n):
+        a, b = Vector(pts[k]), Vector(pts[k + 1])
+        d = b - a
+        r = r0 + (r1 - r0) * (k + 0.5) / n
+        rot = Vector((1, 0, 0)).rotation_difference(d.normalized()).to_matrix().to_4x4()
+        ell(tuple((a + b) / 2), (d.length / 2 + 0.6 * r, r, r), mat, rot=rot)
+
+
+def lanternjaw_larva(kind):
+    if kind == "tick":
+        Y = 0.0625
+        # the dark body under the plates, showing only at their edges
+        ell((0.0, Y, 0.045), (0.165, 0.1, 0.03), c("a_dark"))
+        # three overlapping plates, front to back, each over one cell column, the rear ones
+        # lapping onto the one in front; the front and rear plates kept 0.0625 clear of the
+        # columns beyond them
+        for x, rx_, tilt in ((0.12, 0.058, -6), (0.0, 0.074, -8), (-0.12, 0.058, -10)):
+            ell((x, Y, 0.06 + (0.004 if x < 0 else 0)), (rx_, 0.108, 0.034), c("a_main"), rot=ry(tilt))
+        # two pale hooked fangs, one over each cell row, running down and forward from under
+        # the front plate and dug into the host, tips hooked back: they cross from the front
+        # plate's cell to the host cell in front of and below it on the diagonal between the
+        # two, so they take that host cell and not the ones beside it
+        for y in (0.0, 0.125):
+            tube([(0.14, y, 0.05), (0.1875, y, 0.0), (0.24, y, -0.055)], 0.02, 0.016, c("a_head"), seg=8)
+            cyl((0.24, y, -0.055), (0.215, y, -0.09), 0.016, 0.004, mat=c("a_head"), seg=8)
+        # the one tail nub, curling up off the rear plate under the single lure dot
+        tube(catmull([(-0.155, 0.0, 0.07), (-0.165, 0.0, 0.12), (-0.135, 0.0, 0.155)], 6),
+             0.026, 0.02, c("a_main"), seg=8)
+        ell((-0.125, 0.0, 0.1875), (0.04, 0.04, 0.04), c("a_lure"))
+        return
+    if kind == "grub":
+        Y = 0.0625
+        # four segments along an inchworm's arch: the tail segment standing on the host, two
+        # raised, the front one bending down to the head; a dark joint ring between each pair
+        segs = [((-0.25, Y, 0.125), (0.055, 0.1, 0.075), 0),
+                ((-0.125, Y, 0.19), (0.07, 0.1, 0.052), 0),
+                ((0.0, Y, 0.19), (0.07, 0.1, 0.052), 0),
+                ((0.125, Y, 0.175), (0.058, 0.1, 0.06), 0)]
+        for centre, r, tilt in segs:
+            ell(centre, r, c("a_main"), rot=ry(tilt))
+        for x, z, tilt in ((-0.2, 0.175, -40), (-0.0625, 0.195, 0), (0.07, 0.19, 30)):
+            cyl((x - 0.005 * math.cos(math.radians(tilt)), Y, z),
+                (x + 0.005 * math.cos(math.radians(tilt)), Y, z + 0.005 * math.sin(math.radians(tilt))),
+                0.064, 0.064, mat=c("a_dark"), seg=12)
+        # the pale head capsule under the front segment, its mandibles biting into the host
+        ell((0.14, Y, 0.065), (0.055, 0.092, 0.05), c("a_head"))
+        for y in (0.0, 0.125):
+            tube([(0.16, y, 0.03), (0.165, y, -0.02), (0.15, y, -0.05)], 0.016, 0.006, c("a_head"), seg=6)
+        # the cyan glow at the tail tip, across both rows
+        ell((-0.25, Y, 0.0625), (0.034, 0.09, 0.03), c("a_lure"))
+        return
+    if kind == "nymph":
+        # abdomen and thorax, dark underneath, a violet back plate over each
+        ell((-0.105, 0.0, 0.045), (0.06, 0.048, 0.03), c("a_dark"))
+        ell((-0.1, 0.0, 0.075), (0.06, 0.055, 0.035), c("a_main"), rot=ry(-10))
+        ell((0.0, 0.0, 0.07), (0.055, 0.05, 0.045), c("a_main"))
+        # the oversized head: a helmet three cells wide, two large magenta eyes on its upper
+        # sides, and the pale fangs a column in front of the face
+        ell((0.125, 0.0, 0.11), (0.06, 0.13, 0.08), c("a_main"))
+        for sy in (-1, 1):
+            ell((0.13, sy * 0.125, 0.1875), (0.03, 0.03, 0.035), c("a_eye"))
+        tube(catmull([(0.19, 0.0, 0.2), (0.245, 0.0, 0.13), (0.255, 0.0, 0.05), (0.235, 0.0, 0.01)], 8),
+             0.032, 0.012, c("a_head"), seg=10)
+        for sy in (-1, 1):
+            # a striking arm folded tight: the femur up the head's side, the tibia folded
+            # down in front of it, ending in a pale blade
+            tube([(0.07, sy * 0.06, 0.04), (0.15, sy * 0.13, 0.12), (0.21, sy * 0.125, 0.07)],
+                 0.024, 0.02, c("a_limb"), seg=8)
+            ell((0.235, sy * 0.125, 0.05), (0.025, 0.018, 0.04), c("a_head"), rot=ry(-15))
+            # three legs, clamped round the host's flanks: out over its back, then over its
+            # edge (on the diagonal between the cells, so they take neither neighbour) and down
+            # its side, the dark claw tips hooked in below its top
+            for x in (0.0, -0.0625, -0.125):
+                _capsules([(x, sy * 0.04, 0.05), (x, sy * 0.14, 0.04), (x, sy * 0.1875, 0.0),
+                           (x, sy * 0.235, -0.045)], 0.018, 0.012, c("a_limb"))
+                cyl((x, sy * 0.235, -0.045), (x, sy * 0.225, -0.1), 0.014, 0.003, mat=c("a_foot"), seg=6)
+        # the one unforked tail: an upright stub off the abdomen's rear, a small lure bud on top
+        seg_tail([(-0.15, 0.0, 0.08), (-0.14, 0.0, 0.17), (-0.13, 0.0, 0.255)], 0.03, 0.025)
+        ell((-0.125, 0.0, 0.3), (0.035, 0.035, 0.035), c("a_lure"))
+        return
+    if kind == "leech":
+        # one voxel wide along the spine: the body lying flat for two cells behind the
+        # mouth, then lifting off the host at the back
+        # (the lift crosses on the diagonal between the cells, thin, so the cell under the
+        # lifted end stays empty)
+        tube([(0.07, 0.0, 0.06), (0.0, 0.0, 0.06), (-0.125, 0.0, 0.062)], 0.044, 0.04, c("a_main"), seg=12)
+        cyl((-0.125, 0.0, 0.062), (-0.25, 0.0, 0.1875), 0.024, 0.022, mat=c("a_main"), seg=10)
+        ell((-0.25, 0.0, 0.1875), (0.04, 0.04, 0.04), c("a_main"))
+        # the pale sucker mouth at the front: a disc with a dark ring of a mouth
+        ell((0.125, 0.0, 0.06), (0.05, 0.05, 0.048), c("a_head"))
+        cyl((0.165, 0.0, 0.06), (0.177, 0.0, 0.06), 0.022, 0.022, mat=c("a_dark"), seg=10)
+        # the twin tails as two tiny buds forking off the lifted end, one each side
+        for sy in (-1, 1):
+            cyl((-0.25, 0.0, 0.19), (-0.25, sy * 0.1, 0.19), 0.012, 0.01, mat=c("a_mark"), seg=6)
+            ell((-0.25, sy * 0.125, 0.1875), (0.03, 0.03, 0.03), c("a_lure"))
+        return
+    raise ValueError(f"unknown lanternjaw larva kind {kind!r}")
+
+
+COATS["lanternjaw-larva"] = COATS["lanternjaw"]
+
+
+def build_larva(kind, x, y):
+    """Build the `kind` larva at its true size, its origin moved to (x, y) on z = 0 (as
+    `build` moves an animal's anchor). Returns the new objects."""
+    use("lanternjaw-larva")
+    start = len(L.ORG)
+    lanternjaw_larva(kind)
+    objs = L.ORG[start:]
+    m = Matrix.Translation((x, y, 0))
+    for ob in objs:
+        ob.data.transform(m)
+        ob.data.update()
+    return objs
+
+
 # --- loftstrider · radial canopy browser (2.2 x 2.4 x 3.4 m) ---------------------------------
 #
 # Pick (Wrysk 2026-10-01): art/gen/artbook/loftstrider.png, a front view. Radially symmetric about a vertical axis, in sixes (Wrysk: the image does not keep
