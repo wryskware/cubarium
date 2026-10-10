@@ -1029,7 +1029,12 @@ control and the reward accounting; display targets after seeing results.
      adult takes about 23 h. SEEDPORTER-FIX (Codex) running: fruit-scale K, the freeze bugs, and census
      session deltas.
    - P2/P3 done (roles doc §3): grazer intake stops growing between x4 and x16 (O stays about 1-2.4 %), and x64
-     takes no bites. So mass alone cannot reach 10-30 % offtake. GRAZER-INTAKE (Opus) diagnosing.
+     takes no bites. So mass alone cannot reach 10-30 % offtake.
+   - GRAZER-INTAKE (Opus) found the root cause, a units bug: the taste reference is `emit_reference x mass_scale`
+     (body.rs about L2548, rule from 31e20c81), so the feed gate (cue > 0.02) rises with mass while food
+     stocks don't. The gate is 0.031 at x1 and 1.96 at x64, against a max stand of 1.12. Reach is not the cap:
+     about 74 % of leaf growth is within the grazer band. TASTE-UNITS (Codex) running: the reference in food
+     units, with the default world unchanged. Re-derive the mass genes' boxes after it lands.
    - 2026-10-09 21:15 the session was OOM-killed (a 24 GB target copy in tmpfs /tmp); the library and probes
      resumed as user services.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
