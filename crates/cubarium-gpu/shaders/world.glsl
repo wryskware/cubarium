@@ -168,6 +168,11 @@ layout(set = 0, binding = 11) uniform sampler2D backdropTex;
 layout(set = 0, binding = 12) uniform sampler2D depthTex;
 // Lit tier: the figures' sun map (depth: a figure's height over H), `figSun` above.
 layout(set = 0, binding = 13) uniform sampler2D figSunTex;
+// Lit tier: the emitter table (GLOW-EASE, `cubarium_gpu::voxel::emit_table`). Each emitting
+// cell's colour this frame and its on share, open-addressed by texture index plus one:
+// entries (key, rg, b on as half floats, -); this frame's `view.w` of them from entry
+// `view.z`, none when `view.w` is 0.
+layout(std430, set = 0, binding = 14) readonly buffer EmitCells { uvec4 emitCells[]; };
 
 // The plant part classes, as `crate::voxel`'s PART_* constants number them.
 const int TRUNK = 1;
@@ -367,6 +372,56 @@ vec3 styleEmit(int style) {
     return texelFetch(styleTex, ivec2(3, style), 0).rgb * u.emitK[style >> 2][style & 3];
 }
 bool emitsWhole(float pigmentAlpha) { return fract(pigmentAlpha) > 0.125; }
+
+// GLOW-EASE: voxel (x, y, z)'s entry in the emitter table, or -1. `view.w` is the table's
+// size (a power of two, 0: none) with `EMIT_VINES` set when some entry carries a vine
+// cell's old tile.
+const uint EMIT_VINES = 1u << 20;
+int cellEntry(int x, int y, int z) {
+    uint cap = uint(u.view.w) & (EMIT_VINES - 1u);
+    if (cap == 0u) { return -1; }
+    uint key = uint((z * H + y) * W + wrapX(x)) + 1u;
+    uint h = (key * 0x9E3779B1u) >> (32 - min(findLSB(cap), 31)) & (cap - 1u);
+    for (int i = 0; i < 32; ++i) {
+        uvec4 c = emitCells[u.view.z + int(h)];
+        if (c.x == key) { return u.view.z + int(h); }
+        if (c.x == 0u) { return -1; }
+        h = (h + 1u) & (cap - 1u);
+    }
+    return -1;
+}
+
+// GLOW-EASE: the colour and on share the host gave voxel (x, y, z)'s emitting texels this
+// frame (`cubarium_gpu::voxel::EmitCell`), if it gave one; `e` and `on` are left alone if
+// not. The texels then draw `e + (1 - on) x` their lit pigment, so an emitter fading in or
+// out never steps, and one at nothing is its pigment.
+bool cellEmit(int x, int y, int z, inout vec3 e, inout float on) {
+    if (!LIT) { return false; }
+    int i = cellEntry(x, y, z);
+    if (i < 0) { return false; }
+    uvec4 c = emitCells[i];
+    if ((c.w >> 31) != 0u) { return false; }
+    vec2 rg = unpackHalf2x16(c.y);
+    vec2 bo = unpackHalf2x16(c.z);
+    e = vec3(rg, bo.x);
+    on = clamp(bo.y, 0.0, 1.0);
+    return true;
+}
+
+// GLOW-EASE round 2: a vine cell part way through a change of tile (density, accent,
+// shape): `v` with its old tile's bytes, and the share of the old tile still shown (0: no
+// change under way, `v` left alone). Both tiers.
+float cellVineFrom(int x, int y, int z, inout uvec4 v) {
+    if ((uint(u.view.w) & EMIT_VINES) == 0u) { return 0.0; }
+    int i = cellEntry(x, y, z);
+    if (i < 0) { return 0.0; }
+    uint w = emitCells[i].w;
+    uint s = (w >> 16) & 255u;
+    if (s == 0u) { return 0.0; }
+    v.b = w & 255u;
+    v.a = (w >> 8) & 255u;
+    return float(s) / 255.0;
+}
 
 // The walk's `trans` once it has ended on an emitter: the light the emitter sends to the
 // camera through what is in front of it (`trans` times its colour less the haze), negated

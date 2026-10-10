@@ -80,10 +80,10 @@ impl Candle {
 }
 
 /// The three sines' periods, in `candle_period_s` (before each curve's own ±15 %).
-const PACES: [f64; 3] = [1.0, 0.71, 1.43];
+pub(crate) const PACES: [f64; 3] = [1.0, 0.71, 1.43];
 
 /// splitmix64's finaliser.
-fn mix(mut z: u64) -> u64 {
+pub(crate) fn mix(mut z: u64) -> u64 {
     z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
