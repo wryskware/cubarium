@@ -1,4 +1,4 @@
-//! RIG-STATES (`design/handoffs/rig-states-2026-10-10.md`): a rigged frondgrazer's sleep,
+//! RIG-STATES (`design/handoffs/rig-states-2026-10-10.md`): rigged fauna's sleep,
 //! idle and hunker play as rig clips with their states' eased weights, the class path's
 //! moves standing down, and the clips end where the class path's poses end. Nothing here
 //! pins a cell count or a tuned number: the targets are the class path's own rules
@@ -7,15 +7,19 @@
 use std::path::Path;
 
 use cubarium_voxel::{Command as WorldCommand, Config as WorldConfig, Material, World};
-use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, StartingStores};
+use cubarium_voxel_fauna::{Command, Fauna, FaunaConfig, MobilityMode, StartingStores};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::super::rig::ClipAt;
 use super::*;
 
 fn library() -> ModelLibrary {
+    library_at(0.125)
+}
+
+fn library_at(voxel_m: f64) -> ModelLibrary {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
-    ModelLibrary::load(&root, 0.125).expect("the baked library")
+    ModelLibrary::load(&root, voxel_m).expect("the baked library")
 }
 
 /// A grown frondgrazer standing on a soil plain.
@@ -75,6 +79,63 @@ fn a_rigged_frondgrazer_plays_sleep_idle_and_hunker_as_clips() {
         assert!(on.weight > 0.0 || on.rate > 0.0, "{name}: its weight eases in");
         let pose = s.pose.expect("a pose");
         assert_eq!(pose.rig, RigStates { asleep: true, idle: true, hunker: true }, "{name}");
+    }
+}
+
+/// Every port's sleep uses the state weight and leaves the class breath in place.
+#[test]
+fn the_sleep_ports_play_their_track_with_the_states_eased_weight() {
+    let lib = library();
+    let (_, _, standing) = grown();
+    for founder in [
+        Founder::Chorister,
+        Founder::Lanternjaw,
+        Founder::Seedporter,
+        Founder::Bellwing,
+    ] {
+        let a = Animal {
+            founder: Some(founder),
+            state: State::Asleep,
+            ..standing
+        };
+        let rig = lib
+            .rig_in_mode(founder, MobilityMode::Ground)
+            .expect("ground rig")
+            .0;
+        let clip = rig.clip("asleep").expect("sleep track");
+        let mut models = FigureModels::default();
+        let s = figure(&lib, &mut models, &a, 100, 101);
+        assert!(
+            s.clips
+                .iter()
+                .any(|c| usize::from(c.clip) == clip && (c.weight > 0.0 || c.rate > 0.0))
+        );
+        let p = s.pose.expect("the sleep pose");
+        assert!(p.rig.asleep);
+        assert!(!p.rig.idle && !p.rig.hunker, "only sleep ported");
+        assert_eq!(p.at(1.0, true)[0], 0.0, "the class settle stands down");
+        assert_eq!(
+            p.at(1.0, true)[1],
+            p.at(1.0, false)[1],
+            "the class breath stays"
+        );
+    }
+}
+
+#[test]
+fn a_bellwing_settles_on_its_rig_only_on_the_ground() {
+    let lib = library();
+    let (_, _, standing) = grown();
+    for mode in [MobilityMode::Ground, MobilityMode::Perched, MobilityMode::Fly] {
+        let mut a = Animal { founder: Some(Founder::Bellwing), state: State::Asleep, ..standing };
+        a.mobility.mode = mode;
+        let rig = lib.rig_in_mode(Founder::Bellwing, mode).expect("the shared bellwing rig").0;
+        let clip = rig.clip("asleep").expect("sleep track");
+        let mut models = FigureModels::default();
+        let s = figure(&lib, &mut models, &a, 100, 101);
+        let ground = mode == MobilityMode::Ground;
+        assert_eq!(s.pose.expect("class sleep pose").rig.asleep, ground);
+        assert_eq!(s.clips.iter().any(|c| usize::from(c.clip) == clip), ground);
     }
 }
 
@@ -163,25 +224,82 @@ fn places(posed: &[[i32; 3]], what: &str) -> FxHashSet<[i32; 3]> {
 
 /// In every size bin, the rig's asleep and hunker tracks at full weight show what the
 /// class path's poses show: asleep, the torso row and all over it lowered by its settle,
-/// the legs under it gone; hunkered, the same where the baked hunker holds a cell (the
+/// its cut leg rows gone and unclassified rows kept; hunkered, the same where the baked hunker holds a cell (the
 /// neck, scoop and stalks inside the shield or under the ground line).
 #[test]
 fn the_rigs_asleep_and_hunker_end_on_the_class_paths_poses() {
-    let lib = library();
-    let model = lib.animal(Founder::Browser).expect("the standing model");
-    let hunker = lib.specimen(super::super::model::hunker_model(Founder::Browser).unwrap()).expect("the baked hunker");
-    let rig = lib.rig(Founder::Browser).expect("the rig");
-    let (asleep, down) = (rig.clip("asleep").expect("asleep"), rig.clip("hunker").expect("hunker"));
-    for (bin, b) in model.bins.iter().enumerate() {
-        let local: Vec<sleep::Local> =
-            b.cells.iter().map(|m| sleep::Local { a: m.offset[0], c: m.offset[2], row: m.offset[1], bump: true }).collect();
-        let k = sleep::classify(&local);
-        let lowered = |m: &ModelCell| [m.offset[0], m.offset[1] - k.drop, m.offset[2]];
-        let target: FxHashSet<[i32; 3]> = hunker.bins[bin].cells.iter().map(|m| m.offset).collect();
-        let sleeping: FxHashSet<[i32; 3]> = b.cells.iter().filter(|m| m.offset[1] >= k.torso).map(lowered).collect();
-        let hunkered: FxHashSet<[i32; 3]> = sleeping.iter().copied().filter(|p| target.contains(p)).collect();
-        let shows = |clip: usize, what: &str| outer_faces(&places(&posed(&rig, bin, &b.cells, clip), what));
-        assert_eq!(shows(asleep, "asleep"), outer_faces(&sleeping), "bin {bin} asleep");
-        assert_eq!(shows(down, "hunker"), outer_faces(&hunkered), "bin {bin} hunkered");
+    for voxel_m in [0.125, 0.25] {
+        let lib = library_at(voxel_m);
+        for founder in [
+            Founder::Browser,
+            Founder::Chorister,
+            Founder::Lanternjaw,
+            Founder::Seedporter,
+            Founder::Bellwing,
+        ] {
+            let (rig, model) = lib
+                .rig_in_mode(founder, MobilityMode::Ground)
+                .expect("ground rig and model");
+            let asleep = rig.clip("asleep").expect("asleep");
+            for (bin, b) in model.bins.iter().enumerate() {
+                let local: Vec<sleep::Local> = b
+                    .cells
+                    .iter()
+                    .map(|m| sleep::Local {
+                        a: m.offset[0],
+                        c: m.offset[2],
+                        row: m.offset[1],
+                        bump: true,
+                    })
+                    .collect();
+                let k = sleep::classify(&local);
+                // The class path keeps unclassified rows (e.g. paws further under
+                // the torso than its maximum drop), cuts its leg classes, lowers torso.
+                let sleeping: FxHashSet<[i32; 3]> = b
+                    .cells
+                    .iter()
+                    .zip(&k.class)
+                    .filter_map(|(m, c)| match c {
+                        None => Some(m.offset),
+                        Some(sleep::Class::Torso | sleep::Class::Breathing) => {
+                            Some([m.offset[0], m.offset[1] - k.drop, m.offset[2]])
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                let shows = |clip: usize, what: &str| {
+                    outer_faces(&places(&posed(&rig, bin, &b.cells, clip), what))
+                };
+                assert_eq!(
+                    shows(asleep, "asleep"),
+                    outer_faces(&sleeping),
+                    "{voxel_m} {} bin {bin} asleep",
+                    founder.name()
+                );
+                println!(
+                    "{voxel_m} {} bin {bin}: settle {}, asleep end faces equal: {} faces",
+                    founder.name(),
+                    k.drop,
+                    outer_faces(&sleeping).len()
+                );
+                if let Some(down) = rig.clip("hunker") {
+                    let hunker = lib
+                        .specimen(super::super::model::hunker_model(founder).unwrap())
+                        .expect("the baked hunker");
+                    let target: FxHashSet<[i32; 3]> =
+                        hunker.bins[bin].cells.iter().map(|m| m.offset).collect();
+                    let hunkered: FxHashSet<[i32; 3]> = sleeping
+                        .iter()
+                        .copied()
+                        .filter(|p| target.contains(p))
+                        .collect();
+                    assert_eq!(
+                        shows(down, "hunker"),
+                        outer_faces(&hunkered),
+                        "{voxel_m} bin {bin} hunkered"
+                    );
+                }
+            }
+        }
     }
 }

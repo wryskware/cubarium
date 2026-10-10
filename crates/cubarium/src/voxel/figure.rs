@@ -35,7 +35,7 @@ use cubarium_gpu::figures::{
 };
 use cubarium_gpu::voxel::{Breath, HeadMove, PoseEntry, pose_with};
 use cubarium_voxel::VoxelView;
-use cubarium_voxel_fauna::{Animal, DT, FaunaView, Founder, State};
+use cubarium_voxel_fauna::{Animal, DT, FaunaView, Founder, MobilityMode, State};
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
@@ -1267,7 +1267,12 @@ pub fn specs(
             let bin = model.bins.iter().position(|b| std::ptr::eq(b.cells.as_ptr(), cells.as_ptr()))?;
             (bin < r.bins.len()).then(|| (r.clone(), bin))
         });
-        let rig_states = rigged.as_ref().map_or_else(RigStates::default, |(r, _)| RigStates::of(r));
+        let mut rig_states = rigged.as_ref().map_or_else(RigStates::default, |(r, _)| RigStates::of(r));
+        // The bellwing's cut cells sink below a ground plane. A perch has no such
+        // plane around it: keep its class pose there, and while flying (RIG-STATES).
+        if founder == Founder::Bellwing && a.mobility.mode != MobilityMode::Ground {
+            rig_states.asleep = false;
+        }
         // The class path's hunker classes its cells toward the baked hunker; a rig drawn
         // with a hunker clip plays it instead (RIG-STATES), on the standing classes.
         let toward = hunkering
@@ -1359,7 +1364,7 @@ pub fn specs(
                 .filter_map(|(c, clip)| {
                     let (weight, rate) = match clip.state.as_str() {
                         "cropping" => animals.feed_weight(a),
-                        "asleep" => asleep,
+                        "asleep" => asleep.filter(|_| rig_states.asleep),
                         "idle" => idling,
                         "hunker" => hunkering,
                         _ => None,
