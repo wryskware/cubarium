@@ -291,6 +291,10 @@ def require_columns(rows, columns, source, allow_empty=False):
 def lifecycle(name, records, opening, closing, begin, end, midpoint):
     births = [row for row in records if born(row) and within(number(row, 'born_minute'), begin, end)]
     surviving = [row for row in births if number(row, 'died_minute') is None or number(row, 'died_minute') > end]
+    adult_recruits = [row for row in births if within(number(row, 'matured_minute'), begin, end)
+                      and number(row, 'matured_minute') >= number(row, 'born_minute')
+                      and (number(row, 'died_minute') is None
+                           or number(row, 'matured_minute') <= number(row, 'died_minute'))]
     # Counter deltas include events in the final interval; life timestamps select
     # exact [from,to) events and supply the indispensable surviving-recruit check.
     def delta(prefix):
@@ -303,7 +307,7 @@ def lifecycle(name, records, opening, closing, begin, end, midpoint):
         live_births = sum(row.get('origin') == 'born' for row in births) if any(row.get('origin') == 'hatched' for row in records) else (max(0, len(births) - hatchings) if hatchings is not None else None)
     return dict(live_births=live_births, hatchings=hatchings, eggs_laid=delta('eggs_laid'),
                 maturation=sum(within(number(row, 'matured_minute'), begin, end) for row in records),
-                recruits=len(births), surviving_recruits=len(surviving),
+                recruits=len(births), surviving_recruits=len(surviving), adult_recruits=len(adult_recruits),
                 late_births=sum(within(number(row, 'born_minute'), midpoint, end) for row in births),
                 surviving_late_recruits=sum(within(number(row, 'born_minute'), midpoint, end) for row in surviving))
 
@@ -482,7 +486,7 @@ def score_world(root, arm, seed, cfg, start=None, stop=None, state=None, require
             eligible_values = [number(r, 'breeding_eligible_n') for r in vr]
             eligible = any(value > 0 for value in eligible_values if value is not None) if all(value is not None for value in eligible_values) else None
             slow = name in spec['slow']
-            recruits_key = 'surviving_recruits' if v3 else 'surviving_late_recruits'
+            recruits_key = 'adult_recruits' if v3 else 'surviving_late_recruits'
             jp = 0.0 if v3 and slow else reproductive_penalty(life[recruits_key], eligible, cfg['reproduction'])
             per_j[name] = dict(**life, eligible=eligible, penalty=jp, weight=0 if slow else 1,
                                flag=spec.get('slow_reasons', {}).get(name, 'lifecycle untested in this profile') if slow else '')
@@ -753,6 +757,9 @@ def check_required_data(spec, rows, vitals, lives, names, begin, end, targets):
                     if not keys:
                         raise ValueError(f'missing lifecycle counters for {name}')
                     require_columns(selected, keys, 'census lifecycle')
+            elif source == 'life' and key == 'adult_transitions':
+                if not lives or any('matured_minute' not in row for row in lives):
+                    raise ValueError('missing life adult-transition records: matured_minute')
             elif source == 'life' and key == 'recruits':
                 # A header-only life file may have no recruits; the caller must
                 # still have read a real file, rather than synthesize births.
@@ -1012,7 +1019,7 @@ def health_tables(worlds):
     for name in names:
         rows = [world['health'][name] for world in worlds if name in world['health']]
         events = {key: spread([row['events'].get(key) for row in rows])
-                  for key in ('live_births', 'hatchings', 'eggs_laid', 'maturation', 'surviving_recruits')}
+                  for key in ('live_births', 'hatchings', 'eggs_laid', 'maturation', 'surviving_recruits', 'adult_recruits')}
         deaths = {cause: spread([row['deaths'].get(cause, 0) for row in rows])
                   for cause in sorted({cause for row in rows for cause in row['deaths']})}
         notes = sorted({row['flag'] for row in rows if row['flag']} | {row['stage_note'] for row in rows})

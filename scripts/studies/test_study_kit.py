@@ -659,10 +659,24 @@ class WideScoreTests(unittest.TestCase):
         year = self.world(year=True)['components']['J']['raw']
         for name in self.document['profiles']['wide-screen-2h']['slow']:
             self.assertGreater(year[name]['penalty'], 0)
-        # A surviving recruit early in the year counts, even before the late half.
+        # An early recruit that reaches adulthood counts, even before the late half.
         self.mutate('vitals/life.csv', lambda rows: rows + [dict(rows[0], id=100,
-            lineage='chorister', origin='born', born_minute=1)])
+            lineage='chorister', origin='born', born_minute=1, matured_minute=2)])
         self.assertEqual(self.world(year=True)['components']['J']['raw']['chorister']['penalty'], 0)
+
+    def test_only_recruits_that_reach_adulthood_clear_J(self):
+        self.fixture(load=0)
+        self.mutate('vitals/life.csv', lambda rows: rows + [dict(rows[0], id=100,
+            lineage='chorister', origin='hatched', born_minute=1)])
+        life = self.world(year=True)['components']['J']['raw']['chorister']
+        self.assertEqual(life['adult_recruits'], 0)
+        self.assertGreater(life['penalty'], 0)
+        # Reaching adulthood counts even if that adult dies before the endpoint.
+        self.mutate('vitals/life.csv', lambda rows: [dict(r, matured_minute=2, died_minute=4)
+            if r['id'] == '100' else r for r in rows])
+        life = self.world(year=True)['components']['J']['raw']['chorister']
+        self.assertEqual(life['adult_recruits'], 1)
+        self.assertEqual(life['penalty'], 0)
 
     def test_inactive_component_needs_nonempty_named_reason(self):
         spec = self.document['profiles']['wide-screen-2h']

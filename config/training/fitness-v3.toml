@@ -108,7 +108,7 @@ D = "Landscape is judged at one year from fresh founding; the saved-world screen
 
 [profiles.wide-screen-2h.required_data]
 L = ['census:stocks', 'vitals:n_adult']
-J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'life:adult_transitions', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']
 W = ['census:forest_floor_faces']
@@ -142,7 +142,7 @@ start_kind = "fresh founding"
 
 [profiles.wide-year.required_data]
 L = ['census:stocks', 'vitals:n_adult']
-J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'life:adult_transitions', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']
 W = ['census:forest_floor_faces']
