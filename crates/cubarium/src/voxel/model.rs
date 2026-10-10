@@ -314,8 +314,8 @@ pub struct ModelLibrary {
     /// manifest name: one adult bin each, drawn only where a caller places them
     /// (`examples/voxel_specimens.rs`). Not founders, and not in the simulation.
     specimens: std::collections::BTreeMap<String, AnimalModel>,
-    /// The founders' rigs (FEED-RIG, [`super::rig`]), by founder name: bones and a sampled
-    /// clip baked beside the founder's model, its bins the model's.
+    /// The rigs (FEED-RIG, [`super::rig`]), by founder or pose model name: bones and sampled
+    /// clips baked beside the model, its bins the model's.
     rigs: std::collections::BTreeMap<String, std::sync::Arc<super::rig::AnimalRig>>,
     /// The voxel size the models were baked at, when loaded from disk. A world of another
     /// size draws the glyphs instead: a model is so many cells, not so many metres.
@@ -370,11 +370,36 @@ impl ModelLibrary {
 
     /// A founder's rig, when the bake gave it one (FEED-RIG).
     pub fn rig(&self, founder: Founder) -> Option<&std::sync::Arc<super::rig::AnimalRig>> {
-        self.rigs.get(founder.name())
+        self.rig_named(founder.name())
+    }
+
+    /// A model's rig by the model's name: a founder's, or a pose model's (FEED-ROLLOUT:
+    /// the seedporter's `seedporter-stand`), its bins that model's.
+    pub fn rig_named(&self, name: &str) -> Option<&std::sync::Arc<super::rig::AnimalRig>> {
+        self.rigs.get(name).or_else(|| self.rigs.iter().find(|(k, _)| same_name(k, name)).map(|(_, r)| r))
+    }
+
+    /// **The rig of the model a founder wears in a mode**, with that model
+    /// ([`Self::animal_in_mode`]): the mode's pose model's own rig where the mode has a pose
+    /// model (none if that model has no rig: another model's bins are not its), else the
+    /// founder's.
+    pub fn rig_in_mode(
+        &self,
+        founder: Founder,
+        mode: MobilityMode,
+    ) -> Option<(&std::sync::Arc<super::rig::AnimalRig>, &AnimalModel)> {
+        match mode_model(founder, mode).and_then(|name| Some((name, self.specimen(name)?))) {
+            Some((name, model)) => Some((self.rig_named(name)?, model)),
+            None => Some((self.rig(founder)?, self.animal(founder)?)),
+        }
     }
 
     pub fn insert_rig(&mut self, founder: Founder, rig: super::rig::AnimalRig) {
-        self.rigs.insert(founder.name().to_string(), std::sync::Arc::new(rig));
+        self.insert_rig_named(founder.name(), rig);
+    }
+
+    pub fn insert_rig_named(&mut self, name: &str, rig: super::rig::AnimalRig) {
+        self.rigs.insert(name.to_string(), std::sync::Arc::new(rig));
     }
 
     /// Every specimen's name, in name order.
@@ -457,18 +482,23 @@ impl ModelLibrary {
         }
         // after the specimens: a founder drawn with its specimen (the Veilhound's
         // `chorister`) has its rig checked against that model's bins
+        // A rig is a founder's or a pose model's (a specimen: the seedporter's
+        // `seedporter-stand`), checked against that model's bins.
         for (name, file) in &manifest.rigs {
-            let Some(f) = Founder::ALL.into_iter().find(|f| f.name() == name) else {
-                bail!("{}: no founder is called {name}", manifest_path.display());
+            let model = match Founder::ALL.into_iter().find(|f| f.name() == name) {
+                Some(f) => lib.animal(f),
+                None => lib.specimen(name),
+            };
+            let Some(bins) = model.map(|m| m.bins.len()) else {
+                bail!("{}: rig {name} names no founder or specimen", manifest_path.display());
             };
             let bytes = std::fs::read(dir.join(file))
                 .with_context(|| format!("reading {}", dir.join(file).display()))?;
             let rig = super::rig::AnimalRig::parse(&bytes).with_context(|| format!("parsing {file}"))?;
-            let bins = lib.animal(f).map_or(0, |m| m.bins.len());
             if rig.bins.len() != bins {
                 bail!("{file}: {} bins for a model of {bins}", rig.bins.len());
             }
-            lib.insert_rig(f, rig);
+            lib.insert_rig_named(name, rig);
         }
         Ok(lib)
     }
@@ -499,7 +529,7 @@ struct Manifest {
     /// The unsimulated animals, name → file.
     #[serde(default)]
     specimens: std::collections::BTreeMap<String, String>,
-    /// The founders' rigs, name → file (FEED-RIG).
+    /// The rigs, founder or pose model name → file (FEED-RIG, FEED-ROLLOUT).
     #[serde(default)]
     rigs: std::collections::BTreeMap<String, String>,
 }
@@ -1327,6 +1357,44 @@ mod tests {
         assert_eq!(own.select(1.0).unwrap()[0].material, named_index("a_mark"), "its own first");
         assert!(same_name("ripple_snail", "ripple-snail") && !same_name("ripple", "ripple-snail"));
         assert!(super::super::colours::specimen_coat("ripple_snail").is_some(), "the coat too");
+    }
+
+    /// FEED-ROLLOUT: a founder in a mode with a pose model wears that model's own rig, and
+    /// none when the pose model has none (its bins are not the founder's); a mode without a
+    /// pose model wears the founder's.
+    #[test]
+    fn a_pose_model_wears_its_own_rig_and_never_the_founders() {
+        let parse_animal = |bytes: Vec<u8>| match parse(&bytes).unwrap() {
+            Parsed::Animal(m) => m,
+            Parsed::Plant(_) => unreachable!("an animal file"),
+        };
+        let rig = |state: &str| super::super::rig::AnimalRig {
+            bones: Vec::new(),
+            clips: vec![super::super::rig::Clip {
+                state: state.into(),
+                mode: super::super::rig::ClipMode::Loop,
+                fps: 1.0,
+                frames: 1,
+            }],
+            bins: Vec::new(),
+        };
+        let f = Founder::Seedporter;
+        let (stand, ground) = (
+            mode_model(f, MobilityMode::Perched).unwrap(),
+            mode_model(f, MobilityMode::Ground).unwrap(),
+        );
+        let mut lib = ModelLibrary::default();
+        lib.insert_specimen(f.name(), parse_animal(one_bin_animal("a_main", 1.0)));
+        lib.insert_specimen(stand, parse_animal(one_bin_animal("a_mark", 1.0)));
+        lib.insert_specimen(ground, parse_animal(one_bin_animal("a_pale", 1.0)));
+        lib.insert_rig(f, rig("founder"));
+        lib.insert_rig_named(stand, rig("stand"));
+        let (r, m) = lib.rig_in_mode(f, MobilityMode::Perched).expect("the stand's rig");
+        assert_eq!(r.clips[0].state, "stand");
+        assert!(std::ptr::eq(m, lib.specimen(stand).unwrap()), "with the model it rigs");
+        assert!(lib.rig_in_mode(f, MobilityMode::Ground).is_none(), "the ground pose has no rig");
+        let (r, _) = lib.rig_in_mode(Founder::Seedporter, MobilityMode::Fly).expect("no pose model");
+        assert_eq!(r.clips[0].state, "founder");
     }
 
     /// The state table, as the bake writes it.

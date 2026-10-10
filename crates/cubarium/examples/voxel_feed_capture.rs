@@ -14,9 +14,15 @@
 //! adult and a newborn calf side by side, on a longer script — a feeding bout, a short one,
 //! then asleep (`State::Asleep`, the rest clip) and awake again.
 //!
+//! `--founder seedporter [--pose stand|ground]`: an adult and a newborn in the pose model
+//! it crops in — perched (`seedporter-stand`, each on a one-voxel rock post so its tail
+//! hangs below the perch as in a crown) or on the ground (`seedporter-ground`, as at a
+//! vine face) — on the frondgrazer's script.
+//!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
-//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider]
+//!     [--px N] [--heading DEG] [--flipbook PATH] [--founder frondgrazer|chorister|loftstrider|seedporter]
+//!     [--pose stand|ground]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -44,12 +50,15 @@ use cubarium::voxel::rig;
 use cubarium::voxel::{Lighting, OrganismLook, VoxelConfig};
 use cubarium_voxel::{Command as VoxelCommand, Config, Material, World};
 use cubarium_voxel_fauna::{
-    Animal, Command as FaunaCommand, Fauna, FaunaConfig, FaunaView, Founder, StartingStores, State,
+    Animal, Command as FaunaCommand, Fauna, FaunaConfig, FaunaView, Founder, MobilityMode,
+    StartingStores, State,
 };
 use cubarium_voxel_flora::{Flora, FloraConfig};
 
 /// The cropping script, in seconds from the start: `(from, to)` spans the bodies crop.
 const BOUTS: [(f64, f64); 2] = [(0.5, 4.5), (5.3, 6.0)];
+/// The seedporter's perch: a rock post this many voxels above the floor under each body.
+const SP_POST: u32 = 4;
 /// Seconds the capture runs.
 const LENGTH_S: f64 = 7.5;
 /// The loftstrider's script: two loops of its 2.6 s feeding clip, a short bout, then asleep
@@ -220,6 +229,7 @@ fn main() -> Result<()> {
     let mut flip_path = None;
     let mut perf = None;
     let mut founder = Founder::Browser;
+    let mut mode = MobilityMode::Ground;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -235,7 +245,20 @@ fn main() -> Result<()> {
                     "frondgrazer" | "browser" => Founder::Browser,
                     "chorister" | "veilhound" => Founder::Chorister,
                     "loftstrider" => Founder::Loftstrider,
-                    f => bail!("--founder frondgrazer, chorister or loftstrider, not {f}"),
+                    "seedporter" => {
+                        if mode == MobilityMode::Ground {
+                            mode = MobilityMode::Perched;
+                        }
+                        Founder::Seedporter
+                    }
+                    f => bail!("--founder frondgrazer, chorister, loftstrider or seedporter, not {f}"),
+                }
+            }
+            "--pose" => {
+                mode = match args.next().context("--pose stand|ground")?.as_str() {
+                    "stand" => MobilityMode::Perched,
+                    "ground" => MobilityMode::Ground,
+                    p => bail!("--pose stand or ground, not {p}"),
                 }
             }
             _ if out.is_none() => out = Some(PathBuf::from(a)),
@@ -264,11 +287,22 @@ fn main() -> Result<()> {
     // the Veilhound is 2.2 m with its tail, 18 voxels: a wider and deeper floor; the
     // loftstrider 3.4 m tall and 2.4 m across its fronds, reaching further: taller still
     let ls = founder == Founder::Loftstrider;
-    let (w, xs, z) = match founder {
+    let sp = founder == Founder::Seedporter;
+    let perched = sp && mode == MobilityMode::Perched;
+    let (mut w, xs, z) = match founder {
         Founder::Chorister => (world(48, 16), [15, 36], 8),
         Founder::Loftstrider => (world_of(52, 36, 20), [16, 38], 10),
+        // the ground pose is 1.14 m long with its tail; the perched one 1.04 m tall
+        Founder::Seedporter => (world_of(26, 14, 9), [8, 18], 4),
         _ => (world(22, 7), [6, 15], 3),
     };
+    if perched {
+        for x in xs {
+            for y in 2..2 + SP_POST {
+                w.apply(VoxelCommand::SetMaterial { x, y, z, material: Material::Rock });
+            }
+        }
+    }
     let mut fauna = Fauna::new(FaunaConfig::default());
     for x in xs {
         anyhow::ensure!(
@@ -292,9 +326,20 @@ fn main() -> Result<()> {
     let (adult, newborn) = (core.body_max, core.body_min);
     let mut animals = fv.animals.to_vec();
     for (i, a) in animals.iter_mut().enumerate() {
-        // the loftstrider's second is a newborn calf (its own build, its own bin)
-        a.body = if ls && i == 1 { newborn } else { adult };
+        // the loftstrider's second is a newborn calf (its own build, its own bin); the
+        // seedporter's a newborn (its pose models are one bin: the adult's)
+        a.body = if (ls || sp) && i == 1 { newborn } else { adult };
         a.state = State::Resting;
+        if sp {
+            a.mobility.mode = mode;
+            a.mobility.climb = None;
+            a.mobility.perch = None;
+            if perched {
+                // on the post's top
+                a.site.y = 1 + SP_POST;
+                a.pose.y_m = f64::from(2 + SP_POST) * VOXEL_M;
+            }
+        }
     }
 
     let world_cfg = w.config().clone();
@@ -317,9 +362,9 @@ fn main() -> Result<()> {
     let models =
         Arc::new(ModelLibrary::load(&cfg.models_dir, VOXEL_M).context("the baked models")?);
     let loop_s = {
-        let r = models
-            .rig(founder)
-            .with_context(|| format!("the {} has no rig: rebake it", founder.name()))?;
+        let (r, _) = models
+            .rig_in_mode(founder, mode)
+            .with_context(|| format!("the {} has no rig in {mode:?}: rebake it", founder.name()))?;
         r.loop_s(r.clip("cropping").context("the rig has no feeding clip")?)
     };
     let proj = Projection::new(cfg.tilt_degrees, px, 0, &world_cfg)?;

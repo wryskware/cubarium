@@ -667,7 +667,10 @@ def build_founder_bin(f, n, vox):
 # reference size); the loftstrider's bins are each their own build, and so its rig
 # (`BIN_RIGS`, the bin's part sizes, in its own metres).
 RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
-        "chorister": lambda: A.feed_rig(A.ch_feed_clip())}
+        "chorister": lambda: A.feed_rig(A.ch_feed_clip()),
+        # the seedporter's pose models it crops in (specimens, one bin each)
+        "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
+        "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
 BIN_RIGS = {"loftstrider": lambda n: A.ls_rig_clips(ls_parts(n))}
 
 
