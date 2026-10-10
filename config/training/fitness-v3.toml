@@ -51,10 +51,11 @@ lo = 6.0
 hi = 8.0
 [population.bands.bellwing]
 lo = 0.0 # Only extinction (L) below the ceiling: seasonal swings are allowed.
-nominal_hi = 90.0 # Approximate abundance per d72 area, a readout, not a band edge.
-hi = 900.0 # Provisional very high ceiling: 10× nominal abundance.
+nominal_hi = 90.0 # Nominal abundance per d72 floor area.
+# Wrysk 2026-10-10: seasonal swings free, sustained overshoot penalised
+median_multiple = 3.0 # Window median ceiling / nominal abundance, dimensionless.
 peak = false
-peak_disabled_reason = "Bellwing seasonal swings: no peak penalty; L and the very high A ceiling only."
+peak_disabled_reason = "Bellwing seasonal swings: no peak penalty; L and the window-median A envelope only."
 
 [targets]
 woods_share_lo = 0.20 # Provisional tolerance around the decided quarter of floor.
@@ -70,8 +71,10 @@ glowcap_lit_share_hi = 0.01 # Provisional near-zero tolerance: <=1% of caps expo
 leaf_offtake_lo = 0.10
 leaf_offtake_hi = 0.30
 hunt_lineages = ["chorister", "lanternjaw"]
-hunts_per_hour_lo = 0.5 # Provisional hunts/world-hour per d72 floor area.
-hunts_per_hour_hi = 2.0 # Provisional: scales with configured floor, not founders.
+# Adult frondgrazer shipped core.body_max = 0.05 organic units.
+# Convert the former 0.5–2 kills/hour band by multiplying by 0.05.
+hunt_biomass_per_hour_lo = 0.025 # Organic units/world-hour per d72 floor area, per hunter lineage.
+hunt_biomass_per_hour_hi = 0.1 # Same units; scales with floor, not founders.
 fullness_p10 = 0.30 # Adults only; no adult exposure is structural NA.
 
 [reproduction]
@@ -84,6 +87,7 @@ consistent_fraction = 0.75
 consistent_min_seeds = 8
 
 [profiles.wide-screen-2h]
+feasibility = "relative"
 from_minute = 0
 to_minute = 120
 active = ['L', 'J', 'A', 'K', 'O', 'H', 'F', 'S']
@@ -106,8 +110,8 @@ G_b = "Landscape is judged at one year from fresh founding; the saved-world scre
 D = "Landscape is judged at one year from fresh founding; the saved-world screen tests short-window ecology."
 
 [profiles.wide-screen-2h.required_data]
-L = ['census:stocks']
-J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+L = ['census:stocks', 'vitals:n_adult']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'life:adult_transitions', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']
 W = ['census:forest_floor_faces']
@@ -116,7 +120,7 @@ M = ['census:meadow_patch_max']
 G_b = ['census:grove_patches']
 D = ['census:glowcap_lit_share']
 O = ['census:leaf_produced', 'census:leaf_eaten']
-H = ['census:kills']
+H = ['life:prey_body']
 F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
 S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
 
@@ -128,6 +132,7 @@ plant_stand_slope = 0.0
 plant_vigour_trend = 0.0
 
 [profiles.wide-year]
+feasibility = "absolute"
 from_minute = 0
 to_minute = 600
 active = ['L', 'J', 'A', 'K', 'W', 'G_v', 'M', 'G_b', 'D', 'O', 'H', 'F', 'S']
@@ -139,8 +144,8 @@ start_kind = "fresh founding"
 [profiles.wide-year.disabled]
 
 [profiles.wide-year.required_data]
-L = ['census:stocks']
-J = ['vitals:breeding_eligible_n', 'life:recruits', 'census:lifecycle']
+L = ['census:stocks', 'vitals:n_adult']
+J = ['vitals:breeding_eligible_n', 'life:recruits', 'life:adult_transitions', 'census:lifecycle']
 A = ['census:stocks']
 K = ['census:stocks']
 W = ['census:forest_floor_faces']
@@ -149,7 +154,7 @@ M = ['census:meadow_patch_max']
 G_b = ['census:grove_patches']
 D = ['census:glowcap_lit_share']
 O = ['census:leaf_produced', 'census:leaf_eaten']
-H = ['census:kills']
+H = ['life:prey_body']
 F = ['vitals:fullness_p10_adult', 'vitals:n_adult']
 S = ['vitals:stuck_n', 'vitals:stuck_observed_n']
 
