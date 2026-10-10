@@ -191,6 +191,17 @@ pub const EMIT_VINES: u32 = 1 << 20;
 /// shader looks plant cells up only then.
 pub const EMIT_PLANTS: u32 = 1 << 21;
 
+/// The table capacity and payload flags used by both the shader and the walk variant.
+/// An empty table selects the whole-cell walk even if the supplied cells carry sizes.
+fn emit_view(cap: u32, cells: &[EmitCell]) -> u32 {
+    if cap == 0 {
+        return 0;
+    }
+    let vines = cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
+    let plants = cells.iter().any(|c| c.plant.is_some());
+    cap | if vines { EMIT_VINES } else { 0 } | if plants { EMIT_PLANTS } else { 0 }
+}
+
 /// The emitter table's hash of `key` (a texture index plus one) into `cap` entries, a power
 /// of two: `world.glsl`'s `emitHash`.
 #[inline]
@@ -2187,6 +2198,9 @@ pub struct VoxelRenderer {
     /// drawn pack has an animal posing.
     pose_pipeline: vk::Pipeline,
     depth_pose_pipeline: vk::Pipeline,
+    /// The same four walk variants with CELL-SHRINK weights, bound only while the
+    /// frame's emitter table carries plant sizes. The ordinary variants compile them out.
+    plant_light_pipelines: [vk::Pipeline; 4],
     present: PresentPass,
     /// The model pass (H2): animals drawn as models after the walk ([`crate::figures`]).
     figures: crate::figures::FigurePass,
@@ -2671,9 +2685,12 @@ impl VoxelRenderer {
         // pass (`WEATHER_DEPTH`, constant_id 8), used only on frames that draw weather; and
         // each of them with the sleep pose (`POSE`, constant_id 9), used only on frames whose
         // pack has an animal posing.
-        let walk = |depth: bool, pose: bool| -> Result<vk::Pipeline> {
+        let walk = |depth: bool, pose: bool, plant_light: bool| -> Result<vk::Pipeline> {
             let mut flags: Vec<u32> = constants.to_vec();
-            flags.extend([0, 0, u32::from(depth), u32::from(pose), u32::from(params.plants.is_some())]);
+            flags.extend([
+                0, 0, u32::from(depth), u32::from(pose), u32::from(params.plants.is_some()),
+                u32::from(plant_light),
+            ]);
             let entries: Vec<_> = (0..flags.len() as u32)
                 .map(|i| vk::SpecializationMapEntry::default().constant_id(i).offset(i * 4).size(4))
                 .collect();
@@ -2691,13 +2708,19 @@ impl VoxelRenderer {
                 3,
             )
         };
-        let pipeline = walk(false, false)?;
-        let pose_pipeline = walk(false, true)?;
+        let pipeline = walk(false, false, false)?;
+        let pose_pipeline = walk(false, true, false)?;
         let (depth_pipeline, depth_pose_pipeline) = if params.lit {
-            (walk(true, false)?, walk(true, true)?)
+            (walk(true, false, false)?, walk(true, true, false)?)
         } else {
             (vk::Pipeline::null(), vk::Pipeline::null())
         };
+        let plant_light_pipelines = [
+            walk(false, false, true)?,
+            walk(false, true, true)?,
+            if params.lit { walk(true, false, true)? } else { vk::Pipeline::null() },
+            if params.lit { walk(true, true, true)? } else { vk::Pipeline::null() },
+        ];
         let backdrop = if params.lit {
             backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
         } else {
@@ -2851,6 +2874,7 @@ impl VoxelRenderer {
             depth_pipeline,
             pose_pipeline,
             depth_pose_pipeline,
+            plant_light_pipelines,
             present: PresentPass::new(gpu, raster_view, nearest)?,
             figures,
             figure_frame: crate::figures::FigureFrame::default(),
@@ -3300,11 +3324,7 @@ impl VoxelRenderer {
             self.emit_buffer.write_bytes_at((EMIT_TABLE * 16 * frame.slot) as u64, &self.emit_scratch);
         }
         block.view[2] = (EMIT_TABLE * frame.slot) as i32;
-        let vines = self.emit_cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
-        let plants = self.emit_cells.iter().any(|c| c.plant.is_some());
-        block.view[3] = (cap
-            | if vines && cap > 0 { EMIT_VINES } else { 0 }
-            | if plants && cap > 0 { EMIT_PLANTS } else { 0 }) as i32;
+        block.view[3] = emit_view(cap, &self.emit_cells) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
         let p = &self.params;
         let sun_map = if redraw {
@@ -3513,11 +3533,15 @@ impl VoxelRenderer {
                     &[(self.uniform_stride * frame.slot as u64) as u32],
                 );
                 let weather = self.weather_pass.is_some() && weather_drawn(&self.look, &self.params);
-                let walk = match (weather, self.posing) {
-                    (false, false) => self.pipeline,
-                    (false, true) => self.pose_pipeline,
-                    (true, false) => self.depth_pipeline,
-                    (true, true) => self.depth_pose_pipeline,
+                let walk = if block.view[3] as u32 & EMIT_PLANTS != 0 {
+                    self.plant_light_pipelines[2 * usize::from(weather) + usize::from(self.posing)]
+                } else {
+                    match (weather, self.posing) {
+                        (false, false) => self.pipeline,
+                        (false, true) => self.pose_pipeline,
+                        (true, false) => self.depth_pipeline,
+                        (true, true) => self.depth_pose_pipeline,
+                    }
                 };
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);
@@ -3732,7 +3756,10 @@ impl VoxelRenderer {
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
             d.destroy_pipeline(self.pose_pipeline, None);
-            for p in [self.depth_pipeline, self.depth_pose_pipeline] {
+            for p in [self.depth_pipeline, self.depth_pose_pipeline]
+                .into_iter()
+                .chain(self.plant_light_pipelines)
+            {
                 if p != vk::Pipeline::null() {
                     d.destroy_pipeline(p, None);
                 }
@@ -4682,6 +4709,34 @@ pub(crate) mod tests {
         assert_eq!(t.mask(), 0);
         let (aw, _) = t.atlas_size();
         assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
+    }
+
+    /// Whole-cell and weighted walks follow the table carried by this frame, independently
+    /// of emitter and vine payloads, and return to the whole-cell walk after the change.
+    #[test]
+    fn plant_light_variant_follows_the_current_table_payload() {
+        let mut cells = vec![EmitCell::emitter(7, [0.2, 0.4, 0.6], 0.5)];
+        let mut table = Vec::new();
+        let cap = emit_table(&cells, &mut table);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "emission alone uses the whole-cell walk");
+
+        cells[0].vine = Some(((3, 2), 0.5));
+        assert_ne!(emit_view(cap, &cells) & EMIT_VINES, 0);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "vine changes alone use the whole-cell walk");
+
+        cells.push(EmitCell { plant: Some(0.25), edge: [Some(0.75), None], ..EmitCell::none(9) });
+        let cap = emit_table(&cells, &mut table);
+        let view = emit_view(cap, &cells);
+        assert_ne!(view & EMIT_PLANTS, 0, "a changing plant selects the weighted walk");
+        assert_ne!(view & EMIT_VINES, 0, "the vine payload remains enabled");
+        assert_eq!(view & (EMIT_VINES - 1), cap, "payload flags leave the hash capacity intact");
+        assert_eq!(emit_view(0, &cells), 0, "no uploaded table uses the whole-cell walk");
+
+        cells.pop();
+        let cap = emit_table(&cells, &mut table);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "the next frame returns to the whole-cell walk");
+        cells.clear();
+        assert_eq!(emit_view(emit_table(&cells, &mut table), &cells), 0);
     }
 
     /// The emitter table as `world.glsl`'s `cellEmit` reads it: every cell given is found

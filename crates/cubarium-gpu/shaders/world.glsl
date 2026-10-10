@@ -135,6 +135,10 @@ layout(constant_id = 9) const bool POSE = false;
 // march, the sky plane, the canopy, the AO), so the plants light and shade as they did.
 // Fixed for a renderer's life; off, the walk is exactly what it was.
 layout(constant_id = 10) const bool PLANT_MODELS = false;
+// CELL-SHRINK: the walk binds the weighted variant only while EMIT_PLANTS is set.
+// Off, the original whole-cell crease and sun march compile without size lookups or
+// transmission state. Other passes keep the weighted path (the default).
+layout(constant_id = 11) const bool PLANT_LIGHT = true;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -431,7 +435,7 @@ float entryVineFrom(int i, inout uvec4 v) {
 // the table carries any, so the walk looks plant cells up only then.
 const uint EMIT_PLANTS = 1u << 21;
 float plantSize(int x, int y, int z) {
-    if ((uint(u.view.w) & EMIT_PLANTS) == 0u) { return 1.0; }
+    if (!PLANT_LIGHT || (uint(u.view.w) & EMIT_PLANTS) == 0u) { return 1.0; }
     int i = cellEntry(x, y, z);
     if (i < 0) { return 1.0; }
     uint p = (emitCells[i].w >> 24) & 127u;
@@ -442,7 +446,7 @@ float plantSize(int x, int y, int z) {
 // (`EmitCell::edge`): beside a cell of its crown arriving or leaving, one less that cell's
 // size, so the edge comes and goes with it; 1 (the glyph's own edge) elsewhere.
 float crownEdge(int x, int y, int z, int dx) {
-    if ((uint(u.view.w) & EMIT_PLANTS) == 0u || (dx != 0 && dx != S - 1)) { return 1.0; }
+    if (!PLANT_LIGHT || (uint(u.view.w) & EMIT_PLANTS) == 0u || (dx != 0 && dx != S - 1)) { return 1.0; }
     int i = cellEntry(x, y, z);
     if (i < 0) { return 1.0; }
     uint w = emitCells[i].w;
@@ -511,6 +515,9 @@ vec3 blockLit(vec3 body, float shade) {
 float occluder(int x, int y, int z) {
     if (!inY(y) || z < 0 || z >= D) { return 0.0; }
     uvec4 v = at(x, y, z);
+    if (!PLANT_LIGHT) {
+        return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v) && !cordCell(v))) ? 1.0 : 0.0;
+    }
     if (solidV(v)) { return 1.0; }
     int p = partOf(v);
     if (!isBlockPart(p) || softMark(v) || cordCell(v)) { return 0.0; }
@@ -538,10 +545,21 @@ uint glyphTexel(int part, int glyph, int dx, int row) {
 float creaseBands(float l, float r, float lo, float hi,
              float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv, int b) {
     bool inL = du < b, inR = du >= nu - b, inH = dv < b, inLo = dv >= nv - b;
+    if (!PLANT_LIGHT) {
+        bool band = (inL && l > 0.5) || (inR && r > 0.5) || (inH && hi > 0.5) || (inLo && lo > 0.5)
+            || (inL && inLo && cLL > 0.5) || (inR && inLo && cRL > 0.5)
+            || (inL && inH && cLH > 0.5) || (inR && inH && cRH > 0.5);
+        return band ? 1.0 - u.lightK.w : 1.0;
+    }
     float k = max(max(inL ? l : 0.0, inR ? r : 0.0), max(inH ? hi : 0.0, inLo ? lo : 0.0));
     k = max(k, max(max(inL && inLo ? cLL : 0.0, inR && inLo ? cRL : 0.0),
                    max(inL && inH ? cLH : 0.0, inR && inH ? cRH : 0.0)));
     return 1.0 - u.lightK.w * k;
+}
+
+float crease(float l, float r, float lo, float hi,
+             float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv) {
+    return creaseBands(l, r, lo, hi, cLL, cRL, cLH, cRH, du, dv, nu, nv, creaseWidth(nv));
 }
 
 // `creaseBands` of the face whose open plane holds cell `o`, `U` along its texels' du and
@@ -575,6 +593,14 @@ float modelCrease(uint mask, int dx, int dy, ivec2 size) {
 // z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
     if (!AO) { return 1.0; }
+    if (!PLANT_LIGHT) {
+        int p = z - 1;
+        return crease(
+            occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
+            occluder(x - 1, y - 1, p), occluder(x + 1, y - 1, p),
+            occluder(x - 1, y + 1, p), occluder(x + 1, y + 1, p),
+            dx, dy, S, S);
+    }
     return creaseOpen(ivec3(x, y, z - 1), ivec3(1, 0, 0), ivec3(0, 1, 0), dx, dy, S, S);
 }
 
@@ -582,6 +608,14 @@ float aoFront(int x, int y, int z, int dx, int dy) {
 // y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
     if (!AO) { return 1.0; }
+    if (!PLANT_LIGHT) {
+        int p = y + 1;
+        return crease(
+            occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
+            occluder(x - 1, p, z - 1), occluder(x + 1, p, z - 1),
+            occluder(x - 1, p, z + 1), occluder(x + 1, p, z + 1),
+            dx, dy, S, RISE);
+    }
     return creaseOpen(ivec3(x, y + 1, z), ivec3(1, 0, 0), ivec3(0, 0, 1), dx, dy, S, RISE);
 }
 
@@ -733,11 +767,16 @@ float sunReaches(vec3 p, ivec3 c) {
         uvec4 v = at(c.x, c.y, c.z);
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
-        if (part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
-        if (part == TRUNK
-            || ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v))) {
-            pass *= 1.0 - plantSize(c.x, c.y, c.z);
-            if (pass <= 0.0) { return 0.0; }
+        if (!PLANT_LIGHT) {
+            if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
+            if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v)) { return 0.0; }
+        } else {
+            if (part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
+            if (part == TRUNK
+                || ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v))) {
+                pass *= 1.0 - plantSize(c.x, c.y, c.z);
+                if (pass <= 0.0) { return 0.0; }
+            }
         }
         if (axis == 0) { c.x += dir.x; next.x += inv.x; }
         else if (axis == 1) { c.y += dir.y; next.y += inv.y; }
