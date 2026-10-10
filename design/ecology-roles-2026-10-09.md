@@ -416,4 +416,37 @@ seeds, minutes 60–600].
 - outputs in `runs/eco-roles-probes-2026-10-09/`.
 - **P2:** frondgrazer mass ×1, 4, 16 and 64, tied to the Veilhound as `mass_grazer` is.
 - **P3:** gut throughput S = 1/3 and 1/6. S = 1 is P2's ×1 arm.
-- Results to be added here.
+
+**P2 result, frondgrazer mass** (done 2026-10-09 22:36; `scratchpad/eco-roles/p2p3.txt`;
+m4/s1 failed at minute 621; windows of 15 min). Values are s1 / s7.
+
+| mass | leaf offtake O | surplus / upkeep | fullness p50 | breeding-eligible share |
+|---|---|---|---|---|
+| ×1 | 2.19 % / 0.32 % | +21 / +33 | 0.16 / 0.21 | 0.11 / 0.12 |
+| ×4 | – / 1.2–1.4 % | – / +32 | – / 0.21 | – / 0.13 |
+| ×16 | 2.2–2.4 % / 1.25 % | +0.1 / +5.8 | 0.00 / 0.06 | 0.00 / 0.03 |
+| ×64 | 0.8 % / 0.08 % | −1.0 / −1.0 (no bites) | 0.00 / 0.00 | 0.00 / 0.00 |
+
+- **Up to ×4 the economy is isometric:** offtake scales with mass and surplus per upkeep is
+  unchanged, which is the N·k idea.
+- **Between ×4 and ×16 total intake stops growing.** Offtake stays at about 1–2.4 % of leaf
+  growth while each animal needs 16× more, so they starve. This is a cap on how much leaf the
+  grazers can reach or take, not the food running out.
+- **At ×64 they take no bites at all.** This is a mechanism break (a per-face limit or offer
+  rule scaled by body), not a food knee.
+- **Implication:** with the world as it is, mass can't move leaf offtake toward 10–30 %. The
+  eco genome's premise (×300–900 reaches the target) fails. Diagnosis: GRAZER-INTAKE.
+
+**P3 result, gut throughput S** (from s1; s7 agrees in sign):
+
+| S | frondgrazer surplus/upkeep | capgnawer | shredder | seedporter | O |
+|---|---|---|---|---|---|
+| 1 | +21 | +43 | +33 | +2.7 | 2.2 % |
+| 1/3 | +7 | +14 | +10 | +0.7 to −0.8 | 0.6–0.7 % |
+| 1/6 | +2.4 to +3.2 | +6.5 | +5 | about 0 | 0.3 % |
+
+- At these overcrowded densities, everyone except the seedporter stays positive at S = 1/6.
+- The frondgrazer's eligible share and births fall: births 16 → 5–11 → 0–10 per 15 min.
+- The seedporter is already at zero surplus, so a realistic gut would take it below. Its intake
+  cap is being diagnosed (SEEDPORTER-INTAKE).
+- A slower gut also lowers offtake, as expected.
