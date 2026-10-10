@@ -370,8 +370,10 @@ impl Default for PackConfig {
 /// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
 /// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
 /// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
-/// wave_period = 0.0   # voxels a wave down the strand; 0: the hashed joins above
-/// wave_amplitude = 0.0 # voxels the wave swings either side of the column's centre
+/// wave_period = 12.0  # voxels a wave down the strand; 0: the hashed joins above
+/// wave_amplitude = 0.5 # voxels the wave swings either side of the column's centre
+/// wave_octaves = 3    # sines summed, each ~half the period and half the amplitude
+/// wave_ratios = "jittered" # "octave": exactly 1:2:4; "jittered": ~1:2.3:4.6, per strand
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -396,21 +398,44 @@ pub struct DrapeConfig {
     pub wave_period: f32,
     /// **The long wave's amplitude**, voxels the cord's centre swings either side of its
     /// column's centre; past 0.5 it crosses into the next columns (the plant pass draws it
-    /// there; stamped plants keep it inside the column). Up to 7.97, in 32nds.
+    /// there; stamped plants keep it inside the column). Up to 7.97, in 32nds. With
+    /// octaves it is still the most the summed curve swings either way.
     pub wave_amplitude: f32,
+    /// **The long wave's octaves** (round 3), how many sines the curve sums, 1..=15: octave
+    /// `k` at about 2^k times the base frequency (about half the period each) and 0.5^k of
+    /// the amplitude, each strand on its own phases, the sum scaled back to
+    /// `wave_amplitude`. 1: round 2's single sine.
+    pub wave_octaves: u32,
+    /// **The octaves' frequency ratios** (a look choice): `"octave"`, exactly 1 : 2 : 4, so
+    /// every strand is the same shape shifted, repeating every period; `"jittered"`, about
+    /// 1 : 2.3 : 4.6 (2^k x 1.15), each strand's ratios moved up to ±0.05 x 2^k by its hash,
+    /// so no two strands share a shape and nothing repeats.
+    pub wave_ratios: WaveRatiosConfig,
+}
+
+/// `[drape] wave_ratios`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WaveRatiosConfig {
+    Octave,
+    #[default]
+    Jittered,
 }
 
 impl Default for DrapeConfig {
     fn default() -> DrapeConfig {
-        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look". The long wave
-        // (round 2) is off until he picks a period and an amplitude.
+        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look"; the long wave
+        // "period 12 or 24 with a few higher octaves as well. amp 0.5 looks right" (round 3;
+        // 12 until he picks between them).
         DrapeConfig {
             cords: true,
             cord_px: 2,
             cord_shape: CordShapeConfig::Eased,
             cord_wander: 0.5,
-            wave_period: 0.0,
-            wave_amplitude: 0.0,
+            wave_period: 12.0,
+            wave_amplitude: 0.5,
+            wave_octaves: 3,
+            wave_ratios: WaveRatiosConfig::Jittered,
         }
     }
 }
@@ -431,6 +456,11 @@ impl DrapeConfig {
             wave: cubarium_gpu::cord::CordWave {
                 period: self.wave_period.max(0.0),
                 amplitude: self.wave_amplitude.max(0.0),
+                octaves: self.wave_octaves.clamp(1, 15),
+                ratios: match self.wave_ratios {
+                    WaveRatiosConfig::Octave => cubarium_gpu::cord::WaveRatios::Octave,
+                    WaveRatiosConfig::Jittered => cubarium_gpu::cord::WaveRatios::Jittered,
+                },
             },
         }
     }

@@ -6,8 +6,8 @@
 // below a face join there; it is `u.tex.z` pixels wide at every px_per_voxel (a face texel
 // is a screen pixel); off it the cell is see-through. A drape cell's cap is never drawn (a
 // cord seen from above is a point), and it neither casts the sun march's shadow nor creases
-// the AO of the faces beside it. `u.tex.w`: the path inside the cell (low byte: 0 straight,
-// 1 eased) and how far a join wanders across the face (second byte, hundredths); the long
+// the AO of the faces beside it. `u.tex.w`: the path inside the cell (bit 0: 0 straight,
+// 1 eased), the long wave's ratios (bit 1: jittered) and octave count (bits 4..8), how far a join wanders across the face (second byte, hundredths); the long
 // wave's period (third byte, quarter voxels; 0 off) and amplitude (fourth, 32nds of a voxel).
 //
 // **The long wave** (round 2): with a period, the cord's centre is one sine down its whole
@@ -15,6 +15,11 @@
 // read the same curve there. The plant pass widens a drape cell's front quad by the swing
 // (`plant.vert`, `PlantPush.t.w`), so a cord past half a voxel shows in the next column;
 // the walk sees a cell only by entering it, so there the swing stays inside the column.
+//
+// **Octaves** (round 3): the curve sums `cordOctaves()` sines, octave k at about 2^k the
+// base frequency (`cordFreq`: exactly, or jittered per strand round 1.15 * 2^k) and half the
+// amplitude of the one below, each on its own phase per strand, over the sum of the gains
+// so the swing stays within the amplitude (`cord::WaveRatios`, `GAIN`).
 //
 // Included by `world.glsl` (needs `at`, `cellHash`, `styleTex`, `ROLE_DRAPE`, `S`).
 
@@ -42,7 +47,7 @@ vec2 cordEnds(int x, int y, int z) { return vec2(cordJoin(x, y + 1, z), cordJoin
 
 // `DrapeCords::centre`: the cord's centre at t down the face, between joins a and b.
 float cordAt(float a, float b, float t) {
-    float e = (u.tex.w & 255) == 1 ? t * t * (3.0 - 2.0 * t) : t;
+    float e = (u.tex.w & 1) == 1 ? t * t * (3.0 - 2.0 * t) : t;
     return mix(a, b, e);
 }
 
@@ -67,13 +72,32 @@ float cordAmp(bool walk) {
 }
 
 // `cord::phase`: strand (column) (x, z)'s place in its wave at height 0, 0..1.
-float cordPhase(int x, int z) { return float(cellHash(wrapX(x), 0, z, 78) >> 8u) / 16777216.0; }
+// `cord::octave_phase`: strand (x, z)'s place in octave k's wave at height 0, 0..1.
+float cordPhase(int x, int z, int k) { return float(cellHash(wrapX(x), k, z, 78) >> 8u) / 16777216.0; }
+
+// `DrapeCords::freq`: octave k's frequency on strand (x, z) over the base's.
+float cordFreq(int x, int z, int k) {
+    float o = float(1 << k);
+    if (k == 0 || (u.tex.w & 2) == 0) { return o; }
+    float h = float(cellHash(wrapX(x), k, z, 79) >> 8u) / 16777216.0;
+    return o * (1.15 + 0.05 * (2.0 * h - 1.0));
+}
+
+// `CordWave::octave_count`: the octaves the curve sums, 1..15.
+int cordOctaves() { return max((u.tex.w >> 4) & 15, 1); }
 
 // `DrapeCords::wave_at`: the centre on strand (x, z) at height yw (voxels), face pixels from
 // the column's left edge.
 float cordWaveAt(int x, int z, float yw, float amp) {
-    float a = 6.28318530718 * (yw / max(cordPeriod(), 0.25) + cordPhase(x, z));
-    return float(S) * (0.5 + amp * sin(a));
+    float p = max(cordPeriod(), 0.25);
+    float sum = 0.0, g = 1.0, gs = 0.0;
+    int n = cordOctaves();
+    for (int k = 0; k < n; k++) {
+        sum += g * sin(6.28318530718 * (yw * cordFreq(x, z, k) / p + cordPhase(x, z, k)));
+        gs += g;
+        g *= 0.5;
+    }
+    return float(S) * (0.5 + amp * sum / gs);
 }
 
 // `DrapeCords::wave_centre`: at t down cell p's front face, shifted by sh (top, bottom) px.
