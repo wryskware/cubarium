@@ -136,6 +136,22 @@ episode limits; this resource allowance does not authorize unbounded searches
 or make ordinary tests larger. The voxel episode trainer is capped at 16 workers:
 measurements on this machine showed diminishing returns above that point.
 
+## Jobs go through labd — Wrysk, 2026-10-10
+
+Once `labd.service` runs (`scripts/lab/lab install`; design/lab-daemon.md), every sim, test
+and build job goes through `scripts/lab/lab submit SPEC`.
+- **What the daemon owns:** it pins commits at submit, builds each (commit, arch) once in a
+  snapshot tree (never the live checkout), places tasks across all jobs on the desktop,
+  eidolon and approved EC2, and runs preflight, tripwires, liveness and `DONE`.
+- **Workers:** they write the spec and hand it back, or submit it when their brief says so,
+  instead of launching. They don't start `systemd-run`, `setsid`, `run-study.py` batches or
+  `ab.py` runs themselves.
+- **The parent:** it keeps one `lab wait --any-new` waiter for all jobs.
+- **EC2:** each launch still needs Wrysk's go, given as
+  `lab approve ec2 ID --max-hours H --max-usd D`, and labd tears the host down when the
+  queue drains.
+- **Until labd is installed,** the launchers above stay the path.
+
 ## Lean orchestration — correction, 2026-09-17
 
 Wrysk: tokens are getting tighter; cut the parallel overhead of agents getting
