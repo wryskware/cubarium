@@ -92,12 +92,47 @@ pub const EMIT_PROBE: usize = 32;
 /// in linear light, and its **on** share: the texel draws `rgb + (1 − on) × its lit
 /// pigment`, so one fading out ends on its pigment. `cell` is its texture index,
 /// `(z · height + y) · width + x`.
+///
+/// The same table carries a latticevine cell's **old tile** while it cross-fades into a new
+/// one (GLOW-EASE round 2, `vine`): a cell may be in it for either or both; `emits` false
+/// leaves its emission to its tile.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EmitCell {
     pub cell: u32,
     pub rgb: [f32; 3],
     pub on: f32,
+    /// Whether `rgb` and `on` apply (the cell is an emitter the host eases).
+    pub emits: bool,
+    /// A vine cell's old tile, `(b, a)` as its texel carried it, and the share of it still
+    /// shown (`0..=1`): the shader draws both tiles, the old one this share of coverage and
+    /// colour.
+    pub vine: Option<((u8, u8), f32)>,
 }
+
+impl EmitCell {
+    /// An emitter's colour and on share alone.
+    pub fn emitter(cell: u32, rgb: [f32; 3], on: f32) -> EmitCell {
+        EmitCell { cell, rgb, on, emits: true, vine: None }
+    }
+}
+
+/// An emitter table entry's fourth word: bit 31 set when the entry carries no emission;
+/// a vine cell's old tile in bits 0..16 (`b`, then `a`) and its share, `1..=255` of 255, in
+/// bits 16..24 (0: no old tile). `world.glsl`'s `cellEmit` and `cellVineFrom` read it.
+pub fn emit_word(c: &EmitCell) -> u32 {
+    let mut w = if c.emits { 0 } else { 1 << 31 };
+    if let Some(((b, a), share)) = c.vine {
+        let s = (share.clamp(0.0, 1.0) * 255.0).round() as u32;
+        if s > 0 {
+            w |= u32::from(b) | u32::from(a) << 8 | s << 16;
+        }
+    }
+    w
+}
+
+/// The bit of `view.w` (the emitter table's size) saying some entry carries a vine cell's
+/// old tile, so the shader looks vine cells up only then.
+pub const EMIT_VINES: u32 = 1 << 20;
 
 /// The emitter table's hash of `key` (a texture index plus one) into `cap` entries, a power
 /// of two: `world.glsl`'s `emitHash`.
@@ -123,7 +158,7 @@ pub fn emit_table(cells: &[EmitCell], out: &mut Vec<[u32; 4]>) -> u32 {
         let mut h = emit_hash(key, cap as u32) as usize;
         for _ in 0..EMIT_PROBE {
             if out[h][0] == 0 || out[h][0] == key {
-                out[h] = [key, half(c.rgb[0], c.rgb[1]), half(c.rgb[2], c.on), 0];
+                out[h] = [key, half(c.rgb[0], c.rgb[1]), half(c.rgb[2], c.on), emit_word(c)];
                 break;
             }
             h = (h + 1) & (cap - 1);
@@ -3208,7 +3243,8 @@ impl VoxelRenderer {
             self.emit_buffer.write_bytes_at((EMIT_TABLE * 16 * frame.slot) as u64, &self.emit_scratch);
         }
         block.view[2] = (EMIT_TABLE * frame.slot) as i32;
-        block.view[3] = cap as i32;
+        let vines = self.emit_cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
+        block.view[3] = (cap | if vines && cap > 0 { EMIT_VINES } else { 0 }) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
         let p = &self.params;
         let sun_map = if redraw {
@@ -4593,6 +4629,8 @@ pub(crate) mod tests {
                 cell: k * 7919 % 100_003,
                 rgb: [k as f32 / 500.0, 0.25, 1.0 - k as f32 / 1000.0],
                 on: (k % 11) as f32 / 10.0,
+                emits: k % 3 != 0,
+                vine: (k % 2 == 0).then(|| ((k as u8, (k >> 3) as u8), (k % 7) as f32 / 6.0)),
             })
             .collect();
         let mut out = Vec::new();
@@ -4603,13 +4641,13 @@ pub(crate) mod tests {
             let v = if exp == 0 { man as f32 / 1024.0 * 2f32.powi(-14) } else { (1.0 + man as f32 / 1024.0) * 2f32.powi(exp as i32 - 15) };
             if sign == 1 { -v } else { v }
         };
-        let find = |cell: u32| -> Option<[f32; 4]> {
+        let find = |cell: u32| -> Option<([f32; 4], u32)> {
             let key = cell + 1;
             let mut h = emit_hash(key, cap);
             for _ in 0..EMIT_PROBE {
                 let e = out[h as usize];
                 if e[0] == key {
-                    return Some([unhalf(e[1] & 0xffff), unhalf(e[1] >> 16), unhalf(e[2] & 0xffff), unhalf(e[2] >> 16)]);
+                    return Some(([unhalf(e[1] & 0xffff), unhalf(e[1] >> 16), unhalf(e[2] & 0xffff), unhalf(e[2] >> 16)], e[3]));
                 }
                 if e[0] == 0 {
                     return None;
@@ -4619,10 +4657,20 @@ pub(crate) mod tests {
             None
         };
         for c in &cells {
-            let got = find(c.cell).expect("every cell is found");
+            let (got, word) = find(c.cell).expect("every cell is found");
             let want = [c.rgb[0], c.rgb[1], c.rgb[2], c.on];
             for k in 0..4 {
                 assert!((got[k] - want[k]).abs() <= want[k].abs() / 1000.0 + 1e-6, "{got:?} for {want:?}");
+            }
+            // The fourth word as `cellEmit` and `cellVineFrom` read it.
+            assert_eq!(word >> 31 == 0, c.emits, "the emission bit");
+            let share = ((word >> 16) & 255) as f32 / 255.0;
+            match c.vine {
+                Some(((b, a), s)) if s > 0.5 / 255.0 => {
+                    assert_eq!(((word & 255) as u8, ((word >> 8) & 255) as u8), (b, a), "the old tile");
+                    assert!((share - s).abs() <= 0.5 / 255.0 + 1e-6, "its share {share} for {s}");
+                }
+                _ => assert_eq!(share, 0.0, "no old tile"),
             }
         }
         assert!(find(100_004).is_none());

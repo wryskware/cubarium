@@ -75,8 +75,8 @@ impl Ease {
         candle: None,
     };
 
-    /// A latticevine flower's level at nectar fill `fill` (its nectar over a full flower's,
-    /// as the animals' eyes read it): the fill itself, so 0 only when empty; 1 whatever the
+    /// A latticevine flower's level at nectar fill `fill` (its nectar over what a flower
+    /// opens with): the fill itself, so 0 only when empty; 1 whatever the
     /// fill with `flower_nectar_glow` off.
     pub fn flower_level(&self, fill: f64) -> f32 {
         if !self.nectar {

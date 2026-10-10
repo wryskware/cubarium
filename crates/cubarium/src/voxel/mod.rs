@@ -46,6 +46,7 @@ pub mod animal;
 pub mod appearance;
 pub mod candle;
 pub mod glow_ease;
+pub mod colour_fade;
 pub mod chiplet;
 pub mod hunker;
 pub mod idle;
@@ -524,6 +525,7 @@ pub enum CordShapeConfig {
 /// flower_nectar_glow = true  # a latticevine flower glows by its nectar fill (false: full while open)
 /// flower_cycle = false  # candidate: each flower's glow also cycles on and off on its own phase
 /// flower_cycle_s = 90.0  # flower_cycle: seconds from on to off and on again
+/// colour_fade_s = 4.0  # seconds a plant cell's colour or vine tile takes to change (0: at once)
 /// # FOG-MOTION (2026-10-10, Wrysk picked "deep"): "fixed", "breathing", "flowing", "deep"
 /// fog_motion = "deep"  # how the ground fog moves ("fixed": the old look; costs the same)
 /// fog_breath = 0.5     # breathing/flowing/deep: a bank's density swings this share either way
@@ -680,8 +682,8 @@ pub struct LightConfig {
     pub lantern_flicker_s: f32,
     /// **A latticevine flower glows by its nectar** (GLOW-EASE; Wrysk: "i thought it was
     /// supposed to glow proportional to how much nectar they have"): its bell mouth's
-    /// emission times its nectar fill, the fill the animals' eyes read
-    /// (`fauna.scent.nectar_full`, at most 1), eased over `emit_fade_s`. A flower with no
+    /// emission times its nectar fill, its nectar over what a flower opens with
+    /// (`flora.latticevine`'s `nectar_per_flower`, at most 1), eased over `emit_fade_s`. A flower with no
     /// nectar shows its mouth's pigment. `false`: every open flower glows full, as before.
     pub flower_nectar_glow: bool,
     /// **Flower cycle** (GLOW-EASE, a candidate for Wrysk to compare, off by default): each
@@ -690,6 +692,17 @@ pub struct LightConfig {
     pub flower_cycle: bool,
     /// The flower cycle's period, seconds of the presenter's clock from on to off and on.
     pub flower_cycle_s: f32,
+    /// **GLOW-EASE round 2** (Wrysk, 2026-10-10: "patches of latticevine during the day
+    /// that darken. theres also springturf browning ... these all need to be faded as
+    /// well"): seconds of the presenter's clock a plant cell takes to change colour or a
+    /// latticevine cell its tile (`crate::voxel::colour_fade`): a stand's style swapping
+    /// (springturf curing to straw and back, a model plant's wilt level, a fruit or bloom
+    /// turning ripe, a glowcap lip's colony colour) cross-fades its old colours into the new
+    /// ones, and a vine cell's density (full, thin, bare, a dry spell's dormancy) or accent
+    /// (bud, flower, fruit) cross-fades its old tile into the new one. Both GPU tiers; a
+    /// style fade moves at the pack (20 Hz), a vine tile fade every frame on the lit tier
+    /// and at the tick on the flat one. `0` switches at once (the steps as they were).
+    pub colour_fade_s: f32,
     /// How the ground fog moves (FOG-MOTION, 2026-10-10: **a trial** for Wrysk to pick
     /// from video): `"fixed"` (its pattern evolving and drifting with the clouds, as it
     /// was), `"breathing"` (and each fog bank's density swells and thins slowly, every bank
@@ -772,6 +785,7 @@ impl Default for LightConfig {
             flower_nectar_glow: true,
             flower_cycle: false,
             flower_cycle_s: 90.0,
+            colour_fade_s: 4.0,
             fog_motion: FogMotionKind::Deep,
             fog_breath: cubarium_gpu::weather::FOG_BREATH_DEFAULT,
             fog_breath_s: cubarium_gpu::weather::FOG_BREATH_S_DEFAULT,

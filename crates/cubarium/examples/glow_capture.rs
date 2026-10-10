@@ -8,8 +8,16 @@
 //!     [--a 'KEY = VALUE']... [--b 'KEY = VALUE']... [--seed 1] [--threads N] \
 //!     [--state DIR] [--load DIR] [--warm TICKS] [--until-night] [--max-ticks N] \
 //!     [--seconds S] [--fps 60] [--speed K] [--px 6] [--scan] [--close W,H] [--zoom 2] \
-//!     [--video FILE.mp4] [--close-video FILE.mp4] [--log FILE.csv] [--events FILE.csv]
+//!     [--video FILE.mp4] [--close-video FILE.mp4] [--log FILE.csv] [--events FILE.csv] \
+//!     [--colour] [--flora-at SECONDS 'KEY = VALUE']...
 //! ```
+//!
+//! `--colour` (GLOW-EASE round 2) follows colour swaps instead of emitters: an **event** is
+//! a plant cell whose style or a vine cell whose tile B began to swap that pack
+//! (`VoxelGpuSink::colour_switches`), and those cells are the ones measured. `--flora-at S
+//! LINE` sets the plant layer's config (`FloraConfig` TOML, e.g. `latticevine.dry_water =
+//! 0.99`) once the clip reaches S seconds (0: before the first tick), to drive a dry spell
+//! or a wake the world would not give in the clip.
 //!
 //! The world is founded as the live run founds one (or loaded from `--load`, or from
 //! `--state`, which a first run saves once the wait is over), stepped `--warm` ticks and,
@@ -68,6 +76,8 @@ struct Args {
     events: Option<PathBuf>,
     nectar_ticks: u64,
     nectar_every: u64,
+    colour: bool,
+    flora_at: Vec<(f64, String)>,
 }
 
 fn args() -> Result<Args> {
@@ -96,6 +106,8 @@ fn args() -> Result<Args> {
         events: None,
         nectar_ticks: 0,
         nectar_every: 200,
+        colour: false,
+        flora_at: Vec::new(),
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -130,6 +142,11 @@ fn args() -> Result<Args> {
             "--events" => a.events = Some(PathBuf::from(v()?)),
             "--nectar-ticks" => a.nectar_ticks = v()?.parse()?,
             "--nectar-every" => a.nectar_every = v()?.parse()?,
+            "--colour" => a.colour = true,
+            "--flora-at" => {
+                let at: f64 = v()?.parse()?;
+                a.flora_at.push((at, v()?));
+            }
             _ => bail!("unexpected argument {k}"),
         }
     }
@@ -156,6 +173,31 @@ fn merge(table: &mut toml::Table, set: toml::Table) {
             }
         }
     }
+}
+
+/// `--flora-at`: merge `line` into the plant layer's config.
+fn flora_set(sim: &mut Sim, line: &str) -> Result<()> {
+    let mut table: toml::Table = toml::Value::try_from(sim.flora().config().clone())?
+        .try_into()
+        .context("the flora config as a table")?;
+    let set: toml::Table = line.parse().with_context(|| format!("--flora-at {line:?}"))?;
+    merge(&mut table, set);
+    let cfg: cubarium_voxel_flora::FloraConfig = toml::Value::Table(table).try_into().with_context(|| format!("--flora-at {line:?}"))?;
+    sim.flora_mut().replace_config(cfg).map_err(anyhow::Error::msg)?;
+    eprintln!("glow_capture: flora {line} at {}", status(sim));
+    Ok(())
+}
+
+/// Apply every `--flora-at` line due by clip second `at` not yet applied (`*next` of them).
+fn flora_due(a: &Args, sim: &mut Sim, at: f64, next: &mut usize) -> Result<()> {
+    while let Some((t, line)) = a.flora_at.get(*next) {
+        if *t > at {
+            break;
+        }
+        flora_set(sim, line)?;
+        *next += 1;
+    }
+    Ok(())
 }
 
 fn status(sim: &Sim) -> String {
@@ -318,12 +360,12 @@ struct Steps {
 }
 
 /// `--nectar-ticks N`: step N ticks undrawn and print, every `--nectar-every`, the open
-/// latticevine flowers' nectar fill (their nectar over `fauna.scent.nectar_full`, as the
-/// renderer and the animals' eyes read it): how many are open, how many hold any, and the
+/// latticevine flowers' nectar fill (their nectar over what a flower opens with,
+/// `VineConfig::nectar_per_flower`, as the renderer reads it): how many are open, how many hold any, and the
 /// fill's spread; then each flower's own range over the run.
 fn nectar_range(a: &Args, sim: &mut Sim) -> Result<()> {
     use cubarium_voxel_flora::SpurPhase;
-    let full = sim.fauna().config().scent.nectar_full;
+    let full = sim.flora().config().latticevine.nectar_per_flower();
     let mut seen: HashMap<(u32, u32, u32, u8), (f64, f64)> = HashMap::new();
     let (mut lo_all, mut hi_all) = (f64::MAX, f64::MIN);
     println!("tick,daylight,open,with_nectar,fill_min,fill_p10,fill_median,fill_p90,fill_max");
@@ -398,6 +440,9 @@ fn main() -> Result<()> {
 
     // The close-up's window: the most events in a scan, else the most emitters now.
     let mut sim = load_or_found(&a, &cfg_a)?;
+    let mut a = a;
+    a.flora_at.sort_by(|x, y| x.0.total_cmp(&y.0));
+    let a = a;
     if a.nectar_ticks > 0 {
         return nectar_range(&a, &mut sim);
     }
@@ -412,19 +457,33 @@ fn main() -> Result<()> {
     if a.scan {
         let started = Instant::now();
         let tick0 = sim.world().tick();
+        // `--colour` scans with B, whose swaps are the events.
+        if a.colour {
+            drop(sa);
+            sa = sink(&cfg_b)?;
+            stage_ready(&mut sa, &sim, film0)?;
+        }
         let mut before: HashMap<Cell, [f32; 3]> = sa.emit_targets().into_iter().collect();
         let mut ev_points = Vec::new();
         let want = tick0 + (a.seconds * a.speed * tick_hz).floor() as u64;
+        let mut next = 0;
         while sim.world().tick() < want {
+            let clip_s = (sim.world().tick() - tick0) as f64 / (a.speed * tick_hz);
+            flora_due(&a, &mut sim, clip_s, &mut next)?;
             sim.step();
             sa.set_clock(sim.world().tick(), 0.0);
             sa.stage_world(sim.world(), sim.flora(), sim.fauna());
-            let (map, ev) = events_of(&sa.emit_targets(), &before);
+            let ev: Vec<(Cell, &str)> = if a.colour {
+                sa.colour_switches().into_iter().map(|c| (c, "colour")).collect()
+            } else {
+                let (map, ev) = events_of(&sa.emit_targets(), &before);
+                before = map;
+                ev
+            };
             ev_points.extend(ev.iter().map(|&(c, _)| {
                 let (col, row, _, _) = proj.front_rect(i64::from(c.0), c.1, c.2);
                 (col, row)
             }));
-            before = map;
         }
         eprintln!("glow_capture: scan {} events in {:.1} s", ev_points.len(), started.elapsed().as_secs_f64());
         if !ev_points.is_empty() {
@@ -493,20 +552,32 @@ fn main() -> Result<()> {
     let mut prev: [HashMap<Cell, (f64, f64)>; 2] = [HashMap::new(), HashMap::new()];
     let mut steps = [Steps::default(); 2];
     let (mut ms, mut n_events) = ([0.0f64; 2], 0usize);
-    let near = (2.0 * a.speed * tick_hz).ceil() as u64 + (f64::from(cfg_b.light.emit_fade_s) * a.speed * tick_hz).ceil() as u64;
+    let fade_s = if a.colour { cfg_b.light.colour_fade_s } else { cfg_b.light.emit_fade_s };
+    let near = (2.0 * a.speed * tick_hz).ceil() as u64 + (f64::from(fade_s) * a.speed * tick_hz).ceil() as u64;
+    if a.colour {
+        tracked.clear();
+        tracked_set.clear();
+    }
+    let mut next = 0;
     for k in 0..frames {
         let video_s = k as f64 / a.fps;
         let t = video_s * a.speed * tick_hz;
         let want = tick0 + t.floor() as u64;
         let mut frame_events = 0;
         while sim.world().tick() < want {
+            let clip_s = (sim.world().tick() - tick0) as f64 / (a.speed * tick_hz);
+            flora_due(&a, &mut sim, clip_s, &mut next)?;
             sim.step();
             let tick = sim.world().tick();
             for sk in [&mut sa, &mut sb] {
                 sk.set_clock(tick, 0.0);
                 sk.stage_world(sim.world(), sim.flora(), sim.fauna());
             }
-            let (map, ev) = events_of(&sa.emit_targets(), &before);
+            let (map, ev) = if a.colour {
+                (HashMap::new(), sb.colour_switches().into_iter().map(|c| (c, "colour")).collect())
+            } else {
+                events_of(&sa.emit_targets(), &before)
+            };
             for &(c, kind) in &ev {
                 last_event.insert(c, tick);
                 if tracked_set.insert(c) {
@@ -517,9 +588,11 @@ fn main() -> Result<()> {
                     writeln!(f, "{tick},{video_s:.3},{},{},{},{kind},{col},{row}", c.0, c.1, c.2)?;
                 }
             }
-            for &(c, _) in sb.emitters() {
-                if tracked_set.insert(c) {
-                    tracked.push(c);
+            if !a.colour {
+                for &(c, _) in sb.emitters() {
+                    if tracked_set.insert(c) {
+                        tracked.push(c);
+                    }
                 }
             }
             frame_events += ev.len();

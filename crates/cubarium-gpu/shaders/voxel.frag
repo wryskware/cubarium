@@ -1933,6 +1933,62 @@ vec3 hiTint(vec3 c) { return mix(c, vec3(1.0), u.hiK.x); }
 #if defined(PLANT_VIS) || defined(PLANT_SHADE)
 #include "plant_main.glsl"
 #else
+// A latticevine texel at face pixel (dx, row S - 1 - r) of the vine `vv` carried by voxel
+// (x, level, zc), drawn at depth z (z - 1 is the voxel in front, whose canopy shades it):
+// its colour into `acc` through `trans`. Returns its coverage: 1 ends the walk here (and
+// `trans` is set as the walk's end leaves it), 0 is a hole, between is a vine cell part way
+// through a change of tile (GLOW-EASE round 2: the old tile's share of coverage and colour
+// over the new one's), and `trans` is cut by it.
+float vineDraw(uvec4 vv, int x, int level, int zc, int z, int dx, int r,
+               inout vec3 acc, inout vec3 trans) {
+    int dy = S - 1 - r;
+    vec4 t = vineTexel(vv, x, level, zc, dx, dy);
+    uvec4 o = vv;
+    float s = cellVineFrom(x, level, zc, o);
+    float cn = t.a >= 0.5 ? 1.0 - s : 0.0;
+    vec4 p = vec4(0.0);
+    float co = 0.0;
+    if (s > 0.0) {
+        p = vineTexel(o, x, level, zc, dx, dy);
+        co = p.a >= 0.5 ? s : 0.0;
+    }
+    float cover = cn + co;
+    if (cover <= 0.0) { return 0.0; }
+    float h = hazeAt(float(z));
+    vec3 col = vec3(0.0);
+    vec3 e = vec3(0.0);
+    bool em = false;
+    if (cn > 0.0) {
+        // GLOW-EASE: a flagged mouth texel draws the host's colour for the cell this frame
+        // over its pigment's share.
+        bool en = LIT && vineEmits(t);
+        vec3 c = t.rgb;
+        float on = 1.0;
+        if (en) { e = t.rgb; cellEmit(x, level, zc, e, on); }
+        if (LIT && (!en || on < 1.0)) {
+            c = shadeFront(t.rgb, x, level, z, dx, dy, canopyAt(x, z - 1, level));
+        }
+        if (en) {
+            c = (on < 1.0 ? c * (1.0 - on) : vec3(0.0)) + e;
+            em = any(greaterThan(e, vec3(0.0)));
+        }
+        col += cn * c;
+    }
+    if (co > 0.0) {
+        // The old tile fades out as its pigment: an emitter's glow went before its tile.
+        vec3 c = LIT ? shadeFront(p.rgb, x, level, z, dx, dy, canopyAt(x, z - 1, level)) : p.rgb;
+        col += co * c;
+    }
+    if (cover >= 0.999) {
+        acc += trans * hazed(col, h);
+        trans = em ? emitterTrans(trans, hazed(e * cn, h), h) : vec3(0.0);
+        return 1.0;
+    }
+    acc += trans * cover * hazed(col / cover, h);
+    trans *= 1.0 - cover;
+    return cover;
+}
+
 void main() {
     S = u.geom.x;
     RISE = u.geom.y;
@@ -1987,28 +2043,9 @@ void main() {
                 // cell in front, is drawn flush on the rock, which shows through its holes.
                 if (z > 0 && u.tex.y != 0) {
                     uvec4 f = at(x, level, z - 1);
-                    if (isVine(f) && vineKind(f) == VINE_FLUSH) {
-                        vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
-                        if (t.a >= 0.5) {
-                            // GLOW-EASE: a flagged mouth texel draws the host's colour for
-                            // the cell this frame over its pigment's share.
-                            bool em = LIT && vineEmits(t);
-                            vec3 e = t.rgb;
-                            float on = 1.0;
-                            if (em) { cellEmit(x, level, z - 1, e, on); }
-                            if (LIT && (!em || on < 1.0)) {
-                                t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
-                                                   canopyAt(x, z - 1, level));
-                            }
-                            if (em) {
-                                t.rgb = (on < 1.0 ? t.rgb * (1.0 - on) : vec3(0.0)) + e;
-                                em = any(greaterThan(e, vec3(0.0)));
-                            }
-                            float h = hazeAt(float(z));
-                            acc += trans * hazed(t.rgb, h);
-                            trans = em ? emitterTrans(trans, hazed(e, h), h) : vec3(0.0);
-                            zHit = float(z); break;
-                        }
+                    if (isVine(f) && vineKind(f) == VINE_FLUSH
+                        && vineDraw(f, x, level, z - 1, z, dx, r, acc, trans) >= 1.0) {
+                        zHit = float(z); break;
                     }
                 }
                 acc += trans * blockFront(x, level, z, v, r, dx);
@@ -2021,27 +2058,10 @@ void main() {
             if (isVine(v)) {
                 int k = vineKind(v);
                 int q = max(1, S / 4);
-                if (k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
-                    || (k == VINE_SLIVER_R && dx >= S - q)) {
-                    vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
-                    if (t.a >= 0.5) {
-                        bool em = LIT && vineEmits(t);
-                        vec3 e = t.rgb;
-                        float on = 1.0;
-                        if (em) { cellEmit(x, level, z, e, on); }
-                        if (LIT && (!em || on < 1.0)) {
-                            t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
-                                               canopyAt(x, z - 1, level));
-                        }
-                        if (em) {
-                            t.rgb = (on < 1.0 ? t.rgb * (1.0 - on) : vec3(0.0)) + e;
-                            em = any(greaterThan(e, vec3(0.0)));
-                        }
-                        float h = hazeAt(float(z));
-                        acc += trans * hazed(t.rgb, h);
-                        trans = em ? emitterTrans(trans, hazed(e, h), h) : vec3(0.0);
-                        zHit = float(z); break;
-                    }
+                if ((k == VINE_CURTAIN || (k == VINE_SLIVER_L && dx < q)
+                    || (k == VINE_SLIVER_R && dx >= S - q))
+                    && vineDraw(v, x, level, z, z, dx, r, acc, trans) >= 1.0) {
+                    zHit = float(z); break;
                 }
             }
             int p = partOf(v);
