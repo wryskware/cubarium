@@ -2398,6 +2398,7 @@ struct LjBody {
     born_tick: u64,
     rider: bool,
     host_lineage: Option<Founder>,
+    host_id: Option<u64>,
     attach_body: f64,
     detach: Option<(&'static str, u64, f64)>,
     strikes: u64,
@@ -2524,6 +2525,7 @@ impl LjChain {
                     && a.attached.is_none()
                     && wrap(ex, ez, a) <= fa.config.parasite_attach_radius_m
                     && self.pre_riders.get(&a.id).copied().unwrap_or(0) < fa.config.parasite_max_per_host
+                    && cubarium_voxel_fauna::host_bears(fa.config, phys.core.body_min, a.body)
             });
             if !host {
                 continue;
@@ -2560,6 +2562,7 @@ impl LjChain {
                     born_tick: fa.tick.saturating_sub(a.age_ticks),
                     rider: a.attached.is_some(),
                     host_lineage: host.and_then(|h| h.founder),
+                    host_id: host.map(|h| h.id),
                     attach_body: a.body,
                     min_reserve_share: f64::INFINITY,
                     ..LjBody::default()
@@ -2568,7 +2571,15 @@ impl LjChain {
             if b.rider && b.detach.is_none() && a.attached.is_none() {
                 let line = fa.config.parasite_detach_body_fraction
                     * cubarium_voxel_fauna::effective_config(fa.config, a).body_max;
-                let cause = if a.body >= line { "dropoff" } else { "freed" };
+                // LANTERNJAW-LIFE: below the line, a rider whose host still stands let go of
+                // it because it outgrew it; one whose host left was freed.
+                let cause = if a.body >= line {
+                    "dropoff"
+                } else if b.host_id.is_some_and(|h| fa.animal(h).is_some()) {
+                    "outgrown"
+                } else {
+                    "freed"
+                };
                 b.detach = Some((cause, a.age_ticks, a.body));
             }
             if a.attached.is_none() {

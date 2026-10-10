@@ -44,7 +44,7 @@ use crate::{Fauna, FaunaConfig};
 //     the saved config.
 // 36: the minimal gut — `Animal::{stomach, eating, emergency, bout}`, the gut ledger
 //     lines, `FounderPhysiology::{gut, emergency_clear_hunger}`, `Hunter` without its
-//     satiated rest, `Rest` without `Satiated`, `FaunaConfig::parasite_take_per_day`,
+//     satiated rest, `Rest` without `Satiated`, `FaunaConfig::parasite_take_body_per_day`,
 //     `LifeConfig::ecological_day_s`; per-day upkeep and the new lifespans.
 // 37: springturf spread — `FounderPhysiology::burr_coat`.
 // 38: scenario maps — `FoundingConfig::reference_land_m2` in the saved config.

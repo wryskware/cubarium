@@ -19,7 +19,7 @@
 //!   ([`Command::BuryClutch`]); another lineage's egg needs its [`crate::EggSite`];
 //! - a rider (the lanternjaw's larva) needs a host by the hatching rule: the nearest living
 //!   body not of its lineage and not itself riding, within `parasite_attach_radius_m`, with
-//!   fewer than `parasite_max_per_host` riders.
+//!   fewer than `parasite_max_per_host` riders, that bears the rider ([`crate::host_bears`]).
 //!
 //! **Social ties.** Only a pack lineage keeps a group record ([`PackRecord`]); the herds,
 //! troops and the loftstrider calf's family are kin each body senses, with nothing to join.
@@ -308,7 +308,7 @@ impl Fauna {
     }
 
     /// **The host a rider placed near `(x, z)` would hold** (the hatching rule, module note).
-    fn host_near(&self, lineage: Founder, (x, z): (f64, f64), ring: f64) -> Option<u64> {
+    fn host_near(&self, lineage: Founder, rider_body: f64, (x, z): (f64, f64), ring: f64) -> Option<u64> {
         let radius = self.config.parasite_attach_radius_m;
         let most = self.config.parasite_max_per_host as usize;
         let mut best: Option<(f64, u64)> = None;
@@ -322,6 +322,9 @@ impl Fauna {
                 continue;
             }
             if self.animals.iter().filter(|r| r.attached == Some(Attachment { host: a.id })).count() >= most {
+                continue;
+            }
+            if !crate::host_bears(&self.config, rider_body, a.body) {
                 continue;
             }
             best = Some((d, a.id));
@@ -370,9 +373,9 @@ impl Fauna {
         let v = view.config.voxel_m;
         let ring = f64::from(view.config.width) * v;
         let host = if spec.stage == BodyStage::Rider {
-            Some(self.host_near(founder, (stance.pose.x, stance.pose.z), ring).ok_or_else(|| {
+            Some(self.host_near(founder, body, (stance.pose.x, stance.pose.z), ring).ok_or_else(|| {
                 format!(
-                    "no host within {} m for a rider (a body of another lineage, not riding, with room for one)",
+                    "no host within {} m for a rider (a body of another lineage, not riding, with room for one, that bears it)",
                     self.config.parasite_attach_radius_m
                 )
             })?)

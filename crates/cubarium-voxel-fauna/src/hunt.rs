@@ -1103,7 +1103,8 @@ fn flower_ambush(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Ac
     None
 }
 
-/// A fruit eater takes an insect in reach, or makes a bounded detour to sensed low visitors.
+/// A fruit eater takes an insect in reach (a bellwing, or a small lanternjaw juvenile), or
+/// makes a bounded detour to sensed low visitors.
 pub(crate) fn catch_step(
     fauna: &mut Fauna,
     i: usize,
@@ -1144,7 +1145,8 @@ pub(crate) fn catch_step(
     let target = fauna
         .animals
         .iter()
-        .filter(|o| o.founder == Some(Founder::Bellwing) && crate::is_prey_of(&fauna.config, &a, o))
+        // Any prey of its catch's list (the bellwing; LANTERNJAW-LIFE, a small lanternjaw).
+        .filter(|o| crate::is_prey_of(&fauna.config, &a, o))
         .filter_map(|o| {
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
             let d = dx.hypot(dz);
@@ -1188,8 +1190,9 @@ fn catch_foray(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView
     let now = fauna.tick;
     let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
     let p = fauna.percepts.get(&a.id)?;
+    let list = phys.active_hunter()?;
     let mut targets: Vec<_> = p.tracks.iter().take(usize::from(p.n))
-        .filter(|t| t.known && t.lineage == Founder::Bellwing.index() as u8
+        .filter(|t| t.known && Founder::ALL.get(usize::from(t.lineage)).is_some_and(|&f| list.hunts(f))
             && t.modes & crate::perception::SIGHT != 0 && now.saturating_sub(t.tick) <= memory)
         .filter_map(|t| {
             let prey = fauna.animals.iter().find(|b| b.id == t.id)?;

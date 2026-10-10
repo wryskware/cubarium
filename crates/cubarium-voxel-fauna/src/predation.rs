@@ -102,13 +102,13 @@ pub(crate) fn is_prey_in_window(
     let Some(h) = config.founder(hf).active_hunter() else {
         return false;
     };
-    // An opportunist's table is the bellwing catch's ([`crate::FounderPhysiology::opportunist`]):
-    // `active_hunter` already holds it off with the switch; on, it takes a low bellwing
-    // worth the strikes and nothing else.
+    // An opportunist's table is the catch's ([`crate::FounderPhysiology::opportunist`]):
+    // `active_hunter` already holds it off with the switch; on, it takes low prey of its
+    // list worth the strikes (a bellwing, and since LANTERNJAW-LIFE a small lanternjaw
+    // juvenile for the seedporter) and nothing else.
     let p = config.founder(hf);
     if p.opportunist {
         if !p.catch_bellwings
-            || pf != crate::Founder::Bellwing
             || prey.pose.y_m - hunter.pose.y_m > p.catch_ceiling_m
             || !catch_worthwhile(config, hunter, prey)
         {
@@ -131,7 +131,22 @@ pub(crate) fn is_prey_in_window(
     if !flyer_takeable(config, hunter, &h, pf, prey) {
         return false;
     }
-    h.hunts(pf) && prey.body <= h.prey_max_ratio * window_body
+    h.hunts(pf) && window_size(config, prey) <= h.prey_max_ratio * window_body
+}
+
+/// **The size a prey body counts as in a hunter's window** (LANTERNJAW-LIFE): its structure,
+/// times its lineage's [`crate::FounderPhysiology::adult_size_window_factor`] once it is at or
+/// past its `birth_body` (a grown lanternjaw is formidable).
+pub fn window_size(config: &FaunaConfig, prey: &Animal) -> f64 {
+    let Some(pf) = prey.founder else {
+        return prey.body;
+    };
+    let p = config.founder(pf);
+    if prey.body >= crate::effective_config(config, prey).birth_body {
+        prey.body * p.adult_size_window_factor.max(1.0)
+    } else {
+        prey.body
+    }
 }
 
 /// A flyer (the bellwing) is prey at rest — perched or on the ground — and, since S3 of

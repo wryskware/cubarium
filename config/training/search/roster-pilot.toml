@@ -12,7 +12,7 @@
 #   upkeep is x1 at the gut's daily need f / 7,200 s (the exhibit's old cuts are gone);
 #   `intake` (on the unread bite_per_s) is replaced by the gut's own genes per lineage:
 #   stomach k, bite b, appetite floor s0, refill gap (repair 3) and tau per food class
-#   eaten; the rider's take is `rider_take` (parasite_take_per_day). Gut genes start at
+#   eaten; the rider's take is `rider_take` (parasite_take_body_per_day, its own body a day since LANTERNJAW-LIFE). Gut genes start at
 #   x1. The lanternjaw's and loftstrider's genes are frozen too: readout-only lineages give
 #   the search no signal (Fable 2026-10-03). 60 searched.
 # - F7: R is a readout; S and F are soft (run_margin 1e6: every miss runs and pays k_soft x
@@ -808,7 +808,7 @@ value = 1.0
 
 [[gene]]
 name = "rider_take"
-path = "fauna.parasite_take_per_day"
+path = "fauna.parasite_take_body_per_day"
 range = [0.25, 4.0]
 value = 1.0
 

@@ -1507,7 +1507,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2716 rows)
+**`fauna.*`** (2726 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1659,6 +1659,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.littershredder.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.littershredder.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.littershredder.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.littershredder.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.littershredder.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.littershredder.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -1937,6 +1938,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.frondgrazer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.frondgrazer.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.frondgrazer.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.frondgrazer.burr_coat` | 0.6 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.frondgrazer.senses.sight_m` | 8.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.frondgrazer.senses.sight_night_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -2105,30 +2107,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00007500000000000001 | org-units/s | [0, inf) | 0.000001–0.0001 log | B | derived | fastest structure grows from the reserve |
-| `fauna.founders.lanternjaw.core.body_min` | 0.102 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
-| `fauna.founders.lanternjaw.core.birth_body` | 0.63 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
+| `fauna.founders.lanternjaw.core.body_min` | 0.0525 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
+| `fauna.founders.lanternjaw.core.birth_body` | 0.3675 | org-units | [0, inf) | yes | B | placeholder | structure at which it can pay for a birth |
 | `fauna.founders.lanternjaw.core.birth_cost` | 0.15 | org-units | [0, inf) | yes | B | placeholder | a gestation's package: the newborn's body_min plus its reserve |
 | `fauna.founders.lanternjaw.core.reserve_cap` | 0.6 | fraction of body | [0, inf) | 0.2–5 | A | placeholder | ceiling on new intake into the reserve |
 | `fauna.founders.lanternjaw.core.drown_depth_m` | 0.2 | m | [0, inf) |  | D | placeholder | standing water that kills the heuristic body and a clutch |
 | `fauna.founders.lanternjaw.core.energy_density` | 2.0 | energy per org-unit | [0, inf) |  | N | placeholder | energy an introduced animal arrives with |
 | `fauna.founders.lanternjaw.core.lifespan_median_s` | 86400.0 | s | [0, inf) | 3600–172800 log | B | derived | median lifespan (0: none) |
-| `fauna.founders.lanternjaw.core.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
+| `fauna.founders.lanternjaw.core.reproduction.surplus_floor` | 0.06 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.lanternjaw.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.lanternjaw.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
-| `fauna.founders.lanternjaw.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.lanternjaw.core.reproduction.birth_interval_s` | 7200.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
-| `fauna.founders.lanternjaw.core.reproduction.egg_organic` | 0.15 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.lanternjaw.core.reproduction.egg_organic` | 0.078 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.lanternjaw.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.lanternjaw.core.reproduction.incubation_s` | 0.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
-| `fauna.founders.lanternjaw.core.reproduction.clutch_max` | 3 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
+| `fauna.founders.lanternjaw.core.reproduction.clutch_max` | 7 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
 | `fauna.founders.lanternjaw.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.lanternjaw.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
-| `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 0.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
+| `fauna.founders.lanternjaw.core.reproduction.clutch_hold_max_s` | 1800.0 | s | [0, inf) | 0–7200 | - | placeholder | clutch from surplus: longest a ready layer waits for a full clutch_max before laying what it can (0 lays at once) |
 | `fauna.founders.lanternjaw.core.reproduction.egg_fungus_radius_m` | 0.0 | m | [0, inf) | 0–2 | - | placeholder | fungal egg site: an egg goes within this of a fungus holding cap tissue (0: its own face) |
-| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.0 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
+| `fauna.founders.lanternjaw.core.reproduction.brood_share` | 0.5 | fraction of net income | [0, 1] | 0–1 | - | placeholder | the brood (1 - kappa): share of a mature egg-layer's net income earmarked for its next full clutch; growth draws only above it, hunger ignores it (0 off) |
 | `fauna.founders.lanternjaw.core.reproduction.litters_per_year` | 0 | conceptions per year | [0, inf) |  | - | placeholder | breeding season: at most this many conceptions (gestations opened or clutches laid) per Cubarium year, a pack's counted per pack (0: no season) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.lanternjaw.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
@@ -2215,6 +2217,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.lanternjaw.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.lanternjaw.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.lanternjaw.adult_size_window_factor` | 12.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.lanternjaw.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.lanternjaw.senses.sight_m` | 4.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.lanternjaw.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -2493,6 +2496,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.capgnawer.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.capgnawer.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.capgnawer.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.capgnawer.burr_coat` | 0.8 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.capgnawer.senses.sight_m` | 1.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.capgnawer.senses.sight_night_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -2771,6 +2775,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.loftstrider.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.loftstrider.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.loftstrider.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.loftstrider.burr_coat` | 0.4 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.loftstrider.senses.sight_m` | 12.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.loftstrider.senses.sight_night_m` | 6.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -3049,6 +3054,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.ripple-snail.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.ripple-snail.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.ripple-snail.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.ripple-snail.burr_coat` | 0.1 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.ripple-snail.senses.sight_m` | 0.5 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.ripple-snail.senses.sight_night_m` | 0.25 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -3327,6 +3333,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.bellwing.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.bellwing.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.bellwing.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.bellwing.burr_coat` | 0.3 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.bellwing.senses.sight_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.bellwing.senses.sight_night_m` | 0.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -3605,6 +3612,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.seedporter.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.seedporter.armour` | 0.25 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.seedporter.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.seedporter.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.seedporter.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.seedporter.senses.sight_night_m` | 3.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -3682,7 +3690,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.taste_reference_food` | 1.5 | organic units per site | (0, inf) |  | - | decision, digest | default food reference for taste saturation; independent of body mass and scent emission |
 | `fauna.founders.seedporter.taste_reference` | 0.02 | organic units per site | (0, inf) |  | - | decision, digest | food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food) |
 | `fauna.founders.seedporter.hunter.strike_power` | 4.0 | wound per hit | [0, inf) |  | - | placeholder | a hit adds power x (S_pred / S_prey) x (1 - armour) |
-| `fauna.founders.seedporter.hunter.prey_max_ratio` | 4.0 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
+| `fauna.founders.seedporter.hunter.prey_max_ratio` | 1.0 | x own body | [0, inf) |  | - | placeholder | the size window: prey at most this x its own |
 | `fauna.founders.seedporter.hunter.strike_reach_length_fraction` | 0.8 | x body length | [0, inf) |  | - | placeholder | the strike capsule's reach |
 | `fauna.founders.seedporter.hunter.vertical_reach_m` | 0.0 | m | [0, inf) |  | - | placeholder | rearing and jumping reach above the standing surface; 0 uses only the jaw band |
 | `fauna.founders.seedporter.hunter.jaw_band_height_fraction` | 2.0 | x body height | [0, inf) |  | - | placeholder | the jaw band's top |
@@ -3883,6 +3891,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
 | `fauna.founders.chorister.gut.mass_exponent` | 1.0 | exponent | (0, 1] | 0.5–1 | - | placeholder | e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size |
 | `fauna.founders.chorister.armour` | 0.0 | fraction | [0, 1] |  | - | placeholder | a hit is reduced by 1 - armour |
+| `fauna.founders.chorister.adult_size_window_factor` | 1.0 | x own body | [1, inf) | 1–30 log | - | placeholder | LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size) |
 | `fauna.founders.chorister.burr_coat` | 0.5 | factor | [0, 1] |  | - | placeholder | how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance |
 | `fauna.founders.chorister.senses.sight_m` | 16.0 | m | [0, inf) |  | - | placeholder | sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind) |
 | `fauna.founders.chorister.senses.sight_night_m` | 9.0 | m | [0, inf) |  | - | placeholder | sight's range below the day line |
@@ -4224,6 +4233,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.hatch_chance_per_dusk` | 0.3333333333333333 | probability per dusk | [0, 1] |  | - | placeholder | a dormant egg past its footfall gate hatches at one dusk |
 | `fauna.parasite_attach_radius_m` | 0.75 | m | [0, inf) | 0.25–2 | N | placeholder | host search radius from a hatching egg |
 | `fauna.parasite_max_per_host` | 1 | count | [0, inf) | 0–4 | N | placeholder | riders one host carries (0: dormant eggs never hatch) |
-| `fauna.parasite_take_per_day` | 0.09 | host body per ecological day | [0, inf) | 0.01–0.5 log | N | derived | a rider's take from its host, into its reserve |
-| `fauna.parasite_detach_body_fraction` | 0.24 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
+| `fauna.parasite_take_body_per_day` | 2.0 | rider's own body per ecological day | [0, inf) | 0.5–8 log | N | placeholder | LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider |
+| `fauna.parasite_host_bear_per_day` | 0.5 | host body per ecological day | [0, inf) | 0.1–2 log | N | placeholder | LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host |
+| `fauna.parasite_detach_body_fraction` | 0.28 | fraction of lineage body_max | (0, 1] | 0.15–0.5 | N | placeholder | a rider drops off at this size |
 | `fauna.lineage_body_ceiling` | 2500 | bodies | [0, inf) |  | N | decision | COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off) |

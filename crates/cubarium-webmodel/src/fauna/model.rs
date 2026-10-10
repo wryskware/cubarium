@@ -810,17 +810,15 @@ impl FaunaModel {
         }
     }
 
-    /// **The parasite riders** (`drain_riders`, `step.rs:456-484`; `drop_off_grown`,
-    /// `step.rs:489-506`): each rider takes `parasite_take_per_day / ecological_day_s` of its
-    /// host's body per second into its reserve (from the host's reserve, then structure,
-    /// spread over the host lineage's cohorts), and drops off free at
-    /// `parasite_detach_body_fraction · body_max`. A rider whose host lineage is gone is freed.
+    /// **The parasite riders** (`drain_riders`, `drop_off_grown`, LANTERNJAW-LIFE): each rider
+    /// takes `parasite_take_body_per_day / ecological_day_s` of its **own** body per second
+    /// into its reserve, at most `parasite_host_bear_per_day` of its host's mean body (from the
+    /// host's reserve, then structure, spread over the host lineage's cohorts), and drops off
+    /// free at `parasite_detach_body_fraction · body_max` or once its host no longer bears it
+    /// (`cubarium_voxel_fauna::host_bears`). A rider whose host lineage is gone is freed.
     fn riders(&mut self, dt: f64) {
-        let per_s = if self.config.life.ecological_day_s > 0.0 {
-            self.config.parasite_take_per_day / self.config.life.ecological_day_s
-        } else {
-            0.0
-        };
+        let day = self.config.life.ecological_day_s;
+        let bear_per_s = if day > 0.0 { self.config.parasite_host_bear_per_day / day } else { 0.0 };
         for f in Founder::ALL {
             let detach = self.config.parasite_detach_body_fraction * self.phys(f).core.body_max;
             let n = self.pops[f.index()].len();
@@ -833,7 +831,10 @@ impl FaunaModel {
                     continue;
                 }
                 let riders = self.pops[f.index()][k].n;
-                let want_each = per_s * hc.mean_body * dt;
+                let rider_body = self.pops[f.index()][k].b.body;
+                let want_each = cubarium_voxel_fauna::rider_take_per_s(&self.config, rider_body)
+                    .min(bear_per_s * hc.mean_body)
+                    * dt;
                 let want = want_each * riders;
                 // From the host lineage pro rata to its bodies.
                 let hsc = self.phys(host).core;
@@ -848,7 +849,7 @@ impl FaunaModel {
                 self.ledger[f.index()].rider_take += got;
                 let r = &mut self.pops[f.index()][k];
                 r.b.reserve += got / riders.max(1e-12);
-                if r.b.body >= detach {
+                if r.b.body >= detach || !cubarium_voxel_fauna::host_bears(&self.config, r.b.body, hc.mean_body) {
                     r.host = None;
                     self.ledger[f.index()].dropoffs += r.n;
                 }
@@ -942,7 +943,7 @@ impl FaunaModel {
                     let pp = *self.phys(pf);
                     let cap = rule.meal_cap;
                     for c in self.pops[pf.index()].iter_mut() {
-                        if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, c.b.body) {
+                        if c.host.is_some() || !(c.n > 0.0) || !laws::in_size_window(&hp, hb * per_pack, &pp, c.b.body) {
                             continue;
                         }
                         if hp.opportunist {
