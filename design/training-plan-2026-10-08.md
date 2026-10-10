@@ -1048,6 +1048,11 @@ control and the reward accounting; display targets after seeing results.
    - Role call 6 (Wrysk, 2026-10-10: "yeah fix all four"): absolute persistence for acceptance, J counts only
      adult recruits, a bellwing seasonal envelope (median at most 3x nominal), H as prey biomass per hour.
      SCORE-FIXES (Codex) building.
+   - Role call 7 (Wrysk, 2026-10-10): B, `mass_small` split per species (seedporter, bellwing, capgnawer,
+     lanternjaw), with a guard keeping the lanternjaw big enough for its prey. Re-derive every mass box
+     after the taste fix. Lanternjaw diet (Wrysk): "bellwings and capgnawers should be the main prey. they can
+     eat shredders too. occasionally a juvenile seedporter or frondgrazer. snails can be eaten when ashore."
+     Added to LANTERNJAW-LIFE.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;
