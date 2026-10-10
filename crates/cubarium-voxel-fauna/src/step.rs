@@ -4120,7 +4120,7 @@ fn founder_feed(
     // stand's is its species' income rule.
     let diet = phys.eating_diet();
     let Some((meal, stock, _)) =
-        body::mouth_meal_worth(&flora.view(), view, &cols, site_y, geometry, diet, &phys.food_worth())
+        body::mouth_meal_worth(&flora.view(), view, &cols, site_y, geometry, diet, &phys.mouth_weigh())
     else {
         return false;
     };

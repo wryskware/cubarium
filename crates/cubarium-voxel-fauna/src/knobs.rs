@@ -397,6 +397,16 @@ pub struct TeacherConfig {
     /// was), count. 0 walks straight on.
     #[serde(default = "turn_back_samples")]
     pub forage_turn_back_samples: u32,
+    /// **The capgnawer stays only on food worth staying for** (CAPGNAWER-CAPS, role call
+    /// 5A): its taste reads the worth of a bite against a full bite of its best food
+    /// ([`crate::FounderPhysiology::taste_by_yield`]), and its forager holds still to feed
+    /// only where that worth is at least this, a fraction of a full cap bite. Weaker food
+    /// over [`TeacherConfig::feed_gate`] (its litter, worth its yield ratio however deep
+    /// the pile) it eats on the move while its search, the fungal scent included, goes
+    /// on. Read by the capgnawer's forager only, and meaningful only with its switch on;
+    /// 0 stays on any food it feeds on, the other blind foragers' rule.
+    #[serde(default = "capgnawer_stay_worth")]
+    pub capgnawer_stay_worth: f64,
     /// **EDGE, a pressed walk re-plans**: a reflex walking a body to a target (a glider's
     /// refuge, roost or fruit) that has asked it forward this long without its moving
     /// gives that target up, seconds. A fruit approach that asks no motion, or a hungry
@@ -545,6 +555,9 @@ fn stay_forward() -> f64 {
 fn turn_back_samples() -> u32 {
     2
 }
+fn capgnawer_stay_worth() -> f64 {
+    0.25
+}
 
 fn bw_altitude() -> f64 {
     0.4
@@ -610,6 +623,7 @@ impl Default for TeacherConfig {
             bellwing_roost_ceiling: bw_roost_ceiling(),
             forage_stay_forward: stay_forward(),
             forage_turn_back_samples: turn_back_samples(),
+            capgnawer_stay_worth: capgnawer_stay_worth(),
             press_replan_s: press_replan_s(),
             press_shun_s: press_shun_s(),
             route_refresh_s: route_refresh_s(),
