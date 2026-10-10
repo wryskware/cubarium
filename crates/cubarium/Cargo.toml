@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "cubarium"
 path = "src/main.rs"
 
+# Its mesher and .glb writer carry mechanism tests.
+[[example]]
+name = "voxel_export"
+test = true
+
 [features]
 # `examples/pack_profile.rs`'s per-phase pack times. Off, the phase marks compile to
 # nothing (`sink/gpu/pack_timer.rs`).
