@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1113 rows)
+**`flora.*`** (1151 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -431,6 +431,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.bloomcrown.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.bloomcrown.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.bloomcrown.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.bloomcrown.foliage_kg_per_unit` | 0.038 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.bloomcrown.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.bloomcrown.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.bloomcrown.wilt_water` | 0.05 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -478,6 +480,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.bloomcrown.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.bloomcrown.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.bloomcrown.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.bloomcrown.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.bloomcrown.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.bloomcrown.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.bloomcrown.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -545,6 +549,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.umbrellafrond.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.umbrellafrond.light_half` | 0.15 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.umbrellafrond.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.umbrellafrond.foliage_kg_per_unit` | 0.22 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.umbrellafrond.rooting_depth` | 4 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.umbrellafrond.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.umbrellafrond.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -592,6 +598,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.umbrellafrond.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.umbrellafrond.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.umbrellafrond.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.umbrellafrond.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.umbrellafrond.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.umbrellafrond.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.umbrellafrond.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -659,6 +667,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.springturf.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.springturf.light_half` | 1.0 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.springturf.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.springturf.foliage_kg_per_unit` | 0.0021 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.springturf.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.springturf.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.springturf.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -706,6 +716,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.springturf.wald_mean_m` | 3.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.springturf.wald_shape_m` | 0.5 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.springturf.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.springturf.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.springturf.burr_pickup` | 0.1 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.springturf.burr_retention_mean_m` | 3.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.springturf.burr_retention_shape` | 0.7 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -773,6 +785,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.stonecushion.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.stonecushion.light_half` | 0.3 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.stonecushion.specific_leaf_area_m2_per_kg` | 8.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.stonecushion.foliage_kg_per_unit` | 0.026 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.stonecushion.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.stonecushion.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.stonecushion.wilt_water` | 0.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -820,6 +834,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.stonecushion.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.stonecushion.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.stonecushion.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.stonecushion.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.stonecushion.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.stonecushion.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.stonecushion.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -887,6 +903,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.velvetpad.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.velvetpad.light_half` | 0.1 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.velvetpad.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.velvetpad.foliage_kg_per_unit` | 0.0105 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.velvetpad.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.velvetpad.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.velvetpad.wilt_water` | 0.25 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -934,6 +952,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.velvetpad.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.velvetpad.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.velvetpad.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.velvetpad.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.velvetpad.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.velvetpad.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.velvetpad.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1001,6 +1021,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.glowcap.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.glowcap.light_half` | 0.5 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.glowcap.specific_leaf_area_m2_per_kg` | 20.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.glowcap.foliage_kg_per_unit` | 0.0156 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.glowcap.rooting_depth` | 1 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.glowcap.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.glowcap.wilt_water` | 0.2 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1048,6 +1070,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.glowcap.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.glowcap.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.glowcap.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.glowcap.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.glowcap.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.glowcap.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.glowcap.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1115,6 +1139,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.vaulttree.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.vaulttree.light_half` | 0.6 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.vaulttree.specific_leaf_area_m2_per_kg` | 13.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.vaulttree.foliage_kg_per_unit` | 0.42 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.vaulttree.rooting_depth` | 6 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.vaulttree.rooting_radius` | 2 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.vaulttree.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1162,6 +1188,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.vaulttree.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.vaulttree.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.vaulttree.seed_release_share` | 0.775 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.vaulttree.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.vaulttree.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.vaulttree.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.vaulttree.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1229,6 +1257,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.lanternberry.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.lanternberry.light_half` | 0.4 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.lanternberry.specific_leaf_area_m2_per_kg` | 13.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.lanternberry.foliage_kg_per_unit` | 0.069 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.lanternberry.rooting_depth` | 3 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.lanternberry.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.lanternberry.wilt_water` | 0.1 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1276,6 +1306,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.lanternberry.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.lanternberry.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.lanternberry.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.lanternberry.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.lanternberry.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.lanternberry.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.lanternberry.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1343,6 +1375,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.nutrient_half` | 0.5 | mineral units | [0, inf) | 0.1–2 log | C | placeholder | K_N: mineral half-saturation |
 | `flora.siphonreed.nutrient_draw_max` | 0.01 | /s per unit site mineral | [0, inf) | 0.003–0.1 log | D | placeholder | f_max: rate cap on income from the site's mineral |
 | `flora.siphonreed.light_half` | 0.8 | fraction of open sky | [0, inf) | 0.05–1.5 | B | placeholder | light response half-saturation |
+| `flora.siphonreed.specific_leaf_area_m2_per_kg` | 15.0 | m2 leaf per kg leaf dry mass | (0, inf) | 4–40 log | B | literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form | SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area |
+| `flora.siphonreed.foliage_kg_per_unit` | 0.044 | kg leaf dry mass per org-unit of foliage | (0, inf) | 0.001–1 log | C | derived: Asner et al. 2003 biome LAI of a closed stand of the real analog | stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover) |
 | `flora.siphonreed.rooting_depth` | 2 | reference voxels (0.25 m) | [0, inf) | yes | C | placeholder | root box depth below the support |
 | `flora.siphonreed.rooting_radius` | 1 | reference voxels (0.25 m) | [0, inf) |  | C | placeholder | root box half-width |
 | `flora.siphonreed.wilt_water` | 1.0 | available water (0 wp, 1 fc) | (-inf, inf) | yes | B | measured | mu = 0 at and below |
@@ -1390,6 +1424,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.dispersal` | (absent) | mode (Drop, Wind, Spores, Water, Wald) | (-inf, inf) |  | N | decision | how the species' seeds travel |
 | `flora.siphonreed.wald_mean_m` | 0.0 | m | [0, inf) | 0.25–6 log | - | placeholder | Wald dispersal: the WALD (inverse-Gaussian) kernel's mean distance, the wind knob |
 | `flora.siphonreed.wald_shape_m` | 0.0 | m | [0, inf) | 0.1–4 log | - | placeholder | Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda) |
+| `flora.siphonreed.seed_release_share` | 0.0 | fraction of crown height (0 = fixed kernel) | [0, 1] | 0.3–1 | B | anatomy: the shelves' band | Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a) |
+| `flora.siphonreed.seed_fall_m_per_s` | 1.0 | m/s | (0, inf) | 0.5–2.5 log | A | literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986 | Wald from the crown: the seed's terminal fall speed F |
 | `flora.siphonreed.burr_pickup` | 0.0 | probability per contact at coat 1 | [0, 1] | 0–0.5 | - | placeholder | burrs: a donor's seed latches onto an animal stepping onto its face |
 | `flora.siphonreed.burr_retention_mean_m` | 0.0 | m walked | [0, inf) | 0.5–16 log | - | placeholder | burrs: mean distance a seed rides before it falls off (Weibull) |
 | `flora.siphonreed.burr_retention_shape` | 1.0 | - | (0, inf) | 0.3–2 | - | placeholder | burrs: Weibull shape k of the retention curve (1 exponential, < 1 a falling detachment rate) |
@@ -1462,7 +1498,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.latticevine.founder_spacing` | 8 | voxels (not rescaled) | [0, inf) | 2–24 | - | placeholder | the fewest voxels between two founders' roots |
 | `flora.latticevine.founder_spread_m` | 3.0 | m of floor | [0, inf) | 0–8 | - | placeholder | floor distance founders keep while the walls allow it; the rest fill at founder_spacing; 0 off |
 | `flora.latticevine.seed_max_age_s` | 28800.0 | s | [0, inf) | yes | C | placeholder | a banked latticevine seed (voided from a gut) older than this at its check falls to litter |
-| `flora.shade_k_per_m2` | 0.09375 | m2 per org-unit | [0, inf) | yes | D | derived | canopy attenuation per square metre |
+| `flora.light_extinction_k` | 0.6 | dimensionless | [0, inf) | 0.3–0.9 | A | literature: Monsi & Saeki 1953; Jones 1992; Campbell & Norman 1998 (broadleaf 0.5-0.7) | k_ext: Beer-Lambert light extinction, exp(-k_ext (1-porosity) LAI) per foliage layer |
 | `flora.decomposition` | 0.001 | /s | [0, inf) | yes | B | placeholder | k_d: litter decomposition |
 | `flora.litter_fragment_boost` | 0.25 | fraction | [0, inf) |  | - | placeholder | extra local microbial decay after shredder feeding |
 | `flora.litter_fragment_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | radius of shredder fragmentation |
@@ -1478,6 +1514,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.burr_cap` | 6 | seeds per animal | [0, inf) | 1–20 | - | placeholder | burrs: the most seeds one animal's coat carries at once |
 | `flora.wind_shape` | 2.0 | - | (0, inf) | 1.2–4 | - | placeholder | wind kernel: Lomax shape k (larger is a thinner tail) |
 | `flora.wind_scale_hops` | 2.5 | hops | (0, inf) | 0.5–8 | - | placeholder | wind kernel: Lomax scale a, in the species' hops |
+| `flora.seed_wind_m_per_s` | 2.0 | m/s | [0, inf) | 0.5–6 | B | literature: Katul et al. 2005; Nathan et al. 2002 (canopy-top wind ~2 m/s) | Wald from the crown: mean wind U at release height |
+| `flora.seed_eddy_ratio` | 0.1 | dimensionless (K / (U H)) | (0, inf) | 0.03–0.3 log | B | derived: K = sigma_w^2 T_L, Raupach 1988 / Katul et al. 2005 | Wald from the crown: eddy diffusivity per unit wind and height; shape = H / (2a) |
 | `flora.carcass_remains_fraction` | 0.3 | fraction of the body's organic matter | [0, 1] | 0.1–0.6 | - | placeholder | carrion below this draws as remains, not the body |
 | `flora.carcass_gone_fraction` | 0.02 | fraction of the body's organic matter | [0, 1] | 0.005–0.1 log | - | placeholder | carrion at or below this drops the carcass record |
 | `flora.seed_mark_recent_s` | 120.0 | s | [0, inf) | 10–600 | - | placeholder | how long a seed landing keeps its site's mark |
