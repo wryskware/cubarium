@@ -169,6 +169,10 @@ pub fn browser_cone_readings(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -200,6 +204,10 @@ pub fn browser_cone_observation(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let body = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let reading = senses::cone_readings(
         view,
         &occupancy,
@@ -404,6 +412,10 @@ pub fn browser_cone_census(
     }
     let occupancy = senses::cone_occupancy(view, flora, fauna);
     let geometry = fauna.config.founder(Founder::Browser).body_at(animal.body);
+    let occupancy = senses::FeedingCone::new(
+        view, flora, &occupancy, fauna.config.founder(Founder::Browser),
+        fauna.config.teachers.feed_gate, fauna.config.cue.emit_reference,
+    );
     let origin = senses::cone_origin(view, &animal.pose, animal.site.y, &geometry);
     let heading = animal.pose.heading_rad;
     let range = manifest.cone_range_m;

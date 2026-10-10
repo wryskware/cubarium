@@ -4495,7 +4495,7 @@ pub(crate) fn bitten_cell(
 /// `z` off the strip) is covered by nothing, as before.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn disc_covers(sx: i64, sz: i64, span: i64, r2: f64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
+pub(crate) fn disc_covers(sx: i64, sz: i64, span: i64, r2: f64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
     let Some((dx, dz)) = nearest_offset(sx, sz, width, depth, cx, cz) else {
         return false;
     };
@@ -4932,13 +4932,18 @@ fn observation_v2(
     }
 
     // Cone(3, foliage/body): the fixed ray fan, a fresh reading each observation. No
-    // memory, no expansion, no body identity. Geometry alone, so it reads with or without
-    // a senses handle.
+    // memory, no expansion, no body identity. Crowns use this observer's feeding threshold;
+    // it reads with or without a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = &cone_occupancy.expect("browser observations prepare cone occupancy");
         let fruit = manifest.cone_counts_fruit.then_some(fv);
+        // Fruit cones judge fruit at the hit, independently of the foliage stock.
+        let gate = if fruit.is_some() { 0.0 } else { fauna.config.teachers.feed_gate };
+        let occupancy = crate::senses::FeedingCone::new(
+            view, fv, occupancy, phys, gate, fauna.config.cue.emit_reference,
+        );
         let cone = crate::senses::cone_readings_in(
-            view, fruit, occupancy, a.id, &a.pose, standing_y, manifest, &body,
+            view, fruit, &occupancy, a.id, &a.pose, standing_y, manifest, &body,
         );
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {
