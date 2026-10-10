@@ -1702,6 +1702,54 @@ fn vine_sheet(config: FloraConfig) -> (World, Flora, Vec<Face>) {
     (world, flora, faces)
 }
 
+/// The optimized search keeps the full scan's cutoff and face tie order, even with
+/// a warm geometry index, a moving body and a changing visibility predicate.
+#[test]
+fn indexed_nest_search_matches_full_scan_across_seam_height_and_candidate_ties() {
+    let (world, flora, faces) = vine_sheet(FloraConfig::default());
+    let mut fauna = Fauna::new(nesting(4000.0));
+    aloft(&mut fauna, &world, 0.0, 0.625, 1.5, EAST, StartingStores::FULL);
+    let view = world.view();
+    let fv = flora.view();
+    let phys = *fauna.config.founder(BW);
+    let flight = phys.flight.unwrap();
+    let air = fauna.open_air(&view, &flight);
+    let ring = f64::from(view.config.width) * V;
+    // The sheet has more than 24 candidates, with equal level distances in each row.
+    // Move the same body and change sight filtering while the geometry index is warm.
+    for x in [0.0, ring - 0.125, WALL_FACE_M - 0.5] {
+        for y in [0.875, 1.5, 2.375] {
+            fauna.animals[0].pose.x = x;
+            fauna.animals[0].pose.y_m = y;
+            let a = fauna.animals[0];
+            let sc = crate::body::effective_config(&fauna.config, &a);
+            for reach in [0.0, 0.625, 1.75, ring] {
+                let mut near: Vec<_> = faces.iter().copied().filter_map(|face| {
+                    let fy = (f64::from(face.y) + 0.5) * V;
+                    if fy < y - flight.band_max_m || fy > y + flight.band_max_m {
+                        return None;
+                    }
+                    let (dx, dz) = crate::pose::wrapped_delta(x, a.pose.z,
+                        (f64::from(face.x) + 0.5) * V, (f64::from(face.z) + 0.5) * V, ring);
+                    let d = (dx * dx + dz * dz).sqrt();
+                    (d <= reach).then_some((d, face))
+                }).collect();
+                near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+                for minimum_y in [0.0, 2.0, 100.0] {
+                    let expected = near.iter().take(24).find_map(|&(_, face)| {
+                        crate::step::vine_nest_fits(&view, &air, &phys, &flight, sc.body_min, face)?;
+                        let (pose, _) = crate::flight::vine_cling(&view, &phys, &flight, a.body, face)?;
+                        (pose.y_m >= minimum_y).then_some(pose)
+                    });
+                    let actual = crate::step::nest_target(&mut fauna, 0, &view, &fv, reach,
+                        |pose| pose.y_m >= minimum_y);
+                    assert_eq!(actual, expected, "x={x} y={y} reach={reach} min_y={minimum_y}");
+                }
+            }
+        }
+    }
+}
+
 /// The vine wall's world: 16 × 20 × 5 at 0.25 m, the clock off (or at noon).
 fn config_noon_or_off(noon: bool) -> VoxelConfig {
     config(16, 20, 5, if noon { clock_at(12.0) } else { clock_off() })
