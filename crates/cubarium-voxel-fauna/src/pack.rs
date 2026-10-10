@@ -123,8 +123,14 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
             fauna.ledger.pups_independent += 1;
         }
     }
-    // Succession: a breeder that is gone (or no adult of the pack) gives way to the oldest
-    // adult left, the lowest id on a tie. A pack with no member left is dropped.
+    succession(fauna);
+    provision(fauna, view);
+}
+
+/// **Succession**: a breeder that is gone (or no adult of the pack) gives way to the oldest
+/// adult left, the lowest id on a tie. A pack with no member left is dropped. Run every tick
+/// by [`upkeep`], and at once by a world edit that takes a member out (`crate::edit`).
+pub(crate) fn succession(fauna: &mut Fauna) {
     let ids: Vec<u64> = fauna.packs().iter().map(|p| p.id).collect();
     for id in ids {
         let mut members = 0usize;
@@ -159,7 +165,6 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
             }
         }
     }
-    provision(fauna, view);
 }
 
 /// **Provisioning** (Brief R3; the minimal gut's repair 2 item 6): every adult within

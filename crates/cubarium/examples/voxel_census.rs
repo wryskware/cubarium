@@ -26,6 +26,10 @@
 //! cargo run --release -p cubarium --example voxel_census -- 1 generated closed heuristic
 //! ```
 //!
+//! `edit=FILE.toml` applies a scenario file's world edits (thin, populate, place, remove,
+//! paint, clear: `cubarium_voxel_sim::edit::Scenario`) after founding or `load=`, before the
+//! first tick, and reports each applied and refused entry on stderr.
+//!
 //! `save=<dir>` [`save_min=<m>`] writes the whole run once, at sim minute `m` (default:
 //! the run's last whole minute), as the three layers' own always-fresh envelopes —
 //! `world.bin`, `flora.bin`, `fauna.bin` — plus `minute`: the same directory
@@ -173,7 +177,7 @@ const PATCH_SPECIES: [(Plant, &str); 3] = [(Plant::Springturf, "meadow"), (Plant
 /// carries the world). A bare word matches exactly; `k=` matches a prefix.
 const FOUNDING_ONLY: &[&str] = &[
     "preset=", "config=", "seed=", "generated", "closed", "nofauna", "set=", "eggbank=", "introduce=", "world=",
-    "gap=", "night=", "still", "save=", "save_min=", "params=", "genome=", "gene=", "expand=",
+    "gap=", "night=", "still", "save=", "save_min=", "params=", "genome=", "gene=", "expand=", "edit=",
 ];
 
 fn main() {
@@ -278,6 +282,7 @@ fn main() {
                         .collect()
                 },
             ),
+        edit: args.iter().find_map(|a| a.strip_prefix("edit=")).map(str::to_string),
         segment_kind: if staged::resumed(&args) {
             SegmentKind::Resume
         } else if args.iter().any(|a| a.starts_with("load=")) {
@@ -611,6 +616,9 @@ struct Timing {
     patch_min: usize,
     /// How this process's run began: the vitals readouts' segment rule.
     segment_kind: SegmentKind,
+    /// `edit=FILE.toml`: a scenario file's edits (`cubarium_voxel_sim::edit::Scenario`),
+    /// applied after founding or `load=`, before the first tick. Not carried into `resume=`.
+    edit: Option<String>,
 }
 
 /// How a process's run began, for the vitals readouts (doc comment, `vitals=`).
@@ -687,6 +695,18 @@ fn run(
     timing: &Timing,
     stage: Option<(staged::StageConfig, Vec<String>)>,
 ) {
+    // `edit=FILE.toml`: the scenario's edits, before anything reads the world.
+    if let Some(path) = &timing.edit {
+        let scenario = cubarium_voxel_sim::edit::Scenario::read(std::path::Path::new(path)).unwrap_or_else(|e| panic!("{e}"));
+        let report = sim.edit(|e| scenario.apply(e));
+        for line in &report.applied {
+            eprintln!("edit applied: {line}");
+        }
+        for line in &report.refused {
+            eprintln!("edit refused: {line}");
+        }
+        eprintln!("edit: {} applied, {} refused, from {path}", report.applied.len(), report.refused.len());
+    }
     for lineage in Founder::ALL {
         let fauna = sim.fauna();
         let source = if fauna.policy_driven(lineage) {

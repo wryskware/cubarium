@@ -28,6 +28,7 @@ pub const COMMANDS: &str = "p [on|off] pause/resume, s [N] step, +/- speed, spee
                         save [DIR] save the whole world (default saves/<time>-t<tick>/), \
                         save-terrain PATH save the terrain only, \
                         l PATH load a terrain only (refused once anything is alive), \
+                        edit {json} a world edit (place/remove/lift/set down/move, paint, clear, thin, populate, pick), \
                         i X Y Z inspect, o outlet, q quit";
 
 /// Default rain volume for the `r` command, in cubic metres.

@@ -2533,3 +2533,83 @@ impl Flora {
         rooted.len()
     }
 }
+
+impl Flora {
+    /// **A latticevine painted on `site`** (WORLD-EDIT, `crate::edit`): a founder vine rooted
+    /// on the support face `site`, on the first face beside it a vine can root on (a wall
+    /// foot, then a ledge lip: the banked seed's order), with the founders' reserve and that
+    /// face's leafiness `leafiness` (clamped to `0..=1`), all booked `seeded_*_in`. The vine's
+    /// id, or why not: not a soil support face, a vine already rooted there, or no face
+    /// beside it to root on.
+    pub fn paint_vine(&mut self, world: &World, site: Site, leafiness: f64) -> Result<VineId, String> {
+        let view = world.view();
+        let c = view.config;
+        if !leafiness.is_finite() {
+            return Err("the amount is not finite".into());
+        }
+        if site.x >= c.width || site.z >= c.depth || !view.is_support(i64::from(site.x), site.y, site.z) {
+            return Err("not a support face".into());
+        }
+        if view.material_at(i64::from(site.x), site.y, site.z) != Material::Soil {
+            return Err("a latticevine roots in soil".into());
+        }
+        self.cover.ensure_built();
+        if self.cover.rt.roots.contains_key(&site) {
+            return Err("a latticevine is already rooted there".into());
+        }
+        let ok = |cover: &Cover, f: Face| face_eligible(&view, f) && !cover.rt.index.contains_key(&f) && root_adjacent(c, site, f);
+        let mut first = None;
+        for d in FaceDir::SIDES {
+            let o = d.offset();
+            if let Some((wx, wy, wz)) = step_voxel(c, site.x, site.y + 1, site.z, (-o.0, -o.1, -o.2)) {
+                let f = Face::new(wx, wy, wz, d);
+                if ok(&self.cover, f) {
+                    first = Some(f);
+                    break;
+                }
+            }
+        }
+        if first.is_none() {
+            first = FaceDir::SIDES.into_iter().map(|d| Face::new(site.x, site.y, site.z, d)).find(|&f| ok(&self.cover, f));
+        }
+        let first = first.ok_or("no wall foot or ledge lip beside it for a vine to climb")?;
+        let reserve = self.config.latticevine.founder_reserve;
+        let id = self
+            .seed_vine(world, VineSeed { root: site, first, reserve, lineage: None })
+            .ok_or("the cover refused the vine")?;
+        let vc = &self.config.latticevine;
+        let s = self.cover.slot_of(first).expect("just covered");
+        let want = leafiness.clamp(0.0, 1.0);
+        let d = (want - self.cover.faces[s].leafiness) * vc.leaf_mass;
+        self.cover.faces[s].leafiness = want;
+        self.ledger.seeded_organic_in += d;
+        self.ledger.seeded_energy_in += vc.energy_density * d;
+        Ok(id)
+    }
+
+    /// **Every latticevine rooted on `site` taken out** (WORLD-EDIT): its faces, reserve and
+    /// mineral booked `removed_*_out`. The vines removed.
+    pub fn clear_vines_at(&mut self, site: Site) -> usize {
+        self.cover.ensure_built();
+        let vc = self.config.latticevine.clone();
+        let e = vc.energy_density;
+        let mut n = 0;
+        let mut vi = 0;
+        while vi < self.cover.vines.len() {
+            let v = self.cover.vines[vi];
+            if v.root != site {
+                vi += 1;
+                continue;
+            }
+            for s in self.cover.slots_of(v.id).into_iter().rev() {
+                let cf = self.cover.remove_slot(s);
+                book_removed(&mut self.ledger, e, cf.organic(&vc));
+            }
+            book_removed(&mut self.ledger, e, v.reserve);
+            self.ledger.removed_mineral_out += v.mineral;
+            self.cover.remove_vine(vi);
+            n += 1;
+        }
+        n
+    }
+}
