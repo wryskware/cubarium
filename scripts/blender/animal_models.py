@@ -435,12 +435,7 @@ def chorister():
 
     def leg_zone(f, s, p):
         return 0 if f < 0.4 else 1
-    legs = [  # (x, y, z, r) from hip to the ankle; then the paw
-        [(0.40, 0.08, 0.44, 0.085), (0.56, 0.14, 0.22, 0.045), (0.68, 0.15, 0.05, 0.032)],
-        [(0.14, 0.09, 0.40, 0.085), (0.205, 0.15, 0.2, 0.045), (0.205, 0.16, 0.06, 0.032)],
-        [(-0.50, 0.08, 0.40, 0.1), (-0.36, 0.14, 0.23, 0.055), (-0.66, 0.15, 0.07, 0.032)],
-    ]
-    for leg in legs:
+    for leg in CH_LEGS:
         for sy in (-1, 1):
             pts = [(x, sy * yy, z, r, r) for x, yy, z, r in leg]
             loft(pts, [c("a_main"), c("a_limb")], leg_zone, nring=30, nseg=12)
@@ -988,6 +983,127 @@ def fg_state_rig(shared, cells, bones, scale, hunker):
             f" nested fills the notch {fills}), tucked {tucked}")
 
 
+# Round 2: only the class path's sleep settle, keeping its breath and feeding loop.
+# Sleep-only children inherit their old owner's feed and lip without changing either.
+def sleep_legs(name):
+    """Walking limbs already in the builders, in reference metres (Blender axes)."""
+    legs = []
+    for side in (-1, 1):
+        mirror = lambda p: Vector((p[0], side * p[1], p[2]))
+        if name == "chorister":
+            paths = [[p[:3] for p in leg] for leg in CH_LEGS]
+        elif name == "lanternjaw":
+            paths = [[(hx, 0.12, 0.12), (hx + dx * 0.5, 0.29, 0.28),
+                      (hx + dx, 0.38, 0.11), (hx + dx * 1.15, 0.43, 0.0)]
+                     for hx, dx in LJ_WALK_LEGS]
+        elif name == "seedporter-ground":
+            spec = SP_POSES["ground"]
+            paths = []
+            for root, end, lengths, pole in (("shoulder", "hand", SP_ARM, "arm_pole"),
+                                            ("hip", "ankle", SP_LEG, "leg_pole")):
+                h, t = Vector(spec[root]), Vector(spec[end])
+                knee, _ = ik(h, t, *lengths, Vector(spec[pole]))
+                paths.append([h, knee, t])
+        else:
+            paths = []                     # bellwing: the cut tendril, no walking legs
+        legs += [(f"sleep_leg{k}_{'l' if side > 0 else 'r'}", [mirror(p) for p in path])
+                 for k, path in enumerate(paths)]
+    return legs
+
+
+def sleep_state_rig(shared, cells, bones, scale, pose=None, legs=()):
+    """Per-bin settle from sleep::classify, with its cut cells hidden below the floor.
+
+    Rows further below the torso than the drop are unclassified on the class path:
+    they stay (the adult Veilhound's paws). Only the cut rows fold/sink. No head, tail
+    or arm choreography, no breath or idle clip. Check the actual end moves at bake.
+    """
+    torso, drop = fg_rows(cells)
+    old = shared["bones"]
+    heads = list(shared["heads"])
+    names = list(old)
+    # All bins carry the same bones, including a bone whose coarse bin owns no cell.
+    additions = [(name, 0, path[0]) for name, path in legs]
+    additions += [(f"sleep_{kind}_{name}", i, SWAP_YZ.to_3x3() @ heads[i])
+                  for kind in ("tuck", "stay") for i, (name, _) in enumerate(old)]
+    for name, parent, h in additions:
+        names.append((name, parent))
+        heads.append(SWAP_YZ.to_3x3() @ Vector(h))
+    assert len(names) <= 64, "the renderer's bone limit"
+    paths = dict(legs)
+    for key in cells:
+        i, j, k = key
+        owner = bones[key]
+        if k < torso - drop:
+            bones[key] = f"sleep_stay_{owner}"
+        elif k < torso:
+            p = Vector((i / scale, j / scale, (k + 0.5) / scale))
+            nearest = min(legs, key=lambda leg: min(seg_dist(p, a, b) for a, b in zip(leg[1], leg[1][1:])),
+                          default=None)
+            # Walking legs were on root; the head/fruit/striking-arm/tendril keep their
+            # feed parent, on tuck children. Low belly/tail cells sink without a turn.
+            if owner == "root" and nearest and min(seg_dist(p, a, b) for a, b in
+                    zip(nearest[1], nearest[1][1:])) <= 0.5 / scale + 0.06:
+                bones[key] = nearest[0]
+            else:
+                bones[key] = f"sleep_tuck_{owner}"
+    groups = {name: [p for p, owner in bones.items() if owner == name] for name, _ in names[len(old):]}
+    # Leg turns inward about its existing hip; enough extra sink to hide every corner
+    # at full weight. Cut cells' flat lids must not be left at the standing rows.
+    ends = {}
+    for name, _, h in additions:
+        p = Vector(h)
+        if name.startswith("sleep_stay_"):
+            ends[name] = Matrix.Translation((0, 0, drop / scale))
+            continue
+        angle = (-1 if p.y > 0 else 1) * math.atan2(FG_LEG_TUCK, 0.13) if name in paths else 0.0
+        turn = Matrix.Translation(p) @ Matrix.Rotation(angle, 4, "X") @ Matrix.Translation(-p)
+        top = max(((turn @ Vector(((i + a) / scale, (j + b) / scale, (k + c) / scale))).z
+                   for i, j, k in groups[name] for a in (-0.5, 0.5) for b in (-0.5, 0.5) for c in (0, 1)),
+                  default=0.0)
+        sink = max(0.0, top - drop / scale) + (1.0 / scale if groups[name] else 0.0)
+        ends[name] = Matrix.Translation((0, 0, -sink)) @ turn
+
+    definitions = [(name, parent, SWAP_YZ.to_3x3() @ h, (0, 0, 0))
+                   for (name, parent), h in zip(names, heads)]
+    frames, final = [], None
+    for f in range(FG_STATE_FRAMES):
+        u = f / (FG_STATE_FRAMES - 1)
+        down = Matrix.Translation((0, 0, -drop / scale * u))
+        moves = [down for _ in old]
+        for name, _, _ in additions:
+            end = ends[name]
+            r = end.to_quaternion()
+            turn = Matrix.Identity(4).to_quaternion().slerp(r, u).to_matrix().to_4x4()
+            # Interpolate the hip turn's translation as well as its rotation.
+            turn.translation = end.translation * u
+            moves.append(down @ turn)
+        frames.append(moves)
+        final = moves
+    asleep = moves_clip(definitions, frames, 30)
+    assert asleep["bones"] == names
+    identity = (Matrix.Identity(3), Vector((0, 0, 0)))
+    clips = [dict(c, frames=[list(keys) + [identity] * len(additions) for keys in c["frames"]])
+             for c in shared["clips"]]
+    clips.append(dict(state="asleep", mode=CLIP_TRACK, fps=asleep["fps"], frames=asleep["frames"]))
+    index = {name: n for n, (name, _) in enumerate(names)}
+    landed = []
+    for key, owner in bones.items():
+        i, j, k = key
+        move = final[index[owner]]
+        q = move @ Vector((i / scale, j / scale, (k + 0.5) / scale))
+        landed.append((round(q.x * scale), round(q.y * scale), math.floor(q.z * scale)))
+        if torso - drop <= k < torso:
+            assert all((move @ Vector(((i + a) / scale, (j + b) / scale, (k + c) / scale))).z <= 0
+                       for a in (-0.5, 0.5) for b in (-0.5, 0.5) for c in (0, 1)), "a cut corner shows"
+    target = {(i, j, k - drop) if k >= torso else (i, j, k)
+              for i, j, k in cells if k >= torso or k < torso - drop}
+    assert outer_faces(set(landed)) == outer_faces(target), "asleep end faces differ from sleep::classify"
+    assert all(landed.count(q) == 1 for q, _ in outer_faces(set(landed))), "overlapping surface cells"
+    return dict(shared, bones=names, heads=heads, clips=clips), (
+        f"torso row {torso}, settle {drop}, asleep end faces equal: {len(outer_faces(target))} faces")
+
+
 # --- the Veilhound's rig and feeding clip (FEED-RIG round 2, 2026-10-09) -----------------
 #
 # `design/handoffs/feeding-motion-rig-2026-10-09.md` §Round 2: the chorister (Veilhound)
@@ -1010,6 +1126,11 @@ CH_BONES = [
     ("root", None, (0.0, 0.0, 0.45), (0.1, 0.0, 0.45)),
     ("neck", 0, (CH_NECK_CUT_X, 0.0, 0.51), (0.50, 0.0, 0.52)),
     ("head", 1, (0.50, 0.0, 0.52), CH_TIP),
+]
+CH_LEGS = [  # (x, y, z, r), hip to ankle; the builder adds paws and claws
+    [(0.40, 0.08, 0.44, 0.085), (0.56, 0.14, 0.22, 0.045), (0.68, 0.15, 0.05, 0.032)],
+    [(0.14, 0.09, 0.40, 0.085), (0.205, 0.15, 0.2, 0.045), (0.205, 0.16, 0.06, 0.032)],
+    [(-0.50, 0.08, 0.40, 0.1), (-0.36, 0.14, 0.23, 0.055), (-0.66, 0.15, 0.07, 0.032)],
 ]
 CH_FEED_FPS = 30
 CH_FEED_LOOP_S = 1.8
@@ -2052,6 +2173,7 @@ LJ_HIP = (0.30, 0.10, 0.10)
 LJ_KNEE = (0.39, 0.25, 0.29)
 LJ_BLADE_TIP = (0.49, 0.24, 0.0)
 LJ_SIDE = {1: "l", -1: "r"}  # +y is the body's left (x forward, z up)
+LJ_WALK_LEGS = ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085))
 
 
 def lj_mirror(p, sy):
@@ -2122,7 +2244,7 @@ def lanternjaw():
         bone_of(start, f"tibia_{side}")  # the knee ball, the tibia, the blade and its spines
         # six walking legs: thick, knees above the plates, long dark claws splayed outward and
         # toward their own end
-        for hx, dx in ((0.17, 0.08), (0.02, 0.0), (-0.14, -0.085)):
+        for hx, dx in LJ_WALK_LEGS:
             jointed([(hx, sy * 0.12, 0.12), (hx + dx * 0.5, sy * 0.29, 0.28), (hx + dx, sy * 0.38, 0.11),
                      (hx + dx * 1.15, sy * 0.43, 0.0)], 0.046, 0.034, 0.032)
 
