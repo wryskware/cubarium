@@ -439,13 +439,12 @@ pub struct Manifest {
     /// this mass, and a world of another mass refuses it.
     pub mass_scale: f64,
     /// [`SELF_REFERENCE_RULE`] and [`TASTE_REFERENCE_RULE`]: how the `Self` and taste
-    /// references scale with a body's mass.
+    /// references are computed (only the `Self` references follow body mass).
     pub self_reference_rule: &'static str,
     pub taste_reference_rule: &'static str,
-    /// The lineage's own taste reference stock (`FounderPhysiology::taste_reference`),
-    /// when it does not follow [`TASTE_REFERENCE_RULE`]: the ripple-snail's film capacity
-    /// per site. `None` for every lineage on the rule, whose canonical text does not
-    /// change.
+    /// The effective food-unit taste reference (`taste_reference` override or
+    /// `taste_reference_food`), recorded in the digest. `None` means the film-only
+    /// rule derives the reference from the world's cell capacity.
     pub taste_reference: Option<f64>,
     /// **The hidden width** of this lineage's GRU (contract v3): [`HIDDEN`] for every lineage
     /// today. Folded into the digest and the parameter count, so a bigger brain for one
@@ -470,9 +469,9 @@ pub struct Manifest {
 /// times the body's `mass_scale`: each reads a fraction of an adult of that mass.
 pub const SELF_REFERENCE_RULE: &str = "self_refs_x_body_mass_scale";
 
-/// Taste's reference stock is `M_EMIT × the body's mass_scale`, so a "full" taste is the
-/// same share of the body's need at any mass.
-pub const TASTE_REFERENCE_RULE: &str = "taste_ref_m_emit_x_body_mass_scale";
+/// Taste's reference stock is a per-lineage food quantity, independent of body mass
+/// and scent emission. The effective stock is also recorded in the manifest digest.
+pub const TASTE_REFERENCE_RULE: &str = "taste_ref_food_units";
 
 /// A film eater's taste reference (roster mechanics, the coordinator's item 6): one
 /// site's film capacity, `film_capacity_per_m2 × cell area`, on the world's own cell.
@@ -1203,7 +1202,11 @@ fn anchors(founder: Founder) -> Anchors {
         cruise: p.cruise_body_lengths_per_s * p.adult_length_m,
         yaw: p.yaw_cap_rad_per_s,
         mass: p.mass_scale,
-        taste_ref: p.taste_reference,
+        taste_ref: if p.taste_reference.is_none() && p.diet == crate::Diet::only(crate::Food::Film) {
+            None
+        } else {
+            Some(p.taste_reference_stock(crate::CueConfig::default().emit_reference))
+        },
         slot_range: p.senses.sight_m.max(p.senses.hearing_m).max(p.senses.tremor_m).max(0.0),
     }
 }
@@ -1294,7 +1297,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
-            taste_reference: None,
+            taste_reference: a.taste_ref,
             hidden: HIDDEN,
             option_head: 0,
             slot_range_m: a.slot_range,
@@ -1353,7 +1356,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
-            taste_reference: None,
+            taste_reference: a.taste_ref,
             hidden: HIDDEN,
             option_head: 0,
             slot_range_m: a.slot_range,
@@ -1415,7 +1418,7 @@ impl Manifest {
             mass_scale: a.mass,
             self_reference_rule: SELF_REFERENCE_RULE,
             taste_reference_rule: TASTE_REFERENCE_RULE,
-            taste_reference: None,
+            taste_reference: a.taste_ref,
             hidden: HIDDEN,
             option_head: 0,
             slot_range_m: a.slot_range,
@@ -1794,8 +1797,7 @@ impl Manifest {
             "|mass:{}|self_ref:{}|taste_ref:{}",
             self.mass_scale, self.self_reference_rule, self.taste_reference_rule
         );
-        // A lineage off the rule writes its own reference stock; the others' text is
-        // unchanged.
+        // Fixed food references are digest inputs; film capacity is a world rule.
         if let Some(stock) = self.taste_reference {
             let _ = write!(s, "|taste_ref_stock:{}", stock);
         }

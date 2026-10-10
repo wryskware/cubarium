@@ -51,7 +51,7 @@ pub const MASS_SCALED: [&str; 7] = [
 /// - The bite is not tied: the minimal gut's `gut.bite_per_body_s` is its own number, per
 ///   unit of body, so the mass scale does not carry it either.
 /// - The seven absolute quantities follow the lineage's mass scale (audit §1.4); the bite's
-///   half-saturation, in food units, does not.
+///   half-saturation and taste reference, in food units, do not.
 /// - The placeholder species is the browser's body: its mass and lifespan follow the
 ///   browser's.
 pub fn ties() -> Vec<Tie> {
@@ -374,7 +374,9 @@ fn founder_rows() -> Vec<Row> {
         r("agility", "fraction", fraction, "the dodge's species factor"),
         r("mass_scale", "x placeholder mass", Range::positive(), "the org-unit mass scale the body was built at")
             .digest().prov("decision"),
-        r("taste_reference", "organic units per site", Range::positive(), "food stock per site that tastes as a cue of 1 before saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else emit_reference x mass_scale)")
+        r("taste_reference_food", "organic units per site", Range::positive(), "default food reference for taste saturation; independent of body mass and scent emission")
+            .digest().prov("decision"),
+        r("taste_reference", "organic units per site", Range::positive(), "food-reference override for taste saturation (absent: a film-only diet derives film_capacity_per_m2 x cell area on the world; else taste_reference_food)")
             .optional().digest().prov("decision"),
         // The carnivore's table (`Hunter`): the lanternjaw's only, optional on the others.
         r("hunter.strike_power", "wound per hit", nonneg, "a hit adds power x (S_pred / S_prey) x (1 - armour)").optional(),
@@ -569,7 +571,7 @@ fn knob_rows() -> Vec<Row> {
         r(&format!("fauna.cue.{path}"), unit, range, what)
     };
     rows.extend([
-        c("emit_reference", "organic units", pos, "detritus stock at which a source emits at full strength; the taste reference").grade("C"),
+        c("emit_reference", "organic units", pos, "detritus stock at which a scent source emits at full strength").grade("C"),
         c("half_life_s", "s", pos, "cue half-life").search(0.5, 60.0).log().grade("C"),
         c("fungal_half_life_s", "s", pos, "the fungal field's half-life (the capgnawer's Chem(fungal)): a longer scent reaches farther groves")
             .search(2.0, 1200.0).log(),

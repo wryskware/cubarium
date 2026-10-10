@@ -246,8 +246,7 @@ impl Default for LifeConfig {
 // A knob a saved or authored config lacks takes its default (SAVE-EXTENSIBLE).
 #[serde(default)]
 pub struct CueConfig {
-    /// The detritus stock at which a source emits at full strength, organic units; also
-    /// the taste reference (`× the body's mass_scale`).
+    /// The detritus stock at which a scent source emits at full strength, organic units.
     pub emit_reference: f64,
     /// Cue half-life, seconds.
     pub half_life_s: f64,

@@ -478,25 +478,23 @@ pub struct FounderPhysiology {
     /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
     /// for every lineage until the loftstrider's kick.
     pub counter: Option<Counter>,
-    /// **The org-unit mass scale this physiology was built at** ([`FounderPhysiology::scale_mass`]
-    /// multiplies the seven absolute quantities of [`FounderPhysiology::core`] and records
-    /// the factor here). The senses read it: the `Self` references and taste's reference
-    /// are the manifest's times this (`manifest::SELF_REFERENCE_RULE`,
-    /// `TASTE_REFERENCE_RULE`), so a heavier body reads "a fraction of an adult" and a
-    /// "full" taste means the same share of its need. The founding gate judges a body as
-    /// a x1 one with it (`cubarium_voxel_sim::habitat`).
+    /// **The org-unit mass scale this physiology was built at**: `scale_mass`
+    /// multiplies the seven absolute quantities of `core` and records the factor here.
+    /// The `Self` senses reference a fraction of an adult at this mass
+    /// (`manifest::SELF_REFERENCE_RULE`); food references remain in food units.
+    /// The founding gate judges a body as a x1 one with it.
     #[serde(default = "one")]
     pub mass_scale: f64,
-    /// **Taste's reference stock** (roster R2b repair): the food stock per site, organic
-    /// units, that reads as a taste cue of 1 before saturation (the mouth's response is
-    /// `min(stock / this, 1)` through the chem saturation curve). `None` keeps the
-    /// manifest rule every older lineage uses, `emit_reference × mass_scale`
-    /// ([`FounderPhysiology::taste_reference_stock`], `manifest::TASTE_REFERENCE_RULE`), so
-    /// their cues and digests do not move. The ripple-snail's is the glassfilm's capacity
-    /// per 0.125 m site: a film's stock is a few thousandths of a unit, far under the
-    /// litter-scaled rule's 1.5 at x30, which no film could ever reach the feed gate on.
-    /// Not scaled by [`FounderPhysiology::scale_mass`]: the food's stock does not change
-    /// with the eater's mass.
+    /// Taste's default food reference, organic units per site: `offer / reference`
+    /// enters the cue saturation curve `c / (c + 1)`. Independent of eater mass and
+    /// scent emission. The default preserves the old reference at shipped mass:
+    /// `emit_reference` 0.05 times shipped `mass_scale` 30, giving 1.5 food units.
+    #[serde(default = "default_taste_reference_food")]
+    pub taste_reference_food: f64,
+    /// Optional food-reference override, organic units per site. Seedporter and
+    /// bellwing use their own small-food reference. With no override, a film-only
+    /// diet uses the world's film capacity per site; other diets use
+    /// `taste_reference_food`. Neither reference follows `scale_mass`.
     #[serde(default)]
     pub taste_reference: Option<f64>,
     /// **What it eats** ([`crate::Diet`]): the food classes its mouth takes, each from its
@@ -1753,6 +1751,10 @@ pub struct Counter {
     pub cost: f64,
 }
 
+fn default_taste_reference_food() -> f64 {
+    1.5
+}
+
 fn one() -> f64 {
     1.0
 }
@@ -1916,6 +1918,7 @@ impl FounderPhysiology {
                 agility: 0.3,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 // Litter and carrion (Wrysk, 2026-10-01: the shredder goes back to litter;
                 // the capgnawer owns the glowcap caps, roster R1). Its cap-tissue yield
@@ -2008,6 +2011,7 @@ impl FounderPhysiology {
                 agility: 0.5,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Foliage),
                 founding: Founding::Bodies,
@@ -2119,6 +2123,7 @@ impl FounderPhysiology {
                 agility: 0.0,
                 counter: None,
                 mass_scale: 1.0,
+                taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
                 diet: crate::Diet::only(crate::Food::Carrion),
                 // §2.9: a fresh world is founded with a buried egg bank, not adults.
@@ -2562,11 +2567,11 @@ impl FounderPhysiology {
         }
     }
 
-    /// Taste's reference stock for a world whose cue config has `emit_reference`: the
-    /// lineage's own [`FounderPhysiology::taste_reference`] when it has one, else the
-    /// manifest rule `emit_reference × mass_scale`.
-    pub fn taste_reference_stock(&self, emit_reference: f64) -> f64 {
-        self.taste_reference.unwrap_or(emit_reference * self.mass_scale)
+    /// Taste's food-unit reference: the lineage's override or its default food stock.
+    /// `emit_reference` is retained in the API for callers; scent emission does not
+    /// set the mouth's food reference (`manifest::TASTE_REFERENCE_RULE`).
+    pub fn taste_reference_stock(&self, _emit_reference: f64) -> f64 {
+        self.taste_reference.unwrap_or(self.taste_reference_food)
     }
 
     /// Taste's reference stock **on a world** of cell edge `voxel_m` under the plant layer's
@@ -4318,7 +4323,7 @@ pub(crate) fn taste_reading(
 
 /// [`taste_reading`] against a reference stock `reference`
 /// ([`FounderPhysiology::taste_reference_stock`]: the lineage's own `taste_reference`, else
-/// `emit_reference × mass_scale`, `manifest::TASTE_REFERENCE_RULE`).
+/// `taste_reference_food`, `manifest::TASTE_REFERENCE_RULE`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn taste_reading_at(
     fv: &FloraView<'_>,
@@ -5375,11 +5380,12 @@ mod tests {
             &body,
             Founder::Blind,
         );
-        assert!(
-            t.cue > 0.2,
-            "contact with litter reads its stock: {}",
-            t.cue
-        );
+        let reference = FounderPhysiology::placeholder(Founder::Blind)
+            .taste_reference_stock(crate::CueConfig::default().emit_reference);
+        let c = (0.2 / reference).min(1.0);
+        let expected = c / (c + manifest.tunings.chem_saturation);
+        assert!((t.cue - expected).abs() < 1e-12,
+            "contact with litter reads its stock: {} vs {expected}", t.cue);
         assert!((t.resistance - 0.2).abs() < 1e-12, "the litter resistance");
     }
 

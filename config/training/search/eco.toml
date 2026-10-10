@@ -20,7 +20,8 @@
 #   Wrysk's one range x2-6) AND the lanternjaw, whose prey are those small bodies (prey
 #   at most 1.5x its body) so the hunter keeps its prey-to-hunter ratio.
 # - mass_scale carries its seven absolute quantities (registry tie "mass"; the browser's
-#   placeholder species follows the frondgrazer).
+#   placeholder species follows the frondgrazer). Taste references and bite half-stock
+#   stay in food units and do not follow mass_scale.
 # - gut: every lineage's bite_per_body_s x S and every digestion time / S (the webmodel's
 #   own gut-throughput knob, `web_model gut=`), so the gut ceiling y.k/tau falls by S and
 #   the bite keeps asking twice the gut's throughput.
