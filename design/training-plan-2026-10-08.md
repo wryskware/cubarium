@@ -1042,6 +1042,9 @@ control and the reward accounting; display targets after seeing results.
    - Role call 4, lanternjaw (Wrysk, 2026-10-10): adult at 35 % of body max ("35%-100% adult size range ... like
      octopus"), fast mantis-like growth, rider take grows with size, riders drop off when they outgrow a small
      host, seedporters eat small juveniles, many offspring and low survival. LANTERNJAW-LIFE (Opus) building.
+   - Role call 5 (Wrysk, 2026-10-10): capgnawer A, caps as its real food. Frondgrazer: "more like ungulates ...
+     maybe once a day birth rate", so a birth per world day. ROLES5 (Opus) building these, plus a census
+     print of nest refusals to diagnose the shredder brake.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;
