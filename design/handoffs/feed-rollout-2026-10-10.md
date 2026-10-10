@@ -229,6 +229,23 @@ each, same pattern (`RIGS` in `bake_voxel_models.py`; all three stay specimens t
   so rather than enlarging it (that is Wrysk's call).
 - **Evidence** as above, one MP4 per species (`<name>-feed-px{6,12}.mp4`).
 
+### Seedporter fruit arms get a voxel (after Wrysk saw the clip)
+
+Seedporter merged (3e107bd1): at 125 mm the small fruit arms own no cells in either pose
+(the folded membrane and the chest take every cell in front of the body), so the clip
+shows only as the head moving. Wrysk: "if youre rigging them in which case sure give them
+a voxel."
+
+- In the bake, give each fruit arm's hand (and the fruit, already on `hand_l`) at least
+  one cell of its own in the rigged pose models (`seedporter-stand`, `seedporter-ground`),
+  the way the eyes are guaranteed theirs (the worker who rigged it pointed at that
+  mechanism; find it in `bake_voxel_models.py` / `animal_models.py`). The cell must sit
+  on the hand bone, in front of the chest, so the reach and pluck show. Report what the
+  pose models look like at rest after it (a still, today | after, both poses, 6 px and
+  12 px), since a new cell changes the resting silhouette.
+- Rebake the two pose models and their rigs (specimen path); report cells per bone.
+- Evidence: the feed MP4 again, today (main) | after, `seedporter-feed-r2-px{6,12}.mp4`.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
 open look question). Then sleep, idle and hunker move onto the rig.
 

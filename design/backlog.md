@@ -379,3 +379,15 @@ animals.
 The vaulttree's drape cords (DRAPE-CORD) sway only with their tree. They should stream and
 swing in the wind more than the tree does, as loose cords would: their own lag and
 overshoot behind the tree's sway, more at the tips.
+
+## 20. Thin animal parts drawn as lines (Wrysk, 2026-10-10: "technically we could do the same thing we just did for drapes for the bellwing's tendril.. but idk how much effort thats worth")
+
+At 125 mm the bellwing's whole tendril is one voxel, and other thin parts (the
+littershredder's feelers, the lanternjaw's lure stalks, frond tips, the seedporter's
+fingers) own few or none. The drape cords' trick, a 1–2 screen-pixel line, could draw them
+in the figure pass: each frame the posed bone points of a thin part become a short
+polyline, drawn depth-tested against the walk. That is a new figure-pass primitive (a
+renderer package about the size of a feeding rig), worth it once it serves several
+species, not for the tendril alone. What the tendril needs from it: reach out and down
+from the bell when feeding and wiggle a little.
+
