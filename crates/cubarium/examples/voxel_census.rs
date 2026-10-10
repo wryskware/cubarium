@@ -1735,6 +1735,7 @@ fn print_header() {
         // gone extinct yet, and the count alone could not say so.
         header.push_str(&format!(",eggs_{}", f.name()));
         header.push_str(&format!(",gestating_{}", f.name()));
+        header.push_str(&format!(",dispersed_{}", f.name()));
     }
     header.push_str(",flora_births,flora_deaths,fauna_births,fauna_deaths,fauna_hatched,litter");
     header.push_str(",stored,atmosphere,rain_events,residual");
@@ -1879,6 +1880,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{mean:.4}"));
         row.push(a.eggs_by_founder(founder).to_string());
         row.push(a.gestating_by_founder(founder).to_string());
+        row.push(a.ledger.dispersed_by_founder[founder.index()].to_string());
     }
     row.push(f.ledger.births.to_string());
     row.push(f.ledger.deaths.to_string());

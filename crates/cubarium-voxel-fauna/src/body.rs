@@ -577,6 +577,10 @@ pub struct FounderPhysiology {
     /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
     #[serde(default)]
     pub herding: crate::Herding,
+    /// Young leaving an oversized pack or herd, with all matter returned
+    /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
+    #[serde(default)]
+    pub dispersal: crate::Dispersal,
     /// **Its jump down when trapped** (DROP, [`crate::DropRule`]): off its route graph with no
     /// walking way back on and no glide, it jumps down past its step, at a wound. No jump for
     /// the bellwing and the ripple-snail.
@@ -1924,6 +1928,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
@@ -2010,6 +2015,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
@@ -2119,6 +2125,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 rhythm: crate::Rhythm::default(),
                 cadence: crate::Cadence::default(),
