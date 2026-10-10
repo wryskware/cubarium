@@ -445,6 +445,8 @@ pub struct RouteGraph {
     index: FxHashMap<Site, usize>,
     /// Each node's neighbours (the step edges the disc passes, and a climber's walls).
     adj: Vec<Vec<usize>>,
+    /// The node count of each walkable component, by its id (`components`' values).
+    sizes: FxHashMap<usize, usize>,
     climb: u32,
     width: u32,
     depth: u32,
@@ -528,7 +530,16 @@ impl RouteGraph {
                 }
             }
         }
-        RouteGraph { faces, components, index, adj, climb, width: c.width, depth: c.depth, voxel_m: v }
+        let mut sizes: FxHashMap<usize, usize> = FxHashMap::default();
+        for &k in &components {
+            *sizes.entry(k).or_default() += 1;
+        }
+        RouteGraph { faces, components, index, adj, sizes, climb, width: c.width, depth: c.depth, voxel_m: v }
+    }
+
+    /// The node count of node `i`'s walkable component (WADE-OUT's pocket test).
+    pub fn component_len(&self, i: usize) -> usize {
+        self.components.get(i).and_then(|k| self.sizes.get(k)).copied().unwrap_or(0)
     }
 
     /// The node on `site`, if the disc stands clear there.
@@ -873,6 +884,177 @@ impl RouteGraph {
             let reached = on(land) || self.way_on(view, land, r, headroom, step, wade_m, own_cols, max_cols).is_some();
             reached.then(|| DropWay { from, land, edge, first: pocket[order].1 })
         })
+    }
+
+    /// **WADE-OUT, the way out through the water**: for a body held on `site` — out of its
+    /// depth, or on a pocket of its graph (a component under `open_min` nodes) — the walk its
+    /// own body takes, out to `max_cols` columns round `site`, to a face whose water it wades
+    /// (`wade_m`) and from which an open part of its graph is reached
+    /// ([`RouteGraph::node_near`] within `own_cols`, on a component of at least `open_min`
+    /// nodes). Water past its wade depth does not stop it; water past `under_m` (the depth it
+    /// is under, and drowns in if it stays) it crosses on at most `max_under` faces. Of those
+    /// ways, the one with the fewest faces under, then the fewest faces, whose goal `accept`
+    /// takes. Each step is to the
+    /// neighbouring column's support face nearest its layer within `step`
+    /// ([`VoxelView::nearest_support`]), its disc clear at the face's centre and the step's
+    /// midpoint, and the motor's own walk centre to centre ([`crate::body::motor_walk`]) at
+    /// any depth. The faces from `site` to the goal, the deepest water on them and the number
+    /// under; `None` when there is no such way in reach. An escape only, as DROP's jump is: no
+    /// route ever wades past its body's depth.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wade_way(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        (wade_m, under_m, max_under): (f64, f64, u32),
+        own_cols: u32,
+        open_min: usize,
+        max_cols: u32,
+        accept: &mut dyn FnMut(Site) -> bool,
+    ) -> Option<(Vec<Site>, f64, u32)> {
+        if max_cols == 0 {
+            return None;
+        }
+        let v = self.voxel_m;
+        let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
+        let open = |f: Site| self.node_near(f, centre(f), own_cols).is_some_and(|n| self.component_len(n) >= open_min);
+        let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, headroom, step);
+        let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+        let w = i64::from(self.width);
+        let span = |a: i64, b: i64| {
+            let d = (a - b).rem_euclid(w);
+            d.min(w - d)
+        };
+        // Fewest faces under, then fewest faces: one face under outweighs every walk in the
+        // window.
+        let side = 2 * u64::from(max_cols) + 1;
+        let heavy = side * side;
+        let mut best: FxHashMap<Site, (u64, u32, Site)> = FxHashMap::default();
+        let mut heap = std::collections::BinaryHeap::new();
+        best.insert(site, (0, 0, site));
+        heap.push(std::cmp::Reverse((0u64, site.x, site.y, site.z)));
+        while let Some(std::cmp::Reverse((cost, x, y, z))) = heap.pop() {
+            let f = Site { x, y, z };
+            let (c, under, _) = best[&f];
+            if cost > c {
+                continue;
+            }
+            if f != site && water(f) <= wade_m && open(f) && accept(f) {
+                let mut faces = vec![f];
+                let mut at = f;
+                while at != site {
+                    at = best[&at].2;
+                    faces.push(at);
+                }
+                faces.reverse();
+                let deepest = faces.iter().map(|&f| water(f)).fold(0.0, f64::max);
+                return Some((faces, deepest, under));
+            }
+            let (fx, fz) = centre(f);
+            for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                let nz = i64::from(f.z) + dz;
+                if nz < 0 || nz >= i64::from(self.depth) {
+                    continue;
+                }
+                let nx = (i64::from(f.x) + dx).rem_euclid(w);
+                if span(nx, i64::from(site.x)) > i64::from(max_cols) || (nz - i64::from(site.z)).abs() > i64::from(max_cols) {
+                    continue;
+                }
+                let Some(ny) = view.nearest_support(nx, nz as u32, f.y, step.down, step.up) else {
+                    continue;
+                };
+                let n = Site { x: nx as u32, y: ny, z: nz as u32 };
+                let is_under = water(n) > under_m;
+                let n_under = under + u32::from(is_under);
+                if n_under > max_under {
+                    continue;
+                }
+                let n_cost = cost + 1 + if is_under { heavy } else { 0 };
+                if best.get(&n).is_some_and(|&(c, _, _)| c <= n_cost) {
+                    continue;
+                }
+                let (cx, cz) = centre(n);
+                let (mx, mz) = (fx + 0.5 * dx as f64 * v, fz + 0.5 * dz as f64 * v);
+                if !(clear(cx, cz, ny) && clear(mx, mz, f.y) && clear(mx, mz, ny)) {
+                    continue;
+                }
+                if crate::body::motor_walk(view, (fx, fz), (fx + dx as f64 * v, fz + dz as f64 * v), f.y, r, f64::INFINITY, headroom, step) != Some(ny) {
+                    continue;
+                }
+                best.insert(n, (n_cost, n_under, f));
+                heap.push(std::cmp::Reverse((n_cost, n.x, n.y, n.z)));
+            }
+        }
+        None
+    }
+
+    /// **WADE-OUT, a body's own wading pocket**: the faces a body of radius `r` walks to from
+    /// `site` through water it wades (`wade_m`; the step and clearance rule of
+    /// [`RouteGraph::way_on`]), and whether they all lie within `max_cols` columns of `site`
+    /// (`true`: a pocket it cannot walk out of). When its walk reaches that far it stops
+    /// there (`false`, the faces found so far); `site` deeper than it wades is no pocket
+    /// (`false`, none). A juvenile wades shallower water than the adult its lineage's graph is
+    /// built for, so a shallow on the graph's open water can be a pocket to it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wade_pocket(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        wade_m: f64,
+        max_cols: u32,
+    ) -> (bool, Vec<Site>) {
+        let v = self.voxel_m;
+        let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+        if water(site) > wade_m {
+            return (false, Vec::new());
+        }
+        let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
+        let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, headroom, step);
+        let w = i64::from(self.width);
+        let span = |a: i64, b: i64| {
+            let d = (a - b).rem_euclid(w);
+            d.min(w - d)
+        };
+        let mut seen: FxHashMap<Site, ()> = FxHashMap::default();
+        seen.insert(site, ());
+        let mut pocket = vec![site];
+        let mut k = 0;
+        while k < pocket.len() {
+            let f = pocket[k];
+            k += 1;
+            let (fx, fz) = centre(f);
+            for (dx, dz) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+                let nz = i64::from(f.z) + dz;
+                if nz < 0 || nz >= i64::from(self.depth) {
+                    continue;
+                }
+                let nx = (i64::from(f.x) + dx).rem_euclid(w);
+                let Some(ny) = view.nearest_support(nx, nz as u32, f.y, step.down, step.up) else {
+                    continue;
+                };
+                let n = Site { x: nx as u32, y: ny, z: nz as u32 };
+                if seen.contains_key(&n) || water(n) > wade_m {
+                    continue;
+                }
+                let (cx, cz) = centre(n);
+                let (mx, mz) = (fx + 0.5 * dx as f64 * v, fz + 0.5 * dz as f64 * v);
+                if !(clear(cx, cz, ny) && clear(mx, mz, f.y) && clear(mx, mz, ny)) {
+                    continue;
+                }
+                if span(nx, i64::from(site.x)) > i64::from(max_cols) || (nz - i64::from(site.z)).abs() > i64::from(max_cols) {
+                    return (false, pocket);
+                }
+                seen.insert(n, ());
+                pocket.push(n);
+            }
+        }
+        (true, pocket)
     }
 
     /// Node `i`'s neighbours on the graph.

@@ -1148,12 +1148,15 @@ pub(crate) fn catch_step(
         .filter_map(|o| {
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
             let d = dx.hypot(dz);
-            let prey_radius = crate::body_of(&fauna.config, o)?.footprint_radius();
+            let pg = crate::body_of(&fauna.config, o)?;
             let reach = (h.jaw_forward_length_fraction + h.strike_reach_length_fraction)
                 * geometry.length_m
                 + geometry.footprint_radius()
-                + prey_radius;
-            (d <= reach).then_some((d, dx, dz, o.id))
+                + pg.footprint_radius();
+            // SP-FREEZE2: only a prey its strike can meet in height. A bellwing sipping in
+            // the crown overhead is within reach on the map and never strikable: the wait
+            // for it held a hungry body turning in place under the stand for minutes.
+            (d <= reach && crate::step::in_strike_band(view, &a, &geometry, &h, o, &pg)).then_some((d, dx, dz, o.id))
         })
         .min_by(|x, y| x.0.total_cmp(&y.0).then(x.3.cmp(&y.3)));
     let Some((_, dx, dz, id)) = target else {

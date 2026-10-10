@@ -3936,6 +3936,13 @@ pub struct Fauna {
     /// state: not saved.
     #[serde(skip)]
     pub(crate) drop_plans: FxHashMap<u64, step::jump::DropPlan>,
+    /// WADE-OUT: per held body, its clock and the way it is wading (`step::jump::Wade`).
+    /// Session state: not saved.
+    #[serde(skip)]
+    pub(crate) wading: FxHashMap<u64, step::jump::Wade>,
+    /// WADE-OUT's readout per lineage: the ways out walked to their end. Session state.
+    #[serde(skip)]
+    pub(crate) wade_outs: [u64; Founder::COUNT],
 }
 
 /// **Which layer set a founder's held actions** on its last controller sample (EDGE's
@@ -3974,11 +3981,13 @@ pub enum Steer {
     Search,
     /// VINE-C: a vine nester's hold at, or flight to, a nest site.
     Nest,
+    /// WADE-OUT: a held walker's way out through water past its wade depth.
+    Wade,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 16] = [
+    pub const ALL: [Steer; 17] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -3995,6 +4004,7 @@ impl Steer {
         Steer::Leave,
         Steer::Search,
         Steer::Nest,
+        Steer::Wade,
     ];
 
     /// A short name for tables.
@@ -4016,6 +4026,7 @@ impl Steer {
             Steer::Leave => "leave",
             Steer::Search => "search",
             Steer::Nest => "nest",
+            Steer::Wade => "wade",
         }
     }
 }
@@ -4354,6 +4365,8 @@ impl Fauna {
             pressed: FxHashMap::default(),
             trapped: FxHashMap::default(),
             drop_plans: FxHashMap::default(),
+            wading: FxHashMap::default(),
+            wade_outs: [0; Founder::COUNT],
             walk_shun: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
@@ -4704,6 +4717,24 @@ impl Fauna {
         )
     }
 
+    /// WADE-OUT's readout for body `id` (`step::jump::Wade`): the tick it was first found held
+    /// (out of its depth, or on a pocket of its graph), and the way it is wading — the faces
+    /// left to its goal and its motor's wade limit on them.
+    pub fn wade_state(&self, id: u64) -> Option<(u64, Option<(usize, f64)>)> {
+        self.wading.get(&id).and_then(|w| w.since.map(|since| (since, w.way.as_ref().map(|way| (way.faces.len(), way.wade_m)))))
+    }
+
+    /// WADE-OUT's motor limit for body `id`: the deepest water on the way it is wading, while
+    /// it holds one; `None` otherwise (its own wade depth applies).
+    pub(crate) fn wade_limit(&self, id: u64) -> Option<f64> {
+        self.wading.get(&id).and_then(|w| w.way.as_ref()).map(|way| way.wade_m)
+    }
+
+    /// WADE-OUT's ways out walked to their end, per lineage ([`Founder::index`]), this session.
+    pub fn wade_outs(&self) -> [u64; Founder::COUNT] {
+        self.wade_outs
+    }
+
     /// **A probe's placement** (DROP's `hunter_study drop`): the grounded body `id` stands on
     /// `site`, centred on its column, its trapped clock and jump cleared. No check of the face:
     /// the probe picks it. `false` when there is no such body.
@@ -4717,6 +4748,7 @@ impl Fauna {
         a.mobility = Mobility::default();
         self.trapped.remove(&id);
         self.drop_plans.remove(&id);
+        self.wading.remove(&id);
         true
     }
 
