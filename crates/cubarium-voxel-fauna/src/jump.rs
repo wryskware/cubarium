@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use super::glider::{OffGraph, off_graph_exit};
 use crate::{Actions, Fauna, Founder, FounderPhysiology, Site};
+use rustc_hash::FxHashSet;
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::FloraView;
 
@@ -217,4 +218,217 @@ pub(crate) fn take_off(fauna: &mut Fauna, i: usize, founder: Founder, view: &Vox
     l.drop_wound_by_founder[founder.index()] += w;
     fauna.drop_plans.remove(&a.id);
     fauna.trapped.remove(&a.id);
+}
+
+/// **WADE-OUT: a walker held in water it may not wade walks out through it** (SP-FREEZE2). A
+/// body's wade depth ([`FounderPhysiology::wade_depth_m`], a quarter of a seedporter's height)
+/// is under the depth it drowns in (half its height), and a juvenile's both scale with its
+/// height: a juvenile seedporter 0.23 m tall refuses 6 cm of water. Gliding down onto a
+/// flooded shore it lands on a few faces of water it wades, ringed by water it does not (a
+/// pocket: of its lineage's route graph, a component of a handful of nodes; or of its own,
+/// where the adult the graph is built for wades on), or in water past its depth whose nearest
+/// shallows lie across deeper water (the motor's "never deeper" escape cannot reach them), and
+/// stands there for good: the graph says it is on it, so DROP never finds it cornered.
+///
+/// A grounded walker (not aquatic, not climbing, not a flyer) is **held** when it stands in
+/// water deeper than it wades, or in a pocket: the faces it walks to through water it wades all
+/// lie within the window DROP's pocket search spans (`⌈teachers.way_on_m / voxel⌉` columns
+/// round it; [`crate::RouteGraph::wade_pocket`], read only beside water it does not wade) —
+/// for a body as large as the graph's adult, its graph component has fewer nodes than that
+/// window holds. Held for its lineage's [`DropRule::after_s`] (the shallows reflex's and its
+/// own walk's time to get out; none under water it drowns in), it takes the way out with the
+/// fewest faces of water it would drown in, then the fewest faces
+/// ([`crate::RouteGraph::wade_way`], out to `life.shallows_search_m`), to a face it wades on
+/// an open part of its graph and outside every pocket — crossing water it is under only for
+/// as long as its drown clock allows (`drown_after_s`, less what has run, at a quarter of its
+/// cruise: a short swim) — its motor admitting the way's deepest water
+/// ([`Fauna::wade_limit`]) until it gets there, leaves the way, or runs out of the way's time.
+/// A body with no such way in reach looks again at `teachers.route_refresh_s`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Wade {
+    /// The tick it was first found held; `None` while it is not.
+    pub since: Option<u64>,
+    /// The tick it last looked for a way out.
+    pub searched: Option<u64>,
+    /// The way it is wading, if any.
+    pub way: Option<WadeWay>,
+    /// Its last pocket reading: the tick, whether it was a pocket, and the faces it walked
+    /// (all of them for a pocket; those found before it reached the window's edge otherwise).
+    /// Reused while it stands on one of them, until `teachers.route_refresh_s`.
+    pub read: Option<(u64, bool, FxHashSet<Site>)>,
+}
+
+/// A held body's way out ([`Wade`]): the faces from where it set out to the goal, the deepest
+/// water on them (its motor's wade limit while it walks it), and the tick it gives the way up.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct WadeWay {
+    pub faces: Vec<Site>,
+    pub wade_m: f64,
+    pub until: u64,
+}
+
+/// The way's time, in multiples of walking it at cruise, and the margin added: a bound
+/// against a way the motor cannot finish, not a knob.
+const WADE_TIME_FACTOR: f64 = 4.0;
+const WADE_TIME_MARGIN_S: f64 = 10.0;
+
+/// **The wade-out reflex** for the due body at `i` ([`Wade`]): `None` unless it is held, has
+/// been for its lineage's `drop.after_s`, and has (or now finds) a way out; then the walk to
+/// the way's next face.
+pub(crate) fn wade_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let founder = a.founder?;
+    let phys = *fauna.config.founder(founder);
+    let grounded = a.mobility.mode == crate::MobilityMode::Ground
+        && a.mobility.climb.is_none()
+        && a.attached.is_none()
+        && phys.flight.is_none()
+        && !phys.aquatic;
+    if !grounded {
+        fauna.wading.remove(&a.id);
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let now = fauna.tick;
+    let aim = |a: &crate::Animal, f: Site| {
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v, ring);
+        super::glider::walk_toward(a, dx, dz, 0.0)
+    };
+    // On its way: the next face, until the goal, off the way, or out of time.
+    if let Some(way) = fauna.wading.get(&a.id).and_then(|w| w.way.clone()) {
+        match way.faces.iter().position(|&f| f == a.site) {
+            Some(k) if now < way.until && k + 1 < way.faces.len() => return Some(aim(&a, way.faces[k + 1])),
+            Some(k) if k + 1 == way.faces.len() => {
+                fauna.wading.remove(&a.id);
+                fauna.wade_outs[founder.index()] += 1;
+                return None;
+            }
+            // Off the way (a corner cut onto the next column) it looks again now; out of time,
+            // at the next refresh.
+            off => {
+                if let Some(w) = fauna.wading.get_mut(&a.id) {
+                    w.way = None;
+                    if off.is_none() {
+                        w.searched = None;
+                    }
+                }
+            }
+        }
+    }
+    let tc = fauna.config.teachers;
+    let body = phys.body_at(a.body);
+    let wade = phys.wade_depth_m(&body);
+    let graph = fauna.routes(view, founder, tc.route_refresh_s);
+    let r = body.footprint_radius();
+    let own = (r / v).ceil().max(0.0) as u32;
+    let headroom = body.headroom_voxels(v);
+    let step = phys.step_limits(v);
+    let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
+    let side = 2 * cols as usize + 1;
+    let open_min = side * side;
+    let every = cubarium_voxel::ticks_at_least_one(tc.route_refresh_s);
+    let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+    let here = water(a.site);
+    let deep = here > wade;
+    // Under water it drowns in, it does not wait out the shallows reflex's time.
+    let under = here > phys.drown_depth_m(&body);
+    // A body smaller than the graph's adult wades shallower water: its own pockets.
+    let small = wade < phys.wade_depth_m(&phys.adult_body());
+    let beside = || {
+        [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| {
+            let nz = i64::from(a.site.z) + dz;
+            if nz < 0 || nz >= i64::from(view.config.depth) {
+                return false;
+            }
+            let nx = (i64::from(a.site.x) + dx).rem_euclid(i64::from(view.config.width));
+            view.nearest_support(nx, nz as u32, a.site.y, step.down, step.up)
+                .is_some_and(|ny| view.water_depth_m(nx, ny, nz as u32) > wade)
+        })
+    };
+    let pocket = if deep {
+        false
+    } else if small {
+        let cached = fauna.wading.get(&a.id).and_then(|w| w.read.as_ref()).and_then(|(t, closed, faces)| {
+            (now.saturating_sub(*t) < every && faces.contains(&a.site)).then_some(*closed)
+        });
+        match cached {
+            Some(closed) => closed,
+            None if beside() => {
+                let (closed, faces) = graph.wade_pocket(view, a.site, r, headroom, step, wade, cols);
+                let w = fauna.wading.entry(a.id).or_insert(Wade { since: None, searched: None, way: None, read: None });
+                w.read = Some((now, closed, faces.into_iter().collect()));
+                closed
+            }
+            None => false,
+        }
+    } else {
+        graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_some_and(|n| graph.component_len(n) < open_min)
+    };
+    if !(deep || pocket) {
+        // Not held: keep only a pocket reading worth reusing.
+        match fauna.wading.get_mut(&a.id) {
+            Some(w) if w.read.is_some() => {
+                w.since = None;
+                w.searched = None;
+            }
+            Some(_) => {
+                fauna.wading.remove(&a.id);
+            }
+            None => {}
+        }
+        return None;
+    }
+    let w = fauna.wading.entry(a.id).or_insert(Wade { since: None, searched: None, way: None, read: None });
+    let since = *w.since.get_or_insert(now);
+    if !under && (now.saturating_sub(since) as f64) * cubarium_voxel::DT < phys.drop.after_s {
+        return None;
+    }
+    if w.searched.is_some_and(|t| now.saturating_sub(t) < every) {
+        return None;
+    }
+    w.searched = Some(now);
+    let reach = fauna.config.life.shallows_search_m;
+    let reach_cols = if reach.is_finite() && reach > 0.0 { (reach / v).ceil() as u32 } else { 0 };
+    // The faces under it may cross: the way's time (`WADE_TIME_FACTOR` × its walk at cruise)
+    // under water must end before the drown clock it has left runs out.
+    let cruise = a_cruise(&phys);
+    let left_s = phys.drown_ticks().saturating_sub(a.mobility.submerged_ticks) as f64 * cubarium_voxel::DT;
+    let max_under = (left_s * cruise / (WADE_TIME_FACTOR * v)).floor().clamp(0.0, f64::from(u32::MAX)) as u32;
+    // The goal stands in water a level step shallower than it wades
+    // (`body::LEVEL_TOLERANCE_M`): a flowing sheet's depth moves by millimetres, and a goal on
+    // the very edge of its depth is out of it again on arrival. For a smaller body, the goal
+    // lies outside its own pocket and any other it finds at that depth.
+    let goal_wade = if wade > crate::body::LEVEL_TOLERANCE_M { wade - crate::body::LEVEL_TOLERANCE_M } else { wade };
+    let mut closed: FxHashSet<Site> = match fauna.wading.get(&a.id).and_then(|w| w.read.as_ref()) {
+        Some((_, true, faces)) => faces.clone(),
+        _ => FxHashSet::default(),
+    };
+    let mut accept = |f: Site| {
+        if !small {
+            return true;
+        }
+        if closed.contains(&f) {
+            return false;
+        }
+        let (shut, faces) = graph.wade_pocket(view, f, r, headroom, step, goal_wade, cols);
+        if shut {
+            closed.extend(faces);
+        }
+        !shut
+    };
+    let (faces, wade_m, _) = graph.wade_way(view, a.site, r, headroom, step, (goal_wade, phys.drown_depth_m(&body), max_under), own, open_min, reach_cols, &mut accept)?;
+    let walk_s = (faces.len() as f64) * v / cruise;
+    let until = now + cubarium_voxel::ticks_at_least_one(WADE_TIME_FACTOR * walk_s + WADE_TIME_MARGIN_S);
+    let next = faces[1];
+    if let Some(w) = fauna.wading.get_mut(&a.id) {
+        w.way = Some(WadeWay { faces, wade_m: wade_m.max(wade), until });
+    }
+    Some(aim(&a, next))
+}
+
+/// The lineage's walking cruise, m/s (never zero).
+fn a_cruise(phys: &FounderPhysiology) -> f64 {
+    let c = phys.cruise_body_lengths_per_s * phys.adult_length_m;
+    if c.is_finite() && c > 0.0 { c } else { 1.0 }
 }

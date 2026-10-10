@@ -1047,3 +1047,51 @@ fn a_capgnawer_circling_outside_the_near_band_marks_a_failed_approach() {
     assert!(steer(&mut fauna).is_none(), "the mark returns control to its forager");
     assert_eq!(fauna.ledger.stalled_visits[cap.index()], 1);
 }
+
+/// SP-FREEZE2: a bellwing perched within the catch's reach on the map but above the strike
+/// band (and under the catch ceiling, so it is prey at rest) is no catch to wait for: the wait
+/// turned a hungry seedporter in place under a crown for minutes. Only a prey its strike can
+/// meet in height holds it.
+#[test]
+fn a_seedporter_does_not_wait_under_a_bellwing_its_strike_cannot_reach_in_height() {
+    let world = noon(517);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config();
+    let small = HUNTING;
+    let g = c.founder(SP).body_at(c.founder(SP).core.body_max * small.body);
+    let band = c.founder(SP).hunter.unwrap().strike_height_m(&g);
+    let lift = band + g.height_m;
+    // The catch ceiling over the lift: the bellwing stays prey, so only the band can refuse.
+    c.founders[SP.index()].catch_ceiling_m = 2.0 * lift;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let sp = introduce(&mut fauna, &world, SP, small);
+    place(&mut fauna, sp, 3.0, LANE_Z, EAST);
+    animal_mut(&mut fauna, sp).pose.y_m = SURFACE_M;
+    animal_mut(&mut fauna, sp).eating = true;
+    heuristic(&mut fauna, sp, SP);
+    let h = fauna.config.founder(SP).hunter.unwrap();
+    let ahead = (h.jaw_forward_length_fraction + 0.5 * h.strike_reach_length_fraction) * g.length_m;
+    let bw = bellwing(&mut fauna, &world, 3.0 + ahead, lift);
+    animal_mut(&mut fauna, bw).mobility.mode = MobilityMode::Perched;
+    animal_mut(&mut fauna, bw).mobility.falling = false;
+    assert!(crate::is_prey_of(&fauna.config, &animal(&fauna, sp), &animal(&fauna, bw)), "fixture: prey by the ceiling");
+    let mut waited = 0;
+    for _ in 0..100 {
+        if let Some(a) = fauna.animals.iter_mut().find(|a| a.id == bw) {
+            a.pose.y_m = SURFACE_M + lift;
+            a.mobility.mode = MobilityMode::Perched;
+            a.mobility.falling = false;
+        }
+        // Keep it overhead within reach of wherever the seedporter stands.
+        let p = animal(&fauna, sp).pose;
+        if let Some(a) = fauna.animals.iter_mut().find(|a| a.id == bw) {
+            a.pose.x = p.x + ahead * p.heading_rad.sin();
+            a.pose.z = p.z + ahead * p.heading_rad.cos();
+        }
+        fauna.step_with(&world, &mut flora, 1);
+        waited += usize::from(animal(&fauna, sp).hunt.mode == HuntMode::Wait);
+    }
+    assert_eq!(waited, 0, "it waited {waited} ticks under a bellwing {lift} m up, its band {band} m");
+    assert_eq!(fauna.ledger.strikes_by_founder[SP.index()], 0, "and never struck at it");
+}

@@ -91,7 +91,17 @@ fn main() {
     let driven = cubarium::voxel::policy_founders(&[]);
     let saved = cubarium_voxel_sim::saved::load(std::path::Path::new(&dir), &driven)
         .unwrap_or_else(|e| panic!("load: {e}"));
-    let (world, flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
+    let (world, mut flora, mut fauna, minute) = (saved.world, saved.flora, saved.fauna, saved.minute);
+    // `set=PATH=VALUE` (repeatable): flora/fauna parameters over the save's own configs,
+    // as `voxel_census load= set=` resolves them.
+    let sets: Vec<String> = args.iter().filter_map(|a| a.strip_prefix("set=").map(str::to_string)).collect();
+    if !sets.is_empty() {
+        let loaded = cubarium_voxel_sim::params::Params::over_loaded(world.config().clone(), flora.config(), fauna.config().clone(), &sets)
+            .unwrap_or_else(|e| panic!("the parameter set: {e}"));
+        flora.replace_config(loaded.flora.clone()).unwrap_or_else(|e| panic!("set= flora: {e}"));
+        fauna.replace_config(loaded.params.fauna.clone()).unwrap_or_else(|e| panic!("set= fauna: {e}"));
+        eprintln!("set {sets:?}");
+    }
     install_founders_with(&mut fauna, &[]).expect("default heuristic controllers");
     eprintln!(
         "loaded {dir} at minute {minute}: animals {} ({})",
@@ -184,12 +194,12 @@ fn main() {
                     )
                 });
                 eprintln!(
-                    "body t={} id={} {} x={:.3} z={:.3} y={} ym={:.3} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} lift={:.1} steer={:?} state={:?} mode={:?} eat={} emerg={} full={:.3} body={:.3} thirsty={} ashore={} dry={:.2} retract={} climb={} perch={} falling={} att={:.4} got={:.4} trapped={:?} stay={:?} hunt={:?}{light}",
+                    "body t={} id={} {} x={:.3} z={:.3} y={} ym={:.3} hd={:.2} fwd={:.2} turn={:.2} feed={:.0} lift={:.1} steer={:?} state={:?} mode={:?} eat={} emerg={} full={:.3} body={:.3} thirsty={} ashore={} dry={:.2} retract={} climb={} perch={} falling={} att={:.4} got={:.4} trapped={:?} wade={:?} stay={:?} hunt={:?}{light}",
                     fauna.view().tick, a.id, f.name(), a.pose.x, a.pose.z, a.site.y, a.pose.y_m, a.pose.heading_rad,
                     h.forward, h.turn, h.feed, a.founder_state.lift, fauna.steer_of(a.id), a.state, m.mode,
                     a.eating, a.emergency, a.reserve / config.founder(f).core.reserve_of(a.body).max(1e-12), a.body,
                     m.thirsty, m.ashore, m.dryness, m.retract_ticks, m.climb.is_some(), m.perch.is_some(), m.falling,
-                    fbk.attempted_equivalent, fbk.delivered_equivalent, fauna.trapped_of(a.id), fauna.forage_stays().into_iter().find(|s| s.0 == a.id), a.hunt.mode
+                    fbk.attempted_equivalent, fbk.delivered_equivalent, fauna.trapped_of(a.id), fauna.wade_state(a.id), fauna.forage_stays().into_iter().find(|s| s.0 == a.id), a.hunt.mode
                 );
             }
             if only.as_deref().is_some_and(|l| l != f.name()) {
@@ -321,8 +331,24 @@ fn main() {
                 let own = (r / v).ceil() as u32;
                 let cols = (cfg.teachers.way_on_m / v).ceil() as u32;
                 eprintln!("graph: node_near={:?} way_on={:?}", graph.node_near(a.site, (a.pose.x, a.pose.z), own), graph.way_on(&w, a.site, r, head, step, phys.wade_depth_m(&g), own, cols));
+                if let Some(n) = graph.node_near(a.site, (a.pose.x, a.pose.z), own) {
+                    let comp = graph.components[n];
+                    let size = graph.components.iter().filter(|&&k| k == comp).count();
+                    let mut sizes: HashMap<usize, usize> = HashMap::new();
+                    for &k in &graph.components {
+                        *sizes.entry(k).or_default() += 1;
+                    }
+                    let biggest = sizes.values().copied().max().unwrap_or(0);
+                    eprintln!("graph: node {n} at {:?} component {comp} of {size} nodes (largest {biggest}, {} components)", graph.faces[n], sizes.len());
+                }
                 let way = graph.drop_way(&w, a.site, r, head, step, reach, phys.wade_depth_m(&g), own, cols);
                 eprintln!("drop_way: {way:?}");
+                let window = 2 * (cfg.teachers.way_on_m / v).ceil() as usize + 1;
+                let sc = (cfg.life.shallows_search_m / v).ceil() as u32;
+                for (open_min, under, max_under) in [(window * window, phys.drown_depth_m(&g), 40), (window * window, phys.drown_depth_m(&g), 0), (1, 10.0, 0)] {
+                    let wade = graph.wade_way(&w, a.site, r, head, step, (phys.wade_depth_m(&g), under, max_under), own, open_min, sc, &mut |_| true);
+                    eprintln!("wade_way open_min={open_min} under={under:.3} max_under={max_under}: {:?}", wade.map(|(f, d, u)| (f.len(), f.last().copied(), d, u)));
+                }
             }
             let (cx, cz) = ((a.pose.x / c.voxel_m).floor() as i64, (a.pose.z / c.voxel_m).floor() as i64);
             for dz in -4i64..=4 {
@@ -346,6 +372,71 @@ fn main() {
                     line.push_str(&format!("{cell:>6}{}", if dx == 0 && dz == 0 { '*' } else { ' ' }));
                 }
                 eprintln!("  {line}");
+            }
+            // `water=R`: a (2R+1)² window of columns round it, each its top surface within
+            // 12 layers of its own (relative layers) and the standing water there in cm
+            // (`h:cm`, `h.` for dry; `#` no surface in that span); `|` past the strip's ends.
+            if let Some(rad) = get("water=").map(|s| s.parse::<i64>().expect("water=")) {
+                eprintln!("water id={} wade_cm={:.1} (rows +z downward, columns +x)", a.id, 100.0 * phys.wade_depth_m(&g));
+                let y0 = i64::from(a.site.y);
+                for dz in -rad..=rad {
+                    let mut line = String::new();
+                    for dx in -rad..=rad {
+                        let (x, z) = ((cx + dx).rem_euclid(i64::from(c.width)), cz + dz);
+                        if z < 0 || z >= i64::from(c.depth) {
+                            line.push_str("    |");
+                            continue;
+                        }
+                        let solid = |yy: i64| yy >= 0 && yy < i64::from(c.height) && w.is_solid(x, yy as u32, z as u32);
+                        let top = (-12..=12i64).rev().find(|d| solid(y0 + d) && !solid(y0 + d + 1));
+                        let cell = match top {
+                            None => "#".to_string(),
+                            Some(d) => {
+                                let cm = 100.0 * w.water_depth_m(x, (y0 + d) as u32, z as u32);
+                                if cm < 0.5 { format!("{d:+}.") } else { format!("{d:+}:{cm:.0}") }
+                            }
+                        };
+                        line.push_str(&format!("{cell:>5}{}", if dx == 0 && dz == 0 { '*' } else { ' ' }));
+                    }
+                    eprintln!("  {line}");
+                }
+            }
+            // `wmap=R`: the same window one character a column: `.` dry, `w` water it wades,
+            // `o` up to twice that, `O` deeper, `#` no surface within 40 layers, `*` itself;
+            // then the surface layer relative to its own (`0`-`9` up, `a`-`z` down 1..26).
+            if let Some(rad) = get("wmap=").map(|s| s.parse::<i64>().expect("wmap=")) {
+                let wade = phys.wade_depth_m(&g);
+                let y0 = i64::from(a.site.y);
+                eprintln!("wmap id={} wade_cm={:.1} centre col ({cx},{cz}) rows z from {} downward", a.id, 100.0 * wade, (cz - rad).max(0));
+                let mut hl = Vec::new();
+                for dz in -rad..=rad {
+                    let z = cz + dz;
+                    if z < 0 || z >= i64::from(c.depth) {
+                        continue;
+                    }
+                    let (mut line, mut hline) = (String::new(), String::new());
+                    for dx in -rad..=rad {
+                        let x = (cx + dx).rem_euclid(i64::from(c.width));
+                        let solid = |yy: i64| yy >= 0 && yy < i64::from(c.height) && w.is_solid(x, yy as u32, z as u32);
+                        let top = (-40..=40i64).rev().find(|d| solid(y0 + d) && !solid(y0 + d + 1));
+                        let (ch, hc) = match top {
+                            None => ('#', '#'),
+                            Some(d) => {
+                                let m = w.water_depth_m(x, (y0 + d) as u32, z as u32);
+                                let ch = if m < 0.005 { '.' } else if m <= wade { 'w' } else if m <= 2.0 * wade { 'o' } else { 'O' };
+                                let hc = if d >= 0 { char::from_digit(d.min(9) as u32, 10).unwrap_or('9') } else { (b'a' + ((-d).min(26) - 1) as u8) as char };
+                                (ch, hc)
+                            }
+                        };
+                        line.push(if dx == 0 && dz == 0 { '*' } else { ch });
+                        hline.push(hc);
+                    }
+                    eprintln!("  {line}");
+                    hl.push(hline);
+                }
+                for h in hl {
+                    eprintln!("  {h}");
+                }
             }
         }
     }

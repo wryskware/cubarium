@@ -1791,3 +1791,127 @@ fn a_hungry_vine_climber_or_perch_replans_after_the_configured_stall_clock() {
         if initial == MobilityMode::Climb { assert!(animal(&fauna, id).mobility.falling, "a stalled climber descends"); }
     }
 }
+
+// ------------------------------------------------------------------ juvenile wade pockets (SP-FREEZE2)
+
+/// Standing water `depth_m` deep over column `(x, z)` of a plain (support face `y = 2`), in
+/// the cells above it. The fauna never steps the world, so it stays as laid.
+fn pool(world: &mut World, x: i64, z: u32, depth_m: f64) {
+    let c = world.config().clone();
+    let cell = c.voxel_volume();
+    let mut left = depth_m * c.voxel_m * c.voxel_m;
+    let mut y = 3;
+    while left > 1e-15 {
+        let v = left.min(cell);
+        world.apply(WorldCommand::AddWater { x, y, z, volume_m3: v });
+        left -= v;
+        y += 1;
+    }
+    let got = world.view().water_depth_m(x, 2, z);
+    assert!((got - depth_m).abs() < 1e-9, "fixture: {got} m of water at ({x}, {z}), wanted {depth_m}");
+}
+
+/// A 96 × 40 plain with a lake over columns `30..=60` (every `z`) `lake_m` deep; the columns
+/// in `spot` are `spot_m` deep instead. Dry land either side, open to any body.
+fn lake(lake_m: f64, spot: &[(i64, u32)], spot_m: f64) -> World {
+    let mut world = plain(96, 12, 40);
+    for x in 30..=60 {
+        for z in 0..40 {
+            pool(&mut world, x, z, if spot.contains(&(x, z)) { spot_m } else { lake_m });
+        }
+    }
+    world
+}
+
+/// The juvenile's wade and drown depths, and the adult's wade depth.
+fn juvenile_depths(c: &FaunaConfig) -> (f64, f64, f64) {
+    let p = c.founder(SP);
+    let g = p.body_at(p.core.body_max * juvenile_stores().body);
+    (p.wade_depth_m(&g), p.drown_depth_m(&g), p.wade_depth_m(&p.adult_body()))
+}
+
+/// Run the juvenile on its heuristic until it stands on dry land outside the lake, at most
+/// `cap` ticks; the tick it got there.
+fn walks_ashore(fauna: &mut Fauna, world: &World, flora: &mut Flora, id: u64, cap: usize) -> Option<usize> {
+    for t in 0..cap {
+        fauna.step(world, flora);
+        let a = *fauna.view().animal(id).expect("alive: it never drowns on the way");
+        if !(30..=60).contains(&a.site.x) && world.view().water_depth_m(i64::from(a.site.x), a.site.y, a.site.z) <= 0.0 {
+            return Some(t);
+        }
+    }
+    None
+}
+
+/// WADE-OUT, a juvenile's own pocket: a shallow on a lake its adult wades, ringed by water
+/// over the juvenile's depth. The adult's route graph has it on open ground, so DROP never
+/// finds it cornered, and the shallows reflex never fires (it stands in water it wades);
+/// it wandered the shallow for good. Held its lineage's `drop.after_s`, it wades out.
+#[test]
+fn a_juvenile_on_a_shallow_ringed_by_water_over_its_depth_wades_ashore() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    let (wade, drown, adult) = juvenile_depths(&c);
+    assert!(adult > wade && drown > wade, "fixture: an adult wades deeper and it drowns deeper than it wades");
+    let lake_m = wade + 0.5 * (adult.min(drown) - wade);
+    let spot = [(45, 20), (46, 20), (45, 21), (46, 21)];
+    let world = lake(lake_m, &spot, 0.5 * wade);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let walk = 32.0 * V / (c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m);
+    let cap = ((after + 10.0 * walk + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    let t = walks_ashore(&mut fauna, &world, &mut flora, id, cap);
+    assert!(t.is_some(), "still in the lake after {cap} ticks: {:?}, steer {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// WADE-OUT, out of its depth with the shallows past deeper water: the motor lets a body
+/// out of its depth step no deeper, so the shallows reflex's straight walk to the nearest
+/// face it wades was refused at its first step and it stood there for good.
+#[test]
+fn a_juvenile_out_of_its_depth_with_deeper_water_round_it_wades_ashore() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    let (wade, drown, _) = juvenile_depths(&c);
+    let here = wade + 0.25 * (drown - wade);
+    let around = wade + 0.75 * (drown - wade);
+    assert!(around - here > crate::body::LEVEL_TOLERANCE_M, "fixture: the water round it is a real step deeper");
+    let world = lake(around, &[(45, 20)], here);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let walk = 32.0 * V / (c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m);
+    let cap = ((after + 10.0 * walk + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    let t = walks_ashore(&mut fauna, &world, &mut flora, id, cap);
+    assert!(t.is_some(), "still in the lake after {cap} ticks: {:?}, steer {:?}", animal(&fauna, id), fauna.steer.get(&id));
+}
+
+/// WADE-OUT never takes a body under water it drowns in for longer than its drown clock: a
+/// shallow ringed by water over its drown depth wider than it can cross holds it, alive.
+#[test]
+fn a_juvenile_ringed_by_drowning_water_too_wide_to_cross_stays_and_lives() {
+    let mut c = freeze_config();
+    c.teachers.press_replan_s = 3.0;
+    // A drown clock too short to cross the lake's half-width at cruise.
+    let (wade, drown, _) = juvenile_depths(&c);
+    let cruise = c.founder(SP).cruise_body_lengths_per_s * c.founder(SP).adult_length_m;
+    c.founders[SP.index()].drown_after_s = 4.0 * V / cruise;
+    let spot = [(45, 20), (46, 20), (45, 21), (46, 21)];
+    let world = lake(drown + V, &spot, 0.5 * wade);
+    let mut flora = Flora::new(barren_flora());
+    let after = c.founder(SP).drop.after_s;
+    let cap = ((2.0 * after + 10.0) / DT).ceil() as usize;
+    let mut fauna = Fauna::new(c);
+    fauna.set_births_enabled(false);
+    let id = on_ground(&mut fauna, &world, SP, 45, 20, juvenile_stores());
+    use_teacher(&mut fauna, id);
+    assert_eq!(walks_ashore(&mut fauna, &world, &mut flora, id, cap), None, "no way out it survives");
+    let a = animal(&fauna, id);
+    assert!(spot.contains(&(i64::from(a.site.x), a.site.z)), "it stays on the shallow: {:?}", a.site);
+}

@@ -432,6 +432,7 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
         fauna.controllers.take(a.id);
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
+        fauna.wading.remove(&a.id);
         fauna.book_removed(a);
         fauna.free_riders(a, Some(view));
     }
@@ -1308,6 +1309,7 @@ fn disperse(
         fauna.controllers.take(a.id);
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
+        fauna.wading.remove(&a.id);
         fauna.free_riders(&a, Some(view));
     }
     if pack_changed {
@@ -1949,6 +1951,13 @@ fn controllers(
                 lure = 0.0;
                 lift = 0.0;
                 src = crate::Steer::Drop;
+            } else if let Some(go) = jump::wade_reflex(fauna, i, view) {
+                // WADE-OUT: held in water it may not wade, or on a pocket of its graph, it
+                // walks out through water short of its drown depth; as DROP, a last way out.
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Wade;
             }
         }
         if lure > 0.0 && sky.clock_on && !fauna.config.founder(founder).lure_daylight {
@@ -2848,6 +2857,8 @@ fn founder_act(
     // read against the body's own height by package mobility).
     let step_limits = phys.step_limits(view.config.voxel_m);
     let wall_friction = fauna.config.life.wall_friction;
+    // WADE-OUT: a body wading its way out admits the way's water (`jump::Wade`).
+    let wade_m = fauna.wade_limit(fauna.animals[i].id).map_or(phys.wade_depth_m(&geometry), |w| w.max(phys.wade_depth_m(&geometry)));
     let (motion, standing_y) = {
         let a = &mut fauna.animals[i];
         let mut standing_y = a.site.y;
@@ -2857,7 +2868,7 @@ fn founder_act(
             &mut standing_y,
             &manifest,
             &geometry,
-            phys.wade_depth_m(&geometry),
+            wade_m,
             step_limits,
             wall_friction,
             held,
@@ -3323,6 +3334,21 @@ fn meets_capsule(
     if segment_distance(jaw_from, jaw_to, (prey.pose.x, prey.pose.z), ring) > reach {
         return false;
     }
+    in_strike_band(view, striker, geometry, h, prey, &pg)
+}
+
+/// The strike capsule's height test ([`meets_capsule`]): the band from the striker's base up
+/// its `strike_height_m` meets the prey's cylinder (`pg`, its body), its base on its support
+/// face, or at its pose off the ground.
+pub(crate) fn in_strike_band(
+    view: &VoxelView<'_>,
+    striker: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    prey: &Animal,
+    pg: &crate::Body,
+) -> bool {
+    let v = view.config.voxel_m;
     let s0 = if striker.mobility.mode == crate::MobilityMode::Perched {
         striker.pose.y_m
     } else {
@@ -3642,6 +3668,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
     fauna.controllers.take(a.id);
     fauna.trapped.remove(&a.id);
     fauna.drop_plans.remove(&a.id);
+    fauna.wading.remove(&a.id);
     fauna.free_riders(&a, view);
     let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
@@ -5960,6 +5987,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.controllers.take(*id);
         fauna.trapped.remove(id);
         fauna.drop_plans.remove(id);
+        fauna.wading.remove(id);
         fauna.forage.remove(id);
         fauna.rove.remove(id);
     }
