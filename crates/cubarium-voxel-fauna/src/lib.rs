@@ -3716,6 +3716,8 @@ pub struct FaunaTick(step::TickStart);
 /// One exact strike or kill, captured only when a census requests it.
 #[derive(Clone, Debug)]
 pub struct CensusPredation {
+    /// Identity of the struck or killed body, for exact life-record matching.
+    pub prey_id: u64,
     pub predator: Founder,
     pub prey: Founder,
     /// Structural organic matter at the event, in the same units as Animal::body.

@@ -111,6 +111,8 @@ pub struct LifeRow {
     pub path_m: f64,
     pub activity: Activity,
     pub segment: u32,
+    /// Structural body mass at predation death, in organic units; otherwise absent.
+    pub prey_body: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -451,6 +453,7 @@ impl Recorder {
                         path_m: 0.0,
                         activity: Activity::default(),
                         segment: self.segment,
+                        prey_body: None,
                     },
                     open_intake: [0.0; Food::COUNT],
                     position: pos,
@@ -478,7 +481,27 @@ impl Recorder {
         }
         self.life.observe(fauna, tick);
         for event in self.life.take_events() {
+            let killed = matches!(event.what, What::Died { .. })
+                .then(|| fauna.census_readout().and_then(|r| {
+                    r.predation.iter().rev().find(|p| p.kill && p.prey_id == event.animal)
+                }))
+                .flatten();
+            let id = event.animal;
             self.event(event);
+            if let Some(kill) = killed {
+                self.record_kill(id, kill);
+            }
+        }
+    }
+
+    fn record_kill(&mut self, id: u64, kill: &cubarium_voxel_fauna::CensusPredation) {
+        if let Some(track) = self.tracks.get_mut(&id)
+            && track.row.died_minute.is_some()
+        {
+            // Exact kill instrumentation also disambiguates simultaneous departures.
+            track.row.prey_body = Some(kill.prey_body);
+            track.row.killer_lineage = kill.predator.name().to_string();
+            track.row.cause = format!("killed_by_{}", kill.predator.name());
         }
     }
 
@@ -1196,7 +1219,7 @@ impl LifeRow {
     pub fn write_header(out: &mut impl Write) -> io::Result<()> {
         let mut c: Vec<String> = "id,lineage,native,origin,parent_id,generation,observed_minute,born_minute,matured_minute,independent_minute,died_minute,last_seen_minute,alive,cause,killer_lineage,adult,meals".split(',').map(str::to_string).collect();
         c.extend(Food::ALL.map(|f| format!("intake_{}", f.name())));
-        c.extend("kills,offspring,organic_given,peak_size,min_fullness,path_m,awake_body_s,moving_share,feeding_share,segment".split(',').map(str::to_string));
+        c.extend("kills,offspring,organic_given,peak_size,min_fullness,path_m,awake_body_s,moving_share,feeding_share,segment,prey_body".split(',').map(str::to_string));
         csv(out, c)
     }
     pub fn write_csv(&self, out: &mut impl Write) -> io::Result<()> {
@@ -1235,6 +1258,7 @@ impl LifeRow {
                 .map(|n| val((r.activity.awake_body_s > 0.0).then(|| n / r.activity.awake_body_s))),
         );
         c.push(r.segment.to_string());
+        c.push(val(r.prey_body));
         csv(out, c)
     }
 }
@@ -1682,6 +1706,9 @@ mod tests {
         let header: Vec<_> = lines[0].split(',').collect();
         let row: Vec<_> = lines[1].split(',').collect();
         assert_eq!(header.len(), row.len());
+        assert_eq!(header.last(), Some(&"prey_body"));
+        assert_eq!(row.last(), Some(&""));
+        assert_eq!(dead[0].prey_body, None);
         assert_eq!(
             row[header.iter().position(|s| *s == "cause").unwrap()],
             "drowned"
@@ -1691,6 +1718,38 @@ mod tests {
             "false"
         );
         assert_eq!(row[header.iter().position(|s| *s == "segment").unwrap()], "0");
+    }
+
+    #[test]
+    fn life_csv_records_exact_killed_tissue_and_leaves_living_mass_empty() {
+        let (_, _, fauna) = crate::tests::small_world();
+        let mut recorder = Recorder::new(opts(2.0), RING_M, 0, &fauna, 0.0);
+        let id = fauna.view().animals[0].id;
+        let kill = cubarium_voxel_fauna::CensusPredation {
+            prey_id: id,
+            predator: Founder::Lanternjaw,
+            prey: Founder::Browser,
+            prey_body: fauna.view().animals[0].body / 2.0,
+            kill: true,
+        };
+        assert!(recorder.lives().all(|r| r.prey_body.is_none()));
+        recorder.record_kill(id, &kill);
+        assert!(recorder.lives().all(|r| r.prey_body.is_none()));
+        recorder.event(LifeEvent {
+            tick: 2,
+            animal: id,
+            what: What::Died { cause: "unknown".into(), by: None },
+        });
+        recorder.record_kill(id, &kill);
+        let dead = recorder.take_dead();
+        assert_eq!(dead[0].prey_body, Some(kill.prey_body));
+        assert_eq!(dead[0].killer_lineage, kill.predator.name());
+        let mut bytes = Vec::new();
+        dead[0].write_csv(&mut bytes).unwrap();
+        let csv = String::from_utf8(bytes).unwrap();
+        let header = life_header();
+        assert_eq!(header.split(',').count(), csv.trim_end().split(',').count());
+        assert_eq!(csv.trim_end().split(',').last().unwrap().parse::<f64>().unwrap(), kill.prey_body);
     }
 
     #[test]
