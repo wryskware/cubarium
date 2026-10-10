@@ -411,3 +411,17 @@ so the two packs can decide waits differently. The display uses the change-only 
 picture is not wrong, but the oracle can only check the packer with fades off
 (`--set 'light.colour_fade_s = 0.0'` passes 1200 ticks). Either the full pack carries the
 fade state, or the oracle compares fading cells by their endpoints.
+
+## 23. The shrink lighting's frame cost (CELL-SHRINK, 2026-10-10)
+
+Merged 6a49188a: a changing plant cell's AO crease, shadow and crown edge follow its grow-in
+size (`[plants] light_by_size`, default on).
+- **Cost.** The `PLANT_LIGHT` specialization keeps a still world free. On a live day,
+  though, cells are changing in about 90 % of frames, and the weighted path then costs about
+  +0.45 ms of walk at 6 px on the desktop (2.50 → 2.96 ms, logs3/analysis.txt).
+- **A per-cell gate didn't help** (branch `cell-shrink2`, 976e78e1, unmerged). It used a spare
+  bit on changing cells and dropped the specialization. On vs off then cost the same on a
+  live day, but the still world got +0.45 ms slower than main (logs4/). So the cost is
+  probably the weighted path's register pressure, not its lookups.
+- **Next ideas:** keep the specialization and gate inside it, slim the weighted path's
+  registers, or select the weighted pipeline only when changing cells are on screen.
