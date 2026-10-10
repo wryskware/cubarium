@@ -226,6 +226,12 @@ class AB(Kind):
         binaries = self.binaries(job, ctx)
         return Spawn(self.stage_tasks(job, ctx, "continuation", rest, binaries, starts))
 
+    def census_runs(self, job, ctx):
+        from ..stops import CensusRun
+        return [CensusRun(name, str(seed), [job.out / stage / name / f"s{seed}" / "census.csv"
+                                          for stage in ("full", "early", "continuation")])
+                for seed in job.spec["seed_list"] for name in job.spec["arms"]]
+
     def finish(self, job, ctx):
         if job.spec["preflight_only"]:
             head = "preflight-only: passed; no study launched" if job.state.get("arms") else "preflight did not pass"

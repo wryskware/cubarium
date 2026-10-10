@@ -171,6 +171,19 @@ class Batch(Kind):
                                    stall_min=spec.get("stall_min", 30)),
                      est_h=spec.get("est_h"), timeout_h=spec.get("timeout_h"), meta=dict(out=out, batch=True))]
 
+    def census_runs(self, job, ctx):
+        from ..stops import CensusRun
+        root = job.out / "batch-task/batch"
+        if not job.tasks and job.spec.get("resume"):
+            root = Path(job.spec["resume"])
+        try:
+            manifest = json.loads((root / "batch.json").read_text())
+        except FileNotFoundError:
+            return []
+        return [CensusRun(run["arm"], str(run["seed"]),
+                          [root / run["arm"] / f"s{run['seed']}" / "census.csv"])
+                for run in manifest["runs"]]
+
     def finish(self, job, ctx):
         view = job.tasks.get("batch")
         out = view.task.meta["out"] if view else "?"
