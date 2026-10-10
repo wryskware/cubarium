@@ -735,6 +735,11 @@ pub struct Animals {
     /// rebuild: it rises over [`MEAL_FLASH_FADE_S`] while the animal crops and falls back
     /// after, so the flash eases in and out. Kept the same way as the sleep blend.
     flash_blend: FxHashMap<u64, f32>,
+    /// Each cropping (or just-cropped) animal's feeding-clip weight by id, 0 to 1 before its
+    /// ease, and whether it was cropping, at the last rebuild (FEED-RIG, [`super::rig`]): it
+    /// rises over [`super::rig::FEED_EASE_S`] while the animal crops (the reach) and falls
+    /// after (the return), on the ground only. Kept the same way as the meal flash.
+    feed_blend: FxHashMap<u64, (f32, bool)>,
     /// `VoxelConfig::meal_flash`: how far the accent leans toward the flash at its height.
     meal_flash: f32,
     /// The tick of the last rebuild, which is what the blend's elapsed time is read from.
@@ -797,6 +802,7 @@ impl Animals {
             hunker_blend: FxHashMap::default(),
             hunker_s: hunker::DEFAULT_S,
             flash_blend: FxHashMap::default(),
+            feed_blend: FxHashMap::default(),
             meal_flash: MEAL_FLASH_DEFAULT,
             last_tick: None,
             owners: Vec::new(),
@@ -846,6 +852,7 @@ impl Animals {
         let mut idle: FxHashMap<u64, Idle> = FxHashMap::default();
         let mut hunkers: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let mut flashes: FxHashMap<u64, f32> = FxHashMap::default();
+        let mut feeds: FxHashMap<u64, (f32, bool)> = FxHashMap::default();
         let flash_step = if MEAL_FLASH_FADE_S > 0.0 {
             (dt / MEAL_FLASH_FADE_S) as f32
         } else {
@@ -879,6 +886,16 @@ impl Animals {
             if flash > 0.0 || cropping {
                 flashes.insert(a.id, flash.clamp(0.0, 1.0));
             }
+            // The feeding clip: in while the body crops on the ground, out after, moved on at
+            // the state it had at the last rebuild (as the frame clock extrapolated it).
+            let feeding = cropping && a.mobility.climb.is_none();
+            let feed = match self.feed_blend.get(&a.id) {
+                Some(&(w, was)) => super::rig::advance_weight(w, was, dt),
+                None => 0.0,
+            };
+            if feed > 0.0 || feeding {
+                feeds.insert(a.id, (feed, feeding));
+            }
             // Idle: awake, standing (not walking, feeding or climbing), where it stood at
             // the last rebuild, fully woken, and so for the hold.
             let at = [a.pose.x, a.pose.z, a.pose.heading_rad];
@@ -905,6 +922,25 @@ impl Animals {
         self.idle_blend = idle;
         self.hunker_blend = hunkers;
         self.flash_blend = flashes;
+        self.feed_blend = feeds;
+    }
+
+    /// One animal's feeding-clip weight at this rebuild (before its ease) and its change per
+    /// tick from here, or `None` for a body not feeding and not easing out of it (FEED-RIG).
+    pub(crate) fn feed_weight(&self, animal: &Animal) -> Option<(f32, f32)> {
+        if animal.mobility.climb.is_some() {
+            return None;
+        }
+        let &(w, feeding) = self.feed_blend.get(&animal.id)?;
+        let r = (DT / super::rig::FEED_EASE_S) as f32;
+        let rate = if feeding && w < 1.0 {
+            r
+        } else if !feeding && w > 0.0 {
+            -r
+        } else {
+            0.0
+        };
+        (w > 0.0 || rate != 0.0).then_some((w, rate))
     }
 
     /// One animal's hunker weight at this rebuild and its change per tick from here, or

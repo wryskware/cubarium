@@ -84,6 +84,10 @@ const LEGACY_ATLAS: (u32, u32) = (2048, 1024);
 pub const MAX_TILES: usize = 2048;
 pub const MAX_FIGS: usize = 2048;
 pub const MAX_PALETTE: usize = 16384;
+/// Bone transforms a frame can carry (FEED-RIG): eight for each of [`MAX_TILES`].
+pub const MAX_BONES: usize = 8 * MAX_TILES;
+/// The bones a model's cells can name: [`FigureVoxel::bone`]'s bits.
+pub const BONE_LIMIT: u8 = 32;
 /// The most model voxels the pass holds, every model of a run.
 pub const MAX_VOXELS: usize = 1 << 18;
 const MODEL_BYTES: u64 = (MAX_VOXELS * std::mem::size_of::<FigureVoxel>()) as u64;
@@ -101,8 +105,8 @@ pub const CLASS_LEG2: u8 = 4;
 
 /// One cell of a figure model, as `figure.vert` reads it: its offset in the model's frame,
 /// its palette entry (from the figure's first), its pose class, whether it is the head, the
-/// faces with no cell beside them, its glyph (0: the stamped baked-model glyph), and
-/// each face's open-plane crease neighbours.
+/// faces with no cell beside them, its glyph (0: the stamped baked-model glyph), its rig
+/// bone (bits 14..19; 0 the root, FEED-RIG), and each face's open-plane crease neighbours.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FigureVoxel {
@@ -127,6 +131,17 @@ impl FigureVoxel {
                 | u32::from(glyph & 15) << 10,
             creases: [0; 2],
         }
+    }
+
+    /// This cell on rig bone `bone` (below [`BONE_LIMIT`]): a rigged figure moves it by the
+    /// frame's transform of that bone ([`FigureTile::bones`]).
+    pub fn with_bone(mut self, bone: u8) -> Self {
+        self.bits = (self.bits & !(31 << 14)) | u32::from(bone.min(BONE_LIMIT - 1)) << 14;
+        self
+    }
+
+    pub fn bone(self) -> u8 {
+        ((self.bits >> 14) & 31) as u8
     }
 
     pub fn with_creases(mut self, faces: [u8; 6]) -> Self {
@@ -215,6 +230,24 @@ pub fn crease_masks(cells: &[[i8; 3]]) -> Vec<[u8; 6]> {
         .collect()
 }
 
+/// The open-face mask of every cell of a rigged model (FEED-RIG): the faces with no cell
+/// **of the same bone** beside them. A face between two bones is drawn, so a bending joint
+/// shows the cube behind it rather than a hole; at rest it is inside the body, hidden.
+pub fn open_faces_by_bone(cells: &[[i8; 3]], bones: &[u8]) -> Vec<u8> {
+    let set: std::collections::HashMap<[i8; 3], u8> = cells.iter().copied().zip(bones.iter().copied()).collect();
+    const N: [[i8; 3]; 6] = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+    cells
+        .iter()
+        .zip(bones)
+        .map(|(c, b)| {
+            N.iter().enumerate().fold(0u8, |m, (i, d)| {
+                let n = [c[0].wrapping_add(d[0]), c[1].wrapping_add(d[1]), c[2].wrapping_add(d[2])];
+                if set.get(&n) == Some(b) { m } else { m | 1 << i }
+            })
+        })
+        .collect()
+}
+
 /// The open-face mask of every cell of a model: the faces with no other cell beside them.
 pub fn open_faces(cells: &[[i8; 3]]) -> Vec<u8> {
     let set: std::collections::HashSet<[i8; 3]> = cells.iter().copied().collect();
@@ -271,6 +304,10 @@ pub struct FigureTile {
     pub pose: [f32; 4],
     /// Its first entry in the frame's palette.
     pub palette: u32,
+    /// A rigged figure's bones this frame (FEED-RIG): the first of its transforms in
+    /// [`FigureFrame::bones`] and how many; a cell on bone `k` moves by transform
+    /// `first + k`. `None`: the model as baked.
+    pub bones: Option<(u32, u32)>,
 }
 
 /// One figure this frame: its tile, or two cross-faded by `weight_b`, at tile A's P.
@@ -296,6 +333,9 @@ pub struct FigureFrame {
     pub whole_pixels: bool,
     /// Tile samples per raster pixel on each axis. One preserves the original raster.
     pub supersample: u32,
+    /// Every rigged tile's bone transforms (FEED-RIG), in the model's own frame (voxels):
+    /// three rows of `[m0, m1, m2, t]`, a rest point `p` going to `M p + t`.
+    pub bones: Vec<[[f32; 4]; 3]>,
 }
 
 impl Default for FigureFrame {
@@ -305,6 +345,7 @@ impl Default for FigureFrame {
             palette: Vec::new(),
             whole_pixels: false,
             supersample: 1,
+            bones: Vec::new(),
         }
     }
 }
@@ -387,6 +428,8 @@ struct TileGpu {
     orig: [i32; 4],
     depth: [f32; 4],
     face_size: [i32; 4],
+    /// FEED-RIG: the first of its bones in the slot's bone buffer (-1: none), -, -, -.
+    rig: [i32; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -407,6 +450,8 @@ pub struct Packed {
     casts: Vec<bool>,
     figs: Vec<FigGpu>,
     palette: Vec<[f32; 8]>,
+    /// The rigged tiles' bone transforms, rows of `[m0, m1, m2, t]`.
+    bones: Vec<[[f32; 4]; 3]>,
     used_h: u32,
     /// The viewport and clip-space scale, possibly smaller than the physical planes.
     pub logical_atlas: (u32, u32),
@@ -558,6 +603,18 @@ fn pack_at(
         let (x, y) = shelf.place(w, h, atlas.0, atlas.1)?;
         let span = 2.0 * t.radius + 6.0;
         let v = |a: [f32; 3], w: f32| [a[0], a[1], a[2], w];
+        // Its bones, while the frame has them and the buffer has room; else drawn at rest.
+        let rig = match t.bones {
+            Some((first, n))
+                if out.bones.len() + n as usize <= MAX_BONES
+                    && (first as usize).checked_add(n as usize).is_some_and(|e| e <= frame.bones.len()) =>
+            {
+                let at = out.bones.len() as i32;
+                out.bones.extend_from_slice(&frame.bones[first as usize..(first + n) as usize]);
+                [at, 0, 0, 0]
+            }
+            _ => [-1, 0, 0, 0],
+        };
         out.tiles.push(TileGpu {
             pos: v(t.pos, 0.0),
             ax: v(t.axes[0], t.pose[0]),
@@ -576,6 +633,7 @@ fn pack_at(
                 });
                 [sizes[0], sizes[1], sizes[2], aa as i32]
             },
+            rig,
         });
         out.counts.push(t.count);
         out.casts.push(false);
@@ -711,10 +769,14 @@ impl Plane {
     }
 }
 
-/// Bytes of one ring slot's frame buffer: tiles, then figures, then the palette.
+/// Bytes of one ring slot's frame buffer: tiles, then figures, then the palette, then the
+/// bones (FEED-RIG). Each start is a multiple of 256 bytes, a storage buffer's offset
+/// alignment on every device.
 const AT_FIGS: u64 = (MAX_TILES * std::mem::size_of::<TileGpu>()) as u64;
 const AT_PALETTE: u64 = AT_FIGS + (MAX_FIGS * std::mem::size_of::<FigGpu>()) as u64;
-const SLOT_BYTES: u64 = AT_PALETTE + (MAX_PALETTE * 32) as u64;
+const AT_BONES: u64 = AT_PALETTE + (MAX_PALETTE * 32) as u64;
+const SLOT_BYTES: u64 = AT_BONES + (MAX_BONES * 48) as u64;
+const _: () = assert!(AT_FIGS % 256 == 0 && AT_PALETTE % 256 == 0 && AT_BONES % 256 == 0);
 
 /// The model pass's GPU side: the walk's depth plane, the atlas, the two passes.
 pub struct FigurePass {
@@ -942,7 +1004,7 @@ impl FigurePass {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
         };
-        let data_bindings = [ssbo(0), ssbo(1), ssbo(2), ssbo(3)];
+        let data_bindings = [ssbo(0), ssbo(1), ssbo(2), ssbo(3), ssbo(4)];
         let image_bindings = [img(0), img(1), img(2), img(3)];
         let data_layout = unsafe {
             d.create_descriptor_set_layout(&vk::DescriptorSetLayoutCreateInfo::default().bindings(&data_bindings), None)
@@ -951,7 +1013,7 @@ impl FigurePass {
             d.create_descriptor_set_layout(&vk::DescriptorSetLayoutCreateInfo::default().bindings(&image_bindings), None)
         }?;
         let sizes = [
-            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::STORAGE_BUFFER).descriptor_count(4 * slots as u32),
+            vk::DescriptorPoolSize::default().ty(vk::DescriptorType::STORAGE_BUFFER).descriptor_count(5 * slots as u32),
             vk::DescriptorPoolSize::default().ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER).descriptor_count(4),
         ];
         let pool = unsafe {
@@ -984,7 +1046,8 @@ impl FigurePass {
                 [vk::DescriptorBufferInfo::default().buffer(models.buffer).offset(0).range(vk::WHOLE_SIZE)],
                 [vk::DescriptorBufferInfo::default().buffer(frame.buffer).offset(0).range(AT_FIGS)],
                 [vk::DescriptorBufferInfo::default().buffer(frame.buffer).offset(AT_FIGS).range(AT_PALETTE - AT_FIGS)],
-                [vk::DescriptorBufferInfo::default().buffer(frame.buffer).offset(AT_PALETTE).range(SLOT_BYTES - AT_PALETTE)],
+                [vk::DescriptorBufferInfo::default().buffer(frame.buffer).offset(AT_PALETTE).range(AT_BONES - AT_PALETTE)],
+                [vk::DescriptorBufferInfo::default().buffer(frame.buffer).offset(AT_BONES).range(SLOT_BYTES - AT_BONES)],
             ];
             let writes: Vec<_> = infos
                 .iter()
@@ -1217,6 +1280,9 @@ impl FigurePass {
         buf.write_bytes_at(0, &packed.tiles);
         buf.write_bytes_at(AT_FIGS, &packed.figs);
         buf.write_bytes_at(AT_PALETTE, &packed.palette);
+        if !packed.bones.is_empty() {
+            buf.write_bytes_at(AT_BONES, &packed.bones);
+        }
         let dropped = packed.dropped;
         self.packed[slot] = packed;
         dropped
@@ -1534,6 +1600,7 @@ mod tests {
             radius: 1.0,
             pose: [0.0; 4],
             palette: 0,
+            bones: None,
         }
     }
 
@@ -1573,6 +1640,7 @@ mod tests {
             palette: vec![PaletteEntry::default()],
             whole_pixels: false,
             supersample: 1,
+            ..FigureFrame::default()
         };
         let p = pack(&frame, 4, 2, 60, 256, 8);
         let placed = p.placements();
@@ -1595,6 +1663,7 @@ mod tests {
             palette: vec![PaletteEntry::default()],
             whole_pixels: false,
             supersample: 1,
+            ..FigureFrame::default()
         };
         let p = pack(&frame, 4, 2, 60, 256, 0);
         let xs: Vec<f32> = p.placements().iter().map(|q| q.0[0]).collect();
@@ -1754,6 +1823,48 @@ mod tests {
         assert_eq!(open[0], 0b111111 & !(1 << 1) & !(1 << 3));
         assert_eq!(open[1], 0b111111 & !1);
     }
+    #[test]
+    fn a_cell_keeps_its_bone_and_a_face_between_two_bones_is_drawn() {
+        let v = FigureVoxel::new([1, 2, -3], 4, CLASS_TORSO, true, 0b10_1010, 3).with_bone(5);
+        assert_eq!((v.bone(), v.class(), v.head(), v.open(), v.offset()), (5, CLASS_TORSO, true, 0b10_1010, [1, 2, -3]));
+        let cells = [[0, 0, 0], [1, 0, 0], [2, 0, 0]];
+        let open = open_faces_by_bone(&cells, &[0, 0, 1]);
+        // the first two share a bone: the face between them is inside; the third's
+        // neighbour is another bone's, so both faces between them are drawn
+        assert_eq!(open[0] & 0b10, 0);
+        assert_eq!(open[1] & 0b10, 0b10);
+        assert_eq!(open[2] & 0b01, 0b01);
+        assert_eq!(open_faces_by_bone(&cells, &[0, 0, 0]), open_faces(&cells));
+    }
+
+    #[test]
+    fn a_rigged_tile_carries_its_bones_to_the_buffer() {
+        let rows = |k: f32| [[1.0, 0.0, 0.0, k], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let mut frame = FigureFrame {
+            figures: vec![
+                FigureInstance { id: 1, a: tile([4.0, 3.0, 4.0]), b: None, weight_b: 0.0, alpha: 1.0, highlight: 0.0 },
+                FigureInstance {
+                    id: 2,
+                    a: FigureTile { bones: Some((1, 2)), ..tile([9.0, 3.0, 4.0]) },
+                    b: None,
+                    weight_b: 0.0,
+                    alpha: 1.0,
+                    highlight: 0.0,
+                },
+            ],
+            palette: vec![PaletteEntry::default()],
+            bones: vec![rows(0.0), rows(1.0), rows(2.0)],
+            ..FigureFrame::default()
+        };
+        let p = pack(&frame, 4, 2, 60, 256, 0);
+        assert_eq!(p.bones, vec![rows(1.0), rows(2.0)], "only the rigged tile's bones, from its first");
+        let rigs: Vec<[i32; 4]> = p.tiles.iter().map(|t| t.rig).collect();
+        assert!(rigs.contains(&[-1, 0, 0, 0]) && rigs.contains(&[0, 0, 0, 0]));
+        // bones the frame does not hold: drawn as baked
+        frame.figures[1].a.bones = Some((2, 5));
+        assert!(pack(&frame, 4, 2, 60, 256, 0).tiles.iter().all(|t| t.rig[0] == -1));
+    }
+
     #[test]
     fn creases_are_only_occluders_in_the_faces_open_plane() {
         // The front face (-z) stays flat beside a coplanar cell. A cell left and in

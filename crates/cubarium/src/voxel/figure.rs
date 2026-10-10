@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use cubarium_gpu::figures::{
     CLASS_BREATHING, CLASS_LEG1, CLASS_LEG2, CLASS_NONE, CLASS_TORSO, FigureFrame, FigureInstance,
-    FigureTile, FigureVoxel, PaletteEntry, crease_masks, open_faces,
+    FigureTile, FigureVoxel, PaletteEntry, crease_masks, open_faces, open_faces_by_bone,
 };
 use cubarium_gpu::voxel::{Breath, HeadMove, PoseEntry, pose_with};
 use cubarium_voxel::VoxelView;
@@ -47,9 +47,22 @@ use super::colours;
 use super::hunker;
 use super::idle;
 use super::model::{ModelCell, ModelLibrary, Tag};
+use super::rig::{self, AnimalRig};
 use super::sleep;
 
 // --- the config ---------------------------------------------------------------------------
+
+/// FEED-RIG (`design/handoffs/feeding-motion-rig-2026-10-09.md`): whether a rigged animal's
+/// clip is drawn. Each cube turns with its bone (Wrysk picked the turned cubes, 2026-10-10).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RigDraw {
+    /// Each cube turns with its bone (its corners transformed): a bent neck's cubes tilt.
+    #[default]
+    Turn,
+    /// The clip is not drawn: rigged animals stand as baked while they crop.
+    Off,
+}
 
 /// How the GPU renderer draws animals.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +221,9 @@ pub struct FigureConfig {
     /// by the plant pass, swaying and growing in (`[plants]`), or in the world's voxels, still.
     /// Startup only.
     pub plants: PlantDraw,
+    /// `"turn"` (the default) or `"off"` ([`RigDraw`]): whether a rigged animal's clip is
+    /// drawn, each cube turned with its bone.
+    pub rig: RigDraw,
 }
 
 fn positive_supersample<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -232,6 +248,7 @@ impl Default for FigureConfig {
             subpixel: true,
             supersample: 2,
             plants: PlantDraw::Models,
+            rig: RigDraw::Turn,
         }
     }
 }
@@ -392,6 +409,7 @@ mod preset_tests {
             subpixel: false,
             supersample: 3,
             plants: PlantDraw::Models,
+            rig: super::RigDraw::Off,
         }
     }
 
@@ -619,6 +637,8 @@ struct Cell {
     class: u8,
     head: bool,
     glyph: u8,
+    /// Its rig bone (FEED-RIG), 0 the root (or no rig).
+    bone: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -631,6 +651,8 @@ struct ModelInfo {
     paints: Vec<Paint>,
     /// The rows its torso settles when asleep or hunkered (`sleep::Classified::drop`).
     drop: i32,
+    /// Its rig and size bin, when its cells carry bones (FEED-RIG).
+    rig: Option<(Arc<AnimalRig>, usize)>,
 }
 
 /// Every model the figures have drawn with, interned: its cells in the GPU's layout, once.
@@ -646,6 +668,18 @@ impl FigureModels {
     /// The model under `key`, built by `cells` the first time. `None` for a model with no
     /// cells, or one whose offsets do not fit a byte.
     fn intern(&mut self, key: u64, cells: impl FnOnce() -> (Vec<Cell>, i32)) -> Option<ModelId> {
+        self.intern_rigged(key, None, cells)
+    }
+
+    /// [`Self::intern`] for a model whose cells carry bones of `rig`'s bin (FEED-RIG): a
+    /// face between two bones is drawn ([`open_faces_by_bone`]), and the bounding sphere
+    /// (what the tile holds) reaches every pose of the clip.
+    fn intern_rigged(
+        &mut self,
+        key: u64,
+        rig: Option<(Arc<AnimalRig>, usize)>,
+        cells: impl FnOnce() -> (Vec<Cell>, i32),
+    ) -> Option<ModelId> {
         if let Some(&id) = self.by_key.get(&key) {
             return Some(id);
         }
@@ -678,7 +712,11 @@ impl FigureModels {
             return None;
         }
         let offsets: Vec<[i8; 3]> = cells.iter().map(|c| c.offset.map(|o| o as i8)).collect();
-        let open = open_faces(&offsets);
+        let open = if rig.is_some() {
+            open_faces_by_bone(&offsets, &cells.iter().map(|c| c.bone).collect::<Vec<_>>())
+        } else {
+            open_faces(&offsets)
+        };
         let creases = crease_masks(&offsets);
         let voxels = Arc::make_mut(&mut self.voxels);
         let first = voxels.len() as u32;
@@ -691,7 +729,8 @@ impl FigureModels {
         {
             voxels.push(
                 FigureVoxel::new(*o, place[e] as u8, c.class, c.head, op, c.glyph)
-                    .with_creases(crease),
+                    .with_creases(crease)
+                    .with_bone(c.bone),
             );
         }
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
@@ -705,7 +744,10 @@ impl FigureModels {
         let centre = [0, 1, 2].map(|i| 0.5 * (lo[i] + hi[i]));
         let half = [0, 1, 2].map(|i| 0.5 * (hi[i] - lo[i]));
         // A margin of a voxel: a settling head dips below the body's box.
-        let radius = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt() + 1.0;
+        let mut radius = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt() + 1.0;
+        if let Some((rig, bin)) = &rig {
+            radius = radius.max(rig_reach(&cells, centre, rig, *bin) + 1.0);
+        }
         let id = ModelId(self.models.len() as u32);
         self.models.push(ModelInfo {
             first,
@@ -714,6 +756,7 @@ impl FigureModels {
             radius,
             paints,
             drop,
+            rig,
         });
         self.by_key.insert(key, id);
         Some(id)
@@ -759,7 +802,7 @@ fn class_code(c: Option<sleep::Class>) -> u8 {
 /// A baked model's cells for a figure: its coat paints, and its pose classes — the
 /// sleep's, or toward its baked hunker (`toward`) — and its head, as the stamp classed
 /// them (`Animals::stamp_model`).
-fn baked(cells: &[ModelCell], toward: Option<&[ModelCell]>) -> (Vec<Cell>, i32) {
+fn baked(cells: &[ModelCell], toward: Option<&[ModelCell]>, rig: Option<(&AnimalRig, usize)>) -> (Vec<Cell>, i32) {
     let top = cells.iter().map(|m| m.offset[1]).max().unwrap_or(0);
     let local: Vec<sleep::Local> = cells
         .iter()
@@ -790,6 +833,7 @@ fn baked(cells: &[ModelCell], toward: Option<&[ModelCell]>) -> (Vec<Cell>, i32) 
             class: class_code(class),
             head,
             glyph: 0,
+            bone: rig.map_or(0, |(r, bin)| r.bone_of(bin, m.offset)),
         })
         .collect();
     (out, k.drop)
@@ -852,6 +896,51 @@ pub struct Spec {
     pub orient: Orient,
     pub palette: Vec<PaletteEntry>,
     pub pose: Option<PoseSpec>,
+    /// Its feeding clip this tick, while it crops or eases out of it (FEED-RIG).
+    pub feed: Option<FeedSpec>,
+}
+
+/// A figure's feeding clip at a tick (FEED-RIG): its weight (before the ease) and change per
+/// tick, and how far its clip runs ahead of the frame clock (its own phase).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FeedSpec {
+    pub tick: u64,
+    pub weight: f32,
+    pub rate: f32,
+    pub phase_s: f64,
+}
+
+impl FeedSpec {
+    /// The eased clip weight `ticks` after the staged tick.
+    fn at(&self, ticks: f64) -> f64 {
+        rig::ease(f64::from(self.weight) + f64::from(self.rate) * ticks)
+    }
+}
+
+/// How far any cell of a rigged model reaches from `centre` over its clip, voxels: every
+/// sampled frame at the full weight and on the way to it.
+fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f32 {
+    let mut bones = Vec::new();
+    let mut reach = 0.0f32;
+    for f in 0..rig.frames() {
+        for w in [0.25, 0.5, 0.75, 1.0] {
+            rig.pose(bin, f as f64 / rig.fps, w, &mut bones);
+            for c in cells {
+                let Some(b) = bones.get(usize::from(c.bone)) else { continue };
+                for corner in 0..8 {
+                    let p = [
+                        c.offset[0] as f32 + if corner & 1 == 0 { -0.5 } else { 0.5 },
+                        c.offset[1] as f32 + if corner & 2 == 0 { 0.0 } else { 1.0 },
+                        c.offset[2] as f32 + if corner & 4 == 0 { -0.5 } else { 0.5 },
+                    ];
+                    let q = [0, 1, 2].map(|i| b[i][0] * p[0] + b[i][1] * p[1] + b[i][2] * p[2] + b[i][3]);
+                    let d = [0, 1, 2].map(|i| q[i] - centre[i]);
+                    reach = reach.max((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt());
+                }
+            }
+        }
+    }
+    reach
 }
 
 /// The model a founder draws its lure with: one emitting cell at the tail, over the back.
@@ -864,7 +953,7 @@ fn lure_spec(animal: &Animal, fauna: &FaunaView<'_>, voxel_m: f64, body: &Spec, 
     let back = (0.5 * b.length_m / voxel_m).round() as i32;
     let rows = ((b.height_m / voxel_m).ceil() as i32).max(1);
     let model = models.intern(hash_of(&("lure", back, rows)), || {
-        (vec![Cell { offset: [-back, rows, 0], paint: Paint::Flat, class: CLASS_NONE, head: false, glyph: 0 }], 0)
+        (vec![Cell { offset: [-back, rows, 0], paint: Paint::Flat, class: CLASS_NONE, head: false, glyph: 0, bone: 0 }], 0)
     })?;
     let c = srgb_linear(animal::LANTERNJAW_LURE_SRGB);
     Some(Spec {
@@ -874,6 +963,7 @@ fn lure_spec(animal: &Animal, fauna: &FaunaView<'_>, voxel_m: f64, body: &Spec, 
         orient: body.orient,
         palette: vec![PaletteEntry { base: c, emit: emission.then_some(c) }],
         pose: None,
+        feed: None,
     })
 }
 
@@ -919,6 +1009,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
             class: CLASS_NONE,
             head: matches!(part, AnimalPart::Head { .. }),
             glyph: appearance::animal_glyph(*part).0,
+            bone: 0,
         })
         .collect();
     let key = hash_of(&cells.iter().map(|c| (c.offset, c.glyph)).collect::<Vec<_>>());
@@ -940,6 +1031,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
         orient,
         palette: [style.wood, style.crown, style.heart].map(|base| PaletteEntry { base, emit: None }).to_vec(),
         pose: None,
+        feed: None,
     })
 }
 
@@ -950,7 +1042,7 @@ fn glyph_spec(animal: &Animal, fauna: &FaunaView<'_>, v: f64, at: [f64; 3], mode
 fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models: &mut FigureModels, flash: f32, emission: bool) -> Option<Spec> {
     let cells = animal::rider_cells(lib, a)?;
     let founder = a.founder?;
-    let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None))?;
+    let model = models.intern(hash_of(&(cells.as_ptr() as usize, cells.len(), None::<(usize, usize)>)), || baked(cells, None, None))?;
     let starving = animal::is_starving(a);
     let wounded = animal::is_wounded(a) && !starving;
     let palette = models
@@ -965,17 +1057,19 @@ fn larva_spec(a: &Animal, lib: &ModelLibrary, at: [f64; 3], heading: f64, models
             Paint::Style | Paint::Flat => PaletteEntry::default(),
         })
         .collect();
-    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None })
+    Some(Spec { key: (a.id, 0), model, pos: at, orient: Orient::Ground(heading), palette, pose: None, feed: None })
 }
 
 /// Every animal of `fauna` as figures, after [`Animals::rebuild_without_living`] moved the
 /// pose and flash memory on to this tick. `lib` is the baked models (or `None` for the
-/// dev-mode glyphs).
+/// dev-mode glyphs); `cells_of` a capture's own cells for some animals, by id, in place of
+/// their baked model (empty but for the FEED-RIG flipbook arm).
 pub fn specs(
     animals: &Animals,
     view: &VoxelView<'_>,
     fauna: FaunaView<'_>,
     lib: Option<&ModelLibrary>,
+    cells_of: &FxHashMap<u64, Arc<Vec<ModelCell>>>,
     models: &mut FigureModels,
     out: &mut Vec<Spec>,
 ) {
@@ -1015,7 +1109,10 @@ pub fn specs(
             continue;
         }
         let at = feet(a, v);
-        let baked_cells = lib.and_then(|lib| animal::model_cells(lib, fauna.config, a));
+        let baked_cells = cells_of
+            .get(&a.id)
+            .map(|c| c.as_slice())
+            .or_else(|| lib.and_then(|lib| animal::model_cells(lib, fauna.config, a)));
         let (Some(cells), Some(founder)) = (baked_cells, a.founder) else {
             if let Some(s) = glyph_spec(a, &fauna, v, at, models, flash) {
                 out.push(s);
@@ -1032,7 +1129,19 @@ pub fn specs(
             cells.len(),
             toward.map(|t| (t.as_ptr() as usize, t.len())),
         ));
-        let Some(model) = models.intern(key, || baked(cells, toward)) else { continue };
+        // Its rig, when the founder has one and this is the founder's own model's bin
+        // (not another mode's), and it stands on the ground (FEED-RIG).
+        let rigged = lib.filter(|_| ground).and_then(|lib| {
+            let r = lib.rig(founder)?;
+            let model = lib.animal(founder)?;
+            let bin = model.bins.iter().position(|b| std::ptr::eq(b.cells.as_ptr(), cells.as_ptr()))?;
+            (bin < r.bins.len()).then(|| (r.clone(), bin))
+        });
+        let Some(model) = models.intern_rigged(key, rigged.clone(), || {
+            baked(cells, toward, rigged.as_ref().map(|(r, b)| (&**r, *b)))
+        }) else {
+            continue;
+        };
         let info = models.info(model);
         let starving = animal::is_starving(a);
         let wounded = animal::is_wounded(a) && !starving;
@@ -1096,7 +1205,11 @@ pub fn specs(
             }
             _ => at,
         };
-        let body = Spec { key: (a.id, 0), model, pos, orient, palette, pose };
+        let feed = rigged.as_ref().and_then(|(r, _)| {
+            let (weight, rate) = animals.feed_weight(a)?;
+            Some(FeedSpec { tick: view.tick, weight, rate, phase_s: rig::phase_offset_s(a.id, r.loop_s()) })
+        });
+        let body = Spec { key: (a.id, 0), model, pos, orient, palette, pose, feed };
         if founder == Founder::Lanternjaw
             && let Some(l) = lure_spec(a, &fauna, v, &body, models, emission)
         {
@@ -1396,7 +1509,12 @@ impl FigureTrack {
     /// `mix`, from the models in `models`: what the model pass draws, and what a pick reads.
     pub fn frame(&mut self, t: f64, highlight: Option<(u64, f32)>, models: &FigureModels) -> (FigureFrame, Vec<PickFigure>) {
         let stepped = self.cfg.movement == Movement::Stepped;
-        let mut frame = FigureFrame { whole_pixels: stepped || !self.cfg.subpixel, supersample: self.cfg.supersample, ..FigureFrame::default() };
+        let mut frame = FigureFrame {
+            whole_pixels: stepped || !self.cfg.subpixel,
+            supersample: self.cfg.supersample,
+            ..FigureFrame::default()
+        };
+        let mut bones = Vec::new();
         let mut picks = Vec::new();
         let Some(cur) = &self.cur else { return (frame, picks) };
         let now_s = t / f64::from(cubarium_voxel::TICK_HZ);
@@ -1458,6 +1576,15 @@ impl FigureTrack {
                 (None, Some(p)) => p.at((td - p.tick as f64).max(0.0)),
                 (None, None) => [0.0; 4],
             };
+            // The feeding clip (FEED-RIG): its weight at the drawn time, as the pose's, and
+            // its place in the loop on the frame clock at the animal's own phase.
+            let feed = match (before.and_then(|a| a.feed), spec.feed) {
+                (Some(f), _) => Some((f.at(td - f.tick as f64), f.phase_s)),
+                (None, Some(f)) => Some((f.at((td - f.tick as f64).max(0.0)), f.phase_s)),
+                (None, None) => None,
+            }
+            .filter(|&(w, _)| w > 0.0 && cfg.rig != RigDraw::Off)
+            .map(|(w, phase)| (w, td / f64::from(cubarium_voxel::TICK_HZ) + phase));
             let heading = match spec.orient {
                 Orient::Ground(_) => Some(axes[0][0].atan2(axes[0][2])),
                 Orient::Axes(_) => None,
@@ -1493,10 +1620,19 @@ impl FigureTrack {
                 }
             }
             let f32s = |a: [[f64; 3]; 3]| a.map(|c| c.map(|v| v as f32));
-            let tile_of = |model: ModelId, palette: &[PaletteEntry], axes: [[f64; 3]; 3], frame: &mut FigureFrame| {
+            let mut tile_of = |model: ModelId, palette: &[PaletteEntry], axes: [[f64; 3]; 3], frame: &mut FigureFrame| {
                 let info = models.info(model);
                 let at = frame.palette.len() as u32;
                 frame.palette.extend_from_slice(palette);
+                let rigged = match (&info.rig, feed) {
+                    (Some((rig, bin)), Some((w, phase))) => {
+                        rig.pose(*bin, phase, w, &mut bones);
+                        let first = frame.bones.len() as u32;
+                        frame.bones.extend_from_slice(&bones);
+                        Some((first, bones.len() as u32))
+                    }
+                    _ => None,
+                };
                 FigureTile {
                     first: info.first,
                     count: info.count,
@@ -1506,6 +1642,7 @@ impl FigureTrack {
                     radius: info.radius,
                     pose,
                     palette: at,
+                    bones: rigged,
                 }
             };
             let (a, b, weight_b) = match (&swap, step_pair) {
@@ -1653,13 +1790,13 @@ mod tests {
     use super::*;
 
     fn spec(id: u64, model: ModelId, pos: [f64; 3], h: f64) -> Spec {
-        Spec { key: (id, 0), model, pos, orient: Orient::Ground(h), palette: vec![PaletteEntry::default()], pose: None }
+        Spec { key: (id, 0), model, pos, orient: Orient::Ground(h), palette: vec![PaletteEntry::default()], pose: None, feed: None }
     }
 
     fn one_cell(models: &mut FigureModels, key: u64) -> ModelId {
         models
             .intern(key, || {
-                (vec![Cell { offset: [0, 0, 0], paint: Paint::Flat, class: CLASS_NONE, head: false, glyph: 0 }], 0)
+                (vec![Cell { offset: [0, 0, 0], paint: Paint::Flat, class: CLASS_NONE, head: false, glyph: 0, bone: 0 }], 0)
             })
             .unwrap()
     }

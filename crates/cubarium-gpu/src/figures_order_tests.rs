@@ -36,6 +36,7 @@ fn tile(first: u32, pos: [f32; 3], palette: u32, dz: f32) -> FigureTile {
         radius: 2.5,
         pose: [0.0; 4],
         palette,
+        bones: None,
     }
 }
 
@@ -84,6 +85,7 @@ fn draw_at(mut figures: Vec<FigureInstance>, first: usize) -> Option<(Vec<u8>, u
         ],
         whole_pixels: true,
         supersample: 1,
+        ..FigureFrame::default()
     });
     let mut target = Headless::new(&gpu, &r).unwrap();
     target.draw(&gpu, &mut r, ()).unwrap();

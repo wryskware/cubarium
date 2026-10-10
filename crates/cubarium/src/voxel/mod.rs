@@ -56,6 +56,7 @@ pub mod placement;
 pub mod plant_motion;
 pub mod present;
 pub mod project;
+pub mod rig;
 pub mod save;
 pub mod sleep;
 pub mod stand;

@@ -3107,5 +3107,9 @@
   "seedporter-ground": "seedporter-ground.cvm",
   "seedporter-glide": "seedporter-glide.cvm",
   "lanternjaw-larva": "lanternjaw-larva.cvm"
+ },
+ "rigs": {
+  "frondgrazer": "frondgrazer.rig",
+  "chorister": "chorister.rig"
  }
 }

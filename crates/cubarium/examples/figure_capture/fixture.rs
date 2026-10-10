@@ -139,6 +139,7 @@ pub fn draw_angle(
             radius,
             pose: [0.0; 4],
             palette: 0,
+            bones: None,
         };
         renderer.set_figures(FigureFrame {
             figures: vec![FigureInstance {
@@ -155,6 +156,7 @@ pub fn draw_angle(
                 .collect(),
             whole_pixels: true,
             supersample: cfg.figures.supersample,
+            ..FigureFrame::default()
         });
     }
     target.draw(&gpu, &mut renderer, ())?;
