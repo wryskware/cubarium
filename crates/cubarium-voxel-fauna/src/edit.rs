@@ -666,9 +666,9 @@ impl Fauna {
     /// **A freed rider steps off beside its host** (Wrysk, 2026-10-09): the nearest face
     /// beside the host where the rider could stand by the edit API's own rule
     /// ([`Fauna::check_spot`]), keeping the host's heading, so the drop-off happens in view
-    /// rather than inside the host's body. Rings out from the host's edge to
-    /// [`DROP_OFF_REACH_M`], one voxel at a time; at each distance the host's left and right
-    /// first, then behind, then in front. A host off the ground (climbing, flying), or no
+    /// rather than inside the host's body. Rings out from half the host's length (clear of its
+    /// body as drawn) to [`DROP_OFF_REACH_M`], one voxel at a time; at each distance the
+    /// host's left and right first, then behind, then in front. A host off the ground (climbing, flying), or no
     /// standable face in reach, leaves the rider on the host's place, as
     /// [`crate::release`] put it. Returns whether it moved.
     pub(crate) fn step_off_beside(&mut self, view: &VoxelView<'_>, r: usize, host: &Animal) -> bool {
@@ -694,7 +694,9 @@ impl Fauna {
         let v = c.voxel_m;
         let rider_phys = self.config.founder(rf);
         let step = rider_phys.step_limits(v);
-        let start = self.config.founder(hf).body_at(host.body).footprint_radius()
+        // Clear of the host's whole body: half its length, so the drop-off is not hidden
+        // behind a flank drawn wider than the footprint.
+        let start = 0.5 * self.config.founder(hf).body_at(host.body).length_m
             + rider_phys.body_at(rider_body).footprint_radius();
         let (fx, fz) = host.pose.forward();
         // Left, right, behind, in front of the heading, as (dx, dz) unit vectors.

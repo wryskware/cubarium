@@ -1195,6 +1195,10 @@ fn ring_delta(a: f64, b: f64, width: f64) -> f64 {
 /// rider let go) and is drawn where it lands, not glided.
 pub const JUMP_VOXELS: f64 = 6.0;
 
+/// A model swap whose anchor moved further than this in one tick, voxels, glides there over
+/// the swap's fade ([`FigureConfig::swap_s`]); a walk moves well under a voxel a tick.
+pub const GLIDE_MIN_VOXELS: f64 = 1.0;
+
 /// Where a figure is at `u` of the way from its last tick's spec `a` to this tick's `b`:
 /// position along the short way round the ring, orientation along the shorter arc.
 pub fn between(a: &Spec, b: &Spec, u: f64, width: f64) -> ([f64; 3], [[f64; 3]; 3]) {
@@ -1262,6 +1266,10 @@ struct Live {
     model: ModelId,
     /// A swap under way: the model and colours it left, and when.
     swap: Option<(ModelId, Vec<PaletteEntry>, f64)>,
+    /// A swap that moved the anchor more than [`GLIDE_MIN_VOXELS`] in one tick (a rider
+    /// letting go of its host): where it was drawn, and when. It glides from there over the
+    /// swap's fade instead of hopping within the tick.
+    glide: Option<([f64; 3], f64)>,
     /// Turn steps: the step drawn, the one it left and when.
     step: Option<(i64, i64, f64)>,
     /// Gone from the newest tick since then: it fades out from `last`.
@@ -1343,9 +1351,17 @@ impl FigureTrack {
                     if l.gone.is_some() {
                         l.gone = None;
                     }
+                    if l.glide.is_some_and(|(_, at)| now_s - at >= self.cfg.swap_s) {
+                        l.glide = None;
+                    }
                     if l.model != s.model {
                         l.swap = Some((l.model, l.last.palette.clone(), now_s));
                         l.model = s.model;
+                        let (a, b) = (l.last.pos, s.pos);
+                        let d = [ring_delta(a[0], b[0], self.width), b[1] - a[1], b[2] - a[2]];
+                        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() > GLIDE_MIN_VOXELS {
+                            l.glide = Some((a, now_s));
+                        }
                     }
                     l.last = s.clone();
                 }
@@ -1356,6 +1372,7 @@ impl FigureTrack {
                             born: started.then_some(now_s),
                             model: s.model,
                             swap: None,
+                            glide: None,
                             step: None,
                             gone: None,
                             last: s.clone(),
@@ -1398,6 +1415,7 @@ impl FigureTrack {
         keys.sort_unstable();
         for key in keys {
             let Some(l) = self.live.get_mut(&key) else { continue };
+            let glide = l.glide;
             let now = cur.index.get(&key).map(|&i| &cur.specs[i]);
             let before = self.prev.as_ref().and_then(|p| p.index.get(&key).map(|&i| &p.specs[i]));
             let (spec, pos, axes, alpha) = match (now, l.gone) {
@@ -1420,6 +1438,18 @@ impl FigureTrack {
             };
             // Stepped: the glide's place, on the voxel grid; it hops a voxel each time the
             // glide crosses into the next.
+            // A swap that jumped the anchor: from where it was drawn, over the swap's fade.
+            let pos = match glide {
+                Some((from, at)) if alpha > 0.0 && now_s - at < cfg.swap_s => {
+                    let w = f64::from(blend_weight(now_s - at, cfg.swap_s));
+                    [
+                        from[0] + w * ring_delta(from[0], pos[0], width),
+                        from[1] + w * (pos[1] - from[1]),
+                        from[2] + w * (pos[2] - from[2]),
+                    ]
+                }
+                _ => pos,
+            };
             let pos = if stepped { on_grid(pos, spec.orient) } else { pos };
             // The pose: the older tick's entries run on to the drawn time (they end where
             // the newer ones start), else the newer's from its own tick.
@@ -1686,6 +1716,26 @@ mod tests {
         assert!((leaving - 0.5).abs() < 1e-6, "dead: half gone halfway: {leaving}");
         track.push(25, &[spec(2, m, [5.0, 1.0, 1.0], 0.0)], tick_s(25));
         assert_eq!(alpha(&mut track, 25.0, 1), None, "gone after the fade");
+    }
+
+    #[test]
+    fn a_swap_that_jumps_the_anchor_glides_over_the_fade_and_a_step_does_not() {
+        let mut models = FigureModels::default();
+        let (m1, m2) = (one_cell(&mut models, 1), one_cell(&mut models, 2));
+        let cfg = FigureConfig { swap_s: 1.0, ..FigureConfig::default() };
+        let pos = |track: &mut FigureTrack, t: f64| track.frame(t, None, &models).1[0].pos;
+        // A rider lets go: a new model three voxels down and across in one tick.
+        let mut track = FigureTrack::new(cfg.clone(), 64);
+        track.push(0, &[spec(1, m1, [10.0, 4.0, 5.0], 0.0)], 0.0);
+        track.push(1, &[spec(1, m2, [10.0, 1.0, 8.0], 0.0)], 0.05);
+        assert_eq!(pos(&mut track, 1.0), [10.0, 4.0, 5.0], "it starts where it was drawn");
+        assert_eq!(pos(&mut track, 11.0), [10.0, 2.5, 6.5], "half way at half the fade");
+        assert_eq!(pos(&mut track, 30.0), [10.0, 1.0, 8.0], "and lands after it");
+        // A size bin changing under a walking body: no glide, it is where the tick puts it.
+        let mut track = FigureTrack::new(cfg, 64);
+        track.push(0, &[spec(1, m1, [10.0, 4.0, 5.0], 0.0)], 0.0);
+        track.push(1, &[spec(1, m2, [10.4, 4.0, 5.0], 0.0)], 0.05);
+        assert_eq!(pos(&mut track, 11.0), [10.4, 4.0, 5.0]);
     }
 
     #[test]
