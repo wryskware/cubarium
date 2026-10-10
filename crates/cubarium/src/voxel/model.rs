@@ -1377,6 +1377,7 @@ mod tests {
                 frames: 1,
             }],
             bins: Vec::new(),
+            symmetry: None,
         };
         let f = Founder::Seedporter;
         let (stand, ground) = (
