@@ -275,7 +275,8 @@ fn the_four_parasite_knobs_are_serde_config_fields() {
     for name in [
         "parasite_attach_radius_m",
         "parasite_max_per_host",
-        "parasite_take_per_day",
+        "parasite_take_body_per_day",
+        "parasite_host_bear_per_day",
         "parasite_detach_body_fraction",
     ] {
         assert!(
@@ -296,13 +297,15 @@ fn the_parasite_knobs_are_validated() {
     };
     assert!(bad(&|c| c.parasite_attach_radius_m = -0.1));
     assert!(bad(&|c| c.parasite_attach_radius_m = f64::NAN));
-    assert!(bad(&|c| c.parasite_take_per_day = -0.01));
-    assert!(bad(&|c| c.parasite_take_per_day = f64::INFINITY));
+    assert!(bad(&|c| c.parasite_take_body_per_day = -0.01));
+    assert!(bad(&|c| c.parasite_take_body_per_day = f64::INFINITY));
+    assert!(bad(&|c| c.parasite_host_bear_per_day = -0.01));
+    assert!(bad(&|c| c.parasite_host_bear_per_day = f64::NAN));
     assert!(bad(&|c| c.parasite_detach_body_fraction = 0.0));
     assert!(bad(&|c| c.parasite_detach_body_fraction = 1.5));
     assert!(bad(&|c| c.parasite_detach_body_fraction = f64::NAN));
     assert!(
-        !bad(&|c| c.parasite_take_per_day = 0.0),
+        !bad(&|c| c.parasite_take_body_per_day = 0.0),
         "no take is a knob setting"
     );
 }
@@ -547,11 +550,11 @@ fn a_rider_cannot_be_struck_on_its_own() {
 
 // ------------------------------------------------------------------ the drain
 
-/// Each tick a rider takes `parasite_take_per_day × host body × DT / ecological_day_s`
+/// Each tick a rider takes `parasite_take_body_per_day × its own body × DT / ecological_day_s`
 /// from its host — read against an identical grazer standing out of reach — and the
 /// three ledgers close.
 #[test]
-fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
+fn a_rider_takes_its_own_body_share_and_the_books_close() {
     let mut s = Scene::new(config(), 1);
     let host = s.add(Founder::Browser, StartingStores::FULL, 0.0);
     let twin = s.add(Founder::Browser, StartingStores::FULL, 4.0);
@@ -569,13 +572,16 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
     let (h1, t1) = (animal(&s.fauna, host), animal(&s.fauna, twin));
     let extra =
         (h0.stored_organic() - h1.stored_organic()) - (t0.stored_organic() - t1.stored_organic());
-    // The minimal gut: the take is `parasite_take_per_day` of the host's body per
-    // ecological day, whatever its upkeep.
+    // LANTERNJAW-LIFE: the take is `parasite_take_body_per_day` of the rider's own body per
+    // ecological day (under what the host bears), whatever its upkeep.
     let c = s.fauna.config;
-    let want = c.parasite_take_per_day / c.life.ecological_day_s * h0.body * DT;
+    let r0 = animal(&s.fauna, riders_of(&s.fauna, host)[0]);
+    assert!(crate::host_bears(&c, r0.body, h0.body), "the grazer bears its hatchling");
+    let want = c.parasite_take_body_per_day / c.life.ecological_day_s * r0.body * DT;
     assert!(want > 0.0);
     assert!(
-        (extra - want).abs() <= 1e-6 * want,
+        // The host's emptier reserve digests a hair more into its room than the twin's.
+        (extra - want).abs() <= 1e-3 * want,
         "the host lost {extra} more than its twin; the drain is {want}"
     );
     s.assert_closes("drained");
@@ -587,7 +593,7 @@ fn a_rider_drains_its_hosts_basal_share_and_the_books_close() {
 #[test]
 fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_take_per_day: 0.0,
+        parasite_take_body_per_day: 0.0,
         ..config()
     });
     let a0 = animal(&s.fauna, rider);
@@ -604,7 +610,8 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
     s.assert_closes("undrained");
 
     let (mut s, _host, rider) = ride(FaunaConfig {
-        parasite_take_per_day: 7.2,
+        parasite_take_body_per_day: 200.0,
+        parasite_host_bear_per_day: 1.0e6,
         ..config()
     });
     let cap = s
@@ -635,7 +642,8 @@ fn a_rider_pays_its_own_upkeep_and_grows_from_what_it_drains() {
 #[test]
 fn a_drained_host_starves_as_usual() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_take_per_day: 7.2,
+        parasite_take_body_per_day: 200.0,
+        parasite_host_bear_per_day: 1.0e6,
         ..config()
     });
     let min = s.fauna.config.founder(Founder::Browser).core.body_min;
@@ -669,7 +677,7 @@ fn a_drained_host_starves_as_usual() {
 #[test]
 fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_take_per_day: 0.0,
+        parasite_take_body_per_day: 0.0,
         ..config()
     });
     let c = s.fauna.config;
@@ -730,7 +738,7 @@ fn a_rider_drops_off_at_its_detach_size_and_is_then_free() {
 #[test]
 fn with_no_standable_face_beside_it_a_rider_drops_off_on_its_hosts_place() {
     let (mut s, host, rider) = ride(FaunaConfig {
-        parasite_take_per_day: 0.0,
+        parasite_take_body_per_day: 0.0,
         ..config()
     });
     let site = animal(&s.fauna, host).site;
@@ -768,9 +776,12 @@ fn a_hosts_departure_of_any_cause_frees_every_rider() {
         },
         Departure::Removed,
     ] {
+        // No take: a host starved below what it bears would otherwise shed its riders as
+        // outgrown (LANTERNJAW-LIFE) before it dies; this case is about the departure.
         let mut s = Scene::new(
             FaunaConfig {
                 parasite_max_per_host: 2,
+                parasite_take_body_per_day: 0.0,
                 ..config()
             },
             2,
@@ -895,4 +906,174 @@ fn the_loader_refuses_a_missing_host_a_lanternjaw_host_and_too_many_riders() {
     Fauna::load(&s.fauna.save()).expect("two riders where two are allowed load");
     s.fauna.config.parasite_max_per_host = 1;
     refused(&s.fauna, "two riders where one is allowed");
+}
+
+// ------------------------------------------------------------------ LANTERNJAW-LIFE
+
+/// What a host lost in one step beyond its twin standing out of reach, organic units.
+fn extra_drain(s: &mut Scene, host: u64, twin: u64) -> f64 {
+    let (h0, t0) = (animal(&s.fauna, host), animal(&s.fauna, twin));
+    s.step();
+    let (h1, t1) = (animal(&s.fauna, host), animal(&s.fauna, twin));
+    (h0.stored_organic() - h1.stored_organic()) - (t0.stored_organic() - t1.stored_organic())
+}
+
+/// **Adult at 35 % of body_max** (Wrysk 2026-10-10: "35%-100% adult size range"): a
+/// lanternjaw at 0.35 of its `body_max` is grown — it has reached `birth_body`, and a hunter
+/// reads it at its `adult_size_window_factor` — and one just below is a juvenile at its own
+/// size.
+#[test]
+fn a_lanternjaw_at_35_percent_of_body_max_is_adult_and_below_it_a_juvenile() {
+    let world = clock_off(41);
+    let c = FaunaConfig::default();
+    let mut fauna = Fauna::new(c);
+    let id = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    let core = crate::effective_config(&c, &animal(&fauna, id));
+    let factor = c.founder(Founder::Lanternjaw).adult_size_window_factor;
+
+    animal_mut(&mut fauna, id).body = 0.35 * core.body_max * (1.0 + 1e-9);
+    let a = animal(&fauna, id);
+    assert!(a.body >= core.birth_body, "35 % of body_max is adult");
+    assert!((crate::window_size(&c, &a) - factor * a.body).abs() <= 1e-12 * a.body);
+
+    animal_mut(&mut fauna, id).body = 0.34 * core.body_max;
+    let a = animal(&fauna, id);
+    assert!(a.body < core.birth_body, "below 35 % it is a juvenile");
+    assert_eq!(crate::window_size(&c, &a), a.body, "a juvenile counts at its own size");
+}
+
+/// **A rider takes more as it grows** (Wrysk: "they take more the bigger they get"): on a
+/// grazer that bears it, a rider of three times the body drains three times as much a tick,
+/// read against an identical grazer standing out of reach; the books close.
+#[test]
+fn a_riders_take_grows_with_its_size() {
+    let mut s = Scene::new(config(), 1);
+    let host = s.add(Founder::Browser, StartingStores::FULL, 0.0);
+    let twin = s.add(Founder::Browser, StartingStores::FULL, 4.0);
+    s.past_next_dusk();
+    let rider = riders_of(&s.fauna, host)[0];
+    let small_body = animal(&s.fauna, rider).body;
+    let small = extra_drain(&mut s, host, twin);
+    assert!(small > 0.0, "a hatchling takes from its host");
+
+    let c = s.fauna.config;
+    let line = c.parasite_detach_body_fraction * c.founder(Founder::Lanternjaw).core.body_max;
+    let big = 3.0 * animal(&s.fauna, rider).body;
+    assert!(
+        big < line && crate::host_bears(&c, big, animal(&s.fauna, host).body),
+        "fixture: a rider three times the hatchling still rides the grazer"
+    );
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, big, reserve);
+    let large = extra_drain(&mut s, host, twin);
+    let ratio = large / small;
+    assert!(
+        (ratio - big / small_body).abs() <= 0.01 * big / small_body,
+        "the take went ×{ratio} for a body ×{}",
+        big / small_body
+    );
+    s.assert_closes("a grown rider's take");
+}
+
+/// **A rider drops off a host it has outgrown** (Wrysk: "if the tiniest larva do attach to
+/// littershredders, they should drop off when theyre too big"): on a littershredder that
+/// bears a hatchling, a rider stays on while the shredder bears its take, and drops off once
+/// it does not — below the normal drop-off size — and takes no other host, though a grazer
+/// that would bear it stands beside it.
+#[test]
+fn a_rider_drops_off_a_host_it_has_outgrown_and_takes_no_other() {
+    let mut c = config();
+    let lj = c.founder(Founder::Lanternjaw).core;
+    let line = c.parasite_detach_body_fraction * lj.body_max;
+    // The shredder lets go halfway between a hatchling and the detach size.
+    let limit = 0.5 * (lj.body_min + line);
+    let shredder = c.founder(Founder::Blind).core.body_max;
+    c.parasite_host_bear_per_day = c.parasite_take_body_per_day * limit / shredder;
+    let mut s = Scene::new(c, 1);
+    let host = s.add(Founder::Blind, StartingStores::FULL, 0.0);
+    s.past_next_dusk();
+    let riders = riders_of(&s.fauna, host);
+    assert_eq!(riders.len(), 1, "the hatchling took the shredder, which bears it");
+    let rider = riders[0];
+    let r = s.fauna.config.parasite_attach_radius_m;
+    let grazer = s.add(Founder::Browser, StartingStores::FULL, 0.25 * r);
+
+    let reserve = animal(&s.fauna, rider).reserve;
+    let host_body = animal(&s.fauna, host).body;
+    let borne = 0.97 * limit * host_body / shredder;
+    set_stores(&mut s.fauna, rider, borne, reserve);
+    s.steps(5);
+    assert_eq!(animal(&s.fauna, rider).attached, Some(Attachment { host }), "still borne");
+
+    let host_body = animal(&s.fauna, host).body;
+    let outgrown = 1.03 * limit * host_body / shredder;
+    assert!(outgrown < line, "fixture: under the normal drop-off size");
+    let reserve = animal(&s.fauna, rider).reserve;
+    set_stores(&mut s.fauna, rider, outgrown, reserve);
+    s.steps(3);
+    let a = animal(&s.fauna, rider);
+    assert_eq!(a.attached, None, "it outgrew the shredder and dropped off");
+    assert!(a.body < line, "below the detach size");
+    assert_eq!(s.fauna.ledger.rider_dropoffs, 1);
+    assert_eq!(s.fauna.ledger.riders_freed, 0);
+    s.steps(40);
+    assert_eq!(animal(&s.fauna, rider).attached, None, "it takes no other host");
+    assert!(riders_of(&s.fauna, grazer).is_empty());
+    s.assert_closes("outgrown");
+}
+
+/// **Seedporters eat small lanternjaw juveniles** (Wrysk: "seedporters should also eat the
+/// juveniles if they are small enough"), and a grown lanternjaw is formidable: a full-grown
+/// seedporter takes a free lanternjaw juvenile inside its window but not one at adult size.
+#[test]
+fn a_seedporter_takes_a_small_lanternjaw_juvenile_but_not_an_adult() {
+    let world = clock_off(43);
+    let c = FaunaConfig::default();
+    let mut fauna = Fauna::new(c);
+    let sp = introduce(&mut fauna, &world, Founder::Seedporter, StartingStores::FULL);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    place(&mut fauna, sp, 2.0, LANE_Z, EAST);
+    place(&mut fauna, lj, 2.0 + IN_CAPSULE_M, LANE_Z, WEST);
+    let h = c.founder(Founder::Seedporter).active_hunter().expect("the seedporter's catch");
+    let core = crate::effective_config(&c, &animal(&fauna, lj));
+    let sp_body = animal(&fauna, sp).body;
+
+    let small = 0.5 * core.birth_body.min(h.prey_max_ratio * sp_body);
+    assert!(small > core.body_min, "fixture: a living juvenile");
+    animal_mut(&mut fauna, lj).body = small;
+    assert!(
+        crate::is_prey_of(&c, &animal(&fauna, sp), &animal(&fauna, lj)),
+        "a small juvenile is the seedporter's prey"
+    );
+
+    animal_mut(&mut fauna, lj).body = core.birth_body;
+    assert!(
+        !crate::is_prey_of(&c, &animal(&fauna, sp), &animal(&fauna, lj)),
+        "an adult is not"
+    );
+}
+
+/// **Many offspring**: a full-grown lanternjaw with a full reserve lays a clutch of more than
+/// one egg (the clutch from surplus, its hold shortened here to one tick), and the books
+/// close.
+#[test]
+fn a_lanternjaw_clutch_holds_more_than_one_egg_and_the_books_close() {
+    let world = clock_off(47);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = hunting_config();
+    for p in c.founders.iter_mut() {
+        p.gut.s0 = 0.0;
+    }
+    let rule = &mut c.founders[Founder::Lanternjaw.index()].core.reproduction;
+    rule.surplus_hold_s = DT;
+    rule.clutch_hold_max_s = 0.0;
+    let mut fauna = Fauna::new(c);
+    let lj = introduce(&mut fauna, &world, Founder::Lanternjaw, StartingStores::FULL);
+    drive(&mut fauna, lj, 0.0, false);
+    for _ in 0..3 {
+        fauna.step_with(&world, &mut flora, 1);
+    }
+    let laid = fauna.ledger.eggs_laid_by_founder[Founder::Lanternjaw.index()];
+    assert!(laid > 1, "a clutch of {laid}");
+    assert_closes(&fauna, "after a lanternjaw clutch");
 }

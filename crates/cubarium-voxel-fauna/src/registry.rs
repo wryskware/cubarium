@@ -22,7 +22,10 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.yield_by_food".into(), names: foods.clone() },
                 Alias { pattern: "fauna.founders.*.gut.digestion_s".into(), names: foods },
-                Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders },
+                Alias { pattern: "fauna.founders.*.hunter.prey".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_juveniles_only".into(), names: founders.clone() },
+                Alias { pattern: "fauna.founders.*.hunter.prey_ashore_only".into(), names: founders },
             ],
             Vec::new(),
         )
@@ -291,6 +294,8 @@ fn founder_rows() -> Vec<Row> {
         r("gut.mass_exponent", "exponent", Range::closed(0.0, 1.0).open_lo(), "e: intake at a full stomach goes as body^e (tau x (body/body_max)^(1-e), bite x (body/body_max)^(e-1)); 1 is the adult's per-mass gut at every size")
             .search(0.5, 1.0),
         r("armour", "fraction", fraction, "a hit is reduced by 1 - armour"),
+        r("adult_size_window_factor", "x own body", Range::at_least(1.0), "LANTERNJAW-LIFE: a body at or past birth_body counts as this x its body in every hunter's size window (formidable when grown; 1 its own size)")
+            .search(1.0, 30.0).log(),
         r("burr_coat", "factor", fraction, "how readily a grass burr holds to this coat: multiplies the plant's per-contact pickup chance"),
         // `senses.live` and `senses.scent` are switches: no rows.
         r("senses.sight_m", "m", nonneg, "sight by day: a moving body within this (3D) inside its field, terrain not blocking the line of sight (0: blind)"),
@@ -392,6 +397,7 @@ fn founder_rows() -> Vec<Row> {
         r("hunter.recovery_s", "s", nonneg, "the recovery, at half speed and unable to strike").optional(),
         r("hunter.strike_cost_s", "s of awake upkeep", nonneg, "a strike's cost, hit or miss").optional(),
         r("hunter.lure_power", "x awake upkeep", nonneg, "a lit lure's cost").optional(),
+        r("hunter.prey_weight.*", "fraction", fraction, "LANTERNJAW-DIET: its taste for one prey lineage, a factor on the attack chance (1: none beyond profitability and the search image)").optional(),
         // The flyer's table (`Flight`, F1): the bellwing's only, optional on the others.
         r("flight.span_m", "m", Range::positive(), "wingspan: the collision sphere's diameter").optional().prov("decision"),
         r("flight.band_max_m", "m", nonneg, "the ceiling: the base's most height over the support face below").optional().prov("decision"),
@@ -489,8 +495,10 @@ fn rows() -> Vec<Row> {
         r("fauna.parasite_attach_radius_m", "m", Range::nonneg(), "host search radius from a hatching egg").search(0.25, 2.0).grade("N"),
         r("fauna.parasite_max_per_host", "count", Range::nonneg(), "riders one host carries (0: dormant eggs never hatch)")
             .search(0.0, 4.0).grade("N"),
-        r("fauna.parasite_take_per_day", "host body per ecological day", Range::nonneg(), "a rider's take from its host, into its reserve")
-            .search(0.01, 0.5).log().grade("N").prov("derived"),
+        r("fauna.parasite_take_body_per_day", "rider's own body per ecological day", Range::nonneg(), "LANTERNJAW-LIFE: a rider's take from its host, into its reserve; grows with the rider")
+            .search(0.5, 8.0).log().grade("N"),
+        r("fauna.parasite_host_bear_per_day", "host body per ecological day", Range::nonneg(), "LANTERNJAW-LIFE: the most a host gives a rider; a rider wanting more has outgrown it and drops off, a host that cannot bear a hatchling is no host")
+            .search(0.1, 2.0).log().grade("N"),
         r("fauna.parasite_detach_body_fraction", "fraction of lineage body_max", Range::closed(0.0, 1.0).open_lo(), "a rider drops off at this size")
             .search(0.15, 0.5).grade("N"),
         r("fauna.lineage_body_ceiling", "bodies", Range::nonneg(), "COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off)")

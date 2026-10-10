@@ -445,11 +445,14 @@ yield_by_food.fruit = 0.3364781725258478
 # Insectoid: no swimming (Wrysk 2026-10-10). The default table has it off too.
 wade.swim_out = false
 core.growth_max_per_s = 0.00010069939815158275
-core.reproduction.birth_interval_s = 1097.8253659193513
-# The detritus web D2: the floor revised with the lanternjaw's metabolism and clutch (two
-# days of its need, 0.15; the curiosity gate's 0.2876 with three eggs needed a reserve of
-# 0.74 against a cap of 0.63). See `Reproduction::DORMANT_EGGS_PLACEHOLDER`.
-core.reproduction.surplus_floor = 0.15
+# LANTERNJAW-LIFE (Wrysk 2026-10-10, many offspring, low survival): at most one clutch a
+# world day (the code default), not the searched egg-layers' 1098 s.
+core.reproduction.birth_interval_s = 7200.0
+# LANTERNJAW-LIFE: the floor is two days of a new adult's need (0.06; adult now at 0.35 of
+# body_max, whose reserve cap 0.22 never cleared the old 0.15 floor plus an egg). The
+# detritus web D2 had 0.15, two days of a full-grown one. See
+# `Reproduction::DORMANT_EGGS_PLACEHOLDER`.
+core.reproduction.surplus_floor = 0.06
 core.reproduction.surplus_hold_s = 548.9126829596756
 yield_by_food.litter = 0.46905315573017675
 yield_by_food.cap_tissue = 0.46905315573017675

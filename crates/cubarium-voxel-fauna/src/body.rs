@@ -478,6 +478,13 @@ pub struct FounderPhysiology {
     /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
     /// for every lineage until the loftstrider's kick.
     pub counter: Option<Counter>,
+    /// **Formidable when grown** (LANTERNJAW-LIFE, Wrysk 2026-10-10: "super vulnerable up
+    /// to a size, then its formidable"): a body at or past its `birth_body` counts as this ×
+    /// its structure in every hunter's size window ([`Hunter::prey_max_ratio`],
+    /// [`crate::is_prey_of`]), dimensionless, at least 1. 1 (every lineage but the
+    /// lanternjaw): its own size.
+    #[serde(default = "one")]
+    pub adult_size_window_factor: f64,
     /// **The org-unit mass scale this physiology was built at**: `scale_mass`
     /// multiplies the seven absolute quantities of `core` and records the factor here.
     /// The `Self` senses reference a fraction of an adult at this mass
@@ -1616,6 +1623,27 @@ pub struct Hunter {
     pub strike_cost_s: f64,
     /// A lit lure's cost, × its awake upkeep (§2.12: "doubles its burn").
     pub lure_power: f64,
+    /// **Its taste in prey** (LANTERNJAW-DIET, Wrysk 2026-10-10: "bellwings and capgnawers
+    /// should be the main prey"), by [`Founder::index`]: the attack chance on a prey of that
+    /// lineage is multiplied by this ([`crate::attack_chance`]), dimensionless in `[0, 1]`.
+    /// All 1: no preference beyond profitability and the search image.
+    #[serde(default = "ones_by_founder")]
+    pub prey_weight: [f64; Founder::COUNT],
+    /// **Young only**, by [`Founder::index`] (LANTERNJAW-DIET: "occasionally a juvenile
+    /// seedporter or frondgrazer"): a prey of that lineage at or past its `birth_body` is
+    /// out of range, whatever the size window says. Switches, so no registry row.
+    #[serde(default)]
+    pub prey_juveniles_only: [bool; Founder::COUNT],
+    /// **Ashore only**, by [`Founder::index`] (LANTERNJAW-DIET: "snails can be eaten when
+    /// ashore"): a prey of that lineage is taken only while it is out of water
+    /// ([`crate::Mobility::ashore`], an amphibious body's last tick), never in it.
+    /// Switches, so no registry row.
+    #[serde(default)]
+    pub prey_ashore_only: [bool; Founder::COUNT],
+}
+
+fn ones_by_founder() -> [f64; Founder::COUNT] {
+    [1.0; Founder::COUNT]
 }
 
 impl Hunter {
@@ -1635,6 +1663,12 @@ impl Hunter {
         // ground or in reach"): the bellwing only at rest ([`crate::is_prey_of`]).
         // The seedporter (7, F3) is on it, but only while grounded ([`crate::is_prey_of`]).
         // The chorister (8, roster R3) is on no lanternjaw's list.
+        //
+        // LANTERNJAW-DIET (Wrysk 2026-10-10: "bellwings and capgnawers should be the main
+        // prey. they can eat shredders too. occasionally a juvenile seedporter or frondgrazer.
+        // snails can be eaten when ashore."): the list stays; the grazer and the seedporter
+        // only young (`prey_juveniles_only`), the snail only ashore (`prey_ashore_only`), and
+        // `prey_weight` makes the bellwing and the capgnawer its main prey.
         prey: [true, true, false, true, false, true, true, true, false],
         strike_power: 0.7,
         prey_max_ratio: 1.5,
@@ -1647,6 +1681,13 @@ impl Hunter {
         recovery_s: 3.0,
         strike_cost_s: 100.0,
         lure_power: 1.0,
+        // Main prey (bellwing, capgnawer) at 1; the littershredder and an ashore snail at
+        // half; a young grazer or seedporter a quarter ("occasionally"). Not-listed lineages
+        // carry 1, unread. Order: shredder, grazer, lanternjaw, capgnawer, loftstrider,
+        // ripple-snail, bellwing, seedporter, chorister.
+        prey_weight: [0.5, 0.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.25, 1.0],
+        prey_juveniles_only: [false, true, false, false, false, false, false, true, false],
+        prey_ashore_only: [false, false, false, false, false, true, false, false, false],
     };
 
     /// Whether `prey`'s lineage is on its list.
@@ -1922,6 +1963,7 @@ impl FounderPhysiology {
                 armour: 0.0,
                 agility: 0.3,
                 counter: None,
+                adult_size_window_factor: 1.0,
                 mass_scale: 1.0,
                 taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
@@ -2016,6 +2058,7 @@ impl FounderPhysiology {
                 armour: 0.25,
                 agility: 0.5,
                 counter: None,
+                adult_size_window_factor: 1.0,
                 mass_scale: 1.0,
                 taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
@@ -2059,18 +2102,23 @@ impl FounderPhysiology {
                     // 0.05), so 0.02 never binds the budget.
                     n_tissue: 0.02,
                     body_max: 0.035,
-                    // Hatchling to laying size (0.0034 → 0.021) in about two hours on a
-                    // full reserve: a sixth of its 12 h lifespan.
+                    // The ceiling only: at it a full reserve builds 0.27 ou/h at the shipped
+                    // mass, above a rider's or a free juvenile's growth (LANTERNJAW-LIFE), so
+                    // what it eats, not this, sets how fast it grows.
                     growth_max_per_s: 2.5e-6,
-                    // A hatchling is 0.46 of the adult's length (§2.13): 0.46³ × 0.035.
-                    body_min: 0.0034,
-                    // Laying size: 0.6 of body_max, the browser's ratio.
-                    birth_body: 0.021,
+                    // LANTERNJAW-LIFE (many offspring, low survival): a hatchling is 0.05 of
+                    // the adult's body (0.37 of its length; was 0.0034, 0.46 of its length),
+                    // so its egg is cheap and a clutch large.
+                    body_min: 0.00175,
+                    // LANTERNJAW-LIFE (Wrysk 2026-10-10: "i do really liek 35%-100% adult size
+                    // range"): adult and laying at 0.35 of body_max (was 0.6, the browser's
+                    // ratio); an adult keeps growing toward body_max on what its brood leaves.
+                    birth_body: 0.01225,
                     // Unread by an egg-layer; one egg, so the validator's floor holds.
                     birth_cost: 0.005,
                     // The detritus web D2: small frequent meals, not one grazer (P1's 1.0):
                     // 0.6 of the body holds about eight and a half days of its need, and
-                    // still pays its whole clutch above the floor
+                    // pays a clutch sized by body above the floor
                     // ([`Reproduction::DORMANT_EGGS_PLACEHOLDER`]).
                     reserve_cap: 0.6,
                     drown_depth_m: 0.2,
@@ -2129,6 +2177,12 @@ impl FounderPhysiology {
                 armour: 0.0,
                 agility: 0.0,
                 counter: None,
+                // LANTERNJAW-LIFE: a grown lanternjaw counts as twelve times its body in a
+                // hunter's window. A lone Veilhound's window (1.5 × its 2.74) is 4.1, under
+                // a new adult's 12 × 0.3675 = 4.4, so a hound takes one only with packmates
+                // beside it (two at a new adult, four at a full-grown one); no seedporter
+                // (window 1.0 × 0.356) ever takes one. Juveniles count at their own size.
+                adult_size_window_factor: 12.0,
                 mass_scale: 1.0,
                 taste_reference_food: default_taste_reference_food(),
                 taste_reference: None,
@@ -2421,10 +2475,16 @@ impl FounderPhysiology {
                     // SEEDPORTER-POLLEN (Wrysk 2026-10-09): the vine flowers it climbs over or
                     // brushes past are pollinated by the pollen it brings from others.
                     pollen_by_contact: true,
+                    // LANTERNJAW-LIFE (Wrysk 2026-10-10: "seedporters should also eat the
+                    // juveniles if they are small enough"): the bellwing and a free
+                    // lanternjaw juvenile no heavier than itself — window 1.0 (was 4.0; the
+                    // largest bellwing, 0.03, is under its smallest body, 0.036, so every
+                    // bellwing it took it still takes). A grown lanternjaw is formidable
+                    // (`adult_size_window_factor`) and never in it.
                     hunter: Some(Hunter {
-                        prey: [false, false, false, false, false, false, true, false, false],
+                        prey: [false, false, true, false, false, false, true, false, false],
                         strike_power: 4.0,
-                        prey_max_ratio: 4.0,
+                        prey_max_ratio: 1.0,
                         strike_reach_length_fraction: 0.8,
                         jaw_band_height_fraction: 2.0,
                         vertical_reach_m: 0.0,
@@ -2434,6 +2494,9 @@ impl FounderPhysiology {
                         recovery_s: 1.0,
                         strike_cost_s: 2.0,
                         lure_power: 0.0,
+                        prey_weight: [1.0; Founder::COUNT],
+                        prey_juveniles_only: [false; Founder::COUNT],
+                        prey_ashore_only: [false; Founder::COUNT],
                     }),
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -2472,6 +2535,11 @@ impl FounderPhysiology {
             Founder::Chorister => {
                 let lj = FounderPhysiology::placeholder(Founder::Lanternjaw);
                 let mut core = lj.core;
+                // The P1 lanternjaw's newborn (0.46 of its length) and breeding size (0.6 of
+                // body_max), which the chorister was built on: LANTERNJAW-LIFE's smaller
+                // hatchling and earlier adulthood are the lanternjaw's alone.
+                core.body_min = 0.0034;
+                core.birth_body = 0.021;
                 core.reproduction = Reproduction::LIVE_BIRTH_PLACEHOLDER;
                 // The grazers' surplus floor at the lanternjaw's body (the frondgrazer's
                 // 0.005 at its 0.05), then × r with the other stocks.
@@ -2515,6 +2583,10 @@ impl FounderPhysiology {
                         prey: [false, true, true, false, true, false, true, true, false],
                         lure_power: 0.0,
                         vertical_reach_m: 2.25,
+                        // The lanternjaw's strike, not its diet (LANTERNJAW-DIET).
+                        prey_weight: [1.0; Founder::COUNT],
+                        prey_juveniles_only: [false; Founder::COUNT],
+                        prey_ashore_only: [false; Founder::COUNT],
                         ..Hunter::LANTERNJAW
                     }),
                     diet: crate::Diet::only(crate::Food::Carrion),
@@ -2523,6 +2595,8 @@ impl FounderPhysiology {
                     founding_count: 0,
                     founding_per_world: true,
                     pack: Some(Pack::CHORISTER),
+                    // Built on the lanternjaw, but no formidable adult (LANTERNJAW-LIFE).
+                    adult_size_window_factor: 1.0,
                     // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,
                     // Meat: k 0.20, τ 300 s (Wrysk: one big meal every one or two days).

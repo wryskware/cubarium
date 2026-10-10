@@ -360,14 +360,15 @@ what = "litter decay (dead wood and carrion follow)"
 
 # --- The lanternjaw's recruitment (Fable, 2026-10-02 readouts: riders grow 0.05-0.14
 # body/h on frondgrazers toward a 0.25 drop-off line; small hosts cannot feed one).
-# No host-size rule (with Wrysk). Since the minimal gut the take is per host body
-# (parasite_take_per_day), so host size matters without one. ---
+# No host-size rule (with Wrysk). Since LANTERNJAW-LIFE (Wrysk 2026-10-10) the take is per
+# rider body (parasite_take_body_per_day) and a host bears at most parasite_host_bear_per_day
+# of its body, so a rider outgrows a small host. ---
 
 [[gene]]
 name = "rider_take"
-path = "fauna.parasite_take_per_day"
+path = "fauna.parasite_take_body_per_day"
 range = [0.25, 4.0]
-what = "a rider's take, host body per ecological day, into its reserve (0.09 -> 0.0225-0.36)"
+what = "a rider's take, its own body per ecological day, into its reserve (2 -> 0.5-8; LANTERNJAW-LIFE, was per host body)"
 
 [[gene]]
 name = "rider_attach_radius"

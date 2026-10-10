@@ -203,7 +203,7 @@ pub struct LifeConfig {
     pub shallows_search_m: f64,
     /// **The ecological day**, seconds (the minimal gut, 2026-10-03): the day per-day
     /// physiology is written in — `maintenance_per_s` is a lineage's daily need `f` over
-    /// it, and a rider's [`crate::FaunaConfig::parasite_take_per_day`] is spread over it.
+    /// it, and a rider's [`crate::FaunaConfig::parasite_take_body_per_day`] is spread over it.
     /// 7,200, the default cycle's two hours. Fixed, so the picture clock (a `local` day, a
     /// changed cycle) never changes physiology.
     #[serde(default = "default_ecological_day_s")]

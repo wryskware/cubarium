@@ -68,6 +68,9 @@ fn config() -> FaunaConfig {
         recovery_s: 0.5,
         strike_cost_s: 0.1,
         lure_power: 0.0,
+        prey_weight: [1.0; Founder::COUNT],
+        prey_juveniles_only: [false; Founder::COUNT],
+        prey_ashore_only: [false; Founder::COUNT],
     });
     c.founders[SP.index()].catch_bellwings = true;
     c.founders[SP.index()].catch_ceiling_m = 0.3;

@@ -124,7 +124,7 @@ pub use controller::{
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
-    egg_hatches, hatch_draw, is_prey_of, kind_of, moved_recently, tremor_of,
+    egg_hatches, hatch_draw, is_prey_of, kind_of, moved_recently, tremor_of, window_size,
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
@@ -1374,6 +1374,27 @@ pub(crate) fn release(rider: &mut Animal, host: &Animal) {
     rider.founder_state.feedback = IntervalFeedback::default();
 }
 
+/// **A rider's take**, organic units per second (LANTERNJAW-LIFE): its own body times
+/// [`FaunaConfig::parasite_take_body_per_day`] per world day, so it takes more the bigger it
+/// grows.
+pub fn rider_take_per_s(config: &FaunaConfig, rider_body: f64) -> f64 {
+    let day = config.life.ecological_day_s;
+    if day > 0.0 {
+        config.parasite_take_body_per_day * rider_body / day
+    } else {
+        0.0
+    }
+}
+
+/// **Whether a host bears a rider** of `rider_body` (LANTERNJAW-LIFE): the rider's take
+/// ([`FaunaConfig::parasite_take_body_per_day`] × its body) is no more than the host gives,
+/// [`FaunaConfig::parasite_host_bear_per_day`] × the host's body, both per world day. A
+/// rider its host no longer bears has outgrown it and drops off; a hatchling no host in
+/// reach bears stays in the egg.
+pub fn host_bears(config: &FaunaConfig, rider_body: f64, host_body: f64) -> bool {
+    config.parasite_take_body_per_day * rider_body <= config.parasite_host_bear_per_day * host_body
+}
+
 impl Animal {
     /// The feet's height over the standing surface of `site`, metres: zero on the ground,
     /// the climb's signed progress on a wall.
@@ -1910,34 +1931,46 @@ impl Reproduction {
         gestation_upkeep_factor: 1.0,
     };
 
-    /// The lanternjaw's **dormant egg bank** (§2.13), revised with its metabolism in the
-    /// detritus web D2: each egg `egg_organic` 0.005 — a `body_min` hatchling (0.0034) and a
-    /// small reserve (0.0016) — buried as its own clutch, the clutch **from surplus**
-    /// (eligible on one affordable egg, up to `clutch_max` 3 at laying, the D1 mechanism),
-    /// over a floor of 0.005, one egg. At the shipped mass (×30, adult 1.05, reserve cap
-    /// 0.6 → 0.63): the floor 0.15 is two days of the adult's 0.07 daily need; one egg needs
-    /// a reserve of 0.30, the whole clutch 0.60, which a full adult (0.63) holds and lays,
-    /// keeping 0.18 above the floor. Hold and interval are the other egg-layers'.
+    /// The lanternjaw's **dormant egg bank** (§2.13), revised for **many offspring, low
+    /// survival** (LANTERNJAW-LIFE, Wrysk 2026-10-10: "as bugs, they should probably have a
+    /// many-offspring-low-survival strategy"). At the shipped mass (×30; adult 0.3675 to
+    /// 1.05, reserve cap 0.6 of body):
+    /// - **egg** `egg_organic` 0.0026 (0.078): a `body_min` hatchling (0.0525) and a reserve
+    ///   of half of it again, the old egg's ratio, so its own upkeep keeps it about 13 h,
+    ///   past the bank's viability; half the old egg (0.15);
+    /// - **floor** 0.002 (0.06): two days of a new adult's 0.07 daily need (was 0.15, two
+    ///   days of a full-grown one, which a new adult's cap could never clear with an egg);
+    /// - **clutch from surplus** up to `clutch_max` 7: a new adult (cap 0.22) lays 2, a
+    ///   full-grown one (cap 0.63) the whole 7;
+    /// - **brood** `brood_share` 0.5: a grown body saves half its net income for its next
+    ///   full clutch and grows on the rest, so it keeps growing toward body_max while it lays
+    ///   (D1b), and waits up to `clutch_hold_max_s` 1800 s (a quarter world day) for that
+    ///   clutch;
+    /// - **interval** `birth_interval_s` 7200 s: at most one clutch a world day, a clutch a
+    ///   night.
+    ///
+    /// `clutch_size` 3 is the founding bank's clutch (the clutch from surplus replaces it at
+    /// laying). Hold is the other egg-layers'.
     pub const DORMANT_EGGS_PLACEHOLDER: Reproduction = Reproduction {
         mode: BirthMode::Eggs,
-        surplus_floor: 0.005,
+        surplus_floor: 0.002,
         surplus_hold_s: 900.0,
         gestation_s: 0.0,
         gestation_loss_fraction: 0.25,
-        birth_interval_s: 1800.0,
+        birth_interval_s: 7200.0,
         clutch_size: 3,
-        egg_organic: 0.005,
+        egg_organic: 0.0026,
         incubation_s: 0.0,
         dormant: true,
         surplus_share: SURPLUS_SHARE,
         litter_min: 0.0,
-        clutch_max: 3,
+        clutch_max: 7,
         nest_radius_m: 0.0,
         nest_crowd_max: 0,
         nest_retry_s: NEST_RETRY_S,
-        clutch_hold_max_s: 0.0,
+        clutch_hold_max_s: 1800.0,
         egg_fungus_radius_m: 0.0,
-        brood_share: 0.0,
+        brood_share: 0.5,
         litters_per_year: 0,
         breeding_phase: 0.0,
         breeding_window: 0.0,
@@ -2289,15 +2322,31 @@ pub struct FaunaConfig {
     pub parasite_attach_radius_m: f64,
     /// Riders one host can carry at once, count. Default 1.
     pub parasite_max_per_host: u32,
-    /// **A rider's take** (the minimal gut, repair 2 item 9): host body per world day
-    /// ([`LifeConfig::ecological_day_s`]) a rider takes out of its host — reserve first,
-    /// then structure, all three currencies at the host's density — straight into its
-    /// own reserve. Default 0.09: on a 1.5-ou grazer a hatchling reaches drop-off in about
-    /// 1.19 world days (Astra's integration). Replaces the basal-tied drain, which the
-    /// cut to basal upkeep left unable to grow a rider.
-    pub parasite_take_per_day: f64,
+    /// **A rider's take** (LANTERNJAW-LIFE, Wrysk 2026-10-10: "they take more the bigger
+    /// they get"): the rider's **own** body per world day ([`LifeConfig::ecological_day_s`])
+    /// it takes out of its host — reserve first, then structure, all three currencies at the
+    /// host's density — straight into its own reserve. Replaces the fixed share of the
+    /// host (`parasite_take_per_day`, 0.09 of the host a day), which left a rider on a small
+    /// host sitting under drop-off for hours. Default 2: about twice its own body a world
+    /// day, so a hatchling grows about 1.9 e-folds a world day after its upkeep and goes
+    /// from hatchling to drop-off (×5.6) on a grazer in about 0.9 world days (1.8 h).
+    pub parasite_take_body_per_day: f64,
+    /// **What a host can bear** (LANTERNJAW-LIFE): the host's body per world day it gives a
+    /// rider at most. A rider whose take ([`FaunaConfig::parasite_take_body_per_day`] × its
+    /// body) would exceed this × its host's body has **outgrown its host** and drops off,
+    /// below the normal drop-off size if need be, and does not look for another; a host that
+    /// cannot bear even a hatchling is no host. So "outgrows" is set by the take the host
+    /// can bear, a host-to-rider size ratio of `bear / take` (0.25 at the defaults). Default
+    /// 0.5: a grown grazer (1.5) carries a rider to 0.375, past drop-off; a littershredder
+    /// (0.375) lets go of it at about 0.09, a fifth of the way; a ripple-snail (0.15) can
+    /// carry no hatchling. Half its body a day at the end of a ride is about eight times a
+    /// grazer's own daily need, which its intake (about 29 times its upkeep) covers.
+    pub parasite_host_bear_per_day: f64,
     /// A rider drops off when its body reaches this fraction of its lineage's adult
-    /// `body_max`, dimensionless within `(0, 1]`. Default 0.24.
+    /// `body_max`, dimensionless within `(0, 1]`. Default 0.28 (LANTERNJAW-LIFE, was 0.24):
+    /// with adulthood at 0.35 of `body_max`, a free juvenile grows the last 0.07 of
+    /// `body_max` (0.074 ou at the shipped mass) in about 3 h at the 0.025 ou/h free
+    /// juveniles were measured growing (`design/ecology-roles-2026-10-09.md` §1).
     pub parasite_detach_body_fraction: f64,
     /// Predation, threat perception, wounds and the egg bank ([`PredationConfig`]).
     pub predation: PredationConfig,
@@ -2362,8 +2411,9 @@ impl Default for FaunaConfig {
             parasite_attach_radius_m: FounderPhysiology::placeholder(Founder::Browser)
                 .adult_length_m,
             parasite_max_per_host: 1,
-            parasite_take_per_day: 0.09,
-            parasite_detach_body_fraction: 0.24,
+            parasite_take_body_per_day: 2.0,
+            parasite_host_bear_per_day: 0.5,
+            parasite_detach_body_fraction: 0.28,
             predation: PredationConfig::default(),
             life: LifeConfig::default(),
             cue: CueConfig::default(),
@@ -3282,7 +3332,7 @@ pub struct FaunaLedger {
     pub regurgitated: Taken,
     #[serde(default)]
     pub stomach_out: Taken,
-    /// What riders took out of their hosts ([`FaunaConfig::parasite_take_per_day`]),
+    /// What riders took out of their hosts ([`FaunaConfig::parasite_take_body_per_day`]),
     /// organic: a transfer inside the layer.
     #[serde(default)]
     pub parasite_taken_organic: f64,

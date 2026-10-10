@@ -91,7 +91,19 @@ pub(super) fn hunting_config() -> FaunaConfig {
     // The on/off rhythms (RHYTHMS-CADENCE's leanings have random rests; `rhythm_tests`).
     let mut c = crate::rhythm::fixed_config();
     c.founders[Founder::Lanternjaw.index()].active = Activity::Always;
+    no_diet(&mut c);
     c
+}
+
+/// The lanternjaw's **diet rules off** (LANTERNJAW-DIET's young-only, ashore-only and prey
+/// weights): the strike cases run its strike machinery on grown grazers and seedporters;
+/// `diet_tests` owns the diet.
+pub(super) fn no_diet(c: &mut FaunaConfig) {
+    if let Some(h) = c.founders[Founder::Lanternjaw.index()].hunter.as_mut() {
+        h.prey_weight = [1.0; Founder::COUNT];
+        h.prey_juveniles_only = [false; Founder::COUNT];
+        h.prey_ashore_only = [false; Founder::COUNT];
+    }
 }
 
 /// A lanternjaw hungry enough to strike and not full enough to lie down (its satiated
