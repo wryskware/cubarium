@@ -283,8 +283,11 @@ fn founder_rows() -> Vec<Row> {
             .search(0.002, 1.0).log().prov("decision"),
         r("gut.bite_per_body_s", "raw org-units/s per unit current body", nonneg, "b: a bite's rate at full effort (default 2k / tau)")
             .search(1e-5, 1e-2).log().prov("derived"),
+        // GUT-MASS (2026-10-10): the realistic gut (a ceiling of 7x maintenance) slows every
+        // lineage's digestion 3-6x, the Veilhound's carrion to about 1,300 s; the search
+        // interval reaches 10,000 s so the gut genes' boxes fit around it.
         r("gut.digestion_s.*", "s", Range::positive(), "tau: a food class's pool empties at S / tau into the reserve's room")
-            .search(5.0, 2000.0).log().prov("decision"),
+            .search(5.0, 10000.0).log().prov("decision"),
         r("gut.s0", "fraction of K", fraction, "appetite floor: a fed body wants food at S <= s0 K")
             .search(0.0, 0.8).prov("decision"),
         r("gut.full_tolerance", "fraction of K", Range::closed(0.0, 1.0).open_lo(), "the eating latch goes off at S >= this x K")
