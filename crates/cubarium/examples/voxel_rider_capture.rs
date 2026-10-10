@@ -10,8 +10,9 @@
 //! Writes `OUT_DIR/frames/f-0000.png …` at 60 frames a second of world time. Nothing is
 //! simulated: the two bodies are introduced, the lanternjaw is made a rider of the host
 //! (`Animal::attached`, as the hatching rule leaves it) and both are scripted on a copy of
-//! the view; the drop-off is the fauna's release (the rider takes the host's place and
-//! pose). It prints the ffmpeg line for the MP4. No window is opened.
+//! the view; the drop-off is the fauna's release (the rider steps off onto the nearest
+//! standable face beside the host, `Fauna::beside_host`, keeping its heading). It prints
+//! the ffmpeg line for the MP4. No window is opened.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 use std::path::PathBuf;
@@ -165,10 +166,15 @@ fn main() -> Result<()> {
         let host = animals[hi];
         let rider = &mut animals[ri];
         if !dropped && t >= DROP_S {
-            // the fauna's release: a free juvenile where the host stands
+            // the fauna's release: a free juvenile beside its host (or on its place)
             rider.attached = None;
             rider.site = host.site;
             rider.pose = host.pose;
+            if let Some((site, pose)) = fauna.beside_host(&w.view(), rider, &host) {
+                rider.site = site;
+                rider.pose = pose;
+            }
+            println!("drop-off: host at {:?} ({:.3}, {:.3}), juvenile at {:?} ({:.3}, {:.3})", host.site, host.pose.x, host.pose.z, rider.site, rider.pose.x, rider.pose.z);
             dropped = true;
         } else if !dropped {
             rider.site = host.site;

@@ -758,7 +758,7 @@ fn the_books_close_through_a_hunker_a_pry_open_and_the_kill() {
     assert!(fauna.ledger.vigil.hunker_ticks[GRAZER.index()] > 0 && fauna.ledger.vigil.opens[GRAZER.index()] == 1);
     let birth = fauna.config.founder(GRAZER).core.birth_body;
     assert!(animal(&fauna, g).body >= birth);
-    super::apply_hit(&mut fauna, &mut flora, g, 1.0, VH);
+    super::apply_hit(&mut fauna, &mut flora, g, 1.0, VH, None);
     assert!(fauna.view().animal(g).is_none(), "killed");
     assert_eq!(fauna.ledger.vigil.kills_adult[GRAZER.index()], 1);
     books_close(&fauna, &flora, "after the kill");

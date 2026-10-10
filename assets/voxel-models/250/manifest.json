@@ -1753,11 +1753,11 @@
    ]
   },
   "lanternjaw-larva": {
-   "bytes": 94,
+   "bytes": 89,
    "bins": [
     {
      "length_m": 0.57,
-     "cells": 6
+     "cells": 5
     }
    ]
   }

@@ -189,6 +189,8 @@ pub fn specimen_coat(name: &str) -> Option<Coat> {
         "seedporter" | "seedporter-stand" | "seedporter-ground" | "seedporter-glide" => SEEDPORTER,
         "bellwing" => BELLWING,
         "loftstrider" => LOFTSTRIDER,
+        // the lanternjaw's rider stage, in its lineage's coat
+        "lanternjaw-larva" => LANTERNJAW,
         _ => return None,
     })
 }

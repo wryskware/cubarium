@@ -1174,7 +1174,7 @@ def _capsules(pts, r0, r1, mat):
         ell(tuple((a + b) / 2), (d.length / 2 + 0.6 * r, r, r), mat, rot=rot)
 
 
-def lanternjaw_larva(kind):
+def lanternjaw_larva(kind, vox=None):
     if kind in ("tick3", "tick2"):
         # round 2's tick: round 1's three plates and dark body, the fangs ending on the
         # host's back in front of the plates (a pale cell each), the tail nub and lure on
@@ -1290,13 +1290,20 @@ def lanternjaw_larva(kind):
         tube([(0.11, 0.0, 0.06), (0.0, 0.0, 0.06), (-0.125, 0.0, 0.062)], 0.044, 0.04, c("a_main"), seg=12)
         cyl((-0.125, 0.0, 0.062), (-0.25, 0.0, 0.1875), 0.024, 0.022, mat=c("a_main"), seg=10)
         ell((-0.25, 0.0, 0.1875), (0.04, 0.04, 0.04), c("a_main"))
+        # The two buds stand 0.25 apart, one row each, only on a grid of 0.125 or finer;
+        # coarser, each sits on a cell boundary and both land on one side, so there they are
+        # one cyan bud on the middle row of the lifted rear (Wrysk 2026-10-09).
+        two_buds = vox is None or vox <= 0.125 + 1e-9
         for sy in (-1, 1):
             # thin enough, and from far enough back, to take neither the cell in front of the
             # fork nor the ones beside it: only the tip's cell
             tube([(0.14, 0.0, 0.06), (0.25, sy * 0.125, 0.06)], 0.014, 0.014, c("a_main"), seg=8)
             ell((0.25, sy * 0.125, 0.06), (0.03, 0.03, 0.03), c("a_head"))
-            cyl((-0.25, 0.0, 0.19), (-0.25, sy * 0.1, 0.19), 0.012, 0.01, mat=c("a_mark"), seg=6)
-            ell((-0.25, sy * 0.125, 0.1875), (0.03, 0.03, 0.03), c("a_lure"))
+            if two_buds:
+                cyl((-0.25, 0.0, 0.19), (-0.25, sy * 0.1, 0.19), 0.012, 0.01, mat=c("a_mark"), seg=6)
+                ell((-0.25, sy * 0.125, 0.1875), (0.03, 0.03, 0.03), c("a_lure"))
+        if not two_buds:
+            ell((-0.25, 0.0, 0.1875), (0.03, 0.03, 0.03), c("a_lure"))
         return
     if kind == "leech":
         # one voxel wide along the spine: the body lying flat for two cells behind the
@@ -1320,12 +1327,13 @@ def lanternjaw_larva(kind):
 COATS["lanternjaw-larva"] = COATS["lanternjaw"]
 
 
-def build_larva(kind, x, y):
+def build_larva(kind, x, y, vox=None):
     """Build the `kind` larva at its true size, its origin moved to (x, y) on z = 0 (as
-    `build` moves an animal's anchor). Returns the new objects."""
+    `build` moves an animal's anchor), for a bake at `vox` (None: no grid in mind). Returns
+    the new objects."""
     use("lanternjaw-larva")
     start = len(L.ORG)
-    lanternjaw_larva(kind)
+    lanternjaw_larva(kind, vox)
     objs = L.ORG[start:]
     m = Matrix.Translation((x, y, 0))
     for ob in objs:

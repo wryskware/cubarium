@@ -663,7 +663,7 @@ def bake_specimen(name, vox, out_dir):
 def bake_larva(name, vox, out_dir):
     """One bin: the larva at its built size, its length and width the built extent."""
     reset_scene()
-    objs = A.build_larva(LARVAE[name], 0.5 * vox, 0.5 * vox)
+    objs = A.build_larva(LARVAE[name], 0.5 * vox, 0.5 * vox, vox)
     lo = [min((ob.matrix_world @ v.co)[k] for ob in objs for v in ob.data.vertices) for k in range(2)]
     hi = [max((ob.matrix_world @ v.co)[k] for ob in objs for v in ob.data.vertices) for k in range(2)]
     length, width = hi[0] - lo[0], hi[1] - lo[1]
