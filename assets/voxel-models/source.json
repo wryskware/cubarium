@@ -363,7 +363,7 @@
       ],
       "crown_radius_m": [
         0.625,
-        1.0
+        1.85
       ],
       "profile": [
         {
@@ -455,7 +455,10 @@
           ]
         }
       ],
-      "foliage_state_below": []
+      "foliage_state_below": [
+        0.66,
+        0.33
+      ]
     },
     {
       "name": "lanternberry",
@@ -580,12 +583,52 @@
       "body_max": 1.05
     },
     {
+      "name": "capgnawer",
+      "adult_length_m": 0.25,
+      "adult_width_m": 0.21,
+      "adult_height_m": 0.19,
+      "body_min": 0.1596,
+      "body_max": 0.6384
+    },
+    {
       "name": "loftstrider",
       "adult_length_m": 2.2,
       "adult_width_m": 2.2,
       "adult_height_m": 3.4,
       "body_min": 0.528,
       "body_max": 5.28
+    },
+    {
+      "name": "ripple-snail",
+      "adult_length_m": 0.19,
+      "adult_width_m": 0.19,
+      "adult_height_m": 0.063,
+      "body_min": 0.0363888,
+      "body_max": 0.1455552
+    },
+    {
+      "name": "bellwing",
+      "adult_length_m": 0.125,
+      "adult_width_m": 0.125,
+      "adult_height_m": 0.0625,
+      "body_min": 0.003,
+      "body_max": 0.03
+    },
+    {
+      "name": "seedporter",
+      "adult_length_m": 0.5,
+      "adult_width_m": 0.25,
+      "adult_height_m": 0.2,
+      "body_min": 0.035555555555555556,
+      "body_max": 0.35555555555555557
+    },
+    {
+      "name": "chorister",
+      "adult_length_m": 1.4,
+      "adult_width_m": 0.35,
+      "adult_height_m": 0.6,
+      "body_min": 0.26655999999999996,
+      "body_max": 2.7439999999999998
     }
   ]
 }

@@ -511,7 +511,16 @@ UMBRELLAFROND_STATES = [
     ("stripped", {"tiers": {"lowest": ("all", 0.4, False), "middle": ("all", 0.45, False),
                             "top": ("all", 0.5, False)}}),
 ]
-FOLIAGE_STATES = {"bloomcrown": BLOOMCROWN_STATES, "umbrellafrond": UMBRELLAFROND_STATES}
+# VAULT-SHAPE round 3 (2026-10-10): the vaulttree's shelf count follows its foliage, full to
+# thin: 22, 17 and 12 shelves (the pick's twelve plus the gap-filling rule's extras, placed
+# after the pick's, so every state holds the thinner states' shelves cell for cell).
+VAULTTREE_STATES = [
+    ("b22", {"shelf_fill": 22 / 12}),
+    ("b17", {"shelf_fill": 17 / 12}),
+    ("b12", {"shelf_fill": 1.0}),
+]
+FOLIAGE_STATES = {"bloomcrown": BLOOMCROWN_STATES, "umbrellafrond": UMBRELLAFROND_STATES,
+                  "vaulttree": VAULTTREE_STATES}
 
 
 def bloomcrown(x, y, h, r, layers, i, rng, spec=None):
@@ -684,6 +693,14 @@ VAULT_SHELVES = [
 ]
 VAULT_AXIS_PX, VAULT_HALF_PX = 512.0, 475.0
 VAULT_GROUND_PX, VAULT_TOP_PX = 1530.0, 15.0
+# Shelf fill factor: 1 is the pick's twelve shelves. Only VAULT-SHAPE's scratch candidate D
+# sets it (the bake reads a source.json species' optional `shelf_fill`).
+VAULT_FILL = 1.0
+# Shared lean (VAULT-SHAPE round 2, scratch bakes only; None in every committed bake):
+# (tilt, (dx, dy)): every variant's trunk leans along the unit (dx, dy) by tilt x height at
+# the trunk's split, instead of the pick's 0.07 x height in a direction drawn per variant.
+VAULT_LEAN = None
+VAULT_GOLDEN = math.pi * (3 - math.sqrt(5))  # the golden angle: shelf k's azimuth step
 
 
 def vault_shelf(c, rs, rng, drape_to=None):
@@ -715,12 +732,21 @@ def vault_shelf(c, rs, rng, drape_to=None):
     join(drapes, "drapes")
 
 
-def vaulttree(x, y, h, r, layers, i, rng):
+def vaulttree(x, y, h, r, layers, i, rng, spec=None):
     """Artbook pick (vaulttree.png): an asymmetric leaning trunk of twisted violet plates
     with one dark-teal plate, a leader and arching violet limbs, a canopy of separate
     domed dark-teal shelves with mint rims at many heights (the pick's shelves at the
     pick's heights, 0.55-1.0 of height, the profile's foliage band), long fine cyan
-    tendrils (the drape) hanging from the shelves down into the drape band."""
+    tendrils (the drape) hanging from the shelves down into the drape band.
+
+    Round crown (VAULT-SHAPE round 3, 2026-10-10): the pick is a front view, so the
+    lineup put each shelf at the pick's x offset and drew only a narrow depth (0.45 r)
+    for it, a crown about 2.1 x 1.5 m at r 1. Each shelf now keeps the pick's distance
+    from the axis, height and size, at its own azimuth round the axis (the golden angle
+    from a phase drawn per variant, jittered), so the crown is as deep as it is wide.
+    `spec`: a foliage state (`VAULTTREE_STATES`), its `shelf_fill` the shelf count over
+    the pick's twelve."""
+    fill = (spec or {}).get("shelf_fill", VAULT_FILL)
     if i == 0:  # seedling: one tiny shelf on a stub
         cyl((x, y, 0), (x, y, h * 0.7), 0.012, mat="violet", seg=5)
         vault_shelf((x, y, h), r * 0.7, rng)
@@ -730,8 +756,11 @@ def vaulttree(x, y, h, r, layers, i, rng):
     drape = next((l for l in layers if l[0] == D), None)
     zs = trunk[2] * h  # where the trunk splits into limbs
     rt = trunk[3] * r  # trunk radius: the profile's trunk radius
-    lean_a = rng.uniform(-0.6, 0.6)
+    lean_a = rng.uniform(-0.6, 0.6)  # drawn even under VAULT_LEAN: the shelves keep their draws
     lean = Vector((math.cos(lean_a), math.sin(lean_a), 0)) * 0.07 * h
+    if VAULT_LEAN is not None:
+        tilt, (ldx, ldy) = VAULT_LEAN
+        lean = Vector((ldx, ldy, 0)) * tilt * h
     axis = lambda z: Vector((x, y, z)) + lean * (z / zs) ** 1.4  # noqa: E731
     # trunk: three twisted plates round a core, flaring at the foot
     nz = 9
@@ -750,16 +779,21 @@ def vaulttree(x, y, h, r, layers, i, rng):
     # four highest for a juvenile); the foliage band 0.55-1.0 is the pick's shelf span
     za, zb = fol[1] * h, fol[2] * h
     shelves = VAULT_SHELVES if drape is not None else VAULT_SHELVES[:4]
-    for k, (px, py, ph) in enumerate(shelves):
+    phase = rng.uniform(0, 2 * math.pi)
+    crowning = []
+
+    def place(k, px, py, ph):
         rs = r * ph / VAULT_HALF_PX * (fol[3])
         ztop = max(za + rs * 0.42 * 1.1, h * (VAULT_GROUND_PX - py) / (VAULT_GROUND_PX - VAULT_TOP_PX))
-        ox = (px - VAULT_AXIS_PX) / VAULT_HALF_PX * r
-        oy = rng.uniform(-0.45, 0.45) * r
+        d = abs(px - VAULT_AXIS_PX) / VAULT_HALF_PX * r
+        a = phase + k * VAULT_GOLDEN + rng.uniform(-0.3, 0.3)
+        ox, oy = math.cos(a) * d, math.sin(a) * d
         ex = math.hypot(ox, oy) + rs - r
         if ex > 0:  # keep each shelf inside the crown radius
             s = max(0.0, (math.hypot(ox, oy) - ex) / max(math.hypot(ox, oy), 1e-6))
             ox, oy = ox * s, oy * s
         c = Vector((x + ox, y + oy, ztop))
+        crowning.append((ox, oy))
         # limb: from the leader, a little below the shelf, arching out and up to its base
         base = c - Vector((0, 0, rs * 0.4 + 0.06))
         zo = max(zs, min(base.z - 0.15 * h, zs + 0.6 * (base.z - zs)))
@@ -767,9 +801,24 @@ def vaulttree(x, y, h, r, layers, i, rng):
         mid = o.lerp(base, 0.55) + Vector((0, 0, 0.05 * h))
         tube(bezier(o, mid, base, 5), 0.06 if k < 2 or ph > 150 else 0.045, 0.02, "violet", seg=6)
         vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h))
+    for k, (px, py, ph) in enumerate(shelves):
+        place(k, px, py, ph)
+    if drape is not None and fill > 1.0:
+        # VAULT-SHAPE candidate D (2026-10-10; scratch bakes only, VAULT_FILL is 1 in every
+        # committed bake): more shelves inside the same crown radius. Each gap between two
+        # of the pick's shelves (by height) gets one more, mirrored across the axis, at the
+        # gap's middle height and the two shelves' mean size; the largest gaps first,
+        # round(12 x (VAULT_FILL - 1)) of them. Placed after the pick's shelves, so those
+        # keep their random draws.
+        order = sorted(VAULT_SHELVES, key=lambda sh: sh[1])
+        gaps = sorted(zip(order, order[1:]), key=lambda ab: ab[0][1] - ab[1][1])
+        n = round(len(VAULT_SHELVES) * (fill - 1.0))
+        for k, (a, b) in enumerate(gaps[:n]):
+            place(len(VAULT_SHELVES) + k, 2 * VAULT_AXIS_PX - a[0], (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
     # the leader to the crowning shelf
-    tube([top, top + Vector((0, 0, (zb - zs) * 0.5)), Vector((x + (VAULT_SHELVES[0][0] - VAULT_AXIS_PX)
-          / VAULT_HALF_PX * r * 0.5, y, zb - 0.1))], rt * 0.55, 0.03, "violet", seg=6)
+    cx, cy = crowning[0]
+    tube([top, top + Vector((0, 0, (zb - zs) * 0.5)), Vector((x + cx * 0.5, y + cy * 0.5, zb - 0.1))],
+         rt * 0.55, 0.03, "violet", seg=6)
 
 
 def lanternberry(x, y, h, r, layers, i, rng):

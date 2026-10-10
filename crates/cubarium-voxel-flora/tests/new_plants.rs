@@ -586,7 +586,7 @@ fn a_vaulttree_falls_along_round_r_over_voxel_sites_and_the_line_holds_its_wood(
     for voxel_m in GRIDS {
         for wf in [1.0, 0.3] {
             let wood_max = FloraConfig::default().species(Species::Vaulttree).wood_max;
-            let n_max = sites_for(1.0, voxel_m);
+            let n_max = sites_for(FloraConfig::default().species(Species::Vaulttree).crown_radius_m[1], voxel_m);
             let side = 2 * n_max as u32 + 5;
             let mut world = plain(voxel_m, side, side);
             let f = fall(&mut world, wf * wood_max);
@@ -646,7 +646,7 @@ fn a_vaulttree_falls_along_round_r_over_voxel_sites_and_the_line_holds_its_wood(
 fn an_unsupported_site_s_share_goes_to_the_nearest_supported_site_on_the_line() {
     for voxel_m in GRIDS {
         let wood_max = FloraConfig::default().species(Species::Vaulttree).wood_max;
-        let n = sites_for(1.0, voxel_m);
+        let n = sites_for(FloraConfig::default().species(Species::Vaulttree).crown_radius_m[1], voxel_m);
         assert!(n >= 2, "the fixture needs a line of at least two sites");
         let side = 2 * n as u32 + 5;
 
@@ -704,7 +704,7 @@ fn an_unsupported_site_s_share_goes_to_the_nearest_supported_site_on_the_line() 
 fn with_no_supported_site_on_the_line_the_fall_lands_on_the_origin() {
     for voxel_m in GRIDS {
         let wood_max = FloraConfig::default().species(Species::Vaulttree).wood_max;
-        let side = 2 * sites_for(1.0, voxel_m) as u32 + 5;
+        let side = 2 * sites_for(FloraConfig::default().species(Species::Vaulttree).crown_radius_m[1], voxel_m) as u32 + 5;
         let mut world = plain(voxel_m, side, side);
         let origin = (side / 2, side / 2);
         for z in 0..side {

@@ -72,6 +72,9 @@ def arg(name, default=None):
 ROOT = arg("--out", os.path.join(REPO, "assets", "voxel-models"))
 SOURCE = arg("--source", os.path.join(ROOT, "source.json"))
 ONLY = set(filter(None, (arg("--only") or "").split(",")))
+# Scratch previews only (VAULT-SHAPE 2026-10-10): bake a plant's full-grown size step and
+# nothing smaller. Never for a library the presenter grows stands through.
+ADULT_ONLY = "--adult-only" in ARGS
 
 # Placeholders (design/backlog.md §1).
 VARIANTS = 3
@@ -429,18 +432,36 @@ def bake_plant(sp, vox, out_dir):
         return roles.get(mat, "foliage")
 
     table = state_table(sp)
+    L.VAULT_FILL = float(sp.get("shelf_fill", 1.0))  # VAULT-SHAPE scratch candidates only
+    # VAULT-SHAPE round 2 scratch: an optional `lean` {"tilt", "dir_deg", "turns"} gives every
+    # variant the same lean (organism_lineup.VAULT_LEAN); with "turns", each variant is
+    # baked four times, copy v x 4 + j leaning the shared way turned by j quarter turns as
+    # the presenter's `model::turn` turns (dx, dz) = (x, y), so a stand drawn turned by q
+    # from copy (4 - q) mod 4 leans the shared way in the world. Absent: unchanged.
+    lean = sp.get("lean")
+    copies = 4 if lean and lean.get("turns") else 1
+
+    def lean_of(j):
+        if not lean:
+            return None
+        a = math.radians(float(lean.get("dir_deg", 0.0)))
+        dx, dz = math.cos(a), math.sin(a)
+        for _ in range(j):
+            dx, dz = dz, -dx
+        return (float(lean["tilt"]), (dx, dz))
     steps, meta = [], []
-    for (kh, kr), t in size_steps(sp, vox):
+    for (kh, kr), t in size_steps(sp, vox)[-1 if ADULT_ONLY else 0:]:
         prof = sp["profile"]
         si = stage_index(prof, t)
         stage = prof[si]
         h = dimension(prof, sp["crown_height_m"], t)
         r = dimension(prof, sp["crown_radius_m"], t)
         variants = []
-        for v in range(VARIANTS):
+        for v in range(VARIANTS * copies):
             per_state = []
+            L.VAULT_LEAN = lean_of(v % copies)
             for _, _, spec in table:
-                objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v}"), vox, spec)
+                objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v // copies}"), vox, spec)
                 cells = voxelize(objs, vox, role_of)
 
                 def tag_of(mat, k, h=h, stage=stage):
