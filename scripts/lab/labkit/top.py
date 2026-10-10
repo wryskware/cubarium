@@ -209,7 +209,7 @@ class Dashboard:
                 metric = f'CPU {meter}'
             else:
                 metric = f"load {load_label}/{host.cpus} cpus"
-            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {used}/{host.usable} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
+            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {host.thread_label(used)} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
         return lines
 
     def frame(self, width=80, now=None):

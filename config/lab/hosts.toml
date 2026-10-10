@@ -1,7 +1,8 @@
 # labd host inventory (design/lab-daemon.md). Read at daemon start; restart labd to apply.
 #
 # Capacity per host: usable threads = min(floor(cpus * max_cpu_fraction), cpus - reserve_cpus);
-# each L3 group gets its share. labd never places a task that does not fit, across all jobs.
+# each L3 group gets its share. Builds may share the configured thread overcommit;
+# memory limits always apply across all jobs.
 
 [lab]
 tick_s = 2            # daemon loop period
@@ -32,6 +33,7 @@ mem_gb = 91
 max_mem_gb = 64       # Wrysk's ceiling for offline work (WORKING_POLICY.md); also each unit's MemoryMax
 max_cpu_fraction = 0.9
 reserve_cpus = 4      # Wrysk's app / desktop
+build_overcommit_threads = 8 # shared extra threads for build / cargo-test only
 reserve_mem_gb = 12   # live MemAvailable must keep this free after a placement
 idle = true           # SCHED_IDLE + nice 19 for every task (= chrt -i 0 nice -n 19)
 external_load = true  # subtract load labd does not own (loadavg - labd's threads)
