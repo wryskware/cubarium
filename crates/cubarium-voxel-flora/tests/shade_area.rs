@@ -9,9 +9,9 @@
 //!
 //! Two claims, written before the rule:
 //!
-//! 1. On the 0.25 m reference grid nothing moves. `shade_k_per_m2 = shade_k · (0.25)²`
-//!    and `A_m² = A_cells · (0.25)²` — including the floor, which is one reference cell
-//!    either way — so the exponent is the old one, digit for digit.
+//! 1. On the 0.25 m reference grid nothing moved when the units did (the old
+//!    `shade_k_per_m2 = shade_k · (0.25)²`, `A_m² = A_cells · (0.25)²`). Since SHADE-REAL
+//!    the depth per square metre is `light_extinction_k · SLA · kg per unit`, still per m².
 //! 2. Off it, the same physical crown gives the same physical shade: a 0.125 m world and
 //!    a 0.25 m world holding the same plant attenuate identically.
 

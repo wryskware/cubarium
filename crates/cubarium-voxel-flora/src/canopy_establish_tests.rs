@@ -6,7 +6,7 @@
 //!
 //! Hand-built at 0.125 m voxels (the patch's), so a crown spans neighbouring columns: a
 //! soil slab at field capacity, one row, open sky. The shade is made total with the test's
-//! own `shade_k_per_m2`, and each fixture sets the margin it tests at half the cover the
+//! own `light_extinction_k`, and each fixture sets the margin it tests at half the cover the
 //! open site gives, so no tuned number decides a verdict: the fixture asserts the covers
 //! it relies on before it expects anything.
 
@@ -60,7 +60,7 @@ fn quiet() -> FloraConfig {
         s.cure_after_s = 0.0;
     }
     c.sprout_after_arming = false;
-    c.shade_k_per_m2 = 1e6;
+    c.light_extinction_k = 1e6;
     c
 }
 
@@ -175,13 +175,16 @@ fn a_zero_margin_opens_the_canopy_gate() {
     assert_eq!(flora.view().ledger.canopy_refused[TURF.index()], 0);
 }
 
-/// Velvetpad runners from a pad on face 5 (reach 1: faces 4 and 6). The pad is a mat of
-/// one height, so a parent never shades its own daughter here; the shade is a tall stand.
+/// Velvetpad runners from a pad on face 5 (reach 1: faces 4 and 6). The pad's crown is
+/// narrowed to its own column, so a parent never shades its own daughter here (two mats
+/// of one height that overlap do shade each other since SHADE-REAL); the shade is a tall
+/// stand.
 fn runner_world(tall_on: Option<u32>) -> (World, Flora) {
     let world = slab();
     let mut c = quiet();
     {
         let pad = c.species_mut(PAD);
+        pad.crown_radius_m = [0.4 * VOXEL_M, 0.4 * VOXEL_M];
         pad.clonal_share = 0.99;
         pad.propagule_rate = 1.0;
         pad.donor_reserve_floor = 0.0;

@@ -73,3 +73,41 @@ Measure the turf at the shed tick: pixels moving over 150 and over 60 in one fra
 
 Commit, and don't merge. Return the paths you found, the mechanism, the evidence, the cost
 and your commits.
+
+## Checkpoint 1 (2026-10-10, dc1628c1): what the first worker found
+
+- **Thinning already goes through grow-in.** `PlantTracker::detect` (`sink/gpu/plants.rs`
+  ~162-310) covers fill thinning, the cure shed, bites, regrowth, die-back, and step and state
+  changes. Leaving cells are held and reverse from their current size. On the driven cure
+  (state `runs/glow-ease-states/state-day2-f77`; the old `state-day2` no longer loads at
+  fauna schema 77), 3,617 cells shrink over ~2 s, and none changes size by more than 0.071 of
+  a voxel per frame.
+- **What still steps is their light on their neighbours.** The AO crease and the sun and
+  sky shade are read from the voxel volume. A changing cell leaves the volume (or joins it)
+  at the tick, while its drawn ghost is still whole (or still at size 0). In a 6× close-up
+  that is 13.9k pixels moving 20–50/255 in one frame. With `cure_shed = 0` it is 0.
+  Pictures and logs: `art/gen/runs/cell-shrink-2026-10-10/`.
+- **Elsewhere:**
+  - The main voxel pass draws logs, sprouts, litter and carrion, which still appear and go
+    whole.
+  - The stamped tier is left as it is: a fade there would need per-cell alpha.
+  - At x8 the shrink compresses, because it runs on sim seconds. The display runs at 1×.
+
+## Round 2: the light follows the cell's size (option b)
+
+The parent's pick, under Wrysk's rule that nothing pops (he's asleep; he'll see it in the
+morning): **fade each changing cell's contribution to the AO crease and to the shadow by its
+current grow-in size.**
+- A leaving cell stays in the light's view of the world until it has shrunk, its weight
+  falling with its size.
+- An arriving cell's weight rises with its size.
+
+Keep the crease's look at the ends: weight 1 is today's crease, weight 0 is no cell.
+
+- **Cost cap.** Measure the main walk and the plant pass on the day state, main vs the
+  branch, interleaved. If the change adds more than about 0.2 ms per frame to the walk at 6
+  px, stop and report what it costs and why, before polishing.
+- **Evidence:** the same 6× close-up at the shed tick, today | fixed, and the
+  over-60 / over-20 pixel counts at the shed frame. Show one natural-day stretch too.
+- **Not this round:** the main-pass logs, sprouts, litter and carrion. List what they would
+  take.

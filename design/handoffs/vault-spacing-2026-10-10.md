@@ -1,5 +1,5 @@
 ---
-status: open
+status: open — SHADE-REAL built on branch shade-real (unmerged; effect check written, not launched); VAULT-GUIDE open
 date: 2026-10-10
 owner: the ecology thread (Wrysk briefs it; it spawns the workers when it fits)
 packages: VAULT-GUIDE (small, independent), SHADE-REAL (ecology, opus-high)
@@ -146,3 +146,34 @@ Return (≤ 40 lines):
 - commits.
 
 Merge to main by default (`merge-and-iterate`). Deploying is Wrysk's call.
+
+## SHADE-REAL built (2026-10-10, branch `shade-real`, unmerged)
+
+Commits: `cdaa72d4` (the law, dispersal, tests), `1b87422c` and `e31cbf74` (the `shade_probe`
+example), on `c8b1ac84` (VAULT-COUNT's `vault_count`, cherry-picked).
+
+- **Law, every foliage layer of every species:** `T = exp(−share · k_ext · (1 − porosity) · LAI)`,
+  `LAI = SLA · foliage_kg_per_unit · stock / disc area`.
+  - `flora.light_extinction_k` 0.6 replaces `shade_k_per_m2`.
+  - Per species, `specific_leaf_area_m2_per_kg` and `foliage_kg_per_unit`.
+  - The mass map is read off each analog's closed-stand LAI: over its crown disc, or over one
+    face for the three ground covers.
+  - Sources are in the code docs and registry rows.
+- **Level crowns:** `shade_share` gives the part of an occluder's band above the receiver's
+  middle. Equal bands get half each, symmetrically. A lower top gives nothing, so a taller crown
+  is unchanged. The fungus exception and `same_face_shades` are as before.
+- **Vaulttree seed:** the wind is its only carrier. It now uses the mechanistic WALD from the
+  crown: release 0.775 × crown height, wind 2 m/s, fall 1 m/s, eddy ratio 0.1. A full tree's
+  mean is 10 m, with 7.6 % past 20 m.
+- **No save schema bump.** An old save takes the new knobs' defaults but keeps its own vaulttree
+  dispersal. So a check must found fresh worlds, not load main's library saves.
+- **Static probe on the VAULT-COUNT save** (`shade_probe --build-config`; numbers in
+  `e31cbf74`):
+  - under adult crowns the ground gets a median 0.34 of open light, and gaps 0.93;
+  - a vaulttree newborn passes the gate in 46–69 % of under-crown columns and 96–99 % of gaps;
+  - static thinning: vaulttree 442 → 147–160, umbrellafrond 1171 → 183–238, lanternberry
+    1518 → 667–1036.
+- **Effect check specs, not launched:**
+  - `/tmp/claude-1000/-home-wrysk-wryskware-cubarium/f216c350-6b0e-45f5-8e01-9b322c2e7f2c/scratchpad/shade-real-ab.toml`:
+    8 seeds × 60 min.
+  - `.../scratchpad/shade-real-ab-6h.toml`: 4 seeds × 6 h, for stage counts and spacing.

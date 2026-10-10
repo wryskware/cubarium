@@ -466,6 +466,13 @@ def chorister():
 # rump alike), its pale belly below the rim goes under the ground line, and the legs fold
 # flat under the shield, hooves drawn in 3.5 cm under the rim, so they are hidden.
 FG_POSES = {"rest": dict(drop=0.0, tuck=False), "hunker": dict(drop=0.17, tuck=True)}
+# the legs, front to back: (hip x, foot x), reference metres
+FG_LEGS = ((0.25, 0.33), (-0.03, -0.03), (-0.31, -0.33))
+
+
+def fg_leg_name(k, sy):
+    """Leg `k`'s bone (0 the front pair) on side `sy` (+1 the left, Blender +y)."""
+    return f"leg{k}{'l' if sy > 0 else 'r'}"
 
 
 def frondgrazer(pose="rest"):
@@ -511,9 +518,11 @@ def frondgrazer(pose="rest"):
             xx = x0 + (dx if x0 > 0 else -dx)
             for sy in (-1, 1):
                 ell((xx, sy * (surface(xx, z - drop) + 0.002), z - drop), (r, 0.004, r * 1.4), c("magenta"))
-    # six short stout legs: dark band over two-toed hooves
-    for hx, fx in ((0.25, 0.33), (-0.03, -0.03), (-0.31, -0.33)):
+    # six short stout legs: dark band over two-toed hooves, each on its rig bone
+    # (RIG-STATES: `FG_LEG_BONES`, folding as the body settles)
+    for k, (hx, fx) in enumerate(FG_LEGS):
         for sy in (-1, 1):
+            start = len(L.ORG)
             hip = (hx, sy * 0.12, 0.18)
             knee = ((hx + fx) / 2, sy * 0.15, 0.1)
             fy = 0.155
@@ -526,6 +535,7 @@ def frondgrazer(pose="rest"):
             cyl((fx, sy * fy, 0.032), (fx, sy * fy, 0.055), 0.042, 0.042, mat=c("a_dark"), seg=12)
             for toe in (-1, 1):
                 ell((fx + 0.012, sy * fy + toe * 0.019, 0.02), (0.03, 0.02, 0.022), c("a_foot"))
+            bone_of(start, fg_leg_name(k, sy))
     if tuck:
         # the neck folded back into the shield's front: the scoop flush with the front
         # opening, its trough turned in so only its outer surface shows; the eye stalks
@@ -604,6 +614,10 @@ FG_BONES = [
     ("head", 3, FG_NECK[4], (0.545, 0.0, 0.4)),
     ("eye_l", 4, (0.49, 0.09, 0.41), (0.505, 0.15, 0.465)),
     ("eye_r", 4, (0.49, -0.09, 0.41), (0.505, -0.15, 0.465)),
+    # RIG-STATES: each leg hip to foot, and the three tuck bones (`fg_state_clips`)
+    *[(fg_leg_name(k, sy), 0, (hx, sy * 0.12, 0.18), (fx, sy * 0.155, 0.05))
+      for k, (hx, fx) in enumerate(FG_LEGS) for sy in (1, -1)],
+    *[(f"tuck{e}", 0, (0.0, 0.0, 0.2), (0.1, 0.0, 0.2)) for e in (1, 2, 3)],
 ]
 FG_FEED_FPS = 30
 FG_FEED_LOOP_S = 1.2
@@ -655,10 +669,12 @@ def fg_feed_moves(dip, tip_deg):
     neck_b = side_turn(reach, FG_NOTCH, notch + run / 3)
     head = side_turn(-tip, FG_SCOOP, scoop)
     eyes = []
-    for _, _, h, _ in FG_BONES[5:]:
+    for _, _, h, _ in FG_BONES[5:7]:
         e = Vector(h)
         eyes.append(Matrix.Translation(head @ e - e))
-    return [Matrix.Identity(4), neck_in, neck_a, neck_b, head, *eyes]
+    # the legs and tuck bones (RIG-STATES) stay still while it crops
+    rest = [Matrix.Identity(4)] * (len(FG_BONES) - 7)
+    return [Matrix.Identity(4), neck_in, neck_a, neck_b, head, *eyes, *rest]
 
 
 def fg_feed_armature():
@@ -751,6 +767,225 @@ def fg_feed_pose(clip, frame, w):
         local = Matrix.Translation(h + d * w) @ rw @ Matrix.Translation(-h)
         out.append(local if parent is None else out[parent] @ local)
     return out
+
+
+# --- the frondgrazer's rest states on the rig (RIG-STATES, 2026-10-10) -------------------
+#
+# `design/handoffs/rig-states-2026-10-10.md`: sleep, idle and hunker move off the class
+# path (`crates/cubarium/src/voxel/sleep.rs`, `idle.rs`, `hunker.rs`) onto the rig, each a
+# clip that plays in its state with an eased weight (`rig.rs`). Placeholders that reproduce
+# today's look as the rig plays it; Wrysk directs them from the video.
+#
+# - **asleep** (a track, walked by the sleep weight): today's settle. The root comes down
+#   the rows the class path settles it (`fg_rows`, `sleep::classify`'s drop, per bin), so
+#   the legs and the pale belly under the torso row go under the ground line as the shield
+#   comes down over them, the legs folding in toward the centre line as the hunker model
+#   folds them (`FG_LEG_TUCK`). The breath stays on the class path, on top.
+# - **hunker** (a track, walked by the hunker weight): it ends on today's hunker
+#   (`hunker::classify`): the standing body lowered by the settle, drawn only where the
+#   baked `frondgrazer-hunker` holds a cell. The cells it cuts are on the tuck bones (the
+#   bake assigns them by that footprint, `fg_state_rig`), which sink them under the ground
+#   line as the shield comes down; the neck, scoop and eye stalks slide back down the
+#   neck's line into the shield (`fg_neck_slide`) and the nested neck segment slides up into
+#   the front notch (`FG_SLIDE`, the cropping clip's first move), where the neck's base cell
+#   stood; the legs fold as asleep.
+# - **idle** (a loop, eased by the idle weight): today's head dips (`idle.rs`: 0.3 to 0.5
+#   voxels, out and back over 0.5 s, 4 to 10 s apart), three of them in a loop at their own
+#   depths and gaps, the neck turning down about its base and the scoop kept level. The idle
+#   breath stays on the class path.
+#
+# The bins are one build scaled, but the settle and the dips are whole voxels of each bin's
+# own grid, so these three clips are made per bin (`fg_state_rig`) beside the shared
+# cropping clip, from each bone's move (armature space) per frame (`moves_clip`).
+
+FG_STATE_FRAMES = 16
+# the legs fold in toward the centre line as the hunker model draws them (its hooves at
+# 0.12 m off the centre line against 0.155 m standing), turning about their hips
+FG_LEG_TUCK = 0.035
+FG_IDLE_FPS = 10
+FG_IDLE_LOOP_S = 21.0
+FG_IDLE_MOVE_S = 0.5
+# (start seconds, dip voxels): today's dips are 0.3-0.5 voxels, 4 to 10 s apart
+FG_IDLE_DIPS = ((1.2, 0.42), (9.4, 0.33), (15.1, 0.50))
+FG_NECK_CHAIN = ("neck_a", "neck_b", "head", "eye_l", "eye_r")
+NEIGHBOURS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+
+
+def moves_clip(bones, frames, fps):
+    """A clip from each bone's armature-space move (4x4, Blender axes, reference metres)
+    per frame: as `sample_clip` samples a keyed armature (each bone's turn about its pivot
+    relative to its parent, model axes, and the pivot's displacement)."""
+    heads = [SWAP_YZ.to_3x3() @ Vector(h) for _, _, h, _ in bones]
+    out = []
+    for moves in frames:
+        keys = []
+        for i, (_, parent, _, _) in enumerate(bones):
+            local = moves[i] if parent is None else moves[parent].inverted() @ moves[i]
+            m = SWAP_YZ @ local @ SWAP_YZ
+            r = m.to_3x3()
+            keys.append((r, r @ heads[i] + m.translation - heads[i]))
+        out.append(keys)
+    return {"bones": [(n, p) for n, p, _, _ in bones], "heads": heads, "fps": fps, "frames": out}
+
+
+def fg_rows(cells):
+    """The class path's torso row and settle of a bin's cells ({(i, j, k): ...}, k up):
+    `sleep::classify`'s fullest row (the lowest of a tie) and its rows over the lowest,
+    at most two."""
+    rows = {}
+    for (_, _, k) in cells:
+        rows[k] = rows.get(k, 0) + 1
+    most = max(rows.values())
+    torso = min(r for r, n in rows.items() if n == most)
+    return torso, max(0, min(torso - min(rows), 2))
+
+
+def outer_faces(places):
+    """The faces of `places` ({(i, j, k)}, k up from the ground row) open to the air
+    outside them over the ground: (place, step) for each face whose neighbour is reached
+    from outside the body's box without crossing a place or the ground (a pocket shut
+    inside the body shows nothing)."""
+    over = {q for q in places if q[2] >= 0}
+    if not over:
+        return set()
+    lo = [min(q[a] for q in over) - 1 for a in range(3)]
+    hi = [max(q[a] for q in over) + 1 for a in range(3)]
+    lo[2] = 0
+    start = (lo[0], lo[1], hi[2])
+    air, todo = {start}, [start]
+    while todo:
+        q = todo.pop()
+        for a, b, c in NEIGHBOURS:
+            r = (q[0] + a, q[1] + b, q[2] + c)
+            if r not in air and r not in over and all(lo[x] <= r[x] <= hi[x] for x in range(3)):
+                air.add(r)
+                todo.append(r)
+    return {(q, d) for q in over for d in NEIGHBOURS if (q[0] + d[0], q[1] + d[1], q[2] + d[2]) in air}
+
+
+def fg_neck_slide(cells, solid):
+    """The fewest whole cells `cells` (their places at the hunker's end before sliding,
+    k up from the ground row) slide back and down the neck's line (one back, one down a
+    step) so that every one ends hidden: under the ground line or with all six neighbours
+    in `solid`."""
+    for n in range(1, 8):
+        ends = [(i - n, j, k - n) for (i, j, k) in cells]
+        if all(q[2] < 0 or all((q[0] + a, q[1] + b, q[2] + c) in solid for a, b, c in NEIGHBOURS)
+               for q in ends):
+            return n
+    raise ValueError("the neck finds no hidden place in the hunkered shield")
+
+
+def fg_state_rig(shared, cells, bones, scale, hunker):
+    """The frondgrazer's rig for one size bin: the shared cropping clip and the bin's own
+    asleep, hunker and idle clips. `cells` the bin's cells ({(i, j, k) Blender cell, k
+    up: material}), `bones` each cell's bone name (the tuck bones assigned here), `scale`
+    the bin's voxels per reference metre, `hunker` the baked hunker's cells in the same
+    bin ({(i, j, k)}). Returns the rig and a summary for the bake's log."""
+    torso, drop = fg_rows(cells)
+    names = [b[0] for b in FG_BONES]
+    # the cut: a body cell at or over the torso row whose place `drop` rows down the baked
+    # hunker lacks sinks under the ground line on its tuck bone (the rows it must go
+    # further than the root); the neck chain hides by its own slide
+    for key in cells:
+        i, j, k = key
+        b = bones.get(key, "root")
+        if k >= torso and (i, j, k - drop) not in hunker and (b == "root" or b.startswith("leg")):
+            e = k - drop + 1
+            if e > 3:
+                raise ValueError(f"a cut cell {key} {e} rows over the ground")
+            bones[key] = f"tuck{e}"
+    v = 1.0 / scale                         # one of the bin's cells, reference metres
+    # where the class path's hunker draws (each place `drop` rows down that the baked
+    # hunker holds), and where the root's cells end
+    drawn = {(i, j, k - drop) for (i, j, k) in cells if k >= torso and (i, j, k - drop) in hunker}
+    kept = {(i, j, k - drop) for (i, j, k), b in bones.items() if b == "root" or b.startswith("leg")}
+    # a neck bone whose every cell the class path draws in the notch stays there; the
+    # rest slide back down the neck's line until hidden
+    chain = {b: [key for key, o in bones.items() if o == b] for b in FG_NECK_CHAIN}
+    stays = {b for b, ks in chain.items() if ks and all((i, j, k - drop) in drawn for i, j, k in ks)}
+    held = kept | {(i, j, k - drop) for b in stays for i, j, k in chain[b]}
+    # the nested segment slides up into the notch (the cropping clip's first move) where
+    # the class path draws a neck cell that has slid away, else stays hidden in the shield
+    slide_in = (round(FG_SLIDE[0] * scale), round(FG_SLIDE[1] * scale))
+    nested_keys = [key for key, b in bones.items() if b == "neck_in"]
+    inside = {(i + slide_in[0], j, k + slide_in[1] - drop) for i, j, k in nested_keys}
+    fills = bool(nested_keys) and inside <= drawn - held
+    held |= inside if fills else {(i, j, k - drop) for i, j, k in nested_keys}
+    sliding = [(i, j, k - drop) for b in FG_NECK_CHAIN if b not in stays for i, j, k in chain[b]]
+    n = fg_neck_slide(sliding, held) if sliding else 0
+    if outer_faces(held) != outer_faces(drawn):
+        raise ValueError(f"the hunker ends off the class path's: {sorted(outer_faces(held) ^ outer_faces(drawn))}")
+    hip = {name: Vector(h) for name, _, h, _ in FG_BONES if name.startswith("leg")}
+    tuck_a = math.atan2(FG_LEG_TUCK, 0.13)
+
+    def settled(u, hunkered):
+        down = Matrix.Translation((0, 0, -drop * v * u))
+        out = []
+        for name, _, h, t in FG_BONES:
+            if name == "root":
+                out.append(down)
+            elif name.startswith("leg"):
+                # turned about the hip so the foot comes in toward the centre line; only
+                # as the body settles over it
+                side = 1 if h[1] > 0 else -1
+                a = -side * tuck_a * u * min(drop, 1)
+                p = hip[name]
+                out.append(down @ Matrix.Translation(p) @ Matrix.Rotation(a, 4, "X") @ Matrix.Translation(-p))
+            elif name.startswith("tuck") and hunkered:
+                out.append(down @ Matrix.Translation((0, 0, -int(name[4:]) * v * u)))
+            elif name == "neck_in" and hunkered and fills:
+                out.append(down @ Matrix.Translation((FG_SLIDE[0] * u, 0, FG_SLIDE[1] * u)))
+            elif name in FG_NECK_CHAIN and hunkered and name not in stays:
+                out.append(down @ Matrix.Translation((-n * v * u, 0, -n * v * u)))
+            else:
+                out.append(down)
+        return out
+
+    track = [f / (FG_STATE_FRAMES - 1) for f in range(FG_STATE_FRAMES)]
+    asleep = moves_clip(FG_BONES, [settled(u, False) for u in track], FG_FEED_FPS)
+    hunker_c = moves_clip(FG_BONES, [settled(u, True) for u in track], FG_FEED_FPS)
+    # idle: the neck turns down about its base so the head's pivot dips by today's dip,
+    # in the bin's voxels; the scoop and the eyes carried level
+    base = Vector((FG_NECK[0][0], FG_NECK[0][2]))
+    hd = Vector((FG_NECK[4][0], FG_NECK[4][2])) - base
+    reach, phi = hd.length, math.atan2(hd.y, hd.x)
+
+    def dip_at(t):
+        out = 0.0
+        for start, dip in FG_IDLE_DIPS:
+            x = (t - start) / FG_IDLE_MOVE_S
+            if 0.0 < x < 1.0:
+                out += dip * math.sin(math.pi * x) ** 2
+        return out
+
+    frames = []
+    for f in range(round(FG_IDLE_LOOP_S * FG_IDLE_FPS)):
+        d = dip_at(f / FG_IDLE_FPS) * v
+        theta = phi - math.asin(max(-1.0, min(1.0, (hd.y - d) / reach)))
+        turn = side_turn(-theta, FG_NECK[0], FG_NECK[0])
+        h = Vector(FG_NECK[4])
+        level = Matrix.Translation(turn @ h - h)
+        moves = []
+        for name, _, _, _ in FG_BONES:
+            if name in ("neck_a", "neck_b"):
+                moves.append(turn)
+            elif name in ("head", "eye_l", "eye_r"):
+                moves.append(level)
+            else:
+                moves.append(Matrix.Identity(4))
+        frames.append(moves)
+    idle = moves_clip(FG_BONES, frames, FG_IDLE_FPS)
+    assert shared["bones"] == asleep["bones"] and names == [b[0] for b in shared["bones"]]
+    clips = list(shared["clips"]) + [
+        dict(state="asleep", mode=CLIP_TRACK, fps=asleep["fps"], frames=asleep["frames"]),
+        dict(state="hunker", mode=CLIP_TRACK, fps=hunker_c["fps"], frames=hunker_c["frames"]),
+        dict(state="idle", mode=CLIP_LOOP, fps=idle["fps"], frames=idle["frames"]),
+    ]
+    tucked = {e: sum(1 for b in bones.values() if b == f"tuck{e}") for e in (1, 2, 3)}
+    return ({"bones": shared["bones"], "heads": shared["heads"], "clips": clips},
+            f"torso row {torso}, settle {drop}, neck slide {n} (staying {sorted(stays)},"
+            f" nested fills the notch {fills}), tucked {tucked}")
 
 
 # --- the Veilhound's rig and feeding clip (FEED-RIG round 2, 2026-10-09) -----------------

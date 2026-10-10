@@ -764,6 +764,42 @@ RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
 BIN_RIGS = {"loftstrider": lambda n, cells, vox: A.ls_rig_clips(ls_parts(n), cells, vox)}
+# Founders whose shared rig takes per-bin state clips (RIG-STATES): (the builder's
+# `fn(shared, cells, bones, scale, pose_cells)`, the pose model whose committed cells it
+# reads per bin). The frondgrazer's sleep, hunker and idle are whole voxels of each bin.
+STATE_RIGS = {"frondgrazer": (A.fg_state_rig, "frondgrazer-hunker")}
+
+
+def model_cells(path):
+    """Each bin's cells of a committed animal `.cvm` (its first variant and state; the
+    layout is `write_cvm`'s), as the voxelizer's keys (i, j, k up)."""
+    with open(path, "rb") as fh:
+        b = fh.read()
+    assert b[:4] == b"CVM2", path
+    at = 5                                   # the magic and the kind
+    n, at = b[at], at + 1                    # materials: name each
+    for _ in range(n):
+        at += 1 + b[at]
+    n, at = b[at], at + 1                    # states: name and start each
+    for _ in range(n):
+        at += 1 + b[at] + 8
+    states = n
+    steps, = struct.unpack_from("<H", b, at)
+    at += 2
+    bins = []
+    for _ in range(steps):
+        at += 16                             # height, radius
+        nv, at = b[at], at + 1
+        first = None
+        for _ in range(nv * states):
+            nc, = struct.unpack_from("<I", b, at)
+            at += 4
+            if first is None:
+                first = {(dx, dz, dy) for dx, dy, dz, _, _ in struct.iter_unpack("<bbbBB", b[at:at + 5 * nc])}
+            at += 5 * nc
+        bins.append(first)
+    assert at == len(b), path
+    return bins
 
 
 def write_rig(path, bins):
@@ -862,6 +898,16 @@ def write_rig_of(name, out_dir, rig_bins, vox):
         reset_scene()
         shared = RIGS[name]()
     rig = f"{name}.rig"
+    if name in STATE_RIGS:
+        fn, pose = STATE_RIGS[name]
+        poses = model_cells(os.path.join(out_dir, f"{pose}.cvm"))
+        assert len(poses) == len(rig_bins), f"{pose}: {len(poses)} bins"
+        staged = []
+        for n, (length, scale, raw, bones, r) in enumerate(rig_bins):
+            own, note = fn(r or shared, raw, bones, scale, poses[n])
+            print(f"{vox} m {name} bin {n}: {note}", flush=True)
+            staged.append((length, scale, raw, bones, own))
+        rig_bins = staged
     bins = [(length, scale, r or shared, rig_cells(raw, bones, (r or shared)["bones"]))
             for length, scale, raw, bones, r in rig_bins]
     rig_size = write_rig(os.path.join(out_dir, rig), bins)

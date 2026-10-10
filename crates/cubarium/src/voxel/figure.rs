@@ -662,9 +662,22 @@ pub struct FigureModels {
     uploaded: usize,
     models: Vec<ModelInfo>,
     by_key: FxHashMap<u64, ModelId>,
+    /// `[figures] rig = "off"`: rigs are not drawn, so the class path poses every state.
+    rig_off: bool,
 }
 
 impl FigureModels {
+    /// Whether rigs are drawn (`[figures] rig`, startup only): with `false` the class path
+    /// poses every state, a rig's clips or not.
+    pub fn set_rig_drawn(&mut self, drawn: bool) {
+        self.rig_off = !drawn;
+    }
+
+    /// Whether rigs are drawn ([`Self::set_rig_drawn`]; by default they are).
+    pub fn rig_drawn(&self) -> bool {
+        !self.rig_off
+    }
+
     /// The model under `key`, built by `cells` the first time. `None` for a model with no
     /// cells, or one whose offsets do not fit a byte.
     fn intern(&mut self, key: u64, cells: impl FnOnce() -> (Vec<Cell>, i32)) -> Option<ModelId> {
@@ -717,21 +730,37 @@ impl FigureModels {
         } else {
             open_faces(&offsets)
         };
+        // A rigged cell's lip: open unless the cell over it is on its own lip bone
+        // (`AnimalRig::lip_bones`), so a bone that parts only in a state's transition keeps
+        // the resting body's lips.
+        let lips: Option<Vec<bool>> = rig.as_ref().map(|(r, bin)| {
+            let lip = r.lip_bones(*bin);
+            let of = |b: u8| lip.get(usize::from(b)).copied().unwrap_or(0);
+            let at: FxHashMap<[i8; 3], u8> = offsets.iter().copied().zip(cells.iter().map(|c| c.bone)).collect();
+            offsets
+                .iter()
+                .zip(&cells)
+                .map(|(o, c)| at.get(&[o[0], o[1].wrapping_add(1), o[2]]).is_none_or(|&up| of(up) != of(c.bone)))
+                .collect()
+        });
         let creases = crease_masks(&offsets);
         let voxels = Arc::make_mut(&mut self.voxels);
         let first = voxels.len() as u32;
-        for ((((c, o), &e), &op), &crease) in cells
+        for (i, ((((c, o), &e), &op), &crease)) in cells
             .iter()
             .zip(&offsets)
             .zip(&entry)
             .zip(&open)
             .zip(&creases)
+            .enumerate()
         {
-            voxels.push(
-                FigureVoxel::new(*o, place[e] as u8, c.class, c.head, op, c.glyph)
-                    .with_creases(crease)
-                    .with_bone(c.bone),
-            );
+            let v = FigureVoxel::new(*o, place[e] as u8, c.class, c.head, op, c.glyph)
+                .with_creases(crease)
+                .with_bone(c.bone);
+            voxels.push(match &lips {
+                Some(l) => v.with_lip(l[i]),
+                None => v,
+            });
         }
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for c in &cells {
@@ -874,22 +903,55 @@ pub struct PoseSpec {
     pub head: Option<PoseEntry>,
     pub sleep: Breath,
     pub idle: Breath,
-    /// Its rig has a clip for sleep (FEED-ROLLOUT): while the rig is drawn, the clip lowers
-    /// the body in place of the class-path settle; the breath stays.
-    pub rig_sleep: bool,
+    /// The rest states its rig plays as clips (FEED-ROLLOUT, RIG-STATES): while the rig is
+    /// drawn, each such state's class-path move stands down; the breaths stay.
+    pub rig: RigStates,
+}
+
+/// Which rest states a figure's rig has a clip for (FEED-ROLLOUT's loftstrider `asleep`,
+/// RIG-STATES): while the rig is drawn, the clip moves the body in that state in place of
+/// the class path's — the sleep's settle, the idle head move, the hunker's settle — and the
+/// sleep and idle breaths stay on the class path, on top.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RigStates {
+    pub asleep: bool,
+    pub idle: bool,
+    pub hunker: bool,
+}
+
+impl RigStates {
+    /// The states `rig` has a clip for.
+    pub fn of(rig: &AnimalRig) -> RigStates {
+        RigStates {
+            asleep: rig.clip("asleep").is_some(),
+            idle: rig.clip("idle").is_some(),
+            hunker: rig.clip("hunker").is_some(),
+        }
+    }
+
+    /// Entry `e` with the moves of the states the rig plays taken out.
+    fn stand_down(self, e: &PoseEntry) -> PoseEntry {
+        PoseEntry {
+            sleep: if self.asleep { 0.0 } else { e.sleep },
+            sleep_rate: if self.asleep { 0.0 } else { e.sleep_rate },
+            hunker: if self.hunker { 0.0 } else { e.hunker },
+            hunker_rate: if self.hunker { 0.0 } else { e.hunker_rate },
+            head: if self.idle { HeadMove::NONE } else { e.head },
+            ..*e
+        }
+    }
 }
 
 impl PoseSpec {
     /// Settle and breath of body and head, voxels, `ticks` after the staged tick; with
-    /// `rig_on` (the rig drawn) a body whose rig sleeps keeps its breath but not the sleep's
-    /// settle.
+    /// `rig_on` (the rig drawn) the states its rig plays ([`RigStates`]) move it by their
+    /// clips instead, and it keeps the breaths.
     fn at(&self, ticks: f64, rig_on: bool) -> [f32; 4] {
         let t = ticks as f32;
         let at = |e: &PoseEntry| {
             let p = pose_with(self.sleep, self.idle, e, t);
-            if self.rig_sleep && rig_on {
-                let still = PoseEntry { sleep: 0.0, sleep_rate: 0.0, ..*e };
-                (pose_with(self.sleep, self.idle, &still, t).settle, p.breath)
+            if rig_on && self.rig != RigStates::default() {
+                (pose_with(self.sleep, self.idle, &self.rig.stand_down(e), t).settle, p.breath)
             } else {
                 (p.settle, p.breath)
             }
@@ -1197,12 +1259,6 @@ pub fn specs(
         let asleep = animals.sleep_weight(a).filter(|_| ground);
         let idling = animals.idle_weight(a).filter(|_| ground);
         let hunkering = animals.hunker_weight(a).filter(|_| ground);
-        let toward = hunkering.and(lib).and_then(|lib| animal::hunker_cells(lib, fauna.config, a));
-        let key = hash_of(&(
-            cells.as_ptr() as usize,
-            cells.len(),
-            toward.map(|t| (t.as_ptr() as usize, t.len())),
-        ));
         // Its rig, when the model it wears in its mode has one (the founder's own, or a
         // pose model's: the seedporter's perched `seedporter-stand`) and these are that
         // model's bin's cells, and it stands on the ground (FEED-RIG, FEED-ROLLOUT).
@@ -1211,6 +1267,18 @@ pub fn specs(
             let bin = model.bins.iter().position(|b| std::ptr::eq(b.cells.as_ptr(), cells.as_ptr()))?;
             (bin < r.bins.len()).then(|| (r.clone(), bin))
         });
+        let rig_states = rigged.as_ref().map_or_else(RigStates::default, |(r, _)| RigStates::of(r));
+        // The class path's hunker classes its cells toward the baked hunker; a rig drawn
+        // with a hunker clip plays it instead (RIG-STATES), on the standing classes.
+        let toward = hunkering
+            .filter(|_| !(rig_states.hunker && models.rig_drawn()))
+            .and(lib)
+            .and_then(|lib| animal::hunker_cells(lib, fauna.config, a));
+        let key = hash_of(&(
+            cells.as_ptr() as usize,
+            cells.len(),
+            toward.map(|t| (t.as_ptr() as usize, t.len())),
+        ));
         let Some(model) = models.intern_rigged(key, rigged.clone(), || {
             baked(cells, toward, rigged.as_ref().map(|(r, b)| (&**r, *b)))
         }) else {
@@ -1258,7 +1326,7 @@ pub fn specs(
                 head,
                 sleep: sleep::breath(view.tick, DT),
                 idle: idle::breath(view.tick, DT),
-                rig_sleep: rigged.as_ref().is_some_and(|(r, _)| r.clip("asleep").is_some()),
+                rig: rig_states,
             }
         });
         let orient = match a.mobility.climb {
@@ -1278,8 +1346,10 @@ pub fn specs(
             }
             _ => at,
         };
-        // Its rig's clips, each by the state it plays in (FEED-ROLLOUT): feeding while it
-        // crops, the rest while it sleeps; a state the renderer keeps no weight for has none.
+        // Its rig's clips, each by the state it plays in (FEED-ROLLOUT, RIG-STATES): feeding
+        // while it crops, the rest while it sleeps, idle while it idles, the hunker while it
+        // is hunkered, each with that state's eased weight; a state the renderer keeps no
+        // weight for has none.
         let clips = rigged.as_ref().map_or_else(Vec::new, |(r, _)| {
             r.clips
                 .iter()
@@ -1290,6 +1360,8 @@ pub fn specs(
                     let (weight, rate) = match clip.state.as_str() {
                         "cropping" => animals.feed_weight(a),
                         "asleep" => asleep,
+                        "idle" => idling,
+                        "hunker" => hunkering,
                         _ => None,
                     }?;
                     let phase_s = match clip.mode {
@@ -1904,6 +1976,44 @@ impl FigurePick {
 mod tests {
     use super::*;
 
+    /// RIG-STATES: with the rig drawn, each state its rig plays as a clip stands its
+    /// class-path move down (the sleep's and the hunker's settle, the idle head move) and
+    /// keeps the breaths; a state it has no clip for, or the rig not drawn, poses as ever.
+    #[test]
+    fn a_state_the_rig_plays_stands_its_class_path_move_down_and_keeps_the_breaths() {
+        let e = PoseEntry {
+            sleep: 1.0,
+            drop: 1.0,
+            sleep_phase: 0.25,
+            idle: 1.0,
+            idle_phase: 0.5,
+            head: HeadMove { start: -2.0, ticks: 10.0, dip: 0.4 },
+            hunker: 0.5,
+            ..PoseEntry::ZERO
+        };
+        let spec = |rig| PoseSpec {
+            tick: 7,
+            body: PoseEntry { head: HeadMove::NONE, ..e },
+            head: Some(e),
+            sleep: sleep::breath(7, DT),
+            idle: idle::breath(7, DT),
+            rig,
+        };
+        let class = spec(RigStates::default()).at(3.0, true);
+        assert!(class[0] > 0.0 && class[2] > class[0], "the class path settles, the head dips more");
+        let all = RigStates { asleep: true, idle: true, hunker: true };
+        let drawn = spec(all).at(3.0, true);
+        assert_eq!([drawn[0], drawn[2]], [0.0, 0.0], "no settle, no head move");
+        assert_eq!([drawn[1], drawn[3]], [class[1], class[3]], "the breaths stay");
+        assert_eq!(spec(all).at(3.0, false), class, "the rig not drawn: the class path");
+        // the hunker played alone: the sleep still settles the body, the head still dips
+        let hunker = spec(RigStates { hunker: true, ..RigStates::default() }).at(3.0, true);
+        assert_eq!(hunker, class);
+        let idle = spec(RigStates { idle: true, ..RigStates::default() }).at(3.0, true);
+        assert_eq!(idle[0], class[0]);
+        assert_eq!(idle[2], idle[0], "its head settles with the body, no move of its own");
+    }
+
     fn spec(id: u64, model: ModelId, pos: [f64; 3], h: f64) -> Spec {
         Spec { key: (id, 0), model, pos, orient: Orient::Ground(h), palette: vec![PaletteEntry::default()], pose: None, clips: Vec::new(), aim: None }
     }
@@ -2164,3 +2274,7 @@ mod tests {
 #[cfg(test)]
 #[path = "rider_tests.rs"]
 mod rider_tests;
+
+#[cfg(test)]
+#[path = "rig_states_tests.rs"]
+mod rig_states_tests;

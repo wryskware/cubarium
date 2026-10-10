@@ -412,9 +412,8 @@ impl Canopy {
     /// [`TRANSMISSION_STEP`].
     fn stand_discs(flora: FloraView<'_>, stand: &cubarium_voxel_flora::Stand, out: &mut Vec<Disc>) {
         out.clear();
-        let k = flora.config.shade_k_per_m2;
         for layer in flora.layers(stand) {
-            let t = (-k * (1.0 - layer.porosity) * layer.stock / layer.area_m2).exp();
+            let t = (-layer.optical_depth).exp();
             let t = (t / TRANSMISSION_STEP).round() * TRANSMISSION_STEP;
             if t.is_nan() || t >= 1.0 || layer.cell <= 0 {
                 continue;
@@ -1579,7 +1578,6 @@ mod tests {
         canopy.build(view, &mut plane);
 
         // What the shade model would multiply for a receiver on the ground at (x, z).
-        let k = view.config.shade_k_per_m2;
         let model = |x: i64, z: i64, y: u32| -> f64 {
             let mut t = 1.0;
             for s in view.stands {
@@ -1587,7 +1585,7 @@ mod tests {
                     let (dx, dz) = (x - i64::from(s.site.x), z - i64::from(s.site.z));
                     let inside = ((dx * dx + dz * dz) as f64) <= l.radius_v * l.radius_v;
                     if inside && l.cell > i64::from(y) {
-                        t *= (-k * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+                        t *= (-l.optical_depth).exp();
                     }
                 }
             }
@@ -1664,7 +1662,6 @@ mod tests {
         let mut canopy = Canopy::new(c.width, c.depth);
         let mut plane = vec![0u8; c.width as usize * c.depth as usize * CANOPY_STEPS * 2];
         canopy.build(view, &mut plane);
-        let k = view.config.shade_k_per_m2;
         // The model's product over the layers of every stand but `skip` above `y`.
         let model = |skip: Option<usize>, x: i64, z: i64, y: i64| -> f64 {
             let mut t = 1.0;
@@ -1675,7 +1672,7 @@ mod tests {
                 for l in view.layers(s) {
                     let (dx, dz) = (x - i64::from(s.site.x), z - i64::from(s.site.z));
                     if ((dx * dx + dz * dz) as f64) <= l.radius_v * l.radius_v && l.cell > y {
-                        t *= (-k * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+                        t *= (-l.optical_depth).exp();
                     }
                 }
             }

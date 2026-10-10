@@ -560,17 +560,17 @@ fn light_response(l: f64, half: f64) -> f64 {
     l * (1.0 + half) / (l + half)
 }
 
-/// A single-layer species shades **exactly** as it did before layers existed on the
+/// A single-layer species shades **exactly** as one disc holding the whole of `P` on the
 /// 0.25 m reference grid.
 ///
 /// The claim is about everything the layer model could have moved: the receiver's
-/// reference height (the band's top, which for a `0..1.0` layer is the crown top the
-/// old model compared), the occluder test (strictly higher, footprint by the same disc
-/// rule), the area (`π (r · v)²` floored at one reference cell), and the weighting
-/// (one layer holding the whole of `P`). Only the authored **porosity** is new, and it
-/// enters as one factor `(1 - p)` in the exponent, so this test asserts both forms:
-/// with `p = 0` the number is today's digit for digit, and with the authored `p` it is
-/// today's raised to `1 - p` and nothing else.
+/// reference band (for a `0..1.0` layer, the crown from the face to its top), the
+/// occluder's share (the part of its band above the receiver's middle, SHADE-REAL), the
+/// footprint by the same disc rule, the area (`π (r · v)²` floored at one reference
+/// cell), and the weighting (one layer holding the whole of `P`). The authored
+/// **porosity** enters as one factor `(1 - p)` in the exponent, so this test asserts both
+/// forms: with `p = 0` the one-disc number digit for digit, and with the authored `p` it
+/// raised to `1 - p` and nothing else.
 #[test]
 fn a_single_layer_species_shades_exactly_as_it_did_before() {
     let support = 2;
@@ -636,12 +636,19 @@ fn a_single_layer_species_shades_exactly_as_it_did_before() {
                 .stand_at(at(9, support))
                 .expect("the shaded stand")
                 .light;
-            // The pre-layer expression, verbatim: one disc holding the whole of `P`,
-            // over `π (r · v)²` floored at one reference cell.
+            // The one-disc expression: one disc holding the whole of `P`, over
+            // `π (r · v)²` floored at one reference cell, its leaf area by the shader's
+            // own SLA and mass per unit, through `k_ext`, at the share of its band above
+            // the receiver's middle (SHADE-REAL).
             let r_m = shader_sc.crown_radius(shader_wood, 0.25) * 0.25;
             let area = (std::f64::consts::PI * r_m * r_m).max(0.25 * 0.25);
             let foliage = shader_sc.alpha * shader_wood;
-            let historical = (-FloraConfig::default().shade_k_per_m2 * foliage / area).exp();
+            let share = cubarium_voxel_flora::shade_share(
+                [0.0, shader_sc.crown_height(shader_wood, 0.25)],
+                [0.0, shaded_sc.crown_height(shaded_wood, 0.25)],
+            );
+            let base = FloraConfig::default();
+            let historical = (-share * base.depth_per_stock_m2(&shader_sc) * foliage / area).exp();
             let expected = light_response(historical.powf(1.0 - p), shaded_sc.light_half);
             assert!(
                 (light - expected).abs() < 1e-12,

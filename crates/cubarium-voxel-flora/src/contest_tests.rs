@@ -130,18 +130,18 @@ fn put(flora: &mut Flora, mut stand: Stand, site: Site, place: FaceLayer) {
 }
 
 /// The light law's factor for `receiver`'s top layer under `over`'s foliage layers: every
-/// foliage layer of `over` whose top is above it multiplies the light by
-/// `exp(−shade_k (1 − porosity) stock / area)` (`step::shade_layers_into`).
+/// foliage layer of `over` multiplies the light by `exp(−share · optical_depth)`, the share
+/// by [`crate::layers::shade_share`] (`step::shade_layers_into`).
 fn shade_over(config: &FloraConfig, over: &Stand, receiver: &Stand) -> f64 {
-    let top = crate::layers_of(config, receiver, config.voxel_m)
+    let band = crate::layers_of(config, receiver, config.voxel_m)
         .into_iter()
         .filter(|l| l.kind.bears_foliage())
-        .map(|l| l.band_v[1])
-        .fold(f64::NEG_INFINITY, f64::max);
+        .map(|l| l.band_v)
+        .fold([f64::NEG_INFINITY; 2], |a, b| if b[1] > a[1] { b } else { a });
     crate::layers_of(config, over, config.voxel_m)
         .into_iter()
-        .filter(|l| l.kind.bears_foliage() && l.band_v[1] > top)
-        .map(|l| (-config.shade_k_per_m2 * (1.0 - l.porosity) * l.stock / l.area_m2).exp())
+        .filter(|l| l.kind.bears_foliage())
+        .map(|l| (-crate::layers::shade_share(l.band_v, band) * l.optical_depth).exp())
         .product()
 }
 

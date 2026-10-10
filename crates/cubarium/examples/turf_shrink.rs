@@ -254,7 +254,6 @@ fn main() {
             .collect();
         let wv = sim.world().view();
         let voxel_m = wv.config.voxel_m;
-        let shade_k = cfg.shade_k_per_m2;
         let mut by_col: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
         for (j, s) in fv.stands.iter().enumerate() {
             by_col.entry((s.site.x as i64, s.site.z as i64)).or_default().push(j);
@@ -277,10 +276,11 @@ fn main() {
                         }
                         let o = &fv.stands[j];
                         for l in cubarium_voxel_flora::layer_iter(cfg, o, voxel_m).filter(|l| l.kind.bears_foliage()) {
-                            if l.band_v[1] <= top || (dx * dx + dz * dz) as f64 > l.radius_v * l.radius_v {
+                            let f = cubarium_voxel_flora::shade_share(l.band_v, [top, top]);
+                            if !(f > 0.0) || (dx * dx + dz * dz) as f64 > l.radius_v * l.radius_v {
                                 continue;
                             }
-                            let a = (-shade_k * (1.0 - l.porosity) * l.stock / l.area_m2).exp();
+                            let a = (-f * l.optical_depth).exp();
                             if o.species == TURF {
                                 tt *= a;
                             } else {
