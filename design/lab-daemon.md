@@ -8,7 +8,9 @@ decision_refs: []
 
 Tooling record for `scripts/lab/` (stdlib Python 3.11+). The CLI is `scripts/lab/lab`; the
 daemon is `scripts/lab/labd` (the same as `lab daemon`), run by the user unit that
-`lab install` writes. Host inventory: `config/lab/hosts.toml`. Tests: `scripts/lab/test_lab.py`.
+`lab install` writes. Host inventory: `config/lab/hosts.toml`. Tests: `scripts/lab/test_lab.py`
+and `scripts/lab/tests/test_remote.py` (localhost remote roots, no eidolon or AWS access).
+Run with `timeout 270 env PYTHONPATH=scripts/lab/tests:scripts/lab python3 -m unittest test_lab test_remote`.
 
 Why (Wrysk, 2026-10-10): multi-hour runs were lost to coordination mistakes. An A/B arm ran
 on the wrong config, a shared `target/` mixed binaries, a build raced a commit in the main
@@ -76,6 +78,8 @@ addition: a preflight-only job such as `ab` can need binaries without having any
 | `l3` | must run inside one shared-L3 group; its affinity becomes that group (run-study semantics) |
 | `arch`, `hosts`, `local_only` | constraints. `hosts=None` means non-EC2 hosts; EC2 costs money, so a job opts in by naming `"ec2"` |
 | `inputs` | artifact keys, e.g. `binary:<commit>:<arch>:voxel_census` |
+| `files` | local file/directory → host destination, with placeholders; copied on remote launch and its paths substituted in argv; destinations stay inside the remote job root |
+| `remote_argv` | optional argv for remote execution, used by cargo-test's source-archive path |
 | `outputs` | directory, default `<job>/<name>`; `stdout`/`stderr` default `{out}/stdout.log`, `{out}/stderr.log` |
 | `done_marker` | relative to `outputs`; exit 0 without it counts as failure |
 | `deps`, `priority` | ordering within and across jobs |
@@ -130,18 +134,28 @@ end to end with no core edit.
   It runs `labkit/snaprun.py` as a task. Other arches build natively on their host from a
   `source:<commit>` archive (EC2; untested against AWS).
 - **cargo-test**: a suite (default `cargo nextest run --workspace --exclude cubarium-gpu`)
-  in a snapshot tree. The exit status is the verdict.
+  in a snapshot tree, on desktop or eidolon. Remotes use the same `source:<commit>` archive
+  provider as cross-arch builds, unpack into `<root>/trees/<sha16>`, and keep a warm
+  `<root>/target` across commits/suites. The exit status is the verdict; logs are fetched.
+  Same-arch binary builds still run locally and populate the shared artifact cache.
 - **ab**: `scripts/studies/ab.py`'s guards, imported. Each arm is pinned at submit (tree,
   commit, optional `bin`, otherwise a cached build). Preflight is `ab.arm_inputs` in pinned
   mode, so configs come only from the arm's tree at its commit, followed by
   `ab.preflight`: the resolved `expand=`/`params=` diff, `expect`, and the identical-arm
-  refusal. The early stage is one L3 task per arm and seed. `ab.early_read` is the
+  refusal. Config includes/path inputs are materialized from the same arm's pinned commit,
+  preserving their relative layout. The early stage is one L3 task per arm and seed,
+  eligible for desktop or eidolon. Remotes receive the cached binary (or supplied binary),
+  that arm's config bundle, and only its own load checkpoint. `ab.early_read` is the
   identical-results tripwire. Continuations load only their own checkpoints, after
   `ab.unchanged`. `ab.py` stays a working CLI.
-- **batch**: `scripts/studies/batch.py` as one task, charged `parallel × threads`. Its
+- **batch**: `scripts/studies/batch.py` as one L3 task, charged `parallel × threads`,
+  on desktop or eidolon. Tools, binaries, config dependencies, saved starts and their
+  founding census, required rosters, policies and genomes are staged through the same
+  transport. A cached binary's config comes from its pinned tree. Its
   run-study slots wrap inside the CPU set labd gives it. It keeps policies, starts and
   `--resume`. A lost batch is retried once with `--resume`, and `resume = DIR` continues an
-  old one.
+  old one. Outputs live in `batch-task/batch`, with wrapper logs in `batch-task`;
+  saved manifest commands and input paths are remapped when resuming on another host.
 
 ## Placement
 
@@ -155,6 +169,9 @@ With `external_load`, the load labd does not own (loadavg minus labd's threads) 
 charged too: on the local host every tick, on a remote host at each probe. A task that
 cannot fit on any host even when idle aborts its job at plan time. Otherwise it waits
 (priority, then FIFO, with backfill).
+Among eligible hosts that fit, prefer the most free threads: usable threads minus all
+running labd tasks and external load. `hosts = ["desktop"]` or `["eidolon"]` pins run/test
+tasks; without a pin every enabled non-EC2 host is eligible. EC2 remains opt-in and approved.
 
 - Desktop: SCHED_IDLE plus nice 19 for every task (the effect of `chrt -i 0 nice -n 19`),
   group 1 preferred over the V-cache group 0, and 4 CPUs plus 12 GB reserved for Wrysk.
@@ -183,7 +200,12 @@ Launchers:
   (`loginctl enable-linger`) is Wrysk's call; after that `auto` picks systemd.
 - **Remote hosts:** scripts go through `ssh HOST 'bash -s'`, so fish login shells are fine.
   Tools and artifacts are copied under `root` (`~/cubarium-train/lab`), and outputs are
-  rsynced back when a task ends.
+  incrementally rsynced back at each remote task probe, before progress/liveness hooks read
+  local census, stderr, vitals and checkpoints. At task end a full fetch includes wrapper
+  logs/status; a fetch failure leaves the task and remote copy available for retry.
+  Only after a successful fetch and persisted task result are remote task outputs removed.
+  Shared job inputs are removed when all tasks on that host have fetched their results.
+  `taskwrap.py` resolves the L3 group from that host's sysfs and applies idle class/nice 19.
 
 On start the daemon:
 - resets jobs that were mid-preflight back to `inputs` (preflights are seconds-long);
@@ -314,8 +336,5 @@ Each is one module; none needs a core change.
 
 These remain open:
 - a real EC2 launch;
-- liveness for remote tasks beyond output-dir growth;
-- periodic checkpoint fetches from a running EC2 task (fetch happens at task end and
-  before down);
-- `ab` and `batch` runs on eidolon (both are `local_only`);
+- mechanism-specific remote liveness beyond the existing minute/output-growth probes;
 - inotify for `lab wait`.

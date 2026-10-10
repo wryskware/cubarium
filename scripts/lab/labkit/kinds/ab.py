@@ -36,6 +36,7 @@ if str(STUDIES) not in sys.path:
     sys.path.insert(0, str(STUDIES))
 import ab as abtool  # noqa: E402
 from batch import seed_list  # noqa: E402
+from .staging import pinned_config
 
 RESERVED = {"build", "early", "continuation", "full", "DONE"}
 PRINT_LOCK = threading.Lock()
@@ -111,11 +112,22 @@ class AB(Kind):
         for seed in spec["seed_list"]:
             for name in spec["arms"]:
                 root = job.out / stage / name / f"s{seed}"
-                source = [f"load={starts[name][str(seed)]}"] if starts else \
-                    [f"config={job.out / name / 'config.toml'}", f"seed={seed}"]
+                arm = spec["arms"][name]
+                relative = Path(arm["config"]).relative_to(arm["tree"]) if arm.get("config") else Path(spec["config_path"])
+                config = job.out / name / "source" / relative
+                files = {str(job.out / name): "{job}/" + name}
+                if starts:
+                    checkpoint = starts[name][str(seed)]
+                    files[checkpoint] = "{job}/" + Path(checkpoint).relative_to(job.out).as_posix()
+                    source = [f"load={checkpoint}"]
+                else:
+                    source = [f"config={config}", f"seed={seed}"]
+                if arm.get("bin"):
+                    files[arm["bin"]] = "{job}/inputs/" + name + "/binary"
                 argv = abtool.census_argv(binaries[name], hours, source, root, spec["threads"], spec["segment_min"])
                 tasks.append(Task(name=f"{stage}-{name}-s{seed}", argv=argv, threads=spec["threads"],
-                                  mem_gb=spec["mem_gb"], l3=True, local_only=True, outputs=str(root),
+                                  mem_gb=spec["mem_gb"], l3=True, arch=ctx.arch, hosts=spec.get("hosts"), files=files,
+                                  outputs=str(root),
                                   stdout=str(root / "census.csv"), stderr=str(root / "err.log"),
                                   inputs=[binaries[name][7:-1]] if binaries[name].startswith("{input:") else [],
                                   liveness=dict(minute_file="run/status", stall_min=spec["stall_min"]),
@@ -157,6 +169,10 @@ class AB(Kind):
         with logged(job.out / "preflight.log") as log:
             try:
                 resolved = abtool.arm_inputs(args, job.out)
+                for name, arm in resolved.items():
+                    relative = Path(arm["config_path"]).relative_to(arm["tree"])
+                    config = pinned_config(arm["tree"], arm["commit"], relative, job.out / name / "source")
+                    arm.update(config=str(config), config_sha256=abtool.sha256(config))
                 manifest = dict(arms=resolved, seeds=spec["seed_list"], expect=spec["expect"],
                                 expect_metric=spec["expect_metric"], args={k: v for k, v in spec.items()
                                                                             if not k.startswith("_")}, lab_job=job.id)
@@ -207,7 +223,7 @@ class AB(Kind):
                 abtool.unchanged(arm)
         except ValueError as error:
             return Abort(str(error))
-        binaries = {n: a["binary"] for n, a in arms.items()}
+        binaries = self.binaries(job, ctx)
         return Spawn(self.stage_tasks(job, ctx, "continuation", rest, binaries, starts))
 
     def finish(self, job, ctx):

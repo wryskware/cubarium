@@ -92,6 +92,7 @@ def main():
     parser.add_argument("--seed", action="append", default=[])
     parser.add_argument("--profile", default="release")
     parser.add_argument("--source-tar")
+    parser.add_argument("--target-dir")
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("--out", required=True)
     parser.add_argument("command", nargs=argparse.REMAINDER)
@@ -112,7 +113,10 @@ def main():
     log.write(f"snapshot {tree} at {args.commit}; {seeded}\n")
     log.flush()
     os.utime(tree)
-    env = os.environ | {"CARGO_TARGET_DIR": str(tree / "target")}
+    target = Path(args.target_dir or tree / "target").resolve()
+    if on_tmpfs(target):
+        raise SystemExit(f"refusing tmpfs target {target}")
+    env = os.environ | {"CARGO_TARGET_DIR": str(target)}
     rc = subprocess.run(command, cwd=tree, env=env, stdin=subprocess.DEVNULL).returncode
     if args.source_tar is None and git(tree, "rev-parse", "HEAD") != args.commit:
         raise SystemExit("snapshot HEAD moved during the build")
@@ -121,7 +125,7 @@ def main():
     meta = dict(commit=args.commit, seed=seeded, tree=str(tree), command=command, files={})
     for item in args.artifact:
         name, _, relative = item.partition("=")
-        source = tree / "target" / relative
+        source = target / relative
         destination = out / "artifact" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{name}.tmp")
