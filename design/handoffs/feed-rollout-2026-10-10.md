@@ -179,8 +179,33 @@ down into a pale razor blade), walking legs, and the tail branches carrying the 
 - **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, the
   adult and the smallest bin past the larva.
 
+### Bellwing (fourth)
+
+Lanternjaw merged (fc7502a3); no engine change was needed. The bellwing is the first flyer
+in the rollout.
+
+The small diurnal nectar feeder (`bellwing()` in `animal_models.py`): a bell-shaped body
+(rim magenta), two pairs of membrane wings with glowing leading edges, and **a tendril out
+of the bell's mouth ending in a spindly corkscrew**. It hovers at flowers and also perches
+(crowns, vine faces, undersides); find which it does while `State::Cropping` holds (the
+flight/perch code in `cubarium-voxel-fauna`) and how the figure pass draws it then
+(any wing beat or hover bob it already has on the class path stays as it is).
+
+- **Bones**: root (bell, wings), and the tendril as a chain of 2–4 down to the corkscrew.
+  Report cells per bone per bin; at 125 mm the tendril may own very few cells, say how
+  many.
+- **Feed clip (placeholder; Wrysk directs the real one)**: sipping at a flower ahead and
+  below.
+  1. Reach: the tendril swings down and forward into the flower, the corkscrew
+     straightening a little, 0.3 s, eased; the bell tips forward about 10°.
+  2. Sip: three small pulses, the tendril drawing back about 1 cm and in again, 0.25 s
+     each, the bell bobbing 1 cm with each.
+  3. Loop while it crops; the reach and return from the clip weight.
+- **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, in the
+  state it feeds in (hovering or perched), adult and the smallest bin.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), bellwing, capgnawer, littershredder,
+open look question), capgnawer, littershredder,
 ripple-snail. Then sleep, idle and hunker move onto the rig.
 
 ## Return
