@@ -1037,6 +1037,11 @@ control and the reward accounting; display targets after seeing results.
      units, with the default world unchanged. Re-derive the mass genes' boxes after it lands.
    - 2026-10-09 21:15 the session was OOM-killed (a 24 GB target copy in tmpfs /tmp); the library and probes
      resumed as user services.
+   - Wade-out merged a778bd36 (Wrysk: "deffo swim out"); SMALL-FIXES (liveness ignores chosen stillness,
+     `wade.swim_out` off for the insectoid lanternjaw, seedporter walk-off memory) in check.
+   - Role call 4, lanternjaw (Wrysk, 2026-10-10): adult at 35 % of body max ("35%-100% adult size range ... like
+     octopus"), fast mantis-like growth, rider take grows with size, riders drop off when they outgrow a small
+     host, seedporters eat small juveniles, many offspring and low survival. LANTERNJAW-LIFE (Opus) building.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;
