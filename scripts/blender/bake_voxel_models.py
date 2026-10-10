@@ -145,6 +145,13 @@ FOUNDER_POSES = {"frondgrazer-hunker": "frondgrazer"}
 # ratio, which its table keeps by volume).
 SPECIMEN_YOUNG = {"chorister": [0.46]}
 
+# Founders `source.json` lists (since it was regenerated, 71afcbb0) that are still baked as
+# their specimen, one adult bin at the builder's reference size, as the presenter draws them
+# today: the founder path would scale the bellwing to its sim body (0.125 x 0.125 x
+# 0.0625 m), squashing the picked model (0.375 m wingspan) to 3 cells (FEED-ROLLOUT,
+# 2026-10-10).
+AS_SPECIMEN = {"bellwing"}
+
 # A founder's other life stage, baked as a specimen of one bin at its built (true) size:
 # name -> `animal_models.lanternjaw_larva` kind. The lanternjaw's rider larva, the
 # leechfork (Wrysk 2026-10-09, D16), drawn while it rides a host
@@ -674,6 +681,8 @@ def build_founder_bin(f, n, vox):
 RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         "chorister": lambda: A.feed_rig(A.ch_feed_clip()),
         "lanternjaw": lambda: A.feed_rig(A.lj_feed_clip()),
+        # a specimen of one bin (its young draw the adult's)
+        "bellwing": lambda: A.feed_rig(A.bw_feed_clip()),
         # the seedporter's pose models it crops in (specimens, one bin each)
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
@@ -855,7 +864,7 @@ def main():
                 {"states": states} if len(states) > 1 else {})
             print(f"{vox} m {sp['name']}: {len(meta)} steps, {size} bytes", flush=True)
         for f in src["founders"]:
-            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF:
+            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF or f["name"] in AS_SPECIMEN:
                 continue
             file, size, meta, rig = bake_animal(f, vox, out_dir)
             manifest["founders"][f["name"]] = file
@@ -874,8 +883,8 @@ def main():
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: {base}'s pose, {len(meta)} bins, {size} bytes", flush=True)
         for name in SPECIMENS:
-            if (ONLY and name not in ONLY) or name not in A.REF or any(
-                    f["name"] == name for f in src["founders"]):
+            if (ONLY and name not in ONLY) or name not in A.REF or (name not in AS_SPECIMEN and any(
+                    f["name"] == name for f in src["founders"])):
                 continue
             file, size, meta, rig = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
