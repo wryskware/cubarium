@@ -27,6 +27,7 @@ use cubarium_gpu::voxel::{VoxelStaging, VoxelTexel};
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::FloraView;
 
+use crate::voxel::model::Tag;
 use crate::voxel::plant_motion::{GrowOrder, PlantConfig};
 use crate::voxel::stand::{Part, Stands, drawn_site};
 
@@ -46,6 +47,8 @@ struct Cell {
     weight: f32,
     /// Its top and bottom faces' weights ([`pack_faces`]): where a drape cord's joins move.
     faces: u32,
+    /// A baked model's drape cell (a cord's front quad widens for the long wave).
+    drape: bool,
     /// Its place in the plant's order, 0..1 (0 first to arrive).
     rank: f32,
 }
@@ -358,7 +361,8 @@ impl PlantTracker {
                 p.radius = p.radius.max(((dx * dx + dz * dz) as f64).sqrt());
             }
             set_bit(&mut self.now_bits, index, true);
-            self.cur.push(Cell { index, xyz: [x, y, z], plant, stand, weight: 0.0, faces: pack_faces(0.0, 0.0), rank: 0.0 });
+            let drape = matches!(stands.model_tag(stands.at_index(g)), Some(Tag::Drape(_)));
+            self.cur.push(Cell { index, xyz: [x, y, z], plant, stand, weight: 0.0, faces: pack_faces(0.0, 0.0, drape), drape, rank: 0.0 });
         }
         // Each plant's sway, each cell's share and place in the order.
         for p in self.plants.iter_mut().skip(1) {
@@ -376,6 +380,7 @@ impl PlantTracker {
             c.faces = pack_faces(
                 self.cfg.face_weight(hgt as f64 + 0.5, p.top),
                 self.cfg.face_weight(hgt as f64 - 0.5, p.top),
+                c.drape,
             );
             c.rank = match self.cfg.order {
                 GrowOrder::RootUp => {

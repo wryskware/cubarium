@@ -53,13 +53,16 @@ layout(location = 1) in vec2 vUV;
 // point (`cord::swayed_join`). A leaving cell carries no face weights: its joins move with
 // it.
 bool plantCordShows(uvec4 c, ivec3 p, vec2 uv) {
-    vec2 e = cordEnds(p.x, p.y, p.z);
     float wc = plantWeight(c);
     vec2 wf = vec2(wc);
     if (!plantDying(c) && (c.w >> 31) != 0u) {
         wf = vec2(float((c.w >> 12) & 4095u), float(c.w & 4095u)) / 4095.0;
     }
-    e += tips[plantOf(c)] * (wf - wc) * float(S);
+    vec2 sh = tips[plantOf(c)] * (wf - wc) * float(S);
+    // The long wave: the faces' shifts carried linearly down the cell, uv.x past 0..1 where
+    // the widened quad (`plant.vert`) reaches into the next column.
+    if (cordWave()) { return cordWaveCovers(p, uv.y, uv.x * float(S), cordAmp(false), sh); }
+    vec2 e = cordEnds(p.x, p.y, p.z) + sh;
     return cordCovers(e.x, e.y, uv.y, uv.x * float(S));
 }
 
@@ -87,6 +90,8 @@ void main() {
         vec2 centre = (floor(gl_FragCoord.xy / aa) + 0.5) * aa;
         uv += (centre - gl_FragCoord.xy) / (aa * max(plantScale(c), 1e-3) * float(S));
         if (!plantCordShows(c, p, uv)) { discard; }
+    } else if (uv.x < 0.0 || uv.x >= 1.0) {
+        discard;  // a leaving cell's quad is widened in case it is a cord (`plant.vert`)
     }
     int dx = clamp(int(uv.x * float(S)), 0, S - 1);
     int row = clamp(int(uv.y * float(rows)), 0, rows - 1);

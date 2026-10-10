@@ -21,6 +21,17 @@
 //!   ([`crate::plants`]); a cord's joins move with the *face's* weight instead
 //!   ([`crate::plants::pack_faces`]), so the two cells meeting at a face put the join at
 //!   the same screen point however the plant sways ([`swayed_join`]).
+//!
+//! **The long wave** (round 2, [`CordWave`]): with a period, a cord no longer joins hashed
+//! points face by face. Its centre follows one sine down its whole strand, `amplitude`
+//! voxels either side of its column's centre, `period` voxels a wave, each strand (column)
+//! on its own phase ([`phase`]). The cells above and below a face read the same curve at
+//! the face's height, so the joins agree by construction. An amplitude past half a voxel
+//! carries the cord into the neighbouring columns: the plant pass (the default draw) widens
+//! a drape cell's front face quad to [`DrapeCords::reach`] either side, so the cell draws
+//! its cord wherever it swings, at the cell's own depth. The walk (stamped plants) only
+//! reaches a cell by entering it, so there the swing is held inside the column
+//! ([`DrapeCords::amp`]).
 
 /// The path a cord takes inside its cell between its two joins: a look choice (Wrysk's).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -41,6 +52,33 @@ pub struct DrapeCords {
     /// How much of the face's free width (its width less the cord's) a join may wander
     /// across, centred, 0..1: 0 hangs every cord plumb down the middle.
     pub wander: f32,
+    /// The long wave (round 2); with it on, `shape` and `wander` are not read.
+    pub wave: CordWave,
+}
+
+/// A cord's long wave: its centre a sine down the whole strand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CordWave {
+    /// Voxels from crest to crest down the strand; 0: no wave, the hashed joins of round 1.
+    pub period: f32,
+    /// Voxels the cord's centre swings either side of its column's centre (past 0.5 it
+    /// crosses into the next column).
+    pub amplitude: f32,
+}
+
+impl CordWave {
+    pub const NONE: CordWave = CordWave { period: 0.0, amplitude: 0.0 };
+
+    /// As the uniform carries them: the period in quarter voxels, the amplitude in 32nds.
+    fn quantised(&self) -> (f32, f32) {
+        let p = (self.period.max(0.0) * 4.0).round().min(255.0);
+        let a = (self.amplitude.max(0.0) * 32.0).round().min(255.0);
+        (p / 4.0, a / 32.0)
+    }
+
+    pub fn on(&self) -> bool {
+        self.quantised().0 > 0.0
+    }
 }
 
 impl Default for DrapeCords {
@@ -51,20 +89,24 @@ impl Default for DrapeCords {
 
 impl DrapeCords {
     /// Drape cells drawn as whole cubes.
-    pub const OFF: DrapeCords = DrapeCords { width_px: 0, shape: CordShape::Straight, wander: 1.0 };
+    pub const OFF: DrapeCords =
+        DrapeCords { width_px: 0, shape: CordShape::Straight, wander: 1.0, wave: CordWave::NONE };
 
     pub fn on(&self) -> bool {
         self.width_px > 0
     }
 
     /// `u.tex.z` and `u.tex.w`: the width, and the shape (low byte) with the wander in
-    /// hundredths (second byte).
+    /// hundredths (second byte), the wave's period in quarter voxels (third) and its
+    /// amplitude in 32nds of a voxel (fourth).
     pub fn uniform(&self) -> [i32; 2] {
         let shape = match self.shape {
             CordShape::Straight => 0,
             CordShape::Eased => 1,
         };
-        [self.width_px.min(255) as i32, shape | (self.wander_pct() << 8)]
+        let (p, a) = self.wave.quantised();
+        let wave = ((p * 4.0) as u32) << 16 | ((a * 32.0) as u32) << 24;
+        [self.width_px.min(255) as i32, (shape as u32 | (self.wander_pct() as u32) << 8 | wave) as i32]
     }
 
     fn wander_pct(&self) -> i32 {
@@ -111,9 +153,7 @@ impl DrapeCords {
         let dt = 1.0 / s as f32;
         let up = (c - self.centre(a, b, (t - dt).max(0.0))).abs();
         let down = (self.centre(a, b, (t + dt).min(1.0)) - c).abs();
-        let ext = (0.5 * up.max(down) - 0.5).max(0.0);
-        let r = x - c;
-        r >= -0.5 * w - ext && r < 0.5 * w + ext
+        span(w, c, up, down, x)
     }
 
     /// The walk's test (`plantTexel` on a drape cell): whether front-face texel `(dx, dy)`
@@ -123,10 +163,86 @@ impl DrapeCords {
         if !self.on() {
             return true;
         }
+        let t = (dy as f32 + 0.5) / s as f32;
+        if self.wave.on() {
+            return self.wave_covers(s, (x, y, z), t, dx as f32 + 0.5, self.amp(s, true), (0.0, 0.0));
+        }
         let (a, b) = self.ends(s, x, y, z);
-        self.covers(s, a, b, (dy as f32 + 0.5) / s as f32, dx as f32 + 0.5)
+        self.covers(s, a, b, t, dx as f32 + 0.5)
+    }
+
+    /// `cordAmp`: the wave's amplitude, voxels. In the walk (`walk`) it is held inside the
+    /// column, the cord's width short of its edges: the walk sees a cell only by entering it.
+    pub fn amp(&self, s: u32, walk: bool) -> f32 {
+        let a = self.wave.quantised().1;
+        if !walk {
+            return a;
+        }
+        let w = self.width_px as f32;
+        a.min(((s as f32 - w) / (2.0 * s as f32)).max(0.0))
+    }
+
+    /// `cordWaveAt`: the cord's centre on strand (column) `(x, z)` at height `yw` (voxels,
+    /// continuous: a cell's top face is at its `y + 1`), face pixels from the column's left
+    /// edge, swinging `amp` voxels either side.
+    pub fn wave_at(&self, s: u32, x: i32, z: i32, yw: f32, amp: f32) -> f32 {
+        let p = self.wave.quantised().0.max(0.25);
+        let a = std::f32::consts::TAU * (yw / p + phase(x, z));
+        s as f32 * (0.5 + amp * a.sin())
+    }
+
+    /// `cordWaveCentre`: the centre at `t` down cell `(x, y, z)`'s front face, moved by
+    /// `shift` pixels at its top face and at its bottom face (the sway of each face relative
+    /// to the cell's, [`swayed_join`]), linearly between.
+    pub fn wave_centre(&self, s: u32, (x, y, z): (i32, i32, i32), t: f32, amp: f32, shift: (f32, f32)) -> f32 {
+        self.wave_at(s, x, z, y as f32 + 1.0 - t, amp) + shift.0 + (shift.1 - shift.0) * t
+    }
+
+    /// `cordWaveCovers`: whether face point `(xp, t)` of the cell (`xp` face pixels from its
+    /// left edge, any sign: the cord may be in the next column) is on the waving cord. As
+    /// [`Self::covers`]: `width_px` pixels a row, widened where a row steps more than a
+    /// pixel so the rows stay joined; the rows past a face are the next cell's, read from
+    /// the same curve.
+    pub fn wave_covers(&self, s: u32, cell: (i32, i32, i32), t: f32, xp: f32, amp: f32, shift: (f32, f32)) -> bool {
+        let dt = 1.0 / s as f32;
+        let c = self.wave_centre(s, cell, t, amp, shift);
+        let up = (c - self.wave_centre(s, cell, t - dt, amp, shift)).abs();
+        let down = (self.wave_centre(s, cell, t + dt, amp, shift) - c).abs();
+        span(self.width_px as f32, c, up, down, xp)
+    }
+
+    /// `PlantPush.t.w`: how far the plant pass's front face quad of a drape cell reaches
+    /// either side of its column's centre, voxels (0.5: the cell's own face). It holds the
+    /// whole swing, the cord's half width, the widening of its steepest rows and the sway of
+    /// its joins against its box, with a margin.
+    pub fn reach(&self, s: u32) -> f32 {
+        if !self.on() || !self.wave.on() {
+            return 0.5;
+        }
+        let (p, a) = self.wave.quantised();
+        let px = 0.5 * self.width_px as f32 + std::f32::consts::PI * a / p + 3.0;
+        (a + px / s as f32).max(0.5)
     }
 }
+
+/// `cordSpan`: whether `x` is on a cord row centred at `c`, `w` pixels wide, its centre
+/// `up` and `down` pixels from the rows above and below. Half-open, so a cord covers
+/// exactly `w` pixel centres of a row wherever it lies; a row more than a pixel from a
+/// neighbour takes half the excess as well, so consecutive rows always touch.
+fn span(w: f32, c: f32, up: f32, down: f32, x: f32) -> bool {
+    let ext = (0.5 * up.max(down) - 0.5).max(0.0);
+    let r = x - c;
+    r >= -0.5 * w - ext && r < 0.5 * w + ext
+}
+
+/// `cordPhase`: strand (column) `(x, z)`'s place in its wave at height 0, 0..1 of a period
+/// (`x` already round the ring).
+pub fn phase(x: i32, z: i32) -> f32 {
+    (cell_hash(x, 0, z, PHASE_SALT) >> 8) as f32 / 16_777_216.0
+}
+
+/// The salt of a strand's phase hash.
+const PHASE_SALT: i32 = 78;
 
 /// The salt of a join's hash.
 const JOIN_SALT: i32 = 77;
@@ -161,7 +277,7 @@ mod tests {
         for width_px in [1, 2] {
             for shape in [CordShape::Straight, CordShape::Eased] {
                 for wander in [0.0, 0.5, 1.0] {
-                    v.push(DrapeCords { width_px, shape, wander });
+                    v.push(DrapeCords { width_px, shape, wander, wave: CordWave::NONE });
                 }
             }
         }
@@ -218,7 +334,7 @@ mod tests {
         for width_px in [1u32, 2] {
             for shape in [CordShape::Straight, CordShape::Eased] {
                 // Plumb (no wander): every row is exactly the width, whatever the scale.
-                let plumb = DrapeCords { width_px, shape, wander: 0.0 };
+                let plumb = DrapeCords { width_px, shape, wander: 0.0, wave: CordWave::NONE };
                 for s in SCALES.into_iter().filter(|&s| s >= width_px) {
                     for (x, y, z) in positions() {
                         for dy in 0..s {
@@ -229,7 +345,7 @@ mod tests {
                 }
                 // Wandering: never narrower than the width, and a row less than a pixel from
                 // its neighbours is exactly the width.
-                let c = DrapeCords { width_px, shape, wander: 1.0 };
+                let c = DrapeCords { width_px, shape, wander: 1.0, wave: CordWave::NONE };
                 for s in SCALES.into_iter().filter(|&s| s >= width_px) {
                     for (x, y, z) in positions() {
                         let (a, b) = c.ends(s, x, y, z);
@@ -255,7 +371,7 @@ mod tests {
     fn off_the_cord_a_drape_texel_is_not_the_cells_and_with_the_switch_off_every_texel_is() {
         for s in SCALES {
             for (x, y, z) in positions().take(50) {
-                let on = DrapeCords { width_px: 1, shape: CordShape::Straight, wander: 1.0 };
+                let on = DrapeCords { width_px: 1, shape: CordShape::Straight, wander: 1.0, wave: CordWave::NONE };
                 let shown = (0..s).flat_map(|dy| (0..s).map(move |dx| (dx, dy)))
                     .filter(|&(dx, dy)| on.texel(s, x, y, z, dx, dy))
                     .count() as u32;
@@ -269,7 +385,7 @@ mod tests {
     #[test]
     fn a_swaying_join_is_at_one_screen_point_from_both_of_its_cells() {
         let s = 6;
-        let c = DrapeCords { width_px: 1, shape: CordShape::Eased, wander: 1.0 };
+        let c = DrapeCords { width_px: 1, shape: CordShape::Eased, wander: 1.0, wave: CordWave::NONE };
         let (x, y, z) = (11, 5, 3);
         let join = c.ends(s, x, y + 1, z).1;
         // The face's weight lies between the two cells' weights; the tip is anything.
@@ -284,9 +400,125 @@ mod tests {
 
     #[test]
     fn the_uniform_carries_the_width_shape_and_wander() {
-        let c = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5 };
+        let mut c = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave: CordWave::NONE };
         assert_eq!(c.uniform(), [2, 1 | (50 << 8)]);
+        c.wave = CordWave { period: 6.25, amplitude: 1.5 };
+        let w = c.uniform()[1] as u32;
+        assert_eq!(w & 0xFFFF, 1 | (50 << 8), "the wave leaves the shape and wander");
+        assert_eq!(((w >> 16) & 255) as f32 / 4.0, 6.25);
+        assert_eq!((w >> 24) as f32 / 32.0, 1.5);
         assert_eq!(DrapeCords::OFF.uniform()[0], 0);
         assert!(!DrapeCords::OFF.on());
+    }
+
+    fn waves() -> Vec<DrapeCords> {
+        let mut v = Vec::new();
+        for width_px in [1, 2] {
+            for (period, amplitude) in [(3.0, 0.5), (6.0, 1.0), (12.0, 2.0), (3.0, 2.0), (7.5, 0.2)] {
+                let wave = CordWave { period, amplitude };
+                v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+            }
+        }
+        v
+    }
+
+    /// The pixels of row `dy` of cell `(x, y, z)` on the waving cord as the plant pass draws
+    /// it (no walk limit), over the reach either side, with each face's sway `shift`.
+    fn wave_row(c: &DrapeCords, s: u32, cell: (i32, i32, i32), dy: u32, shift: (f32, f32)) -> Vec<i32> {
+        let r = (c.reach(s) * s as f32).ceil() as i32 + 2 * s as i32;
+        let t = (dy as f32 + 0.5) / s as f32;
+        (-r..s as i32 + r)
+            .filter(|&dx| c.wave_covers(s, cell, t, dx as f32 + 0.5, c.amp(s, false), shift))
+            .collect()
+    }
+
+    #[test]
+    fn under_the_long_wave_two_stacked_cells_meet_at_one_point_of_their_shared_face() {
+        for c in waves() {
+            for s in SCALES {
+                for (x, y, z) in positions() {
+                    let (upper, lower) = ((x, y + 1, z), (x, y, z));
+                    for walk in [false, true] {
+                        let a = c.amp(s, walk);
+                        let up_end = c.wave_centre(s, upper, 1.0, a, (0.0, 0.0));
+                        let low_top = c.wave_centre(s, lower, 0.0, a, (0.0, 0.0));
+                        assert!((up_end - low_top).abs() < 1e-3, "{c:?} at {s} px: {up_end} vs {low_top}");
+                    }
+                    // Swaying: the face's shift is the upper's bottom and the lower's top.
+                    let face = 0.7;
+                    let a = c.amp(s, false);
+                    let up_end = c.wave_centre(s, upper, 1.0, a, (-0.3, face));
+                    let low_top = c.wave_centre(s, lower, 0.0, a, (face, 1.9));
+                    assert!((up_end - low_top).abs() < 1e-3);
+                    // And the drawn pixels touch across the face.
+                    let up = wave_row(&c, s, upper, s - 1, (0.0, 0.0));
+                    let down = wave_row(&c, s, lower, 0, (0.0, 0.0));
+                    let touch = up.iter().any(|&p| down.iter().any(|&q| p.abs_diff(q) <= 1));
+                    assert!(touch, "{c:?} at {s} px, ({x}, {y}, {z}): {up:?} over {down:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn under_the_long_wave_a_row_less_than_a_pixel_from_its_neighbours_is_the_width_at_every_scale() {
+        for c in waves() {
+            for s in SCALES.into_iter().filter(|&s| s >= c.width_px) {
+                let a = c.amp(s, false);
+                for (x, y, z) in positions().take(60) {
+                    for dy in 0..s {
+                        let n = wave_row(&c, s, (x, y, z), dy, (0.0, 0.0)).len() as u32;
+                        let t = (dy as f32 + 0.5) / s as f32;
+                        let dt = 1.0 / s as f32;
+                        let at = |t: f32| c.wave_centre(s, (x, y, z), t, a, (0.0, 0.0));
+                        let step = (at(t) - at(t - dt)).abs().max((at(t + dt) - at(t)).abs());
+                        assert!(n >= c.width_px, "{c:?} at {s} px: row {dy} has {n}");
+                        if step <= 1.0 {
+                            assert_eq!(n, c.width_px, "{c:?} at {s} px: row {dy}, step {step}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn past_half_a_voxel_the_cord_shows_in_the_next_column_and_the_plant_quad_holds_all_of_it() {
+        for c in waves() {
+            for s in SCALES.into_iter().filter(|&s| s >= c.width_px) {
+                let mut outside = 0;
+                for (x, y, z) in positions().take(80) {
+                    for dy in 0..s {
+                        for sh in [(0.0, 0.0), (-1.5, 1.5)] {
+                            for dx in wave_row(&c, s, (x, y, z), dy, sh) {
+                                let off = (dx as f32 + 0.5) / s as f32 - 0.5;
+                                assert!(off.abs() <= c.reach(s), "{c:?} at {s} px: {dx} past the quad");
+                                if dx < 0 || dx >= s as i32 {
+                                    outside += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if c.amp(s, false) > 1.0 {
+                    assert!(outside > 0, "{c:?} at {s} px never leaves its column");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn in_the_walk_the_wave_stays_in_its_column_and_still_crosses_every_row() {
+        for c in waves() {
+            for s in SCALES.into_iter().filter(|&s| s > c.width_px) {
+                for (x, y, z) in positions().take(40) {
+                    for dy in 0..s {
+                        let n = (0..s).filter(|&dx| c.texel(s, x, y, z, dx, dy)).count();
+                        assert!(n >= 1, "{c:?} at {s} px: row {dy} empty");
+                        assert!(n < s as usize || s <= 2, "{c:?} at {s} px: row {dy} full");
+                    }
+                }
+            }
+        }
     }
 }

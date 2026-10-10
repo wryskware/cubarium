@@ -370,6 +370,8 @@ impl Default for PackConfig {
 /// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
 /// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
 /// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
+/// wave_period = 0.0   # voxels a wave down the strand; 0: the hashed joins above
+/// wave_amplitude = 0.0 # voxels the wave swings either side of the column's centre
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -387,12 +389,29 @@ pub struct DrapeConfig {
     /// width less the cord's, `0..=1`: 0 hangs every cord plumb down the middle of its
     /// column, 1 lets a join fall anywhere across the face (a hash of the face).
     pub cord_wander: f32,
+    /// **The long wave's period** (round 2), voxels from crest to crest down a strand: with
+    /// a period the cord's centre is one sine down its whole strand, each strand on its own
+    /// phase, and `cord_shape` and `cord_wander` are not read. 0: no wave (the hashed
+    /// joins). Up to 63.75, in quarter voxels.
+    pub wave_period: f32,
+    /// **The long wave's amplitude**, voxels the cord's centre swings either side of its
+    /// column's centre; past 0.5 it crosses into the next columns (the plant pass draws it
+    /// there; stamped plants keep it inside the column). Up to 7.97, in 32nds.
+    pub wave_amplitude: f32,
 }
 
 impl Default for DrapeConfig {
     fn default() -> DrapeConfig {
-        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look".
-        DrapeConfig { cords: true, cord_px: 2, cord_shape: CordShapeConfig::Eased, cord_wander: 0.5 }
+        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look". The long wave
+        // (round 2) is off until he picks a period and an amplitude.
+        DrapeConfig {
+            cords: true,
+            cord_px: 2,
+            cord_shape: CordShapeConfig::Eased,
+            cord_wander: 0.5,
+            wave_period: 0.0,
+            wave_amplitude: 0.0,
+        }
     }
 }
 
@@ -409,6 +428,10 @@ impl DrapeConfig {
                 CordShapeConfig::Eased => cubarium_gpu::cord::CordShape::Eased,
             },
             wander: self.cord_wander.clamp(0.0, 1.0),
+            wave: cubarium_gpu::cord::CordWave {
+                period: self.wave_period.max(0.0),
+                amplitude: self.wave_amplitude.max(0.0),
+            },
         }
     }
 }
