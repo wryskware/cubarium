@@ -900,10 +900,13 @@ fn run(
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
+        // Vitals need exact kill masses, including after a drift window closes.
+        if vitals.is_some() && sim.fauna().census_readout().is_none() {
+            sim.fauna_mut().set_census_readout(true);
+        }
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
-        if let Some(d) = &mut drift { d.poll(sim, tick); }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -915,6 +918,7 @@ fn run(
             }
             vitals_time += start.elapsed();
         }
+        if let Some(d) = &mut drift { d.poll(sim, tick); }
         weather.poll(sim);
         deaths.poll(sim, tick);
         vine.poll(sim, tick, summary_start);
