@@ -135,6 +135,10 @@ layout(constant_id = 9) const bool POSE = false;
 // march, the sky plane, the canopy, the AO), so the plants light and shade as they did.
 // Fixed for a renderer's life; off, the walk is exactly what it was.
 layout(constant_id = 10) const bool PLANT_MODELS = false;
+// CELL-SHRINK: the walk binds the weighted variant only while EMIT_PLANTS is set.
+// Off, the original whole-cell crease and sun march compile without size lookups or
+// transmission state. Other passes keep the weighted path (the default).
+layout(constant_id = 11) const bool PLANT_LIGHT = true;
 
 layout(set = 0, binding = 1) uniform usampler3D voxels;  // rgba8ui, one texel per voxel
 layout(set = 0, binding = 2) uniform usampler3D roofTex; // r8ui, voxels to the solid above
@@ -424,6 +428,33 @@ float entryVineFrom(int i, inout uvec4 v) {
     return float(s) / 255.0;
 }
 
+// CELL-SHRINK: how big plant cell (x, y, z) is drawn while it arrives or leaves through the
+// plant pass's grow-in (`cubarium_gpu::voxel::EmitCell::plant`), 1 for a whole cell: the
+// weight of the light it casts on the rest of the world (its AO crease, its sun shadow). A
+// leaving cell stays in the volume until it has shrunk away. `view.w`'s `EMIT_PLANTS` says
+// the table carries any, so the walk looks plant cells up only then.
+const uint EMIT_PLANTS = 1u << 21;
+float plantSize(int x, int y, int z) {
+    if (!PLANT_LIGHT || (uint(u.view.w) & EMIT_PLANTS) == 0u) { return 1.0; }
+    int i = cellEntry(x, y, z);
+    if (i < 0) { return 1.0; }
+    uint p = (emitCells[i].w >> 24) & 127u;
+    return p == 0u ? 1.0 : float(p - 1u) / 125.0;
+}
+
+// CELL-SHRINK: how much of crown cell (x, y, z)'s outline edge at face column `dx` is drawn
+// (`EmitCell::edge`): beside a cell of its crown arriving or leaving, one less that cell's
+// size, so the edge comes and goes with it; 1 (the glyph's own edge) elsewhere.
+float crownEdge(int x, int y, int z, int dx) {
+    if (!PLANT_LIGHT || (uint(u.view.w) & EMIT_PLANTS) == 0u || (dx != 0 && dx != S - 1)) { return 1.0; }
+    int i = cellEntry(x, y, z);
+    if (i < 0) { return 1.0; }
+    uint w = emitCells[i].w;
+    if (((w >> 16) & 255u) != 0u) { return 1.0; }
+    uint e = dx == 0 ? (w & 255u) : ((w >> 8) & 255u);
+    return e == 0u ? 1.0 : float(e - 1u) / 254.0;
+}
+
 // The walk's `trans` once it has ended on an emitter: the light the emitter sends to the
 // camera through what is in front of it (`trans` times its colour less the haze), negated
 // and less one, so that every channel is at most -1. Nothing else makes `trans` negative,
@@ -479,12 +510,20 @@ vec3 blockLit(vec3 body, float shade) {
 
 // A cell that darkens the corners of a face beside it: terrain and block parts (trunk,
 // crown, heart, log, animal). Sprouts, floor marks and vine cells do not. Outside the
-// world in y or z is open.
+// world in y or z is open. A plant cell part way through arriving or leaving darkens them
+// by its size (`plantSize`): 1 is a whole cell, 0 none.
 float occluder(int x, int y, int z) {
     if (!inY(y) || z < 0 || z >= D) { return 0.0; }
     uvec4 v = at(x, y, z);
-    return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v) && !cordCell(v))) ? 1.0 : 0.0;
+    if (!PLANT_LIGHT) {
+        return (solidV(v) || (isBlockPart(partOf(v)) && !softMark(v) && !cordCell(v))) ? 1.0 : 0.0;
+    }
+    if (solidV(v)) { return 1.0; }
+    int p = partOf(v);
+    if (!isBlockPart(p) || softMark(v) || cordCell(v)) { return 0.0; }
+    return plantBlockPart(p) ? plantSize(x, y, z) : 1.0;
 }
+float occluderAt(ivec3 c) { return occluder(c.x, c.y, c.z); }
 
 // The AO is a **crease line** (Wrysk, checkpoint 2): a face stays flat, and only a thin
 // band along an edge whose side neighbour in the face's open plane occludes, and a small
@@ -500,19 +539,45 @@ uint glyphTexel(int part, int glyph, int dx, int row) {
 }
 
 // The crease factor at texel (du, dv) of a face nu x nv texels, dv = 0 on its `hi` side,
-// from its four side neighbours and four diagonals (lo/hi x left/right).
+// from its four side neighbours and four diagonals (lo/hi x left/right), each an occluder's
+// weight (0..1): the strongest of those whose band or corner square holds the texel takes
+// the AO step that share of the way.
 float creaseBands(float l, float r, float lo, float hi,
              float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv, int b) {
     bool inL = du < b, inR = du >= nu - b, inH = dv < b, inLo = dv >= nv - b;
-    bool band = (inL && l > 0.5) || (inR && r > 0.5) || (inH && hi > 0.5) || (inLo && lo > 0.5)
-        || (inL && inLo && cLL > 0.5) || (inR && inLo && cRL > 0.5)
-        || (inL && inH && cLH > 0.5) || (inR && inH && cRH > 0.5);
-    return band ? 1.0 - u.lightK.w : 1.0;
+    if (!PLANT_LIGHT) {
+        bool band = (inL && l > 0.5) || (inR && r > 0.5) || (inH && hi > 0.5) || (inLo && lo > 0.5)
+            || (inL && inLo && cLL > 0.5) || (inR && inLo && cRL > 0.5)
+            || (inL && inH && cLH > 0.5) || (inR && inH && cRH > 0.5);
+        return band ? 1.0 - u.lightK.w : 1.0;
+    }
+    float k = max(max(inL ? l : 0.0, inR ? r : 0.0), max(inH ? hi : 0.0, inLo ? lo : 0.0));
+    k = max(k, max(max(inL && inLo ? cLL : 0.0, inR && inLo ? cRL : 0.0),
+                   max(inL && inH ? cLH : 0.0, inR && inH ? cRH : 0.0)));
+    return 1.0 - u.lightK.w * k;
 }
 
 float crease(float l, float r, float lo, float hi,
              float cLL, float cRL, float cLH, float cRH, int du, int dv, int nu, int nv) {
     return creaseBands(l, r, lo, hi, cLL, cRL, cLH, cRH, du, dv, nu, nv, creaseWidth(nv));
+}
+
+// `creaseBands` of the face whose open plane holds cell `o`, `U` along its texels' du and
+// `V` toward its `hi` side, reading only the occluders whose band or corner holds the texel
+// (an inner texel reads none).
+float creaseOpen(ivec3 o, ivec3 U, ivec3 V, int du, int dv, int nu, int nv) {
+    int b = creaseWidth(nv);
+    bool inL = du < b, inR = du >= nu - b, inH = dv < b, inLo = dv >= nv - b;
+    float k = 0.0;
+    if (inL) { k = max(k, occluderAt(o - U)); }
+    if (inR) { k = max(k, occluderAt(o + U)); }
+    if (inH) { k = max(k, occluderAt(o + V)); }
+    if (inLo) { k = max(k, occluderAt(o - V)); }
+    if (inL && inLo) { k = max(k, occluderAt(o - U - V)); }
+    if (inR && inLo) { k = max(k, occluderAt(o + U - V)); }
+    if (inL && inH) { k = max(k, occluderAt(o - U + V)); }
+    if (inR && inH) { k = max(k, occluderAt(o + U + V)); }
+    return 1.0 - u.lightK.w * k;
 }
 
 // A figure face's baked open-plane occluders, in the same order as `crease`.
@@ -528,24 +593,30 @@ float modelCrease(uint mask, int dx, int dy, ivec2 size) {
 // z-1.
 float aoFront(int x, int y, int z, int dx, int dy) {
     if (!AO) { return 1.0; }
-    int p = z - 1;
-    return crease(
-        occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
-        occluder(x - 1, y - 1, p), occluder(x + 1, y - 1, p),
-        occluder(x - 1, y + 1, p), occluder(x + 1, y + 1, p),
-        dx, dy, S, S);
+    if (!PLANT_LIGHT) {
+        int p = z - 1;
+        return crease(
+            occluder(x - 1, y, p), occluder(x + 1, y, p), occluder(x, y - 1, p), occluder(x, y + 1, p),
+            occluder(x - 1, y - 1, p), occluder(x + 1, y - 1, p),
+            occluder(x - 1, y + 1, p), occluder(x + 1, y + 1, p),
+            dx, dy, S, S);
+    }
+    return creaseOpen(ivec3(x, y, z - 1), ivec3(1, 0, 0), ivec3(0, 1, 0), dx, dy, S, S);
 }
 
 // AO of a top face of (x, y, z) at texel (dx, dy), dy = 0 at the back: the open plane is
 // y+1; its near side (z-1) is the face's bottom rows.
 float aoTop(int x, int y, int z, int dx, int dy) {
     if (!AO) { return 1.0; }
-    int p = y + 1;
-    return crease(
-        occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
-        occluder(x - 1, p, z - 1), occluder(x + 1, p, z - 1),
-        occluder(x - 1, p, z + 1), occluder(x + 1, p, z + 1),
-        dx, dy, S, RISE);
+    if (!PLANT_LIGHT) {
+        int p = y + 1;
+        return crease(
+            occluder(x - 1, p, z), occluder(x + 1, p, z), occluder(x, p, z - 1), occluder(x, p, z + 1),
+            occluder(x - 1, p, z - 1), occluder(x + 1, p, z - 1),
+            occluder(x - 1, p, z + 1), occluder(x + 1, p, z + 1),
+            dx, dy, S, RISE);
+    }
+    return creaseOpen(ivec3(x, y + 1, z), ivec3(1, 0, 0), ivec3(0, 0, 1), dx, dy, S, RISE);
 }
 
 // The sky plane at open cell (x, y, z). Above the world, and in front of it (a front
@@ -658,7 +729,9 @@ bool crownLets(uvec4 v, ivec3 c) {
 }
 
 // 1 where the sun reaches world point `p`, which lies on the boundary of open cell `c`
-// (the cell in front of the face it is on); 0 where anything opaque is in the way.
+// (the cell in front of the face it is on); 0 where anything opaque is in the way. A plant
+// cell part way through arriving or leaving lets through what its size does not cover
+// (CELL-SHRINK, `plantSize`): the ray goes on past it with that share.
 // Whether a figure stands between world point `p` and the sun: on the sun ray through `p`
 // the map holds a figure higher than `p` (by a quarter voxel, so a top face does not shade
 // itself).
@@ -686,22 +759,30 @@ float sunReaches(vec3 p, ivec3 c) {
         (dir.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * inv.x,
         (dir.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * inv.y,
         (dir.z > 0 ? float(c.z + 1) - p.z : p.z - float(c.z)) * inv.z);
+    float pass = 1.0;
     for (int i = 0; i < SUN_MARCH; ++i) {
-        if (c.y >= H || c.z < 0 || c.z >= D) { return 1.0; }
+        if (c.y >= H || c.z < 0 || c.z >= D) { return pass; }
         if (c.y < 0) { return 0.0; }
         int axis = (next.x < next.y && next.x < next.z) ? 0 : (next.y < next.z ? 1 : 2);
         uvec4 v = at(c.x, c.y, c.z);
         if (solidV(v)) { return 0.0; }
         int part = partOf(v);
-        if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
-        if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v)) {
-            return 0.0;
+        if (!PLANT_LIGHT) {
+            if (part == TRUNK || part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
+            if ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v)) { return 0.0; }
+        } else {
+            if (part == LOG || (part == ANIMAL_INTERIM && !softMark(v))) { return 0.0; }
+            if (part == TRUNK
+                || ((part == CROWN || part == CROWN_HEART) && !crownLets(v, c) && !cordCell(v))) {
+                pass *= 1.0 - plantSize(c.x, c.y, c.z);
+                if (pass <= 0.0) { return 0.0; }
+            }
         }
         if (axis == 0) { c.x += dir.x; next.x += inv.x; }
         else if (axis == 1) { c.y += dir.y; next.y += inv.y; }
         else { c.z += dir.z; next.z += inv.z; }
     }
-    return 1.0;
+    return pass;
 }
 
 // A lit colour: the base under the quantised light, and where the sun reaches, leaning

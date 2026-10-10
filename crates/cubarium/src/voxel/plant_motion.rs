@@ -125,6 +125,11 @@ pub struct PlantConfig {
     /// (`model::plant_quarter`), so stands of one species do not all face one way. Read
     /// by the stamp whichever way plants are drawn. Startup only.
     pub turn: bool,
+    /// Whether a cell arriving or leaving casts its light on the rest of the world (its AO
+    /// crease, its sun shadow) by its grow-in size, a leaving cell held in the volume until
+    /// it has shrunk (CELL-SHRINK). Off, that light comes and goes whole at the tick, as
+    /// before. Startup only.
+    pub light_by_size: bool,
 }
 
 impl Default for PlantConfig {
@@ -143,6 +148,7 @@ impl Default for PlantConfig {
             species: BTreeMap::from([("glowcap".to_string(), 0.0)]),
             wind: WindConfig::default(),
             turn: true,
+            light_by_size: true,
         }
     }
 }

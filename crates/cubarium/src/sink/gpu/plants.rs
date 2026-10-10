@@ -23,7 +23,7 @@
 use rustc_hash::FxHashMap;
 
 use cubarium_gpu::plants::{PlantList, PlantRec, SETTLED, cell_scale, pack_cell, pack_faces, unsmooth};
-use cubarium_gpu::voxel::{VoxelStaging, VoxelTexel};
+use cubarium_gpu::voxel::{PART_CROWN, PART_CROWN_HEART, VoxelStaging, VoxelTexel};
 use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::FloraView;
 
@@ -76,6 +76,9 @@ struct Change {
     stand: Option<u64>,
     rec: PlantRec,
     weight: f32,
+    /// CELL-SHRINK: the crown cells beside it (left, right; `u32::MAX` none) of the same crown,
+    /// whose outline edge facing it shows by how much of it is not there.
+    edges: [u32; 2],
 }
 
 /// The cells between ticks: see the module.
@@ -102,6 +105,10 @@ pub(super) struct PlantTracker {
     cache: PlantList,
     cache_valid: bool,
     scratch: Vec<u32>,
+    /// Cells whose hold in the volume began or ended since the packer last took them
+    /// ([`PlantTracker::take_held`]): a leaving cell's texel stays in the volume while it
+    /// shrinks, so the light it casts (the AO crease, the sun's shadow) fades with it.
+    held: Vec<u32>,
 }
 
 fn bit(bits: &[u64], i: u32) -> bool {
@@ -144,6 +151,92 @@ impl PlantTracker {
             cache: PlantList::default(),
             cache_valid: false,
             scratch: Vec::new(),
+            held: Vec::new(),
+        }
+    }
+
+    /// A leaving cell's texel as it was stamped and the style it holds, while it shrinks:
+    /// what the volume keeps at texture index `i` so the light it casts fades with its
+    /// size, `None` for any other cell.
+    pub(super) fn ghost(&self, i: u32) -> Option<(VoxelTexel, Option<StyleKey>)> {
+        if !self.cfg.light_by_size {
+            return None;
+        }
+        self.changes.get(&i).filter(|ch| ch.dying).map(|ch| (ch.texel, ch.key))
+    }
+
+    /// Every leaving cell's texture index (the full pack's overlay takes them).
+    pub(super) fn ghost_cells(&self) -> impl Iterator<Item = u32> + '_ {
+        let on = self.cfg.light_by_size;
+        self.changes.iter().filter(move |(_, ch)| on && ch.dying).map(|(&i, _)| i)
+    }
+
+    /// The cells whose hold began or ended since the last call: the change-only pack
+    /// composes them again.
+    pub(super) fn take_held(&mut self, mut f: impl FnMut(u32)) {
+        for i in self.held.drain(..) {
+            f(i);
+        }
+    }
+
+    /// Whether cell `i` (texture index) is arriving: its crown neighbours keep their edges
+    /// toward it drawn, faded by its size ([`PlantTracker::lights`]), until it has grown.
+    pub(super) fn arriving(&self, i: u32) -> bool {
+        self.cfg.light_by_size && self.changes.get(&i).is_some_and(|ch| !ch.dying)
+    }
+
+    /// The crown cells beside a changing cell at `xyz` (left, right) whose outline edge faces
+    /// it: crown cells of the same crown, as `Stands::crown_continues` reads it. Arriving
+    /// (`leaving` none): from the stamped cell's own part. Leaving, from the last tick's
+    /// texels (`master`) and the one it leaves with: the same stand, or the same style.
+    fn edges(
+        &self,
+        flora: FloraView<'_>,
+        stands: &Stands,
+        xyz: [u32; 3],
+        stand: Option<u64>,
+        leaving: Option<(&[VoxelTexel], VoxelTexel)>,
+    ) -> [u32; 2] {
+        let [x, y, z] = xyz;
+        let (w, h) = (self.width, self.height);
+        let own = stands.at(i64::from(x), i64::from(y), z);
+        [w - 1, 1].map(|dx| {
+            let nx = (x + dx) % w;
+            let p = stands.at(i64::from(nx), i64::from(y), z);
+            let n = VoxelStaging::index(w, h, nx, y, z);
+            let same = matches!(p, Part::Crown { .. })
+                && match leaving {
+                    None => stands.crown_continues(p, i64::from(x), y, z) && own != Part::None,
+                    Some((master, texel)) => {
+                        let was = master[n];
+                        (matches!(was.part(), PART_CROWN | PART_CROWN_HEART) && was.style() == texel.style())
+                            || (stand.is_some()
+                                && stands
+                                    .owner(i64::from(nx), y, z)
+                                    .and_then(|o| flora.stands.get(o))
+                                    .is_some_and(|s| Some(s.id) == stand))
+                    }
+                };
+            if same { n as u32 } else { u32::MAX }
+        })
+    }
+
+    /// Whether some cell is arriving or leaving.
+    pub(super) fn changing(&self) -> bool {
+        self.cfg.light_by_size && !self.changes.is_empty()
+    }
+
+    /// Each arriving or leaving cell's size at frame-clock `now` (seconds), as the plant pass
+    /// draws it, and its crown neighbours ([`Change::edges`]): the weight its light (the AO
+    /// crease and the sun's shadow it casts) takes, and one less it, the share of the
+    /// neighbours' outline edge toward it drawn.
+    pub(super) fn lights(&self, now: f64, mut f: impl FnMut(u32, f32, [u32; 2])) {
+        if !self.cfg.light_by_size {
+            return;
+        }
+        let grow = self.grow_s() as f32;
+        for (&i, ch) in &self.changes {
+            f(i, cell_scale((now - ch.time) as f32, 0.0, ch.dying, grow), ch.edges);
         }
     }
 
@@ -208,10 +301,14 @@ impl PlantTracker {
             lap!("plant gather");
         }
         if settle {
-            for (_, ch) in self.changes.drain() {
+            for (i, ch) in self.changes.drain() {
                 if let Some(key) = ch.key {
                     release_key(palette, &key);
                 }
+                if ch.dying {
+                    self.held.push(i);
+                }
+                self.held.extend(ch.edges.iter().copied().filter(|&n| n != u32::MAX));
             }
         } else {
             let grow = self.grow_s();
@@ -245,6 +342,7 @@ impl PlantTracker {
                         stand: c.stand,
                         rec: PlantRec::default(),
                         weight: c.weight,
+                        edges: self.edges(flora, stands, c.xyz, c.stand, None),
                     },
                 );
             }
@@ -281,8 +379,23 @@ impl PlantTracker {
                     .map_or(PlantRec::default(), |p| p.rec);
                 self.changes.insert(
                     c.index,
-                    Change { dying: true, time: start, xyz: c.xyz, texel, key, stand: c.stand, rec, weight: c.weight },
+                    Change {
+                        dying: true,
+                        time: start,
+                        xyz: c.xyz,
+                        texel,
+                        key,
+                        stand: c.stand,
+                        rec,
+                        weight: c.weight,
+                        edges: if matches!(texel.part(), PART_CROWN | PART_CROWN_HEART) {
+                            self.edges(flora, stands, c.xyz, c.stand, Some((master, texel)))
+                        } else {
+                            [u32::MAX; 2]
+                        },
+                    },
                 );
+                self.held.push(c.index);
             }
             // Changes done.
             let mut done = Vec::new();
@@ -292,10 +405,16 @@ impl PlantTracker {
                 }
             }
             for i in done {
-                if let Some(ch) = self.changes.remove(&i)
-                    && let Some(key) = ch.key
-                {
-                    release_key(palette, &key);
+                if let Some(ch) = self.changes.remove(&i) {
+                    if let Some(key) = ch.key {
+                        release_key(palette, &key);
+                    }
+                    // A leaving cell's hold ends; an arrived cell's crown neighbours close
+                    // their edges toward it again.
+                    if ch.dying {
+                        self.held.push(i);
+                    }
+                    self.held.extend(ch.edges.iter().copied().filter(|&n| n != u32::MAX));
                 }
             }
         }
@@ -632,5 +751,93 @@ mod tests {
         }
         assert!(r.list.plants.iter().skip(1).any(|p| p.amp > 0.0), "the tree sways");
         assert_eq!(r.list.plants[0].amp, 0.0, "plant 0 is still");
+    }
+
+    /// Every cell's size from `lights` at `now`, by texture index, and the edge neighbours.
+    fn lights_at(t: &PlantTracker, now: f64) -> (FxHashMap<u32, f32>, Vec<(u32, u32)>) {
+        let (mut sizes, mut edges) = (FxHashMap::default(), Vec::new());
+        t.lights(now, |i, s, e| {
+            sizes.insert(i, s);
+            edges.extend(e.iter().filter(|&&n| n != u32::MAX).map(|&n| (i, n)));
+        });
+        (sizes, edges)
+    }
+
+    fn held(t: &mut PlantTracker) -> Vec<u32> {
+        let mut v = Vec::new();
+        t.take_held(|i| v.push(i));
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// CELL-SHRINK: a leaving cell stays held (its texel, for the volume) from the tick it
+    /// leaves until it has shrunk, the packer is told when the hold begins and ends, and the
+    /// weight of its light follows its drawn size down without a step.
+    #[test]
+    fn a_leaving_cell_is_held_while_it_shrinks_and_its_light_follows_its_size() {
+        let mut r = Rig::new(still_order());
+        r.tick(1, 0.0, true);
+        assert!(held(&mut r.tracker).is_empty(), "nothing is held on a world's first tick");
+        r.tick(2, 1.0, false);
+        let mut ghosts: Vec<u32> = r.tracker.ghost_cells().collect();
+        ghosts.sort_unstable();
+        assert!(!ghosts.is_empty() && ghosts.iter().all(|&i| r.tracker.ghost(i).is_some()));
+        assert_eq!(held(&mut r.tracker), ghosts, "each hold begins at the tick it leaves");
+        // Frame by frame, each cell's weight is the size the plant pass draws, and moves no
+        // faster than the grow-in's own ease allows.
+        let dt = 1.0 / 60.0;
+        let mut before = lights_at(&r.tracker, 1.0).0;
+        assert!(before.values().all(|&s| s == 1.0), "whole at the tick");
+        let mut t = 1.0;
+        while t < 1.0 + FADE {
+            t += dt;
+            let now = lights_at(&r.tracker, t).0;
+            for (i, &s) in &now {
+                assert!((s - before[i]).abs() <= 1.5 * dt as f32 / GROW as f32 + 1e-4, "cell {i} steps at {t}");
+            }
+            before = now;
+        }
+        assert!(before.values().all(|&s| s == 0.0), "shrunk away by foliage_fade_s");
+        r.tick(3, 1.0 + FADE + 0.01, false);
+        assert_eq!(r.tracker.ghost_cells().count(), 0, "no hold once shrunk");
+        assert_eq!(held(&mut r.tracker), ghosts, "and the packer hears each hold end");
+        assert!(!r.tracker.changing());
+    }
+
+    /// Off, nothing is held and no cell carries a weight: the light comes and goes at the tick.
+    #[test]
+    fn without_light_by_size_nothing_is_held_or_weighted() {
+        let mut r = Rig::new(PlantConfig { light_by_size: false, ..still_order() });
+        r.tick(1, 0.0, true);
+        r.tick(2, 1.0, false);
+        assert!(r.list.cells.iter().any(|&c| unpack_cell(c).3), "the cells still shrink in the plant pass");
+        assert_eq!(r.tracker.ghost_cells().count(), 0);
+        assert!(!r.tracker.changing() && lights_at(&r.tracker, 1.5).0.is_empty());
+    }
+
+    /// An arriving cell's light grows from nothing; the crown cells beside it of its crown are
+    /// named, so their edge toward it fades out as it grows, and are recomposed once it has.
+    #[test]
+    fn an_arriving_cell_names_its_crown_neighbours_and_releases_them_when_grown() {
+        let mut r = Rig::new(still_order());
+        r.tick(1, 0.0, false);
+        r.tick(2, 0.05, true);
+        let (w, h) = (24u32, 32u32);
+        let xyz = |i: u32| (i % w, (i / w) % h, i / (w * h));
+        let (sizes, edges) = lights_at(&r.tracker, 0.05);
+        assert!(!sizes.is_empty() && sizes.values().all(|&s| s == 0.0), "nothing shown at the tick");
+        assert!(sizes.keys().all(|&i| r.tracker.arriving(i)));
+        assert!(!edges.is_empty(), "a vaulttree's crown has cells side by side");
+        for &(c, n) in &edges {
+            let ((cx, cy, cz), (nx, ny, nz)) = (xyz(c), xyz(n));
+            assert!((cy, cz) == (ny, nz) && ((nx + 1) % w == cx || (cx + 1) % w == nx), "{c} beside {n}");
+            assert!(matches!(r.stands.at(i64::from(nx), i64::from(ny), nz), Part::Crown { .. }), "a crown cell");
+        }
+        held(&mut r.tracker);
+        r.tick(3, 0.05 + FADE + 0.01, true);
+        assert!(sizes.keys().all(|&i| !r.tracker.arriving(i)), "grown");
+        let after = held(&mut r.tracker);
+        assert!(edges.iter().all(|(_, n)| after.binary_search(n).is_ok()), "each neighbour recomposed");
     }
 }
