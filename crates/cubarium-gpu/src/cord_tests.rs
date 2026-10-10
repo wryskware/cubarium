@@ -2,7 +2,7 @@
 //! cord where the CPU mirror says, and off the cord it reaches what is behind the cell.
 //! Skips with a printed reason when there is no Vulkan device.
 
-use crate::cord::{CordShape, DrapeCords};
+use crate::cord::{CordShape, CordWave, DrapeCords, WaveRatios};
 use crate::target::Headless;
 use crate::vk::Gpu;
 use crate::voxel::{
@@ -79,8 +79,13 @@ fn face_pixels(p: &VoxelParams) -> Vec<(u32, u32, u32, usize)> {
 #[test]
 fn off_the_cord_the_walk_reaches_the_wall_and_on_it_draws_the_cord_where_the_mirror_says() {
     for cords in [
-        DrapeCords { width_px: 1, shape: CordShape::Straight, wander: 1.0 },
-        DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 1.0 },
+        DrapeCords { width_px: 1, shape: CordShape::Straight, wander: 1.0, wave: CordWave::NONE },
+        DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 1.0, wave: CordWave::NONE },
+        // The long wave, its swing past the column held inside it in the walk.
+        DrapeCords { width_px: 1, shape: CordShape::Eased, wander: 1.0, wave: CordWave { period: 5.0, amplitude: 1.5, octaves: 1, ratios: WaveRatios::Octave } },
+        // With octaves (round 3), both ratios.
+        DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave: CordWave { period: 12.0, amplitude: 0.5, octaves: 3, ratios: WaveRatios::Octave } },
+        DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave: CordWave { period: 24.0, amplitude: 0.5, octaves: 3, ratios: WaveRatios::Jittered } },
     ] {
         let Some((with, p)) = draw(cords, true) else { return };
         let Some((without, _)) = draw(cords, false) else { return };

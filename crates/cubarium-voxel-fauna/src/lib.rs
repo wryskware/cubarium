@@ -1071,6 +1071,26 @@ pub struct Animal {
     /// search image, the encounter memory per prey lineage. Default for every other body.
     #[serde(default)]
     pub hunt: HuntMemory,
+    /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
+    /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
+    /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
+    /// ground pool or a mycelium face — for the presenter, which turns a feeding clip
+    /// toward it. Presentation memory, not state: never saved, read by no rule, and equal on
+    /// every body ([`LastBite`]), so no decision and no comparison sees it.
+    #[serde(skip)]
+    pub bite: LastBite,
+}
+
+/// [`Animal::bite`]: the cell of the body's last bite, if it has bitten since it was made
+/// or loaded. **Transient presentation memory**: it compares equal whatever it holds, so
+/// two bodies that differ only in it are the same body to every rule and every test.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LastBite(pub Option<Site>);
+
+impl PartialEq for LastBite {
+    fn eq(&self, _: &LastBite) -> bool {
+        true
+    }
 }
 
 /// **The stomach** (repair 2 item 10): one raw-food pool per [`Food`] class, each in all
@@ -5458,6 +5478,7 @@ impl Fauna {
             emergency: false,
             bout: None,
             hunt: crate::HuntMemory::default(),
+            bite: LastBite::default(),
         };
         let mut animal = animal;
         // A founder arrives with its eating latch off and a stomach at `s0 · K` of its own

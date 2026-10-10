@@ -87,9 +87,184 @@ legs bend like spiders'"
   `voxel_feed_capture` can place one cheaply; say if not), and the rest transition
   (standing → lowered → standing). Side-on and three-quarter, 6 px and 12 px.
 
+### Seedporter (second)
+
+Loftstrider merged (e85c4499): the engine now has clips per state (`.rig` CRG2: each clip
+names its state, `cropping` or `asleep`, as a loop or a track; `Spec.clips`;
+`AnimalRig::pose(bin, &[ClipAt])` layers them), bone limit 64. Build on it; change the
+engine only if the seedporter needs something it lacks.
+
+The diurnal frugivore (`seedporter()`, `sp_body`, `SP_POSES` in `animal_models.py`; pose
+models `seedporter` = climbing, `-stand`, `-ground`, `-glide`, memory: one Blender rig,
+baked per pose). Wrysk's anatomy: the membranes run from the big arms' wrists to the hind
+knees; **the small fruit arms are the middle pair**.
+
+- Find which pose model the renderer draws while the seedporter crops (it eats fruit in
+  stands and on vine faces) and rig that pose; rig the others too if it is cheap, and say
+  which you did.
+- **Bones**: root (body), head (jaw if the model has one), each small fruit arm a chain of
+  2–3 to the hand; the big arms, legs and tail stay on the root unless the clip needs them.
+  Report bones and cells per bone, adult and young.
+- **Feed clip (placeholder; Wrysk directs the real one)**: the fruit arms do the work.
+  1. Reach: both small arms reach up and forward to a fruit about a body length ahead and
+     above, 0.4 s, eased; the head tips up toward it.
+  2. Pluck and bring: the hands close and pull back to the mouth, 0.4 s, the head dipping to
+     meet them.
+  3. Chew: the head bobs twice, 0.5 s, the arms held in.
+  4. Loop while it crops; the reach and return from the clip weight.
+- No sleep pose this round.
+- **Evidence** as above (`voxel_feed_capture`): today | the clip, side-on and three-quarter,
+  6 px and 12 px, adult and young, in the pose it feeds in.
+
+### Loftstrider round 2 (after Wrysk saw the first clip)
+
+Round 1 merged (e85c4499; MP4s `art/gen/runs/feed-rollout-2026-10-10/loftstrider-feed-rest-px{6,12}.mp4`).
+Wrysk: "so the loftstrider fronds should curve in bending the other direction. they can
+unfurl, reach upwards, and curl the opposite way to place food in the mouth. for the
+sitting, the feet need a separate joint so that they stay flat on the ground. implementing
+aiming is a great idea, or at least the framework for it."
+
+- **Fronds**: from their rest droop they unfurl (straighten), reach upward into the browse
+  band, and curl the **opposite** way to their droop, inward over the head, to place the
+  spray in the mouth on top. Then they relax back to the droop.
+- **Rest**: a foot bone per leg (the ankle a joint), so the toes stay flat on the ground
+  while the knees fold. Also fix the hip bulbs dipping about 5 cm into the ground: the body
+  lowers until its underside touches, no further.
+- **Aiming (the framework, and the loftstrider using it)**:
+  - Sim: when an animal takes a bite of a stand, keep the bitten cell on the animal
+    (`founder_feed`, `cubarium-voxel-fauna/src/step.rs` ~4086, from `body::mouth_meal`'s
+    `Meal::Stand` place). **Transient, out of the save** (`#[serde(skip)]` or kept beside
+    the animal), so no save schema change and no behaviour change; say how you kept the sim
+    bit-for-bit the same in what it decides.
+  - Renderer: per frame, the bite's height above the feet and its bearing from the heading,
+    eased so a new bite doesn't snap the aim. Carried in the figure `Spec` so any species'
+    clips can read it.
+  - Loftstrider: the reach follows the height (blend between a low and a high reach, or
+    IK the fronds to it; your call) and the bearing (the frond pair nearest it does the
+    work, by its six-fold symmetry, and the lean and neck turn toward it). With no bite
+    recorded it reaches as today.
+- **Raise and lower** (Wrysk left it to us: "do whatever makes sense"): the standing model
+  stays as it is (legs nearly straight, so it can't rise above its stand). The body drops
+  instead: for a low bite the knees bend and the body crouches toward it; for a high one it
+  stands at full height and the fronds and neck do the reaching. The crouch comes from the
+  aim's height, eased.
+- **Evidence** as round 1, plus an aiming clip: one animal browsing bites placed low, high,
+  and to each side (stage them in `voxel_feed_capture`), today | round 2.
+
+### Lanternjaw (third)
+
+Seedporter merged (3e107bd1): rigs are looked up by model name
+(`ModelLibrary::rig_in_mode`), so pose models can carry rigs. The Veilhound
+(`chorister`, `ch_feed_*`) is the nearest pattern: a carrion tear.
+
+The ambush carnivore (`lanternjaw()` in `animal_models.py`): an armoured body under six
+back plates, a head with a central ridge and four magenta eyes, **two large pale fangs
+hanging in front of the mouth**, **two striking arms** (a raised femur, a tibia curving
+down into a pale razor blade), walking legs, and the tail branches carrying the lure orbs.
+
+- **Bones**: root (body, plates, walking legs, tail), head (eyes, ridge, fangs), each
+  striking arm a femur and a tibia/blade. Leave the tail and lure on the root unless the
+  clip needs them. Report bones and cells per bone, every bin (the larva is a separate
+  model: leave it).
+- **Feed clip (placeholder; Wrysk directs the real one)**: at a carcass on the ground
+  ahead.
+  1. Pin: both striking arms swing down so the blades press the ground about one voxel
+     ahead, 0.35 s, eased; the head lowers toward the same spot.
+  2. Tear: the head pulls back and up about 4 cm with a small twist, alternating sides,
+     0.4 s, the arms pressing down harder as it pulls; then the head dips again, 0.3 s.
+  3. Every second tear, a swallow: the head lifts about 6 cm, 0.4 s, the arms easing up.
+  4. Loop while it crops; the reach and return from the clip weight.
+- If the aim framework lands on main before you finish (branch `feed-loftstrider2`), don't
+  wait for it; the lanternjaw's carrion is ahead on the ground either way.
+- **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, the
+  adult and the smallest bin past the larva.
+
+### Bellwing (fourth)
+
+Lanternjaw merged (fc7502a3); no engine change was needed. The bellwing is the first flyer
+in the rollout.
+
+The small diurnal nectar feeder (`bellwing()` in `animal_models.py`): a bell-shaped body
+(rim magenta), two pairs of membrane wings with glowing leading edges, and **a tendril out
+of the bell's mouth ending in a spindly corkscrew**. It hovers at flowers and also perches
+(crowns, vine faces, undersides); find which it does while `State::Cropping` holds (the
+flight/perch code in `cubarium-voxel-fauna`) and how the figure pass draws it then
+(any wing beat or hover bob it already has on the class path stays as it is).
+
+- **Bones**: root (bell, wings), and the tendril as a chain of 2–4 down to the corkscrew.
+  Report cells per bone per bin; at 125 mm the tendril may own very few cells, say how
+  many.
+- **Feed clip (placeholder; Wrysk directs the real one)**: sipping at a flower ahead and
+  below.
+  1. Reach: the tendril swings down and forward into the flower, the corkscrew
+     straightening a little, 0.3 s, eased; the bell tips forward about 10°.
+  2. Sip: three small pulses, the tendril drawing back about 1 cm and in again, 0.25 s
+     each, the bell bobbing 1 cm with each.
+  3. Loop while it crops; the reach and return from the clip weight.
+- **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, in the
+  state it feeds in (hovering or perched), adult and the smallest bin.
+
+### The small ground feeders: capgnawer, littershredder, ripple-snail (one package)
+
+Bellwing merged (edaa8469). Lesson from the bellwing and lanternjaw: at 125 mm a small part
+owns 0–3 cells, so a clip shows mostly as the whole front moving. These three are small
+(0.2–0.3 m), so keep each clip to what can read: the front of the body. One rig and clip
+each, same pattern (`RIGS` in `bake_voxel_models.py`; all three stay specimens there,
+`AS_SPECIMEN`, unless the founder bins are already theirs: check the manifest).
+
+- **Capgnawer** (`capgnawer()`; glowcap grazer): two mantle lobes with a central cleft, six
+  mandibles in three stacked pairs round a vertical mouth under the cleft. Bones: root,
+  a front (head/mandible) bone. Clip: the front dips to the cap ahead and gnaws, a small
+  forward-back rasp 0.3 s, three times, then a lift 0.4 s; the lobes stay on the root.
+- **Littershredder** (`littershredder()`; detritus feeder): a blunt plough at the front,
+  gold plates, seven pairs of short legs, two pale feelers curling down under the plough's
+  lip. Bones: root, the plough (head) bone, the feelers if they own cells. Clip: the plough
+  pushes down and forward into the litter about 1 cm and lifts, 0.35 s each, rocking a
+  little side to side; the feelers sweep.
+- **Ripple-snail** (`ripple_snail()`; film grazer): a dome shell on a dark foot, a pale
+  mantle skirt, an open front with two palps reaching forward and down. Bones: root
+  (shell, foot), the front (opening and palps). Clip: the front lowers and the palps sweep
+  side to side over the film, 0.5 s a sweep, with a slow shell bob.
+- Report cells per bone for each, both voxel sizes; if a part owns no cell at 125 mm, say
+  so rather than enlarging it (that is Wrysk's call).
+- **Evidence** as above, one MP4 per species (`<name>-feed-px{6,12}.mp4`).
+
+### Seedporter fruit arms get a voxel (after Wrysk saw the clip)
+
+Seedporter merged (3e107bd1): at 125 mm the small fruit arms own no cells in either pose
+(the folded membrane and the chest take every cell in front of the body), so the clip
+shows only as the head moving. Wrysk: "if youre rigging them in which case sure give them
+a voxel."
+
+- In the bake, give each fruit arm's hand (and the fruit, already on `hand_l`) at least
+  one cell of its own in the rigged pose models (`seedporter-stand`, `seedporter-ground`),
+  the way the eyes are guaranteed theirs (the worker who rigged it pointed at that
+  mechanism; find it in `bake_voxel_models.py` / `animal_models.py`). The cell must sit
+  on the hand bone, in front of the chest, so the reach and pluck show. Report what the
+  pose models look like at rest after it (a still, today | after, both poses, 6 px and
+  12 px), since a new cell changes the resting silhouette.
+- Rebake the two pose models and their rigs (specimen path); report cells per bone.
+- Evidence: the feed MP4 again, today (main) | after, `seedporter-feed-r2-px{6,12}.mp4`.
+
+### Small feeders round 2: the front owns its cells
+
+Small feeders merged (f013da6d): at 125 mm the littershredder's plough and the
+ripple-snail's front own no cells (the root claims them), and the capgnawer's front owns
+one, so the clips barely show. The seedporter's hands (7d85b28b) got cells of their own by
+`own_cells` (a claimed extra cell), which made its front three cells wide, wider than the
+chest. Wrysk's rule: a rigged part gets a voxel.
+
+- Prefer **reassigning** over adding: give the front bone the body's front-most cells by
+  position (as the Veilhound's neck and the lanternjaw's head are split: cells ahead of a
+  plane), so the silhouette doesn't change and the front moves. Use `own_cells` only where
+  a part has no cell at all after that, and say where.
+- Littershredder (all 5 bins), ripple-snail, capgnawer; both voxel sizes. Report cells per
+  bone before/after, and a rest still today | after (6 px, 12 px) to show the silhouette
+  holds.
+- Evidence: the three feed MP4s again, today (main) | after, `<name>-feed-r2-px{6,12}.mp4`.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), seedporter, lanternjaw, bellwing, capgnawer, littershredder,
-ripple-snail. Then sleep, idle and hunker move onto the rig.
+open look question). Then sleep, idle and hunker move onto the rig.
 
 ## Return
 

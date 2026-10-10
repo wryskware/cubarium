@@ -99,6 +99,10 @@ def arm_inputs(args, out):
     relative = Path(args.config_path)
     if not relative.parts or relative.is_absolute() or ".." in relative.parts or relative.parts[0] != "config":
         raise GuardError("--config-path must be a relative path under config/")
+    # Pinned (the lab daemon's ab kind): every arm names an exact commit, which may be a
+    # `git stash create` snapshot of a dirty tree, and a supplied binary built from it.
+    # Configs are then always read from that commit, never from the live working tree.
+    pinned = getattr(args, "pinned", False)
     arms = {}
     for name, value in trees.items():
         tree = Path(value).resolve(strict=True)
@@ -106,18 +110,20 @@ def arm_inputs(args, out):
             raise GuardError(f"{name}: --arm must name a Git tree root")
         head = git(tree, "rev-parse", "HEAD").decode().strip()
         commit = git(tree, "rev-parse", "--verify", f"{commits.get(name, 'HEAD')}^{{commit}}").decode().strip()
-        source_status = tree_status(tree, out)
-        dirty = bool(source_status)
+        if pinned and (name not in binaries or name not in commits):
+            raise GuardError(f"{name}: pinned arms need a supplied binary and commit")
+        source_status = b"" if pinned else tree_status(tree, out)
+        dirty = bool(getattr(args, "dirty", {}).get(name)) if pinned else bool(source_status)
         if name in binaries and name not in commits:
             raise GuardError(f"{name}: a supplied binary requires --commit NAME=REF")
         source = Path(configs[name]) if name in configs else tree / relative
         if not source.is_absolute():
             source = tree / source
-        source = source.resolve(strict=name in configs or commit == head)
+        source = source.resolve(strict=name in configs or (commit == head and not pinned))
         if not source.is_relative_to(tree) or Path(git(source.parent, "rev-parse", "--show-toplevel").decode().strip()).resolve() != tree:
             raise GuardError(f"{name}: config {source} resolves into a different tree than binary source {tree}")
         config_relative = source.relative_to(tree)
-        if commit == head:
+        if commit == head and not pinned:
             content = source.read_bytes()
             origin = "working tree"
         else:
@@ -335,6 +341,12 @@ def early_read(out, stage, arm_names, seeds, metrics, minute):
     return not identical
 
 
+def census_argv(binary, hours, source, root, threads, segment_min):
+    """One staged census run, without placement or priority (callers add those)."""
+    return [str(binary), str(hours), *source, "heuristic", f"threads={threads}", f"vitals={root / 'vitals'}",
+            f"run={root / 'run'}", "check_min=3", f"segment_min={segment_min}", "keep=3"]
+
+
 def jobs_for(stage, arms, seeds, args, wrapper, hours, starts=None):
     jobs = []
     for seed in seeds:
@@ -342,9 +354,8 @@ def jobs_for(stage, arms, seeds, args, wrapper, hours, starts=None):
             root = stage / name / f"s{seed}"
             slot = args.slot_base + len(jobs)
             source = [f"load={starts[name, seed]}"] if starts else [f'config={arm["config"]}', f"seed={seed}"]
-            command = prefix(wrapper, slot) + [arm["binary"], str(hours), *source,
-                "heuristic", f"threads={args.threads}", f"vitals={root / 'vitals'}",
-                f"run={root / 'run'}", "check_min=3", f"segment_min={args.segment_min}", "keep=3"]
+            command = prefix(wrapper, slot) + census_argv(arm["binary"], hours, source, root,
+                                                          args.threads, args.segment_min)
             arm["commands"].append(dict(kind=stage.name, seed=seed, argv=command, line=shlex.join(command)))
             jobs.append(dict(arm=name, seed=seed, slot=slot, command=command, state="queued"))
     return jobs

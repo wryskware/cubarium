@@ -83,6 +83,14 @@ engineering. Iteration speed is priority one. Clean code, fast and dirty process
 
 ## Training resources — correction, 2026-09-18
 
+### Agent Rust builds are gentle — Wrysk, 2026-10-10
+
+"can our rust builds maybe not run at like -j 32? my machine gets bombed with rust-lld and it
+hammers IO and gets less responsive." `~/.local/bin/cargo` wraps cargo for agent shells (CLAUDECODE,
+CODEX_*, labd's LABD_TASK): at most 8 jobs (`CARGO_BUILD_JOBS`, unless set), SCHED_IDLE, nice 19 and
+the idle IO class, all inherited by rustc and rust-lld. labd's `[build] threads` is 8. Don't pass a
+larger `-j`. A human shell gets plain cargo.
+
 ### Simulation study CPU placement — Wrysk, 2026-10-06
 
 Keep each multithreaded simulation study (censuses, probes, staged arms and soaks)
@@ -135,6 +143,22 @@ the machine is no longer otherwise idle. Keep the experiment's wall-time and
 episode limits; this resource allowance does not authorize unbounded searches
 or make ordinary tests larger. The voxel episode trainer is capped at 16 workers:
 measurements on this machine showed diminishing returns above that point.
+
+## Jobs go through labd — Wrysk, 2026-10-10
+
+Once `labd.service` runs (`scripts/lab/lab install`; design/lab-daemon.md), every sim, test
+and build job goes through `scripts/lab/lab submit SPEC`.
+- **What the daemon owns:** it pins commits at submit, builds each (commit, arch) once in a
+  snapshot tree (never the live checkout), places tasks across all jobs on the desktop,
+  eidolon and approved EC2, and runs preflight, tripwires, liveness and `DONE`.
+- **Workers:** they write the spec and hand it back, or submit it when their brief says so,
+  instead of launching. They don't start `systemd-run`, `setsid`, `run-study.py` batches or
+  `ab.py` runs themselves.
+- **The parent:** it keeps one `lab wait --any-new` waiter for all jobs.
+- **EC2:** each launch still needs Wrysk's go, given as
+  `lab approve ec2 ID --max-hours H --max-usd D`, and labd tears the host down when the
+  queue drains.
+- **Until labd is installed,** the launchers above stay the path.
 
 ## Lean orchestration — correction, 2026-09-17
 

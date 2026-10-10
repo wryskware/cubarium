@@ -29,8 +29,9 @@ checked after voxelization at every grid size; coarse-grid aliases claim the nea
 cell in the authored direction, like the existing sub-voxel accent fallback.
 
 Foliage states (`design/handoffs/foliage-states-implementation-2026-10-08.md`): a species
-with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4) is baked in
-every state at every step and variant, the builder's cuts applied to the smaller steps too
+with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4, vaulttree 5) is
+baked in every state at every step and variant (a state's `shelf_fill` or `shelves` may be a
+list, one per variant), the builder's cuts applied to the smaller steps too
 (an umbrellafrond's two tiers are its lowest and top; a seedling's one tier is its
 lowest). The file's state table carries each state's name and the total foliage fraction
 it starts below (`source.json`'s `foliage_state_below`, the species config's). A stripped
@@ -143,6 +144,14 @@ FOUNDER_POSES = {"frondgrazer-hunker": "frondgrazer"}
 # (body_min / body_max)^(1/3) = 0.46 of the adult's length (the lanternjaw's hatchling
 # ratio, which its table keeps by volume).
 SPECIMEN_YOUNG = {"chorister": [0.46]}
+
+# Founders `source.json` lists (since it was regenerated, 71afcbb0) that are still baked as
+# their specimen, one adult bin at the builder's reference size, as the presenter draws them
+# today: the founder path would scale the bellwing to its sim body (0.125 x 0.125 x
+# 0.0625 m), squashing the picked model (0.375 m wingspan) to 3 cells (FEED-ROLLOUT,
+# 2026-10-10). The other four newly listed founders are committed as specimens too, so a
+# full bake keeps them as they are until each gets its own founder bins on purpose.
+AS_SPECIMEN = {"bellwing", "capgnawer", "ripple-snail", "seedporter", "chorister"}
 
 # A founder's other life stage, baked as a specimen of one bin at its built (true) size:
 # name -> `animal_models.lanternjaw_larva` kind. The lanternjaw's rider larva, the
@@ -461,6 +470,10 @@ def bake_plant(sp, vox, out_dir):
             per_state = []
             L.VAULT_LEAN = lean_of(v % copies)
             for _, _, spec in table:
+                for key in ("shelf_fill", "shelves"):  # one per variant (vaulttree b0-2)
+                    if spec and isinstance(spec.get(key), list):
+                        per = spec[key]
+                        spec = dict(spec, **{key: per[(v // copies) % len(per)]})
                 objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v // copies}"), vox, spec)
                 cells = voxelize(objs, vox, role_of)
 
@@ -559,7 +572,49 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
             if bones is not None:
                 c = Vector(((key[0] + 0.5) * vox, (key[1] + 0.5) * vox, (key[2] + 0.5) * vox))
                 bones[key] = A.part_bone(bone, c)
+    if bones is not None:
+        own_cells(objs, vox, cells, bones)
     return cells
+
+
+def own_cells(objs, vox, cells, bones):
+    """A rig's own-cell parts (`animal_models.own_cell`): each group left without a cell
+    of its material on its bone claims one, as an eye claims its accent cell. The cell its
+    centre is in, or, while that holds another bone's part, the next one ahead (+x, the
+    way the model faces), so the claimed cell sits in front of the body. The groups go
+    from the most central (across, y) out, and one whose cell another group has taken
+    steps sideways toward its own side, so a pair beside a middle part stays a pair."""
+    groups = {}
+    for ob in objs:
+        if "own_cell" in ob:
+            groups.setdefault(ob["own_cell"], []).append(ob)
+    if not groups:
+        return
+    centre = {}
+    for g, obs in groups.items():
+        vs = [v.co for ob in obs for v in ob.data.vertices]
+        lo = Vector(min(v[k] for v in vs) for k in range(3))
+        hi = Vector(max(v[k] for v in vs) for k in range(3))
+        centre[g] = (lo + hi) / 2
+    mid = sum((p.y for p in centre.values())) / len(centre)
+    claimed, todo = {}, []
+    for g in sorted(groups, key=lambda g: abs(centre[g].y - mid)):
+        ob, p = groups[g][0], centre[g]
+        slot, bone = A.slot_of(ob.data.materials[0].name), A.part_bone(ob, p)
+        have = [key for key in cells if cells[key] == slot and bones.get(key) == bone]
+        if have:
+            claimed.update((key, g) for key in have)
+        else:
+            todo.append((g, p, slot, bone))
+    for g, p, slot, bone in todo:
+        i, j, k = (math.floor(p[a] / vox) for a in range(3))
+        while (i, j, k) in cells and bones.get((i, j, k)) != bone and (i, j, k) not in claimed:
+            i += 1
+        side = 1 if p.y >= mid else -1
+        while (i, j, k) in claimed:
+            j += side
+        claimed[(i, j, k)] = g
+        cells[(i, j, k)], bones[(i, j, k)] = slot, bone
 
 
 def animal_cells(objs, vox, floor=0):
@@ -593,14 +648,14 @@ def loftstrider_sectors(cells, vox):
     return counts
 
 
-def loftstrider_cells(objs, vox):
+def loftstrider_cells(objs, vox, bones=None):
     """Preserve six authored directions when small landmarks alias on a coarse grid.
 
     Like the accent fallback, a missing landmark claims one cell. Choose the closest
     cell to its mesh in its authored direction, without displacing another landmark.
     Mesh proportions stay untouched; a fine grid that already retains them is unchanged.
     """
-    cells = voxelize_animal(objs, vox)
+    cells = voxelize_animal(objs, vox, 0, bones)
     landmark_slots = set().union(*(s for s, _ in LOFTSTRIDER_PARTS.values()))
     for part, (slots, az) in LOFTSTRIDER_PARTS.items():
         seen = {loftstrider_direction(i, j, vox, az)
@@ -631,12 +686,20 @@ def loftstrider_cells(objs, vox):
                             c = Vector(((i + .5) * vox, (j + .5) * vox, (k + .5) * vox))
                             _, _, face, dist = bvh.find_nearest(c)
                             if face is not None and face_slots[me.polygons[face].material_index] in slots:
-                                candidates.append((dist, key, face_slots[me.polygons[face].material_index]))
+                                candidates.append((dist, key, face_slots[me.polygons[face].material_index],
+                                                   A.part_bone(ob, c)))
             if not candidates:
                 raise ValueError(f"no voxel for loftstrider {part} direction {direction}")
-            _, key, slot = min(candidates)
+            _, key, slot, bone = min(candidates, key=lambda x: x[:3])
             cells[key] = slot
+            if bones is not None:
+                bones[key] = bone
     return cells
+
+
+def ls_parts(n):
+    """The loftstrider's part sizes in bin `n`: Wrysk's calf-l38 blended to the adult."""
+    return A.ls_blend(A.LS_CALVES_R2["calf-l38"], n / (BINS - 1))
 
 
 def build_founder_bin(f, n, vox):
@@ -647,35 +710,74 @@ def build_founder_bin(f, n, vox):
     s = s0 + (1.0 - s0) * t
     if f["name"] == "loftstrider":
         reset_scene()
-        objs = A.build_loftstrider(A.ls_blend(A.LS_CALVES_R2["calf-l38"], t),
-                                  0.5 * vox, 0.5 * vox)
+        objs = A.build_loftstrider(ls_parts(n), 0.5 * vox, 0.5 * vox)
     else:
         objs = build_animal(f["name"], s, adult, vox)
     return adult[0] * s, adult[1] * s, objs
 
 
-# The founders with a rig (FEED-RIG): the builder's clip, sampled. Each is baked with a
-# `<name>.rig` beside its `.cvm` (`write_rig`), named under the manifest's `rigs`.
-RIGS = {"frondgrazer": A.fg_feed_clip, "chorister": A.ch_feed_clip}
+# The founders with a rig (FEED-RIG, FEED-ROLLOUT): the builder's clips, sampled. Each is
+# baked with a `<name>.rig` beside its `.cvm` (`write_rig`), named under the manifest's
+# `rigs`. A rig whose bins are one build scaled has one rig for every bin (`RIGS`, at the
+# reference size); the loftstrider's bins are each their own build, and so its rig
+# (`BIN_RIGS`, the bin's part sizes, in its own metres).
+RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
+        "chorister": lambda: A.feed_rig(A.ch_feed_clip()),
+        "lanternjaw": lambda: A.feed_rig(A.lj_feed_clip()),
+        # a specimen of one bin (its young draw the adult's)
+        "bellwing": lambda: A.feed_rig(A.bw_feed_clip()),
+        # the small ground feeders: the littershredder's founder bins, the capgnawer and
+        # ripple-snail specimens of one bin
+        "littershredder": lambda: A.feed_rig(A.lt_feed_clip()),
+        "capgnawer": lambda: A.feed_rig(A.cg_feed_clip()),
+        "ripple-snail": lambda: A.feed_rig(A.rs_feed_clip()),
+        # the seedporter's pose models it crops in (specimens, one bin each)
+        "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
+        "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
+BIN_RIGS = {"loftstrider": lambda n, cells, vox: A.ls_rig_clips(ls_parts(n), cells, vox)}
 
 
-def write_rig(path, clip, bins):
-    """`<name>.rig` (CRG1; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones,
-    the sampled clip, and per size bin its scale and each cell's bone."""
-    b = bytearray(b"CRG1")
-    b += struct.pack("<B", len(clip["bones"]))
-    for (name, parent), h in zip(clip["bones"], clip["heads"]):
+def write_rig(path, bins):
+    """`<name>.rig` (CRG3; `crates/cubarium/src/voxel/rig.rs` has the layout): the bones,
+    the turn symmetry (`symmetry`: order and each bone's image; none when absent) and the
+    clips, and per size bin its scale, each clip's aim (`aim`, the bite height it reaches
+    for, metres; NaN when absent) and lower (`lower`, the share of the `asleep` track it
+    holds the body at; 0 when absent), its bones' heads, each clip's sampled frames and each
+    cell's bone. `bins`: (length, scale, rig, cells), every rig with the same bones and
+    clips."""
+    first = bins[0][2]
+    b = bytearray(b"CRG3")
+    b += struct.pack("<B", len(first["bones"]))
+    for name, parent in first["bones"]:
         enc = name.encode()
         b += struct.pack("<B", len(enc)) + enc
-        b += struct.pack("<B3f", 255 if parent is None else parent, *h)
-    b += struct.pack("<fH", clip["fps"], len(clip["frames"]))
-    for keys in clip["frames"]:
-        for r, d in keys:
-            b += struct.pack("<9f", *(r[i][j] for i in range(3) for j in range(3)))
-            b += struct.pack("<3f", *d)
+        b += struct.pack("<B", 255 if parent is None else parent)
+    order, image = first.get("symmetry") or (0, [])
+    b += struct.pack("<B", order)
+    if order >= 2:
+        assert len(image) == len(first["bones"])
+        b += bytes(image)
+    b += struct.pack("<B", len(first["clips"]))
+    for clip in first["clips"]:
+        enc = clip["state"].encode()
+        b += struct.pack("<B", len(enc)) + enc
+        b += struct.pack("<BfH", clip["mode"], clip["fps"], len(clip["frames"]))
     b += struct.pack("<B", len(bins))
-    for length, scale, cells in bins:
-        b += struct.pack("<dfI", length, scale, len(cells))
+    for length, scale, rig, cells in bins:
+        assert rig["bones"] == first["bones"] and len(rig["clips"]) == len(first["clips"])
+        b += struct.pack("<df", length, scale)
+        for clip in rig["clips"]:
+            aim = clip.get("aim")
+            b += struct.pack("<ff", float("nan") if aim is None else aim, clip.get("lower", 0.0))
+        for h in rig["heads"]:
+            b += struct.pack("<3f", *h)
+        for clip, c0 in zip(rig["clips"], first["clips"]):
+            assert len(clip["frames"]) == len(c0["frames"])
+            for keys in clip["frames"]:
+                for r, d in keys:
+                    q = r.to_quaternion()
+                    b += struct.pack("<7f", q.w, q.x, q.y, q.z, *d)
+        b += struct.pack("<I", len(cells))
         for dx, dy, dz, bone in cells:
             b += struct.pack("<bbbB", dx, dy, dz, bone)
     with open(path, "wb") as fh:
@@ -694,15 +796,18 @@ def bake_animal(f, vox, out_dir):
     bytes, per-bin detail, rig file or None)."""
     name = f["name"]
     steps, meta = [], []
-    rigged = name in RIGS
+    rigged = name in RIGS or name in BIN_RIGS
     rig_bins = []
     for n in range(BINS):
         length, width, objs = build_founder_bin(f, n, vox)
         bones = {} if rigged else None
-        raw = loftstrider_cells(objs, vox) if name == "loftstrider" else voxelize_animal(objs, vox, 0, bones)
-        if rigged:
+        raw = loftstrider_cells(objs, vox, bones) if name == "loftstrider" else voxelize_animal(objs, vox, 0, bones)
+        if name in BIN_RIGS:
+            # the bin is its own build, in metres
+            rig_bins.append((length, 1.0 / vox, raw, bones, BIN_RIGS[name](n, bones, vox)))
+        elif rigged:
             # the bin is the reference build scaled by length / reference length
-            rig_bins.append((length, length / A.REF[name][1] / vox, raw, bones))
+            rig_bins.append((length, length / A.REF[name][1] / vox, raw, bones, None))
         counts = loftstrider_sectors(raw, vox) if name == "loftstrider" else None
         if counts is not None:
             if any(count != 6 for count in counts.values()):
@@ -721,16 +826,21 @@ def bake_animal(f, vox, out_dir):
 
 
 def write_rig_of(name, out_dir, rig_bins, vox):
-    """`<name>.rig` from its clip and its bins' (length, scale, cells, cell bones); the
-    file's name."""
-    reset_scene()
-    clip = RIGS[name]()
+    """`<name>.rig` from its bins' (length, scale, cells, cell bones, the bin's own rig or
+    None for the shared one); the file's name."""
+    shared = None
+    if any(r is None for *_, r in rig_bins):
+        reset_scene()
+        shared = RIGS[name]()
     rig = f"{name}.rig"
-    bins = [(length, scale, rig_cells(raw, bones, clip["bones"])) for length, scale, raw, bones in rig_bins]
-    rig_size = write_rig(os.path.join(out_dir, rig), clip, bins)
-    counts = [{n: sum(1 for c in cells if c[3] == i) for i, (n, _) in enumerate(clip["bones"])}
-              for _, _, cells in bins]
-    print(f"{vox} m {name}: rig {len(clip['bones'])} bones, {len(clip['frames'])} frames, {rig_size} bytes,"
+    bins = [(length, scale, r or shared, rig_cells(raw, bones, (r or shared)["bones"]))
+            for length, scale, raw, bones, r in rig_bins]
+    rig_size = write_rig(os.path.join(out_dir, rig), bins)
+    first = bins[0][2]
+    counts = [{n: sum(1 for c in cells if c[3] == i) for i, (n, _) in enumerate(first["bones"])}
+              for _, _, _, cells in bins]
+    frames = {c["state"]: len(c["frames"]) for c in first["clips"]}
+    print(f"{vox} m {name}: rig {len(first['bones'])} bones, frames {frames}, {rig_size} bytes,"
           f" cells per bone by bin {counts}", flush=True)
     return rig
 
@@ -750,7 +860,7 @@ def bake_specimen(name, vox, out_dir):
         raw = voxelize_animal(objs, vox, floor, bones)
         cells = cells_of(raw, lambda mat, k: 0x30 if animal_role(mat) == "accent" else 0x00)
         if rigged:
-            rig_bins.append((l0 * s, s / vox, raw, bones))
+            rig_bins.append((l0 * s, s / vox, raw, bones, None))
         steps.append((l0 * s, w0 * s, [cells]))
         meta.append({"length_m": round(l0 * s, 4), "cells": len(cells)})
     file = f"{name}.cvm"
@@ -802,7 +912,7 @@ def main():
                 {"states": states} if len(states) > 1 else {})
             print(f"{vox} m {sp['name']}: {len(meta)} steps, {size} bytes", flush=True)
         for f in src["founders"]:
-            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF:
+            if (ONLY and f["name"] not in ONLY) or f["name"] not in A.REF or f["name"] in AS_SPECIMEN:
                 continue
             file, size, meta, rig = bake_animal(f, vox, out_dir)
             manifest["founders"][f["name"]] = file
@@ -821,8 +931,8 @@ def main():
             manifest["detail"][name] = {"bytes": size, "bins": meta}
             print(f"{vox} m {name}: {base}'s pose, {len(meta)} bins, {size} bytes", flush=True)
         for name in SPECIMENS:
-            if (ONLY and name not in ONLY) or name not in A.REF or any(
-                    f["name"] == name for f in src["founders"]):
+            if (ONLY and name not in ONLY) or name not in A.REF or (name not in AS_SPECIMEN and any(
+                    f["name"] == name for f in src["founders"])):
                 continue
             file, size, meta, rig = bake_specimen(name, vox, out_dir)
             manifest["specimens"][name] = file
