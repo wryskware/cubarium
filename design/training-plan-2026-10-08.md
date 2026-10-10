@@ -1017,6 +1017,14 @@ control and the reward accounting; display targets after seeing results.
      over-size family, with the condition that leaving must not sink world resources: the leaver's
      matter goes to litter where it leaves. DISPERSAL (Codex) building; Veilhound dispersal built but
      off until role call 2.
+   - DISPERSAL merged 1270d05c (role calls 1 A+B and 2 B1): loftstrider season, herd max 3 adults; Veilhound
+     pack max 4 adults, pups don't count; leavers' matter to litter.
+   - Role call 3 (Wrysk, 2026-10-09: "do A first"): vine fruit hangs ripe about 12 days, shipped 3e3098ed
+     (fruit_s 1200 s, spur_share 0.58 keeps the flower cadence). The eidolon check showed standing fruit up
+     5-25x but seedporter vine intake unchanged, so fruit is not their limit. SEEDPORTER-INTAKE (Opus)
+     diagnoses what is.
+   - 2026-10-09 21:15 the session was OOM-killed (a 24 GB target copy in tmpfs /tmp); the library and probes
+     resumed as user services.
    - WORLD-EDIT merged 39b02553 (Wrysk: place/remove/move plants and animals, API only): `Sim::edit`,
      session `edit {json}` plus a `pick` query, `voxel_census edit=FILE.toml` (thin, populate, place,
      remove, paint, clear). Ledger-booked, no schema bump. 1,559 crate tests and the full suite pass;
