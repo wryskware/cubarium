@@ -72,6 +72,9 @@ def arg(name, default=None):
 ROOT = arg("--out", os.path.join(REPO, "assets", "voxel-models"))
 SOURCE = arg("--source", os.path.join(ROOT, "source.json"))
 ONLY = set(filter(None, (arg("--only") or "").split(",")))
+# Scratch previews only (VAULT-SHAPE 2026-10-10): bake a plant's full-grown size step and
+# nothing smaller. Never for a library the presenter grows stands through.
+ADULT_ONLY = "--adult-only" in ARGS
 
 # Placeholders (design/backlog.md §1).
 VARIANTS = 3
@@ -429,8 +432,9 @@ def bake_plant(sp, vox, out_dir):
         return roles.get(mat, "foliage")
 
     table = state_table(sp)
+    L.VAULT_FILL = float(sp.get("shelf_fill", 1.0))  # VAULT-SHAPE scratch candidates only
     steps, meta = [], []
-    for (kh, kr), t in size_steps(sp, vox):
+    for (kh, kr), t in size_steps(sp, vox)[-1 if ADULT_ONLY else 0:]:
         prof = sp["profile"]
         si = stage_index(prof, t)
         stage = prof[si]

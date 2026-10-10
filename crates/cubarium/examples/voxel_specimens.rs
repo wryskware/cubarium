@@ -55,6 +55,15 @@
 //!
 //! `--loftstrider-bins` draws only the loftstrider's five founder bins, newborn to adult,
 //! using live bodies at the bins' length keys. `--voxel-m M` chooses the baked grid size.
+//!
+//! VAULT-SHAPE (`design/handoffs/vaulttree-proportions-2026-10-10.md`): `--crown-radius
+//! SPECIES:R` sets the species' full-grown crown radius (`crown_radius_m[1]`, metres) in the
+//! strip's flora config, so a scratch library baked at another radius is drawn at its own
+//! adult step and spaced for it. `--scale` adds the loftstrider and the seedporter (the
+//! models' specimens) after a `--candidates` or `--stand` strip, for scale. `--stand
+//! SPECIES:N:SPACING_M` draws N full-grown stands of the species and nothing else, on a
+//! triangular lattice whose nearest neighbours are SPACING_M apart (rows of three, two,
+//! three, … alternating half a step), so overlapping crowns show how a stand fills.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -126,6 +135,15 @@ fn main() -> Result<()> {
     let mut states_of: Option<Species> = None;
     let mut loftstrider_bins = false;
     let mut voxel_m = 0.125;
+    let mut radius_override: Option<(Species, f64)> = None;
+    let mut scale = false;
+    let mut stand: Option<(Species, usize, f64)> = None;
+    let species_named = |name: &str| {
+        Species::ALL
+            .into_iter()
+            .find(|s| s.name() == name)
+            .with_context(|| format!("no species {name}"))
+    };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -136,6 +154,20 @@ fn main() -> Result<()> {
             "--contest" => contest = true,
             "--gpu" => gpu = true,
             "--loftstrider-bins" => loftstrider_bins = true,
+            "--scale" => scale = true,
+            "--crown-radius" => {
+                let v = args.next().context("--crown-radius SPECIES:R")?;
+                let (name, r) = v.split_once(':').context("--crown-radius SPECIES:R")?;
+                radius_override = Some((species_named(name)?, r.parse()?));
+            }
+            "--stand" => {
+                let v = args.next().context("--stand SPECIES:N:SPACING_M")?;
+                let mut it = v.split(':');
+                let name = it.next().context("--stand SPECIES:N:SPACING_M")?;
+                let n = it.next().context("--stand SPECIES:N:SPACING_M")?.parse()?;
+                let d = it.next().context("--stand SPECIES:N:SPACING_M")?.parse()?;
+                stand = Some((species_named(name)?, n, d));
+            }
             "--voxel-m" => voxel_m = args.next().context("--voxel-m M")?.parse()?,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -174,7 +206,10 @@ fn main() -> Result<()> {
     }
     let out = out.context("usage: voxel_specimens OUT.png [--glyphs] [--wilt W]")?;
 
-    let flora_cfg = FloraConfig::default();
+    let mut flora_cfg = FloraConfig::default();
+    if let Some((species, r)) = radius_override {
+        flora_cfg.species_mut(species).crown_radius_m[1] = r;
+    }
     // Lay the specimens out first, so the world is exactly as wide as they need.
     let mut plan: Vec<(Species, f64, bool)> = Vec::new();
     if let Some((species, idx)) = &candidates {
@@ -196,7 +231,12 @@ fn main() -> Result<()> {
             }
         }
     }
-    let solo = candidates.is_some() || states_of.is_some() || loftstrider_bins;
+    // `--stand`: the stands' (x, z) cells on the lattice, after the plan is laid out.
+    let mut stand_cells: Vec<(i64, u32)> = Vec::new();
+    if let Some((species, n, _)) = stand {
+        plan.extend((0..n).map(|_| (species, 1.0, false)));
+    }
+    let solo = candidates.is_some() || states_of.is_some() || loftstrider_bins || stand.is_some();
     for species in Species::ALL.into_iter().filter(|_| !solo) {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
@@ -207,7 +247,25 @@ fn main() -> Result<()> {
     }
     let mut x = GAP;
     let mut columns = Vec::new();
-    for &(species, _, _) in &plan {
+    let mut stand_depth = 0u32;
+    if let Some((species, n, d)) = stand {
+        let r = (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
+        let step = d / voxel_m;
+        let x0 = GAP + r;
+        let z0 = r + 2;
+        for k in 0..n {
+            // rows of three then two, alternating half a step: 0 1 2 / 3 4 / 5 6 7 / …
+            let (row, col) = (k / 5 * 2 + usize::from(k % 5 >= 3), if k % 5 >= 3 { k % 5 - 3 } else { k % 5 });
+            let off = if row % 2 == 1 { 0.5 } else { 0.0 };
+            let cx = x0 + ((col as f64 + off) * step).round() as i64;
+            let cz = z0 + (row as f64 * step * 0.75f64.sqrt()).round() as i64;
+            stand_cells.push((cx, cz as u32));
+            columns.push(cx);
+            stand_depth = stand_depth.max((cz + r + 3) as u32);
+            x = x.max(cx + r + 1 + GAP);
+        }
+    }
+    for &(species, _, _) in plan.iter().skip(stand_cells.len()) {
         let r =
             (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
         let r = r.max(1);
@@ -215,6 +273,11 @@ fn main() -> Result<()> {
         x += 2 * r + 1 + GAP + extra_gap.get(columns.len() - 1).copied().unwrap_or(0);
     }
     let founders = if solo { 0 } else { FOUNDERS.len() };
+    let tallest = plan
+        .iter()
+        .map(|&(sp, _, _)| (flora_cfg.species(sp).crown_height_m_at(f64::INFINITY) / voxel_m).ceil() as u32)
+        .max()
+        .unwrap_or(0);
     let animal_x: Vec<i64> = (0..founders as i64).map(|k| x + 4 + k * SLOT).collect();
     let mut width = (x + founders as i64 * SLOT + 6) as u32;
 
@@ -230,7 +293,7 @@ fn main() -> Result<()> {
         ))
     };
     // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
-    let mut depth = 8u32;
+    let mut depth = 8u32.max(stand_depth);
     let mut specimens = Vec::new();
     let mut loftstriders = Vec::new();
     if loftstrider_bins {
@@ -265,9 +328,12 @@ fn main() -> Result<()> {
         }
         width = (sx + GAP) as u32;
     }
-    if let Some(lib) = models.as_ref().filter(|_| !solo) {
-        let mut sx = x + FOUNDERS.len() as i64 * SLOT + 3;
+    if let Some(lib) = models.as_ref().filter(|_| !solo || scale) {
+        let mut sx = x + founders as i64 * SLOT + 3;
         for (name, heading_rad, lift) in SPECIMENS {
+            if solo && !matches!(name, "loftstrider" | "seedporter") {
+                continue;
+            }
             let Some(cells) = lib.specimen(name).and_then(|m| m.select(f64::INFINITY)) else {
                 eprintln!("voxel_specimens: no {name} model; skipped");
                 continue;
@@ -295,7 +361,7 @@ fn main() -> Result<()> {
 
     let world_cfg = Config {
         width,
-        height: 40,
+        height: 40u32.max(tallest + 8),
         depth,
         voxel_m,
         ..Config::default()
@@ -324,13 +390,14 @@ fn main() -> Result<()> {
     // The stands' row. `--contest` stands them two rows deeper, so the turf drawn in front
     // of a full-grown vaulttree's trunk (two cells in front of its stem) is in the world.
     let stand_z = if contest { 3 } else { 1 };
-    for (&(species, f, _), &x) in plan.iter().zip(&columns) {
+    for (k, (&(species, f, _), &x)) in plan.iter().zip(&columns).enumerate() {
         let wood = flora_cfg.species(species).wood_max * f;
+        let z = stand_cells.get(k).map_or(stand_z, |c| c.1);
         if !flora.apply(
             &world,
             FloraCommand::Seed {
                 x,
-                z: stand_z,
+                z,
                 species,
                 wood,
             },

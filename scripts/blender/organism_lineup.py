@@ -684,6 +684,9 @@ VAULT_SHELVES = [
 ]
 VAULT_AXIS_PX, VAULT_HALF_PX = 512.0, 475.0
 VAULT_GROUND_PX, VAULT_TOP_PX = 1530.0, 15.0
+# Shelf fill factor: 1 is the pick's twelve shelves. Only VAULT-SHAPE's scratch candidate D
+# sets it (the bake reads a source.json species' optional `shelf_fill`).
+VAULT_FILL = 1.0
 
 
 def vault_shelf(c, rs, rng, drape_to=None):
@@ -750,7 +753,8 @@ def vaulttree(x, y, h, r, layers, i, rng):
     # four highest for a juvenile); the foliage band 0.55-1.0 is the pick's shelf span
     za, zb = fol[1] * h, fol[2] * h
     shelves = VAULT_SHELVES if drape is not None else VAULT_SHELVES[:4]
-    for k, (px, py, ph) in enumerate(shelves):
+
+    def place(k, px, py, ph):
         rs = r * ph / VAULT_HALF_PX * (fol[3])
         ztop = max(za + rs * 0.42 * 1.1, h * (VAULT_GROUND_PX - py) / (VAULT_GROUND_PX - VAULT_TOP_PX))
         ox = (px - VAULT_AXIS_PX) / VAULT_HALF_PX * r
@@ -767,6 +771,20 @@ def vaulttree(x, y, h, r, layers, i, rng):
         mid = o.lerp(base, 0.55) + Vector((0, 0, 0.05 * h))
         tube(bezier(o, mid, base, 5), 0.06 if k < 2 or ph > 150 else 0.045, 0.02, "violet", seg=6)
         vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h))
+    for k, (px, py, ph) in enumerate(shelves):
+        place(k, px, py, ph)
+    if drape is not None and VAULT_FILL > 1.0:
+        # VAULT-SHAPE candidate D (2026-10-10; scratch bakes only, VAULT_FILL is 1 in every
+        # committed bake): more shelves inside the same crown radius. Each gap between two
+        # of the pick's shelves (by height) gets one more, mirrored across the axis, at the
+        # gap's middle height and the two shelves' mean size; the largest gaps first,
+        # round(12 x (VAULT_FILL - 1)) of them. Placed after the pick's shelves, so those
+        # keep their random draws.
+        order = sorted(VAULT_SHELVES, key=lambda sh: sh[1])
+        gaps = sorted(zip(order, order[1:]), key=lambda ab: ab[0][1] - ab[1][1])
+        n = round(len(VAULT_SHELVES) * (VAULT_FILL - 1.0))
+        for k, (a, b) in enumerate(gaps[:n]):
+            place(len(VAULT_SHELVES) + k, 2 * VAULT_AXIS_PX - a[0], (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
     # the leader to the crowning shelf
     tube([top, top + Vector((0, 0, (zb - zs) * 0.5)), Vector((x + (VAULT_SHELVES[0][0] - VAULT_AXIS_PX)
           / VAULT_HALF_PX * r * 0.5, y, zb - 0.1))], rt * 0.55, 0.03, "violet", seg=6)
