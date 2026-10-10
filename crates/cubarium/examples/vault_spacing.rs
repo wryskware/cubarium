@@ -14,7 +14,8 @@
 //! 1..=SEEDS (default 8) as `founding_probe` does, optionally steps TICKS, and prints for
 //! each seed the vaulttrees' wood fractions and each one's horizontal distance to its
 //! nearest vaulttree neighbour (all of them, and among the adult-stage ones, wood above
-//! the profile's adult threshold), in metres across the ring.
+//! the profile's adult threshold), in metres across the ring, with each one's total
+//! foliage fraction (the presenter's foliage-state input, `total_foliage_fraction`).
 
 use cubarium::voxel::{LayerConfig, Seeds, found, load_config, params_of};
 use cubarium_voxel_flora::Species;
@@ -69,12 +70,13 @@ fn report(flora: &cubarium_voxel_flora::Flora, voxel_m: f64, ring_m: f64, label:
     println!("{label}: {} vaulttrees, {} adult (wood > {adult_wf} max)", vt.len(), adult.len());
     for (s, (p, dn)) in vt.iter().zip(pts.iter().zip(&d)) {
         println!(
-            "  x={:.2} z={:.2} y={} wf={:.2} nearest={:.2} m layer fill {:?}",
+            "  x={:.2} z={:.2} y={} wf={:.2} nearest={:.2} m total foliage {:.2} layer fill {:?}",
             p.0,
             p.1,
             s.site.y,
             s.wood / sc.wood_max,
             dn,
+            cubarium::voxel::stand::total_foliage_fraction(s, sc),
             cubarium_voxel_flora::layer_iter(flora.config(), s, voxel_m)
                 .filter(|l| l.capacity > 0.0)
                 .map(|l| (l.stock / l.capacity * 100.0).round() / 100.0)

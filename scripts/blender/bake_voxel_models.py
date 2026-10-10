@@ -29,8 +29,9 @@ checked after voxelization at every grid size; coarse-grid aliases claim the nea
 cell in the authored direction, like the existing sub-voxel accent fallback.
 
 Foliage states (`design/handoffs/foliage-states-implementation-2026-10-08.md`): a species
-with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4) is baked in
-every state at every step and variant, the builder's cuts applied to the smaller steps too
+with states in `organism_lineup.FOLIAGE_STATES` (bloomcrown 3, umbrellafrond 4, vaulttree 5) is
+baked in every state at every step and variant (a state's `shelf_fill` or `shelves` may be a
+list, one per variant), the builder's cuts applied to the smaller steps too
 (an umbrellafrond's two tiers are its lowest and top; a seedling's one tier is its
 lowest). The file's state table carries each state's name and the total foliage fraction
 it starts below (`source.json`'s `foliage_state_below`, the species config's). A stripped
@@ -461,6 +462,10 @@ def bake_plant(sp, vox, out_dir):
             per_state = []
             L.VAULT_LEAN = lean_of(v % copies)
             for _, _, spec in table:
+                for key in ("shelf_fill", "shelves"):  # one per variant (vaulttree b0-2)
+                    if spec and isinstance(spec.get(key), list):
+                        per = spec[key]
+                        spec = dict(spec, **{key: per[(v // copies) % len(per)]})
                 objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v // copies}"), vox, spec)
                 cells = voxelize(objs, vox, role_of)
 
