@@ -1686,6 +1686,12 @@ pub struct Hunter {
     pub vertical_reach_m: f64,
     /// The jaw's point: the nose, this × its current length ahead of its centre (half).
     pub jaw_forward_length_fraction: f64,
+    /// Fraction of a flyer's looming range at which this hunter's strike is visible.
+    /// Dimensionless [0, 1]: 1 is a plain whole-body lunge, smaller gives a short arm
+    /// grab less warning, and 0 gives no strike warning.
+    /// Only the strike is scaled: an approaching body's ordinary looming is unchanged.
+    #[serde(default = "strike_warning_neutral")]
+    pub strike_warning_scale: f64,
     /// The three phases, seconds (§2.3): a crouch, the lunge, and the recovery in which it
     /// cannot strike and moves at half speed.
     pub windup_s: f64,
@@ -1719,6 +1725,10 @@ fn ones_by_founder() -> [f64; Founder::COUNT] {
     [1.0; Founder::COUNT]
 }
 
+fn strike_warning_neutral() -> f64 {
+    1.0
+}
+
 impl Hunter {
     /// Vertical strike extent over the hunter's support, metres.
     pub fn strike_height_m(&self, geometry: &Body) -> f64 {
@@ -1749,6 +1759,7 @@ impl Hunter {
         jaw_band_height_fraction: 0.6,
         vertical_reach_m: 0.0,
         jaw_forward_length_fraction: 0.5,
+        strike_warning_scale: 1.0,
         windup_s: 0.15,
         lunge_s: 0.25,
         recovery_s: 3.0,
@@ -2612,6 +2623,7 @@ impl FounderPhysiology {
                         jaw_band_height_fraction: 2.0,
                         vertical_reach_m: 0.0,
                         jaw_forward_length_fraction: 0.5,
+                        strike_warning_scale: 1.0,
                         windup_s: 0.1,
                         lunge_s: 0.15,
                         recovery_s: 1.0,
