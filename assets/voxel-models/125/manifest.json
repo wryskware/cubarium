@@ -5149,6 +5149,9 @@
   "seedporter-stand": "seedporter-stand.rig",
   "seedporter-ground": "seedporter-ground.rig",
   "lanternjaw": "lanternjaw.rig",
-  "bellwing": "bellwing.rig"
+  "bellwing": "bellwing.rig",
+  "littershredder": "littershredder.rig",
+  "ripple-snail": "ripple-snail.rig",
+  "capgnawer": "capgnawer.rig"
  }
 }

@@ -684,6 +684,11 @@ RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         "lanternjaw": lambda: A.feed_rig(A.lj_feed_clip()),
         # a specimen of one bin (its young draw the adult's)
         "bellwing": lambda: A.feed_rig(A.bw_feed_clip()),
+        # the small ground feeders: the littershredder's founder bins, the capgnawer and
+        # ripple-snail specimens of one bin
+        "littershredder": lambda: A.feed_rig(A.lt_feed_clip()),
+        "capgnawer": lambda: A.feed_rig(A.cg_feed_clip()),
+        "ripple-snail": lambda: A.feed_rig(A.rs_feed_clip()),
         # the seedporter's pose models it crops in (specimens, one bin each)
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}

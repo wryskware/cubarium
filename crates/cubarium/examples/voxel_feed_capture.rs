@@ -26,6 +26,11 @@
 //! sips in) `BW_HOVER_M` over the floor, on the frondgrazer's script. Its model is a
 //! specimen of one bin, so the newborn draws the adult's.
 //!
+//! `--founder capgnawer|littershredder|ripple-snail` (the small ground feeders): an adult and
+//! a newborn on the floor, on the frondgrazer's script. The capgnawer and ripple-snail are
+//! specimens of one bin, so their newborns draw the adult's; the littershredder's newborn
+//! is its founder's smallest bin.
+//!
 //! `--aim` (FEED-ROLLOUT round 2, loftstrider only): one adult cropping on through four
 //! staged bites (`AIM_BITES`: low ahead, high ahead, then level to each side), its last
 //! bite set on the body as the sim keeps it (`Animal::bite`), so the clip aims at each.
@@ -35,7 +40,8 @@
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
 //!     [--px N] [--heading DEG] [--flipbook PATH]
-//!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing] [--pose stand|ground]
+//!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing|capgnawer|
+//!                littershredder|ripple-snail] [--pose stand|ground]
 //!     [--aim] [--models DIR]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
@@ -276,6 +282,9 @@ fn main() -> Result<()> {
                     "chorister" | "veilhound" => Founder::Chorister,
                     "loftstrider" => Founder::Loftstrider,
                     "lanternjaw" => Founder::Lanternjaw,
+                    "capgnawer" => Founder::Capgnawer,
+                    "littershredder" => Founder::Blind,
+                    "ripple-snail" => Founder::RippleSnail,
                     "bellwing" => {
                         mode = MobilityMode::Fly;
                         Founder::Bellwing
@@ -287,7 +296,7 @@ fn main() -> Result<()> {
                         Founder::Seedporter
                     }
                     f => bail!(
-                        "--founder frondgrazer, chorister, loftstrider, seedporter, lanternjaw or bellwing, not {f}"
+                        "--founder frondgrazer, chorister, loftstrider, seedporter, lanternjaw, bellwing, capgnawer, littershredder or ripple-snail, not {f}"
                     ),
                 }
             }
@@ -327,6 +336,7 @@ fn main() -> Result<()> {
     let sp = founder == Founder::Seedporter;
     let lj = founder == Founder::Lanternjaw;
     let bw = founder == Founder::Bellwing;
+    let small = matches!(founder, Founder::Capgnawer | Founder::Blind | Founder::RippleSnail);
     let perched = sp && mode == MobilityMode::Perched;
     anyhow::ensure!(!aiming || ls, "--aim is the loftstrider's");
     let (mut w, xs, z) = match founder {
@@ -339,6 +349,8 @@ fn main() -> Result<()> {
         Founder::Lanternjaw => (world_of(26, 10, 9), vec![8, 18], 4),
         // 0.375 m across the wings, 0.4 m tall with the tendril, hovering
         Founder::Bellwing => (world_of(14, 10, 7), vec![4, 10], 3),
+        // 0.19-0.375 m long: two or three voxels each
+        Founder::Capgnawer | Founder::Blind | Founder::RippleSnail => (world_of(12, 6, 5), vec![3, 8], 2),
         _ => (world(22, 7), vec![6, 15], 3),
     };
     if perched {
@@ -374,7 +386,7 @@ fn main() -> Result<()> {
         // the loftstrider's second is a newborn calf (its own build, its own bin); the
         // seedporter's a newborn (its pose models are one bin: the adult's); the
         // lanternjaw's a newborn, the founder's smallest bin (its larva is the rider)
-        a.body = if (ls || sp || lj || bw) && i == 1 { newborn } else { adult };
+        a.body = if (ls || sp || lj || bw || small) && i == 1 { newborn } else { adult };
         a.state = State::Resting;
         if bw {
             // aloft, holding still: as it sips at a flower
