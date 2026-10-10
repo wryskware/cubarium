@@ -337,3 +337,12 @@ Options, to choose when the game version's direction is clearer:
   interventions a budget with game meaning, and keeps the world itself closed.
 
 Studies can keep "outside" either way (a per-call or per-scenario source switch).
+
+## 16. Voxelize animals live on the world grid (Wrysk, 2026-10-10: "its worth doing a study but lets hold off")
+
+Idea from the FEED-RIG trial's flipbook arm: draw animals from their 3D models and have the
+GPU voxelize them every frame on the world's voxel boundaries, so all movement is on the
+grid. Held as a study, not started: it needs a skinned-mesh pass, a per-frame voxelizer
+that matches the bake's rules (coats, open faces, glyphs), and higher-fidelity models; on
+the world grid, walking and turning would also step a whole voxel at a time, as the
+flipbook arm did. Shipped instead: the bone rig with turned cubes (B).
