@@ -99,6 +99,12 @@ pub const TWINKLE_WRAP_S: f64 = 3600.0;
 /// Seconds for a rain mode to fade in or out (checkpoint 2): a shower comes in over a few
 /// seconds, and one mode cross-fades into the next.
 pub const RAIN_TAU_S: f32 = 2.5;
+/// Seconds for the rain's haze (its veil over the depth of the scene) to follow the rain
+/// (FOG-MOTION): far slower than the streaks, so the veil gathers and thins as weather
+/// does, over about a minute, instead of switching in with the mode. At night it is most
+/// of what a drizzle shows (a pale veil over the dark scene and sky), and at
+/// [`RAIN_TAU_S`] it came and went in a couple of seconds.
+pub const RAIN_HAZE_TAU_S: f32 = 20.0;
 /// Seconds for the fog to follow the view. The model moves fog over minutes; this only
 /// smooths a jump (a new world, a preview).
 pub const FOG_TAU_S: f32 = 3.0;
@@ -176,6 +182,9 @@ pub struct Eased {
     pub rain: [f32; 3],
     /// The rain rate, m/s, eased as the modes are.
     pub rain_rate: f32,
+    /// How much of each rain mode's haze hangs in the air (drizzle, shower, downpour),
+    /// each 0..1, following the modes over [`RAIN_HAZE_TAU_S`].
+    pub haze: [f32; 3],
     /// Ground fog, 0..1.
     pub fog: f32,
     /// The most recent strike's fill flash and bolt ([`strike_light`]), and the strike.
@@ -196,6 +205,7 @@ impl Eased {
         seconds: 0.0,
         rain: [0.0; 3],
         rain_rate: 0.0,
+        haze: [0.0; 3],
         fog: 0.0,
         flash: 0.0,
         bolt: 0.0,
@@ -251,6 +261,7 @@ impl WeatherEase {
                 seconds: 0.0,
                 rain: modes,
                 rain_rate: rate,
+                haze: modes,
                 fog: target.fog.clamp(0.0, 1.0),
                 flash,
                 bolt,
@@ -276,6 +287,10 @@ impl WeatherEase {
                         let r = ease(s.rain_rate, rate, dt, RAIN_TAU_S);
                         if rate == 0.0 && r < 1e-3 * R0 { 0.0 } else { r }
                     },
+                    haze: [0, 1, 2].map(|i| {
+                        let h = ease(s.haze[i], modes[i], dt, RAIN_HAZE_TAU_S);
+                        if modes[i] == 0.0 && h < 1e-3 { 0.0 } else { h }
+                    }),
                     fog: {
                         let f = ease(s.fog, target.fog.clamp(0.0, 1.0), dt, FOG_TAU_S);
                         if target.fog <= 0.0 && f < 1e-3 { 0.0 } else { f }
@@ -380,6 +395,80 @@ pub const FOG_FLASH: f32 = 0.4;
 pub const FOG_GLOW: f32 = 0.5;
 /// The fog's own hue, which the ambient leans a third of the way to: a pale lavender.
 pub const FOG_LAVENDER_SRGB: u32 = 0xC8B8F0;
+
+/// How the ground fog moves (FOG-MOTION, `design/handoffs/fog-motion-2026-10-10.md`, a
+/// trial for Wrysk to pick from video; `[light] fog_motion`). Every mode keeps the fog's
+/// own drifting pattern (`voxel.frag`'s `fogNoise`); the speeds are voxels and seconds of
+/// sim time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FogMotion {
+    pub mode: FogMode,
+    /// Breathing: how far a bank's density swings either way, as a share of it (0..1).
+    pub breath: f32,
+    /// Breathing: seconds for a bank to swell, thin and swell again (nudged to a whole
+    /// number of them in the weather clock's 3600 s wrap).
+    pub breath_s: f32,
+    /// Flowing: how fast the banks and the pattern in them drift along +x (the way the
+    /// clouds drift and the plants' breeze runs), voxels a second, on top of the drift
+    /// the pattern always has (nudged to a whole number of laps round the ring in 3600 s).
+    pub flow: f32,
+}
+
+/// [`FogMotion::mode`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FogMode {
+    /// The fog as it was (its fine pattern evolving and drifting with the clouds).
+    #[default]
+    Fixed,
+    /// And each bank's density swells and thins slowly, every bank on its own phase.
+    Breathing,
+    /// And the banks drift along with the air.
+    Flowing,
+    /// Flowing, and less of a flat sheet (candidate d): the band's top billows with the
+    /// fog's pattern and its density is taken at two depths along each ray.
+    Deep,
+}
+
+impl FogMode {
+    /// The shader's code for it (`fogM.x`).
+    pub fn code(self) -> f32 {
+        match self {
+            FogMode::Fixed => 0.0,
+            FogMode::Breathing => 1.0,
+            FogMode::Flowing => 2.0,
+            FogMode::Deep => 3.0,
+        }
+    }
+}
+
+/// `[light] fog_breath`, `fog_breath_s` and `fog_flow` by default (subtle first guesses
+/// for Wrysk to tune from the video).
+pub const FOG_BREATH_DEFAULT: f32 = 0.5;
+pub const FOG_BREATH_S_DEFAULT: f32 = 40.0;
+pub const FOG_FLOW_DEFAULT: f32 = 0.5;
+
+impl Default for FogMotion {
+    fn default() -> FogMotion {
+        FogMotion {
+            mode: FogMode::Fixed,
+            breath: FOG_BREATH_DEFAULT,
+            breath_s: FOG_BREATH_S_DEFAULT,
+            flow: FOG_FLOW_DEFAULT,
+        }
+    }
+}
+
+impl FogMotion {
+    /// The shader's `fogM`: the mode, the breath's swing, its period, the flow.
+    pub fn uniform(&self) -> [f32; 4] {
+        [
+            self.mode.code(),
+            self.breath.clamp(0.0, 1.0),
+            self.breath_s.max(1.0),
+            self.flow.max(0.0),
+        ]
+    }
+}
 
 /// `[light] star_bloom` by default: how much of the brightest stars' light feeds the
 /// bloom (0 skips it).
@@ -538,6 +627,8 @@ pub struct Look {
     /// streaks' colour (linear: the palette's water surface toward its light, lit by the
     /// time of day and the flash).
     pub rain: [f32; 3],
+    /// How much of each mode's haze hangs in the air ([`Eased::haze`]).
+    pub rain_haze: [f32; 3],
     pub rings: f32,
     pub rain_colour: [f32; 3],
     /// Ground fog: its density a voxel of path at the fog's floor (0: none), the light it
@@ -564,6 +655,7 @@ impl Look {
         self.cloud_cover > 1e-3
             || self.stars > 1e-3
             || self.rain.iter().any(|&r| r > 0.0)
+            || self.rain_haze.iter().any(|&h| h > 0.0)
             || self.rings > 0.0
             || self.fog > 0.0
             || self.flash > 0.0
@@ -793,6 +885,7 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         cloud_shade,
         star_bloom: p.star_bloom.max(0.0),
         rain,
+        rain_haze: e.haze.map(|h| h.clamp(0.0, 1.0)),
         rings,
         rain_colour,
         fog: FOG_DENSITY * fog,

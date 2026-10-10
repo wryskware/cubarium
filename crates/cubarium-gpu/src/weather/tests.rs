@@ -208,3 +208,40 @@ fn dawn_fog_glows_warm() {
     let warmth = |c: [f32; 3]| c[0] / c[2];
     assert!(warmth(dawn.fog_light()) > warmth(fog(0.5).fog_light()));
 }
+
+#[test]
+fn each_fog_motion_has_its_own_code_and_a_bounded_uniform() {
+    let codes: Vec<f32> = [FogMode::Fixed, FogMode::Breathing, FogMode::Flowing, FogMode::Deep]
+        .iter()
+        .map(|m| m.code())
+        .collect();
+    for (i, a) in codes.iter().enumerate() {
+        assert!(codes[i + 1..].iter().all(|b| b != a), "{codes:?}");
+    }
+    let wild = FogMotion { mode: FogMode::Deep, breath: 3.0, breath_s: 0.0, flow: -1.0 };
+    let [mode, breath, period, flow] = wild.uniform();
+    assert_eq!(mode, FogMode::Deep.code());
+    assert!((0.0..=1.0).contains(&breath) && period >= 1.0 && flow >= 0.0);
+}
+
+/// The rain's haze follows the mode by its own slower ease: it gathers and thins a little
+/// every frame, lags the streaks both ways, and lingers after they stop.
+#[test]
+fn the_rain_haze_gathers_and_thins_slower_than_the_streaks() {
+    let mut e = WeatherEase::default();
+    e.advance(&Weather::CLEAR_NOON, 0.0, 256, 0.0);
+    let drizzle = Weather { rain: Rain::Drizzle, rain_m_per_s: 0.1 * R0, ..Weather::CLEAR_NOON };
+    let mut last = 0.0f32;
+    for k in 1..=60 * 30 {
+        let w = if k <= 60 * 5 { &drizzle } else { &Weather::CLEAR_NOON };
+        let s = e.advance(w, 1.0 / 60.0, 256, 0.0);
+        assert!((s.haze[0] - last).abs() < 0.01, "frame {k}: {last} -> {}", s.haze[0]);
+        if k == 60 * 5 {
+            assert!(s.haze[0] < s.rain[0], "the haze lags the streaks in: {s:?}");
+        }
+        if k == 60 * 30 {
+            assert!(s.rain[0] == 0.0 && s.haze[0] > 0.0, "the haze outlasts the streaks: {s:?}");
+        }
+        last = s.haze[0];
+    }
+}

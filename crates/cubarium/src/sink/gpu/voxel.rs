@@ -394,6 +394,12 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.renderer.read_raster(&self.gpu)
     }
 
+    /// The look the next frame draws, and the ground fog's floor (voxels up): what a
+    /// capture logs to follow the weather frame by frame.
+    pub fn look(&self) -> (cubarium_gpu::weather::Look, f32) {
+        (self.renderer.look(), self.renderer.fog_floor())
+    }
+
     /// Turn the picture `x` raster columns round the ring (the hosted view's pan).
     pub fn set_view_x(&mut self, x: i32) {
         self.renderer.set_view_x(x);
@@ -2692,6 +2698,17 @@ pub fn params_of(cfg: &VoxelConfig, proj: Projection, roof_from_texture: bool) -
         },
         star_bloom: cfg.light.star_bloom.max(0.0),
         day_sky_brightness: cfg.light.day_sky_brightness.clamp(0.0, 2.0),
+        fog_motion: cubarium_gpu::weather::FogMotion {
+            mode: match cfg.light.fog_motion {
+                crate::voxel::FogMotionKind::Fixed => cubarium_gpu::weather::FogMode::Fixed,
+                crate::voxel::FogMotionKind::Breathing => cubarium_gpu::weather::FogMode::Breathing,
+                crate::voxel::FogMotionKind::Flowing => cubarium_gpu::weather::FogMode::Flowing,
+                crate::voxel::FogMotionKind::Deep => cubarium_gpu::weather::FogMode::Deep,
+            },
+            breath: cfg.light.fog_breath,
+            breath_s: cfg.light.fog_breath_s,
+            flow: cfg.light.fog_flow,
+        },
         plants: (cfg.figures.plants == PlantDraw::Models).then(|| cfg.plants.motion()),
     }
 }
@@ -3248,6 +3265,19 @@ mod tests {
     /// The same packer, tick after tick, against the old pack run fresh each time: a
     /// terrain edit, a moved animal, a stand that grows and one that dies all have to
     /// leave nothing of the tick before behind.
+
+    /// `[light] fog_motion` and its numbers reach the renderer's params as written.
+    #[test]
+    fn the_fog_motion_trial_reaches_the_renderer() {
+        let cfg: VoxelConfig =
+            toml::from_str("[light]\nfog_motion = \"deep\"\nfog_breath = 0.3\nfog_breath_s = 25.0\nfog_flow = 0.8\n")
+                .unwrap();
+        let proj = Projection::new(cfg.tilt_degrees, 6, cfg.raster_height, &cfg.sim.world).unwrap();
+        let m = params_of(&cfg, proj, true).fog_motion;
+        assert_eq!(m.mode, cubarium_gpu::weather::FogMode::Deep);
+        assert_eq!((m.breath, m.breath_s, m.flow), (0.3, 25.0, 0.8));
+        assert!(toml::from_str::<VoxelConfig>("[light]\nfog_motion = \"swirling\"\n").is_err());
+    }
     #[test]
     fn the_cheap_pack_writes_the_texels_the_old_pack_wrote() {
         let c = config();
