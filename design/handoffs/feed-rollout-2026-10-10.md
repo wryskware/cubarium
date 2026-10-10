@@ -87,8 +87,37 @@ legs bend like spiders'"
   `voxel_feed_capture` can place one cheaply; say if not), and the rest transition
   (standing → lowered → standing). Side-on and three-quarter, 6 px and 12 px.
 
+### Seedporter (second)
+
+Loftstrider merged (e85c4499): the engine now has clips per state (`.rig` CRG2: each clip
+names its state, `cropping` or `asleep`, as a loop or a track; `Spec.clips`;
+`AnimalRig::pose(bin, &[ClipAt])` layers them), bone limit 64. Build on it; change the
+engine only if the seedporter needs something it lacks.
+
+The diurnal frugivore (`seedporter()`, `sp_body`, `SP_POSES` in `animal_models.py`; pose
+models `seedporter` = climbing, `-stand`, `-ground`, `-glide`, memory: one Blender rig,
+baked per pose). Wrysk's anatomy: the membranes run from the big arms' wrists to the hind
+knees; **the small fruit arms are the middle pair**.
+
+- Find which pose model the renderer draws while the seedporter crops (it eats fruit in
+  stands and on vine faces) and rig that pose; rig the others too if it is cheap, and say
+  which you did.
+- **Bones**: root (body), head (jaw if the model has one), each small fruit arm a chain of
+  2–3 to the hand; the big arms, legs and tail stay on the root unless the clip needs them.
+  Report bones and cells per bone, adult and young.
+- **Feed clip (placeholder; Wrysk directs the real one)**: the fruit arms do the work.
+  1. Reach: both small arms reach up and forward to a fruit about a body length ahead and
+     above, 0.4 s, eased; the head tips up toward it.
+  2. Pluck and bring: the hands close and pull back to the mouth, 0.4 s, the head dipping to
+     meet them.
+  3. Chew: the head bobs twice, 0.5 s, the arms held in.
+  4. Loop while it crops; the reach and return from the clip weight.
+- No sleep pose this round.
+- **Evidence** as above (`voxel_feed_capture`): today | the clip, side-on and three-quarter,
+  6 px and 12 px, adult and young, in the pose it feeds in.
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), seedporter, lanternjaw, bellwing, capgnawer, littershredder,
+open look question), lanternjaw, bellwing, capgnawer, littershredder,
 ripple-snail. Then sleep, idle and hunker move onto the rig.
 
 ## Return
