@@ -226,8 +226,8 @@ bool plantTexel(int x, int y, int z, uvec4 v, bool top, int dx, int dy, inout ve
 // S on is row `row - S` of its cap, from the back edge, as the atlas lays them out. A
 // posing body's cap (WX4) is drawn through here from the band's own voxel, so the walk
 // still calls each glyph function from one place.
-bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out bool lum) {
-    lum = false;
+bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, out vec3 glow) {
+    glow = vec3(0.0);
     uint q = glyphTexel(partOf(v), glyphOf(v), dx, row);
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
@@ -236,13 +236,24 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
     int localY = top ? row - S : row;
     float hz = hazeAt(float(z) + (top ? float(RISE - 1 - localY) / float(RISE) : 0.0));
     if (tone == 63 && !top) { return false; }
+    // GLOW-EASE: an emitter part way on adds its colour over its pigment's share.
+    vec3 eAdd = vec3(0.0);
+    float keep = 1.0;
     if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
-        // An emitter: its style's emissive colour, unshadowed and at full value.
+        // An emitter: its style's emissive colour (or the host's for this cell this
+        // frame), unshadowed and at full value.
         vec3 e = styleEmit(int(v.a));
+        float on = 1.0;
+        cellEmit(x, y, z, e, on);
         if (any(greaterThan(e, vec3(0.0)))) {
-            rgb = hazed(e, hz);
-            lum = true;
-            return true;
+            // `glow`, the emission alone, is what the bloom and the walk's emitter test read.
+            glow = hazed(e, hz);
+            if (on >= 1.0) {
+                rgb = glow;
+                return true;
+            }
+            eAdd = e;
+            keep = 1.0 - on;
         }
     }
     if (!plantTexel(x, y, z, v, top, dx, localY, base)) { return false; }
@@ -283,7 +294,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
             vec3 f = shadeFront(base, x, y, z, dx, localY, cf);
             c = rim ? mix(f, tl, u.plantA.z) : f;
         }
-        rgb = hazed(c, hz);
+        rgb = hazed(c * keep + eAdd, hz);
         return true;
     }
     if (top) {
@@ -317,20 +328,28 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
 }
 
 // `localY` is the cap's row from its back edge (RISE - 1 - r for a cell where it stands).
-bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, out bool lum) {
-    lum = false;
+bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, out vec3 glow) {
+    glow = vec3(0.0);
     int r = RISE - 1 - localY;
     int atlasY = (partOf(v) * 8 + glyphOf(v)) * (S + RISE) + S + localY;
     uint q = texelFetch(glyphTex, ivec2(dx, atlasY), 0).r;
     vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
     vec3 base = pigment.rgb;
     int tone = int(q >> 2);
+    vec3 eAdd = vec3(0.0);
+    float keep = 1.0;
     if (LIT && (tone == TONE_EMIT || emitsWhole(pigment.a))) {
         vec3 e = styleEmit(int(v.a));
+        float on = 1.0;
+        cellEmit(x, y, z, e, on);
         if (any(greaterThan(e, vec3(0.0)))) {
-            rgb = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
-            lum = true;
-            return true;
+            glow = hazed(e, hazeAt(float(z) + float(r) / float(RISE)));
+            if (on >= 1.0) {
+                rgb = glow;
+                return true;
+            }
+            eAdd = e;
+            keep = 1.0 - on;
         }
     }
     if (!plantTexel(x, y, z, v, true, dx, localY, base)) { return false; }
@@ -346,7 +365,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
             float gain = 0.5 + float(tone & 15) / 16.0;
             lc = mix(lc, own / u.plantA.x * gain, u.shadeB.y);
         }
-        rgb = hazed(lc, hazeAt(float(z) + float(r) / float(RISE)));
+        rgb = hazed(lc * keep + eAdd, hazeAt(float(z) + float(r) / float(RISE)));
         return true;
     }
     float shade = roofShade(roofGap(x, y, z));
@@ -1298,7 +1317,10 @@ vec3 reflectionShade(bool found, ivec3 c, vec3 hp, int axis, vec3 r) {
         uint q = texelFetch(glyphTex, ivec2(t.y, atlasY), 0).r;
         vec4 pigment = texelFetch(styleTex, ivec2(int(q & 3u), int(v.a)), 0);
         vec3 e = styleEmit(int(v.a));
-        if ((int(q >> 2) == TONE_EMIT || emitsWhole(pigment.a)) && any(greaterThan(e, vec3(0.0)))) {
+        bool emits = int(q >> 2) == TONE_EMIT || emitsWhole(pigment.a);
+        float on = 1.0;
+        if (emits) { cellEmit(c.x, c.y, c.z, e, on); }
+        if (emits && any(greaterThan(e, vec3(0.0)))) {
             return hazed(e, hazeAt(float(c.z)));
         }
         base = pigment.rgb;
@@ -1955,14 +1977,23 @@ void main() {
                     if (isVine(f) && vineKind(f) == VINE_FLUSH) {
                         vec4 t = vineTexel(f, x, level, z - 1, dx, S - 1 - r);
                         if (t.a >= 0.5) {
-                            if (LIT && !vineEmits(t)) {
+                            // GLOW-EASE: a flagged mouth texel draws the host's colour for
+                            // the cell this frame over its pigment's share.
+                            bool em = LIT && vineEmits(t);
+                            vec3 e = t.rgb;
+                            float on = 1.0;
+                            if (em) { cellEmit(x, level, z - 1, e, on); }
+                            if (LIT && (!em || on < 1.0)) {
                                 t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                    canopyAt(x, z - 1, level));
                             }
+                            if (em) {
+                                t.rgb = (on < 1.0 ? t.rgb * (1.0 - on) : vec3(0.0)) + e;
+                                em = any(greaterThan(e, vec3(0.0)));
+                            }
                             float h = hazeAt(float(z));
                             acc += trans * hazed(t.rgb, h);
-                            trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
-                                                        : vec3(0.0);
+                            trans = em ? emitterTrans(trans, hazed(e, h), h) : vec3(0.0);
                             zHit = float(z); break;
                         }
                     }
@@ -1981,14 +2012,21 @@ void main() {
                     || (k == VINE_SLIVER_R && dx >= S - q)) {
                     vec4 t = vineTexel(v, x, level, z, dx, S - 1 - r);
                     if (t.a >= 0.5) {
-                        if (LIT && !vineEmits(t)) {
+                        bool em = LIT && vineEmits(t);
+                        vec3 e = t.rgb;
+                        float on = 1.0;
+                        if (em) { cellEmit(x, level, z, e, on); }
+                        if (LIT && (!em || on < 1.0)) {
                             t.rgb = shadeFront(t.rgb, x, level, z, dx, S - 1 - r,
                                                canopyAt(x, z - 1, level));
                         }
+                        if (em) {
+                            t.rgb = (on < 1.0 ? t.rgb * (1.0 - on) : vec3(0.0)) + e;
+                            em = any(greaterThan(e, vec3(0.0)));
+                        }
                         float h = hazeAt(float(z));
                         acc += trans * hazed(t.rgb, h);
-                        trans = LIT && vineEmits(t) ? emitterTrans(trans, hazed(t.rgb, h), h)
-                                                    : vec3(0.0);
+                        trans = em ? emitterTrans(trans, hazed(e, h), h) : vec3(0.0);
                         zHit = float(z); break;
                     }
                 }
@@ -2005,12 +2043,13 @@ void main() {
                     v = at(x, fy, z);
                 }
                 vec3 art;
-                bool lum;
-                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, lum)) {
+                vec3 glow;
+                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, glow)) {
                     plantBehind = plantHidden(v);
                     if (partOf(v) == ANIMAL_INTERIM && highlighted(x, fy, z)) { art = hiTint(art); }
                     acc += trans * art;
-                    trans = LIT && lum ? emitterTrans(trans, art, hazeAt(float(z))) : vec3(0.0);
+                    trans = LIT && any(greaterThan(glow, vec3(0.0)))
+                        ? emitterTrans(trans, glow, hazeAt(float(z))) : vec3(0.0);
                     zHit = float(z); break;
                 }
             }
@@ -2036,16 +2075,16 @@ void main() {
             if (v.g != 0u) { waterAt(x, below, z, v, px.y, acc, trans); }
             int p = partOf(v);
             vec3 cap;
-            bool lum;
+            vec3 glow;
             // A posing cell's cap is where its settle and breath put it (WX4).
             int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
             if (isBlockPart(p) && !walkSkipsPlant(v, trans) && cl >= 0
-                && glyphCapAt(x, below, z, v, cl, dx, cap, lum)) {
+                && glyphCapAt(x, below, z, v, cl, dx, cap, glow)) {
                 plantBehind = plantHidden(v);
                 if (p == ANIMAL_INTERIM && highlighted(x, below, z)) { cap = hiTint(cap); }
                 acc += trans * cap;
-                trans = LIT && lum
-                    ? emitterTrans(trans, cap, hazeAt(float(z) + float(r) / float(RISE)))
+                trans = LIT && any(greaterThan(glow, vec3(0.0)))
+                    ? emitterTrans(trans, glow, hazeAt(float(z) + float(r) / float(RISE)))
                     : vec3(0.0);
                 zHit = float(z) + (float(r) + 0.5) / float(RISE); break;
             }

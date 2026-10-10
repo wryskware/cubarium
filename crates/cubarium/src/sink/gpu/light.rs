@@ -978,6 +978,20 @@ pub(crate) struct GlowSet {
     buckets: Vec<Vec<((u32, u32, u32), [f32; 3])>>,
     /// Scratch: the curve cells' sums.
     sum: Vec<[f32; 3]>,
+    /// GLOW-EASE's emitters ([`GlowSet::mix_with`]): each source glow cell's light at unit
+    /// colour (its cells and their falloff), kept until the terrain or the reach moves.
+    footprints: rustc_hash::FxHashMap<u32, Vec<(u32, f32)>>,
+    footprint_key: (u64, u32),
+    footprint_seen: Vec<u32>,
+    footprint_mark: u32,
+    footprint_queue: VecDeque<(u32, u8)>,
+    /// This mix's sources by glow cell, the light they add, the cells it reached (and a
+    /// flag per cell), and the cells the last mix's reached.
+    anim_src: Vec<(u32, [f32; 3])>,
+    anim: Vec<[f32; 3]>,
+    anim_in: Vec<bool>,
+    anim_cells: Vec<u32>,
+    anim_prev: Vec<u32>,
 }
 
 impl GlowSet {
@@ -996,6 +1010,16 @@ impl GlowSet {
             stale: true,
             buckets: vec![Vec::new(); n],
             sum: vec![[0.0; 3]; cells],
+            footprints: Default::default(),
+            footprint_key: (u64::MAX, 0),
+            footprint_seen: vec![0; cells],
+            footprint_mark: 0,
+            footprint_queue: VecDeque::new(),
+            anim_src: Vec::new(),
+            anim: vec![[0.0; 3]; cells],
+            anim_in: vec![false; cells],
+            anim_cells: Vec::new(),
+            anim_prev: Vec::new(),
         }
     }
 
@@ -1067,7 +1091,67 @@ impl GlowSet {
     /// Mix the grids at the curves' gains (`gains[k]` for curve `k`; `gains[0]` unused)
     /// into [`GlowSet::bytes`], bumping [`GlowSet::key`] when a byte changed. Returns
     /// whether one did.
+    #[cfg(test)]
     pub(crate) fn mix(&mut self, gains: &[f32]) -> bool {
+        self.mix_with(gains, std::iter::empty(), 0.0, 0)
+    }
+
+    /// [`GlowSet::mix`], plus GLOW-EASE's emitters (`animated`: each a voxel and its colour
+    /// this tick, in linear light, `crate::voxel::glow_ease`) added on top: each source glow
+    /// cell's light is spread once at unit colour (its **footprint**, by the spread's own
+    /// rule) and scaled by the sources' sum every tick, which is the one-grid build of the
+    /// same emitters up to float rounding, since the spread is linear in its sources.
+    pub(crate) fn mix_with(
+        &mut self,
+        gains: &[f32],
+        animated: impl Iterator<Item = ((u32, u32, u32), [f32; 3])>,
+        glow_gain: f32,
+        reach: u32,
+    ) -> bool {
+        // The animated sources, by glow cell.
+        self.anim_src.clear();
+        for (v, rgb) in animated {
+            let c = self.grids[0].cell_of(v.0, v.1, v.2);
+            self.anim_src.push((c, rgb.map(|k| k * glow_gain)));
+        }
+        self.anim_src.sort_unstable_by_key(|s| s.0);
+        self.anim_src.dedup_by(|b, a| {
+            if a.0 == b.0 {
+                for k in 0..3 {
+                    a.1[k] += b.1[k];
+                }
+                true
+            } else {
+                false
+            }
+        });
+        let fkey = (self.grids[0].terrain, reach);
+        if self.footprint_key != fkey {
+            self.footprints.clear();
+            self.footprint_key = fkey;
+        }
+        self.anim_cells.clear();
+        for j in 0..self.anim_src.len() {
+            let (src, rgb) = self.anim_src[j];
+            if rgb == [0.0; 3] {
+                continue;
+            }
+            if !self.footprints.contains_key(&src) {
+                let fp = self.footprint(src, reach);
+                self.footprints.insert(src, fp);
+            }
+            for &(c, w) in &self.footprints[&src] {
+                let cu = c as usize;
+                if !self.anim_in[cu] {
+                    self.anim_in[cu] = true;
+                    self.anim_cells.push(c);
+                }
+                for k in 0..3 {
+                    self.anim[cu][k] += rgb[k] * w;
+                }
+            }
+        }
+        let animating = !self.anim_cells.is_empty() || !self.anim_prev.is_empty();
         let quantise = |l: [f32; 3]| l.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
         let mut changed = false;
         let mut put = |bytes: &mut [u8], c: usize, rgb: [u8; 3]| {
@@ -1084,7 +1168,7 @@ impl GlowSet {
             for (c, l) in steady.iter().enumerate() {
                 put(&mut self.bytes, c, quantise(*l));
             }
-        } else if gains == self.gains.as_slice() {
+        } else if gains == self.gains.as_slice() && !animating {
             return false;
         }
         let gain = |k: usize| gains.get(k).copied().unwrap_or(1.0);
@@ -1106,9 +1190,31 @@ impl GlowSet {
                 }
             }
         }
-        for &c in &self.union {
-            put(&mut self.bytes, c as usize, quantise(self.sum[c as usize]));
+        let union = &self.union;
+        let base = |c: u32, sum: &[[f32; 3]]| {
+            if union.binary_search(&c).is_ok() { sum[c as usize] } else { steady[c as usize] }
+        };
+        for &c in union {
+            if !self.anim_in[c as usize] {
+                put(&mut self.bytes, c as usize, quantise(self.sum[c as usize]));
+            }
         }
+        // The animated emitters' cells over whatever else lights them, and the cells only
+        // the last mix's reached back to that alone.
+        for &c in &self.anim_cells {
+            let (b, a) = (base(c, &self.sum), self.anim[c as usize]);
+            put(&mut self.bytes, c as usize, quantise([b[0] + a[0], b[1] + a[1], b[2] + a[2]]));
+        }
+        for &c in &self.anim_prev {
+            if !self.anim_in[c as usize] {
+                put(&mut self.bytes, c as usize, quantise(base(c, &self.sum)));
+            }
+        }
+        for &c in &self.anim_cells {
+            self.anim[c as usize] = [0.0; 3];
+            self.anim_in[c as usize] = false;
+        }
+        std::mem::swap(&mut self.anim_prev, &mut self.anim_cells);
         self.stale = false;
         self.gains.clear();
         self.gains.extend_from_slice(gains);
@@ -1116,6 +1222,53 @@ impl GlowSet {
             self.key += 1;
         }
         changed
+    }
+
+    /// The light one source in glow cell `src` sends each cell at unit colour, by
+    /// [`Glow::spread`]'s rule (the same reach, falloff and terrain stops).
+    fn footprint(&mut self, src: u32, reach: u32) -> Vec<(u32, f32)> {
+        let g = &self.grids[0];
+        let (dw, dh, dd) = (g.dims.0 as i64, g.dims.1 as i64, g.dims.2 as i64);
+        let reach = reach.min(254) as u8;
+        let fall = 1.0 / (f32::from(reach) + 1.0);
+        self.footprint_mark = self.footprint_mark.wrapping_add(1);
+        if self.footprint_mark == 0 {
+            self.footprint_seen.fill(0);
+            self.footprint_mark = 1;
+        }
+        let mark = self.footprint_mark;
+        let mut out = Vec::new();
+        let queue = &mut self.footprint_queue;
+        queue.clear();
+        queue.push_back((src, 0));
+        self.footprint_seen[src as usize] = mark;
+        while let Some((c, steps)) = queue.pop_front() {
+            let ci = c as usize;
+            out.push((c, 1.0 - f32::from(steps) * fall));
+            if steps >= reach || (steps > 0 && u32::from(g.air[ci]) * 2 < u32::from(g.total[ci])) {
+                continue;
+            }
+            let (x, y, z) = (i64::from(c) % dw, (i64::from(c) / dw) % dh, i64::from(c) / (dw * dh));
+            for (nx, ny, nz) in [
+                (x - 1, y, z),
+                (x + 1, y, z),
+                (x, y - 1, z),
+                (x, y + 1, z),
+                (x, y, z - 1),
+                (x, y, z + 1),
+            ] {
+                if !(0..dh).contains(&ny) || !(0..dd).contains(&nz) {
+                    continue;
+                }
+                let n = ((nz * dh + ny) * dw + nx.rem_euclid(dw)) as usize;
+                if self.footprint_seen[n] == mark || g.air[n] == 0 {
+                    continue;
+                }
+                self.footprint_seen[n] = mark;
+                queue.push_back((n as u32, steps + 1));
+            }
+        }
+        out
     }
 }
 

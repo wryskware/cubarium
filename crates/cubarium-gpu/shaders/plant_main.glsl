@@ -132,18 +132,18 @@ void main() {
         plantVoxel(c, v);
         ivec3 p = plantCellAt(c);
         vec3 rgb;
-        bool lum;
-        bool shown = cap ? glyphCapAt(p.x, p.y, p.z, v, row, dx, rgb, lum)
-                         : glyphFrontAt(p.x, p.y, p.z, v, row, dx, rgb, lum);
+        vec3 glow;
+        bool shown = cap ? glyphCapAt(p.x, p.y, p.z, v, row, dx, rgb, glow)
+                         : glyphFrontAt(p.x, p.y, p.z, v, row, dx, rgb, glow);
         if (!shown) { continue; }
         zNear = min(zNear, plantFaceZ(c, cap, py));
         // The flat tier's day and night, as the walk tints what it gathered.
         if (!LIT) { rgb *= u.tint.rgb; }
         col += counts[k] * rgb;
         cover += counts[k];
-        if (LIT && lum) {
+        if (LIT && any(greaterThan(glow, vec3(0.0)))) {
             float hz = hazeAt(float(p.z) + (cap ? float(RISE - 1 - row) / float(RISE) : 0.0));
-            em += counts[k] * max(rgb - clamp(hz, 0.0, 1.0) * u.hazeC.rgb, vec3(0.0));
+            em += counts[k] * max(glow - clamp(hz, 0.0, 1.0) * u.hazeC.rgb, vec3(0.0));
         }
     }
     if (cover <= 0.0) { return; }
