@@ -367,9 +367,9 @@ impl Default for PackConfig {
 /// ```toml
 /// [drape]
 /// cords = true        # false: drape cells are whole cubes again
-/// cord_px = 1         # the cord's width in screen pixels, the same at every px_per_voxel
-/// cord_shape = "straight" # its path inside a cell between its joins: "straight" | "eased"
-/// cord_wander = 1.0   # how far a join may sit from the face's middle, 0..1 of its free width
+/// cord_px = 2         # the cord's width in screen pixels, the same at every px_per_voxel
+/// cord_shape = "eased" # its path inside a cell between its joins: "straight" | "eased"
+/// cord_wander = 0.5   # how far a join may sit from the face's middle, 0..1 of its free width
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -391,7 +391,8 @@ pub struct DrapeConfig {
 
 impl Default for DrapeConfig {
     fn default() -> DrapeConfig {
-        DrapeConfig { cords: true, cord_px: 1, cord_shape: CordShapeConfig::Straight, cord_wander: 1.0 }
+        // Wrysk's picks (2026-10-10): "prefer 2px", eased, "prefer 0.5 look".
+        DrapeConfig { cords: true, cord_px: 2, cord_shape: CordShapeConfig::Eased, cord_wander: 0.5 }
     }
 }
 
@@ -416,8 +417,8 @@ impl DrapeConfig {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CordShapeConfig {
-    #[default]
     Straight,
+    #[default]
     Eased,
 }
 
