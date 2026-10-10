@@ -418,14 +418,15 @@ pub struct FogMotion {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FogMode {
     /// The fog as it was (its fine pattern evolving and drifting with the clouds).
-    #[default]
     Fixed,
     /// And each bank's density swells and thins slowly, every bank on its own phase.
     Breathing,
     /// And the banks drift along with the air.
     Flowing,
     /// Flowing, and less of a flat sheet (candidate d): the band's top billows with the
-    /// fog's pattern and its density is taken at two depths along each ray.
+    /// fog's pattern and its density is taken at two depths along each ray. Wrysk's pick
+    /// (2026-10-10), the default; the others stay as graphics settings.
+    #[default]
     Deep,
 }
 
@@ -450,7 +451,7 @@ pub const FOG_FLOW_DEFAULT: f32 = 0.5;
 impl Default for FogMotion {
     fn default() -> FogMotion {
         FogMotion {
-            mode: FogMode::Fixed,
+            mode: FogMode::Deep,
             breath: FOG_BREATH_DEFAULT,
             breath_s: FOG_BREATH_S_DEFAULT,
             flow: FOG_FLOW_DEFAULT,
