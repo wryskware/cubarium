@@ -73,9 +73,11 @@
 //! seven full-grown stands in a loose cluster (a centre and six round it at 1.0–1.2
 //! spacings), base variants 0 1 2 0 1 2 0 unless `--pick I,J,…` names them. `--view-turn
 //! Q` turns the whole grove (its layout and every tree) by Q more quarters: the grove seen
-//! from another side. `--lean-turns` says the library's full-grown step holds four lean
-//! copies of each variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean
-//! turned by j quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
+//! from another side. `--grove SPECIES:SPACING_M:N` (round 4) draws N trees: the first
+//! seven as above (or fewer), the rest on a loose outer ring about two spacings out.
+//! `--lean-turns` says the library's full-grown step holds four lean copies of each
+//! variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean turned by j
+//! quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
 //! leans the same way in the world whatever its turn.
 //!
 //! VAULT-SHAPE round 3: `--foliage F,F,…` sets each listed stand's total foliage fraction
@@ -129,6 +131,18 @@ const GROVE: [(f64, f64); 7] = [
     (300.0, 1.1),
 ];
 
+/// `--grove SPECIES:SPACING_M:N` with N over seven: tree k ≥ 7 of the grove, (bearing in
+/// degrees, distance in spacings) on an outer ring round the seven (VAULT-SHAPE round 4),
+/// its bearings evenly spread from a quarter step past north, the distances alternating
+/// 1.9 and 2.1 spacings so the ring is loose too.
+fn grove_at(k: usize, n: usize) -> (f64, f64) {
+    if k < GROVE.len() {
+        return GROVE[k];
+    }
+    let (j, m) = ((k - GROVE.len()) as f64, (n - GROVE.len()) as f64);
+    (360.0 * (j + 0.25) / m, if (k - GROVE.len()) % 2 == 0 { 1.9 } else { 2.1 })
+}
+
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
 const SPECIMENS: [(&str, f64, u32); 10] = [
@@ -168,7 +182,7 @@ fn main() -> Result<()> {
     let mut radius_override: Option<(Species, f64)> = None;
     let mut scale = false;
     let mut stand: Option<(Species, usize, f64)> = None;
-    let mut grove: Option<(Species, f64)> = None;
+    let mut grove: Option<(Species, f64, usize)> = None;
     let mut turns: Vec<u8> = Vec::new();
     let mut picks: Option<Vec<usize>> = None;
     let mut view_turn = 0u8;
@@ -205,9 +219,11 @@ fn main() -> Result<()> {
                 stand = Some((species_named(name)?, n, d));
             }
             "--grove" => {
-                let v = args.next().context("--grove SPECIES:SPACING_M")?;
-                let (name, d) = v.split_once(':').context("--grove SPECIES:SPACING_M")?;
-                grove = Some((species_named(name)?, d.parse()?));
+                let v = args.next().context("--grove SPECIES:SPACING_M[:N]")?;
+                let (name, d) = v.split_once(':').context("--grove SPECIES:SPACING_M[:N]")?;
+                let (d, n) = d.split_once(':').map_or(Ok((d, GROVE.len())), |(d, n)| n.parse().map(|n| (d, n)))?;
+                anyhow::ensure!(n >= 1, "--grove needs at least one tree");
+                grove = Some((species_named(name)?, d.parse()?, n));
             }
             "--turn" => {
                 let v = args.next().context("--turn Q,Q,...")?;
@@ -291,8 +307,8 @@ fn main() -> Result<()> {
     if let Some((species, n, _)) = stand {
         plan.extend((0..n).map(|_| (species, 1.0, false)));
     }
-    if let Some((species, _)) = grove {
-        plan.extend((0..GROVE.len()).map(|_| (species, 1.0, false)));
+    if let Some((species, _, n)) = grove {
+        plan.extend((0..n).map(|_| (species, 1.0, false)));
     }
     let solo = candidates.is_some()
         || states_of.is_some()
@@ -327,13 +343,13 @@ fn main() -> Result<()> {
             x = x.max(cx + r + 1 + GAP);
         }
     }
-    if let Some((species, d)) = grove {
+    if let Some((species, d, n)) = grove {
         // The cluster's cells about its centre, turned with the view.
         let r = (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
         let step = d / voxel_m;
-        let at: Vec<(i64, i64)> = GROVE
-            .iter()
-            .map(|&(a, k)| {
+        let at: Vec<(i64, i64)> = (0..n)
+            .map(|i| grove_at(i, n))
+            .map(|(a, k)| {
                 let a = a.to_radians();
                 let (dx, dz) = ((k * a.cos() * step).round() as i32, (k * a.sin() * step).round() as i32);
                 let (dx, dz) = model::turn(view_turn, dx, dz);

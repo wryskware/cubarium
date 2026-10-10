@@ -518,6 +518,15 @@ VAULTTREE_STATES = [
     ("b22", {"shelf_fill": 22 / 12}),
     ("b17", {"shelf_fill": 17 / 12}),
     ("b12", {"shelf_fill": 1.0}),
+    # VAULT-SHAPE round 4 (2026-10-10, Wrysk: "add like a 6L and 0-1L for continuity"): a
+    # thinning tree keeps losing shelves down to bare. b6 keeps every other one of the
+    # pick's twelve by height (the crowning shelf first); the barest, b0-2, keeps 0, 1 and 2
+    # shelves in variants 0, 1 and 2 (Wrysk 2026-10-10: "i would make the variant 0 1 2
+    # actually for shelves"; a list, one shelf_fill per variant, the bake picks by
+    # variant). A dropped shelf loses its cap, rim and drape; its limb and twigs stay, so
+    # every state holds the thinner states' cells.
+    ("b6", {"shelf_fill": 6 / 12}),
+    ("b0-2", {"shelf_fill": [0.0, 1 / 12, 2 / 12]}),
 ]
 FOLIAGE_STATES = {"bloomcrown": BLOOMCROWN_STATES, "umbrellafrond": UMBRELLAFROND_STATES,
                   "vaulttree": VAULTTREE_STATES}
@@ -703,15 +712,15 @@ VAULT_LEAN = None
 VAULT_GOLDEN = math.pi * (3 - math.sqrt(5))  # the golden angle: shelf k's azimuth step
 
 
-def vault_shelf(c, rs, rng, drape_to=None):
+def vault_shelf(c, rs, rng, drape_to=None, bare=False):
     """One canopy shelf: a domed dark-teal cap (p1) over a drooping mint rim (p2), a fan
-    of fine twigs under it, and cyan tendril clusters (teal, the drape) hanging from it."""
+    of fine twigs under it, and cyan tendril clusters (teal, the drape) hanging from it.
+    `bare`: the twigs only (a shelf a thinning tree has lost), with the same random draws,
+    so the shelves after it are placed as in the full tree."""
     cx, cy, ztop = c
     d = rs * 0.42  # dome rise
-    revolve((cx, cy, ztop), [(0.02, 0.0), (rs * 0.55, -d * 0.3), (rs * 0.88, -d * 0.8), (rs * 0.86, -d * 0.8 - 0.03),
-                             (rs * 0.5, -d * 0.3 - 0.03), (0.02, -0.035)], "p1", seg=20)
-    revolve((cx, cy, ztop), [(rs * 0.86, -d * 0.78), (rs * 1.0, -d * 1.1), (rs * 0.97, -d * 1.1 - 0.03),
-                             (rs * 0.84, -d * 0.8 - 0.03)], "p2", seg=20)
+    if not bare:
+        _vault_cap(cx, cy, ztop, rs, d)
     with Collect() as twigs:
         for dx, dy in ring_dirs(4, rng.random() * 6.3):
             cyl((cx, cy, ztop - d * 1.4 - 0.04), (cx + dx * rs * 0.6, cy + dy * rs * 0.6, ztop - d * 0.7), 0.012,
@@ -727,9 +736,19 @@ def vault_shelf(c, rs, rng, drape_to=None):
             z1 = rng.uniform(drape_to[0], drape_to[0] + 0.4 * (drape_to[1] - drape_to[0]))
             for _ in range(rng.randint(2, 4)):
                 ox, oy = rng.uniform(-0.02, 0.02), rng.uniform(-0.02, 0.02)
-                cyl((bx + ox, by + oy, ztop - d * 0.8), (bx + ox, by + oy, z1 + rng.uniform(0, 0.12)), 0.006,
-                    mat="teal", seg=4)
-    join(drapes, "drapes")
+                z2 = z1 + rng.uniform(0, 0.12)
+                if not bare:
+                    cyl((bx + ox, by + oy, ztop - d * 0.8), (bx + ox, by + oy, z2), 0.006, mat="teal", seg=4)
+    if not bare:
+        join(drapes, "drapes")
+
+
+def _vault_cap(cx, cy, ztop, rs, d):
+    """A shelf's domed cap (p1) and drooping rim (p2)."""
+    revolve((cx, cy, ztop), [(0.02, 0.0), (rs * 0.55, -d * 0.3), (rs * 0.88, -d * 0.8), (rs * 0.86, -d * 0.8 - 0.03),
+                             (rs * 0.5, -d * 0.3 - 0.03), (0.02, -0.035)], "p1", seg=20)
+    revolve((cx, cy, ztop), [(rs * 0.86, -d * 0.78), (rs * 1.0, -d * 1.1), (rs * 0.97, -d * 1.1 - 0.03),
+                             (rs * 0.84, -d * 0.8 - 0.03)], "p2", seg=20)
 
 
 def vaulttree(x, y, h, r, layers, i, rng, spec=None):
@@ -745,7 +764,11 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
     from the axis, height and size, at its own azimuth round the axis (the golden angle
     from a phase drawn per variant, jittered), so the crown is as deep as it is wide.
     `spec`: a foliage state (`VAULTTREE_STATES`), its `shelf_fill` the shelf count over
-    the pick's twelve."""
+    the pick's twelve. Below one (VAULT-SHAPE round 4) the adult keeps n = round(12 x
+    fill) of the pick's shelves, evenly through their height order (shelf round(j x 12 /
+    n) for j < n, the crowning shelf first); the others are drawn bare (`vault_shelf`), so
+    the limbs stay and every shelf keeps its random draws. The juvenile's four shelves
+    and the seedling's one are the same in every state."""
     fill = (spec or {}).get("shelf_fill", VAULT_FILL)
     if i == 0:  # seedling: one tiny shelf on a stub
         cyl((x, y, 0), (x, y, h * 0.7), 0.012, mat="violet", seg=5)
@@ -782,6 +805,11 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
     phase = rng.uniform(0, 2 * math.pi)
     crowning = []
 
+    keep = None  # every shelf
+    if drape is not None and fill < 1.0:
+        n = round(len(VAULT_SHELVES) * fill)
+        keep = {round(j * len(VAULT_SHELVES) / n) for j in range(n)} if n > 0 else set()
+
     def place(k, px, py, ph):
         rs = r * ph / VAULT_HALF_PX * (fol[3])
         ztop = max(za + rs * 0.42 * 1.1, h * (VAULT_GROUND_PX - py) / (VAULT_GROUND_PX - VAULT_TOP_PX))
@@ -800,7 +828,8 @@ def vaulttree(x, y, h, r, layers, i, rng, spec=None):
         o = top + Vector((0, 0, zo - zs))
         mid = o.lerp(base, 0.55) + Vector((0, 0, 0.05 * h))
         tube(bezier(o, mid, base, 5), 0.06 if k < 2 or ph > 150 else 0.045, 0.02, "violet", seg=6)
-        vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h))
+        vault_shelf(c, rs, rng, None if drape is None else (drape[1] * h, drape[2] * h),
+                    bare=keep is not None and k not in keep)
     for k, (px, py, ph) in enumerate(shelves):
         place(k, px, py, ph)
     if drape is not None and fill > 1.0:

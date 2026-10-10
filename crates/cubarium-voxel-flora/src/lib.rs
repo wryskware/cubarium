@@ -1602,8 +1602,8 @@ pub struct SpeciesConfig {
     /// states, and the model thins layer by layer as before. Fractions of capacity. Start
     /// values (the orchestrator's, 2026-10-08): bloomcrown browsed 0.66 and stripped 0.25,
     /// umbrellafrond browsed A 0.75, browsed B 0.5 and stripped 0.25; vaulttree 17 shelves
-    /// 0.66 and 12 shelves 0.33 (VAULT-SHAPE round 3, 2026-10-10). The simulation never
-    /// reads it.
+    /// 0.8, 12 shelves 0.6, 6 shelves 0.4 and bare (0-2 shelves by variant) 0.2 (VAULT-SHAPE round 4,
+    /// 2026-10-10). The simulation never reads it.
     #[serde(default)]
     pub foliage_state_below: Vec<f64>,
     /// The **hysteresis** on [`SpeciesConfig::foliage_state_below`], a fraction of
@@ -2849,10 +2849,12 @@ impl SpeciesConfig {
             // VAULT-SHAPE round 3 (Wrysk 2026-10-10, candidate B): the mature crown 1.85 m
             // in radius, 3.7 m across at 6.5 m tall, the old 3.5 m tree's height to width.
             crown_radius_m: [0.625, 1.85],
-            // Shelves by foliage (VAULT-SHAPE round 3): the baked states are the crown at
-            // 22, 17 and 12 shelves; a full tree draws 22, a middle one 17, a thin one 12.
-            // Start values (the worker's, 2026-10-10).
-            foliage_state_below: vec![0.66, 0.33],
+            // Shelves by foliage (VAULT-SHAPE rounds 3 and 4): the baked states are the
+            // crown at 22, 17, 12 and 6 shelves and the barest, b0-2 (0, 1 or 2 shelves by
+            // variant); a full tree draws 22, a bare one 0-2. Evenly spaced (round 4, the
+            // worker's, 2026-10-10): World 2's living vaulttrees sat at 0.25-1.0 of total
+            // foliage, and bare starts just above the 0.15 graze refuge.
+            foliage_state_below: vec![0.8, 0.6, 0.4, 0.2],
             // Anatomy document §3. The limbs are a sparse Trunk (structure, no foliage);
             // the lobes' sky gaps are porosity 0.45; the drape hangs under the limbs.
             // Bands follow the artbook pick (`art/gen/artbook/vaulttree.png`, Wrysk
