@@ -1601,8 +1601,9 @@ pub struct SpeciesConfig {
     /// `k − 1`. The baked model carries the states; this picks among them. Empty: no
     /// states, and the model thins layer by layer as before. Fractions of capacity. Start
     /// values (the orchestrator's, 2026-10-08): bloomcrown browsed 0.66 and stripped 0.25,
-    /// umbrellafrond browsed A 0.75, browsed B 0.5 and stripped 0.25. The simulation
-    /// never reads it.
+    /// umbrellafrond browsed A 0.75, browsed B 0.5 and stripped 0.25; vaulttree 17 shelves
+    /// 0.66 and 12 shelves 0.33 (VAULT-SHAPE round 3, 2026-10-10). The simulation never
+    /// reads it.
     #[serde(default)]
     pub foliage_state_below: Vec<f64>,
     /// The **hysteresis** on [`SpeciesConfig::foliage_state_below`], a fraction of
@@ -2801,7 +2802,7 @@ impl SpeciesConfig {
     ///   `senescence` 0.0005, half the base; `reserve_cap` 1.5, three times the base.
     ///   `alive_min` 0.02 (a 0.05 minimum package; a seed is four of them at
     ///   `propagule_rate` 0.0008, still 300 s of a funded donor), `donor_min` 2.5, `hop` 4.
-    /// - **Shape.** Crown `[2.25, 3.5]` m × `[0.625, 1.0]` m, grown from the capped seedling;
+    /// - **Shape.** Crown `[2.25, 6.5]` m × `[0.625, 1.85]` m, grown from the capped seedling;
     ///   the profile is anatomy §3's table.
     pub fn vaulttree() -> SpeciesConfig {
         SpeciesConfig {
@@ -2845,7 +2846,13 @@ impl SpeciesConfig {
             // REACH-HEIGHTS: saplings grow through the browse zone; mature shelves
             // stand above even the loftstrider's mouth.
             crown_height_m: [2.25, 6.5],
-            crown_radius_m: [0.625, 1.0],
+            // VAULT-SHAPE round 3 (Wrysk 2026-10-10, candidate B): the mature crown 1.85 m
+            // in radius, 3.7 m across at 6.5 m tall, the old 3.5 m tree's height to width.
+            crown_radius_m: [0.625, 1.85],
+            // Shelves by foliage (VAULT-SHAPE round 3): the baked states are the crown at
+            // 22, 17 and 12 shelves; a full tree draws 22, a middle one 17, a thin one 12.
+            // Start values (the worker's, 2026-10-10).
+            foliage_state_below: vec![0.66, 0.33],
             // Anatomy document §3. The limbs are a sparse Trunk (structure, no foliage);
             // the lobes' sky gaps are porosity 0.45; the drape hangs under the limbs.
             // Bands follow the artbook pick (`art/gen/artbook/vaulttree.png`, Wrysk

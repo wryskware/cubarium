@@ -1135,7 +1135,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.overtop_per_check` | 0.1 | probability per check | [0, 1] | yes | C | tuned | a seedling comes up through a ground cover overtop_covers allows |
 | `flora.vaulttree.overtop_covers` | (absent) | species names ([] = any ground cover) | (-inf, inf) |  | N | decision | the ground covers a seedling may come up through |
 | `flora.vaulttree.crown_height_m.*` | 2.25, 6.5 | m | [0, inf) | yes | B | placeholder | crown top above the support [min, max] |
-| `flora.vaulttree.crown_radius_m.*` | 0.625, 1.0 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
+| `flora.vaulttree.crown_radius_m.*` | 0.625, 1.85 | m | [0, inf) | yes | B | placeholder | crown half-width [min, max] |
 | `flora.vaulttree.graze_refuge` | 0.15 | fraction of each layer's capacity | [0, 1) | 0–0.6 | B | placeholder | foliage no bite can take |
 | `flora.vaulttree.defence_per_bite` | 0.003 | fraction toward 1 per bite | [0, 1] | yes | D | measured | induced defence rise |
 | `flora.vaulttree.defence_half_life_s` | 1200.0 | s (<= 0: no decay) | (-inf, inf) | yes | D | placeholder | induced defence half-life once grazing stops |
@@ -1173,7 +1173,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.cure_max_s` | 0.0 | s (0 = no limit) | [0, inf) | 0–86400 | - | placeholder | curing: dormant this long, the drought kills the stand |
 | `flora.vaulttree.cure_cover` | 0.0 | cover ratio (0 = off) | [0, inf) | 0–2 | - | placeholder | curing: below the wake water, a stand whose usable income covers less than this of its upkeep counts as dry |
 | `flora.vaulttree.cured_srgb` | 0 | sRGB 0x00RRGGBB (look, 0 = the species' palette) | [0, inf) |  | N | decision | the plain-voxel colour of a cured stand's crown |
-| `flora.vaulttree.foliage_state_below.*` | (absent) | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
+| `flora.vaulttree.foliage_state_below.*` | 0.66, 0.33 | fraction of total foliage capacity (descending) | [0, 1] |  | N | decision | presentation: the total foliage fraction below which each reduced foliage state of the baked model is drawn |
 | `flora.vaulttree.foliage_state_hysteresis` | 0.05 | fraction of total foliage capacity | [0, 1] |  | N | decision | presentation: how far above a state's threshold a stand must regrow to return to the fuller state |
 | `flora.vaulttree.founder_per_m2` | 0.1 | founders per m2 of habitat | [0, inf) | 0–10 | - | placeholder | founding: stands per square metre of ground the species' own gates pass on |
 | `flora.vaulttree.founder_colony` | 1 | stands | [1, inf) | 1–12 | - | placeholder | founding: the size of one founder colony |

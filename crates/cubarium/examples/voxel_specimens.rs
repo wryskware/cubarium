@@ -77,6 +77,11 @@
 //! copies of each variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean
 //! turned by j quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
 //! leans the same way in the world whatever its turn.
+//!
+//! VAULT-SHAPE round 3: `--foliage F,F,…` sets each listed stand's total foliage fraction
+//! (of `alpha · wood`, every layer alike, as `--states` does), in the order `--turn` reads;
+//! one value sets every listed stand. The presenter's own state choice then picks the
+//! foliage state (the vaulttree's 22, 17 or 12 shelves).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,6 +173,7 @@ fn main() -> Result<()> {
     let mut picks: Option<Vec<usize>> = None;
     let mut view_turn = 0u8;
     let mut lean_turns = false;
+    let mut foliage: Vec<f64> = Vec::new();
     let species_named = |name: &str| {
         Species::ALL
             .into_iter()
@@ -213,6 +219,10 @@ fn main() -> Result<()> {
             }
             "--view-turn" => view_turn = args.next().context("--view-turn Q")?.parse::<u8>()? % 4,
             "--lean-turns" => lean_turns = true,
+            "--foliage" => {
+                let v = args.next().context("--foliage F,F,...")?;
+                foliage = v.split(',').map(str::parse).collect::<Result<_, _>>()?;
+            }
             "--voxel-m" => voxel_m = args.next().context("--voxel-m M")?.parse()?,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -606,7 +616,12 @@ fn main() -> Result<()> {
     // species' full-grown step is rewritten to one variant per listed stand (its picked
     // variant turned by its quarter turns), and each stand gets an id that picks its own.
     let listed_species = candidates.as_ref().map(|c| c.0).or(stand.map(|s| s.0)).or(grove.map(|g| g.0));
-    let rewrite = candidates.is_some() || grove.is_some() || !turns.is_empty() || picks.is_some() || lean_turns;
+    let rewrite = candidates.is_some()
+        || grove.is_some()
+        || !turns.is_empty()
+        || picks.is_some()
+        || lean_turns
+        || !foliage.is_empty();
     if let (Some(species), Some(lib), true) = (listed_species, models.as_ref(), rewrite) {
         let mut model = lib.plant(species).context("no model for the listed species")?.clone();
         let last = model.steps.len().checked_sub(1).context("an empty model")?;
@@ -665,6 +680,16 @@ fn main() -> Result<()> {
                 }
             }
             s.id = next;
+            // `--foliage`: this stand's total foliage fraction, every layer alike.
+            let f = if foliage.len() == 1 { foliage.first() } else { foliage.get(k) };
+            if let Some(&f) = f {
+                let want = f * sc.alpha * s.wood;
+                let scale = if s.foliage > 0.0 { want / s.foliage } else { 0.0 };
+                for v in &mut s.layer_stock {
+                    *v *= scale;
+                }
+                s.foliage = want;
+            }
         }
         models = Some(lib);
     }
