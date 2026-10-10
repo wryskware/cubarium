@@ -81,6 +81,12 @@ def cmd_status(args, paths):
             eta = fmt_h(max(0.0, est - elapsed)) if est else "?"
             print(f"  {row['job'][:30]}/{row['name'][:28]:28} {row['host']}:g{row['grp'] if row['grp'] is not None and row['grp'] >= 0 else '-'}"
                   f"  up {fmt_h(elapsed)}  left {eta}")
+    waiting = store.q("SELECT job, name, reason FROM tasks WHERE state='pending' AND reason IS NOT NULL "
+                      "ORDER BY job, seq")
+    if waiting:
+        print("\nwaiting tasks:")
+        for row in waiting:
+            print(f"  {row['job']}/{row['name']}: {row['reason']}")
     print_hosts(store, paths, brief=True)
     ec2 = store.kv_get("ec2", dict(state="idle"))
     line = f"ec2: {ec2.get('state')}"

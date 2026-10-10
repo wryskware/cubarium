@@ -602,10 +602,17 @@ class Daemon:
         live_mem = mem_available_gb()
         rows = self.store.q(
             "SELECT t.*, j.priority AS jp FROM tasks t JOIN jobs j ON t.job=j.id "
-            "WHERE t.state='pending' AND j.state='running' ORDER BY j.priority DESC, j.submitted, t.seq")
+            "WHERE t.state='pending' AND j.state='running' ORDER BY j.submitted, t.seq, j.id")
+        # Stable sorting preserves FIFO when job + task priorities are equal.
+        rows = [(row, Task.from_dict(json.loads(row["spec"]))) for row in rows]
+        rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
         states = {}
-        for row in rows:
-            task = Task.from_dict(json.loads(row["spec"]))
+        reservations = {}
+        now = self.clock()
+        for row, task in rows:
+            priority = row["jp"] + task.priority
+            key = dict(job=row["job"], name=row["name"])
+            self.store.update("tasks", key, reason=None)
             if row["job"] not in states:
                 states[row["job"]] = {r["name"]: r["state"] for r in self.store.q(
                     "SELECT name, state FROM tasks WHERE job=?", row["job"])}
@@ -617,9 +624,43 @@ class Daemon:
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
+                if host.name in reservations:
+                    if any(priority >= reserved_priority or deadline is None or task.est_h is None
+                           or task.est_h <= 0 or now + task.est_h * 3600 > deadline
+                           for reserved_priority, deadline in reservations[host.name]):
+                        continue
                 if self.launch(row, task, host, group):
                     usage[host.name].add(task, group)
                 break
+            else:
+                eligible = [h for h in candidates if h.up and could_ever_fit(task, h)
+                            and (not task.l3 or h.groups)]
+                if eligible:
+                    host = eligible[0]
+                    reservations.setdefault(host.name, []).append(
+                        (priority, self.reservation_start(task, host, live_mem, now)))
+                    self.store.update("tasks", key,
+                                      reason=f"waiting for {task.threads} threads on {host.name} (reserved)")
+
+    def reservation_start(self, task, host, live_mem, now):
+        """Earliest estimated fit; unestimated/overdue tasks and external load stay charged."""
+        running = []
+        for row in self.store.q("SELECT spec, grp, started FROM tasks WHERE state='running' AND host=?", host.name):
+            other = Task.from_dict(json.loads(row["spec"]))
+            end = row["started"] + other.est_h * 3600 if row["started"] is not None and other.est_h else None
+            running.append((other, row["grp"], end if end is not None and end > now else None))
+        for end in sorted({end for _, _, end in running if end is not None}):
+            remaining = Usage()
+            freed_mem = 0
+            for other, group, finish in running:
+                if finish is None or finish > end:
+                    remaining.add(other, group)
+                else:
+                    freed_mem += other.mem_gb
+            memory = live_mem + freed_mem if host.kind == "local" else None
+            if fits(task, host, remaining, memory) is not None:
+                return end
+        return None
 
     def ensure_tools(self, host, transport):
         if host.name in self.tools:
