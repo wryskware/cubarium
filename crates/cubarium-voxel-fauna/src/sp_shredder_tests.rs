@@ -4,7 +4,7 @@
 #[path = "predation_fixture.rs"]
 mod fixture;
 
-use crate::{Activity, Fauna, FaunaConfig, Food, Founder};
+use crate::{Activity, Fauna, FaunaConfig, Food, Founder, StartingStores};
 use cubarium_voxel::{Command as WorldCommand, Material, World};
 use cubarium_voxel_flora::{Face, FaceDir, Flora, FloraConfig, Site, SpurPhase, VineSeed};
 use fixture::*;
@@ -34,7 +34,15 @@ fn scene(on: bool) -> (World, Flora, Fauna, u64, u64, f64) {
     hunter.strike_cost_s = 0.1;
     let mut fauna = Fauna::new(config);
     fauna.set_births_enabled(false);
-    let sp = introduce(&mut fauna, &world, SP, HUNTING);
+    let sp = introduce(
+        &mut fauna,
+        &world,
+        SP,
+        StartingStores {
+            body: 1.0,
+            reserve: 0.0,
+        },
+    );
     place(&mut fauna, sp, 3.0, LANE_Z, EAST);
     animal_mut(&mut fauna, sp).pose.y_m = SURFACE_M;
     animal_mut(&mut fauna, sp).eating = true;
@@ -44,7 +52,19 @@ fn scene(on: bool) -> (World, Flora, Fauna, u64, u64, f64) {
     let hunter = phys.hunter.unwrap();
     let ahead = (hunter.jaw_forward_length_fraction + 0.5 * hunter.strike_reach_length_fraction)
         * geometry.length_m;
-    let sh = introduce(&mut fauna, &world, SH, HUNTING);
+    // Full adult shredders can exceed this opportunist's size window. Use a
+    // normal subadult within it, resolving mass against each founder's config.
+    let shredder_max = fauna.config.founder(SH).core.body_max;
+    let prey_limit = hunter.prey_max_ratio * animal(&fauna, sp).body;
+    let sh = introduce(
+        &mut fauna,
+        &world,
+        SH,
+        StartingStores {
+            body: 0.75 * shredder_max.min(prey_limit) / shredder_max,
+            reserve: HUNTING.reserve,
+        },
+    );
     place(&mut fauna, sh, 3.0 + ahead, LANE_Z, EAST);
     animal_mut(&mut fauna, sh).pose.y_m = SURFACE_M;
     drive(&mut fauna, sh, 0.0, false);
