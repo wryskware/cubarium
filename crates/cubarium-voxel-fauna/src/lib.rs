@@ -3724,6 +3724,18 @@ pub struct CensusPredation {
     pub kill: bool,
 }
 
+/// **The gates of an egg-layer's laying** (ROLES5), in the order `lay` meets them, each
+/// counted in body-ticks for a body of breeding size (`birth_body` or more) held there
+/// ([`Fauna::lay_refusals_by_founder`]):
+/// - `surplus`: its surplus hold not met, refractory over;
+/// - `interval`: the refractory after its last clutch still running;
+/// - `clutch_wait`: waiting for the reserve of a full clutch;
+/// - `wall`: climbing, not on the litter;
+/// - `site`: no egg site where it stands (litter, film, fungus, shore, vine; a flyer's
+///   headroom);
+/// - `crowded`: the nest-site brake, its refusal and the retry wait after it.
+pub const LAY_GATES: [&str; 6] = ["surplus", "interval", "clutch_wait", "wall", "site", "crowded"];
+
 /// Run-scoped instrumentation. Skipped by saves; no rule reads it.
 #[derive(Clone, Debug, Default)]
 pub struct CensusReadout {
@@ -3757,6 +3769,11 @@ pub struct Fauna {
     /// Exact paid body creations since construction/load; runtime instrumentation only.
     #[serde(skip)]
     born_by_founder: [u64; Founder::COUNT],
+    /// ROLES5: body-ticks an adult egg-layer's laying was held at each gate of `lay`
+    /// ([`LAY_GATES`]), by lineage, since construction or load. Runtime instrumentation
+    /// only, never saved; no rule reads it.
+    #[serde(skip)]
+    lay_refusals_by_founder: [[u64; LAY_GATES.len()]; Founder::COUNT],
     #[serde(skip)]
     census_readout: Option<CensusReadout>,
     /// Whether paid births run in [`step`]. Defaults to **true**, which is the live world's
@@ -4343,6 +4360,7 @@ impl Fauna {
             clutches: Vec::new(),
             ledger: FaunaLedger::default(),
             born_by_founder: [0; Founder::COUNT],
+            lay_refusals_by_founder: [[0; LAY_GATES.len()]; Founder::COUNT],
             census_readout: None,
             births_enabled: true,
             controllers: FounderControllers::default(),
@@ -4708,6 +4726,11 @@ impl Fauna {
 
     /// Paid live births and hatchlings by lineage since construction/load. Introductions
     /// are excluded; callers take interval differences. This counter is never saved.
+    /// [`LAY_GATES`]' body-ticks by lineage since construction or load (ROLES5).
+    pub fn lay_refusals_by_founder(&self) -> &[[u64; LAY_GATES.len()]; Founder::COUNT] {
+        &self.lay_refusals_by_founder
+    }
+
     pub fn born_by_founder(&self) -> [u64; Founder::COUNT] {
         self.born_by_founder
     }

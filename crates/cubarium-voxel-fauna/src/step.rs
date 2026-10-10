@@ -4842,6 +4842,25 @@ fn fail_gestation(fauna: &mut Fauna, i: usize, rule: &crate::Reproduction) {
 /// for a lineage whose [`crate::EggSite`] is film, film; a vine nester's clutch goes on a
 /// latticevine face instead ([`vine_egg_site`], VINE-C); and a laying that has nowhere to go **costs nothing**: no escrow, no partial payment,
 /// no refractory, and the surplus keeps standing for the next tick.
+/// [`crate::LAY_GATES`]' indices.
+const LAY_SURPLUS: usize = 0;
+const LAY_INTERVAL: usize = 1;
+const LAY_CLUTCH_WAIT: usize = 2;
+const LAY_WALL: usize = 3;
+const LAY_SITE: usize = 4;
+const LAY_CROWDED: usize = 5;
+
+/// ROLES5: one body-tick held at `gate`, for a founder body of breeding size (a juvenile
+/// is not yet held by any gate). Instrumentation only.
+fn lay_held(fauna: &mut Fauna, i: usize, sc: &SpeciesConfig, gate: usize) {
+    let a = &fauna.animals[i];
+    if let Some(f) = a.founder
+        && a.body >= sc.birth_body
+    {
+        fauna.lay_refusals_by_founder[f.index()][gate] += 1;
+    }
+}
+
 fn lay(
     fauna: &mut Fauna,
     i: usize,
@@ -4851,7 +4870,14 @@ fn lay(
     rule: &crate::Reproduction,
 ) {
     let seed = view.config.seed;
-    if !rule.hold_met(&fauna.animals[i].reproduction) || fauna.animals[i].reproduction.retry_ticks > 0 {
+    // ROLES5: which gate held a breeding-size body back, counted per tick (`LAY_GATES`).
+    if fauna.animals[i].reproduction.retry_ticks > 0 {
+        lay_held(fauna, i, sc, LAY_CROWDED);
+        return;
+    }
+    if !rule.hold_met(&fauna.animals[i].reproduction) {
+        let gate = if fauna.animals[i].reproduction.refractory_ticks > 0 { LAY_INTERVAL } else { LAY_SURPLUS };
+        lay_held(fauna, i, sc, gate);
         return;
     }
     // LIFE-HISTORY: a layer with a breeding season lays only inside its window. Gated before
@@ -4871,11 +4897,13 @@ fn lay(
         let full = rule.full_clutch(sc.reserve_of(a.body));
         if wait > 0 && rule.clutch_for(a.reserve) < full && a.reproduction.clutch_wait_ticks < wait {
             a.reproduction.clutch_wait_ticks += 1;
+            lay_held(fauna, i, sc, LAY_CLUTCH_WAIT);
             return;
         }
     }
     // Not on a wall: a clutch goes on the litter the body is standing in.
     if fauna.animals[i].mobility.climb.is_some() {
+        lay_held(fauna, i, sc, LAY_WALL);
         return;
     }
     let Some(lineage) = fauna.animals[i].founder else {
@@ -4888,6 +4916,7 @@ fn lay(
     let vine = if egg_site == crate::EggSite::Vine && !rule.dormant {
         let found = vine_egg_site(fauna, i, view, flora, sc.body_min);
         if found.is_none() {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
         found
@@ -4920,6 +4949,7 @@ fn lay(
             crate::EggSite::Vine => false,
         };
         if !fits {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
     }
@@ -4933,9 +4963,11 @@ fn lay(
         let (x, z) = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
         let room = crate::flight::overhead_clear(view, shape, x, z, crate::surface_m(site.y, v), flight.egg_headroom_m);
         if room + crate::flight::EPS < flight.egg_headroom_m {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
         if !fauna.open_air(view, &flight).over_face_is_open(site) {
+            lay_held(fauna, i, sc, LAY_SITE);
             return;
         }
     }
@@ -4958,6 +4990,7 @@ fn lay(
     if !rule.dormant && nest_crowded(fauna, i, view, rule) {
         fauna.animals[i].reproduction.retry_ticks = rule.retry_ticks();
         fauna.ledger.nest_refusals_by_founder[lineage.index()] += 1;
+        lay_held(fauna, i, sc, LAY_CROWDED);
         return;
     }
     // LIFE-HISTORY: no more than `litters_per_year` clutches a year (the window is gated
