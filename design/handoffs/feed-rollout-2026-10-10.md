@@ -204,9 +204,33 @@ flight/perch code in `cubarium-voxel-fauna`) and how the figure pass draws it th
 - **Evidence** as above: today | the clip, side-on and three-quarter, 6 px and 12 px, in the
   state it feeds in (hovering or perched), adult and the smallest bin.
 
+### The small ground feeders: capgnawer, littershredder, ripple-snail (one package)
+
+Bellwing merged (edaa8469). Lesson from the bellwing and lanternjaw: at 125 mm a small part
+owns 0–3 cells, so a clip shows mostly as the whole front moving. These three are small
+(0.2–0.3 m), so keep each clip to what can read: the front of the body. One rig and clip
+each, same pattern (`RIGS` in `bake_voxel_models.py`; all three stay specimens there,
+`AS_SPECIMEN`, unless the founder bins are already theirs: check the manifest).
+
+- **Capgnawer** (`capgnawer()`; glowcap grazer): two mantle lobes with a central cleft, six
+  mandibles in three stacked pairs round a vertical mouth under the cleft. Bones: root,
+  a front (head/mandible) bone. Clip: the front dips to the cap ahead and gnaws, a small
+  forward-back rasp 0.3 s, three times, then a lift 0.4 s; the lobes stay on the root.
+- **Littershredder** (`littershredder()`; detritus feeder): a blunt plough at the front,
+  gold plates, seven pairs of short legs, two pale feelers curling down under the plough's
+  lip. Bones: root, the plough (head) bone, the feelers if they own cells. Clip: the plough
+  pushes down and forward into the litter about 1 cm and lifts, 0.35 s each, rocking a
+  little side to side; the feelers sweep.
+- **Ripple-snail** (`ripple_snail()`; film grazer): a dome shell on a dark foot, a pale
+  mantle skirt, an open front with two palps reaching forward and down. Bones: root
+  (shell, foot), the front (opening and palps). Clip: the front lowers and the palps sweep
+  side to side over the film, 0.5 s a sweep, with a slow shell bob.
+- Report cells per bone for each, both voxel sizes; if a part owns no cell at 125 mm, say
+  so rather than enlarging it (that is Wrysk's call).
+- **Evidence** as above, one MP4 per species (`<name>-feed-px{6,12}.mp4`).
+
 Next sections (written when each starts): frondgrazer (its neck under the shield is an
-open look question), capgnawer, littershredder,
-ripple-snail. Then sleep, idle and hunker move onto the rig.
+open look question). Then sleep, idle and hunker move onto the rig.
 
 ## Return
 
