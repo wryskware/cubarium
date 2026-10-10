@@ -59,3 +59,36 @@ fits), lit, at the desktop scale (6 px a voxel) and 2×:
 
 Commits (the sheet script changes, if any); absolute picture paths; the measured stand
 spacing; the cell counts per candidate; the findings above. Stop: Wrysk picks.
+
+## Round 2 (2026-10-10): B, more shelves, a grove, four sides, lean
+
+Round 1 (branch `vault-shape`, 74055726) added `voxel_specimens --crown-radius / --scale /
+--stand`, the `vault_spacing` example and the scratch `shelf_fill`; stand spacing measured
+1.38 m in World 2. Build on it, same worktree and branch.
+
+Wrysk: "start with B, but i would experiment with more shelves. will want to see it in a
+canopy too cuz fewer shelves could be fine there. also, can we show it from other angles?
+lets at least be able to rotate on 90deg.. not sure about the lean.. maybe just rotate the
+canopies and vary lean less because in a grove trees would lean together."
+
+- **B at three shelf counts**: radius 1.85 m with 12 (the pick's), 17 and 22 shelves, by
+  round 1's gap-filling rule. Name them B12, B17, B22.
+- **Four sides**: each lone tree from the four quarter turns (0°, 90°, 180°, 270°). Find
+  how the sheet can turn a model by a quarter (a voxel model turns by quarters exactly) and
+  add it as a flag; also report whether the live plant pass can draw a plant turned by a
+  quarter today, and what it would take if not.
+- **Lean**: find the vaulttree builder's lean and its variation across the three variants
+  (`scripts/blender/organism_lineup.py`, near `vault_shelf`). Make one scratch rule where
+  every variant leans the same way and less (state the angles before and after), the
+  variety coming from turning each tree by a quarter instead.
+- **Grove**: seven B trees at 1.38 m (round 1's measure) in a loose cluster, each turned by
+  its own quarter, all leaning the same way under the new lean rule: once each for B12,
+  B17 and B22, seen from 0° and 90°. Then the same seven with today's lean variation, B17
+  only, for comparison.
+
+Same rules and outputs as round 1 (`art/gen/runs/vaulttree-proportions-2026-10-10/` in the
+main checkout, 1× and 2×, lit, with a loftstrider and seedporter for scale). Nothing in
+`assets/voxel-models/` changes yet.
+
+Return: commit; picture paths; the lean angles before and after; cells per shelf count;
+whether the live pass can turn plants by quarters. Stop: Wrysk picks.
