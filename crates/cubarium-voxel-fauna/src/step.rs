@@ -6212,3 +6212,6 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
 #[cfg(test)]
 #[path = "dispersal_tests.rs"]
 mod dispersal_tests;
+#[cfg(test)]
+#[path = "roles5_tests.rs"]
+mod roles5_tests;
