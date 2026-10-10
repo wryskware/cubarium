@@ -687,6 +687,10 @@ VAULT_GROUND_PX, VAULT_TOP_PX = 1530.0, 15.0
 # Shelf fill factor: 1 is the pick's twelve shelves. Only VAULT-SHAPE's scratch candidate D
 # sets it (the bake reads a source.json species' optional `shelf_fill`).
 VAULT_FILL = 1.0
+# Shared lean (VAULT-SHAPE round 2, scratch bakes only; None in every committed bake):
+# (tilt, (dx, dy)): every variant's trunk leans along the unit (dx, dy) by tilt x height at
+# the trunk's split, instead of the pick's 0.07 x height in a direction drawn per variant.
+VAULT_LEAN = None
 
 
 def vault_shelf(c, rs, rng, drape_to=None):
@@ -733,8 +737,11 @@ def vaulttree(x, y, h, r, layers, i, rng):
     drape = next((l for l in layers if l[0] == D), None)
     zs = trunk[2] * h  # where the trunk splits into limbs
     rt = trunk[3] * r  # trunk radius: the profile's trunk radius
-    lean_a = rng.uniform(-0.6, 0.6)
+    lean_a = rng.uniform(-0.6, 0.6)  # drawn even under VAULT_LEAN: the shelves keep their draws
     lean = Vector((math.cos(lean_a), math.sin(lean_a), 0)) * 0.07 * h
+    if VAULT_LEAN is not None:
+        tilt, (ldx, ldy) = VAULT_LEAN
+        lean = Vector((ldx, ldy, 0)) * tilt * h
     axis = lambda z: Vector((x, y, z)) + lean * (z / zs) ** 1.4  # noqa: E731
     # trunk: three twisted plates round a core, flaring at the foot
     nz = 9

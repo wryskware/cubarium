@@ -64,6 +64,19 @@
 //! SPECIES:N:SPACING_M` draws N full-grown stands of the species and nothing else, on a
 //! triangular lattice whose nearest neighbours are SPACING_M apart (rows of three, two,
 //! three, … alternating half a step), so overlapping crowns show how a stand fills.
+//!
+//! VAULT-SHAPE round 2: `--turn Q,Q,…` turns each stand of a `--candidates`, `--stand` or
+//! `--grove` strip (in its order) by Q quarter turns, exactly as `model::turn` turns an
+//! animal (1 faces −z); a missing entry is 0. The sheet does it by giving each stand its
+//! own turned copy of its variant in the species' full-grown step, so the presenter is
+//! unchanged (its plant pass does not turn plants). `--grove SPECIES:SPACING_M` draws
+//! seven full-grown stands in a loose cluster (a centre and six round it at 1.0–1.2
+//! spacings), base variants 0 1 2 0 1 2 0 unless `--pick I,J,…` names them. `--view-turn
+//! Q` turns the whole grove (its layout and every tree) by Q more quarters: the grove seen
+//! from another side. `--lean-turns` says the library's full-grown step holds four lean
+//! copies of each variant (`v × 4 + j`, the bake's scratch `lean.turns`, the shared lean
+//! turned by j quarters), and picks copy `(4 − turn) mod 4` for each stand, so every tree
+//! leans the same way in the world whatever its turn.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -98,6 +111,18 @@ const FOUNDERS: [Founder; 6] = [
     Founder::Lanternjaw,
 ];
 const SLOT: i64 = 10;
+
+/// `--grove`: the seven trees as (bearing in degrees, distance in spacings) from the
+/// centre: a loose cluster, the six round the centre a little irregular.
+const GROVE: [(f64, f64); 7] = [
+    (0.0, 0.0),
+    (10.0, 1.0),
+    (65.0, 1.15),
+    (120.0, 1.0),
+    (180.0, 1.2),
+    (235.0, 1.05),
+    (300.0, 1.1),
+];
 
 /// The unsimulated animals drawn after the founders: manifest name, heading (π/2 faces
 /// +x, side-on; π faces the viewer), and how many voxels above the ground it hovers.
@@ -138,6 +163,11 @@ fn main() -> Result<()> {
     let mut radius_override: Option<(Species, f64)> = None;
     let mut scale = false;
     let mut stand: Option<(Species, usize, f64)> = None;
+    let mut grove: Option<(Species, f64)> = None;
+    let mut turns: Vec<u8> = Vec::new();
+    let mut picks: Option<Vec<usize>> = None;
+    let mut view_turn = 0u8;
+    let mut lean_turns = false;
     let species_named = |name: &str| {
         Species::ALL
             .into_iter()
@@ -168,6 +198,21 @@ fn main() -> Result<()> {
                 let d = it.next().context("--stand SPECIES:N:SPACING_M")?.parse()?;
                 stand = Some((species_named(name)?, n, d));
             }
+            "--grove" => {
+                let v = args.next().context("--grove SPECIES:SPACING_M")?;
+                let (name, d) = v.split_once(':').context("--grove SPECIES:SPACING_M")?;
+                grove = Some((species_named(name)?, d.parse()?));
+            }
+            "--turn" => {
+                let v = args.next().context("--turn Q,Q,...")?;
+                turns = v.split(',').map(|q| q.parse::<u8>().map(|q| q % 4)).collect::<Result<_, _>>()?;
+            }
+            "--pick" => {
+                let v = args.next().context("--pick I,J,...")?;
+                picks = Some(v.split(',').map(str::parse).collect::<Result<_, _>>()?);
+            }
+            "--view-turn" => view_turn = args.next().context("--view-turn Q")?.parse::<u8>()? % 4,
+            "--lean-turns" => lean_turns = true,
             "--voxel-m" => voxel_m = args.next().context("--voxel-m M")?.parse()?,
             "--px" => px = args.next().context("--px N")?.parse()?,
             "--textures" => {
@@ -236,7 +281,14 @@ fn main() -> Result<()> {
     if let Some((species, n, _)) = stand {
         plan.extend((0..n).map(|_| (species, 1.0, false)));
     }
-    let solo = candidates.is_some() || states_of.is_some() || loftstrider_bins || stand.is_some();
+    if let Some((species, _)) = grove {
+        plan.extend((0..GROVE.len()).map(|_| (species, 1.0, false)));
+    }
+    let solo = candidates.is_some()
+        || states_of.is_some()
+        || loftstrider_bins
+        || stand.is_some()
+        || grove.is_some();
     for species in Species::ALL.into_iter().filter(|_| !solo) {
         for f in [0.1, 0.4, 1.0] {
             plan.push((species, f, false));
@@ -265,6 +317,29 @@ fn main() -> Result<()> {
             x = x.max(cx + r + 1 + GAP);
         }
     }
+    if let Some((species, d)) = grove {
+        // The cluster's cells about its centre, turned with the view.
+        let r = (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
+        let step = d / voxel_m;
+        let at: Vec<(i64, i64)> = GROVE
+            .iter()
+            .map(|&(a, k)| {
+                let a = a.to_radians();
+                let (dx, dz) = ((k * a.cos() * step).round() as i32, (k * a.sin() * step).round() as i32);
+                let (dx, dz) = model::turn(view_turn, dx, dz);
+                (i64::from(dx), i64::from(dz))
+            })
+            .collect();
+        let (lx, lz) = (at.iter().map(|p| p.0).min().unwrap_or(0), at.iter().map(|p| p.1).min().unwrap_or(0));
+        for &(dx, dz) in &at {
+            let cx = GAP + r + dx - lx;
+            let cz = r + 2 + dz - lz;
+            stand_cells.push((cx, cz as u32));
+            columns.push(cx);
+            stand_depth = stand_depth.max((cz + r + 3) as u32);
+            x = x.max(cx + r + 1 + GAP);
+        }
+    }
     for &(species, _, _) in plan.iter().skip(stand_cells.len()) {
         let r =
             (flora_cfg.species(species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as i64;
@@ -285,7 +360,7 @@ fn main() -> Result<()> {
     // own footprint: side-on as the chorister and ripple-snail picks are, the others facing
     // the viewer as theirs do, the bellwing hovering.
     let models_dir = models_dir_arg.unwrap_or(VoxelConfig::default().models_dir);
-    let models: Option<Arc<ModelLibrary>> = if glyphs {
+    let mut models: Option<Arc<ModelLibrary>> = if glyphs {
         None
     } else {
         Some(Arc::new(
@@ -293,7 +368,12 @@ fn main() -> Result<()> {
         ))
     };
     // Deep enough for the widest specimen (the loftstrider's legs and fronds span 21 cells).
-    let mut depth = 8u32.max(stand_depth);
+    // `--candidates`: the crown's full depth in front of and behind the stem (round 1's lone
+    // trees stood at z 1 in an 8-deep world, so most of a wide crown was clipped).
+    let candidate_z = candidates.as_ref().map(|(species, _)| {
+        (flora_cfg.species(*species).crown_radius_m_at(f64::INFINITY) / voxel_m).ceil() as u32 + 2
+    });
+    let mut depth = 8u32.max(stand_depth).max(candidate_z.map_or(0, |z| 2 * z + 1));
     let mut specimens = Vec::new();
     let mut loftstriders = Vec::new();
     if loftstrider_bins {
@@ -389,7 +469,8 @@ fn main() -> Result<()> {
     let mut flora = Flora::new(flora_cfg.clone());
     // The stands' row. `--contest` stands them two rows deeper, so the turf drawn in front
     // of a full-grown vaulttree's trunk (two cells in front of its stem) is in the world.
-    let stand_z = if contest { 3 } else { 1 };
+    // `--candidates` stands deep enough that their whole crown is in the world.
+    let stand_z = if contest { 3 } else { candidate_z.unwrap_or(1) };
     for (k, (&(species, f, _), &x)) in plan.iter().zip(&columns).enumerate() {
         let wood = flora_cfg.species(species).wood_max * f;
         let z = stand_cells.get(k).map_or(stand_z, |c| c.1);
@@ -521,25 +602,71 @@ fn main() -> Result<()> {
             s.foliage = want;
         }
     }
-    // `--candidates`: give each stand an id whose variant pick is its listed index.
-    if let (Some((species, idx)), Some(lib)) = (&candidates, &models) {
-        let model = lib.plant(*species).context("no model for the candidate species")?;
-        let adult = model.steps.last().context("an empty model")?;
-        let sc = flora_cfg.species(*species);
+    // `--candidates`, `--grove`, or a `--stand` with `--turn`/`--pick`/`--lean-turns`: the
+    // species' full-grown step is rewritten to one variant per listed stand (its picked
+    // variant turned by its quarter turns), and each stand gets an id that picks its own.
+    let listed_species = candidates.as_ref().map(|c| c.0).or(stand.map(|s| s.0)).or(grove.map(|g| g.0));
+    let rewrite = candidates.is_some() || grove.is_some() || !turns.is_empty() || picks.is_some() || lean_turns;
+    if let (Some(species), Some(lib), true) = (listed_species, models.as_ref(), rewrite) {
+        let mut model = lib.plant(species).context("no model for the listed species")?.clone();
+        let last = model.steps.len().checked_sub(1).context("an empty model")?;
+        let adult = &model.steps[last];
+        let copies = if lean_turns { 4 } else { 1 };
+        let base = adult.variants.len() / copies;
+        anyhow::ensure!(base > 0, "the full-grown step has fewer than {copies} variants");
+        let n = plan.len();
+        let mut variants = Vec::with_capacity(n);
+        let mut states = vec![Vec::with_capacity(n); adult.states.len()];
+        for k in 0..n {
+            let v = match (&candidates, &picks) {
+                (Some((_, idx)), _) => idx[k],
+                (None, Some(p)) => p.get(k).copied().unwrap_or(k % base),
+                (None, None) => k % base,
+            };
+            anyhow::ensure!(v < base, "no variant {v}");
+            let q = (turns.get(k).copied().unwrap_or(0) + view_turn) % 4;
+            let src = v * copies + if lean_turns { usize::from((4 - q) % 4) } else { 0 };
+            let turned = |cells: &[model::ModelCell]| -> Vec<model::ModelCell> {
+                cells
+                    .iter()
+                    .map(|c| {
+                        let (dx, dz) = model::turn(q, c.offset[0], c.offset[2]);
+                        model::ModelCell { offset: [dx, c.offset[1], dz], ..*c }
+                    })
+                    .collect()
+            };
+            variants.push(turned(&adult.variants[src]));
+            for (st, per) in states.iter_mut().zip(&adult.states) {
+                st.push(turned(&per[src]));
+            }
+        }
+        model.steps[last].variants = variants;
+        model.steps[last].states = states;
+        let mut lib = (**lib).clone();
+        lib.insert_plant(species, model);
+        let lib = Arc::new(lib);
+        let model = lib.plant(species).context("the rewritten model")?;
+        let sc = flora_cfg.species(species);
         let mut next = 1_000_000u64;
-        for (s, &want) in stands.iter_mut().zip(idx) {
-            let target = adult.variants.get(want).with_context(|| format!("no variant {want}"))?;
+        for s in stands.iter_mut().filter(|s| s.species == species) {
+            let k = (0..n)
+                .find(|&k| {
+                    columns[k] == i64::from(s.site.x)
+                        && stand_cells.get(k).map_or(true, |c| c.1 == s.site.z)
+                })
+                .context("a stand off the plan")?;
             loop {
                 next += 1;
                 let got = model
-                    .select_sized(sc.crown_height_m_at(s.wood), sc.crown_radius_m_at(s.wood), next)
+                    .pick_sized(sc.crown_height_m_at(s.wood), sc.crown_radius_m_at(s.wood), next)
                     .context("no model step")?;
-                if std::ptr::eq(got.as_ptr(), target.as_ptr()) {
+                if got == (last, k) {
                     break;
                 }
             }
             s.id = next;
         }
+        models = Some(lib);
     }
     let view = FloraView {
         stands: &stands,

@@ -433,6 +433,22 @@ def bake_plant(sp, vox, out_dir):
 
     table = state_table(sp)
     L.VAULT_FILL = float(sp.get("shelf_fill", 1.0))  # VAULT-SHAPE scratch candidates only
+    # VAULT-SHAPE round 2 scratch: an optional `lean` {"tilt", "dir_deg", "turns"} gives every
+    # variant the same lean (organism_lineup.VAULT_LEAN); with "turns", each variant is
+    # baked four times, copy v x 4 + j leaning the shared way turned by j quarter turns as
+    # the presenter's `model::turn` turns (dx, dz) = (x, y), so a stand drawn turned by q
+    # from copy (4 - q) mod 4 leans the shared way in the world. Absent: unchanged.
+    lean = sp.get("lean")
+    copies = 4 if lean and lean.get("turns") else 1
+
+    def lean_of(j):
+        if not lean:
+            return None
+        a = math.radians(float(lean.get("dir_deg", 0.0)))
+        dx, dz = math.cos(a), math.sin(a)
+        for _ in range(j):
+            dx, dz = dz, -dx
+        return (float(lean["tilt"]), (dx, dz))
     steps, meta = [], []
     for (kh, kr), t in size_steps(sp, vox)[-1 if ADULT_ONLY else 0:]:
         prof = sp["profile"]
@@ -441,10 +457,11 @@ def bake_plant(sp, vox, out_dir):
         h = dimension(prof, sp["crown_height_m"], t)
         r = dimension(prof, sp["crown_radius_m"], t)
         variants = []
-        for v in range(VARIANTS):
+        for v in range(VARIANTS * copies):
             per_state = []
+            L.VAULT_LEAN = lean_of(v % copies)
             for _, _, spec in table:
-                objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v}"), vox, spec)
+                objs = build_plant(name, h, r, si, stage, random.Random(f"{name}:{v // copies}"), vox, spec)
                 cells = voxelize(objs, vox, role_of)
 
                 def tag_of(mat, k, h=h, stage=stage):
