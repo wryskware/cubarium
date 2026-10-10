@@ -15,7 +15,8 @@
 // the stamped models turn (`cubarium::voxel::model::turn`), so a quarter heading draws
 // what the stamp drew. The sleep and idle poses move it as `voxel.frag`'s `posedSpan` did:
 // a torso cell down by the settle, a breathing cell's top by the breath, a leg cell's top
-// cut where the settling torso's bottom has come down to.
+// cut where the settling torso's bottom has come down to. A rigged figure's cell then moves
+// by its bone (FEED-RIG, `bonePose`): turned with it, or kept upright, its normal with it.
 
 #include "figure.glsl"
 
@@ -53,7 +54,9 @@ void main() {
     bool head = (cell.y & 8u) != 0u;
     uint open = (cell.y >> 4) & 63u;
     int glyph = int((cell.y >> 10) & 15u);
-    vec3 n = mat3(t.ax.xyz, t.ay.xyz, t.az.xyz) * FACE_N[face];
+    int row = boneRow(t, cell.y);
+    vec3 nLocal = row >= 0 && t.rig.y == 0 ? boneTurn(row, FACE_N[face]) : FACE_N[face];
+    vec3 n = mat3(t.ax.xyz, t.ay.xyz, t.az.xyz) * nLocal;
     // A face against another cell of the model, or turned away from the camera (the view
     // runs along (0, -rise/s, 1)), is never seen: off the clip volume.
     bool seen = (open & (1u << uint(face))) != 0u && n.z * float(pc.k.y) - n.y * float(pc.k.z) < 1e-4;
@@ -83,7 +86,9 @@ void main() {
     }
     vec3 unit = FACE_O[face] + ab.x * FACE_U[face] + ab.y * FACE_V[face];
     vec3 local = vec3(c.x - 0.5 + unit.x, mix(y0, y1, unit.y), c.z - 0.5 + unit.z);
-    vec3 rel = t.ax.xyz * local.x + t.ay.xyz * local.y + t.az.xyz * local.z;
+    vec3 mid = vec3(c.x, 0.5 * (y0 + y1), c.z);
+    vec3 posed = bonePose(t, row, local, mid);
+    vec3 rel = t.ax.xyz * posed.x + t.ay.xyz * posed.y + t.az.xyz * posed.z;
     vec3 q = t.pos.xyz + rel;
     // Screen pixels from P's projection, then the tile's texels, then the atlas.
     vec2 screen = vec2(rel.x * float(pc.k.y), -(rel.y * float(pc.k.y) + rel.z * float(pc.k.z)));
@@ -103,7 +108,8 @@ void main() {
     // The nearest cap texel to this side, as shadeTop uses for the stamp's rim.
     float inward = 0.5 / float(min(vCapSize.x, vCapSize.y));
     vec3 rim = unit - FACE_N[face] * inward;
-    vRimWorld = q + t.ay.xyz * (y1 - local.y) - n * inward;
+    vec3 rimLocal = bonePose(t, row, vec3(local.x, y1, local.z) - FACE_N[face] * inward, mid);
+    vRimWorld = t.pos.xyz + mat3(t.ax.xyz, t.ay.xyz, t.az.xyz) * rimLocal;
     vRimFace = vec2(rim.x, 1.0 - rim.z);
     vNormal = n;
     vFace = vec2(ab.x, 1.0 - ab.y);

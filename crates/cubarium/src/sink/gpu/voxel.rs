@@ -616,6 +616,17 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.figure_track.is_some()
     }
 
+    /// Draw animal `id` with `cells` (a model's cells, facing +x from its anchor) in place
+    /// of its baked model from the next staged tick on, or with its own again (`None`): a
+    /// capture's hook (the FEED-RIG flipbook arm, `examples/voxel_feed_capture.rs`). A
+    /// changed model cross-fades over `[figures] swap_s` as any swap does.
+    pub fn set_figure_cells(&mut self, id: u64, cells: Option<Arc<Vec<crate::voxel::model::ModelCell>>>) {
+        match cells {
+            Some(c) => self.packer.figure_cells.insert(id, c),
+            None => self.packer.figure_cells.remove(&id),
+        };
+    }
+
     /// Draw animal `id` leaning `mix` toward white (the model pass's highlight), from the
     /// next clock on.
     pub fn set_figure_highlight(&mut self, highlight: Option<(u64, f32)>) {
@@ -1232,6 +1243,9 @@ struct Packer {
     figures: bool,
     figure_models: FigureModels,
     figure_specs: Vec<Spec>,
+    /// A capture's own cells for some animals, by id, in place of their baked model
+    /// ([`VoxelGpuSink::set_figure_cells`]; the FEED-RIG flipbook arm).
+    figure_cells: rustc_hash::FxHashMap<u64, Arc<Vec<crate::voxel::model::ModelCell>>>,
     /// This tick's emitting figure cells, for the glow volume.
     figure_emitters: Vec<((u32, u32, u32), [f32; 3])>,
     /// Unsimulated animals drawn from the models' `specimens` (`voxel_specimens` only).
@@ -1506,6 +1520,7 @@ impl Packer {
             figures: false,
             figure_models: FigureModels::default(),
             figure_specs: Vec::new(),
+            figure_cells: Default::default(),
             figure_emitters: Vec::new(),
             specimens: Vec::new(),
             palette: Palette::new(),
@@ -1718,7 +1733,7 @@ impl Packer {
             lap!("plant changes");
         }
         if self.figures {
-            figure::specs(&self.animals, view, fauna, self.models.as_deref(), &mut self.figure_models, &mut self.figure_specs);
+            figure::specs(&self.animals, view, fauna, self.models.as_deref(), &self.figure_cells, &mut self.figure_models, &mut self.figure_specs);
             self.figure_emitters.clear();
             if self.light.as_ref().is_some_and(|l| l.emission.on) {
                 let c = view.config;

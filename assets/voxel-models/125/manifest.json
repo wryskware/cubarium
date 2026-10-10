@@ -3097,5 +3097,8 @@
   "seedporter-stand": "seedporter-stand.cvm",
   "seedporter-ground": "seedporter-ground.cvm",
   "seedporter-glide": "seedporter-glide.cvm"
+ },
+ "rigs": {
+  "frondgrazer": "frondgrazer.rig"
  }
 }

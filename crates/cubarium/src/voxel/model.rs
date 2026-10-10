@@ -61,7 +61,9 @@
 //! tag: 0x00 trunk, 0x10|i foliage i, 0x20|i drape i, 0x30 accent, 0x40|i fallen foliage i
 //! ```
 //!
-//! An animal file has one state.
+//! An animal file has one state. A founder with a rig (FEED-RIG: its bones and sampled
+//! feeding clip) has a `<name>.rig` beside it, named under the manifest's `rigs`
+//! ([`super::rig`] has its layout).
 
 use std::path::Path;
 
@@ -245,7 +247,7 @@ impl AnimalModel {
 
 /// The index of the value nearest `want` among ascending `values`, a tie to the later.
 /// A non-finite `want` takes the last.
-fn nearest(values: impl Iterator<Item = f64>, want: f64) -> Option<usize> {
+pub(crate) fn nearest(values: impl Iterator<Item = f64>, want: f64) -> Option<usize> {
     let mut best: Option<(usize, f64)> = None;
     for (i, v) in values.enumerate() {
         let d = if want.is_finite() {
@@ -300,6 +302,9 @@ pub struct ModelLibrary {
     /// manifest name: one adult bin each, drawn only where a caller places them
     /// (`examples/voxel_specimens.rs`). Not founders, and not in the simulation.
     specimens: std::collections::BTreeMap<String, AnimalModel>,
+    /// The founders' rigs (FEED-RIG, [`super::rig`]), by founder name: bones and a sampled
+    /// clip baked beside the founder's model, its bins the model's.
+    rigs: std::collections::BTreeMap<String, std::sync::Arc<super::rig::AnimalRig>>,
     /// The voxel size the models were baked at, when loaded from disk. A world of another
     /// size draws the glyphs instead: a model is so many cells, not so many metres.
     voxel_m: Option<f64>,
@@ -349,6 +354,15 @@ impl ModelLibrary {
                 .find(|(k, _)| same_name(k, name))
                 .map(|(_, m)| m)
         })
+    }
+
+    /// A founder's rig, when the bake gave it one (FEED-RIG).
+    pub fn rig(&self, founder: Founder) -> Option<&std::sync::Arc<super::rig::AnimalRig>> {
+        self.rigs.get(founder.name())
+    }
+
+    pub fn insert_rig(&mut self, founder: Founder, rig: super::rig::AnimalRig) {
+        self.rigs.insert(founder.name().to_string(), std::sync::Arc::new(rig));
     }
 
     /// Every specimen's name, in name order.
@@ -421,6 +435,19 @@ impl ModelLibrary {
                 Parsed::Plant(_) => bail!("{file} is a plant model, listed as a founder"),
             }
         }
+        for (name, file) in &manifest.rigs {
+            let Some(f) = Founder::ALL.into_iter().find(|f| f.name() == name) else {
+                bail!("{}: no founder is called {name}", manifest_path.display());
+            };
+            let bytes = std::fs::read(dir.join(file))
+                .with_context(|| format!("reading {}", dir.join(file).display()))?;
+            let rig = super::rig::AnimalRig::parse(&bytes).with_context(|| format!("parsing {file}"))?;
+            let bins = lib.animal(f).map_or(0, |m| m.bins.len());
+            if rig.bins.len() != bins {
+                bail!("{file}: {} bins for a model of {bins}", rig.bins.len());
+            }
+            lib.insert_rig(f, rig);
+        }
         for (name, file) in &manifest.specimens {
             let bytes = std::fs::read(dir.join(file))
                 .with_context(|| format!("reading {}", dir.join(file).display()))?;
@@ -458,6 +485,9 @@ struct Manifest {
     /// The unsimulated animals, name → file.
     #[serde(default)]
     specimens: std::collections::BTreeMap<String, String>,
+    /// The founders' rigs, name → file (FEED-RIG).
+    #[serde(default)]
+    rigs: std::collections::BTreeMap<String, String>,
 }
 
 enum Parsed {

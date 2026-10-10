@@ -33,8 +33,11 @@ void main() {
     vec3 unit = FACE_O[face] + ab.x * FACE_U[face] + ab.y * FACE_V[face];
     vec3 local = vec3(c.x - 0.5 + unit.x, mix(y0, y1, unit.y), c.z - 0.5 + unit.z);
     mat3 m = mat3(t.ax.xyz, t.ay.xyz, t.az.xyz);
-    vec3 q = t.pos.xyz + m * local;
-    vec3 mid = t.pos.xyz + m * vec3(c.x, 0.5 * (y0 + y1), c.z);
+    // A rigged cell moves by its bone as `figure.vert` moves it (FEED-RIG).
+    int row = boneRow(t, cell.y);
+    vec3 centre = vec3(c.x, 0.5 * (y0 + y1), c.z);
+    vec3 q = t.pos.xyz + m * bonePose(t, row, local, centre);
+    vec3 mid = t.pos.xyz + m * bonePose(t, row, centre, centre);
     float w = float(pc.k.y);
     // Round the ring by the cell's middle, so a cell is never torn across the seam.
     float shift = w * floor((mid.x - mid.y * pc.atlas.x) / w);
