@@ -234,7 +234,7 @@ whole-save format down into the sim crate (the session crate sits above it) and 
 study tool at the one writer and loader. Medium; touches tools other threads use mid-study.
 `cubarium-world found|advance` covers making game-loadable saves headless meanwhile.
 
-## 10. Water table as a new-world setting (Wrysk, 2026-10-07)
+## 10. Water table as a new-world setting (Wrysk, 2026-10-07) — SHIPPED as Low / Medium / High (0.375, 0.75, 1.125 m) on the new-world screen (`game/ui/new_world.gd`); `lake_scale` below stays parked
 
 The wide terrarium's lake grows by its water table (`water_level_m`), and Wrysk picks 0.375
 or 0.75 per seed. He would like to set it when choosing a seed in the new-world screen
@@ -276,7 +276,7 @@ without dropping to `wgpu-hal`; the panel no longer constrains the renderer (D-0
   `unsafe` for the `ash` calls in `cubarium-gpu` is exempt from the no-unsafe rule ("im fine
   with the unsafe ash -- that crate is exampt").
 
-## 12. Seedporter night roosts and rain-grounded bellwings (Wrysk, 2026-10-08: one behaviour package after the foliage/calf work)
+## 12. Seedporter night roosts and rain-grounded bellwings (Wrysk, 2026-10-08: one behaviour package after the foliage/calf work) — SHIPPED (fb4cf71b). **Closed.**
 
 "seedporters should prefer to roost in vault trees at night, or up top mesas they can reach by climbing
 latticevine." Queued to start once the foliage-states and loftstrider-calf work is finished. It is
