@@ -263,21 +263,22 @@ pub fn gut_ceiling_per_s(phys: &FounderPhysiology, body: f64, food: Food) -> f64
 /// A prey whose share is 1 dies to one hit.
 pub fn strike_share(hunter: &FounderPhysiology, hunter_body: f64, prey: &FounderPhysiology, prey_body: f64) -> f64 {
     match hunter.active_hunter() {
-        Some(h) => cubarium_voxel_fauna::profitability(&h, hunter_body, prey_body, prey.armour),
+        Some(h) => cubarium_voxel_fauna::profitability(&h, hunter.size(hunter_body), prey.size(prey_body), prey.armour),
         None => 0.0,
     }
 }
 
 /// Whether a prey of `prey_body` is inside a hunter's size window (`Hunter::prey_max_ratio`,
 /// `predation::window_size`): at most `ratio ×` the hunter's own body, a grown prey counting
-/// as its `adult_size_window_factor` × its body (LANTERNJAW-LIFE).
+/// as its `adult_size_window_factor` × its size (LANTERNJAW-LIFE). Inputs are organic
+/// bodies; each physiology removes its own demand scale before comparison.
 pub fn in_size_window(hunter: &FounderPhysiology, hunter_body: f64, prey: &FounderPhysiology, prey_body: f64) -> bool {
     let size = if prey_body >= prey.core.birth_body {
-        prey_body * prey.adult_size_window_factor.max(1.0)
+        prey.size(prey_body) * prey.adult_size_window_factor.max(1.0)
     } else {
-        prey_body
+        prey.size(prey_body)
     };
-    hunter.active_hunter().is_some_and(|h| size <= h.prey_max_ratio * hunter_body)
+    hunter.active_hunter().is_some_and(|h| size <= h.prey_max_ratio * hunter.size(hunter_body))
 }
 
 /// **A lifespan draw's survival** at age `age_s` (`draw_lifespan_ticks`, `lib.rs:2210-2233`):

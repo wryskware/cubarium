@@ -22,9 +22,12 @@ import re
 import secrets
 import subprocess
 import time
+from types import SimpleNamespace
 
 from .hosts import Host, allowed
 from .core import Task
+from . import providers
+from .kinds.build import Build
 
 AUTH = re.compile(r"ExpiredToken|expired|Unable to locate credentials|InvalidClientTokenId|AuthFailure|"
                   r"sso|SignatureDoesNotMatch|could not be found in the credential", re.I)
@@ -106,6 +109,15 @@ class Ec2Pool:
                               cwd=self.d.paths.repo, stdin=subprocess.DEVNULL)
         return done
 
+    def probe_host(self):
+        """EC2 is outside the static inventory, so probe its execution-host L3 groups here."""
+        try:
+            info = self.d.probe(self.host)
+        except (OSError, subprocess.SubprocessError) as error:
+            info = dict(up=False, error=str(error))
+        self.d.apply_probe(self.host, info)
+        return self.host.up
+
     def eligible(self):
         """Pending tasks of live jobs that may run on EC2 (the job named it, or only EC2 fits)."""
         types = self.potential_hosts()
@@ -120,14 +132,41 @@ class Ec2Pool:
     def on_ec2(self):
         return self.d.store.q("SELECT * FROM tasks WHERE state='running' AND host='ec2'")
 
+    def pending_builds(self, tasks):
+        """Include required builds before the provider jobs have been planned, once per key."""
+        builds = {t.meta["key"]: t for t in tasks if t.meta.get("kind") == "build" and t.meta.get("key")}
+        hosts = self.potential_hosts()[:1]
+        for key in {key for task in tasks for key in task.inputs if key.startswith("binary:")}:
+            if key in builds or self.d.ctx.artifact(key):
+                continue
+            row = self.d.store.one("SELECT spec FROM recipes WHERE key=?", key)
+            if not row:
+                continue
+            spec = providers.binary(key, json.loads(row["spec"]), self.d.ctx)
+            spec["pinned"] = True
+            kind = Build()
+            spec = kind.validate(spec, self.d.ctx)
+            # This is the same recipe the provider will execute; planning does no build.
+            for task in kind.plan(SimpleNamespace(spec=spec, state={}), self.d.ctx):
+                if any(allowed(task, host) for host in hosts):
+                    builds[key] = task
+        return list(builds.values())
+
     def worth(self, tasks):
         local = [h for h in self.d.inv.hosts.values() if h.kind != "ec2"]
         only_ec2 = [t for t in tasks if not any(allowed(t, h) for h in local)]
         name, info = self.type_info()
-        local_h, unknown = self.d.eta()
-        ec2_h, _ = estimate(tasks, [], self.potential_hosts()[:1])
+        local_h, _ = self.d.eta()
+        hosts = self.potential_hosts()[:1]
+        builds = self.pending_builds(tasks)
+        simulations = [t for t in tasks if t.meta.get("kind") != "build"]
+        ec2_h, unknown = estimate(simulations, [], hosts)
+        # Builds precede sims, so add their time rather than treating both as parallel work.
+        # Serializing distinct commits is conservative even if a large host overlaps builds.
+        build_h = sum(t.est_h or 0 for t in builds) / max((h.speed for h in hosts), default=1.0)
+        unknown += sum(t.est_h is None for t in builds)
         setup = float(self.cfg.get("setup_h", 0.25))
-        ec2_total = None if ec2_h is None else ec2_h + setup
+        ec2_total = None if ec2_h is None else ec2_h + build_h + setup
         estimate_info = dict(instance_type=name, price_usd_h=info.get("spot_usd_h"), local_eta_h=local_h,
                              ec2_eta_h=ec2_total, unknown_estimates=unknown,
                              est_usd=None if ec2_total is None else round(ec2_total * info.get("spot_usd_h", 0), 2),
@@ -176,6 +215,7 @@ class Ec2Pool:
             self.save()
             return
         match = re.search(r"\bi-[0-9a-f]+\b", done.stdout)
+        self.forget_host()
         self.s.update(state="launching", instance=match[0] if match else None, launched=self.d.clock(), ip=None)
         self.d.events.emit("ec2-launching", approval=self.s.get("approval"), instance=self.s["instance"],
                            instance_type=self.s["type"])
@@ -226,12 +266,19 @@ class Ec2Pool:
             return False
         for row in self.on_ec2():
             self.d.task_lost(row, f"ec2 down: {reason}")
+        self.forget_host()
         self.host = None
         self.d.events.emit("host-down", host="ec2", reason=reason, instance=self.s.get("instance"),
                            hours=round(hours, 3), est_usd=round(usd, 2))
         self.s = dict(state="idle", last=dict(reason=reason, hours=hours, usd=usd))
         self.save()
         return True
+
+    def forget_host(self):
+        """A new instance has none of the last one's uploads: drop the persistent upload marks
+        and the tools cache for `ec2` (launch 2 of 2026-10-10 found no source archive)."""
+        self.d.store.x("DELETE FROM kv WHERE key LIKE 'uploaded:ec2:%'")
+        self.d.tools.discard("ec2")
 
     def open_request(self, details):
         request_id = f"ec2-{secrets.token_hex(3)}"
@@ -257,6 +304,8 @@ class Ec2Pool:
                 self.d.task_lost(row, "ec2 instance gone")
             self.s = dict(state="idle")
             self.save()
+        elif self.host and self.s["state"] == "up":
+            self.probe_host()
         for instance in rows:
             if instance != self.s.get("instance"):
                 self.d.events.emit("ec2-orphan", instance=instance, reason="tagged host labd did not launch")
@@ -299,16 +348,17 @@ class Ec2Pool:
             if row and row["state"] == "running" and row["ip"] not in ("None", ""):
                 self.s["ip"] = row["ip"]
                 self.host = self.make_host(row["ip"])
-                if not self.ready():
+                if not self.ready() or not self.probe_host():
                     self.host = None
                     return
-                self.host.up = True
                 self.s["state"] = "up"
                 self.save()
                 self.d.events.emit("host-up", host="ec2", instance=self.s.get("instance"), ip=row["ip"])
             elif self.d.clock() - self.s.get("launched", 0) > float(self.cfg.get("launch_timeout_s", 900)):
                 self.down("instance never became ready")
         elif state == "up":
+            if self.host and self.d._due("probe:ec2", self.d.inv.get("probe_s", 300)):
+                self.probe_host()
             if not tasks and not self.on_ec2():
                 self.down("queue drained")
                 return

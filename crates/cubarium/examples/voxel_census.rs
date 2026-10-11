@@ -138,6 +138,8 @@
 
 #[path = "support/census_drift.rs"]
 mod census_drift;
+#[path = "support/sp_shredder_probe.rs"]
+mod sp_shredder_probe;
 
 use cubarium::voxel::VoxelConfig;
 use cubarium::voxel::habitat;
@@ -898,6 +900,7 @@ fn run(
     let mut vitals_time = std::time::Duration::ZERO;
     let first_tick = tick;
     let mut steer_log = SteerLog::from_env(sim);
+    let mut shredder_probe = sp_shredder_probe::Probe::new(sim);
     while tick < total_ticks {
         lj.before(sim);
         let attached_before = sim.fauna().view().ledger.riders_attached;
@@ -908,6 +911,9 @@ fn run(
         sim.step();
         lj.after(sim, attached_before);
         tick += 1;
+        if tick % u64::from(TICK_HZ) == 0 {
+            if let Some(p) = shredder_probe.as_mut() { p.sample(sim); }
+        }
         if let Some(l) = steer_log.as_mut() {
             l.tick(sim, tick);
         }
@@ -981,6 +987,7 @@ fn run(
     }
     if let Some(d) = &mut drift { d.finish(sim, tick).unwrap_or_else(|e| panic!("{e}")); }
     weather.summary(sim);
+    if let Some(p) = shredder_probe { p.report(sim); }
     spells.end(tick / TICKS_PER_MIN);
     lj.summary(sim);
     vine.summary(sim, summary_start);
@@ -991,21 +998,28 @@ fn run(
     let shredder_intake: f64 = ledger.eaten_by_founder_food[Founder::Blind.index()].iter().sum();
     eprintln!("decay probe: shredder_intake_organic={shredder_intake:.6}");
     // ROLES5: the egg-laying refusals, last in err.log.
-    eprintln!("{}", lay_refusal_line(sim.fauna().lay_refusals_by_founder(), &ledger.nest_refusals_by_founder));
+    eprintln!(
+        "{}",
+        lay_refusal_line(sim.fauna().lay_refusals_by_founder(), &ledger.nest_refusals_by_founder, &sim.fauna().nest_seek_tally())
+    );
 }
 
 /// ROLES5's readout of why egg-layers did not lay (never scored), one line: per lineage
 /// held at any gate since load, the body-seconds a breeding-size body was held at each of
 /// `lay`'s gates ([`cubarium_voxel_fauna::LAY_GATES`]: surplus hold, interval, clutch wait,
-/// wall, egg site, crowded nest with its retry wait) and the crowded-nest refusals, events.
+/// wall, egg site, crowded nest with its retry wait, on a walk off a crowded nest) and the
+/// crowded-nest refusals, events; then SHREDDER-NEST's walks off a crowded nest since load
+/// (`walk_offs` begun, `walk_lays` ended by a clutch, `give_ups`).
 fn lay_refusal_line(
     held: &[[u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT],
     refusals: &[u64; Founder::COUNT],
+    seek: &[cubarium_voxel_fauna::NestSeekTally; Founder::COUNT],
 ) -> String {
     let mut parts = Vec::new();
     for f in Founder::ALL {
         let k = f.index();
-        if held[k].iter().all(|&t| t == 0) && refusals[k] == 0 {
+        let t = seek[k];
+        if held[k].iter().all(|&t| t == 0) && refusals[k] == 0 && t == cubarium_voxel_fauna::NestSeekTally::default() {
             continue;
         }
         let gates: Vec<String> = cubarium_voxel_fauna::LAY_GATES
@@ -1013,7 +1027,15 @@ fn lay_refusal_line(
             .zip(held[k])
             .map(|(name, ticks)| format!("{name}={:.0}", ticks as f64 / f64::from(TICK_HZ)))
             .collect();
-        parts.push(format!("{} {} refused={}", f.name(), gates.join(" "), refusals[k]));
+        parts.push(format!(
+            "{} {} refused={} walk_offs={} walk_lays={} give_ups={}",
+            f.name(),
+            gates.join(" "),
+            refusals[k],
+            t.walk_offs,
+            t.walk_lays,
+            t.give_ups
+        ));
     }
     if parts.is_empty() {
         parts.push("none".to_string());
@@ -1919,6 +1941,12 @@ fn print_header() {
             f.name()
         ));
     }
+    // HUNT-ESCAPE (2026-10-10): strikes begun on bellwings by each ground hunter (the kills
+    // are `kills_*_bellwing`), the bellwings' escape bursts and the snaps that closed on air
+    // because of one, and the grown lanternjaws' counter-strikes on their attackers and the
+    // wound they dealt, all cumulative.
+    header.push_str(",struck_chorister_bellwing,struck_seedporter_bellwing,struck_lanternjaw_bellwing");
+    header.push_str(",flushes_bellwing,escapes_bellwing,counters_lanternjaw,counter_wound_lanternjaw");
     for killer in Founder::ALL {
         for prey in Founder::ALL {
             header.push_str(&format!(",kills_{}_{}", killer.name(), prey.name()));
@@ -2155,6 +2183,18 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", l.eaten_carrion_by_founder[i]));
         row.push(l.eggs_laid_by_founder[i].to_string());
         row.push(l.eggs_hatched_by_founder[i].to_string());
+    }
+    {
+        let bw = Founder::Bellwing.index();
+        let struck = cubarium_voxel_fauna::perception::STRUCK;
+        for by in [Founder::Chorister, Founder::Seedporter, Founder::Lanternjaw] {
+            row.push(l.funnel[by.index()][bw][struck].to_string());
+        }
+        row.push(l.flushes_by_founder[bw].to_string());
+        row.push(l.flush_escapes_by_founder[bw].to_string());
+        let lj = Founder::Lanternjaw.index();
+        row.push(l.counters_by_founder[lj].to_string());
+        row.push(format!("{:.6}", l.counter_wound_by_founder[lj]));
     }
     for killer in Founder::ALL {
         for prey in Founder::ALL {
@@ -3096,17 +3136,27 @@ mod session_summary_tests {
         let mut held = [[0u64; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT];
         let mut refused = [0u64; Founder::COUNT];
         let k = Founder::Blind.index();
-        held[k] = [1, 2, 3, 4, 5, 6].map(|s| s * u64::from(TICK_HZ));
+        held[k] = [1, 2, 3, 4, 5, 6, 8].map(|s| s * u64::from(TICK_HZ));
         refused[k] = 7;
-        let line = lay_refusal_line(&held, &refused);
+        let mut seek = [cubarium_voxel_fauna::NestSeekTally::default(); Founder::COUNT];
+        seek[k] = cubarium_voxel_fauna::NestSeekTally { walk_offs: 9, walk_lays: 10, give_ups: 11 };
+        let line = lay_refusal_line(&held, &refused, &seek);
         assert!(line.starts_with("lay refusals"), "{line}");
         let name = Founder::Blind.name();
         assert!(
-            line.contains(&format!("{name} surplus=1 interval=2 clutch_wait=3 wall=4 site=5 crowded=6 refused=7")),
+            line.contains(&format!(
+                "{name} surplus=1 interval=2 clutch_wait=3 wall=4 site=5 crowded=6 seeking=8 refused=7 walk_offs=9 walk_lays=10 give_ups=11"
+            )),
             "{line}"
         );
         assert!(!line.contains(Founder::Capgnawer.name()), "a lineage held nowhere is left out: {line}");
-        assert!(lay_refusal_line(&[[0; 6]; Founder::COUNT], &[0; Founder::COUNT]).ends_with("none"));
+        let none = [cubarium_voxel_fauna::NestSeekTally::default(); Founder::COUNT];
+        let zero = [[0; cubarium_voxel_fauna::LAY_GATES.len()]; Founder::COUNT];
+        assert!(lay_refusal_line(&zero, &[0; Founder::COUNT], &none).ends_with("none"));
+        // A lineage that only walked off a nest is still listed.
+        let mut walked = none;
+        walked[k].walk_offs = 1;
+        assert!(lay_refusal_line(&zero, &[0; Founder::COUNT], &walked).contains("walk_offs=1"));
     }
 
     #[test]

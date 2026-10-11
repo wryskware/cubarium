@@ -9,7 +9,8 @@
 //!     [--state DIR] [--load DIR] [--warm TICKS] [--until-night] [--max-ticks N] \
 //!     [--seconds S] [--fps 60] [--speed K] [--px 6] [--scan] [--close W,H] [--zoom 2] \
 //!     [--video FILE.mp4] [--close-video FILE.mp4] [--log FILE.csv] [--events FILE.csv] \
-//!     [--colour] [--flora-at SECONDS 'KEY = VALUE']...
+//!     [--colour] [--flora-at SECONDS 'KEY = VALUE']... [--plant-log FILE.csv]
+//!     [--fresh-fauna] [--close-at X,Y]
 //! ```
 //!
 //! `--colour` (GLOW-EASE round 2) follows colour swaps instead of emitters: an **event** is
@@ -78,6 +79,9 @@ struct Args {
     nectar_every: u64,
     colour: bool,
     flora_at: Vec<(f64, String)>,
+    plant_log: Option<PathBuf>,
+    fresh_fauna: bool,
+    close_at: Option<(u32, u32)>,
 }
 
 fn args() -> Result<Args> {
@@ -108,6 +112,9 @@ fn args() -> Result<Args> {
         nectar_every: 200,
         colour: false,
         flora_at: Vec::new(),
+        plant_log: None,
+        fresh_fauna: false,
+        close_at: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -143,6 +150,14 @@ fn args() -> Result<Args> {
             "--nectar-ticks" => a.nectar_ticks = v()?.parse()?,
             "--nectar-every" => a.nectar_every = v()?.parse()?,
             "--colour" => a.colour = true,
+            "--plant-log" => a.plant_log = Some(PathBuf::from(v()?)),
+            "--fresh-fauna" => a.fresh_fauna = true,
+            "--close-at" => {
+                let s = v()?;
+                let n: Vec<u32> = s.split(',').map(str::parse).collect::<Result<_, _>>()?;
+                let [x, y] = n[..] else { bail!("--close-at X,Y, not {s:?}") };
+                a.close_at = Some((x, y));
+            }
             "--flora-at" => {
                 let at: f64 = v()?.parse()?;
                 a.flora_at.push((at, v()?));
@@ -210,6 +225,23 @@ fn load_or_found(a: &Args, cfg: &VoxelConfig) -> Result<Sim> {
     let files = a.state.as_ref().map(|d| (d.join("world.voxel"), d.join("flora.bin"), d.join("fauna.bin")));
     let from = a.load.clone().or_else(|| files.as_ref().filter(|(w, _, _)| w.exists()).map(|_| a.state.clone().unwrap()));
     let (world, flora, fauna) = match &from {
+        // `--fresh-fauna`: the save's world and plants with seed `--seed`'s founding
+        // animals, for a save whose animal layout is older than this build's.
+        Some(dir) if a.fresh_fauna => {
+            let world = cubarium_voxel::World::load(&std::fs::read(dir.join("world.voxel"))?)
+                .map_err(|e| anyhow::anyhow!("world: {e:#}"))?;
+            let flora = cubarium_voxel_flora::snapshot::decode(&std::fs::read(dir.join("flora.bin"))?)
+                .map_err(|e| anyhow::anyhow!("flora: {e:#}"))?;
+            let params = params_of(cfg, &[])?;
+            let f = found_habitat(
+                &cfg.sim.world,
+                &LayerConfig::new(&params, cfg.sim.world.voxel_m),
+                cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
+                Seeds::from(a.seed),
+                false,
+            );
+            (world, flora, f.fauna)
+        }
         Some(dir) => {
             let s = cubarium_voxel_sim::saved::load(dir, &[]).map_err(anyhow::Error::msg)?;
             (s.world, s.flora, s.fauna)
@@ -278,6 +310,44 @@ fn stage_ready(sink: &mut VoxelGpuSink, sim: &Sim, film0: Instant) -> Result<()>
 }
 
 type Cell = (u32, u32, u32);
+
+/// Every plant cell the plant pass drew last frame and how big (0..1, `plant.glsl`'s
+/// `plantScale`); cells drawn at no size are left out.
+fn plant_scales(sink: &VoxelGpuSink, grow_s: f32) -> HashMap<Cell, f32> {
+    let Some((list, seconds)) = sink.plant_drawn() else { return HashMap::new() };
+    let t = (seconds - list.epoch) as f32;
+    list.cells
+        .iter()
+        .filter_map(|&c| {
+            let (xyz, _, _, dying, time) = cubarium_gpu::plants::unpack_cell(c);
+            let s = cubarium_gpu::plants::cell_scale(t, time, dying, grow_s);
+            (s > 0.0).then_some(((xyz[0], xyz[1], xyz[2]), s))
+        })
+        .collect()
+}
+
+/// Plant cells whose drawn size moved more than half a voxel's from one frame to the next
+/// (appearing or going whole counts as 1), and the largest move.
+fn scale_steps(before: &HashMap<Cell, f32>, now: &HashMap<Cell, f32>) -> (usize, f32) {
+    if before.is_empty() {
+        return (0, 0.0);
+    }
+    let mut n = 0;
+    let mut worst = 0.0f32;
+    let mut see = |d: f32| {
+        worst = worst.max(d);
+        n += usize::from(d > 0.5);
+    };
+    for (c, &s) in now {
+        see((s - before.get(c).copied().unwrap_or(0.0)).abs());
+    }
+    for (c, &s) in before {
+        if !now.contains_key(c) {
+            see(s);
+        }
+    }
+    (n, worst)
+}
 
 /// A's emitters now, as a map, and the events against `before`.
 fn events_of(now: &[(Cell, [f32; 3])], before: &HashMap<Cell, [f32; 3]>) -> (HashMap<Cell, [f32; 3]>, Vec<(Cell, &'static str)>) {
@@ -509,7 +579,7 @@ fn main() -> Result<()> {
             }
         }
     }
-    let (cx, cy) = (best.0, best.1);
+    let (cx, cy) = a.close_at.map_or((best.0, best.1), |(x, y)| (x.min(rw - cw), y.min(rh - ch)));
     eprintln!("glow_capture: raster {rw}x{rh}, close-up {cw}x{ch} at ({cx}, {cy}) holding {} points", best.2);
 
     // A again, beside B, so both start from the same first pack.
@@ -544,6 +614,20 @@ fn main() -> Result<()> {
         None => None,
     };
 
+    let mut plant_log = match &a.plant_log {
+        Some(path) => {
+            let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
+            writeln!(
+                f,
+                "frame,tick,a_cells,a_changing,a_dropped,a_pops,a_max_step,a_stage_ms,\
+                 b_cells,b_changing,b_dropped,b_pops,b_max_step,b_stage_ms,b_walk_gpu_ms,b_plant_gpu_ms"
+            )?;
+            Some(f)
+        }
+        None => None,
+    };
+    let mut plant_prev: [HashMap<Cell, f32>; 2] = [HashMap::new(), HashMap::new()];
+    let mut gpu_last = (0.0f64, 0.0f64, 0u64);
     let tick0 = sim.world().tick();
     let mut before: HashMap<Cell, [f32; 3]> = sa.emit_targets().into_iter().collect();
     let mut tracked: Vec<Cell> = before.keys().copied().collect();
@@ -565,14 +649,17 @@ fn main() -> Result<()> {
         let t = video_s * a.speed * tick_hz;
         let want = tick0 + t.floor() as u64;
         let mut frame_events = 0;
+        let mut stage_ms = [0.0f64; 2];
         while sim.world().tick() < want {
             let clip_s = (sim.world().tick() - tick0) as f64 / (a.speed * tick_hz);
             flora_due(&a, &mut sim, clip_s, &mut next)?;
             sim.step();
             let tick = sim.world().tick();
-            for sk in [&mut sa, &mut sb] {
+            for (j, sk) in [&mut sa, &mut sb].into_iter().enumerate() {
                 sk.set_clock(tick, 0.0);
+                let at = Instant::now();
                 sk.stage_world(sim.world(), sim.flora(), sim.fauna());
+                stage_ms[j] += at.elapsed().as_secs_f64() * 1e3;
             }
             let (map, ev) = if a.colour {
                 (HashMap::new(), sb.colour_switches().into_iter().map(|c| (c, "colour")).collect())
@@ -611,6 +698,27 @@ fn main() -> Result<()> {
             pics.push(rgba);
         }
         let tick = sim.world().tick();
+        if let Some(f) = &mut plant_log {
+            let st = |sk: &VoxelGpuSink| sk.plant_stats().unwrap_or_default();
+            let (pa, pb) = (st(&sa), st(&sb));
+            let grow = [cfg_a.plants.grow_s as f32, cfg_b.plants.grow_s as f32];
+            let mut pops = [(0usize, 0.0f32); 2];
+            // B's GPU milliseconds in the walk and the plant pass, this frame.
+            let (w, p, n) = sb.walk_plant_gpu();
+            let gpu_b = if n > gpu_last.2 { (w - gpu_last.0, p - gpu_last.1) } else { (0.0, 0.0) };
+            gpu_last = (w, p, n);
+            for (j, sk) in [&sa, &sb].into_iter().enumerate() {
+                let now = plant_scales(sk, grow[j]);
+                pops[j] = scale_steps(&plant_prev[j], &now);
+                plant_prev[j] = now;
+            }
+            writeln!(
+                f,
+                "{k},{tick},{},{},{},{},{:.3},{:.2},{},{},{},{},{:.3},{:.2},{:.3},{:.3}",
+                pa.cells, pa.changing, pa.dropped, pops[0].0, pops[0].1, stage_ms[0],
+                pb.cells, pb.changing, pb.dropped, pops[1].0, pops[1].1, stage_ms[1], gpu_b.0, gpu_b.1
+            )?;
+        }
         let mut worst = [(0.0f64, 0.0f64); 2];
         for (j, rgba) in pics.iter().enumerate() {
             let sat = Sat::new(rgba, rw as usize, rh as usize);

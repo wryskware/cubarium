@@ -33,8 +33,10 @@
 //!    accepted prey's tremor at least [`HuntConfig::tremor_turn`]: turn toward it, feed
 //!    held.
 //! 4. **Patrol.** Otherwise it waits still on its patch with the lure lit for
-//!    [`HuntConfig::patch_wait_s`]; a fruitless wait (or a walk given up) remembers the
-//!    patch as fruitless for [`HuntConfig::fruitless_memory_s`], and it chooses the next:
+//!    [`HuntConfig::patch_wait_s`], its jaw ready (LJ-HUNT, [`HuntConfig::wait_strikes`]:
+//!    feed held, so a prey that comes into its strike capsule is struck); a fruitless wait
+//!    (or a walk given up) remembers the patch as fruitless for
+//!    [`HuntConfig::fruitless_memory_s`], and it chooses the next:
 //!    the food of its prey within [`HuntConfig::cue_scan_m`] pooled into
 //!    [`HuntConfig::patch_m`] squares, each lineage's cue scaled to its best square and
 //!    weighted by its attack preference — and (S2) the scent its prey lay on those food faces
@@ -249,7 +251,8 @@ pub fn attack_chance(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::
     let Some(h) = config.founder(hf).active_hunter() else {
         return 0.0;
     };
-    profitability(&h, a.body, o.body, config.founder(pf).armour)
+    let (hp, pp) = (config.founder(hf), config.founder(pf));
+    profitability(&h, hp.size(a.body), pp.size(o.body), pp.armour)
         * attack_preference(&config.hunt, &h, &a.hunt.image, pf)
         * h.prey_weight[pf.index()].clamp(0.0, 1.0)
 }
@@ -263,16 +266,17 @@ pub fn accepts(config: &crate::FaunaConfig, a: &crate::Animal, o: &crate::Animal
     draw(DOMAIN_ATTACK, a.id, o.id, tick / window) < attack_chance(config, a, o)
 }
 
-/// **Profitability**: the share of a kill one strike makes on a prey of `prey_body` with
+/// **Profitability**: the share of a kill one strike makes on a prey of `prey_size` with
 /// `armour`, `min(1, power × (S_pred / S_prey) × (1 − armour))` — the wound formula
 /// (predation §2.4). A prey it kills in one strike is worth 1; an adult grazer that takes
 /// three hits about a third. It scales the attack preference, so the small prey are its
 /// living and the big ones a chance (proposal §3.2: adult grazers "are not its living").
-pub fn profitability(h: &crate::Hunter, hunter_body: f64, prey_body: f64, armour: f64) -> f64 {
-    if !(prey_body > 0.0) {
+/// Both sizes are demand-independent ([`crate::FounderPhysiology::size`]).
+pub fn profitability(h: &crate::Hunter, hunter_size: f64, prey_size: f64, armour: f64) -> f64 {
+    if !(prey_size > 0.0) {
         return 1.0;
     }
-    let hit = h.strike_power * (hunter_body / prey_body) * (1.0 - armour);
+    let hit = h.strike_power * (hunter_size / prey_size) * (1.0 - armour);
     if hit.is_finite() { hit.clamp(0.0, 1.0) } else { 1.0 }
 }
 
@@ -852,6 +856,9 @@ pub(crate) fn steer(
     };
     let lit = if h.lure_power > 0.0 { 1.0 } else { 0.0 };
     let still = Actions { forward: 0.0, turn: 0.0, feed: 0.0 };
+    // LJ-HUNT: waiting in ambush, the jaw is ready — feed held, so the strike capsule takes a
+    // size-eligible prey that comes into it ([`HuntConfig::wait_strikes`]).
+    let ambush = Actions { feed: if cfg.wait_strikes { 1.0 } else { 0.0 }, ..still };
     // Fed: digest where it stands.
     if !a.eating {
         fauna.animals[i].hunt.mode = HuntMode::Idle;
@@ -970,7 +977,7 @@ pub(crate) fn steer(
         if m.samples < samples_of(cfg.patch_wait_s) {
             fauna.animals[i].hunt = m;
             fauna.ledger.hunt_wait_samples += 1;
-            return Some((still, lit));
+            return Some((ambush, lit));
         }
         // A fruitless wait: remember the patch and choose the next.
         m.remember_fruitless(m.patch.0, m.patch.1, forget_at);
@@ -985,7 +992,7 @@ pub(crate) fn steer(
             m.samples = 0;
             fauna.animals[i].hunt = m;
             fauna.ledger.hunt_wait_samples += 1;
-            return Some((still, lit));
+            return Some((ambush, lit));
         }
         m.samples += 1;
         if m.samples >= samples_of(cfg.patrol_give_up_s) {
@@ -1128,6 +1135,10 @@ pub(crate) fn catch_step(
     {
         return None;
     }
+    // SP-SHREDDER: fruit is the staple even with a catch at the same mouth.
+    if crate::step::glider_fruit_in_reach(view, fv, &a, &phys).is_some() {
+        return None;
+    }
     if let Some(go) = meal_step(fauna, i, view, fv) {
         return Some(go);
     }
@@ -1148,7 +1159,7 @@ pub(crate) fn catch_step(
     let target = fauna
         .animals
         .iter()
-        // Any prey of its catch's list (the bellwing; LANTERNJAW-LIFE, a small lanternjaw).
+        // Any prey of its catch's list: bellwings, shredders and small lanternjaws.
         .filter(|o| crate::is_prey_of(&fauna.config, &a, o))
         .filter_map(|o| {
             let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);

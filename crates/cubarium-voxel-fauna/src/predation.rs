@@ -78,18 +78,22 @@ pub struct Hit {
     pub striker: u64,
     /// FINDINGS-FIX-2: the strike's [`Strike::lure`].
     pub lure: bool,
+    /// HUNT-ESCAPE: a counter-strike ([`crate::Counter`]): `prey` is the attacker, `striker`
+    /// the grown body answering it, `by` its lineage.
+    pub counter: bool,
 }
 
 /// Whether `hunter` would take `prey` (§2.1): its lineage is on the hunter's list and its
 /// structure is inside the hunter's size window, which follows the hunter's own body; a
 /// glider only on the ground.
 pub fn is_prey_of(config: &FaunaConfig, hunter: &Animal, prey: &Animal) -> bool {
-    is_prey_in_window(config, hunter, prey, hunter.body)
+    let Some(hf) = hunter.founder else { return false };
+    is_prey_in_window(config, hunter, prey, config.founder(hf).size(hunter.body))
 }
 
 /// [`is_prey_of`] with the size window measured against `window_body` in place of the
-/// hunter's own body: the pack seam (roster R3), where a pack member's window is the
-/// summed body of its adult packmates nearby (`crate::pack::window_body`).
+/// hunter's own physical size: the pack seam (roster R3), where a pack member's window is
+/// the summed sizes of its adult packmates nearby (`crate::pack::window_body`).
 pub(crate) fn is_prey_in_window(
     config: &FaunaConfig,
     hunter: &Animal,
@@ -104,8 +108,8 @@ pub(crate) fn is_prey_in_window(
     };
     // An opportunist's table is the catch's ([`crate::FounderPhysiology::opportunist`]):
     // `active_hunter` already holds it off with the switch; on, it takes low prey of its
-    // list worth the strikes (a bellwing, and since LANTERNJAW-LIFE a small lanternjaw
-    // juvenile for the seedporter) and nothing else.
+    // list worth the strikes (bellwings, littershredders and small lanternjaw
+    // juveniles for the seedporter) and nothing else.
     let p = config.founder(hf);
     if p.opportunist {
         if !p.catch_bellwings
@@ -150,10 +154,11 @@ pub fn window_size(config: &FaunaConfig, prey: &Animal) -> f64 {
         return prey.body;
     };
     let p = config.founder(pf);
+    let size = p.size(prey.body);
     if prey.body >= crate::effective_config(config, prey).birth_body {
-        prey.body * p.adult_size_window_factor.max(1.0)
+        size * p.adult_size_window_factor.max(1.0)
     } else {
-        prey.body
+        size
     }
 }
 
@@ -432,7 +437,8 @@ pub(crate) fn catch_worthwhile(config: &FaunaConfig, hunter: &Animal, prey: &Ani
     let p = config.founder(hf);
     let Some(h) = p.active_hunter() else { return false };
     let armour = prey.founder.map_or(0.0, |pf| config.founder(pf).armour);
-    let damage = h.strike_power * hunter.body / prey.body.max(f64::MIN_POSITIVE) * (1.0 - armour);
+    let prey_size = prey.founder.map_or(prey.body, |pf| config.founder(pf).size(prey.body));
+    let damage = h.strike_power * p.size(hunter.body) / prey_size.max(f64::MIN_POSITIVE) * (1.0 - armour);
     if damage <= 0.0 {
         return false;
     }

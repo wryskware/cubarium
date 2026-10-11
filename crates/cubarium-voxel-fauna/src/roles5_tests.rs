@@ -106,6 +106,9 @@ fn gnawer_config() -> FaunaConfig {
         }
     }
     p.gut.s0 = 0.0;
+    if let Some(v) = table(&doc, &["fauna", "teachers"]).and_then(|t| t.get("capgnawer_stay_worth")) {
+        c.teachers.capgnawer_stay_worth = v.as_float().expect("a stay worth");
+    }
     if let Some(h) = table(&doc, &["fauna", "cue"]).and_then(|t| t.get("fungal_half_life_s")) {
         c.cue.fungal_half_life_s = h.as_float().expect("a half-life");
     }
@@ -172,18 +175,84 @@ fn a_capgnawer_at_capped_glowcaps_gains_more_from_caps_than_from_litter() {
     let mut flora = cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::default());
     let site = glowcap(&mut flora, &world, 8, 6);
     let caps_stock = flora.view().fungus_at(site).unwrap().foliage;
-    let (both, _, _) = feed_at(true, 3.0 * caps_stock, 40);
-    assert!(both[Food::CapTissue.index()] > 0, "it bit no caps beside more litter: {both:?}");
-    assert_eq!(both[Food::Litter.index()], 0, "it took the larger litter stock over the caps: {both:?}");
+    // Beside more litter, and beside a pile far deeper than the caps (the wide world's
+    // piles run several units deep): a bite saturates in stock, so the caps still win.
+    for litter in [3.0 * caps_stock, 100.0 * caps_stock] {
+        let (both, _, _) = feed_at(true, litter, 40);
+        assert!(both[Food::CapTissue.index()] > 0, "it bit no caps beside {litter} litter: {both:?}");
+        assert_eq!(both[Food::Litter.index()], 0, "it took the litter ({litter}) over the caps: {both:?}");
+    }
+}
+
+/// **A bite's worth saturates in stock** (CAPGNAWER-CAPS): under the capgnawer's weighing
+/// a deep litter pile is worth no more than a full bite of litter, its yield ratio, and a
+/// cap holding a few crumbs (stock well over the bite half-stock) is worth more. The
+/// richest-stock rule (the switch off) ranks the deep pile over the crumbs.
+#[test]
+fn a_deep_litter_pile_tastes_no_better_than_a_bite_of_litter() {
+    use crate::Food;
+    let mut p = gnawer_config().founders[GNAWER.index()];
+    let k = p.bite_half_stock_for(Food::Litter);
+    let crumbs = 10.0 * p.bite_half_stock_for(Food::CapTissue);
+    let (shallow, deep) = (10.0 * k, 1.0e4 * k);
+    let w = p.mouth_weigh();
+    let worth = p.food_worth();
+    let litter = |s: f64| w.offer(Food::Litter, s, s);
+    assert!(litter(deep) > litter(shallow), "more stock is never worth less");
+    assert!(litter(deep) <= worth[Food::Litter.index()], "a bite of litter is worth at most its yield ratio");
+    assert!(w.offer(Food::CapTissue, crumbs, crumbs) > litter(deep), "crumbs of cap outrank the deep pile");
+    p.taste_by_yield = false;
+    let w = p.mouth_weigh();
+    assert!(w.offer(Food::Litter, deep, deep) > w.offer(Food::CapTissue, crumbs, crumbs), "the stock rule ranks the pile first");
+}
+
+/// **It eats weak food on the move and stays on caps** (CAPGNAWER-CAPS): the capgnawer's
+/// forager, tasting food over the feed gate but under its stay taste, feeds and walks on;
+/// over its stay taste it holds still and feeds. The littershredder's forager on the
+/// same weak taste stays, as before.
+#[test]
+fn the_capgnawer_forager_eats_weak_food_on_the_move_and_stays_on_strong() {
+    use crate::controller::{BlindForager, Controller, Response};
+    let cfg = gnawer_config().teachers;
+    assert!(cfg.capgnawer_stay_worth > cfg.feed_gate, "fixture: a stay taste over the feed gate");
+    let weak = 0.5 * (cfg.feed_gate + cfg.capgnawer_stay_worth);
+    let strong = 0.5 * (cfg.capgnawer_stay_worth + 1.0);
+    let tasting = |founder: Founder, cue: f64| {
+        let m = founder.manifest();
+        let mut o = vec![0.0; m.inputs()];
+        o[7] = 1.0;
+        let t = m.modules.iter().find(|m| m.name == "Taste(1)").expect("taste");
+        o[t.offset] = cue;
+        o[t.offset + 2] = 1.0;
+        o
+    };
+    let act = |c: &mut BlindForager, o: &[f64]| match c.drive(o) {
+        Response::Bounded(a) | Response::Body(a, _) => a,
+        Response::Logits(_) => unreachable!(),
+    };
+    let mut g = BlindForager::for_founder(GNAWER, cfg);
+    for _ in 0..3 {
+        let a = act(&mut g, &tasting(GNAWER, weak));
+        assert_eq!(a.feed, 1.0, "it eats the weak food");
+        assert!(a.forward > cfg.forage_stay_forward, "and walks on: forward {}", a.forward);
+    }
+    let a = act(&mut g, &tasting(GNAWER, strong));
+    assert_eq!(a.feed, 1.0);
+    assert_eq!((a.forward, a.turn), (cfg.forage_stay_forward, 0.0), "it holds still on strong food");
+    let mut shredder = BlindForager::for_founder(Founder::Blind, cfg);
+    let a = act(&mut shredder, &tasting(Founder::Blind, weak));
+    assert_eq!((a.feed, a.forward), (1.0, cfg.forage_stay_forward), "the shredder still stays on it");
 }
 
 /// **It leaves ordinary litter for the caps.** A hungry young capgnawer on a lane strewn
 /// with litter, a glowcap 2 m east: under its own heuristic it walks to the caps and bites
-/// them. With the yield weighing off (every food worth its stock, the old rule), it stays
-/// on the litter at its feet.
+/// them, on an ordinary strew and on piles as deep as the wide world's. With the yield
+/// weighing off and no stay taste (the old rule), it stays on the litter at its feet.
 #[test]
 fn a_hungry_capgnawer_on_litter_walks_to_the_glowcap() {
     use crate::Food;
+    // An ordinary strew, and piles as deep as the wide world's (CAPGNAWER-CAPS).
+    for pile in [0.3, 5.0] {
     let run = |by_yield: bool| -> (u64, u64) {
         let world = clock_off(47);
         let mut flora = cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::default());
@@ -191,13 +260,17 @@ fn a_hungry_capgnawer_on_litter_walks_to_the_glowcap() {
         for x in 0..48u32 {
             for z in 3..10u32 {
                 if (x, z) != (cap.x, cap.z) {
-                    litter(&mut flora, cubarium_voxel_flora::Site { x, y: SURFACE_Y, z }, 0.3);
+                    litter(&mut flora, cubarium_voxel_flora::Site { x, y: SURFACE_Y, z }, pile);
                 }
             }
         }
         let cap_x = (f64::from(cap.x) + 0.5) * VOXEL_M;
         let mut c = gnawer_config();
         c.founders[GNAWER.index()].taste_by_yield = by_yield;
+        if !by_yield {
+            // The old rule whole: no worth weighing, and it stays on any food it feeds on.
+            c.teachers.capgnawer_stay_worth = 0.0;
+        }
         let mut fauna = Fauna::new(c);
         let core = fauna.config().founders[GNAWER.index()].core;
         let id = introduce(&mut fauna, &world, GNAWER, StartingStores { body: core.body_min / core.body_max, reserve: 0.3 });
@@ -215,7 +288,8 @@ fn a_hungry_capgnawer_on_litter_walks_to_the_glowcap() {
         (b[Food::CapTissue.index()], b[Food::Litter.index()])
     };
     let (caps, _) = run(true);
-    assert!(caps > 0, "weighing by yield, it never reached the caps 2 m off");
+    assert!(caps > 0, "weighing by yield, it never reached the caps 2 m off (litter {pile})");
     let (old_caps, old_litter) = run(false);
-    assert!(old_litter > 0 && old_caps == 0, "fixture: the stock rule holds it on litter ({old_caps} cap bites, {old_litter} litter)");
+    assert!(old_litter > 0 && old_caps == 0, "fixture: the stock rule holds it on litter {pile} ({old_caps} cap bites, {old_litter} litter)");
+    }
 }

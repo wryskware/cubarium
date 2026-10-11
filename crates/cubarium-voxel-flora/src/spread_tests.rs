@@ -374,7 +374,7 @@ fn sampled_wind_distances_match_the_wald_kernel() {
         let voxel = 0.125;
         let cols: Vec<f64> = (0..100_000u64)
             .map(|i| {
-                let (dx, dz) = wald_offset(&mut Rng::keyed(DOMAIN_WIND, 6, i, 1), &s, voxel, 1e6);
+                let (dx, dz) = wald_offset(&mut Rng::keyed(DOMAIN_WIND, 6, i, 1), s.wald_mean_m, s.wald_shape_m, voxel, 1e6);
                 ((dx * dx + dz * dz) as f64).sqrt()
             })
             .collect();

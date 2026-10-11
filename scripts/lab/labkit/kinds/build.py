@@ -12,7 +12,12 @@ trees/ (never the live checkout), seeding target/<profile> by reflink. Other kin
 submit builds themselves: they name the key (ctx.binary) and the core plans this kind.
 """
 
+import functools
 import json
+import os
+import re
+import shutil
+import subprocess
 
 from ..core import Kind, SpecError, Task, binary_key
 
@@ -23,6 +28,24 @@ RECIPES = {
 }
 SOURCE_EXCLUDES = ("art", "design", "captures", "runs", "graft", "docs", "spikes", "assets/atelier",
                    "assets/voxel-textures")
+
+
+@functools.lru_cache(maxsize=1)
+def local_toolchain():
+    """This machine's rustc version (for example "1.98.1"), so a native build on another arch uses
+    the same compiler as the local one: the workspace denies warnings, and a newer rustc's
+    deprecations fail the build (first EC2 launch, 2026-10-10). "stable" if rustc can't be read."""
+    for rustc in (shutil.which("rustc"), os.path.expanduser("~/.cargo/bin/rustc")):
+        if not rustc:
+            continue
+        try:
+            out = subprocess.run([rustc, "--version"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        match = re.match(r"rustc (\d+\.\d+\.\d+)", out)
+        if match:
+            return match.group(1)
+    return "stable"
 
 
 def pin(spec, ctx, field="commit"):
@@ -66,6 +89,15 @@ def source_key(ctx, repo, commit):
     return key
 
 
+def simulation_arch(spec, ctx):
+    """Keep a simulation job on one platform; an EC2 opt-in selects its native arch."""
+    if "ec2" not in (spec.get("hosts") or []):
+        return ctx.arch
+    cfg = ctx.inventory.ec2 if ctx.inventory else {}
+    instance = (cfg.get("types") or ["c7g.16xlarge"])[0]
+    return cfg.get("instance_types", {}).get(instance, {}).get("arch", "aarch64")
+
+
 class Build(Kind):
     name = "build"
     description = "cargo build at a commit into the artifact cache"
@@ -101,7 +133,7 @@ class Build(Kind):
         trees = ctx.paths.cache / "trees"
         common = dict(threads=spec["threads"], mem_gb=spec["mem_gb"], produces={key: f"artifact/{spec['target']}"},
                       est_h=spec.get("est_h", 0.25), timeout_h=spec.get("timeout_h", 2), priority=10,
-                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key))
+                      meta=dict(tree=str(trees / spec["commit"][:16]), key=key, kind="build"))
         if spec["arch"] == ctx.arch:
             argv = [ctx.python, str(ctx.lab_dir / "snaprun.py"), "--repo", spec["repo"], "--commit", spec["commit"],
                     "--trees", str(trees), *[a for s in seeds(ctx, spec["repo"]) for a in ("--seed", s)],
@@ -110,9 +142,13 @@ class Build(Kind):
             return [Task(name="build", argv=argv, local_only=True, arch=ctx.arch, **common)]
         # Another arch builds natively on its host from a source archive of the same commit.
         source = source_key(ctx, spec["repo"], spec["commit"])
-        bootstrap = ('command -v cargo >/dev/null || . "$HOME/.cargo/env" 2>/dev/null || '
-                     '{ curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null && . "$HOME/.cargo/env"; }; '
-                     'exec "$@"')
+        # The same rustc as the local build (spec "toolchain" overrides), installed by rustup.
+        toolchain = spec.get("toolchain") or local_toolchain()
+        bootstrap = ('. "$HOME/.cargo/env" 2>/dev/null; '
+                     'command -v rustup >/dev/null || { curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal '
+                     '--default-toolchain none >/dev/null && . "$HOME/.cargo/env"; }; '
+                     f'rustup toolchain install {toolchain} --profile minimal >/dev/null && '
+                     f'export RUSTUP_TOOLCHAIN={toolchain} && exec "$@"')
         argv = ["bash", "-c", bootstrap, "labd-build", "{python}", "{lab}/snaprun.py", "--commit", spec["commit"],
                 "--trees", "{lab}/../trees", "--source-tar", "{input:" + source + "}", "--profile",
                 spec.get("profile", "release"), "--artifact", f"{spec['target']}={relative}", "--out", "{out}",

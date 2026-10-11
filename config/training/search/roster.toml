@@ -367,8 +367,8 @@ what = "litter decay (dead wood and carrion follow)"
 [[gene]]
 name = "rider_take"
 path = "fauna.parasite_take_body_per_day"
-range = [0.25, 4.0]
-what = "a rider's take, its own body per ecological day, into its reserve (2 -> 0.5-8; LANTERNJAW-LIFE, was per host body)"
+range = [0.125, 2.0]
+what = "a rider's take, its own body per ecological day, into its reserve (4 -> 0.5-8; LJ-GROW-B)"
 
 [[gene]]
 name = "rider_attach_radius"

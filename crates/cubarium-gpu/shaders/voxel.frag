@@ -300,7 +300,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
                 base *= u.shadeB.x;
             } else if (tone == 4 || tone == 5) {
                 base = mix(base, styleAt(int(v.a), 0), u.plantB.x);
-                if (tone == 5) { base *= u.plantA.w; }
+                if (tone == 5) { base *= mix(1.0, u.plantA.w, crownEdge(x, y, z, dx)); }
             } else if (tone >= 16 && tone <= 31) {
                 base *= 0.5 + float(tone & 15) / 16.0;
             }
@@ -332,7 +332,7 @@ bool glyphFrontAt(int x, int y, int z, uvec4 v, int row, int dx, out vec3 rgb, o
         base = plantLit(base, roofShade(roofGap(x, y, z)));
     } else if (tone == 4 || tone == 5) {
         base = mix(base, styleAt(int(v.a), 0), u.plantB.x);
-        if (tone == 5) { base *= u.plantA.w; }
+        if (tone == 5) { base *= mix(1.0, u.plantA.w, crownEdge(x, y, z, dx)); }
     } else if (tone >= 16 && tone <= 31) {
         base *= 0.5 + float(tone & 15) / 16.0;
     }
@@ -373,7 +373,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
         vec3 own = shadeTop(base, x, y, z, dx, localY, ct);
         vec3 lc = own;
         if (tone == 1) {
-            lc *= u.plantA.w;
+            lc *= mix(1.0, u.plantA.w, crownEdge(x, y, z, dx));
         } else if (tone >= 32 && tone <= 47) {
             float gain = 0.5 + float(tone & 15) / 16.0;
             lc = mix(lc, own / u.plantA.x * gain, u.shadeB.y);
@@ -384,7 +384,7 @@ bool glyphCapAt(int x, int y, int z, uvec4 v, int localY, int dx, out vec3 rgb, 
     float shade = roofShade(roofGap(x, y, z));
     vec3 cap = plantLit(base, shade);
     if (tone == 1) {
-        cap *= u.plantA.w;
+        cap *= mix(1.0, u.plantA.w, crownEdge(x, y, z, dx));
     } else if (tone >= 32 && tone <= 47) {
         float gain = 0.5 + float(tone & 15) / 16.0;
         cap = mix(cap, base * gain, u.shadeB.y);

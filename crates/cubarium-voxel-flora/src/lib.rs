@@ -95,7 +95,7 @@ pub use cover::{
 };
 
 pub use layers::{
-    Layer, LayerKind, MAX_FOLIAGE_LAYERS, Profile, StandLayer, disc_offset, trunk_offsets,
+    Layer, LayerKind, MAX_FOLIAGE_LAYERS, Profile, StandLayer, disc_offset, shade_share, trunk_offsets,
 };
 pub use step::upkeep_factor;
 pub use step::pollinated_share;
@@ -1206,6 +1206,31 @@ pub struct SpeciesConfig {
     /// a small `light_half` earns nearly full income in shade and one with a large value
     /// needs open sky.
     pub light_half: f64,
+    /// **Specific leaf area**, m² of one-sided leaf per kg of leaf dry mass (SHADE-REAL):
+    /// with [`SpeciesConfig::foliage_kg_per_unit`] it turns foliage stock into leaf area,
+    /// and leaf area into shade ([`FloraConfig::light_extinction_k`]). The growth form's
+    /// median from the global leaf surveys (Wright et al. 2004, *Nature* 428: 821–827,
+    /// GLOPNET; Poorter et al. 2009, *New Phytol.* 182: 565–588, LMA by functional
+    /// group): herbs, grasses and ferns about 20 (LMA ~50 g/m²), deciduous woody plants
+    /// about 13 (LMA ~75), evergreen and cushion leaves about 8 (LMA ~125).
+    pub specific_leaf_area_m2_per_kg: f64,
+    /// **Leaf dry mass in one org-unit of this species' foliage**, kg (SHADE-REAL's
+    /// stock-to-mass map). The org-unit has no one mass: the parameter audit
+    /// (`design/7_Research/ecology-parameter-audit-2026-09-28.md` §3) found a foliage unit
+    /// means 0.04–0.25 kg dry across the nine species. So each species' is read off its
+    /// real analog at full size, **closed**: a closed stand of the analog holds a leaf area
+    /// index `LAI_ref` per square metre of ground, so
+    /// `foliage_kg_per_unit = LAI_ref · A_closed / (specific_leaf_area · α · W_max)`, where
+    /// `A_closed` is the ground one full stand holds when the stand is closed: its crown
+    /// disc `π r_max²` for an upright plant (closed crowns touch; the disc floored as the
+    /// shade model floors it), but **one face** (0.125² m² on the shipped grid) for a
+    /// ground cover, which closes one stand per face with its discs overlapping (a disc
+    /// LAI there would put a sward's real LAI at the overlap times it). `LAI_ref` is the biome mean of the
+    /// global LAI synthesis (Asner, Scurlock & Hicke 2003, *Global Ecol. Biogeogr.* 12:
+    /// 191–205): deciduous broadleaf forest 5.1, grassland 2.5, tundra 2.7, wetland 6.3;
+    /// 3 for a shrub's crown (above its 2.1 stand mean, which counts the ground between
+    /// shrubs; the audit's own foliage estimate). Each species' constructor states its own.
+    pub foliage_kg_per_unit: f64,
     /// Roots reach `rooting_depth` voxels down from the support (the support voxel
     /// counts as the first) and `rooting_radius` voxels sideways in `x` and `z`; only
     /// soil voxels in that box hold water for the stand.
@@ -1494,6 +1519,24 @@ pub struct SpeciesConfig {
     /// stronger wind (a larger mean) also fattens the tail relatively: the coefficient of
     /// variation is `√(μ / λ)`. Inert on every other mode.
     pub wald_shape_m: f64,
+    /// **Release from the crown** (SHADE-REAL, item 3): the height seeds leave the parent
+    /// at, as a share of its crown height **now** ([`SpeciesConfig::crown_height_m_at`]).
+    /// Above zero, a [`Dispersal::Wald`] species' kernel is the mechanistic WALD of Katul
+    /// et al. (2005, *Am. Nat.* 166: 368–381) instead of the fixed
+    /// [`SpeciesConfig::wald_mean_m`] and [`SpeciesConfig::wald_shape_m`]: with
+    /// `H = seed_release_share · crown height`, `U` [`FloraConfig::seed_wind_m_per_s`],
+    /// `F` [`SpeciesConfig::seed_fall_m_per_s`] and the eddy diffusivity
+    /// `K = a · U · H` (`a` [`FloraConfig::seed_eddy_ratio`]),
+    ///
+    /// `mean = H · U / F`, `shape = H² · U / (2 K) = H / (2a)`,
+    ///
+    /// so a taller parent and a stronger wind throw farther, and the wind fattens the tail
+    /// (`CV² = mean / shape = 2 a U / F`). Zero (the base) keeps the fixed kernel.
+    /// Fraction.
+    pub seed_release_share: f64,
+    /// **The seed's terminal fall speed**, m/s (`F` above). Inert unless
+    /// [`SpeciesConfig::seed_release_share`] is above zero.
+    pub seed_fall_m_per_s: f64,
     /// **Burrs** (epizoochory): the chance, per contact, that a donor stand's seed latches
     /// onto an animal of coat factor 1 that steps onto its face; scaled by the animal's
     /// own coat factor (`cubarium_voxel_fauna`'s `burr_coat`). The seed is one whole
@@ -1765,6 +1808,20 @@ impl SpeciesConfig {
         }
     }
 
+    /// **The WALD kernel a donor of `wood` throws with**, `(mean, shape)` in metres
+    /// ([`Dispersal::Wald`]): the mechanistic kernel from its crown when
+    /// [`SpeciesConfig::seed_release_share`] is above zero, `H · U / F` and `H / (2a)`,
+    /// else the fixed [`SpeciesConfig::wald_mean_m`] and [`SpeciesConfig::wald_shape_m`].
+    pub fn wald_kernel(&self, wood: f64, wind_m_per_s: f64, eddy_ratio: f64) -> (f64, f64) {
+        if !(self.seed_release_share > 0.0) {
+            return (self.wald_mean_m, self.wald_shape_m);
+        }
+        let h = self.seed_release_share * self.crown_height_m_at(wood);
+        let mean = h * wind_m_per_s.max(0.0) / self.seed_fall_m_per_s.max(1e-9);
+        let shape = h / (2.0 * eddy_ratio.max(1e-9));
+        (mean, shape)
+    }
+
     /// Height of the crown top above the support face, **in metres**, seedling cap and
     /// growth rule applied ([`SpeciesConfig::crown_dimension_m`]).
     pub fn crown_height_m_at(&self, wood: f64) -> f64 {
@@ -1921,6 +1978,9 @@ impl SpeciesConfig {
             nutrient_half: 0.5,
             nutrient_draw_max: 0.01,
             light_half: 0.5,
+            // SHADE-REAL leaf area: base: a mid-range leaf (SLA 15) at 0.1 kg per unit; every species sets its own.
+            specific_leaf_area_m2_per_kg: 15.0,
+            foliage_kg_per_unit: 0.1,
             rooting_depth: 2,
             rooting_radius: 1,
             // Package F's upland scale (available water, 1 = field capacity): wilts only
@@ -1988,6 +2048,8 @@ impl SpeciesConfig {
             // No WALD kernel, no burrs, no curing: springturf's preset says why it has them.
             wald_mean_m: 0.0,
             wald_shape_m: 0.0,
+            seed_release_share: 0.0,
+            seed_fall_m_per_s: 1.0,
             burr_pickup: 0.0,
             burr_retention_mean_m: 0.0,
             burr_retention_shape: 1.0,
@@ -2032,6 +2094,9 @@ impl SpeciesConfig {
             founder_colony: 3,
             founder_cap: 64,
             light_half: 0.8,
+            // SHADE-REAL leaf area: bloomcrown: a forb-shrub (SLA 20); crown LAI 3 over π·0.3125² m² at α·W_max 1.2 → 0.038 kg/unit (the audit's 0.04).
+            specific_leaf_area_m2_per_kg: 20.0,
+            foliage_kg_per_unit: 0.038,
             rooting_depth: 2,
             rooting_radius: 1,
             // Upland: the most drought-hardy of the three upland plants —
@@ -2126,6 +2191,9 @@ impl SpeciesConfig {
             founder_colony: 3,
             founder_cap: 40,
             light_half: 0.15,
+            // SHADE-REAL leaf area: umbrellafrond: fern-like fronds (SLA 20); crown LAI 3 over π·0.75² m² at 1.2 units → 0.22 kg/unit.
+            specific_leaf_area_m2_per_kg: 20.0,
+            foliage_kg_per_unit: 0.22,
             rooting_depth: 4,
             rooting_radius: 1,
             // Wetland: needs ground wetter than drained. Wilts at field
@@ -2288,6 +2356,10 @@ impl SpeciesConfig {
             founder_colony: 6,
             founder_cap: 160,
             light_half: 1.0,
+            // SHADE-REAL leaf area: springturf: a grass (SLA 20); a closed sward, one stand
+            // per 0.125 m face, holds grassland LAI 2.5 → 2.5·0.125²/(20·0.945) = 0.0021 kg/unit.
+            specific_leaf_area_m2_per_kg: 20.0,
+            foliage_kg_per_unit: 0.0021,
             rooting_depth: 2,
             rooting_radius: 1,
             wilt_water: 0.0,
@@ -2440,6 +2512,10 @@ impl SpeciesConfig {
             founder_colony: 3,
             founder_cap: 64,
             light_half: 0.3,
+            // SHADE-REAL leaf area: stonecushion: an evergreen cushion (SLA 8); a closed
+            // carpet, one stand per 0.125 m face, holds tundra LAI 2.7 → 2.7·0.125²/(8·0.2) = 0.026 kg/unit.
+            specific_leaf_area_m2_per_kg: 8.0,
+            foliage_kg_per_unit: 0.026,
             rooting_depth: 2,
             rooting_radius: 1,
             wilt_water: 0.0,
@@ -2536,6 +2612,10 @@ impl SpeciesConfig {
             founder_colony: 6,
             founder_cap: 120,
             light_half: 0.1,
+            // SHADE-REAL leaf area: velvetpad: a soft mat (SLA 20); a closed mat, one stand
+            // per 0.125 m face, holds tundra LAI 2.7 → 2.7·0.125²/(20·0.2) = 0.0105 kg/unit.
+            specific_leaf_area_m2_per_kg: 20.0,
+            foliage_kg_per_unit: 0.0105,
             rooting_depth: 2,
             rooting_radius: 1,
             wilt_water: 0.25,
@@ -2699,6 +2779,11 @@ impl SpeciesConfig {
             dark_spore_bias: 4.0,
             dark_founder_share: 0.5,
             trophic: Trophic::Saprotroph,
+            // SHADE-REAL leaf area: a cap is not a leaf; it shades as one opaque disc over
+            // its footprint, an "LAI" of 1 over the 0.0625 m² floor at 0.2 units of cap
+            // (SLA 20) → 0.0156 kg/unit.
+            specific_leaf_area_m2_per_kg: 20.0,
+            foliage_kg_per_unit: 0.0156,
             substrate_uptake_per_s: 0.02,
             substrate_budgeted: true,
             substrate_required: true,
@@ -2810,6 +2895,9 @@ impl SpeciesConfig {
             founder_colony: 1,
             founder_cap: 12,
             light_half: 0.6,
+            // SHADE-REAL leaf area: vaulttree: a deciduous broadleaf tree (SLA 13); forest LAI 5.1 over π·1.85² m² at α·W_max 10 → 0.42 kg/unit, 4.2 kg of leaf on a full 6.5 m tree.
+            specific_leaf_area_m2_per_kg: 13.0,
+            foliage_kg_per_unit: 0.42,
             establish_light_min: 0.9,
             rooting_depth: 6,
             rooting_radius: 2,
@@ -2821,15 +2909,26 @@ impl SpeciesConfig {
             relax_rate_per_s: 0.02,
             drown_depth_m: 0.1,
             falls: true,
-            // Seeds: a **winged seed on the wind** at a kernel scale of `hop` 4
-            // (1 m): most land under or beside the crown and a few percent 10 m out. 6 h,
+            // Seeds: a **winged seed on the wind** (SHADE-REAL, Wrysk 2026-10-10: "seeds
+            // probably could travel more"). The wind is its only carrier: it sets no fruit
+            // (`fruit_per_s` 0, so no gut carries it) and has no burrs. The kernel is the
+            // mechanistic WALD from the crown: released at 0.775 of the crown height (the
+            // middle of the shelves' 0.55–1.0 band, where the seeds hang), falling at
+            // 1.0 m/s (a spinning samara's terminal velocity: maples 0.7–1.2 m/s, Green
+            // 1980, *Am. J. Bot.* 67: 1218–1224; wind-dispersed tree diaspores, Augspurger
+            // 1986, *Am. J. Bot.* 73: 353–363). A full 6.5 m tree's mean is then 10 m in the
+            // 2 m/s wind and a donor's at its 2.5 wood (a 3.0 m crown) 4.6 m, against the old Lomax at
+            // `hop` 4 (1 m) that put 79 % within 3 m. `hop` stays for the rescale and reads
+            // nothing here. 6 h,
             // the bottom of the range: a large tree seed does not keep, and the tree's
             // bet is a seedling in the next gap, not a long bank. Package SU: a seed of
             // **4** minimum packages (0.2 of material), the biggest seedling of the nine;
             // `propagule_rate` ×4 with it (0.0002 → 0.0008), so a funded donor still sends
             // a seed every 300 s, and bloomcrown's 0.1 per check through a ground cover.
             hop: 4,
-            dispersal: Dispersal::Wind,
+            dispersal: Dispersal::Wald,
+            seed_release_share: 0.775,
+            seed_fall_m_per_s: 1.0,
             seed_mass: 4,
             overtop_per_check: 0.1,
             seed_max_age_s: 21_600.0,
@@ -2926,6 +3025,9 @@ impl SpeciesConfig {
             founder_colony: 3,
             founder_cap: 40,
             light_half: 0.4,
+            // SHADE-REAL leaf area: lanternberry: a deciduous shrub (SLA 13); crown LAI 3 over π·0.4375² m² at 2 units → 0.069 kg/unit.
+            specific_leaf_area_m2_per_kg: 13.0,
+            foliage_kg_per_unit: 0.069,
             establish_light_min: 0.35,
             rooting_depth: 3,
             rooting_radius: 1,
@@ -3027,6 +3129,9 @@ impl SpeciesConfig {
             founder_colony: 6,
             founder_cap: 64,
             light_half: 0.8,
+            // SHADE-REAL leaf area: siphonreed: a reed (SLA 15, Phragmites-like); wetland LAI 6.3 over the 0.0625 m² floor at 0.6 units → 0.044 kg/unit.
+            specific_leaf_area_m2_per_kg: 15.0,
+            foliage_kg_per_unit: 0.044,
             establish_light_min: 0.6,
             rooting_depth: 2,
             rooting_radius: 1,
@@ -3127,14 +3232,33 @@ pub struct FloraConfig {
     /// The latticevine, which is not a stand: a vine rooted on a support face covering rock
     /// faces ([`cover`]).
     pub latticevine: VineConfig,
-    /// Canopy attenuation, **per square metre**: a taller stand whose crown covers a
-    /// site multiplies the light reaching that site by
-    /// `exp(-shade_k_per_m2 · P / crown_area_m2)`, where the crown's area is
-    /// `π · (radius_cells · voxel_m)²` floored at one reference cell, `(0.25 m)²`.
+    /// **`k_ext`, the canopy's light-extinction coefficient** (SHADE-REAL, Wrysk
+    /// 2026-10-10: "realistic numbers ... for shade generally"). Dimensionless. Light
+    /// through foliage follows Beer–Lambert, `exp(−k_ext · Ω · LAI)` (Monsi & Saeki 1953),
+    /// and every foliage layer of every species shades by it
+    /// ([`StandLayer::optical_depth`]):
     ///
-    /// Per square metre and not per cell, so optical depth does not depend on the grid.
-    /// A config with an unknown field is refused (`deny_unknown_fields`).
-    pub shade_k_per_m2: f64,
+    /// - `LAI` is the layer's leaf area per square metre of its own disc,
+    ///   `specific_leaf_area · foliage_kg_per_unit · stock / area_m2` (the species'
+    ///   [`SpeciesConfig::specific_leaf_area_m2_per_kg`] and
+    ///   [`SpeciesConfig::foliage_kg_per_unit`]), the disc's area floored at
+    ///   [`FloraConfig::min_layer_area_m2`];
+    /// - `Ω = 1 − porosity`, the share of the disc leaves cover (the crown's gaps, a
+    ///   clumping index);
+    /// - an occluder's depth counts by [`shade_share`], the part of its band above
+    ///   the receiver's middle, so crowns of one height shade each other by half.
+    ///
+    /// **0.6**: the middle of broadleaf canopies' 0.5–0.7 (Jones 1992, *Plants and
+    /// Microclimate* §2.7; Campbell & Norman 1998, *An Introduction to Environmental
+    /// Biophysics* ch. 15: a spherical leaf-angle distribution gives 0.5 for the sun
+    /// overhead and about 0.7 for diffuse sky). A closed crown of LAI 3–6 then passes
+    /// 3–17 % before its gaps.
+    ///
+    /// It replaced `shade_k_per_m2` (0.09375 m² per org-unit, a fitted constant that let a
+    /// full vaulttree crown pass about 94 %). An older save's `shade_k_per_m2` is ignored
+    /// and this default applies. A config with an unknown field is refused
+    /// (`deny_unknown_fields`).
+    pub light_extinction_k: f64,
     /// `k_d`: litter decomposition per second. Its organic matter is respired out of the
     /// system (`respired_out`, energy to heat) and its mineral is released to the site's
     /// pool at the same fraction.
@@ -3221,6 +3345,19 @@ pub struct FloraConfig {
     /// **Wind seed: kernel scale** `a`, in the species' `hop`s (distances in `hop`
     /// multiples, so it follows the voxel rescale through `hop`).
     pub wind_scale_hops: f64,
+    /// **Seed wind: the mean wind at release height**, m/s (`U` of the mechanistic WALD,
+    /// [`SpeciesConfig::seed_release_share`]). **2.0**: a light breeze (Beaufort 2 is
+    /// 1.6–3.3 m/s), the order of the mean wind at the top of the Duke Forest canopy
+    /// Katul et al. (2005) and Nathan et al. (2002, *Nature* 418: 409–413) parameterised
+    /// their tree-seed kernels with. One wind for every species that uses the mechanistic
+    /// kernel; the fixed kernels ([`SpeciesConfig::wald_mean_m`]) do not read it.
+    pub seed_wind_m_per_s: f64,
+    /// **Seed wind: eddy diffusivity per unit wind and height**, `a = K / (U · H)`,
+    /// dimensionless: the WALD's shape is `H / (2a)`. **0.1**, from canopy-flow
+    /// turbulence, `K = σ_w² T_L` with `σ_w ≈ 1.1 u*`, `T_L ≈ 0.3 h / u*` and
+    /// `u* ≈ 0.3 U` at the canopy top (Raupach 1988; the values Katul et al. 2005 use),
+    /// so `K ≈ 0.11 U h`.
+    pub seed_eddy_ratio: f64,
     /// **Burrs: the most seeds one animal carries** at once ([`SpeciesConfig::burr_pickup`]);
     /// a full coat picks up no more until one falls off. Count.
     pub burr_cap: u32,
@@ -3357,7 +3494,7 @@ impl Default for FloraConfig {
             lanternberry: SpeciesConfig::lanternberry(),
             siphonreed: SpeciesConfig::siphonreed(),
             latticevine: VineConfig::default(),
-            shade_k_per_m2: 0.09375,
+            light_extinction_k: 0.6,
             decomposition: 0.001,
             litter_fragment_boost: 0.25,
             litter_fragment_radius_m: 0.5,
@@ -3376,6 +3513,8 @@ impl Default for FloraConfig {
             wind_tries: 4,
             wind_shape: 2.0,
             wind_scale_hops: 2.5,
+            seed_wind_m_per_s: 2.0,
+            seed_eddy_ratio: 0.1,
             // A handful: a coat holds many burrs, but one burr here is a whole package.
             burr_cap: 6,
             carcass_remains_fraction: 0.3,
@@ -3446,6 +3585,13 @@ impl FloraConfig {
     /// latticevine's per-face amounts by the face's area against the reference face's).
     /// Reference-sized and coarser grids keep the authored geometry, as do invalid sizes
     /// (which the world config rejects at its own input boundary).
+    /// `k_ext · specific_leaf_area · foliage_kg_per_unit`, m² per org-unit: a foliage
+    /// layer's optical depth per unit of stock per square metre of disc, before its
+    /// porosity ([`StandLayer::optical_depth`]).
+    pub fn depth_per_stock_m2(&self, sc: &SpeciesConfig) -> f64 {
+        self.light_extinction_k * sc.specific_leaf_area_m2_per_kg * sc.foliage_kg_per_unit
+    }
+
     pub fn rescaled_to(mut self, voxel_m: f64) -> FloraConfig {
         const REFERENCE_VOXEL_M: f64 = 0.25;
         if !voxel_m.is_finite() || !(voxel_m > 0.0) {
@@ -4215,6 +4361,7 @@ pub fn layer_iter<'c>(config: &'c FloraConfig, stand: &Stand, voxel_m: f64) -> L
     LayerIter {
         graze_refuge: sc.graze_refuge,
         min_area_m2: config.min_layer_area_m2,
+        depth_per_stock_m2: config.depth_per_stock_m2(sc),
         layers: stage.layers.iter().enumerate(),
         height_v: sc.crown_height(stand.wood, voxel_m),
         radius_v: sc.crown_radius(stand.wood, voxel_m).max(0.0),
@@ -4233,6 +4380,8 @@ pub struct LayerIter<'c> {
     graze_refuge: f64,
     /// [`FloraConfig::min_layer_area_m2`].
     min_area_m2: f64,
+    /// [`FloraConfig::depth_per_stock_m2`] of the stand's species.
+    depth_per_stock_m2: f64,
     layers: std::iter::Enumerate<std::slice::Iter<'c, Layer>>,
     height_v: f64,
     radius_v: f64,
@@ -4386,6 +4535,7 @@ impl Crown {
         LayerIter {
             graze_refuge: sc.graze_refuge,
             min_area_m2: config.min_layer_area_m2,
+            depth_per_stock_m2: config.depth_per_stock_m2(sc),
             layers: sc.profile[usize::from(self.stage)].layers.iter().enumerate(),
             height_v: self.height_v,
             radius_v: self.radius_v,
@@ -4558,6 +4708,8 @@ impl Iterator for LayerIter<'_> {
                 ),
             };
             let cell = i64::from(self.site_y) + i64::from(disc);
+            let stock = fi.map_or(0.0, |i| self.layer_stock[i]);
+            let area_m2 = (std::f64::consts::PI * r_m * r_m).max(self.min_area_m2);
             let cells = if is_foliage {
                 (cell, cell)
             } else {
@@ -4579,14 +4731,15 @@ impl Iterator for LayerIter<'_> {
                 cells,
                 share: if is_foliage { layer.share } else { 0.0 },
                 capacity: if is_foliage { layer.share * cap } else { 0.0 },
-                stock: fi.map_or(0.0, |i| self.layer_stock[i]),
+                stock,
                 floor: if is_foliage {
                     self.graze_refuge * layer.share * cap
                 } else {
                     0.0
                 },
                 porosity: layer.porosity,
-                area_m2: (std::f64::consts::PI * r_m * r_m).max(self.min_area_m2),
+                area_m2,
+                optical_depth: self.depth_per_stock_m2 * (1.0 - layer.porosity) * stock / area_m2,
             });
         }
         None
@@ -5808,6 +5961,40 @@ impl Flora {
             stands.push(stand);
         }
         step::founder_light(&self.config, &stands, world)[start..].to_vec()
+    }
+
+    /// **What a newborn of `species` on `site` would read now** (a diagnostic for probes,
+    /// SHADE-REAL): `(L_eff, cover)`, its light through every other stand's foliage after
+    /// its light response (the canopy gate's own [`step::canopy_light`], the site's terrain
+    /// sky as the open light) and its income over upkeep at that light with full water and
+    /// mineral ([`break_even_cover`] at `μ = N = 1`): an upper bound on the gate's cover.
+    pub fn newborn_canopy(&self, world: &World, site: Site, species: Species) -> (f64, f64) {
+        let view = world.view();
+        let open = view.sky_visibility(site.x as i64, site.y, site.z);
+        let newborn = seeds::newborn_stand(&self.config, site, species);
+        let l_eff = step::canopy_light(&self.config, &self.stands, &view, open, &newborn);
+        let cover = break_even_cover(self.config.species(species), newborn.wood, newborn.foliage, l_eff, 1.0, 1.0);
+        (l_eff, cover)
+    }
+
+    /// **Take the stands at `(site, place)` out of the layer** without booking their matter
+    /// anywhere (a probe's diagnostic, SHADE-REAL's static thinning; the ledgers no longer
+    /// close afterwards, so never call it on a world that will run on).
+    pub fn remove_stands(&mut self, at: &[(Site, FaceLayer)]) {
+        self.stands.retain(|s| !at.contains(&(s.site, s.place)));
+        self.crowns = CrownCache::default();
+    }
+
+    /// **Run the saved stands under another plant config** (a probe's diagnostic,
+    /// SHADE-REAL): the config replaced, every stand's foliage re-binned into the new
+    /// profile's layers, the crown cache dropped. For reading a save under this build's
+    /// geometry; a world that will run on is loaded the ordinary way.
+    pub fn set_config_rebinned(&mut self, config: FloraConfig) {
+        self.config = config;
+        for s in &mut self.stands {
+            s.bin_layers(&self.config);
+        }
+        self.crowns = CrownCache::default();
     }
 
     /// Publish founding light without advancing the ecological clock or any stock.

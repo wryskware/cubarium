@@ -152,7 +152,7 @@ fn the_old_flora_validator_refusals_still_refuse() {
     });
     // The shared rates.
     for (field, edit) in [
-        ("shade_k_per_m2", (|c: &mut FloraConfig| c.shade_k_per_m2 = f64::NEG_INFINITY) as fn(&mut FloraConfig)),
+        ("light_extinction_k", (|c: &mut FloraConfig| c.light_extinction_k = f64::NEG_INFINITY) as fn(&mut FloraConfig)),
         ("decomposition", |c| c.decomposition = -1.0),
         ("wood_decomposition", |c| c.wood_decomposition = f64::NAN),
         ("carrion_decomposition", |c| c.carrion_decomposition = -1.0),

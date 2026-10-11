@@ -40,7 +40,7 @@ class CargoTest(Kind):
                      hosts=spec.get("hosts"), arch=ctx.arch, threads=spec["threads"], mem_gb=spec["mem_gb"],
                      est_h=spec.get("est_h", 0.25), timeout_h=spec.get("timeout_h", 1),
                      env={"CARGO_BUILD_JOBS": str(spec["threads"])},
-                     meta=dict(tree=str(trees / spec["commit"][:16])))]
+                     meta=dict(tree=str(trees / spec["commit"][:16]), kind="cargo-test"))]
 
     def finish(self, job, ctx):
         view = job.tasks.get("test")

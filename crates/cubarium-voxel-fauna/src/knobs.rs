@@ -397,6 +397,16 @@ pub struct TeacherConfig {
     /// was), count. 0 walks straight on.
     #[serde(default = "turn_back_samples")]
     pub forage_turn_back_samples: u32,
+    /// **The capgnawer stays only on food worth staying for** (CAPGNAWER-CAPS, role call
+    /// 5A): its taste reads the worth of a bite against a full bite of its best food
+    /// ([`crate::FounderPhysiology::taste_by_yield`]), and its forager holds still to feed
+    /// only where that worth is at least this, a fraction of a full cap bite. Weaker food
+    /// over [`TeacherConfig::feed_gate`] (its litter, worth its yield ratio however deep
+    /// the pile) it eats on the move while its search, the fungal scent included, goes
+    /// on. Read by the capgnawer's forager only, and meaningful only with its switch on;
+    /// 0 stays on any food it feeds on, the other blind foragers' rule.
+    #[serde(default = "capgnawer_stay_worth")]
+    pub capgnawer_stay_worth: f64,
     /// **EDGE, a pressed walk re-plans**: a reflex walking a body to a target (a glider's
     /// refuge, roost or fruit) that has asked it forward this long without its moving
     /// gives that target up, seconds. A fruit approach that asks no motion, or a hungry
@@ -545,6 +555,9 @@ fn stay_forward() -> f64 {
 fn turn_back_samples() -> u32 {
     2
 }
+fn capgnawer_stay_worth() -> f64 {
+    0.25
+}
 
 fn bw_altitude() -> f64 {
     0.4
@@ -610,6 +623,7 @@ impl Default for TeacherConfig {
             bellwing_roost_ceiling: bw_roost_ceiling(),
             forage_stay_forward: stay_forward(),
             forage_turn_back_samples: turn_back_samples(),
+            capgnawer_stay_worth: capgnawer_stay_worth(),
             press_replan_s: press_replan_s(),
             press_shun_s: press_shun_s(),
             route_refresh_s: route_refresh_s(),
@@ -794,6 +808,19 @@ pub struct HuntConfig {
     /// went for another. Off (the default, opportunistic), any size-eligible prey in the
     /// capsule, as D2 did.
     pub strike_chosen_only: bool,
+    /// **The jaw ready in ambush** (LJ-HUNT). On, a patroller waiting still on its patch holds
+    /// `feed`, as it does while engaged, so a size-eligible prey that walks or flies into its
+    /// strike capsule is struck there (an ambush predator's strike), by the capsule's rule
+    /// and [`HuntConfig::strike_chosen_only`]. Off, main's rule: it strikes only a prey its
+    /// patrol has engaged — seen ahead and accepted — and a prey that wanders into reach while
+    /// it waits, or one drawn to its lure, unseen, is let go.
+    pub wait_strikes: bool,
+    /// **The lunge sweeps its band** (LJ-HUNT). On, a lanternjaw's lunge contact test takes the
+    /// jaw band from the height the lunge began at to the one it ends at, so a lunge that steps
+    /// down a ledge (the terraced ground does, a voxel at a time) still meets the prey it was
+    /// aimed at — a bellwing hovering at its lure's height. Off, main's rule: the band where the
+    /// lunge ends only. Other hunters keep main's rule.
+    pub lunge_sweeps_band: bool,
     /// **Eat the kill first** (HUNTER-MEAL, Astra's open questions §3). On, a hungry hunter
     /// (the lanternjaw's patrol, and a Veilhound between its pack's hunts) with a usable
     /// carcass — carrion under the plant layer's carcass record — that it can walk to within
@@ -860,6 +887,8 @@ impl Default for HuntConfig {
             attack_explore: 1.0,
             attack_decision_s: 20.0,
             strike_chosen_only: false,
+            wait_strikes: true,
+            lunge_sweeps_band: true,
             meal_first: true,
             carcass_scan_m: 3.0,
             reachable_only: true,
@@ -1067,6 +1096,15 @@ pub struct LightConfig {
     /// — and is drawn to a still beacon by its level × its class's expectation. Off: by its
     /// level alone (S3). A switch, no registry row. On.
     pub learn: bool,
+    /// **The lure entrances** (LJ-HUNT, Wrysk 2026-10-10: "a lured bellwing doesn't react").
+    /// On, a flyer drawn to a lure ([`crate::light`]'s `drawn_to_lure`) sees no loom in a lit
+    /// lanternjaw, nor in a strike begun on it while it was lured ([`crate::Strike::lure`]),
+    /// and that lure moving (the lunge) stays the still light it follows instead of turning
+    /// into a moving light that repels: the looming shadow and the moving light repel it from
+    /// everything else, but not from the jaw behind the light it is inspecting. Off, main's
+    /// rule: the lunge at a lured bellwing looms and its lure repels like any other, and it
+    /// climbs out of the capsule before the jaw arrives. A switch, no registry row. On.
+    pub lure_masks_loom: bool,
     /// The **innate** expectation (a probability of reward, `0..=1`) of a near-IR reflector: what
     /// a naive body expects, and what a learned one relaxes back to. 0.5: either colour may pay
     /// (pollinators come with a colour bias but are drawn to both; Giurfa et al. 1995).
@@ -1119,6 +1157,7 @@ impl Default for LightConfig {
             near_forward: 0.3,
             glow_scent_gate: 0.05,
             learn: true,
+            lure_masks_loom: true,
             nir_innate: 0.5,
             cyan_innate: 0.12,
             learn_rate: 0.3,

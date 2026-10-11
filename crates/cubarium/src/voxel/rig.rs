@@ -17,7 +17,8 @@
 //!
 //! # Clips per state
 //!
-//! Each clip names the animal state it plays in (`cropping`, `asleep`) and how it plays:
+//! Each clip names the animal state it plays in (`cropping`, `asleep`, `idle`, `hunker`) and
+//! how it plays:
 //!
 //! - a **loop** ([`ClipMode::Loop`]) runs on the frame clock at the animal's own phase
 //!   ([`phase_offset_s`]); its weight eases each bone's turn from none by a slerp and its
@@ -28,9 +29,13 @@
 //!
 //! Each clip's weight eases 0 → 1 while its state holds and back after (the feeding clip's
 //! over [`FEED_EASE_S`], `Animals::feed_weight`; the rest's with the sleep blend,
-//! `Animals::sleep_weight`), drawn through a smoothstep ([`ease`]). Clips partly on at once
-//! layer: each bone's turns compose in the rig's clip order and its displacements add
-//! ([`AnimalRig::pose`]), so a clip easing out under another ends where the other alone is.
+//! `Animals::sleep_weight`; RIG-STATES' idle and hunker with theirs, `Animals::idle_weight`
+//! and `Animals::hunker_weight`), drawn through a smoothstep ([`ease`]). Clips partly on at
+//! once layer: each bone's turns compose in the rig's clip order and its displacements add
+//! ([`AnimalRig::pose`]), so a clip easing out under another ends where the other alone is
+//! (cropping → hunker: the neck's reach eases out over the feeding ease while the hunker
+//! track walks in over its own). While the rig is drawn, a state it has a clip for stands
+//! its class-path move down (`figure::RigStates`); the sleep and idle breaths stay.
 //!
 //! # Aiming (FEED-ROLLOUT round 2)
 //!
@@ -270,6 +275,161 @@ impl AnimalRig {
             .and_then(|b| b.bones.get(&offset))
             .copied()
             .unwrap_or(0)
+    }
+
+    /// Each bone's **lip bone** in bin `bin` (RIG-STATES): itself when a loop clip moves it
+    /// (a non-rest key in any frame), else its parent's lip bone, the root's at the top. A
+    /// bone only a track moves (a leg folding as the body settles, the hunker's tucks) parts
+    /// from its parent only in that transition, so at rest a cell under it keeps the body's
+    /// lip (`figure::intern_rigged`).
+    pub fn lip_bones(&self, bin: usize) -> Vec<usize> {
+        let n = self.bones.len();
+        let mut moved = vec![false; n];
+        if let Some(b) = self.bins.get(bin) {
+            for (c, clip) in self.clips.iter().enumerate() {
+                if clip.mode != ClipMode::Loop {
+                    continue;
+                }
+                for (i, key) in b.keys.get(c).map_or(&[][..], |k| &k[..]).iter().enumerate() {
+                    let still = (key.q[0].abs() - 1.0).abs() < 1e-6 && key.d.iter().all(|v| v.abs() < 1e-7);
+                    moved[i % n] |= !still;
+                }
+            }
+        }
+        let mut lip = vec![0; n];
+        for (k, bone) in self.bones.iter().enumerate() {
+            lip[k] = match bone.parent.filter(|&p| p < k) {
+                _ if moved[k] => k,
+                Some(p) => lip[p],
+                None => 0,
+            };
+        }
+        lip
+    }
+
+    /// The loop-only drawing of a rig with track-only children. With no track playing,
+    /// those children are their parent's cells: even their internal faces and the atlas
+    /// bounds must be the parent's, rather than merely applying an identity transform.
+    pub fn without_tracks(&self, bin: usize) -> Option<AnimalRig> {
+        let n = self.bones.len();
+        let aliases = |b: &RigBin| {
+            let (mut loops, mut tracks) = (vec![false; n], vec![false; n]);
+            for (c, clip) in self.clips.iter().enumerate() {
+                for (i, key) in b.keys[c].iter().enumerate() {
+                    let still =
+                        (key.q[0].abs() - 1.0).abs() < 1e-6 && key.d.iter().all(|v| v.abs() < 1e-7);
+                    let moved = if clip.mode == ClipMode::Loop {
+                        &mut loops
+                    } else {
+                        &mut tracks
+                    };
+                    moved[i % n] |= !still;
+                }
+            }
+            let mut owner: Vec<usize> = (0..n).collect();
+            for (k, bone) in self.bones.iter().enumerate() {
+                if tracks[k]
+                    && !loops[k]
+                    && let Some(p) = bone.parent
+                {
+                    owner[k] = owner[p];
+                }
+            }
+            owner
+        };
+        let b = self.bins.get(bin)?;
+        let owner = aliases(b);
+        if b.bones
+            .values()
+            .all(|&k| owner[usize::from(k)] == usize::from(k))
+        {
+            return None;
+        }
+        let keep: Vec<usize> = self
+            .clips
+            .iter()
+            .enumerate()
+            .filter_map(|(c, clip)| (clip.mode == ClipMode::Loop).then_some(c))
+            .collect();
+        let mut rest = self.clone();
+        rest.clips = keep.iter().map(|&c| self.clips[c].clone()).collect();
+        for (b, original) in rest.bins.iter_mut().zip(&self.bins) {
+            let owner = aliases(original);
+            for k in b.bones.values_mut() {
+                *k = owner[usize::from(*k)] as u8;
+            }
+            b.aims = keep.iter().map(|&c| original.aims[c]).collect();
+            b.lowers = keep.iter().map(|&c| original.lowers[c]).collect();
+            b.keys = keep.iter().map(|&c| original.keys[c].clone()).collect();
+        }
+        Some(rest)
+    }
+
+    /// Tracks can also be walked by an aimed loop's lowering, without a state weight.
+    pub fn tracks_playing(&self, bin: usize, clips: &[ClipAt], aim: Option<Aim>) -> bool {
+        let Some(b) = self.bins.get(bin) else {
+            return false;
+        };
+        clips.iter().any(|at| {
+            (at.weight > 0.0
+                && self
+                    .clips
+                    .get(at.clip)
+                    .is_some_and(|c| c.mode == ClipMode::Track))
+                || self.lowering(b, at, aim) > 0.0
+        })
+    }
+
+    /// Reconstruct the feed skeleton independently of the runtime alias rule, for the
+    /// sleep-port mechanism test. The bake appends sleep children and preserves feed keys.
+    #[cfg(test)]
+    pub(super) fn before_sleep_port(&self) -> AnimalRig {
+        let keep: Vec<usize> = self
+            .bones
+            .iter()
+            .enumerate()
+            .filter_map(|(k, b)| (!b.name.starts_with("sleep_")).then_some(k))
+            .collect();
+        let clips: Vec<usize> = self
+            .clips
+            .iter()
+            .enumerate()
+            .filter_map(|(c, clip)| (clip.state != "asleep").then_some(c))
+            .collect();
+        let mut original = self.clone();
+        original.bones = keep
+            .iter()
+            .map(|&k| {
+                let mut bone = self.bones[k].clone();
+                bone.parent = bone
+                    .parent
+                    .map(|p| keep.iter().position(|&k| k == p).unwrap());
+                bone
+            })
+            .collect();
+        original.clips = clips.iter().map(|&c| self.clips[c].clone()).collect();
+        for (b, source) in original.bins.iter_mut().zip(&self.bins) {
+            b.heads = keep.iter().map(|&k| source.heads[k]).collect();
+            b.aims = clips.iter().map(|&c| source.aims[c]).collect();
+            b.lowers = clips.iter().map(|&c| source.lowers[c]).collect();
+            b.keys = clips
+                .iter()
+                .map(|&c| {
+                    source.keys[c]
+                        .chunks(self.bones.len())
+                        .flat_map(|frame| keep.iter().map(|&k| frame[k]))
+                        .collect()
+                })
+                .collect();
+            for k in b.bones.values_mut() {
+                let mut owner = usize::from(*k);
+                while !keep.contains(&owner) {
+                    owner = self.bones[owner].parent.unwrap();
+                }
+                *k = keep.iter().position(|&k| k == owner).unwrap() as u8;
+            }
+        }
+        original
     }
 
     /// The aim height of the state's first aimed clip in bin `bin` (the unaimed reach), if
@@ -945,6 +1105,16 @@ mod tests {
         let b = tip(&[on(0, 0.0, 0.51), on(1, 0.0, 0.5)], &mut out);
         assert!((0..3).all(|i| (a[i] - b[i]).abs() < 0.05), "{a:?} {b:?}");
         assert!(a[1] < 0.0 && a[2] < 0.0 && a[2] > -1.0, "{a:?}");
+    }
+
+    /// RIG-STATES: a bone a loop clip moves is its own lip bone; one only a track moves
+    /// (it parts from its parent only in a state's transition) shares its parent's.
+    #[test]
+    fn a_bone_only_a_track_moves_shares_its_parents_lip() {
+        assert_eq!(rig(1.0, vec![quarter_loop()]).lip_bones(0), vec![0, 1]);
+        let still_loop = ("cropping", ClipMode::Loop, vec![[rest(), rest()]]);
+        let fold = ("hunker", ClipMode::Track, vec![[rest(), rest()], [rest(), key(quat_of(QUARTER_Y), [0.0; 3])]]);
+        assert_eq!(rig(1.0, vec![still_loop, fold]).lip_bones(0), vec![0, 0]);
     }
 
     #[test]

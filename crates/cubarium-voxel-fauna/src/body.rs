@@ -150,6 +150,22 @@ const LIFE_LOFTSTRIDER_DAYS: f64 = 16.0;
 
 /// What a shredder builds out of a unit of litter — and, by the decision, of carrion.
 const LITTER_YIELD: f64 = 0.5;
+
+/// LJ-GROW (Wrysk 2026-10-10): the lanternjaw's assimilation yield, every food class. A
+/// predatory insect assimilates about 0.8-0.9 of the prey it eats (Slansky & Scriber 1985,
+/// carnivorous insects' approximate digestibility), and here the reserve then pays upkeep
+/// and builds structure at par, so the yield stands for assimilation less construction
+/// overhead (~0.7 of it): about 0.6. The shipped presets carried 0.469 (searched).
+pub const LANTERNJAW_YIELD: f64 = 0.6;
+
+/// LJ-GROW: the lanternjaw's growth ceiling before mass scaling, org-units/s (×30 shipped:
+/// 3.0e-4, 1.08 ou/h at a full reserve). See its row in the lanternjaw's physiology.
+pub const LANTERNJAW_GROWTH_MAX_PER_S: f64 = 1.0e-5;
+
+/// LJ-GROW (d), Wrysk 2026-10-10 ("im not opposed to adjusting the breeding rate"): the
+/// lanternjaw's brood share, the fraction of a grown body's net income saved for its next
+/// clutch (the shared rule's 0.5 elsewhere).
+pub const LANTERNJAW_BROOD_SHARE: f64 = 0.75;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
@@ -415,7 +431,8 @@ pub struct FounderPhysiology {
     /// Metres from a flower at which a daytime mimic holds its ambush.
     #[serde(default)]
     pub flower_ambush_m: f64,
-    /// Switch: an opportunistic fruit eater also catches bellwings within reach.
+    /// Switch: a fruit eater also catches profitable small prey within reach
+    /// (bellwings, littershredders and small lanternjaw juveniles for the seedporter).
     #[serde(default)]
     pub catch_bellwings: bool,
     /// **Switch: its body carries pollen** (SEEDPORTER-POLLEN, Wrysk 2026-10-09:
@@ -426,12 +443,17 @@ pub struct FounderPhysiology {
     #[serde(default)]
     pub pollen_by_contact: bool,
     /// **Switch: it weighs its foods by what they build** (ROLES5, role call 5A, the
-    /// capgnawer): at a mouth holding several of its foods it takes the one **worth** most,
-    /// its offer × its [`FounderPhysiology::yield_by_food`] over the best yield in its diet
-    /// ([`FounderPhysiology::food_worth`]), and its taste reads that worth. So a weak
-    /// fallback (the capgnawer's litter) tastes weak, does not hold the forager on it, and
-    /// the scent of its main food can lead it on. Off: every food is worth its stock, the
-    /// richest-stock rule.
+    /// capgnawer): at a mouth holding several of its foods it takes the one whose **bite is
+    /// worth** most, and its taste reads that worth ([`FounderPhysiology::mouth_weigh`]): the
+    /// bite's share of a full bite (`offer / (stock + K)`, the gut's own diminishing bite)
+    /// times the food's [`FounderPhysiology::yield_by_food`] over the best yield in its
+    /// diet ([`FounderPhysiology::food_worth`]). A bite saturates in stock, so a deep pile of
+    /// a weak food (the capgnawer's litter) is worth no more than a shallow one and always
+    /// tastes weak, under a cap holding a few crumbs (CAPGNAWER-CAPS: weighing the stock
+    /// itself let the wide world's litter piles, several units deep, outrank and outtaste
+    /// cropped caps). Its forager stays to feed only on food worth
+    /// `teachers.capgnawer_stay_worth`, eating weaker food on the move while its search goes
+    /// on. Off: every food is worth its stock, the richest-stock rule.
     #[serde(default)]
     pub taste_by_yield: bool,
     /// Switch: its [`FounderPhysiology::hunter`] table is the **opportunistic catch's**
@@ -442,7 +464,7 @@ pub struct FounderPhysiology {
     /// [`FounderPhysiology::eating_diet`].
     #[serde(default)]
     pub opportunist: bool,
-    /// Metres above the hunter's base: maximum bellwing base height for a catch.
+    /// Metres above the hunter's base: maximum prey base height for a catch.
     #[serde(default)]
     pub catch_ceiling_m: f64,
     /// Organic units: minimum carrion yield less the expected strikes' upkeep cost.
@@ -484,8 +506,8 @@ pub struct FounderPhysiology {
     /// The species factor of the dodge (§2.3's table): frondgrazer 0.5, littershredder
     /// 0.3. The lanternjaw is in nobody's prey list yet, so its 0 is never read.
     pub agility: f64,
-    /// The counter-strike seam (§2.7): fired when struck, wounding the attacker. `None`
-    /// for every lineage until the loftstrider's kick.
+    /// The counter-strike (§2.7, [`Counter`]): a grown body a strike reaches wounds its
+    /// attacker. `None` but for the lanternjaw (HUNT-ESCAPE).
     pub counter: Option<Counter>,
     /// **Formidable when grown** (LANTERNJAW-LIFE, Wrysk 2026-10-10: "super vulnerable up
     /// to a size, then its formidable"): a body at or past its `birth_body` counts as this ×
@@ -1489,6 +1511,48 @@ pub struct Flight {
     /// flower's near-IR at (`SenseTable::light_m`), a wall of vine being no harder to see.
     #[serde(default = "nest_search")]
     pub nest_search_m: f64,
+    /// **FLUSH** (HUNT-ESCAPE, Wrysk 2026-10-10, role call 8 B: "bellwing would be able to
+    /// react very quickly, so catching one shouldnt be all that easy"; [`crate::flush`]): an
+    /// awake flyer that senses a body that hunts it looming — a strike begun on it within its
+    /// `senses.loom_m`, or a hunter closing on it there — takes off this long after, seconds.
+    /// Bellwing 0.05 (one tick): an insect's startle escape is tens of milliseconds. 0: at once.
+    #[serde(default = "flush_reaction")]
+    pub flush_reaction_s: f64,
+    /// ...and bursts away from the threat's line at this × its cruise speed. Bellwing 3 (3 m/s,
+    /// 24 body lengths a second, a moth's dash). 0: no flush at all.
+    #[serde(default = "flush_speed")]
+    pub flush_speed_factor: f64,
+    /// ...rising at this × the burst's speed, × its speed. Bellwing 0.5.
+    #[serde(default = "flush_climb")]
+    pub flush_climb_fraction: f64,
+    /// ...for this long, seconds. Bellwing 0.3: about a metre.
+    #[serde(default = "flush_burst")]
+    pub flush_burst_s: f64,
+    /// After the burst it flies on away from the threat, climbing, neither sipping nor
+    /// landing by choice, until this long after the takeoff, seconds. Bellwing 3: three metres
+    /// at cruise, out of a Veilhound's reach before it may come down again.
+    #[serde(default = "flush_hold")]
+    pub flush_s: f64,
+}
+
+fn flush_reaction() -> f64 {
+    Flight::BELLWING.flush_reaction_s
+}
+
+fn flush_speed() -> f64 {
+    Flight::BELLWING.flush_speed_factor
+}
+
+fn flush_climb() -> f64 {
+    Flight::BELLWING.flush_climb_fraction
+}
+
+fn flush_burst() -> f64 {
+    Flight::BELLWING.flush_burst_s
+}
+
+fn flush_hold() -> f64 {
+    Flight::BELLWING.flush_s
 }
 
 fn nest_search() -> f64 {
@@ -1537,6 +1601,11 @@ impl Flight {
         rain_ground_m_per_s: 20.0 / 1000.0 / 3600.0,
         rain_ground_hysteresis_m_per_s: 5.0 / 1000.0 / 3600.0,
         nest_search_m: 4.0,
+        flush_reaction_s: 0.05,
+        flush_speed_factor: 3.0,
+        flush_climb_fraction: 0.5,
+        flush_burst_s: 0.3,
+        flush_s: 3.0,
     };
 }
 
@@ -1622,6 +1691,12 @@ pub struct Hunter {
     pub vertical_reach_m: f64,
     /// The jaw's point: the nose, this × its current length ahead of its centre (half).
     pub jaw_forward_length_fraction: f64,
+    /// Fraction of a flyer's looming range at which this hunter's strike is visible.
+    /// Dimensionless [0, 1]: 1 is a plain whole-body lunge, smaller gives a short arm
+    /// grab less warning, and 0 gives no strike warning.
+    /// Only the strike is scaled: an approaching body's ordinary looming is unchanged.
+    #[serde(default = "strike_warning_neutral")]
+    pub strike_warning_scale: f64,
     /// The three phases, seconds (§2.3): a crouch, the lunge, and the recovery in which it
     /// cannot strike and moves at half speed.
     pub windup_s: f64,
@@ -1655,6 +1730,10 @@ fn ones_by_founder() -> [f64; Founder::COUNT] {
     [1.0; Founder::COUNT]
 }
 
+fn strike_warning_neutral() -> f64 {
+    1.0
+}
+
 impl Hunter {
     /// Vertical strike extent over the hunter's support, metres.
     pub fn strike_height_m(&self, geometry: &Body) -> f64 {
@@ -1685,6 +1764,7 @@ impl Hunter {
         jaw_band_height_fraction: 0.6,
         vertical_reach_m: 0.0,
         jaw_forward_length_fraction: 0.5,
+        strike_warning_scale: 1.0,
         windup_s: 0.15,
         lunge_s: 0.25,
         recovery_s: 3.0,
@@ -1797,12 +1877,26 @@ impl Gut {
     }
 }
 
-/// The counter-strike seam (§2.7): a struck animal's answer, wounding its attacker. Unused.
+/// **The counter-strike** (§2.7's seam; HUNT-ESCAPE, Wrysk 2026-10-10: grown lanternjaws
+/// fight back, "its not like attacking a grazer"): a grown body (at or past its `birth_body`)
+/// a strike reaches answers it, wounding the attacker through the hit path ([`crate::Hit`]),
+/// `damage × (S_self / S_attacker) × (1 − the attacker's armour)`, the strike's own rule
+/// turned round. Whether the strike wounds or kills it is unchanged. A juvenile and a rider
+/// do not answer.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Counter {
+    /// The answer reaches the attacker's jaw within this of its own footprint, metres.
     pub reach: f64,
+    /// Wound per answer at equal size.
     pub damage: f64,
+    /// Its cost, in seconds of its own awake upkeep.
     pub cost: f64,
+}
+
+impl Counter {
+    /// The lanternjaw's answer: its own strike turned on the attacker — power 0.7, the cost of
+    /// a strike (100 s of awake upkeep) — and its claws' reach, half a metre. Placeholders.
+    pub const LANTERNJAW: Counter = Counter { reach: 0.5, damage: Hunter::LANTERNJAW.strike_power, cost: Hunter::LANTERNJAW.strike_cost_s };
 }
 
 fn default_taste_reference_food() -> f64 {
@@ -1825,9 +1919,6 @@ impl FounderPhysiology {
         self.hunter.filter(|_| !self.opportunist || self.catch_bellwings)
     }
 
-    /// **The diet at its mouth**: [`FounderPhysiology::diet`], less carrion for an
-    /// [`opportunist`](FounderPhysiology::opportunist) whose catch is switched off
-    /// (carrion is the catch's food, on the same rule as [`FounderPhysiology::active_hunter`]).
     /// What a unit of each food is worth to this lineage's mouth, 0–1: all 1 unless
     /// [`FounderPhysiology::taste_by_yield`], then each food's yield over the best yield
     /// among the foods it eats ([`FounderPhysiology::eating_diet`]).
@@ -1845,6 +1936,23 @@ impl FounderPhysiology {
         worth
     }
 
+    /// **How its mouth weighs its foods** (CAPGNAWER-CAPS): by stock, the richest-stock
+    /// rule, unless [`FounderPhysiology::taste_by_yield`], then by the worth of the bite
+    /// each food gives ([`Weigh::Bite`]).
+    pub(crate) fn mouth_weigh(&self) -> Weigh {
+        if !self.taste_by_yield {
+            return Weigh::Stock;
+        }
+        let mut half = [0.0; crate::Food::COUNT];
+        for f in crate::Food::ALL {
+            half[f.index()] = self.bite_half_stock_for(f);
+        }
+        Weigh::Bite { worth: self.food_worth(), half }
+    }
+
+    /// **The diet at its mouth**: [`FounderPhysiology::diet`], less carrion for an
+    /// [`opportunist`](FounderPhysiology::opportunist) whose catch is switched off
+    /// (carrion is the catch's food, on the same rule as [`FounderPhysiology::active_hunter`]).
     pub fn eating_diet(&self) -> crate::Diet {
         if self.opportunist && !self.catch_bellwings {
             crate::Diet::of(&self.diet.foods().filter(|&f| f != crate::Food::Carrion).collect::<Vec<_>>())
@@ -2130,10 +2238,13 @@ impl FounderPhysiology {
                     // 0.05), so 0.02 never binds the budget.
                     n_tissue: 0.02,
                     body_max: 0.035,
-                    // The ceiling only: at it a full reserve builds 0.27 ou/h at the shipped
-                    // mass, above a rider's or a free juvenile's growth (LANTERNJAW-LIFE), so
-                    // what it eats, not this, sets how fast it grows.
-                    growth_max_per_s: 2.5e-6,
+                    // LJ-GROW (Wrysk 2026-10-10: "bugs dont take like 4 months to grow"):
+                    // 1.0e-5, 3.0e-4 ou/s at the shipped mass (1.08 ou/h at a full
+                    // reserve). Growth is this × fullness, so the old 2.5e-6 (and the
+                    // presets' 1.0e-4 shipped) held riders at ~0.3 fullness, ~25-35 % under
+                    // their take, and kept a free juvenile's meal in the reserve. It still
+                    // builds only out of the reserve, which only food fills.
+                    growth_max_per_s: LANTERNJAW_GROWTH_MAX_PER_S,
                     // LANTERNJAW-LIFE (many offspring, low survival): a hatchling is 0.05 of
                     // the adult's body (0.37 of its length; was 0.0034, 0.46 of its length),
                     // so its egg is cheap and a clutch large.
@@ -2151,7 +2262,13 @@ impl FounderPhysiology {
                     reserve_cap: 0.6,
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
-                    reproduction: Reproduction::DORMANT_EGGS_PLACEHOLDER,
+                    // LJ-GROW (d): a new adult earmarks three quarters of its net income for
+                    // its next clutch ([`LANTERNJAW_BROOD_SHARE`]), not half, so its first
+                    // clutch comes sooner and it grows on toward body_max on the rest.
+                    reproduction: Reproduction {
+                        brood_share: LANTERNJAW_BROOD_SHARE,
+                        ..Reproduction::DORMANT_EGGS_PLACEHOLDER
+                    },
                     // Repair 2 item 5: the predators' twelve world days.
                     lifespan_median_s: LIFE_PREDATOR_DAYS * DAY_S,
                 },
@@ -2178,8 +2295,9 @@ impl FounderPhysiology {
                 contact_height_fraction: CONTACT_HEIGHT_FRACTION,
                 mouth_reach_length_fraction: MOUTH_REACH_LENGTH_FRACTION,
                 // Carrion is the one food its mouth takes; every class carries the same
-                // number so none is a silent zero.
-                yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
+                // number so none is a silent zero. LJ-GROW: a predatory insect's
+                // conversion ([`LANTERNJAW_YIELD`]), not the litter feeders' 0.5.
+                yield_by_food: [LANTERNJAW_YIELD; crate::Food::COUNT],
                 organ_structure_fraction: 0.10,
                 // S3 (D1, Wrysk 2026-10-06): active wherever it is dark — at night, and by
                 // day in caves and deep shade with the daylight-mimic switch off.
@@ -2205,7 +2323,8 @@ impl FounderPhysiology {
                 hunter: Some(Hunter::LANTERNJAW),
                 armour: 0.0,
                 agility: 0.0,
-                counter: None,
+                // HUNT-ESCAPE (Wrysk 2026-10-10): a grown lanternjaw fights back.
+                counter: Some(Counter::LANTERNJAW),
                 // LANTERNJAW-LIFE: a grown lanternjaw counts as twelve times its body in a
                 // hunter's window. A lone Veilhound's window (1.5 × its 2.74) is 4.1, under
                 // a new adult's 12 × 0.3675 = 4.4, so a hound takes one only with packmates
@@ -2513,14 +2632,17 @@ impl FounderPhysiology {
                     // largest bellwing, 0.03, is under its smallest body, 0.036, so every
                     // bellwing it took it still takes). A grown lanternjaw is formidable
                     // (`adult_size_window_factor`) and never in it.
+                    // SP-SHREDDER (Wrysk 2026-10-10): littershredders are also
+                    // opportunistic prey; the same size, reach and gain gates apply.
                     hunter: Some(Hunter {
-                        prey: [false, false, true, false, false, false, true, false, false],
+                        prey: [true, false, true, false, false, false, true, false, false],
                         strike_power: 4.0,
                         prey_max_ratio: 1.0,
                         strike_reach_length_fraction: 0.8,
                         jaw_band_height_fraction: 2.0,
                         vertical_reach_m: 0.0,
                         jaw_forward_length_fraction: 0.5,
+                        strike_warning_scale: 1.0,
                         windup_s: 0.1,
                         lunge_s: 0.15,
                         recovery_s: 1.0,
@@ -2580,6 +2702,9 @@ impl FounderPhysiology {
                 // The P1 lanternjaw's reserve cap, which the chorister was built on: the
                 // detritus web's smaller lanternjaw cap is the lanternjaw's alone.
                 core.reserve_cap = 1.0;
+                // The lanternjaw's growth ceiling before LJ-GROW, which the chorister was
+                // built on: LJ-GROW's faster juvenile growth is the lanternjaw's alone.
+                core.growth_max_per_s = 2.5e-6;
                 core.scale_mass(CHORISTER_VOLUME_RATIO);
                 core.maintenance_per_s = DAILY_CHORISTER / DAY_S;
                 // LIFE-HISTORY: one litter a pack a year, conceived just after the dry season,
@@ -2627,12 +2752,17 @@ impl FounderPhysiology {
                     founding_count: 0,
                     founding_per_world: true,
                     pack: Some(Pack::CHORISTER),
-                    // Built on the lanternjaw, but no formidable adult (LANTERNJAW-LIFE).
+                    // Built on the lanternjaw, but no formidable adult (LANTERNJAW-LIFE)
+                    // and no counter-strike (HUNT-ESCAPE).
                     adult_size_window_factor: 1.0,
+                    counter: None,
                     // An endotherm-like sleeper, not the lanternjaw's 0.3 (1a).
                     sleep_upkeep: SLEEP_UPKEEP,
                     // Meat: k 0.20, τ 300 s (Wrysk: one big meal every one or two days).
                     gut: Gut::of(0.20, 300.0),
+                    // The litter yield it was built on; LJ-GROW's conversion is the
+                    // lanternjaw's alone.
+                    yield_by_food: [LITTER_YIELD; crate::Food::COUNT],
                     ..lj
                 }
             }
@@ -2760,6 +2890,12 @@ impl FounderPhysiology {
         self.organ_structure_fraction * total_body.max(0.0)
     }
 
+    /// Physical size in x1 structural units, independent of the demand scale.
+    /// Cross-animal size windows and damage use this; energy budgets use organic units.
+    pub fn size(&self, body_organic: f64) -> f64 {
+        body_organic / self.mass_scale
+    }
+
     /// The adult's geometry: the authored dimensions, and the anchors as fractions of
     /// them.
     pub fn adult_body(&self) -> Body {
@@ -2769,7 +2905,7 @@ impl FounderPhysiology {
     /// The geometry of a body holding `body_organic` of structure: the adult's
     /// dimensions times `(body / body_max)^(1/3)` (decisions §1), so a newborn browser
     /// at `body_min` is 0.46 of the adult's length. Growth changes geometry only; no
-    /// rate reads this.
+    /// rate reads this. Body and body_max share the demand scale, so it cancels here.
     pub fn body_at(&self, body_organic: f64) -> Body {
         let max = self.core.body_max;
         let fraction = if max.is_finite() && max > 0.0 && body_organic.is_finite() {
@@ -3973,13 +4109,39 @@ pub(crate) fn mouth_meal(
     body: &Body,
     diet: crate::Diet,
 ) -> Option<(Meal, f64, f64)> {
-    mouth_meal_worth(fv, view, cols, standing_y, body, diet, &[1.0; crate::Food::COUNT])
+    mouth_meal_worth(fv, view, cols, standing_y, body, diet, &Weigh::Stock)
 }
 
-/// `mouth_meal` with each food's offer weighed by `worth`
-/// ([`FounderPhysiology::food_worth`]): the comparison and the reported offer are
-/// `worth × offer`; the stock a bite diminishes on is unweighed. All-ones is `mouth_meal`,
-/// the richest-stock rule.
+/// **How a mouth weighs the foods it holds** ([`FounderPhysiology::mouth_weigh`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Weigh {
+    /// Each food is worth its offer: the richest-stock rule, every lineage but one.
+    Stock,
+    /// Each food is worth what a bite of it builds against a full bite of the best food in
+    /// the diet: `worth × offer / (stock + K)`, 0–1, with `worth` the yield ratio
+    /// ([`FounderPhysiology::food_worth`]) and `K` the food's bite half-stock
+    /// ([`FounderPhysiology::bite_half_stock_for`]). For a pool (offer = stock) it is
+    /// `worth` times the gut's own diminishing factor `E / (E + K)`; a stand's defence
+    /// scales it as it scales the offer.
+    Bite { worth: [f64; crate::Food::COUNT], half: [f64; crate::Food::COUNT] },
+}
+
+impl Weigh {
+    /// What a food at the mouth, `stock` of it offering `offer`, is worth under this rule.
+    pub(crate) fn offer(&self, food: crate::Food, stock: f64, offer: f64) -> f64 {
+        match self {
+            Weigh::Stock => offer,
+            Weigh::Bite { worth, half } => {
+                let d = stock.max(0.0) + half[food.index()].max(0.0);
+                if d > 0.0 { (worth[food.index()] * offer.max(0.0) / d).clamp(0.0, 1.0) } else { 0.0 }
+            }
+        }
+    }
+}
+
+/// `mouth_meal` with each food's offer weighed by `weigh` ([`Weigh::offer`]): the
+/// comparison and the reported offer are the weighed ones; the stock a bite diminishes on
+/// is unweighed. [`Weigh::Stock`] is `mouth_meal`, the richest-stock rule.
 pub(crate) fn mouth_meal_worth(
     fv: &FloraView<'_>,
     view: &VoxelView<'_>,
@@ -3987,7 +4149,7 @@ pub(crate) fn mouth_meal_worth(
     standing_y: u32,
     body: &Body,
     diet: crate::Diet,
-    worth: &[f64; crate::Food::COUNT],
+    weigh: &Weigh,
 ) -> Option<(Meal, f64, f64)> {
     let mut best: Option<(Meal, f64, f64)> = None;
     for food in diet.foods() {
@@ -4026,7 +4188,7 @@ pub(crate) fn mouth_meal_worth(
                     }))
                 })
         };
-        let found = found.map(|(meal, stock, offer)| (meal, stock, offer * worth[food.index()]));
+        let found = found.map(|(meal, stock, offer)| (meal, stock, weigh.offer(food, stock, offer)));
         if let Some((meal, stock, offer)) = found
             && stock > 0.0
             && best.is_none_or(|(_, _, b)| offer > b)
@@ -4345,7 +4507,7 @@ pub(crate) fn bitten_cell(
 /// `z` off the strip) is covered by nothing, as before.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn disc_covers(sx: i64, sz: i64, span: i64, r2: f64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
+pub(crate) fn disc_covers(sx: i64, sz: i64, span: i64, r2: f64, width: i64, depth: i64, cx: i64, cz: u32) -> bool {
     let Some((dx, dz)) = nearest_offset(sx, sz, width, depth, cx, cz) else {
         return false;
     };
@@ -4486,7 +4648,7 @@ pub(crate) fn taste_reading(
         manifest,
         body,
         FounderPhysiology::placeholder(founder).diet,
-        &FounderPhysiology::placeholder(founder).food_worth(),
+        &FounderPhysiology::placeholder(founder).mouth_weigh(),
         // The unit tests' bodies are the placeholder tables' (mass 1).
         FounderPhysiology::placeholder(founder).taste_reference_on(
             crate::CueConfig::default().emit_reference,
@@ -4508,7 +4670,7 @@ pub(crate) fn taste_reading_at(
     manifest: &Manifest,
     body: &Body,
     diet: crate::Diet,
-    worth: &[f64; crate::Food::COUNT],
+    weigh: &Weigh,
     reference: f64,
 ) -> TasteReading {
     let sat = manifest.tunings.chem_saturation;
@@ -4525,7 +4687,7 @@ pub(crate) fn taste_reading_at(
     // the blind layout reads every food as its one soft class `litter`, and bare ground
     // as a valid zero; the lanternjaw's reads `carrion`, ground likewise; the browser's
     // reads `foliage`, and a mouth in air is no contact and no taste.
-    let offer = mouth_meal_worth(fv, view, &cols, standing_y, body, diet, worth).map(|(_, _, offer)| offer);
+    let offer = mouth_meal_worth(fv, view, &cols, standing_y, body, diet, weigh).map(|(_, _, offer)| offer);
     // The class is the manifest's taste cue; a mouth on bare ground is a valid zero for
     // every layout but the foliage-tasting ones (the browser's and the loftstrider's).
     // The capgnawer keeps the blind layout's `litter` class: its caps and litter are both
@@ -4534,7 +4696,12 @@ pub(crate) fn taste_reading_at(
     let ground_valid = class != "foliage";
     match offer {
         Some(offer) => TasteReading {
-            cue: response(offer),
+            // A bite's worth is already a 0–1 share of a full bite of the best food: the
+            // cue reads it as it is, with no stock reference (CAPGNAWER-CAPS).
+            cue: match weigh {
+                Weigh::Stock => response(offer),
+                Weigh::Bite { .. } => offer,
+            },
             resistance: resistance_of(manifest, class),
             valid: true,
         },
@@ -4687,7 +4854,7 @@ fn observation_v2(
         manifest,
         &body,
         phys.diet,
-        &phys.food_worth(),
+        &phys.mouth_weigh(),
         phys.taste_reference_on(fauna.config.cue.emit_reference, view.config.voxel_m, fv.config),
     );
     // A fruit taste (F3, the seedporter): the fruit in the mouth's reach — the stand it
@@ -4777,13 +4944,18 @@ fn observation_v2(
     }
 
     // Cone(3, foliage/body): the fixed ray fan, a fresh reading each observation. No
-    // memory, no expansion, no body identity. Geometry alone, so it reads with or without
-    // a senses handle.
+    // memory, no expansion, no body identity. Crowns use this observer's feeding threshold;
+    // it reads with or without a senses handle.
     if let Some(cn) = module_opt(manifest, "Cone(3, foliage/body)") {
         let occupancy = &cone_occupancy.expect("browser observations prepare cone occupancy");
         let fruit = manifest.cone_counts_fruit.then_some(fv);
+        // Fruit cones judge fruit at the hit, independently of the foliage stock.
+        let gate = if fruit.is_some() { 0.0 } else { fauna.config.teachers.feed_gate };
+        let occupancy = crate::senses::FeedingCone::new(
+            view, fv, occupancy, phys, gate, fauna.config.cue.emit_reference,
+        );
         let cone = crate::senses::cone_readings_in(
-            view, fruit, occupancy, a.id, &a.pose, standing_y, manifest, &body,
+            view, fruit, &occupancy, a.id, &a.pose, standing_y, manifest, &body,
         );
         let base = cn.offset;
         for (k, sec) in cone.sectors.iter().enumerate() {

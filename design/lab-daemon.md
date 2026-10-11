@@ -9,8 +9,8 @@ decision_refs: []
 Tooling record for `scripts/lab/` (stdlib Python 3.11+). The CLI is `scripts/lab/lab`; the
 daemon is `scripts/lab/labd` (the same as `lab daemon`), run by the user unit that
 `lab install` writes. Host inventory: `config/lab/hosts.toml`. Tests: `scripts/lab/test_lab.py`
-and `scripts/lab/tests/test_remote.py` (localhost remote roots, no eidolon or AWS access).
-Run with `timeout 270 env PYTHONPATH=scripts/lab/tests:scripts/lab python3 -m unittest test_lab test_remote`.
+and `scripts/lab/tests/` (localhost remote roots, no eidolon or AWS access).
+Run with `cd scripts/lab && timeout 270 python3 -m pytest -q tests test_lab.py`.
 
 Why (Wrysk, 2026-10-10): multi-hour runs were lost to coordination mistakes. An A/B arm ran
 on the wrong config, a shared `target/` mixed binaries, a build raced a commit in the main
@@ -45,6 +45,77 @@ A spec is a short table. `kind` picks the plugin. `name`, `priority` and `out` (
 `runs/lab/<job-id>/`) are common. Everything else belongs to the kind. Relative paths are
 resolved from the submitter's working directory.
 
+### Job stop conditions
+
+Every kind can use `[[stop]]` rules. The core checks local census files at task end
+and at the progress cadence, after remote outputs have been mirrored. For example,
+an A/B boom guard checks the selected arm after 30 simulation minutes:
+
+```toml
+[[stop]]
+when = "founders_littershredder > 300"
+after_minute = 30
+arms = ["branch"]
+scope = "any"
+action = "abort"
+reason = "shredder boom"
+```
+
+`when` accepts census column names, numbers, `+ - * /`, comparisons (including
+chained comparisons), `and`, `or`, `not`, and parentheses. It uses a small AST
+interpreter with no `eval`. `delta(col, minutes)` subtracts the last sample at or
+before that many simulation minutes ago from the latest sample, including prior
+stages. For A/B jobs, `arm(name, col)` reads the latest value in another arm for
+the same seed: `count - arm(main, count) > 10`. Arm and column arguments can be identifiers
+or quoted strings. Census time is `sim_min` (`minute` is also supported). Missing
+runs, peer outputs, or insufficient delta history do not match. Incomplete final
+CSV lines are ignored until the writer completes them.
+
+Defaults are `after_minute = 0`, `scope = "any"`, `action = "abort"`, and all arms.
+`scope = "all"` requires every expected run in the selected arms to match,
+including runs that have not started. `arms` is only available on A/B expression
+rules. Unknown columns are rejected at submission when an explicit output or
+resume directory already exposes a header; otherwise they produce a logged
+`stop-error` and abort visibly on first evaluation. Referenced columns are checked
+even when a boolean expression would short-circuit.
+
+A question answered guard can keep its partial results and run the kind's summary:
+
+```toml
+[[stop]]
+when = "seedporter_shredder_catches > 0"
+after_minute = 45
+scope = "any"
+action = "finish"
+reason = "question answered: seedporters catch shredders"
+```
+
+Use the actual counter name in the study's census header. For checks involving
+several files or a custom analysis, use an executable local hook instead:
+
+```toml
+[[stop]]
+hook = "scripts/studies/stops/answered.py"
+every_min = 10
+```
+
+The hook path resolves from the submitter's working directory. It gets the job
+output directory as `argv[1]` and prints exactly one JSON line, for example
+`{"stop": true, "action": "finish", "reason": "question answered"}`. A Python
+hook needs an executable bit and a Python shebang. Hooks run locally in a worker
+thread, read mirrored outputs, and start at the first progress check, then at most
+once per `every_min` wall minutes (default 10; timestamps persist across daemon
+restarts). Nonzero exits, invalid replies, and the 60-second timeout are logged as
+`stop-hook-error` and treated as continue. Hooks do not block the scheduler.
+
+The first firing rule emits `stopped` with its action and reason. Both actions
+cancel running tasks through the usual graceful cancellation path and skip
+pending tasks. `abort` ends as aborted; `finish` ends as done and calls the kind's
+`finish` on the retained outputs, after collecting stopped remote tasks. It never
+spawns further stages. The reason goes into `DONE`, `summary.txt`, and the stored
+summary. `lab status` and `lab top` show rules and the final reason. A/B's existing
+identical-results tripwire remains in place.
+
 ## The kind interface
 
 `labkit/core.py`. A kind is one module in `labkit/kinds/`, or in a directory on
@@ -58,12 +129,17 @@ Discovery registers it. The scheduler and the CLI never change for a new kind.
 | `inputs(job, ctx)` | before preflight (optional) | artifact keys needed beyond the tasks' own `inputs` |
 | `preflight(job, ctx)` | once every input exists, before any task starts; in a worker thread; seconds-long | `None` or `Abort(reason)` |
 | `progress(job, task, ctx)` | each task end (`task` set), and every `progress_s` (`task` None) | `None`, `Abort(reason)` or `Spawn([Task])` |
+| `census_runs(job, ctx)` | generic stop checks | expected `CensusRun(arm, seed, paths)` entries; paths are local, chronological stage files |
 | `finish(job, ctx)` | no task pending or running | summary text; the core writes `summary.txt` and `DONE` |
 
 By default `progress` aborts the job when a task does not end `done`, and `finish` counts
 task states. `validate` takes `ctx`, unlike the brief's sketch, because pinning a commit
 (a `git stash create` for a dirty tree) has to happen at submit time. `inputs` is an
 addition: a preflight-only job such as `ab` can need binaries without having any tasks.
+The default `census_runs` declares one `census.csv` per task. A/B groups stage files
+by arm and seed; batch declares all runs from the mirrored `batch.json` manifest,
+including queued runs. Kinds with another layout override only this declaration;
+expression parsing, hooks, cancellation, and reporting stay in the core.
 
 `job` gives `id`, `spec`, `out`, `state` (a kind-private dict, persisted after every hook),
 `tasks` (name → view with `task`, `state`, `rc`, `reason`, `host`, `out`) and `inputs`
@@ -144,12 +220,22 @@ end to end with no core edit.
   `ab.preflight`: the resolved `expand=`/`params=` diff, `expect`, and the identical-arm
   refusal. Config includes/path inputs are materialized from the same arm's pinned commit,
   preserving their relative layout. The early stage is one L3 task per arm and seed,
-  eligible for desktop or eidolon. Remotes receive the cached binary (or supplied binary),
+  eligible for desktop or eidolon by default. Naming `ec2` selects its configured native
+  architecture for the whole job, including every seed, arm and continuation; mixed
+  host lists keep that architecture rather than comparing arms on different platforms.
+  Local x86 binaries still run config expansion/diff in preflight. Each ARM arm binary
+  is built natively from its `source:<commit>` archive and cached per commit/arch;
+  simulations wait for both builds. A supplied arm binary is used for local preflight,
+  while ARM simulations build from that arm's pinned source commit.
+  Remotes receive the cached binary (or supplied binary),
   that arm's config bundle, and only its own load checkpoint. `ab.early_read` is the
   identical-results tripwire. Continuations load only their own checkpoints, after
   `ab.unchanged`. `ab.py` stays a working CLI.
 - **batch**: `scripts/studies/batch.py` as one L3 task, charged `parallel × threads`,
-  on desktop or eidolon. Tools, binaries, config dependencies, saved starts and their
+  on desktop or eidolon by default, or the configured EC2 architecture when `hosts`
+  names `ec2`. EC2 batches use `binary = {tree, commit}` for the native cached build;
+  a bare `bin` lacks a source commit and is refused for another architecture.
+  Tools, binaries, config dependencies, saved starts and their
   founding census, required rosters, policies and genomes are staged through the same
   transport. A cached binary's config comes from its pinned tree. Its
   run-study slots wrap inside the CPU set labd gives it. It keeps policies, starts and
@@ -277,7 +363,12 @@ sleep loop costs nothing.
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
-   `max(longest task, thread-hours / capacity)` plus `setup_h`. The cost is that estimate
+   `max(longest simulation task, simulation thread-hours / capacity)` plus the estimated
+   time of all uncached native builds, then `setup_h`. Required builds count once per
+   binary key, even before their provider tasks are planned; cached binaries add no build
+   time. Distinct builds are estimated serially, conservatively. A simulation job's
+   `est_h` supplies its task wall estimate; build recipes default to 0.25 h per commit.
+   The cost is that estimate
    × the assumed spot price in `hosts.toml`. One request opens with
    `lab approve ec2 <id> --max-hours H --max-usd D`, and labd never calls `up` without
    it. The request is withdrawn if the eligible tasks go away.
@@ -286,9 +377,14 @@ sleep loop costs nothing.
 3. **launching → up.** Once `status` shows the instance running with an IP and the host
    is bootstrapped, the instance becomes the schedulable host `ec2` over ssh (key
    `~/.ssh/cubarium-aws.pem`, `python3.11`, setsid launcher).
+   Its L3 groups are probed on that host before scheduling simulations, again when
+   restoring the daemon connection, and periodically while up.
 4. **While up:**
    - When elapsed hours reach H, or hours × price reach D, labd emits `ec2-limit` and runs
      `down`. The tasks there become lost or requeued.
+   - Native builds use the existing source-archive recipe, Cargo thread budget and host
+     `max_cpu_fraction`. Completed binaries and simulation outputs are fetched into the
+     artifact cache and job directory through the same transport as eidolon.
    - When the queue drains (nothing eligible pending, nothing running there), it runs
      `down`.
    - On spot loss (`status` no longer lists the instance), it emits `host-down`, requeues
@@ -303,8 +399,8 @@ sleep loop costs nothing.
    not launch (`ec2-orphan`) and never kills them.
 
 v1 is tested only against a mocked `aws-graviton.sh` and a local stand-in for the host. No
-instance was launched. The first real launch should be watched end to end: build, task,
-fetch, down.
+instance was launched. The first real launch is still unwatched until someone runs it.
+Watch it end to end: bootstrap, native build, local preflight, simulation, fetch, down.
 
 ## Later kinds
 

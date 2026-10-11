@@ -37,6 +37,7 @@ if str(STUDIES) not in sys.path:
 import ab as abtool  # noqa: E402
 from batch import seed_list  # noqa: E402
 from .staging import pinned_config
+from .build import simulation_arch
 
 RESERVED = {"build", "early", "continuation", "full", "DONE"}
 PRINT_LOCK = threading.Lock()
@@ -100,12 +101,15 @@ class AB(Kind):
             raise SpecError("hours ends before early_minute")
         return spec
 
-    def keys(self, job, ctx):
-        return {name: ctx.binary(arm["tree"], arm["commit"], "voxel_census", dirty=arm.get("dirty", False))
-                for name, arm in job.spec["arms"].items() if not arm.get("bin")}
+    def keys(self, job, ctx, arch=None):
+        arch = arch or job.state.get("arch", ctx.arch)
+        return {name: ctx.binary(arm["tree"], arm["commit"], "voxel_census", arch=arch,
+                                 dirty=arm.get("dirty", False))
+                for name, arm in job.spec["arms"].items() if not arm.get("bin") or arch != ctx.arch}
 
     def inputs(self, job, ctx):
-        return list(self.keys(job, ctx).values())
+        # Config expansion/diff executes locally, even when the simulations are ARM.
+        return list(dict.fromkeys([*self.keys(job, ctx, ctx.arch).values(), *self.keys(job, ctx).values()]))
 
     def stage_tasks(self, job, ctx, stage, hours, binaries, starts=None):
         spec, tasks = job.spec, []
@@ -122,11 +126,12 @@ class AB(Kind):
                     source = [f"load={checkpoint}"]
                 else:
                     source = [f"config={config}", f"seed={seed}"]
-                if arm.get("bin"):
+                if binaries[name] == arm.get("bin"):
                     files[arm["bin"]] = "{job}/inputs/" + name + "/binary"
                 argv = abtool.census_argv(binaries[name], hours, source, root, spec["threads"], spec["segment_min"])
                 tasks.append(Task(name=f"{stage}-{name}-s{seed}", argv=argv, threads=spec["threads"],
-                                  mem_gb=spec["mem_gb"], l3=True, arch=ctx.arch, hosts=spec.get("hosts"), files=files,
+                                  mem_gb=spec["mem_gb"], l3=True, arch=job.state.get("arch", ctx.arch),
+                                  hosts=spec.get("hosts"), files=files,
                                   outputs=str(root),
                                   stdout=str(root / "census.csv"), stderr=str(root / "err.log"),
                                   inputs=[binaries[name][7:-1]] if binaries[name].startswith("{input:") else [],
@@ -135,10 +140,10 @@ class AB(Kind):
         return tasks
 
     def binaries(self, job, ctx, placeholders=True):
-        keys = self.keys(job, ctx)
+        keys = self.keys(job, ctx) if placeholders else self.keys(job, ctx, ctx.arch)
         result = {}
         for name, arm in job.spec["arms"].items():
-            if arm.get("bin"):
+            if name not in keys:
                 result[name] = arm["bin"]
             elif placeholders:
                 result[name] = "{input:" + keys[name] + "}"
@@ -151,6 +156,7 @@ class AB(Kind):
         return early, (spec["early_minute"] / 60 if early else spec["hours"])
 
     def plan(self, job, ctx):
+        job.state["arch"] = ctx.arch if job.spec["preflight_only"] else simulation_arch(job.spec, ctx)
         if job.spec["preflight_only"]:
             return []
         early, hours = self.horizons(job.spec)
@@ -225,6 +231,12 @@ class AB(Kind):
             return Abort(str(error))
         binaries = self.binaries(job, ctx)
         return Spawn(self.stage_tasks(job, ctx, "continuation", rest, binaries, starts))
+
+    def census_runs(self, job, ctx):
+        from ..stops import CensusRun
+        return [CensusRun(name, str(seed), [job.out / stage / name / f"s{seed}" / "census.csv"
+                                          for stage in ("full", "early", "continuation")])
+                for seed in job.spec["seed_list"] for name in job.spec["arms"]]
 
     def finish(self, job, ctx):
         if job.spec["preflight_only"]:

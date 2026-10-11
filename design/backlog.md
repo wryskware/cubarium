@@ -391,7 +391,7 @@ renderer package about the size of a feeding rig), worth it once it serves sever
 species, not for the tendril alone. What the tendril needs from it: reach out and down
 from the bell when feeding and wiggle a little.
 
-## 21. The Blender bake is not reproducible (found 2026-10-10, FEED-ROLLOUT small feeders)
+## 21. The Blender bake is not reproducible (found 2026-10-10, FEED-ROLLOUT small feeders) — FIXED in code 2026-10-10 (bake-repro f75b48e7: canonical BVH face order and nearest-face ties; two full bakes byte-identical). The committed assets are still the old bakes: a full rebake changes 40 of 68 files slightly (`art/gen/runs/bake-repro-2026-10-10/repro-full-asset-diff.txt`), so it waits for Wrysk's look.
 
 Two plain bakes at the same commit (5f71bea7) gave different models: one littershredder cell
 at 125 mm changed material, and the 250 mm ripple-snail came out with 1 cell in one run and
@@ -411,3 +411,17 @@ so the two packs can decide waits differently. The display uses the change-only 
 picture is not wrong, but the oracle can only check the packer with fades off
 (`--set 'light.colour_fade_s = 0.0'` passes 1200 ticks). Either the full pack carries the
 fade state, or the oracle compares fading cells by their endpoints.
+
+## 23. The shrink lighting's frame cost (CELL-SHRINK, 2026-10-10)
+
+Merged 6a49188a: a changing plant cell's AO crease, shadow and crown edge follow its grow-in
+size (`[plants] light_by_size`, default on).
+- **Cost.** The `PLANT_LIGHT` specialization keeps a still world free. On a live day,
+  though, cells are changing in about 90 % of frames, and the weighted path then costs about
+  +0.45 ms of walk at 6 px on the desktop (2.50 → 2.96 ms, logs3/analysis.txt).
+- **A per-cell gate didn't help** (branch `cell-shrink2`, 976e78e1, unmerged). It used a spare
+  bit on changing cells and dropped the specialization. On vs off then cost the same on a
+  live day, but the still world got +0.45 ms slower than main (logs4/). So the cost is
+  probably the weighted path's register pressure, not its lookups.
+- **Next ideas:** keep the specialization and gate inside it, slim the weighted path's
+  registers, or select the weighted pipeline only when changing cells are on screen.

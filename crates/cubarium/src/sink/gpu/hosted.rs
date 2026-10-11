@@ -605,7 +605,7 @@ struct Camera { zoom: f32, center: [f32; 2], screen: (u32, u32) }
 // Preserve the original overview, including cover/auto sizing. Detail multiplies
 // both projection axes by the same integer; 64 is a detail ceiling, not an overview cap.
 fn detail_factor(base_s: u32, zoom: f32) -> u32 {
-    [4, 2, 1].into_iter().find(|&f| f as f32 <= zoom + 0.001 && (f == 1 || base_s * f <= 64)).unwrap_or(1)
+    [4, (64 / base_s.max(1)).clamp(1, 4), 2, 1].into_iter().find(|&f| f as f32 <= zoom + 0.001 && (f == 1 || base_s * f <= 64)).unwrap_or(1)
 }
 
 struct Controls {
@@ -1408,7 +1408,7 @@ mod tests {
     #[test]
     fn detail_preserves_overview_and_scales_both_axes() {
         assert_eq!(super::detail_factor(13, 4.0), 4);
-        assert_eq!(super::detail_factor(18, 4.0), 2);
+        assert_eq!(super::detail_factor(18, 4.0), 3);
         assert_eq!(super::detail_factor(40, 4.0), 1);
         assert_eq!(super::detail_factor(80, 1.0), 1);
         assert_eq!(super::detail_factor(7, 1.9), 1);

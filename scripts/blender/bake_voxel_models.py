@@ -3,6 +3,9 @@
     cargo run -p cubarium --example voxel_model_source
     blender -b -P scripts/blender/bake_voxel_models.py [-- [--only NAME[,NAME]] [--out DIR]]
 
+RIG-STATES round 2: add `--sleep-only` to port the committed model and rig without
+voxelizing or writing any `.cvm` or manifest. Existing feed keys are copied exactly.
+
 Reads **only** `assets/voxel-models/source.json` for numbers (crown ranges, stage
 profiles, founder bodies, voxel sizes; `design/handoffs/voxel-organism-models-2026-09-23.md`
 §1) and reuses `organism_lineup.py`'s builders for shapes. Writes, per voxel size,
@@ -267,6 +270,46 @@ def animal_role(slot):
     return ANIMAL_ROLE.get(slot, "trunk") if slot in PALETTE else None
 
 
+class BakeBVH:
+    """A BVH independent of BMesh's (notably UV-sphere) face enumeration.
+
+    Sort polygons by their oriented loop (starting at its smallest vertex index)
+    and material index. Pass the original loops to Blender: coordinates, winding,
+    loop starts, normals and tessellation of nonplanar quads remain authored.
+    Only BVH insertion order changes. Returned indices address `mesh.polygons`.
+
+    Equal float32 nearest distances choose the smallest canonical face index,
+    then the lexicographically smallest hit position (two triangles of one face).
+    Across parts the existing authored build order breaks equal scores; accents
+    still overwrite in build order. Boundary rules remain: dot == 0 is outside,
+    distance == half a voxel is included, and floor assigns an accent on a grid
+    plane to the positive-side cell. No geometric epsilon or coordinate snapping.
+    """
+
+    def __init__(self, vertices, mesh):
+        faces = []
+        for p in mesh.polygons:
+            loop = tuple(p.vertices)
+            start = loop.index(min(loop))
+            faces.append((loop[start:] + loop[:start], p.material_index, loop, p.index))
+        faces.sort()
+        self.original = [f[3] for f in faces]
+        self.tree = BVHTree.FromPolygons(vertices, [f[2] for f in faces])
+
+    def find_nearest(self, point):
+        hit = self.tree.find_nearest(point)
+        if hit[0] is None:
+            return hit
+        # The API takes a float32 radius and squares it. Widen only the search
+        # radius enough to include the rounded nearest distance; selection uses
+        # exact returned distances, so this is not an occupancy tolerance.
+        radius = max(hit[3] * (1 + 2 ** -22), 2 ** -63)
+        hits = self.tree.find_nearest_range(point, radius)
+        loc, nor, index, dist = min(
+            [hit, *hits], key=lambda h: (h[3], h[2], tuple(h[0])))
+        return loc, nor, self.original[index], dist
+
+
 def voxelize(objs, vox, role_of):
     """{(i, j, k): material}: the lineup's rule, and accents as the module header says."""
     parts, accents = [], []
@@ -279,7 +322,7 @@ def voxelize(objs, vox, role_of):
         vs = [v.co.copy() for v in me.vertices]
         if not vs:
             continue
-        bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+        bvh = BakeBVH(vs, me)
         lo = Vector(min(v[k] for v in vs) for k in range(3))
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         (accents if role == "accent" else parts).append((bvh, lo, hi, mat))
@@ -511,7 +554,7 @@ def voxelize_animal(objs, vox, floor=0, bones=None):
         slots = [A.slot_of(m.name) for m in me.materials]
         if not any(animal_role(s) for s in slots):
             continue
-        bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+        bvh = BakeBVH(vs, me)
         lo = Vector(min(v[k] for v in vs) for k in range(3))
         hi = Vector(max(v[k] for v in vs) for k in range(3))
         face_slot = [slots[p.material_index] for p in me.polygons]
@@ -701,7 +744,7 @@ def loftstrider_cells(objs, vox, bones=None):
                 angle = math.degrees(math.atan2(mid.y, mid.x)) - az
                 if round(angle / 60) % 6 != direction:
                     continue
-                bvh = BVHTree.FromPolygons(vs, [tuple(p.vertices) for p in me.polygons])
+                bvh = BakeBVH(vs, me)
                 lo = [math.floor(min(v[k] for v in vs) / vox) - 1 for k in range(3)]
                 hi = [math.ceil(max(v[k] for v in vs) / vox) + 1 for k in range(3)]
                 for i in range(lo[0], hi[0]):
@@ -764,6 +807,45 @@ RIGS = {"frondgrazer": lambda: A.feed_rig(A.fg_feed_clip()),
         "seedporter-stand": lambda: A.feed_rig(A.sp_feed_clip("stand")),
         "seedporter-ground": lambda: A.feed_rig(A.sp_feed_clip("ground"))}
 BIN_RIGS = {"loftstrider": lambda n, cells, vox: A.ls_rig_clips(ls_parts(n), cells, vox)}
+# Founders whose shared rig takes per-bin state clips (RIG-STATES): (the builder's
+# `fn(shared, cells, bones, scale, pose_cells)`, the pose model whose committed cells it
+# reads per bin). The frondgrazer's sleep, hunker and idle are whole voxels of each bin.
+STATE_RIGS = {"frondgrazer": (A.fg_state_rig, "frondgrazer-hunker")}
+SLEEP_PORTS = ("chorister", "lanternjaw", "seedporter-ground", "bellwing")
+for _name in SLEEP_PORTS:
+    STATE_RIGS[_name] = (lambda *args, name=_name: A.sleep_state_rig(*args, legs=A.sleep_legs(name)), None)
+
+
+def model_cells(path):
+    """Each bin's cells of a committed animal `.cvm` (its first variant and state; the
+    layout is `write_cvm`'s), as the voxelizer's keys (i, j, k up)."""
+    with open(path, "rb") as fh:
+        b = fh.read()
+    assert b[:4] == b"CVM2", path
+    at = 5                                   # the magic and the kind
+    n, at = b[at], at + 1                    # materials: name each
+    for _ in range(n):
+        at += 1 + b[at]
+    n, at = b[at], at + 1                    # states: name and start each
+    for _ in range(n):
+        at += 1 + b[at] + 8
+    states = n
+    steps, = struct.unpack_from("<H", b, at)
+    at += 2
+    bins = []
+    for _ in range(steps):
+        at += 16                             # height, radius
+        nv, at = b[at], at + 1
+        first = None
+        for _ in range(nv * states):
+            nc, = struct.unpack_from("<I", b, at)
+            at += 4
+            if first is None:
+                first = {(dx, dz, dy) for dx, dy, dz, _, _ in struct.iter_unpack("<bbbBB", b[at:at + 5 * nc])}
+            at += 5 * nc
+        bins.append(first)
+    assert at == len(b), path
+    return bins
 
 
 def write_rig(path, bins):
@@ -804,8 +886,10 @@ def write_rig(path, bins):
             assert len(clip["frames"]) == len(c0["frames"])
             for keys in clip["frames"]:
                 for r, d in keys:
-                    q = r.to_quaternion()
-                    b += struct.pack("<7f", q.w, q.x, q.y, q.z, *d)
+                    # A committed rig's quaternion tuple is copied without a matrix
+                    # round trip: even the feed clip's float bits must stay unchanged.
+                    q = r.to_quaternion() if hasattr(r, "to_quaternion") else r
+                    b += struct.pack("<7f", *q, *d)
         b += struct.pack("<I", len(cells))
         for dx, dy, dz, bone in cells:
             b += struct.pack("<bbbB", dx, dy, dz, bone)
@@ -818,6 +902,87 @@ def rig_cells(raw, bones, names):
     """The bone of each cell `cells_of` writes, in its offsets (dx, dy up, dz)."""
     index = {n: i for i, (n, _) in enumerate(names)}
     return [(i, k, j, index[bones[(i, j, k)]]) for (i, j, k) in sorted(raw, key=lambda c: (c[2], c[1], c[0]))]
+
+
+def read_sleep_source(path):
+    """Committed CRG2/3 bins, preserving raw feed keys. Undo this port's children on
+    repeat bakes so editing sleep is idempotent and never resamples feeding."""
+    with open(path, "rb") as fh:
+        data = fh.read()
+    at = 4
+    assert data[:4] in (b"CRG2", b"CRG3"), path
+
+    def take(fmt):
+        nonlocal at
+        values = struct.unpack_from(fmt, data, at)
+        at += struct.calcsize(fmt)
+        return values
+
+    def name():
+        nonlocal at
+        n, = take("<B")
+        text = data[at:at + n].decode()
+        at += n
+        return text
+
+    n, = take("<B")
+    bones = []
+    for _ in range(n):
+        text, parent = name(), take("<B")[0]
+        bones.append((text, None if parent == 255 else parent))
+    if data[:4] == b"CRG3":
+        order, = take("<B")
+        assert order == 0, "sleep ports have no aim symmetry"
+    nc, = take("<B")
+    clips = []
+    for _ in range(nc):
+        text = name()
+        mode, fps, frames = take("<BfH")
+        clips.append(dict(state=text, mode=mode, fps=fps, count=frames))
+    keep = [i for i, (text, _) in enumerate(bones) if not text.startswith("sleep_")]
+    assert keep == list(range(len(keep))), "sleep-only children follow the feed bones"
+    bins = []
+    for _ in range(take("<B")[0]):
+        length, scale = take("<df")
+        aims = [take("<ff") for _ in clips] if data[:4] == b"CRG3" else [(float("nan"), 0.0)] * nc
+        heads = [Vector(take("<3f")) for _ in bones]
+        own = []
+        for clip, (aim, lower) in zip(clips, aims):
+            frames = []
+            for _ in range(clip["count"]):
+                keys = [take("<7f") for _ in bones]
+                if clip["state"] != "asleep":
+                    assert all(keys[i] == (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                               for i in range(len(keep), n)), "sleep children must inherit their feed parent"
+                frames.append([(keys[i][:4], Vector(keys[i][4:])) for i in keep])
+            if clip["state"] != "asleep":
+                own.append(dict(state=clip["state"], mode=clip["mode"], fps=clip["fps"],
+                                aim=None if math.isnan(aim) else aim, lower=lower, frames=frames))
+        cells = {}
+        for _ in range(take("<I")[0]):
+            i, k, j, owner = take("<bbbB")
+            while owner not in keep:
+                owner = bones[owner][1]
+            cells[(i, j, k)] = bones[owner][0]
+        bins.append((length, scale, dict(bones=bones[:len(keep)], heads=heads[:len(keep)], clips=own), cells))
+    assert at == len(data), path
+    return bins
+
+
+def bake_sleep_only(name, vox, out_dir):
+    """Port only the rig side file of the exact committed cells and feed rig."""
+    fn, pose = STATE_RIGS[name]
+    assert pose is None, "the round-2 sleep ports"
+    cells = model_cells(os.path.join(out_dir, f"{name}.cvm"))
+    source = read_sleep_source(os.path.join(out_dir, f"{name}.rig"))
+    assert len(cells) == len(source)
+    bins = []
+    for n, ((length, scale, shared, bones), raw) in enumerate(zip(source, cells)):
+        assert raw == set(bones), f"{name} bin {n}: committed model/rig cells differ"
+        own, note = fn(shared, raw, bones, scale)
+        print(f"{vox} m {name} bin {n}: {note}", flush=True)
+        bins.append((length, scale, raw, bones, own))
+    return write_rig_of(name, out_dir, bins, vox, states_done=True)
 
 
 def bake_animal(f, vox, out_dir):
@@ -854,7 +1019,7 @@ def bake_animal(f, vox, out_dir):
     return file, size, meta, rig
 
 
-def write_rig_of(name, out_dir, rig_bins, vox):
+def write_rig_of(name, out_dir, rig_bins, vox, states_done=False):
     """`<name>.rig` from its bins' (length, scale, cells, cell bones, the bin's own rig or
     None for the shared one); the file's name."""
     shared = None
@@ -862,8 +1027,33 @@ def write_rig_of(name, out_dir, rig_bins, vox):
         reset_scene()
         shared = RIGS[name]()
     rig = f"{name}.rig"
+    if name in STATE_RIGS and not states_done:
+        fn, pose = STATE_RIGS[name]
+        poses = model_cells(os.path.join(out_dir, f"{pose}.cvm")) if pose else [None] * len(rig_bins)
+        assert len(poses) == len(rig_bins), f"{pose}: {len(poses)} bins"
+        staged = []
+        for n, (length, scale, raw, bones, r) in enumerate(rig_bins):
+            own, note = fn(r or shared, raw, bones, scale, poses[n])
+            print(f"{vox} m {name} bin {n}: {note}", flush=True)
+            staged.append((length, scale, raw, bones, own))
+        rig_bins = staged
     bins = [(length, scale, r or shared, rig_cells(raw, bones, (r or shared)["bones"]))
             for length, scale, raw, bones, r in rig_bins]
+    if name in SLEEP_PORTS:
+        # Keep the feed skeleton, but discard sleep children empty in every bin.
+        used = {c[3] for *_, cells in bins for c in cells}
+        keep = [i for i, (bone, _) in enumerate(bins[0][2]["bones"])
+                if i in used or not bone.startswith("sleep_")]
+        index = {old: new for new, old in enumerate(keep)}
+        trimmed = []
+        for length, scale, r, cells in bins:
+            own = dict(r, bones=[(r["bones"][i][0], None if r["bones"][i][1] is None
+                                 else index[r["bones"][i][1]]) for i in keep],
+                       heads=[r["heads"][i] for i in keep],
+                       clips=[dict(c, frames=[[keys[i] for i in keep] for keys in c["frames"]])
+                              for c in r["clips"]])
+            trimmed.append((length, scale, own, [(x, y, z, index[b]) for x, y, z, b in cells]))
+        bins = trimmed
     rig_size = write_rig(os.path.join(out_dir, rig), bins)
     first = bins[0][2]
     counts = [{n: sum(1 for c in cells if c[3] == i) for i, (n, _) in enumerate(first["bones"])}
@@ -919,6 +1109,13 @@ def main():
     for sp in src["species"]:
         for st in sp["profile"]:
             st["wood_fraction_max"] = float(st["wood_fraction_max"])  # "inf" -> inf
+    if "--sleep-only" in ARGS:
+        assert ONLY and ONLY <= set(SLEEP_PORTS), f"--sleep-only --only {','.join(SLEEP_PORTS)}"
+        for vox in src["voxel_sizes_m"]:
+            out_dir = os.path.join(ROOT, str(round(vox * 1000)))
+            for name in sorted(ONLY):
+                bake_sleep_only(name, vox, out_dir)
+        return
     for vox in src["voxel_sizes_m"]:
         out_dir = os.path.join(ROOT, str(round(vox * 1000)))
         os.makedirs(out_dir, exist_ok=True)

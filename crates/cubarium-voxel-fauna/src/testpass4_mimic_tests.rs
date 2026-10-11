@@ -46,6 +46,7 @@ fn config() -> FaunaConfig {
         jaw_band_height_fraction: 2.0,
         vertical_reach_m: 0.0,
         jaw_forward_length_fraction: 0.5,
+        strike_warning_scale: 1.0,
         windup_s: 0.1,
         lunge_s: 0.15,
         recovery_s: 0.5,

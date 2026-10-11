@@ -964,7 +964,7 @@ pub(crate) fn propagate(flora: &mut Flora, world: &World, dt: f64) {
         }
 
         // ---- one seed.
-        let (site, banked) = match landing(&view, ground, config, sc, home, world_seed, tick) {
+        let (site, banked) = match landing(&view, ground, config, sc, home, donor.wood, world_seed, tick) {
             Landing::Bank(site) => (site, true),
             Landing::Lost(site) => (site, false),
             Landing::Retry => continue,
@@ -1192,13 +1192,16 @@ pub(crate) enum Landing {
 }
 
 /// Where one seed from a donor on `home` lands, by the species' [`Dispersal`] mode. Every
-/// draw is keyed by the world's seed, the donor's site and the tick.
+/// draw is keyed by the world's seed, the donor's site and the tick. `wood` is the
+/// donor's: a crown-released WALD throws from its crown's height now.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn landing(
     view: &VoxelView<'_>,
     ground: &[Ground],
     config: &FloraConfig,
     sc: &SpeciesConfig,
     home: Site,
+    wood: f64,
     world_seed: u64,
     tick: u64,
 ) -> Landing {
@@ -1210,7 +1213,7 @@ pub(crate) fn landing(
             .map_or(Landing::Retry, Landing::Bank),
         Dispersal::Spores => spore_target(view, ground, sc, home, world_seed, home_index, tick),
         Dispersal::Water => water_target(view, sc, home, world_seed, home_index, tick),
-        Dispersal::Wald => wald_target(view, config, sc, home, world_seed, home_index, tick)
+        Dispersal::Wald => wald_target(view, config, sc, home, wood, world_seed, home_index, tick)
             .map_or(Landing::Retry, Landing::Bank),
     }
 }
@@ -1283,11 +1286,13 @@ pub(crate) fn retention_distance(rng: &mut Rng, mean: f64, k: f64) -> f64 {
 /// columns at the world's cell size, capped at the world's larger side, in a uniform
 /// direction; wrapped round the ring and reflected off the walls, onto the column's
 /// highest support face, never the donor's own. Up to `wind_tries` draws.
+#[allow(clippy::too_many_arguments)]
 fn wald_target(
     view: &VoxelView<'_>,
     config: &FloraConfig,
     sc: &SpeciesConfig,
     home: Site,
+    wood: f64,
     world_seed: u64,
     home_index: u64,
     tick: u64,
@@ -1295,8 +1300,9 @@ fn wald_target(
     let c = view.config;
     let cap = f64::from(c.width.max(c.depth));
     let mut rng = Rng::keyed(DOMAIN_WIND, world_seed, home_index, tick);
+    let (mean, shape) = sc.wald_kernel(wood, config.seed_wind_m_per_s, config.seed_eddy_ratio);
     for _ in 0..config.wind_tries {
-        let (dx, dz) = wald_offset(&mut rng, sc, c.voxel_m, cap);
+        let (dx, dz) = wald_offset(&mut rng, mean, shape, c.voxel_m, cap);
         let z = reflect(home.z as i64 + dz, c.depth);
         if let Some(site) = highest_support(view, home.x as i64 + dx, z)
             && site != home
@@ -1307,10 +1313,11 @@ fn wald_target(
     None
 }
 
-/// One WALD offset in whole columns (`voxel_m` the cell), capped at `cap` columns; a
-/// seed that would fall back on its own column lands one column out in its direction.
-pub(crate) fn wald_offset(rng: &mut Rng, sc: &SpeciesConfig, voxel_m: f64, cap: f64) -> (i64, i64) {
-    let r = (wald_distance(rng, sc.wald_mean_m, sc.wald_shape_m) / voxel_m.max(1e-9)).min(cap);
+/// One WALD offset in whole columns (`voxel_m` the cell) for a kernel of `mean` and
+/// `shape` metres ([`SpeciesConfig::wald_kernel`]), capped at `cap` columns; a seed that
+/// would fall back on its own column lands one column out in its direction.
+pub(crate) fn wald_offset(rng: &mut Rng, mean: f64, shape: f64, voxel_m: f64, cap: f64) -> (i64, i64) {
+    let r = (wald_distance(rng, mean, shape) / voxel_m.max(1e-9)).min(cap);
     let theta = std::f64::consts::TAU * rng.unit();
     let (s, co) = theta.sin_cos();
     let (dx, dz) = ((r * co).round() as i64, (r * s).round() as i64);
@@ -2153,7 +2160,7 @@ mod tests {
         let ground: Vec<Ground> = Vec::new();
         let (mut banked, mut lost) = (0, 0);
         for tick in 0..400u64 {
-            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, tick) {
+            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 0.0, 11, tick) {
                 Landing::Bank(site) => {
                     banked += 1;
                     assert_ne!(site, home);
@@ -2223,7 +2230,7 @@ mod tests {
         let ground: Vec<Ground> = Vec::new();
         let mut banked = 0;
         for tick in 0..200u64 {
-            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, tick) {
+            match landing(&view, &ground, &FloraConfig::default(), &sc, home, 0.0, 11, tick) {
                 Landing::Bank(site) => {
                     banked += 1;
                     assert!(
@@ -2795,7 +2802,7 @@ mod tests {
             sc.hop = 5;
             sc.spore_tries = tries;
             (0..400u64)
-                .filter(|&t| matches!(landing(&view, &ground, &FloraConfig::default(), &sc, home, 11, t), Landing::Bank(_)))
+                .filter(|&t| matches!(landing(&view, &ground, &FloraConfig::default(), &sc, home, 0.0, 11, t), Landing::Bank(_)))
                 .count()
         };
         let (two, eight) = (banked(2), banked(8));
@@ -2881,7 +2888,7 @@ mod tests {
         zero.dark_spore_bias = 0.0;
         for tick in 0..600u64 {
             assert_eq!(
-                landing(&view, &ground, &config, &zero, home, 11, tick),
+                landing(&view, &ground, &config, &zero, home, 0.0, 11, tick),
                 reference_spore_target(&view, &ground, &zero, home, 11, tick),
                 "tick {tick}"
             );
@@ -2889,7 +2896,7 @@ mod tests {
         let dark_share = |sc: &SpeciesConfig| {
             let (mut dark, mut banked) = (0u32, 0u32);
             for tick in 0..2000u64 {
-                if let Landing::Bank(site) = landing(&view, &ground, &config, sc, home, 11, tick) {
+                if let Landing::Bank(site) = landing(&view, &ground, &config, sc, home, 0.0, 11, tick) {
                     banked += 1;
                     let sky = view.sky_visibility(site.x as i64, site.y, site.z);
                     if sc.darkness(sky) >= 0.5 {

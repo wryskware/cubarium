@@ -107,18 +107,41 @@ pub struct EmitCell {
     /// shown (`0..=1`): the shader draws both tiles, the old one this share of coverage and
     /// colour.
     pub vine: Option<((u8, u8), f32)>,
+    /// CELL-SHRINK: a plant cell's grow-in size (`0..=1`) while it arrives or leaves through
+    /// the plant pass, which weights the light it casts on the rest of the world: its AO
+    /// crease and its sun shadow (`world.glsl`'s `plantSize`). `None` casts it whole.
+    pub plant: Option<f32>,
+    /// CELL-SHRINK: on a crown cell beside a cell of its crown that is arriving or leaving,
+    /// the share (`0..=1`) of its outline edge on that side (left, right) drawn: one less
+    /// the neighbour's size (`world.glsl`'s `crownEdge`). `None` draws the edge as the
+    /// cell's glyph has it. Not carried beside a vine cell's old tile.
+    pub edge: [Option<f32>; 2],
 }
 
 impl EmitCell {
     /// An emitter's colour and on share alone.
     pub fn emitter(cell: u32, rgb: [f32; 3], on: f32) -> EmitCell {
-        EmitCell { cell, rgb, on, emits: true, vine: None }
+        EmitCell { cell, rgb, on, emits: true, vine: None, plant: None, edge: [None; 2] }
+    }
+
+    /// A cell with nothing to carry yet: no emission, no old tile, a whole plant cell.
+    pub fn none(cell: u32) -> EmitCell {
+        EmitCell { cell, rgb: [0.0; 3], on: 0.0, emits: false, vine: None, plant: None, edge: [None; 2] }
     }
 }
 
+/// A plant size's code in an emitter table entry's fourth word (bits 24..31): 0 for none (a
+/// whole cell), else `1 + size × PLANT_STEPS`.
+pub const PLANT_STEPS: f32 = 125.0;
+
+/// A crown edge share's code in an emitter table entry's fourth word (bits 0..8 left, 8..16
+/// right, where a vine cell keeps its old tile): 0 for none, else `1 + share × EDGE_STEPS`.
+pub const EDGE_STEPS: f32 = 254.0;
+
 /// An emitter table entry's fourth word: bit 31 set when the entry carries no emission;
 /// a vine cell's old tile in bits 0..16 (`b`, then `a`) and its share, `1..=255` of 255, in
-/// bits 16..24 (0: no old tile). `world.glsl`'s `cellEmit` and `cellVineFrom` read it.
+/// bits 16..24 (0: no old tile); a plant cell's size in bits 24..31 ([`PLANT_STEPS`]).
+/// `world.glsl`'s `cellEmit`, `cellVineFrom` and `plantSize` read it.
 pub fn emit_word(c: &EmitCell) -> u32 {
     let mut w = if c.emits { 0 } else { 1 << 31 };
     if let Some(((b, a), share)) = c.vine {
@@ -127,12 +150,57 @@ pub fn emit_word(c: &EmitCell) -> u32 {
             w |= u32::from(b) | u32::from(a) << 8 | s << 16;
         }
     }
+    if w & 0xff_0000 == 0 {
+        for (k, e) in c.edge.iter().enumerate() {
+            if let Some(e) = e {
+                w |= (1 + (e.clamp(0.0, 1.0) * EDGE_STEPS).round() as u32) << (8 * k);
+            }
+        }
+    }
+    if let Some(size) = c.plant {
+        w |= (1 + (size.clamp(0.0, 1.0) * PLANT_STEPS).round() as u32) << 24;
+    }
     w
+}
+
+/// The share of a crown cell's edge (`side` 0 left, 1 right) [`emit_word`] carries, as the
+/// shader reads it back (1: the glyph's own edge).
+pub fn edge_share_of(word: u32, side: usize) -> f32 {
+    if word & 0xff_0000 != 0 {
+        return 1.0;
+    }
+    match (word >> (8 * side)) & 255 {
+        0 => 1.0,
+        e => (e - 1) as f32 / EDGE_STEPS,
+    }
+}
+
+/// The size [`emit_word`] gives a plant cell, as the shader reads it back (1: whole).
+pub fn plant_size_of(word: u32) -> f32 {
+    match (word >> 24) & 127 {
+        0 => 1.0,
+        p => (p - 1) as f32 / PLANT_STEPS,
+    }
 }
 
 /// The bit of `view.w` (the emitter table's size) saying some entry carries a vine cell's
 /// old tile, so the shader looks vine cells up only then.
 pub const EMIT_VINES: u32 = 1 << 20;
+
+/// The bit of `view.w` saying some entry carries a plant cell's size (CELL-SHRINK), so the
+/// shader looks plant cells up only then.
+pub const EMIT_PLANTS: u32 = 1 << 21;
+
+/// The table capacity and payload flags used by both the shader and the walk variant.
+/// An empty table selects the whole-cell walk even if the supplied cells carry sizes.
+fn emit_view(cap: u32, cells: &[EmitCell]) -> u32 {
+    if cap == 0 {
+        return 0;
+    }
+    let vines = cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
+    let plants = cells.iter().any(|c| c.plant.is_some());
+    cap | if vines { EMIT_VINES } else { 0 } | if plants { EMIT_PLANTS } else { 0 }
+}
 
 /// The emitter table's hash of `key` (a texture index plus one) into `cap` entries, a power
 /// of two: `world.glsl`'s `emitHash`.
@@ -2135,6 +2203,9 @@ pub struct VoxelRenderer {
     /// drawn pack has an animal posing.
     pose_pipeline: vk::Pipeline,
     depth_pose_pipeline: vk::Pipeline,
+    /// The same four walk variants with CELL-SHRINK weights, bound only while the
+    /// frame's emitter table carries plant sizes. The ordinary variants compile them out.
+    plant_light_pipelines: [vk::Pipeline; 4],
     present: PresentPass,
     /// The model pass (H2): animals drawn as models after the walk ([`crate::figures`]).
     figures: crate::figures::FigurePass,
@@ -2619,9 +2690,12 @@ impl VoxelRenderer {
         // pass (`WEATHER_DEPTH`, constant_id 8), used only on frames that draw weather; and
         // each of them with the sleep pose (`POSE`, constant_id 9), used only on frames whose
         // pack has an animal posing.
-        let walk = |depth: bool, pose: bool| -> Result<vk::Pipeline> {
+        let walk = |depth: bool, pose: bool, plant_light: bool| -> Result<vk::Pipeline> {
             let mut flags: Vec<u32> = constants.to_vec();
-            flags.extend([0, 0, u32::from(depth), u32::from(pose), u32::from(params.plants.is_some())]);
+            flags.extend([
+                0, 0, u32::from(depth), u32::from(pose), u32::from(params.plants.is_some()),
+                u32::from(plant_light),
+            ]);
             let entries: Vec<_> = (0..flags.len() as u32)
                 .map(|i| vk::SpecializationMapEntry::default().constant_id(i).offset(i * 4).size(4))
                 .collect();
@@ -2639,13 +2713,19 @@ impl VoxelRenderer {
                 3,
             )
         };
-        let pipeline = walk(false, false)?;
-        let pose_pipeline = walk(false, true)?;
+        let pipeline = walk(false, false, false)?;
+        let pose_pipeline = walk(false, true, false)?;
         let (depth_pipeline, depth_pose_pipeline) = if params.lit {
-            (walk(true, false)?, walk(true, true)?)
+            (walk(true, false, false)?, walk(true, true, false)?)
         } else {
             (vk::Pipeline::null(), vk::Pipeline::null())
         };
+        let plant_light_pipelines = [
+            walk(false, false, true)?,
+            walk(false, true, true)?,
+            if params.lit { walk(true, false, true)? } else { vk::Pipeline::null() },
+            if params.lit { walk(true, true, true)? } else { vk::Pipeline::null() },
+        ];
         let backdrop = if params.lit {
             backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
         } else {
@@ -2802,6 +2882,7 @@ impl VoxelRenderer {
             depth_pipeline,
             pose_pipeline,
             depth_pose_pipeline,
+            plant_light_pipelines,
             present: PresentPass::new(gpu, raster_view, nearest)?,
             figures,
             figure_frame: crate::figures::FigureFrame::default(),
@@ -3279,8 +3360,7 @@ impl VoxelRenderer {
             self.emit_buffer.write_bytes_at((EMIT_TABLE * 16 * frame.slot) as u64, &self.emit_scratch);
         }
         block.view[2] = (EMIT_TABLE * frame.slot) as i32;
-        let vines = self.emit_cells.iter().any(|c| emit_word(c) & 0xff_0000 != 0);
-        block.view[3] = (cap | if vines && cap > 0 { EMIT_VINES } else { 0 }) as i32;
+        block.view[3] = emit_view(cap, &self.emit_cells) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
         let p = &self.params;
         let sun_map = if redraw {
@@ -3489,11 +3569,15 @@ impl VoxelRenderer {
                     &[(self.uniform_stride * frame.slot as u64) as u32],
                 );
                 let weather = self.weather_pass.is_some() && weather_drawn(&self.look, &self.params);
-                let walk = match (weather, self.posing) {
-                    (false, false) => self.pipeline,
-                    (false, true) => self.pose_pipeline,
-                    (true, false) => self.depth_pipeline,
-                    (true, true) => self.depth_pose_pipeline,
+                let walk = if block.view[3] as u32 & EMIT_PLANTS != 0 {
+                    self.plant_light_pipelines[2 * usize::from(weather) + usize::from(self.posing)]
+                } else {
+                    match (weather, self.posing) {
+                        (false, false) => self.pipeline,
+                        (false, true) => self.pose_pipeline,
+                        (true, false) => self.depth_pipeline,
+                        (true, true) => self.depth_pose_pipeline,
+                    }
                 };
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);
@@ -3619,6 +3703,11 @@ impl VoxelRenderer {
         self.plants.as_ref().map(|p| p.stats())
     }
 
+    /// The plant pass's drawn list and the clock it was last drawn at ([`crate::plants::PlantPass::drawn`]).
+    pub fn plant_drawn(&self) -> Option<(&crate::plants::PlantList, f64)> {
+        self.plants.as_ref().map(|p| p.drawn())
+    }
+
     /// The figures the next frame draws (H2's model pass). A change redraws.
     pub fn set_figures(&mut self, frame: crate::figures::FigureFrame) {
         if frame != self.figure_frame {
@@ -3703,7 +3792,10 @@ impl VoxelRenderer {
         unsafe {
             d.destroy_pipeline(self.pipeline, None);
             d.destroy_pipeline(self.pose_pipeline, None);
-            for p in [self.depth_pipeline, self.depth_pose_pipeline] {
+            for p in [self.depth_pipeline, self.depth_pose_pipeline]
+                .into_iter()
+                .chain(self.plant_light_pipelines)
+            {
                 if p != vk::Pipeline::null() {
                     d.destroy_pipeline(p, None);
                 }
@@ -4657,6 +4749,34 @@ pub(crate) mod tests {
         assert_eq!(t.rgba[((slot as u32 * 6 * aw) * 4) as usize], 9);
     }
 
+    /// Whole-cell and weighted walks follow the table carried by this frame, independently
+    /// of emitter and vine payloads, and return to the whole-cell walk after the change.
+    #[test]
+    fn plant_light_variant_follows_the_current_table_payload() {
+        let mut cells = vec![EmitCell::emitter(7, [0.2, 0.4, 0.6], 0.5)];
+        let mut table = Vec::new();
+        let cap = emit_table(&cells, &mut table);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "emission alone uses the whole-cell walk");
+
+        cells[0].vine = Some(((3, 2), 0.5));
+        assert_ne!(emit_view(cap, &cells) & EMIT_VINES, 0);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "vine changes alone use the whole-cell walk");
+
+        cells.push(EmitCell { plant: Some(0.25), edge: [Some(0.75), None], ..EmitCell::none(9) });
+        let cap = emit_table(&cells, &mut table);
+        let view = emit_view(cap, &cells);
+        assert_ne!(view & EMIT_PLANTS, 0, "a changing plant selects the weighted walk");
+        assert_ne!(view & EMIT_VINES, 0, "the vine payload remains enabled");
+        assert_eq!(view & (EMIT_VINES - 1), cap, "payload flags leave the hash capacity intact");
+        assert_eq!(emit_view(0, &cells), 0, "no uploaded table uses the whole-cell walk");
+
+        cells.pop();
+        let cap = emit_table(&cells, &mut table);
+        assert_eq!(emit_view(cap, &cells) & EMIT_PLANTS, 0, "the next frame returns to the whole-cell walk");
+        cells.clear();
+        assert_eq!(emit_view(emit_table(&cells, &mut table), &cells), 0);
+    }
+
     /// The emitter table as `world.glsl`'s `cellEmit` reads it: every cell given is found
     /// by its own probe with its colour and on share (to half precision), a cell not given
     /// is not, and an empty list is no table.
@@ -4669,6 +4789,8 @@ pub(crate) mod tests {
                 on: (k % 11) as f32 / 10.0,
                 emits: k % 3 != 0,
                 vine: (k % 2 == 0).then(|| ((k as u8, (k >> 3) as u8), (k % 7) as f32 / 6.0)),
+                plant: (k % 5 != 0).then(|| (k % 13) as f32 / 12.0),
+                edge: [(k % 3 == 1).then(|| (k % 9) as f32 / 8.0), (k % 4 == 1).then(|| (k % 5) as f32 / 4.0)],
             })
             .collect();
         let mut out = Vec::new();
@@ -4709,6 +4831,22 @@ pub(crate) mod tests {
                     assert!((share - s).abs() <= 0.5 / 255.0 + 1e-6, "its share {share} for {s}");
                 }
                 _ => assert_eq!(share, 0.0, "no old tile"),
+            }
+            // CELL-SHRINK: the plant size as `plantSize` reads it, whole when none was given;
+            // the emission bit and the old tile are left as they were.
+            let size = plant_size_of(word);
+            match c.plant {
+                Some(p) => assert!((size - p).abs() <= 0.5 / PLANT_STEPS + 1e-6, "size {size} for {p}"),
+                None => assert_eq!(size, 1.0, "a cell given no size is whole"),
+            }
+            // Its crown edges, unless an old vine tile holds those bits.
+            let tile = matches!(c.vine, Some((_, s)) if s > 0.5 / 255.0);
+            for side in 0..2 {
+                let got = edge_share_of(word, side);
+                match c.edge[side] {
+                    Some(e) if !tile => assert!((got - e).abs() <= 0.5 / EDGE_STEPS + 1e-6, "edge {got} for {e}"),
+                    _ => assert_eq!(got, 1.0, "no edge given (or a vine tile's) draws the glyph's"),
+                }
             }
         }
         assert!(find(100_004).is_none());

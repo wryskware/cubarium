@@ -157,6 +157,12 @@ fn species_rows() -> Vec<Row> {
         r("nutrient_draw_max", "/s per unit site mineral", nonneg, "f_max: rate cap on income from the site's mineral")
             .search(0.003, 0.1).log().grade("D"),
         r("light_half", "fraction of open sky", nonneg, "light response half-saturation").search(0.05, 1.5).grade("B"),
+        r("specific_leaf_area_m2_per_kg", "m2 leaf per kg leaf dry mass", Range::positive(),
+            "SLA: leaf area per leaf mass; LAI = SLA * foliage_kg_per_unit * stock / disc area")
+            .search(4.0, 40.0).log().grade("B").prov("literature: Wright et al. 2004 GLOPNET; Poorter et al. 2009 LMA by growth form"),
+        r("foliage_kg_per_unit", "kg leaf dry mass per org-unit of foliage", Range::positive(),
+            "stock-to-mass map: LAI_ref * A_closed / (SLA * alpha * W_max), A_closed the crown disc (one face for a ground cover)")
+            .search(0.001, 1.0).log().grade("C").prov("derived: Asner et al. 2003 biome LAI of a closed stand of the real analog"),
         r("rooting_depth", "reference voxels (0.25 m)", nonneg, "root box depth below the support")
             .scale(Scale::Length).evolve().grade("C"),
         r("rooting_radius", "reference voxels (0.25 m)", nonneg, "root box half-width")
@@ -237,6 +243,11 @@ fn species_rows() -> Vec<Row> {
             .search(0.25, 6.0).log(),
         r("wald_shape_m", "m", nonneg, "Wald dispersal: the WALD kernel's shape lambda; CV = sqrt(mean / lambda)")
             .search(0.1, 4.0).log(),
+        r("seed_release_share", "fraction of crown height (0 = fixed kernel)", fraction,
+            "Wald from the crown: release height H = share * crown height; mean H*U/F, shape H/(2a)")
+            .search(0.3, 1.0).grade("B").prov("anatomy: the shelves' band"),
+        r("seed_fall_m_per_s", "m/s", Range::positive(), "Wald from the crown: the seed's terminal fall speed F")
+            .search(0.5, 2.5).log().grade("A").prov("literature: Green 1980 samaras 0.7-1.2 m/s; Augspurger 1986"),
         r("burr_pickup", "probability per contact at coat 1", fraction, "burrs: a donor's seed latches onto an animal stepping onto its face")
             .search(0.0, 0.5),
         r("burr_retention_mean_m", "m walked", nonneg, "burrs: mean distance a seed rides before it falls off (Weibull)")
@@ -376,7 +387,9 @@ fn rows() -> Vec<Row> {
     let positive = Range::positive();
     let fraction = Range::fraction();
     rows.extend([
-        r("flora.shade_k_per_m2", "m2 per org-unit", nonneg, "canopy attenuation per square metre").evolve().log().grade("D").prov("derived"),
+        r("flora.light_extinction_k", "dimensionless", nonneg,
+            "k_ext: Beer-Lambert light extinction, exp(-k_ext (1-porosity) LAI) per foliage layer")
+            .search(0.3, 0.9).grade("A").prov("literature: Monsi & Saeki 1953; Jones 1992; Campbell & Norman 1998 (broadleaf 0.5-0.7)"),
         r("flora.decomposition", "/s", nonneg, "k_d: litter decomposition").evolve().log().grade("B"),
         r("flora.litter_fragment_boost", "fraction", nonneg, "extra local microbial decay after shredder feeding"),
         r("flora.litter_fragment_radius_m", "m", nonneg, "radius of shredder fragmentation"),
@@ -396,6 +409,10 @@ fn rows() -> Vec<Row> {
             .search(1.0, 20.0),
         r("flora.wind_shape", "-", positive, "wind kernel: Lomax shape k (larger is a thinner tail)").search(1.2, 4.0),
         r("flora.wind_scale_hops", "hops", positive, "wind kernel: Lomax scale a, in the species' hops").search(0.5, 8.0),
+        r("flora.seed_wind_m_per_s", "m/s", nonneg, "Wald from the crown: mean wind U at release height")
+            .search(0.5, 6.0).grade("B").prov("literature: Katul et al. 2005; Nathan et al. 2002 (canopy-top wind ~2 m/s)"),
+        r("flora.seed_eddy_ratio", "dimensionless (K / (U H))", positive, "Wald from the crown: eddy diffusivity per unit wind and height; shape = H / (2a)")
+            .search(0.03, 0.3).log().grade("B").prov("derived: K = sigma_w^2 T_L, Raupach 1988 / Katul et al. 2005"),
         r("flora.carcass_remains_fraction", "fraction of the body's organic matter", fraction, "carrion below this draws as remains, not the body")
             .search(0.1, 0.6),
         r("flora.carcass_gone_fraction", "fraction of the body's organic matter", fraction, "carrion at or below this drops the carcass record")

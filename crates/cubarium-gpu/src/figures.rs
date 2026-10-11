@@ -106,7 +106,8 @@ pub const CLASS_LEG2: u8 = 4;
 /// One cell of a figure model, as `figure.vert` reads it: its offset in the model's frame,
 /// its palette entry (from the figure's first), its pose class, whether it is the head, the
 /// faces with no cell beside them, its glyph (0: the stamped baked-model glyph), its rig
-/// bone (bits 14..19; 0 the root, FEED-RIG), and each face's open-plane crease neighbours.
+/// bone (bits 14..19; 0 the root, FEED-RIG), whether its top reads open for the lip tone
+/// (bit 20, [`FigureVoxel::with_lip`]), and each face's open-plane crease neighbours.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FigureVoxel {
@@ -128,9 +129,23 @@ impl FigureVoxel {
             bits: u32::from(class & 7)
                 | u32::from(head) << 3
                 | u32::from(open & 63) << 4
-                | u32::from(glyph & 15) << 10,
+                | u32::from(glyph & 15) << 10
+                | u32::from((open >> 3) & 1) << 20,
             creases: [0; 2],
         }
+    }
+
+    /// Whether its top reads open for the lip tone, the top row of a side face drawn as the
+    /// top's edge (`figure.frag`); by default its open `+y` face. A rigged model draws a top
+    /// face against another bone's cell (so a moving bone leaves no hole), but its lip keeps
+    /// the body at rest where the two bones only part in a state's transition (RIG-STATES).
+    pub fn with_lip(mut self, open: bool) -> Self {
+        self.bits = (self.bits & !(1 << 20)) | u32::from(open) << 20;
+        self
+    }
+
+    pub fn lip(self) -> bool {
+        (self.bits >> 20) & 1 != 0
     }
 
     /// This cell on rig bone `bone` (below [`BONE_LIMIT`]): a rigged figure moves it by the
@@ -1818,6 +1833,8 @@ mod tests {
         let v = FigureVoxel::new([-3, 7, -128], 200, CLASS_LEG2, true, 0b101010, 5);
         assert_eq!(v.offset(), [-3, 7, -128]);
         assert_eq!((v.palette(), v.class(), v.head(), v.open()), (200, CLASS_LEG2, true, 0b101010));
+        assert!(v.lip(), "its lip is its open top by default");
+        assert!(!v.with_lip(false).lip() && v.with_lip(false).open() == 0b101010);
         let open = open_faces(&[[0, 0, 0], [1, 0, 0], [0, 1, 0]]);
         // The first cell has neighbours at +x (bit 1) and +y (bit 3).
         assert_eq!(open[0], 0b111111 & !(1 << 1) & !(1 << 3));
