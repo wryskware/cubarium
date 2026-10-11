@@ -389,7 +389,9 @@ in the figure pass: each frame the posed bone points of a thin part become a sho
 polyline, drawn depth-tested against the walk. That is a new figure-pass primitive (a
 renderer package about the size of a feeding rig), worth it once it serves several
 species, not for the tendril alone. What the tendril needs from it: reach out and down
-from the bell when feeding and wiggle a little.
+from the bell when feeding and wiggle a little, and curl in when the bellwing sleeps (Wrysk,
+2026-10-11: "yes"; the other sleep poses shipped in d2b7fa7b, and at 125 mm a rig-only curl
+would not show).
 
 ## 21. The Blender bake is not reproducible (found 2026-10-10, FEED-ROLLOUT small feeders) — FIXED in code 2026-10-10 (bake-repro f75b48e7: canonical BVH face order and nearest-face ties; two full bakes byte-identical). REBAKED 2026-10-11 (bc7ce1cd, merged 54ea3220, Wrysk's go): one full deterministic rebake; 40 of 68 files changed slightly, exactly the list in `art/gen/runs/bake-repro-2026-10-10/repro-full-asset-diff.txt`. Rebakes now change only what they mean to. **Closed.**
 
