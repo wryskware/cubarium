@@ -713,7 +713,7 @@ vec3 bandAt(float t) {
 // day), with the twilight band over it at dawn and dusk.
 vec3 skyAt(int py) {
     if (u.roofK.w > 0.5) {
-        float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
+        float t = clamp(float(py + u.camera.x) / float(max(u.camera.y, 1)), 0.0, 1.0);
         vec3 c = mix(u.skyC.rgb, u.skyHorizon.rgb, t);
         if (u.dayK.w > 0.0) { c += bandAt(t); }
         return c;
@@ -1031,7 +1031,8 @@ vec3 daySkyAt(float t) {
 // band, the stars, the clouds. `.a` is the light the pixel sends the bloom (a bright
 // star's, times `dayB.w`).
 vec4 litSky(int px, int py) {
-    float t = clamp(float(py) / float(max(u.extent.w, 1)), 0.0, 1.0);
+    py += u.camera.x;
+    float t = clamp(float(py) / float(max(u.camera.y, 1)), 0.0, 1.0);
     bool gradient = u.roofK.w > 0.5;
     vec3 sky = gradient ? mix(u.skyC.rgb, u.skyHorizon.rgb, t) : u.skyC.rgb;
     float day = u.dayA.w;

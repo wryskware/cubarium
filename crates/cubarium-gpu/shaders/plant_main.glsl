@@ -96,7 +96,7 @@ void main() {
     int dx = clamp(int(uv.x * float(S)), 0, S - 1);
     int row = clamp(int(uv.y * float(rows)), 0, rows - 1);
     if (!plantFaceShows(p.x, p.y, p.z, v, cap, row, dx)) { discard; }
-    outId = (uint(inst + 1) << 9) | (cap ? 256u : 0u) | (uint(dx) << 4) | uint(row);
+    outId = (uint(inst + 1) << 13) | (cap ? 4096u : 0u) | (uint(dx) << 6) | uint(row);
 }
 #endif
 
@@ -156,10 +156,10 @@ void main() {
     float py = gl_FragCoord.y;
     for (int k = 0; k < m; ++k) {
         uint id = ids[k];
-        uvec4 c = cells[int(id >> 9) - 1];
-        bool cap = (id & 256u) != 0u;
-        int dx = int((id >> 4) & 15u);
-        int row = int(id & 15u);
+        uvec4 c = cells[int(id >> 13) - 1];
+        bool cap = (id & 4096u) != 0u;
+        int dx = int((id >> 6) & 63u);
+        int row = int(id & 63u);
         uvec4 v;
         plantVoxel(c, v);
         ivec3 p = plantCellAt(c);

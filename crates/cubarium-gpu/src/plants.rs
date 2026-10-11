@@ -55,8 +55,8 @@ pub const MAX_PLANT_CELLS: usize = 1 << 18;
 pub const MAX_PLANTS: usize = 1 << 16;
 /// The most layer samples a raster pixel axis (`plant_main.glsl`'s `PLANT_SAMPLES`).
 pub const MAX_SUPERSAMPLE: u32 = 4;
-/// The largest voxel a layer id can name a texel of (four bits each for column and row).
-pub const MAX_PX_PER_VOXEL: u32 = 16;
+/// The largest voxel a layer id can name a texel of (six bits each for column and row).
+pub const MAX_PX_PER_VOXEL: u32 = 64;
 
 const IDS: vk::Format = vk::Format::R32_UINT;
 

@@ -390,6 +390,63 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self
     }
 
+    /// Build another projection on the same GPU from the current packed world. No
+    /// simulation snapshot, light bake or organism placement is changed by zoom.
+    pub(super) fn projected_renderer(&mut self, cfg: &VoxelConfig, proj: Projection) -> Result<VoxelRenderer> {
+        let mut p = self.renderer.params();
+        p.s = proj.s; p.rise = proj.rise; p.base = proj.base;
+        p.raster_w = u32::from(proj.raster_w); p.raster_h = u32::from(proj.raster_h);
+        let textures = load_textures(cfg, None, &p);
+        let mut next = VoxelRenderer::new(&self.gpu, p, &textures)?;
+        next.inherit_atmosphere(&self.renderer);
+        self.packer.glyphs = vec![0; p.glyph_bytes()];
+        let used = appearance::atlas_len(p.s, p.rise);
+        appearance::write_atlas(p.s, p.rise, &mut self.packer.glyphs[..used]);
+        let models = self.packer.figure_models.voxels();
+        next.put_figure_models(0, &models);
+        let mut keys = [0; SLOW_PLANES];
+        keys[PLANE_ROOF] = self.packer.roof_key;
+        keys[PLANE_GLYPHS] = GLYPHS_KEY;
+        if let Some(l) = &self.packer.light {
+            keys[PLANE_SKY] = l.sky_key;
+            keys[PLANE_CANOPY] = l.canopy_key;
+            keys[PLANE_GLOW] = if self.packer.incremental { l.glow_set.key } else { l.glow.key };
+        }
+        let packer = &mut self.packer;
+        let tick = self.staged_tick.unwrap_or(0);
+        next.stage(keys, |mut out| {
+            out.owed.mark_full();
+            if let (Some(t), Some(list)) = (packer.plants.as_mut(), out.plants.as_deref_mut()) {
+                t.build(&mut packer.palette, true, list);
+            }
+            let entries = packer.animals.pose_entries();
+            if entries.len() > 1 {
+                *out.poses = sleep::table(tick, FrameClock::TICK_WRAP, cubarium_voxel_fauna::DT);
+                out.poses.entries[1..entries.len()].copy_from_slice(&entries[1..]);
+            }
+            packer.palette.write(out.styles, out.emit_curves);
+            *out.styles_key = packer.palette.version();
+            let planes = packer.planes();
+            for (i, (dst, src)) in [
+                (out.roof, planes.0), (out.glyphs, planes.1), (out.sky, planes.2),
+                (out.canopy, planes.3), (out.glow, planes.4),
+            ].into_iter().enumerate() {
+                if out.write[i] { dst.copy_from_slice(src); }
+            }
+            cubarium_gpu::voxel::write_upload(&packer.delta.master, p.width, p.height, p.depth,
+                out.owed, out.voxels, out.carried);
+        });
+        next.set_water_visible(packer.wet);
+        if let Some(sv) = &mut self.sunvis { sv.restore(&mut next); }
+        Ok(next)
+    }
+
+    pub(super) fn replace_renderer(&mut self, next: VoxelRenderer) {
+        let mut old = std::mem::replace(&mut self.renderer, next);
+        old.destroy(&self.gpu);
+        self.figure_tick = None;
+    }
+
     pub fn params(&self) -> VoxelParams {
         self.renderer.params()
     }
@@ -631,7 +688,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.figure_pick = Arc::new(FigurePick {
             s: p.s,
             rise: p.rise,
-            base: p.base,
+            base: p.base + self.renderer.view_y(),
             width: p.width,
             figures,
             voxels: self.packer.figure_models.voxels(),
@@ -3257,6 +3314,67 @@ mod tests {
     use cubarium_voxel::{Command, Config};
     use cubarium_voxel_fauna::{Command as FaunaCommand, FaunaConfig};
     use cubarium_voxel_flora::{Command as FloraCommand, FloraConfig, Species};
+
+    /// Compare a real 64-pixel plant/terrain crop with the same pixels of the full
+    /// projection, crossing the ring seam and moving vertically. This checks both
+    /// the widened plant IDs and that target size does not become world circumference.
+    #[test]
+    fn projected_plant_crop_matches_the_full_world_at_64_pixels() {
+        use cubarium_gpu::target::readback::ReadbackRing;
+        let c = Config { width: 8, height: 10, depth: 3, ..Config::default() };
+        let cfg = VoxelConfig {
+            px_per_voxel: 16, textures: false, vine_tiles: false,
+            lighting: Lighting::Flat,
+            sim: cubarium_session::SimParams { world: c.clone(), ..Default::default() },
+            ..VoxelConfig::default()
+        };
+        let base = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, 0, &c).unwrap();
+        let mut world = World::empty(c.clone());
+        for z in 0..c.depth { for x in 0..c.width {
+            set(&mut world, x as i64, 0, z, Material::Bedrock);
+            set(&mut world, x as i64, 1, z, Material::Soil);
+        }}
+        let plants = flora(&world, &[(0, 1, Species::Bloomcrown, 0.3), (7, 1, Species::Umbrellafrond, 0.3)]);
+        let fauna = Fauna::new(FaunaConfig::default());
+        let mut sink = match VoxelGpuSink::offscreen(&cfg, base, None) {
+            Ok(s) => s,
+            Err(e) => { eprintln!("no Vulkan device: {e:#}"); return; }
+        };
+        assert!(sink.stage_world(&world, &plants, &fauna));
+        let mut full = base;
+        full.s *= 4; full.rise *= 4; full.base *= 4;
+        full.raster_w *= 4; full.raster_h *= 4;
+        let mut renderer = sink.projected_renderer(&cfg, full).unwrap();
+        let mut ring = ReadbackRing::new(sink.gpu.clone(), &renderer, renderer.raster_image(), 2).unwrap();
+        let mut reference = Vec::new();
+        ring.submit(&mut renderer, (), 0).unwrap();
+        ring.drain(&mut renderer, |_, bytes| reference.extend_from_slice(bytes)).unwrap();
+        drop(ring);
+        renderer.destroy(&sink.gpu);
+        let mut crop = full;
+        crop.raster_w = 192; crop.raster_h = 192;
+        let mut renderer = sink.projected_renderer(&cfg, crop).unwrap();
+        let x = full.raster_w as i32 - 96;
+        let y = full.base - 256;
+        renderer.set_view_x(x); renderer.set_view_y(y, full.raster_h as u32);
+        let y = renderer.view_y();
+        let mut ring = ReadbackRing::new(sink.gpu.clone(), &renderer, renderer.raster_image(), 2).unwrap();
+        let mut got = Vec::new();
+        ring.submit(&mut renderer, (), 1).unwrap();
+        ring.drain(&mut renderer, |_, bytes| got.extend_from_slice(bytes)).unwrap();
+        drop(ring);
+        renderer.destroy(&sink.gpu);
+        let mut worst = 0;
+        for py in 0..crop.raster_h as i32 { for px in 0..crop.raster_w as i32 {
+            let sx = (px + x).rem_euclid(full.raster_w as i32);
+            let sy = py + y;
+            if !(0..full.raster_h as i32).contains(&sy) { continue; }
+            let a = ((sy * full.raster_w as i32 + sx) * 4) as usize;
+            let b = ((py * crop.raster_w as i32 + px) * 4) as usize;
+            for k in 0..3 { worst = worst.max(reference[a+k].abs_diff(got[b+k])); }
+        }}
+        assert!(worst <= 2, "cropped world/plant placement differs by {worst} colour codes");
+    }
 
     // The old pack's per-tick style table, for the reference pack.
     type StyleKey = (Style, u8, [Option<u16>; 2], Option<[u32; 4]>);

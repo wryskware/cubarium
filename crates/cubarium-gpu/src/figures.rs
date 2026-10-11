@@ -1232,8 +1232,8 @@ impl FigurePass {
 
     /// Pack this frame into ring slot `slot`'s buffer. Returns how many tiles the atlas
     /// had no room for.
-    pub fn prepare(&mut self, slot: usize, frame: &FigureFrame, s: u32, rise: u32, base: i32, view_x: i32) -> usize {
-        let packed = pack(frame, s, rise, base, self.raster.0, view_x);
+    pub fn prepare(&mut self, slot: usize, frame: &FigureFrame, s: u32, rise: u32, base: i32, view_x: i32, ring_width: u32) -> usize {
+        let packed = pack(frame, s, rise, base, ring_width, view_x);
         self.atlas_stats = FigureAtlasStats {
             width: ATLAS_W,
             height: ATLAS_H,

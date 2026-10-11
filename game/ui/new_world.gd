@@ -109,7 +109,7 @@ func _ready() -> void:
 	_found_cancel.pressed.connect(func(): cancel())
 	_large_back.pressed.connect(close_large)
 	_large_pick.pressed.connect(func(): _pick(_large_index))
-	%PanHint.text = ("Pan: drag, arrows, WASD or the left stick." if WorldViews.is_real()
+	%PanHint.text = ("Wheel: zoom. Pan: drag, arrows, WASD or left stick. Home: overview." if WorldViews.is_real()
 		else "Pan: drag, WASD or the right stick. Zoom: wheel.")
 	_refresh_controls()
 

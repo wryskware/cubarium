@@ -966,7 +966,7 @@ impl VoxelParams {
                 self.depth
             );
         }
-        if self.raster_w != self.width * self.s {
+        if self.raster_w == 0 {
             bail!(
                 "the raster is {} px wide but {} voxels at {} px each is {}",
                 self.raster_w,
@@ -1190,6 +1190,7 @@ impl VoxelParams {
             fig_map: [0.0; 4],
             fog_m: self.fog_motion.uniform(),
             rain_h: [look.rain_haze[0], look.rain_haze[1], look.rain_haze[2], 0.0],
+            camera: [0, self.raster_h as i32, 0, 0],
         }
     }
 }
@@ -1342,6 +1343,7 @@ struct VoxelUniforms {
     /// How much of each rain mode's haze hangs in the air (`rainH`,
     /// [`crate::weather::Look::rain_haze`]).
     rain_h: [f32; 4],
+    camera: [i32; 4],
 }
 
 /// The most cells a highlight names one by one; a larger body is highlighted by its box.
@@ -2112,6 +2114,9 @@ pub struct VoxelRenderer {
     emit_scratch: Vec<[u32; 4]>,
     /// The view's turn round the ring, raster columns ([`VoxelRenderer::set_view_x`]).
     view_x: i32,
+    view_y: i32,
+    projection_base: i32,
+    projection_height: u32,
     /// The highlighted animal ([`VoxelRenderer::set_highlight`]).
     highlight: Option<Highlight>,
     /// The slot of the last frame that retired, i.e. the one whose timestamps are the
@@ -2763,6 +2768,9 @@ impl VoxelRenderer {
             emit_cells: Vec::new(),
             emit_scratch: Vec::new(),
             view_x: 0,
+            view_y: 0,
+            projection_base: params.base,
+            projection_height: params.raster_h,
             highlight: None,
             last_done: None,
             ring: StagingRing::new(STAGING_RING),
@@ -2957,7 +2965,7 @@ impl VoxelRenderer {
     /// is drawn at column 0. The camera's pan, in whole pixels; 0 is the strip as it always
     /// was. A change redraws.
     pub fn set_view_x(&mut self, x: i32) {
-        let rw = self.params.raster_w as i32;
+        let rw = (self.params.width * self.params.s) as i32;
         let x = if rw > 0 { x.rem_euclid(rw) } else { 0 };
         if x != self.view_x {
             self.view_x = x;
@@ -2965,6 +2973,33 @@ impl VoxelRenderer {
             self.version += 1;
         }
     }
+
+    /// Retain the current atmosphere while replacing projection-dependent resources.
+    pub fn inherit_atmosphere(&mut self, old: &Self) {
+        self.weather = old.weather;
+        self.weather_ease = old.weather_ease.clone();
+        self.weather_at = old.weather_at;
+        self.clock = old.clock;
+        self.look = old.look;
+        self.fog_floor = old.fog_floor;
+        self.curve_gain.clone_from(&old.curve_gain);
+        self.set_emit_cells(&old.emit_cells);
+    }
+
+    /// Vertical camera origin. Whole-voxel steps preserve bloom grid alignment;
+    /// the viewer supplies the remaining smooth pixel offset.
+    pub fn set_view_y(&mut self, y: i32, full_height: u32) {
+        let y = y.div_euclid(self.params.s as i32) * self.params.s as i32;
+        self.projection_height = full_height;
+        if y != self.view_y {
+            self.view_y = y;
+            self.params.base = self.projection_base - y;
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    pub fn view_y(&self) -> i32 { self.view_y }
 
     /// The view's turn round the ring ([`VoxelRenderer::set_view_x`]).
     pub fn view_x(&self) -> i32 {
@@ -3228,6 +3263,7 @@ impl VoxelRenderer {
         }
         block.vol[3] = self.sunvis.fade();
         block.view[0] = self.view_x;
+        block.camera = [self.view_y, self.projection_height as i32, 0, 0];
         if let Some(h) = &self.highlight {
             let (lo, hi, count, cells) = h.block(self.params.width);
             block.hi_min = lo;
@@ -3249,7 +3285,7 @@ impl VoxelRenderer {
         let p = &self.params;
         let sun_map = if redraw {
             self.figures_dropped +=
-                self.figures.prepare(frame.slot, &self.figure_frame, p.s, p.rise, p.base, self.view_x) as u64;
+                self.figures.prepare(frame.slot, &self.figure_frame, p.s, p.rise, p.base, self.view_x, p.width * p.s) as u64;
             (p.lit && self.figures.has_tiles(frame.slot))
                 .then(|| crate::figures::sun_map(p.width, p.height, p.depth, self.look.sun))
                 .flatten()
@@ -4549,9 +4585,11 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_params_whose_raster_does_not_match_the_world_is_refused() {
+    fn cropped_rasters_are_valid_but_empty_rasters_are_refused() {
         let mut p = params();
-        p.raster_w = 500;
+        p.raster_w = 100;
+        assert!(p.validate().is_ok());
+        p.raster_w = 0;
         assert!(p.validate().is_err());
         let mut p = params();
         p.rise = 5;

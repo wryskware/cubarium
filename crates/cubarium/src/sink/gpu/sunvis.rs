@@ -590,6 +590,13 @@ impl SunVisDriver {
         }
     }
 
+    pub(crate) fn restore(&mut self, renderer: &mut VoxelRenderer) {
+        if let Some(shown) = &self.shown {
+            renderer.put_sunvis(&interleave(shown, shown), 1.0);
+            self.fade = None;
+        }
+    }
+
     /// Every frame: take in a finished bake, move the fade, and rebake under a sun that
     /// has moved (a world that has not been packed since, as in a capture, keeps its grid).
     pub(crate) fn frame(&mut self, now: f64, sun: [f32; 3], renderer: &mut VoxelRenderer) {

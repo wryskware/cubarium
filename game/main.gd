@@ -18,6 +18,7 @@ extends Node
 ## Command line (after `--`): `--saves DIR` (the slots' root, default `user://saves`),
 ## `--no-autoload` (don't open the last save), `--new` (open the picker at start-up).
 
+const WindowFit := preload("res://ui/window_fit.gd")
 const WorldViews := preload("res://ui/world_views.gd")
 const Saves := preload("res://ui/saves.gd")
 const PauseMenu := preload("res://ui/pause_menu.tscn")
@@ -103,6 +104,8 @@ func _ready() -> void:
 	world_view.animal_clicked.connect(_on_clicked)
 	_apply_stored_motion()
 	_build_ui()
+	if world_view.has_method("set_scope_enabled"):
+		world_view.set_scope_enabled(settings.get_value("view", "zoom_scope", true))
 
 	var last := _last_slot() if autoload and not start_new else ""
 	if last != "":
@@ -155,7 +158,7 @@ func _build_ui() -> void:
 	add_child(layer)
 	ui = Control.new()
 	ui.theme = THEME
-	ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ui.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(ui)
 
@@ -203,6 +206,7 @@ func _build_ui() -> void:
 	guide.show_in_world.connect(_on_show_in_world)
 	settings_page = tabbed.settings
 	settings_page.changed.connect(_on_motion_changed)
+	settings_page.scope_changed.connect(_on_scope_changed)
 
 	dialog = Dialog.instantiate()
 	dialog.shell = self
@@ -220,6 +224,13 @@ func _build_ui() -> void:
 	notices = Notices.instantiate()
 	notices.shell = self
 	ui.add_child(notices)
+	get_viewport().size_changed.connect(_fit_ui)
+	_fit_ui()
+
+
+func _fit_ui() -> void:
+	WindowFit.apply(ui, get_viewport().get_visible_rect().size)
+	WindowFit.fit_inspector(inspect, ui)
 
 
 # --- State --------------------------------------------------------------------------
@@ -320,7 +331,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _typing() -> bool:
-	return get_viewport().gui_get_focus_owner() is LineEdit
+	var focus := get_viewport().gui_get_focus_owner()
+	return focus is LineEdit or focus is TextEdit
 
 
 ## Esc (or Start): close the innermost thing open; with nothing open, toggle the menu.
@@ -437,13 +449,13 @@ func close_all() -> void:
 func _process(_delta: float) -> void:
 	for n in session.take_notices():
 		_on_notice(n)
-	world_view.set("input_enabled", not overlay_open() and busy() != "loading")
+	world_view.set("input_enabled", not overlay_open() and busy() != "loading" and not _typing())
 	paused_label.visible = player_paused and not overlay_open()
 	busy_panel.visible = pending_load != "" and not slots.visible
 	if tooltip.visible:
 		var at := ui.get_local_mouse_position() + Vector2(18, 18)
-		at.x = minf(at.x, ui.size.x - tooltip.size.x - 8)
-		at.y = minf(at.y, ui.size.y - tooltip.size.y - 8)
+		at.x = clampf(at.x, 8.0, maxf(8.0, ui.size.x - tooltip.size.x - 8))
+		at.y = clampf(at.y, 8.0, maxf(8.0, ui.size.y - tooltip.size.y - 8))
 		tooltip.position = at
 	if inspect.visible and inspect.dead:
 		world_view.stop_follow()
@@ -549,6 +561,13 @@ func current_motion() -> Dictionary:
 ## The tabbed page on its Settings tab, which shows the settings in force.
 func open_settings() -> void:
 	open_tabbed("settings")
+
+
+func _on_scope_changed(enabled: bool) -> void:
+	settings.set_value("view", "zoom_scope", enabled)
+	settings.save(settings_path)
+	if world_view.has_method("set_scope_enabled"):
+		world_view.set_scope_enabled(enabled)
 
 
 func _on_motion_changed(movement: String, subpixel: bool) -> void:

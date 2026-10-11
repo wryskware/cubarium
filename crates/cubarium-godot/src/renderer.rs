@@ -100,6 +100,10 @@ impl WorldRenderer {
         d.set("width", &(frame.width as i64).to_variant());
         d.set("height", &(frame.height as i64).to_variant());
         d.set("view_x", &(frame.view_x as i64).to_variant());
+        d.set("view_y", frame.view_y as i64);
+        d.set("s", frame.s as i64); d.set("rise", frame.rise as i64);
+        d.set("base_s", frame.base_s as i64); d.set("base_rise", frame.base_rise as i64);
+        d.set("ring_width", frame.ring_width as i64); d.set("full_height", frame.full_height as i64);
         d.set("tick", &(frame.tick as i64).to_variant());
         d.set("generation", &(frame.generation as i64).to_variant());
         h.recycle(frame);
@@ -111,6 +115,13 @@ impl WorldRenderer {
     fn set_view_x(&self, x: i64) {
         if let Some(h) = &self.hosted {
             h.set_view_x(x as i32);
+        }
+    }
+
+    #[func]
+    fn set_camera(&self, zoom: f64, center: Vector2, screen: Vector2i) {
+        if let Some(h) = &self.hosted {
+            h.set_camera(zoom as f32, [center.x, center.y], (screen.x.max(1) as u32, screen.y.max(1) as u32));
         }
     }
 

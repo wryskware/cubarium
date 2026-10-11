@@ -14,6 +14,7 @@ extends Control
 ## shell it starts hidden and the tabbed page shows it.
 
 signal changed(movement: String, subpixel: bool)
+signal scope_changed(enabled: bool)
 
 ## The slider's stops, left to right.
 const MOVEMENTS := ["smooth", "stepped"]
@@ -22,7 +23,9 @@ const MOVEMENTS := ["smooth", "stepped"]
 var shell: Node
 var movement := "smooth"
 var subpixel := true
+var scope_enabled := true
 
+@onready var _scope: NeonCheckbox = %ZoomScope
 @onready var _movement: NeonDotSlider = %Movement
 @onready var _subpixel: NeonCheckbox = %Subpixel
 
@@ -30,6 +33,9 @@ var subpixel := true
 func _ready() -> void:
 	_movement.changed.connect(_on_movement)
 	_subpixel.toggled.connect(_on_subpixel)
+	_scope.toggled.connect(func(on: bool):
+		scope_enabled = on
+		scope_changed.emit(on))
 	if shell == null:
 		# By itself: the sample page stays as laid out.
 		movement = MOVEMENTS[_movement.index]
@@ -37,6 +43,7 @@ func _ready() -> void:
 		_sync()
 		return
 	visible = false
+	scope_enabled = shell.settings.get_value("view", "zoom_scope", true)
 	_sync()
 
 
@@ -89,6 +96,8 @@ func subpixel_enabled() -> bool:
 
 
 func _sync() -> void:
+	_scope.set_pressed_no_signal(scope_enabled)
+	_scope.queue_redraw()
 	_movement.index = MOVEMENTS.find(movement)
 	_subpixel.set_pressed_no_signal(subpixel)
 	_subpixel.disabled = movement == "stepped"

@@ -529,6 +529,13 @@ pub struct HostedFrame {
     pub height: u32,
     /// The raster columns this frame is turned round the ring ([`Hosted::set_view_x`]).
     pub view_x: i32,
+    pub view_y: i32,
+    pub s: u32,
+    pub rise: u32,
+    pub base_s: u32,
+    pub base_rise: u32,
+    pub ring_width: u32,
+    pub full_height: u32,
     /// The world's tick it shows, and which world (counts installs).
     pub tick: u64,
     pub generation: u64,
@@ -592,8 +599,18 @@ impl Clock {
     }
 }
 
+#[derive(Clone, Copy)]
+struct Camera { zoom: f32, center: [f32; 2], screen: (u32, u32) }
+
+// Preserve the original overview, including cover/auto sizing. Detail multiplies
+// both projection axes by the same integer; 64 is a detail ceiling, not an overview cap.
+fn detail_factor(base_s: u32, zoom: f32) -> u32 {
+    [4, 2, 1].into_iter().find(|&f| f as f32 <= zoom + 0.001 && (f == 1 || base_s * f <= 64)).unwrap_or(1)
+}
+
 struct Controls {
     view_x: i32,
+    camera: Option<Camera>,
     highlight: Option<u64>,
     /// The animals' live settings asked for ([`Hosted::set_figure_motion`]); `None`: the
     /// config's.
@@ -615,11 +632,13 @@ struct SinkState {
     /// The content version last submitted.
     drawn_version: Option<u64>,
     /// `(tag, view_x, tick)` of the frames in flight.
-    flight: VecDeque<(u64, i32, u64)>,
+    flight: VecDeque<(u64, HostedFrame)>,
     /// The highlight drawn: the animal and the pick map's version it was taken from.
     highlight_drawn: Option<(u64, u64)>,
     /// The projection it draws with, for the pick map.
     proj: Projection,
+    overview: Projection,
+    factor: u32,
 }
 
 // The state is genuinely `Send`: the loop's pack and the presenter's record take it in
@@ -691,6 +710,8 @@ impl Shared {
             flight: VecDeque::new(),
             highlight_drawn: None,
             proj,
+            overview: proj,
+            factor: 1,
         };
         // The old renderer goes outside the lock: dropping it waits for its GPU. A renderer
         // shut down ([`Shared::shutdown`]) takes no new one: checked under the lock its
@@ -795,20 +816,18 @@ impl Shared {
         let mut out = Vec::new();
         let mut copy_ms = 0.0;
         let gpu = st.sink.gpu.clone();
-        let (w, h) = st.ring.size();
         {
             let flight = &mut st.flight;
-            let generation = st.generation;
             st.ring.poll(&mut st.sink.renderer, |tag, bytes| {
                 let at = Instant::now();
                 let mut buf = self.spare.lock().ok().and_then(|mut s| s.pop()).unwrap_or_default();
                 buf.clear();
                 buf.extend_from_slice(bytes);
                 copy_ms += at.elapsed().as_secs_f64() * 1e3;
-                while let Some(&(t, view_x, tick)) = flight.front() {
-                    flight.pop_front();
+                while let Some((t, mut meta)) = flight.pop_front() {
                     if t == tag {
-                        out.push(HostedFrame { rgba: std::mem::take(&mut buf), width: w, height: h, view_x, tick, generation });
+                        meta.rgba = std::mem::take(&mut buf);
+                        out.push(meta);
                         break;
                     }
                 }
@@ -820,6 +839,37 @@ impl Shared {
             })?;
         }
         let gpu_ms = (!out.is_empty()).then(|| st.sink.renderer.gpu_split(&gpu)).flatten();
+        let camera = self.controls.lock().ok().and_then(|c| c.camera);
+        let factor = camera.map_or(1, |c| detail_factor(st.overview.s, c.zoom));
+        if due && st.ready && factor != st.factor {
+            // Retire readbacks before replacing their renderer's command pool.
+            st.ring.drain(&mut st.sink.renderer, |_, _| {})?;
+            st.flight.clear();
+            let mut proj = st.overview;
+            proj.s *= factor; proj.rise *= factor; proj.base *= factor as i32;
+            proj.raster_w = u16::try_from(u32::from(proj.raster_w) * factor)?;
+            proj.raster_h = u16::try_from(u32::from(proj.raster_h) * factor)?;
+            let mut target = proj;
+            if factor > 1 {
+                target.raster_w = (u32::from(st.overview.raster_w) + 4 * proj.s).min(u32::from(proj.raster_w)) as u16;
+                target.raster_h = (u32::from(st.overview.raster_h) + 4 * proj.s).min(u32::from(proj.raster_h)) as u16;
+            }
+            let mut next = st.sink.projected_renderer(&self.cfg, target)?;
+            let ring = match ReadbackRing::new(gpu.clone(), &next, next.raster_image(), RING) {
+                Ok(ring) => ring,
+                Err(e) => { next.destroy(&gpu); return Err(e.into()); }
+            };
+            drop(std::mem::replace(&mut st.ring, ring));
+            st.sink.replace_renderer(next);
+            st.proj = proj; st.factor = factor;
+            st.drawn_version = None; st.highlight_drawn = None;
+            if let Ok(mut map) = self.pick.lock() && let Some(old) = map.as_ref() {
+                let mut new = (**old).clone();
+                new.s = proj.s; new.rise = proj.rise; new.base = proj.base;
+                new.version += 1;
+                *map = Some(Arc::new(new));
+            }
+        }
         if due && st.ready && st.ring.can_submit(&st.sink.renderer) {
             let t = self.clock.lock().map(|mut c| c.now()).unwrap_or(0.0);
             let (view_x, highlight, motion) =
@@ -838,7 +888,16 @@ impl Shared {
             if figures && let Ok(mut f) = self.figures.lock() {
                 *f = Some(st.sink.figure_pick());
             }
-            st.sink.renderer.set_view_x(view_x);
+            let p = st.sink.renderer.params();
+            let (x, y) = camera.map_or((view_x, 0), |c| {
+                let _screen = c.screen;
+                let f = st.factor as f32;
+                let x = (c.center[0] * f - p.raster_w as f32 * 0.5).floor() as i32;
+                let y = (c.center[1] * f - p.raster_h as f32 * 0.5).floor() as i32;
+                (x, y)
+            });
+            st.sink.renderer.set_view_x(x);
+            st.sink.renderer.set_view_y(y, u32::from(st.overview.raster_h) * st.factor);
             let pick = self.pick.lock().ok().and_then(|p| p.clone());
             let want = highlight.zip(pick.as_ref().map(|p| p.version));
             if !figures && want != st.highlight_drawn {
@@ -858,7 +917,13 @@ impl Shared {
                 let tag = st.sink.frames;
                 if st.ring.submit(&mut st.sink.renderer, (), tag)? {
                     st.sink.frames += 1;
-                    st.flight.push_back((tag, st.sink.renderer.view_x(), t.floor() as u64));
+                    st.flight.push_back((tag, HostedFrame {
+                        width: p.raster_w, height: p.raster_h,
+                        view_x: st.sink.renderer.view_x(), view_y: st.sink.renderer.view_y(),
+                        s: st.proj.s, rise: st.proj.rise, base_s: st.overview.s, base_rise: st.overview.rise,
+                        ring_width: u32::from(st.overview.raster_w), full_height: u32::from(st.overview.raster_h),
+                        tick: t.floor() as u64, generation: st.generation, ..Default::default()
+                    }));
                     st.drawn_version = Some(st.sink.renderer.content_version());
                     if let Ok(mut s) = self.stats.lock() {
                         s.record_ms += at.elapsed().as_secs_f64() * 1e3;
@@ -990,7 +1055,7 @@ impl Hosted {
             mailbox: Mailbox::default(),
             spare: Mutex::new(Vec::new()),
             clock: Mutex::new(Clock::still(0)),
-            controls: Mutex::new(Controls { view_x: 0, highlight: None, motion: None, drawn: None }),
+            controls: Mutex::new(Controls { view_x: 0, camera: None, highlight: None, motion: None, drawn: None }),
             pick: Mutex::new(None),
             figures: Mutex::new(None),
             stats: Mutex::new(HostedStats::default()),
@@ -1091,6 +1156,14 @@ impl Hosted {
         }
     }
 
+    /// Camera coordinates are in the original overview raster, independent of detail.
+    pub fn set_camera(&self, zoom: f32, center: [f32; 2], screen: (u32, u32)) {
+        if !zoom.is_finite() || center.iter().any(|x| !x.is_finite()) { return; }
+        if let Ok(mut c) = self.shared.controls.lock() {
+            c.camera = Some(Camera { zoom: zoom.clamp(1.0, 4.0), center, screen });
+        }
+    }
+
     /// Draw animal `id` highlighted, or none.
     pub fn set_highlight(&self, id: Option<u64>) {
         if let Ok(mut c) = self.shared.controls.lock() {
@@ -1136,6 +1209,8 @@ impl Hosted {
     /// `radius`; with stamped animals, [`PickMap::pick`].
     pub fn pick(&self, px: i32, py: i32, radius: f32) -> Option<u64> {
         let map = self.pick_map();
+        let factor = self.shared.sink.lock().ok().and_then(|s| s.as_ref().map(|s| s.factor)).unwrap_or(1) as f32;
+        let (px, py, radius) = ((px as f32 * factor).round() as i32, (py as f32 * factor).round() as i32, radius * factor);
         if let Some(f) = self.figure_pick() {
             let ground = map.as_ref().map_or(f32::MAX, |m| m.terrain_z(px, py));
             if let Some((z, id)) = f.hit(px, py)
@@ -1151,10 +1226,9 @@ impl Hosted {
     /// Where animal `id` is drawn, world raster pixels ([`FigurePick::animal_at`] with the
     /// model pass, [`PickMap::animal_at`] without).
     pub fn animal_at(&self, id: u64) -> Option<(f32, f32)> {
-        if let Some(f) = self.figure_pick() {
-            return f.animal_at(id);
-        }
-        self.pick_map()?.animal_at(id)
+        let factor = self.shared.sink.lock().ok().and_then(|s| s.as_ref().map(|s| s.factor)).unwrap_or(1) as f32;
+        let pos = self.figure_pick().and_then(|f| f.animal_at(id)).or_else(|| self.pick_map()?.animal_at(id))?;
+        Some((pos.0 / factor, pos.1 / factor))
     }
 
     fn figure_pick(&self) -> Option<Arc<FigurePick>> {
@@ -1331,6 +1405,16 @@ impl LoopHook for LiveHook {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detail_preserves_overview_and_scales_both_axes() {
+        assert_eq!(super::detail_factor(13, 4.0), 4);
+        assert_eq!(super::detail_factor(18, 4.0), 2);
+        assert_eq!(super::detail_factor(40, 4.0), 1);
+        assert_eq!(super::detail_factor(80, 1.0), 1);
+        assert_eq!(super::detail_factor(7, 1.9), 1);
+        assert_eq!(super::detail_factor(7, 2.2), 2);
+    }
+
     use super::*;
 
     #[test]

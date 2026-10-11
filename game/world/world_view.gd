@@ -30,10 +30,10 @@ extends Control
 ## - `problem() -> String`: why nothing is drawn yet, when the renderer did not start or
 ##   gave up ("" otherwise), so a thumbnail can say so instead of staying blank.
 ##
-## Panning: mouse drag, arrows/WASD, the gamepad's left stick, eased. `x` turns round the
-## ring without end: the renderer turns its raster by whole pixels and the frame is shifted
-## here by the fraction left over, so the camera glides while the world's pixels stay locked
-## to each other. `y` moves only when the strip is taller than the view.
+## Mouse wheel zooms toward the pointer (1–4×); Home restores the overview. Drag,
+## arrows/WASD and the left stick pan in both axes. The camera lives in baseline raster
+## coordinates: Rust renders integer detail tiers and cropped frames, while Godot smooths
+## the fractional camera movement and zoom without changing the world projection.
 
 signal animal_hovered(id: int)
 signal animal_clicked(id: int)
@@ -42,6 +42,11 @@ signal animal_clicked(id: int)
 ## repository root.
 const DEFAULT_CONFIG := "config/desktop/terrarium.toml"
 const FPS := 60.0
+const SCOPE := preload("res://ui/neon/zoom_scope.gdshader")
+const ZOOM_MIN := 1.0
+const ZOOM_MAX := 4.0
+const ZOOM_WHEEL_STEP := 1.16
+const ZOOM_EASE_S := 0.10
 const PAN_EASE_S := 0.12
 const DRAG_EASE_S := 0.05
 const FOLLOW_EASE_S := 0.35
@@ -53,16 +58,18 @@ const CLICK_SLOP_PX := 5.0
 ## The smallest pick box round an animal, screen pixels.
 const PICK_MIN_PX := 10.0
 
-## The desktop window's present pass (`present.frag`, `WindowFit`), with the ring's turn:
-## each screen pixel the area average of the raster it covers, in linear light (exactly the
-## nearest upscale at a whole scale), the picture centred with black bars, and `x` wrapping
-## round the ring by `shift`.
+## Area-average in linear light for fractional fits; nearest at whole pixel scales.
+## All samples use the same baseline camera transform as picking, follow and captures.
 const SHADER := """
 shader_type canvas_item;
 render_mode blend_disabled;
 uniform vec2 view_size = vec2(1.0);
 uniform vec2 raster_size = vec2(1.0);
-uniform vec2 shift = vec2(0.0);
+uniform vec2 world_size = vec2(1.0);
+uniform vec2 camera_center = vec2(0.5);
+uniform vec2 source_center = vec2(0.5);
+uniform float step_px = 1.0;
+uniform bool wrap_frame = true;
 const int MAX_TAPS = 8;
 vec3 dec(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c)); }
 vec3 enc(vec3 c) {
@@ -71,26 +78,22 @@ vec3 enc(vec3 c) {
 }
 void fragment() {
 	vec2 panel = floor(UV * view_size);
-	float st = max(raster_size.x / view_size.x, raster_size.y / view_size.y);
-	vec2 corner = 0.5 * (view_size - raster_size / st);
-	vec2 centre = st * (panel + 0.5 - corner);
-	vec2 lo = centre - 0.5 * st;
-	vec2 hi = centre + 0.5 * st;
-	if (any(lessThanEqual(hi, vec2(0.0))) || any(greaterThanEqual(lo, raster_size))) {
+	vec2 delta = (panel + 0.5 - view_size * 0.5) * step_px;
+	vec2 world = camera_center + delta;
+	vec2 centre = source_center + delta;
+	vec2 lo = centre - 0.5 * step_px;
+	vec2 hi = centre + 0.5 * step_px;
+	if (abs(delta.x) - 0.5 * step_px >= world_size.x * 0.5 || world.y + 0.5 * step_px <= 0.0 || world.y - 0.5 * step_px >= world_size.y
+		|| hi.y <= 0.0 || lo.y >= raster_size.y || (!wrap_frame && (hi.x <= 0.0 || lo.x >= raster_size.x))) {
 		COLOR = vec4(0.0, 0.0, 0.0, 1.0);
 	} else {
-		// The picture's own edges stay where the fit puts them; inside, x turns round the ring.
-		lo.x = max(lo.x, 0.0);
-		hi.x = min(hi.x, raster_size.x);
-		lo += shift;
-		hi += shift;
-		vec2 span = hi - lo;
-		vec2 over = max(span - float(MAX_TAPS - 1), vec2(0.0));
+		vec2 over = max(hi - lo - float(MAX_TAPS - 1), vec2(0.0));
 		lo += 0.5 * over;
 		hi -= 0.5 * over;
 		lo.y = max(lo.y, 0.0);
 		hi.y = min(hi.y, raster_size.y);
-		int rw = int(raster_size.x);
+		if (!wrap_frame) { lo.x = max(lo.x, 0.0); hi.x = min(hi.x, raster_size.x); }
+		int rw = int(wrap_frame ? world_size.x : raster_size.x);
 		int x0 = int(floor(lo.x));
 		int x1 = int(ceil(hi.x)) - 1;
 		int y0 = int(floor(lo.y));
@@ -134,17 +137,30 @@ var following := -1
 var hovered := -1
 ## The latest frame: its raster, its turn round the ring, its world, its tick.
 var raster_size := Vector2i.ZERO
+## Full overview dimensions, unchanged by detail tiers and camera crops.
+var baseline_size := Vector2i.ZERO
 var frame_view_x := 0
+var frame_view_y := 0
+var frame_factor := 1.0
+var frame_s := 1
+var frame_base_s := 1
+var scope_enabled := true
 var frame_generation := -1
 var frame_tick := -1
 var frames_shown := 0
 ## Milliseconds spent turning frames into the texture (create + upload), cumulative.
 var upload_ms := 0.0
 
-## The pan: `x` raster columns round the ring (unwrapped), `y` raster rows. `_pan` is
-## drawn, `_pan_to` is where it eases to.
-var _pan := Vector2.ZERO
-var _pan_to := Vector2.ZERO
+## Camera centre in baseline raster pixels; x remains unwrapped round the ring.
+var _center := Vector2.ZERO
+var _center_to := Vector2.ZERO
+var _zoom := 1.0
+var _zoom_to := 1.0
+var _zoom_anchor := Vector2.ZERO
+var _zoom_anchor_world := Vector2.ZERO
+var _zoom_anchor_active := false
+var _scope: ColorRect
+var _scope_material: ShaderMaterial
 var _ease_s := PAN_EASE_S
 var _dragging := false
 var _drag_moved := false
@@ -169,6 +185,13 @@ func _ready() -> void:
 	shader.code = SHADER
 	_material.shader = shader
 	material = _material
+	_scope = ColorRect.new()
+	_scope.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scope_material = ShaderMaterial.new()
+	_scope_material.shader = SCOPE
+	_scope.material = _scope_material
+	add_child(_scope)
 
 
 func _exit_tree() -> void:
@@ -202,9 +225,18 @@ func show_view(view: Dictionary) -> void:
 
 func reset_framing() -> void:
 	stop_follow()
-	_pan = Vector2(0.0, _y_range().x)
-	_pan_to = _pan
+	_zoom_anchor_active = false
+	_zoom = ZOOM_MIN
+	_zoom_to = ZOOM_MIN
+	_center = Vector2(baseline_size) * 0.5
+	_center_to = _center
 	_apply_pan()
+
+
+func set_scope_enabled(enabled: bool) -> void:
+	scope_enabled = enabled
+	if _scope_material != null:
+		_scope_material.set_shader_parameter("enabled", enabled)
 
 
 func set_highlight(id: int) -> void:
@@ -244,22 +276,20 @@ func stop_follow() -> void:
 
 ## The latest frame as framed now (its turn round the ring included), fitted into `size`
 ## with black bars, without anything drawn over the view.
-func capture(size: Vector2i) -> Image:
-	var out := Image.create_empty(maxi(size.x, 1), maxi(size.y, 1), false, Image.FORMAT_RGBA8)
+func capture(target_size: Vector2i) -> Image:
+	var out := Image.create_empty(maxi(target_size.x, 1), maxi(target_size.y, 1), false, Image.FORMAT_RGBA8)
 	out.fill(Color.BLACK)
-	if _image == null:
+	if _image == null or size.x <= 0.0 or size.y <= 0.0:
 		return out
-	var w := _image.get_width()
-	var h := _image.get_height()
-	var turned := Image.create_empty(w, h, false, Image.FORMAT_RGBA8)
-	var s := posmod(int(round(_shift().x)), w)
-	turned.blit_rect(_image, Rect2i(s, 0, w - s, h), Vector2i(0, 0))
-	if s > 0:
-		turned.blit_rect(_image, Rect2i(0, 0, s, h), Vector2i(w - s, 0))
-	var k := minf(float(size.x) / w, float(size.y) / h)
-	var fit := Vector2i(maxi(1, int(w * k)), maxi(1, int(h * k)))
-	turned.resize(fit.x, fit.y, Image.INTERPOLATE_LANCZOS)
-	out.blit_rect(turned, Rect2i(Vector2i.ZERO, fit), (size - fit) / 2)
+	var scale := minf(float(target_size.x) / size.x, float(target_size.y) / size.y)
+	var fit := Vector2i(maxi(1, int(size.x * scale)), maxi(1, int(size.y * scale)))
+	var origin := (target_size - fit) / 2
+	for y in fit.y:
+		for x in fit.x:
+			var p := Vector2((x + 0.5) * size.x / fit.x, (y + 0.5) * size.y / fit.y)
+			var source := _screen_to_frame(p)
+			if source.x >= 0.0:
+				out.set_pixel(origin.x + x, origin.y + y, _image.get_pixel(int(source.x), int(source.y)))
 	return out
 
 
@@ -297,8 +327,15 @@ func _process(delta: float) -> void:
 		_take_frame()
 	_input_pan(delta)
 	_follow()
-	var k := 1.0 - exp(-delta / _ease_s)
-	_pan = _pan.lerp(_pan_to, k)
+	_zoom = lerpf(_zoom, _zoom_to, 1.0 - exp(-delta / ZOOM_EASE_S))
+	if absf(_zoom - _zoom_to) < 0.0001:
+		_zoom = _zoom_to
+	if _zoom_anchor_active:
+		_center = _zoom_anchor_world - _zoom_anchor * _step()
+		_center_to = _zoom_anchor_world - _zoom_anchor * _base_step() / _zoom_to
+		_zoom_anchor_active = _zoom != _zoom_to
+	else:
+		_center = _center.lerp(_center_to, 1.0 - exp(-delta / _ease_s))
 	_apply_pan()
 	if _mouse.x >= 0.0 and input_enabled and not _dragging:
 		_hover(_mouse)
@@ -348,9 +385,14 @@ func _take_frame() -> void:
 		_texture.update(img)
 	upload_ms += (Time.get_ticks_usec() - at) / 1000.0
 	_image = img
-	var fresh := int(f["generation"]) != frame_generation or Vector2i(w, h) != raster_size
+	var fresh := int(f["generation"]) != frame_generation or baseline_size == Vector2i.ZERO
 	raster_size = Vector2i(w, h)
+	baseline_size = Vector2i(int(f.get("ring_width", w)), int(f.get("full_height", h)))
+	frame_s = int(f.get("s", 1))
+	frame_base_s = int(f.get("base_s", 1))
+	frame_factor = float(frame_s) / maxf(float(frame_base_s), 1.0)
 	frame_view_x = int(f["view_x"])
+	frame_view_y = int(f.get("view_y", 0))
 	frame_generation = int(f["generation"])
 	frame_tick = int(f["tick"])
 	frames_shown += 1
@@ -372,74 +414,110 @@ func _draw() -> void:
 
 # --- framing -------------------------------------------------------------------------------
 
-## Raster pixels per screen pixel (the fit).
-func _step() -> float:
-	if raster_size.x <= 0 or size.x <= 0.0 or size.y <= 0.0:
+## Baseline raster pixels per screen pixel at the overview and at the drawn zoom.
+func _base_step() -> float:
+	if baseline_size.x <= 0 or size.x <= 0.0 or size.y <= 0.0:
 		return 1.0
-	return maxf(raster_size.x / size.x, raster_size.y / size.y)
+	return maxf(baseline_size.x / size.x, baseline_size.y / size.y)
 
 
-## The range `_pan.y` may take: 0 when the strip fits the view's height.
-func _y_range() -> Vector2:
-	var visible := size.y * _step()
-	var extra := float(raster_size.y) - visible
-	return Vector2(0.0, maxf(extra, 0.0)) if extra > 0.0 else Vector2.ZERO
+func _step() -> float:
+	return _base_step() / _zoom
 
 
-## The shift the shown frame needs: the pan, less the whole columns the frame is already
-## turned, the short way round.
-func _shift() -> Vector2:
-	var rw := float(maxi(raster_size.x, 1))
-	var sx := fposmod(_pan.x - frame_view_x + rw / 2.0, rw) - rw / 2.0
-	var r := _y_range()
-	var sy := _pan.y - (r.x + r.y) / 2.0 if r.y > 0.0 else 0.0
-	return Vector2(sx, sy)
+## Bounds on the camera centre: when the full strip fits vertically it stays centred.
+func _y_range(zoom := -1.0) -> Vector2:
+	var z := _zoom if zoom < 0.0 else zoom
+	var half_visible := size.y * _base_step() / z * 0.5
+	var height := float(baseline_size.y)
+	return Vector2(half_visible, height - half_visible) if half_visible * 2.0 < height else Vector2.ONE * height * 0.5
+
+
+func _wrapped_delta(x: float, width: float) -> float:
+	return fposmod(x + width * 0.5, width) - width * 0.5
+
+
+## The current camera centre inside the latest cropped detail frame, the short way round.
+func _source_center() -> Vector2:
+	var rw := float(maxi(baseline_size.x, 1)) * frame_factor
+	var frame_center := float(frame_view_x) + raster_size.x * 0.5
+	return Vector2(raster_size.x * 0.5 + _wrapped_delta(_center.x * frame_factor - frame_center, rw),
+		_center.y * frame_factor - frame_view_y)
+
+
+func _wrap_frame() -> bool:
+	return raster_size.x >= baseline_size.x * frame_factor
 
 
 func _apply_pan() -> void:
 	var r := _y_range()
-	_pan_to.y = clampf(_pan_to.y, r.x, r.y)
-	_pan.y = clampf(_pan.y, r.x, r.y)
-	if renderer != null and raster_size.x > 0:
-		renderer.set_view_x(posmod(int(floor(_pan.x)), raster_size.x))
+	var target := _y_range(_zoom_to)
+	_center_to.y = clampf(_center_to.y, target.x, target.y)
+	_center.y = clampf(_center.y, r.x, r.y)
+	if renderer != null and baseline_size.x > 0:
+		renderer.set_camera(_zoom, _center, Vector2i(size))
 	if _material != null:
 		_material.set_shader_parameter("view_size", size)
-		_material.set_shader_parameter("shift", _shift())
+		_material.set_shader_parameter("raster_size", Vector2(raster_size))
+		_material.set_shader_parameter("world_size", Vector2(baseline_size) * frame_factor)
+		_material.set_shader_parameter("camera_center", _center * frame_factor)
+		_material.set_shader_parameter("source_center", _source_center())
+		_material.set_shader_parameter("step_px", _step() * frame_factor)
+		_material.set_shader_parameter("wrap_frame", _wrap_frame())
+	if _scope_material != null:
+		_scope_material.set_shader_parameter("view_size", size)
+		_scope_material.set_shader_parameter("zoom", _zoom)
+		_scope_material.set_shader_parameter("enabled", scope_enabled)
 	queue_redraw()
 
 
-## Screen point `p` (this node's pixels) as a world raster pixel, or (-1, -1) off the
-## picture.
+## The baseline projected world under a screen point; off the picture returns (-1, -1).
+func _baseline_at(p: Vector2) -> Vector2:
+	if baseline_size.x <= 0 or not Rect2(Vector2.ZERO, size).has_point(p):
+		return Vector2(-1, -1)
+	var delta := (p - size * 0.5) * _step()
+	var world := _center + delta
+	if absf(delta.x) >= baseline_size.x * 0.5 or world.y < 0.0 or world.y >= baseline_size.y:
+		return Vector2(-1, -1)
+	world.x = fposmod(world.x, float(baseline_size.x))
+	return world
+
+
+## Shared source transform for snapshots and the presentation shader.
+func _screen_to_frame(p: Vector2) -> Vector2:
+	if _baseline_at(p).x < 0.0:
+		return Vector2(-1, -1)
+	var source := _source_center() + (p - size * 0.5) * _step() * frame_factor
+	if _wrap_frame():
+		source.x = fposmod(source.x, float(maxi(baseline_size.x, 1)) * frame_factor)
+	if source.x < 0.0 or source.x >= raster_size.x or source.y < 0.0 or source.y >= raster_size.y:
+		return Vector2(-1, -1)
+	return source
+
+
+## Baseline world raster pixel for picking; (-1, -1) outside the shown picture.
 func screen_to_raster(p: Vector2) -> Vector2i:
-	if raster_size.x <= 0:
-		return Vector2i(-1, -1)
-	var st := _step()
-	var corner := 0.5 * (size - Vector2(raster_size) / st)
-	var c := st * (p - corner)
-	if c.x < 0.0 or c.y < 0.0 or c.x >= raster_size.x or c.y >= raster_size.y:
-		return Vector2i(-1, -1)
-	c += _shift()
-	return Vector2i(posmod(int(floor(c.x)) + frame_view_x, raster_size.x), int(floor(c.y)))
+	var at := _baseline_at(p)
+	return Vector2i(-1, -1) if at.x < 0.0 else Vector2i(int(floor(at.x)), int(floor(at.y)))
 
 
-## A world raster pixel as a screen point (this node's pixels), the inverse of
-## `screen_to_raster` at the pixel's centre.
+## A baseline world raster pixel's centre as a screen point, the inverse of picking.
 func raster_to_screen(r: Vector2) -> Vector2:
-	var st := _step()
-	var corner := 0.5 * (size - Vector2(raster_size) / st)
-	var rw := float(maxi(raster_size.x, 1))
-	var c := Vector2(fposmod(r.x + 0.5 - frame_view_x, rw), r.y + 0.5) - _shift()
-	c.x = fposmod(c.x, rw)
-	return c / st + corner
+	var delta := Vector2(_wrapped_delta(r.x + 0.5 - _center.x, float(maxi(baseline_size.x, 1))), r.y + 0.5 - _center.y)
+	return size * 0.5 + delta / _step()
 
 
 # --- input ---------------------------------------------------------------------------------
 
 func _gui_input(event: InputEvent) -> void:
-	if not input_enabled:
+	if not _input_allowed():
 		_dragging = false
 		return
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var direction := 1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0
+		zoom_at(_zoom_to * pow(ZOOM_WHEEL_STEP, direction * maxf(event.factor, 1.0)), event.position)
+		accept_event()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			_dragging = true
 			_drag_moved = false
@@ -471,12 +549,13 @@ func _notification(what: int) -> void:
 
 func _drag_by(px: Vector2) -> void:
 	stop_follow()
-	_pan_to -= px * _step()
+	_zoom_anchor_active = false
+	_center_to -= px * _step()
 	_ease_s = DRAG_EASE_S
 
 
 func _input_pan(delta: float) -> void:
-	if not input_enabled or raster_size.x <= 0 or not is_visible_in_tree():
+	if not _input_allowed() or baseline_size.x <= 0:
 		return
 	var dir := Vector2.ZERO
 	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
@@ -495,7 +574,8 @@ func _input_pan(delta: float) -> void:
 			_ease_s = PAN_EASE_S
 		return
 	stop_follow()
-	_pan_to += dir.limit_length(1.0) * PAN_SPEED * float(raster_size.x) * delta
+	_zoom_anchor_active = false
+	_center_to += dir.limit_length(1.0) * PAN_SPEED * size.x * _step() * delta
 	_ease_s = PAN_EASE_S
 
 
@@ -503,22 +583,50 @@ func _input_pan(delta: float) -> void:
 ## scene's pan.
 func pan_by(views: Vector2) -> void:
 	stop_follow()
-	_pan_to += Vector2(views.x * raster_size.x, views.y * size.y * _step())
+	_zoom_anchor_active = false
+	_center_to += Vector2(views.x * size.x, views.y * size.y) * _step()
 	_ease_s = FOLLOW_EASE_S
 
 
 func _follow() -> void:
-	if following < 0 or renderer == null or raster_size.x <= 0:
+	if following < 0 or renderer == null or baseline_size.x <= 0:
 		return
 	var at: Vector2 = renderer.animal_at(following)
 	if at.x < 0.0:
 		stop_follow()
 		return
-	var rw := float(raster_size.x)
-	_pan_to.x = _pan.x + wrapf(at.x - (rw / 2.0 + _pan.x), -rw / 2.0, rw / 2.0)
-	var r := _y_range()
-	_pan_to.y = at.y - size.y * _step() / 2.0 if r.y > 0.0 else 0.0
+	_zoom_anchor_active = false
+	_center_to.x = _center.x + _wrapped_delta(at.x - _center.x, float(baseline_size.x))
+	_center_to.y = at.y
 	_ease_s = FOLLOW_EASE_S
+
+
+func _input_allowed() -> bool:
+	if not input_enabled or not is_visible_in_tree():
+		return false
+	var focus := get_viewport().gui_get_focus_owner()
+	return not (focus is LineEdit or focus is TextEdit)
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	if _input_allowed() and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_HOME:
+		reset_framing()
+		get_viewport().set_input_as_handled()
+
+
+## Set an eased zoom with the world point under the cursor held still, except at y bounds.
+func zoom_at(value: float, p: Vector2) -> void:
+	if baseline_size.x <= 0:
+		return
+	var next := clampf(value, ZOOM_MIN, ZOOM_MAX)
+	if is_equal_approx(next, _zoom_to):
+		return
+	stop_follow()
+	_zoom_anchor = p - size * 0.5
+	_zoom_anchor_world = _center + _zoom_anchor * _step()
+	_zoom_to = next
+	_center_to = _zoom_anchor_world - _zoom_anchor * _base_step() / _zoom_to
+	_zoom_anchor_active = true
 
 
 # --- picking -------------------------------------------------------------------------------

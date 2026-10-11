@@ -48,9 +48,9 @@ theme_type_variation = &"TitleLabel"
 theme_override_constants/shadow_offset_x = 4
 theme_override_constants/shadow_offset_y = 4
 theme_override_font_sizes/font_size = 52
-text = " Animals "
+text = " View "
 script = ExtResource("nt_title")
-title = "Animals"
+title = "View"
 
 [node name="HeadGap" type="Control" parent="Margin/Stack"]
 custom_minimum_size = Vector2(0, 34)
@@ -130,6 +130,7 @@ unique_name_in_owner = true
 layout_mode = 2
 size_flags_vertical = 4
 focus_neighbor_top = NodePath("../../../MovementField/Row/Movement")
+focus_neighbor_bottom = NodePath("../../../ScopeField/Row/ZoomScope")
 toggle_mode = true
 button_pressed = true
 script = ExtResource("6_check")
@@ -151,3 +152,46 @@ theme_type_variation = &"SmallTextLabel"
 text = "Smooth movement only. On, they glide between pixels; off, they land on whole pixels."
 autowrap_mode = 3
 
+
+[node name="ScopeField" type="VBoxContainer" parent="Margin/Stack/Form"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 8
+
+[node name="Row" type="HBoxContainer" parent="Margin/Stack/Form/ScopeField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/separation = 24
+
+[node name="Label" type="Label" parent="Margin/Stack/Form/ScopeField/Row"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+theme_type_variation = &"FactLabel"
+text = "Zoom scope"
+vertical_alignment = 1
+uppercase = true
+
+[node name="ZoomScope" type="BaseButton" parent="Margin/Stack/Form/ScopeField/Row"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 4
+focus_neighbor_top = NodePath("../../../SubpixelField/Row/Subpixel")
+toggle_mode = true
+button_pressed = true
+script = ExtResource("6_check")
+
+[node name="Note" type="MarginContainer" parent="Margin/Stack/Form/ScopeField"]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 224
+theme_override_constants/margin_top = 0
+theme_override_constants/margin_right = 0
+theme_override_constants/margin_bottom = 0
+
+[node name="ScopeNote" type="Label" parent="Margin/Stack/Form/ScopeField/Note"]
+custom_minimum_size = Vector2(520, 0)
+layout_mode = 2
+size_flags_horizontal = 0
+theme_type_variation = &"SmallTextLabel"
+text = "Soft violet edges and notched pink corners fade in as you zoom. Wheel to zoom, drag or WASD to pan, Home to reset."
+autowrap_mode = 3

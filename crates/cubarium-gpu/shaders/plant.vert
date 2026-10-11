@@ -71,7 +71,7 @@ void main() {
     if (face == 0 && pc.t.w > 0.5 && (plantDying(c) || (c.w & 0xC0000000u) == 0xC0000000u)) {
         span = vec2(0.5 - pc.t.w, 0.5 + pc.t.w);
     }
-    float rw = pc.layer.z;
+    float rw = float(pc.geom.w) * S;
     float rel = (ctr.x - h) * S - float(pc.k.z);
     float left = rel - rw * floor(rel / rw);
     if (copy) {
