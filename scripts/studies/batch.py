@@ -142,7 +142,8 @@ def execute(out, jobs, parallel, groups, threads):
                 os.sched_setaffinity(0, cpus)
 
             try:
-                with (root / "census.csv").open("w") as stdout, (root / "err.log").open("w") as stderr:
+                mode = "a" if job.get("append_census") else "w"
+                with (root / "census.csv").open(mode) as stdout, (root / "err.log").open(mode) as stderr:
                     process = subprocess.Popen(job["command"], stdout=stdout, stderr=stderr,
                                                stdin=subprocess.DEVNULL, preexec_fn=confine)
                 active[process.pid] = (process, job, cpus)
@@ -216,8 +217,14 @@ def resume(out, binary, wrapper, parallel, groups, threads):
         job.setdefault("original_command", command)
         prefix = [sys.executable, str(wrapper), "--slot", str(job["slot"]), "--"]
         if any((run / "ckpt").glob("m*/minute")):
-            job["command"] = prefix + ["chrt", "-i", "0", "nice", "-n", "19", str(binary),
-                                        f"resume={run}", f"threads={threads}"]
+            # labd ships its tools together; a standalone checkout has labkit beside studies.
+            tools = Path(__file__).resolve().parents[1]
+            adapter = tools / "census_resume.py"
+            if not adapter.is_file():
+                adapter = tools / "lab/labkit/census_resume.py"
+            job["command"] = prefix + ["chrt", "-i", "0", "nice", "-n", "19", sys.executable,
+                                        str(adapter), str(binary), str(root), str(threads)]
+            job["append_census"] = True
         else:
             # Only task-owned incomplete outputs with no committed checkpoint.
             if root.exists():
@@ -227,6 +234,7 @@ def resume(out, binary, wrapper, parallel, groups, threads):
             tail[tail.index("19") + 1] = str(binary)
             tail = [f"threads={threads}" if a.startswith("threads=") else a for a in tail]
             job["command"] = prefix + tail
+            job["append_census"] = False
         job["state"] = "queued"
     manifest.update(runs=jobs, l3_groups=groups, max_parallel=parallel)
     atomic(out / "batch.json", json.dumps(manifest, indent=2) + "\n")

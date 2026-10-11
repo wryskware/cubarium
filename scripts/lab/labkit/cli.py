@@ -12,6 +12,7 @@ import tomllib
 
 from .core import Context, SpecError, load_kinds
 from .top import cmd_top
+from .ec2 import fill_label
 from .hosts import Inventory
 from .store import TERMINAL, Paths, Store, new_id, read_events, spool
 from .stops import rule_labels, validate_rules
@@ -101,8 +102,13 @@ def cmd_status(args, paths):
         details = json.loads(request["request"])
         line += (f"\n  approval needed {request['id']}: {details.get('eligible_tasks')} tasks, local ETA "
                  f"{fmt_h(details.get('local_eta_h'))}, {details.get('instance_type')} ETA {fmt_h(details.get('ec2_eta_h'))}"
-                 f" ~${details.get('est_usd')}  ->  lab approve ec2 {request['id']} --max-hours H --max-usd D")
+                 f" ~${details.get('est_usd')}  {fill_label(details)}"
+                 f"  ->  lab approve ec2 {request['id']} --max-hours H --max-usd D")
     print(line)
+    tail = store.kv_get("ec2-tail", {})
+    if tail:
+        print(f"  EC2 tail: {tail['moved']} tasks moved home; ~{tail['est_h_saved']:.2f} task h saved, "
+              f"~${tail['usd_saved']:.2f} instance cost saved")
 
 
 def print_hosts(store, paths, brief=False):

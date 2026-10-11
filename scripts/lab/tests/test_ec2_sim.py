@@ -1,6 +1,7 @@
 """Graviton simulation jobs: mocked AWS, cargo and census; localhost transport only."""
 
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -123,17 +124,34 @@ cp "$source" "$CARGO_TARGET_DIR/release/examples/voxel_census"
         self.assertLessEqual(max(costs), min(costs) * 1.10)
         self.assertEqual(event["instance_type"], "size32")
 
-    def test_memory_pressure_scales_thread_capacity(self):
+    def test_memory_pressure_limits_schedule_concurrency(self):
         cfg = self.size_inventory((16,))
         cfg["types"] = ["tight", "roomy"]
         cfg["instance_types"] = {
             name: dict(arch="aarch64", cpus=16, mem_gb=memory, spot_usd_h=0.5)
             for name, memory in [("tight", 8), ("roomy", 32)]}
-        _, event = self.size_request(mem_gb=3)
+        count, threads, wall_h, mem_gb = 8, 2, 2, 3
+        daemon, event = self.size_request(count, threads, wall_h, mem_gb)
         options = {o["type"]: o for o in event["options"]}
         self.assertEqual(event["instance_type"], "roomy")
-        self.assertAlmostEqual(options["tight"]["eta_h"], 6 + cfg["setup_h"])
-        self.assertAlmostEqual(options["roomy"]["eta_h"], 2 + cfg["setup_h"])
+        for name, host in zip(cfg["types"], daemon.ec2.potential_hosts()):
+            parallel = min(host.usable // threads, int(host.max_mem_gb // mem_gb))
+            option = options[name]
+            self.assertAlmostEqual(option["eta_h"], math.ceil(count / parallel) * wall_h / host.speed + cfg["setup_h"])
+            self.assertTrue(all(s["fraction"] <= parallel * threads / host.usable for s in option["fill_profile"]))
+
+    def test_each_size_and_chosen_approval_include_fill_and_idle_cost(self):
+        self.size_inventory()
+        daemon, event = self.size_request()
+        choice = next(o for o in event["options"] if o["type"] == event["instance_type"])
+        for key in ("fill_profile", "fill_mean", "idle_usd"):
+            self.assertEqual(event[key], choice[key])
+        for option, host in zip(event["options"], daemon.ec2.potential_hosts()):
+            busy = sum(s["fraction"] * s["hours"] * host.usable for s in option["fill_profile"])
+            tasks = daemon.ec2.eligible()
+            self.assertAlmostEqual(busy, sum(t.threads * t.est_h / host.speed for t in tasks))
+            self.assertLessEqual(option["fill_mean"], 1)
+            self.assertAlmostEqual(option["idle_usd"], option["eta_h"] * host.price_usd_h * (1 - option["fill_mean"]))
 
     def test_fallback_launch_records_actual_type_capacity_and_cost(self):
         cfg = self.size_inventory()
