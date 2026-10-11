@@ -9,8 +9,9 @@
 //!
 //! - `--lib DIR`: a baked library directory holding `manifest.json` (default
 //!   `assets/voxel-models/125`); a scratch bake's `runs/.../125` works the same.
-//! - `NAME`: a plant species (`vaulttree`), a founder (`loftstrider`, `chorister`) or a
+//! - `NAME`: a plant species (`vaulttree`), a founder (`loftstrider`, `veilhound`) or a
 //!   specimen (`lanternjaw-larva`), looked up in that order. Several names are a batch.
+//!   The Veilhound's code name `chorister` is read too, but its file is `veilhound.glb`.
 //! - `--step N`: the plant's growth step or the animal's size bin, by index (default the
 //!   last: the tallest step, the adult bin).
 //! - `--variant N|all`: the plant variant (default 0). `all` writes one file per variant.
@@ -91,11 +92,16 @@ fn main() -> Result<()> {
     ensure!(!names.is_empty(), "usage: voxel_export [--lib DIR] [--out DIR] [options] NAME...");
     std::fs::create_dir_all(&out_dir).with_context(|| format!("{}", out_dir.display()))?;
     let opts = Paint { ripe };
-    for name in &names {
+    for shown in &names {
+        // The Veilhound keeps its code name `chorister` in the library; files say Veilhound.
+        let (name, shown) = match shown.as_str() {
+            "veilhound" | "chorister" => ("chorister", "veilhound"),
+            n => (n, n),
+        };
         for (file_tag, cells) in resolve(&lib, name, step, variant, state, opts)? {
             let mesh = build_mesh(&cells, voxel_m as f32);
-            let glb = write_glb(&mesh, &format!("{name}{file_tag}{suffix}"), unlit, voxel_m)?;
-            let path = out_dir.join(format!("{name}{file_tag}{suffix}.glb"));
+            let glb = write_glb(&mesh, &format!("{shown}{file_tag}{suffix}"), unlit, voxel_m)?;
+            let path = out_dir.join(format!("{shown}{file_tag}{suffix}.glb"));
             std::fs::write(&path, &glb).with_context(|| format!("{}", path.display()))?;
             println!(
                 "{}: {} cells, {} vertices, {} triangles, {} bytes",

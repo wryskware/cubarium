@@ -112,7 +112,7 @@ both: legs fold on leg bones, and cut cells sink under the ground line on tuck b
 Port round 1's `asleep` track to each rigged species whose class-path sleep settle is more
 than 0 rows. Find each species' settle rows the way round 1 did, from `sleep::classify` per
 bin. Expected from round 1's survey:
-- **Veilhound** (`chorister`) and **lanternjaw:** port both.
+- **Veilhound** and **lanternjaw:** port both.
 - **Seedporter:** port its ground pose (`seedporter-ground`). Sleep while perched only if the
   same pattern fits; otherwise say why.
 - **Bellwing:** port it only if it settles when grounded.
@@ -171,7 +171,7 @@ must leave its files byte-identical, and you commit only the files of the specie
 
 ### The poses
 
-- **Veilhound** (`chorister`; a wolf-like hunter). Today it only sinks a few rows. Two
+- **Veilhound** (a wolf-like hunter). Today it only sinks a few rows. Two
   candidates, both played by its `asleep` track:
   - **A, lying down:** the body comes down to the ground, the legs fold under it, the head
     drops to rest on the forepaws, and the tail curls along its side.
@@ -219,7 +219,7 @@ For each species: two grown animals falling asleep, sleeping and waking, today |
 real time, lit, side-on and three-quarter, at px 6 and 12. Use the state scripting in
 `voxel_feed_capture`.
 - Write to `/home/wrysk/wryskware/cubarium/art/gen/runs/sleep-poses-2026-10-11/<species>-sleep-px{6,12}.mp4`.
-  The Veilhound gets `chorister-sleep-A-…` and `chorister-sleep-B-…`.
+  The Veilhound gets `veilhound-sleep-A-…` and `veilhound-sleep-B-…`.
 - Make one still sheet of every end pose at px 12 (`end-poses.png`), so they can be compared
   at a glance.
 
@@ -314,3 +314,115 @@ lit, real time, today | candidate, side-on and three-quarter, at px 6 and 12.
 - Tests.
 - Commits.
 - Anything that doesn't read at px 6.
+
+## Round 4 result
+
+Built on branch `ls-idle` (23dba8ca). Videos are in `art/gen/runs/ls-idle-2026-10-11/`.
+- **The live probe:** in two 60-minute worlds, loftstriders idle 75–82 % of all ticks, which is
+  every awake moment they aren't walking. Bouts run about 4–40 minutes.
+- **Candidate C** changes some cropping frames on main, so it can't merge as built.
+
+Wrysk (2026-10-11): "C looks more like feeding. maybe if it like scratched an itch and then
+cleaned its frond in its mouth after, and probably only ever one frond at a time. B is good.
+A is too much, i dont think we keep it. combo b+c. however, both look awkward because the
+rest of the body isnt included in the idle animation, so it feels unnatural. and dont play
+24s animations on repeat.. idles should be like, randomized, like how in the sims or in WoW
+your character has various idle animations it cycles through on random intervals."
+
+## Round 5: random idle actions, the whole body moving (renderer-worker, opus-high)
+
+Continue on worktree `.claude/worktrees/ls-idle`, branch `ls-idle`. Read round 4's commit
+23dba8ca first, and merge main in. Don't merge to main.
+
+### 1. The engine: idle actions on random intervals
+
+- **No long loop.** An idling animal holds a still **base idle** (today's class-path breath;
+  no new motion). Now and then it plays one **idle action**: a short one-shot clip that
+  eases in, plays once and eases back out to the base.
+- **Each species has a set of actions.** The scheduler picks the next action and the gap
+  before it at random, Sims- or WoW-style. Never two at once, and never the same action
+  twice in a row when there is more than one.
+- **Stateless and deterministic.** The schedule is a pure hash of the animal's id and the
+  time, as `idle.rs`'s head moves are (`move_near`, `moves_between`). Two packs drawing the
+  same frame agree, and nothing goes into the save. Generalize that scheduler; don't build
+  a second one beside it.
+- **Starting and stopping.**
+  - An action starts only once the idle weight is full.
+  - If the animal leaves idle mid-action (it walks, crops, falls asleep or hunkers), the
+    action eases out with the idle weight.
+  - Nothing pops.
+- **Knobs** (`every-number-a-knob`): the gap range and each action's relative weight. The
+  numbers are yours to start with, and Wrysk tunes them from the video. Tests check the
+  mechanism, never these numbers.
+- **The `.rig` format** has to carry several idle clips per species. Extend it as cleanly as
+  you can, and say how.
+- **The frondgrazer.** Its idle is a 21 s loop of three neck dips (round 1). Under Wrysk's
+  rule it becomes one action, a single dip, scheduled like the others. That is closer to
+  `idle.rs`'s original random 4–10 s gaps, and each dip looks as it does today. Say what
+  changed.
+
+### 2. The loftstrider's two actions
+
+The whole body takes part in both. The feet stay planted unless a foot is the thing that
+moves. Use the rig's leg IK from the feed rounds, as the low-bite crouch does, so the body
+can shift, lean and turn over planted feet.
+
+- **Look about (B, kept):** today's B (head and neck lift and turn to a side, hold, come
+  back), with the body in it.
+  - The body shifts its weight toward the side it looks to, and leans and turns a little
+    into the look.
+  - It looks to one side only per action, and the side is picked at random.
+  - Hold, then settle back.
+- **Scratch and clean (replaces C):** **one frond only**, picked at random.
+  1. The frond reaches to scratch an itch on the body (a flank, a shoulder or the back), and
+     the body leans or twists into it.
+  2. The frond comes back to the mouth and is cleaned there: it curls in, and the head works
+     on it.
+  3. Everything settles.
+  It must not read as feeding. The other fronds stay as they are.
+- **Fronds drifting (A) is dropped.**
+- Each action takes a few seconds, not tens.
+
+### Rules
+
+- Every other state draws exactly as on main: walking, cropping at all three aims, the asleep
+  rest, and the frondgrazer's hunker and sleep. Round 4's C broke this, and this round fixes
+  it.
+  - Check with the round-4 evidence script's `CMP` lines: 0 differing non-idle frames at px 6
+    and 12, side-on and three-quarter.
+  - Run the feed checks too.
+- **Unchanged parts:**
+  - The awake model gains no visible cell; nested hidden cells are fine.
+  - No new colours.
+  - The calf plays the same actions at its own size.
+- Read `design/handoffs/worker-rules-2026-10-07.md`.
+  - **Windows:** none; Blender only with `-b`.
+  - **Time:** no tool call over 5 minutes. A longer job runs as a detached chain to a DONE
+    marker, and you hand back.
+  - **Commits:** explicit paths only.
+  - **Unsafe:** only the `ash` FFI.
+  - **Tests:** mechanism tests only, never tuned numbers.
+  - **Names:** say "Veilhound", never the old code name, in anything you write or name.
+
+### Evidence
+
+Write everything to `/home/wrysk/wryskware/cubarium/art/gen/runs/ls-idle-r5-2026-10-11/`:
+- `loftstrider-idle-px{6,12}.mp4`: two grown loftstriders and the calf idling for about 2
+  minutes at real time, today | new, side-on above three-quarter. It should show several
+  actions at random times, different for each animal.
+- `loftstrider-look-px12.mp4` and `loftstrider-scratch-px12.mp4`: one action each, close
+  enough to judge the body's part in it.
+- `frondgrazer-idle-px12.mp4`: today's loop | the random dips.
+- `loftstrider-handover-px12.mp4`: idle → crop → idle → walk → idle → sleep → wake, with an
+  action interrupted part-way.
+
+### Return (40 lines or fewer)
+
+- The scheduler: where it lives, how it's hashed, the knobs.
+- The `.rig` format change.
+- Per action: what moves, including the body, and the bones.
+- The frondgrazer change.
+- The `CMP` and feed checks, raw.
+- MP4 paths.
+- Tests.
+- Commits.
