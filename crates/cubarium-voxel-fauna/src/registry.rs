@@ -146,7 +146,9 @@ fn species_rows() -> Vec<Row> {
             .search(60.0, 3600.0).log().grade("C").prov("derived"),
         r("reproduction.surplus_share", "fraction of the hold", Range::fraction(), "share of the hold spent in surplus before breeding")
             .prov("decision"),
-        r("reproduction.gestation_s", "s", nonneg, "a gestation's length").search(60.0, 6000.0).log().grade("D"),
+        r("reproduction.gestation_s", "s", nonneg, "a gestation's length").search(60.0, 36000.0).log().grade("D"),
+        r("reproduction.young_per_birth", "young", nonneg, "young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins)")
+            .evolve().grade("B").prov("decision"),
         r("reproduction.gestation_loss_fraction", "fraction", Range::fraction(), "organic respired when a gestation fails")
             .search(0.0, 1.0).grade("C"),
         r("reproduction.birth_interval_s", "s", nonneg, "refractory after a birth or a laying")
