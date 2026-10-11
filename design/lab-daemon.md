@@ -9,8 +9,8 @@ decision_refs: []
 Tooling record for `scripts/lab/` (stdlib Python 3.11+). The CLI is `scripts/lab/lab`; the
 daemon is `scripts/lab/labd` (the same as `lab daemon`), run by the user unit that
 `lab install` writes. Host inventory: `config/lab/hosts.toml`. Tests: `scripts/lab/test_lab.py`
-and `scripts/lab/tests/test_remote.py` (localhost remote roots, no eidolon or AWS access).
-Run with `timeout 270 env PYTHONPATH=scripts/lab/tests:scripts/lab python3 -m unittest test_lab test_remote`.
+and `scripts/lab/tests/` (localhost remote roots, no eidolon or AWS access).
+Run with `cd scripts/lab && timeout 270 python3 -m pytest -q tests test_lab.py`.
 
 Why (Wrysk, 2026-10-10): multi-hour runs were lost to coordination mistakes. An A/B arm ran
 on the wrong config, a shared `target/` mixed binaries, a build raced a commit in the main
@@ -220,12 +220,22 @@ end to end with no core edit.
   `ab.preflight`: the resolved `expand=`/`params=` diff, `expect`, and the identical-arm
   refusal. Config includes/path inputs are materialized from the same arm's pinned commit,
   preserving their relative layout. The early stage is one L3 task per arm and seed,
-  eligible for desktop or eidolon. Remotes receive the cached binary (or supplied binary),
+  eligible for desktop or eidolon by default. Naming `ec2` selects its configured native
+  architecture for the whole job, including every seed, arm and continuation; mixed
+  host lists keep that architecture rather than comparing arms on different platforms.
+  Local x86 binaries still run config expansion/diff in preflight. Each ARM arm binary
+  is built natively from its `source:<commit>` archive and cached per commit/arch;
+  simulations wait for both builds. A supplied arm binary is used for local preflight,
+  while ARM simulations build from that arm's pinned source commit.
+  Remotes receive the cached binary (or supplied binary),
   that arm's config bundle, and only its own load checkpoint. `ab.early_read` is the
   identical-results tripwire. Continuations load only their own checkpoints, after
   `ab.unchanged`. `ab.py` stays a working CLI.
 - **batch**: `scripts/studies/batch.py` as one L3 task, charged `parallel × threads`,
-  on desktop or eidolon. Tools, binaries, config dependencies, saved starts and their
+  on desktop or eidolon by default, or the configured EC2 architecture when `hosts`
+  names `ec2`. EC2 batches use `binary = {tree, commit}` for the native cached build;
+  a bare `bin` lacks a source commit and is refused for another architecture.
+  Tools, binaries, config dependencies, saved starts and their
   founding census, required rosters, policies and genomes are staged through the same
   transport. A cached binary's config comes from its pinned tree. Its
   run-study slots wrap inside the CPU set labd gives it. It keeps policies, starts and
@@ -353,7 +363,12 @@ sleep loop costs nothing.
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
-   `max(longest task, thread-hours / capacity)` plus `setup_h`. The cost is that estimate
+   `max(longest simulation task, simulation thread-hours / capacity)` plus the estimated
+   time of all uncached native builds, then `setup_h`. Required builds count once per
+   binary key, even before their provider tasks are planned; cached binaries add no build
+   time. Distinct builds are estimated serially, conservatively. A simulation job's
+   `est_h` supplies its task wall estimate; build recipes default to 0.25 h per commit.
+   The cost is that estimate
    × the assumed spot price in `hosts.toml`. One request opens with
    `lab approve ec2 <id> --max-hours H --max-usd D`, and labd never calls `up` without
    it. The request is withdrawn if the eligible tasks go away.
@@ -362,9 +377,14 @@ sleep loop costs nothing.
 3. **launching → up.** Once `status` shows the instance running with an IP and the host
    is bootstrapped, the instance becomes the schedulable host `ec2` over ssh (key
    `~/.ssh/cubarium-aws.pem`, `python3.11`, setsid launcher).
+   Its L3 groups are probed on that host before scheduling simulations, again when
+   restoring the daemon connection, and periodically while up.
 4. **While up:**
    - When elapsed hours reach H, or hours × price reach D, labd emits `ec2-limit` and runs
      `down`. The tasks there become lost or requeued.
+   - Native builds use the existing source-archive recipe, Cargo thread budget and host
+     `max_cpu_fraction`. Completed binaries and simulation outputs are fetched into the
+     artifact cache and job directory through the same transport as eidolon.
    - When the queue drains (nothing eligible pending, nothing running there), it runs
      `down`.
    - On spot loss (`status` no longer lists the instance), it emits `host-down`, requeues
@@ -379,8 +399,8 @@ sleep loop costs nothing.
    not launch (`ec2-orphan`) and never kills them.
 
 v1 is tested only against a mocked `aws-graviton.sh` and a local stand-in for the host. No
-instance was launched. The first real launch should be watched end to end: build, task,
-fetch, down.
+instance was launched. The first real launch is still unwatched until someone runs it.
+Watch it end to end: bootstrap, native build, local preflight, simulation, fetch, down.
 
 ## Later kinds
 

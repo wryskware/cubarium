@@ -19,6 +19,7 @@ import shlex
 import shutil
 
 from ..core import Kind, SpecError, Task
+from .build import simulation_arch
 from .staging import file_inputs, pinned_config
 
 OWNED = ("--detach", "--bin", "--resume", "--max-parallel")
@@ -60,12 +61,15 @@ class Batch(Kind):
 
     def plan(self, job, ctx):
         spec = job.spec
+        job.state["arch"] = arch = simulation_arch(spec, ctx)
         inputs = []
         if spec.get("bin"):
+            if arch != ctx.arch:
+                raise SpecError("batch on EC2 needs binary = {tree, commit}; bin has no source commit")
             binary = spec["bin"]
         else:
             key = ctx.binary(spec["binary"]["tree"], spec["binary"]["commit"], spec["binary"].get("name", "voxel_census"),
-                             dirty=spec["binary"].get("dirty", False))
+                             arch=arch, dirty=spec["binary"].get("dirty", False))
             binary, inputs = "{input:" + key + "}", [key]
         script = str(ctx.repo / "scripts/studies/batch.py")
         output = job.out / "batch-task"
@@ -165,7 +169,7 @@ class Batch(Kind):
         argv = resume if spec.get("resume") else ["{python}", script, out, "--bin", binary,
                                                    "--max-parallel", str(parallel), *args]
         return [Task(name="batch", argv=argv, threads=parallel * threads, mem_gb=spec.get("mem_gb", 3 * parallel),
-                     l3=True, arch=ctx.arch, hosts=spec.get("hosts"), inputs=inputs, files=files,
+                     l3=True, arch=arch, hosts=spec.get("hosts"), inputs=inputs, files=files,
                      outputs=str(output), retries=1, resume_argv=resume,
                      liveness=dict(paths=["batch/*/s*/census.csv", "batch/STATE.tsv"],
                                    stall_min=spec.get("stall_min", 30)),
