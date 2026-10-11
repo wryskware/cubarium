@@ -21,6 +21,30 @@ func _init(root_dir: String) -> void:
 	root = root_dir.rstrip("/")
 	staging = root + ".staging"
 	DirAccess.make_dir_recursive_absolute(root)
+	recover()
+
+
+## Put back any slot a crash left half replaced. A replacement (here, or the extension's
+## autosave in world_save.rs) moves the slot to `<root>.staging/.previous-<name>` and then
+## moves the new save in; a crash between the two leaves only the previous save, which is
+## moved back when its slot is missing. Returns the names restored.
+func recover() -> Array:
+	var restored := []
+	var d := DirAccess.open(staging)
+	if d == null:
+		return restored
+	d.include_hidden = true
+	for dir in d.get_directories():
+		if not dir.begins_with(".previous-"):
+			continue
+		var slot := dir.trim_prefix(".previous-")
+		if name_problem(slot) != "" or exists(slot):
+			continue
+		if DirAccess.rename_absolute(staging.path_join(dir), path_of(slot)) == OK:
+			restored.append(slot)
+		else:
+			push_warning("Could not restore the previous save of \"%s\" from %s." % [slot, staging.path_join(dir)])
+	return restored
 
 
 ## The slots, newest first, as the session's `saves` query lists them (read without
@@ -43,11 +67,12 @@ func exists(slot: String) -> bool:
 	return DirAccess.dir_exists_absolute(path_of(slot))
 
 
-## Why `slot` can't be a slot name, or "".
+## Why `slot` can't be a slot name, or "". An autosave's own suffix doesn't count toward
+## the length: the limit is on what the player types.
 func name_problem(slot: String) -> String:
 	if slot.strip_edges() != slot or slot.is_empty():
 		return "A name can't be empty or start or end with a space."
-	if slot.length() > MAX_NAME:
+	if slot.trim_suffix(AUTOSAVE_SUFFIX).length() > MAX_NAME:
 		return "A name is at most %d characters." % MAX_NAME
 	if slot.begins_with(".") or not slot.is_valid_filename():
 		return "A name can't start with a dot or hold any of  / \\ : * ? \" < > |"
