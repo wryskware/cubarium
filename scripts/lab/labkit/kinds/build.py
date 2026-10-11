@@ -12,7 +12,12 @@ trees/ (never the live checkout), seeding target/<profile> by reflink. Other kin
 submit builds themselves: they name the key (ctx.binary) and the core plans this kind.
 """
 
+import functools
 import json
+import os
+import re
+import shutil
+import subprocess
 
 from ..core import Kind, SpecError, Task, binary_key
 
@@ -23,6 +28,24 @@ RECIPES = {
 }
 SOURCE_EXCLUDES = ("art", "design", "captures", "runs", "graft", "docs", "spikes", "assets/atelier",
                    "assets/voxel-textures")
+
+
+@functools.lru_cache(maxsize=1)
+def local_toolchain():
+    """This machine's rustc version (for example "1.98.1"), so a native build on another arch uses
+    the same compiler as the local one: the workspace denies warnings, and a newer rustc's
+    deprecations fail the build (first EC2 launch, 2026-10-10). "stable" if rustc can't be read."""
+    for rustc in (shutil.which("rustc"), os.path.expanduser("~/.cargo/bin/rustc")):
+        if not rustc:
+            continue
+        try:
+            out = subprocess.run([rustc, "--version"], capture_output=True, text=True, timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        match = re.match(r"rustc (\d+\.\d+\.\d+)", out)
+        if match:
+            return match.group(1)
+    return "stable"
 
 
 def pin(spec, ctx, field="commit"):
@@ -119,9 +142,13 @@ class Build(Kind):
             return [Task(name="build", argv=argv, local_only=True, arch=ctx.arch, **common)]
         # Another arch builds natively on its host from a source archive of the same commit.
         source = source_key(ctx, spec["repo"], spec["commit"])
-        bootstrap = ('command -v cargo >/dev/null || . "$HOME/.cargo/env" 2>/dev/null || '
-                     '{ curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null && . "$HOME/.cargo/env"; }; '
-                     'exec "$@"')
+        # The same rustc as the local build (spec "toolchain" overrides), installed by rustup.
+        toolchain = spec.get("toolchain") or local_toolchain()
+        bootstrap = ('. "$HOME/.cargo/env" 2>/dev/null; '
+                     'command -v rustup >/dev/null || { curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal '
+                     '--default-toolchain none >/dev/null && . "$HOME/.cargo/env"; }; '
+                     f'rustup toolchain install {toolchain} --profile minimal >/dev/null && '
+                     f'export RUSTUP_TOOLCHAIN={toolchain} && exec "$@"')
         argv = ["bash", "-c", bootstrap, "labd-build", "{python}", "{lab}/snaprun.py", "--commit", spec["commit"],
                 "--trees", "{lab}/../trees", "--source-tar", "{input:" + source + "}", "--profile",
                 spec.get("profile", "release"), "--artifact", f"{spec['target']}={relative}", "--out", "{out}",
