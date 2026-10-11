@@ -176,11 +176,12 @@ what = "growth to breeding size; real: x0.12-0.25 (maturity 4-8x fast)"
 
 [[gene]]
 inverse = ["flora.*.seed_max_age_s", "flora.*.defence_half_life_s", "flora.latticevine.dry_spell_s", "flora.latticevine.wet_spell_s", "flora.latticevine.bud_s", "flora.latticevine.flower_s", "flora.latticevine.fruit_s", "flora.latticevine.spent_s", "fauna.founders.*.core.lifespan_median_s", "fauna.founders.*.core.reproduction.surplus_hold_s", "fauna.founders.*.core.reproduction.gestation_s", "fauna.founders.*.core.reproduction.birth_interval_s", "fauna.founders.*.core.reproduction.incubation_s", "fauna.predation.egg_viability_median_s"]
+# LEAF-LIFE, Wrysk 2026-10-10: leaf lifetime keeps its growth-form clock.
 name = "K_bio"
-path = ["flora.*.foliage_rate", "flora.*.wood_rate", "flora.*.assimilation", "flora.*.maintenance", "flora.*.senescence", "flora.*.propagule_rate", "flora.*.substrate_uptake_per_s", "flora.decomposition", "flora.latticevine.leaf_upkeep", "flora.latticevine.wood_upkeep", "flora.latticevine.regrow_rate", "fauna.founders.*.core.maintenance_per_s", "fauna.founders.*.core.growth_max_per_s", "fauna.predation.wound_heal_per_s", "fauna.predation.egg_upkeep_per_s"]
+path = ["flora.*.foliage_rate", "flora.*.wood_rate", "flora.*.assimilation", "flora.*.maintenance", "flora.glowcap.senescence", "flora.*.propagule_rate", "flora.*.substrate_uptake_per_s", "flora.decomposition", "flora.latticevine.leaf_upkeep", "flora.latticevine.wood_upkeep", "flora.latticevine.regrow_rate", "fauna.founders.*.core.maintenance_per_s", "fauna.founders.*.core.growth_max_per_s", "fauna.predation.wound_heal_per_s", "fauna.predation.egg_upkeep_per_s"]
 range = [0.25, 4.0]
 value = 1.2133140832503821
-what = "every biological rate faster, every life-history time shorter, together"
+what = "biological rates except leaf fall faster, other life-history times shorter, together"
 
 [[gene]]
 name = "growth@turf"
@@ -214,29 +215,33 @@ what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
 name = "leaf_fall@turf"
 path = ["flora.@turf.senescence"]
 range = [0.05, 4.0]
-value = 0.8493014468489534
-what = "leaf fall rate (1 / leaf life); real: herbs x0.25-0.8"
+# LEAF-LIFE, Wrysk 2026-10-10: use the new growth-form leaf lifetime unchanged.
+value = 1.0
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@mat"
 path = ["flora.@mat.senescence"]
 range = [0.05, 4.0]
-value = 0.8719952109382512
-what = "leaf fall rate (1 / leaf life); real: mats x0.07-0.5"
+# LEAF-LIFE, Wrysk 2026-10-10: use the new growth-form leaf lifetime unchanged.
+value = 1.0
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@shrub"
 path = ["flora.@shrub.senescence"]
 range = [0.05, 4.0]
-value = 1.2202956864022303
-what = "leaf fall rate (1 / leaf life); real: tropical shrubs x0.06-0.25"
+# LEAF-LIFE, Wrysk 2026-10-10: use the new growth-form leaf lifetime unchanged.
+value = 1.0
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@tree"
 path = ["flora.@tree.senescence"]
 range = [0.05, 4.0]
-value = 0.8875598261404076
-what = "leaf fall rate (1 / leaf life); real: x0.06-0.25"
+# LEAF-LIFE, Wrysk 2026-10-10: use the new growth-form leaf lifetime unchanged.
+value = 1.0
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "alpha@turf"

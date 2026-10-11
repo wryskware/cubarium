@@ -1928,6 +1928,13 @@ pub struct Reach {
     pub up: u32,
 }
 
+// LEAF-LIFE, Wrysk 2026-10-10: leaf-life days are 1/365 of the ten-hour year.
+const LEAF_LIFE_YEAR_S: f64 = 10.0 * 60.0 * 60.0;
+
+fn leaf_senescence(leaf_life_days: f64) -> f64 {
+    1.0 / (leaf_life_days * LEAF_LIFE_YEAR_S / 365.0)
+}
+
 impl SpeciesConfig {
     fn v1_base() -> SpeciesConfig {
         SpeciesConfig {
@@ -1953,7 +1960,8 @@ impl SpeciesConfig {
             wood_max: 0.6,
             reserve_cap: 0.5,
             maintenance: 0.0002,
-            senescence: 0.001,
+            // LEAF-LIFE, Wrysk 2026-10-10: herbs, ferns, shrubs and reeds keep leaves a season.
+            senescence: leaf_senescence(90.0),
             foliage_rate: 0.002,
             wood_rate: 0.001,
             build: 0.2,
@@ -2335,7 +2343,7 @@ impl SpeciesConfig {
     ///   package (below) and 3.15 since its alpha sweep: a grazed mature stand carries about
     ///   the original (alpha 4) velvetpad's edible foliage, about 1.9× today's.
     ///   `foliage_rate` 0.06 (× 3) and `graze_refuge` 0.4 (basal buds) regrow a cropped
-    ///   sward fast. `senescence` 0.00167 (× 1.67 the base): heavy thatch.
+    ///   sward fast. LEAF-LIFE (Wrysk 2026-10-10) gives grass leaves 30 year-days.
     /// - **Drought-tolerant.** `wilt_water` 0 and `full_water` 0.3, `rooting_depth` 2: it
     ///   earns on any water its deeper box holds (the probe: an adult and a newborn live
     ///   through 55,000 s at available water 0.2, longer than the bank, and regrow).
@@ -2446,7 +2454,8 @@ impl SpeciesConfig {
             // edible + litter at 1.07× the original plants; 5.4 and 6.3 gave the same stand,
             // 6.3 the more food. Was 1.8 (presets 3.6), 1.5 (3.0), before that 6.2 (4.0).
             alpha: 3.15,
-            senescence: 0.00167,
+            // LEAF-LIFE, Wrysk 2026-10-10: grass leaves live 30 year-days.
+            senescence: leaf_senescence(30.0),
             foliage_rate: 0.06,
             wood_rate: 0.01,
             propagule_rate: 0.002,
@@ -2539,7 +2548,8 @@ impl SpeciesConfig {
             alive_min: 0.01,
             donor_min: 0.05,
             maintenance: 0.00005,
-            senescence: 0.0003,
+            // LEAF-LIFE, Wrysk 2026-10-10: evergreen cushion leaves live a year.
+            senescence: leaf_senescence(365.0),
             foliage_rate: 0.0005,
             wood_rate: 0.0002,
             propagule_rate: 0.00005,
@@ -2581,17 +2591,11 @@ impl SpeciesConfig {
     ///   sky velvetpad's light response `L (1 + h) / (L + h)` is **0.7333** where
     ///   bloomcrown's is **0.36**;
     ///   `establish_light_min` 0.05 lets a cohort start almost anywhere the terrain does
-    ///   not roof over. `senescence` 0.0005, half the base, is the other half of being a
-    ///   shade plant: long-lived leaves. The break-even it buys, **under stated
-    ///   conditions** — full foliage (`P = α · W`), site mineral 1 so the Monod factor is
-    ///   2/3, no aeration stress and no growth — is where income equals maintenance plus
-    ///   the construction cost of replacing senesced foliage:
+    ///   not roof over. LEAF-LIFE (Wrysk 2026-10-10) gives this evergreen cushion
+    ///   a year of leaf life. Its break-even, at full foliage and with no growth, is
+    ///   where income equals maintenance plus the cost of replacing shed foliage:
     ///   `L_eff · μ = (maintenance + (1 + c_g) · senescence · α) / (assimilation · α ·
-    ///   monod)`. At the base senescence 0.001 that is
-    ///   `(0.0002 + 1.2·0.001·2) / (0.004·2·(2/3)) = 0.0026 / 0.0053333` = **0.4875**,
-    ///   which is not shade at all; at 0.0005 it is `0.0014 / 0.0053333` = **0.2625**.
-    ///   At 4 % of open sky `L_eff` is 0.3143, so 4 % clears 0.2625 only with `μ` at or
-    ///   above 0.835 — sufficient moisture, not any moisture.
+    ///   monod)`. Longer-lived foliage lowers that replacement cost.
     /// - **Size and rates.** `wood_max` 0.2, `alive_min` 0.015, `donor_min` 0.1 — a third
     ///   of bloomcrown's body; `wood_rate` 0.002 and `foliage_rate` 0.004 are twice the
     ///   base and `propagule_rate` 0.0005 is two and a half times, a pad that fills in
@@ -2650,7 +2654,8 @@ impl SpeciesConfig {
             alive_min: 0.015,
             donor_min: 0.1,
             alpha: 1.0,
-            senescence: 0.0005,
+            // LEAF-LIFE, Wrysk 2026-10-10: evergreen cushion leaves live a year.
+            senescence: leaf_senescence(365.0),
             foliage_rate: 0.004,
             wood_rate: 0.002,
             propagule_rate: 0.0005,
@@ -2884,7 +2889,7 @@ impl SpeciesConfig {
     ///   wet week. `drown_depth_m` 0.1.
     /// - **Slow, long-lived, large reserve.** `wood_max` 5.0 (bloomcrown 0.6),
     ///   `wood_rate` 0.0003 and `foliage_rate` 0.001, `maintenance` 0.0001 and
-    ///   `senescence` 0.0005, half the base; `reserve_cap` 1.5, three times the base.
+    ///   season-long leaves (LEAF-LIFE, Wrysk 2026-10-10); `reserve_cap` 1.5, three times the base.
     ///   `alive_min` 0.02 (a 0.05 minimum package; a seed is four of them at
     ///   `propagule_rate` 0.0008, still 300 s of a funded donor), `donor_min` 2.5, `hop` 4.
     /// - **Shape.** Crown `[2.25, 6.5]` m × `[0.625, 1.85]` m, grown from the capped seedling;
@@ -2938,7 +2943,8 @@ impl SpeciesConfig {
             donor_min: 2.5,
             reserve_cap: 1.5,
             maintenance: 0.0001,
-            senescence: 0.0005,
+            // LEAF-LIFE, Wrysk 2026-10-10: broadleaf tree leaves live a season.
+            senescence: leaf_senescence(90.0),
             foliage_rate: 0.001,
             wood_rate: 0.0003,
             propagule_rate: 0.0008,

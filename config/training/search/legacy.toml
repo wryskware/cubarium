@@ -20,8 +20,9 @@ what = "regrowth: every photosynthetic species' foliage_rate"
 [[gene]]
 name = "flora.senescence"
 path = "flora.@photo.senescence"
+# LEAF-LIFE, Wrysk 2026-10-10: multipliers of the new leaf-life base; x1 is inside these bounds.
 range = [0.25, 4.0]
-what = "litterfall: every photosynthetic species' senescence"
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "flora.decomposition"

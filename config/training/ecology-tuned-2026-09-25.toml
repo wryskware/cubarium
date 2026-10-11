@@ -2,7 +2,8 @@
 # TRAINING ONLY. The live defaults are unchanged; load with --arm tuned=<this file> or EcologyParams::load.
 [ecology]
 "flora.foliage_rate" = 0.42978844102157104
-"flora.senescence" = 0.987922555874324
+# LEAF-LIFE, Wrysk 2026-10-10: restore the growth-form leaf lifetime (historical leaf multiplier replaced).
+"flora.senescence" = 1.0
 "flora.decomposition" = 3.8828707239964175
 "founder.yield_by_food" = 0.3620822822151667
 "founder.reproduction.surplus_floor" = 1.7869870907906003
