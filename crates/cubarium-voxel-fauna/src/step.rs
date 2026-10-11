@@ -348,7 +348,10 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             // books it itself while the prey is still drawn).
             let lure_kill = hit.lure && !crate::light::drawn_to_lure(fauna, hit.prey);
             let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
+            let tapped = hit.by == crate::Founder::Seedporter && prey_founder == Some(crate::Founder::Bellwing) && sp_miss_enabled();
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by, Some(&view));
+            if tapped { eprintln!("SPMISS hit tick={} hunter={} prey={} damage={} killed={}", tick, hit.striker, hit.prey, hit.damage, fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err()); }
+
             if let (true, Some(f)) = (lure_kill, prey_founder) {
                 if fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err() {
                     fauna.ledger.lure_kills[f.index()] += 1;
@@ -3603,6 +3606,7 @@ pub(crate) fn prey_in_capsule(
     // D2b: a patroller strikes only a prey its attack choice accepts this window.
     let choosy = fauna.config.hunt.patrol && (a.founder == Some(crate::Founder::Lanternjaw) && fauna.controllers.layer(a.id) == crate::Layer::Heuristic);
     let mut best: Option<(f64, u64)> = None;
+    let mut projected = None;
     for o in &fauna.animals {
         if o.id == a.id
             || o.mobility.climb.is_some()
@@ -3612,6 +3616,21 @@ pub(crate) fn prey_in_capsule(
         {
             continue;
         }
+        // Check the same delivered sweep as resolve. Predict once, without changing
+        // the world or paying a strike cost; prey can still move during the windup.
+        let (end, from, to) = projected.get_or_insert_with(|| {
+            let mut end = *a;
+            let phys = fauna.config.founder(a.founder.expect("a founder body"));
+            end.strike = Some(Strike { phase: StrikePhase::Lunge, ticks_left: crate::Hunter::ticks(h.lunge_s), prey: o.id, from_x: a.pose.x, from_z: a.pose.z, lure: false });
+            for _ in 0..crate::Hunter::ticks(h.lunge_s) {
+                advance_lunge(&fauna.config, view, &mut end, phys, h, geometry);
+            }
+            let (from, to) = lunge_jaws(&end, geometry, h, (a.pose.x, a.pose.z));
+            (end, from, to)
+        });
+        if !meets_capsule(&fauna.config, view, end, geometry, h, *from, *to, o) {
+            continue;
+        }
         let (dx, dz) = crate::pose::wrapped_delta(jaw.0, jaw.1, o.pose.x, o.pose.z, ring);
         let d = dx * dx + dz * dz;
         if best.is_none_or(|(b, _)| d < b) {
@@ -3619,6 +3638,83 @@ pub(crate) fn prey_in_capsule(
         }
     }
     best.map(|(_, id)| id)
+}
+
+/// Advance one lunge tick, on a copy when checking a prospective strike. The
+/// terrain-constrained motion is shared with resolution so a nominal reach through
+/// a wall or across an unsteppable face cannot start an endless series of misses.
+fn advance_lunge(
+    config: &crate::FaunaConfig,
+    view: &VoxelView<'_>,
+    a: &mut Animal,
+    phys: &crate::FounderPhysiology,
+    h: &crate::Hunter,
+    geometry: &crate::Body,
+) {
+    let founder = a.founder.expect("a founder body");
+    let manifest = config.manifest(founder);
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let per_tick = reach / f64::from(crate::Hunter::ticks(h.lunge_s));
+    let lunge = Actions {
+        forward: per_tick / (manifest.cruise_m_per_s * DT),
+        turn: 0.0,
+        feed: 0.0,
+    };
+    let mut standing_y = a.site.y;
+    if a.mobility.mode != crate::MobilityMode::Perched {
+        body::resolve_motion(
+            view,
+            &mut a.pose,
+            &mut standing_y,
+            &manifest,
+            geometry,
+            phys.wade_depth_m(geometry),
+            phys.step_limits(view.config.voxel_m),
+            config.life.wall_friction,
+            lunge,
+        );
+    }
+    if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
+        a.site = Site {
+            x: cx.rem_euclid(i64::from(view.config.width)) as u32,
+            y: standing_y,
+            z: cz,
+        };
+    }
+}
+
+/// The jaw sweep actually delivered by the lunge; a perched catch extends its
+/// arms, while a ground catch uses the body's terrain-constrained endpoint.
+fn lunge_jaws(
+    a: &Animal,
+    geometry: &crate::Body,
+    h: &crate::Hunter,
+    from: (f64, f64),
+) -> ((f64, f64), (f64, f64)) {
+    let heading = a.pose.heading_rad;
+    let jaw_from = jaw_of(
+        from.0,
+        from.1,
+        heading,
+        geometry.length_m,
+        h.jaw_forward_length_fraction,
+    );
+    let jaw_to = if a.mobility.mode == crate::MobilityMode::Perched {
+        let reach = h.strike_reach_length_fraction * geometry.length_m;
+        (
+            jaw_from.0 + reach * heading.sin(),
+            jaw_from.1 + reach * heading.cos(),
+        )
+    } else {
+        jaw_of(
+            a.pose.x,
+            a.pose.z,
+            heading,
+            geometry.length_m,
+            h.jaw_forward_length_fraction,
+        )
+    };
+    (jaw_from, jaw_to)
 }
 
 /// One tick of a strike's **windup** or **lunge** (predation §2.3). The windup is a
@@ -3665,45 +3761,7 @@ fn strike_tick(
     }
     // One lunge tick: `strike_reach / lunge ticks` forward, turn held still.
     let geometry = phys.body_at(fauna.animals[i].body);
-    let manifest = fauna.config.manifest(founder);
-    let reach = h.strike_reach_length_fraction * geometry.length_m;
-    let per_tick = reach / f64::from(crate::Hunter::ticks(h.lunge_s));
-    let lunge = Actions {
-        forward: per_tick / (manifest.cruise_m_per_s * DT),
-        turn: 0.0,
-        feed: 0.0,
-    };
-    let step_limits = phys.step_limits(view.config.voxel_m);
-    let wall_friction = fauna.config.life.wall_friction;
-    let perched = fauna.animals[i].mobility.mode == crate::MobilityMode::Perched;
-    let standing_y = if perched {
-        fauna.animals[i].site.y
-    } else {
-        let a = &mut fauna.animals[i];
-        let mut standing_y = a.site.y;
-        body::resolve_motion(
-            view,
-            &mut a.pose,
-            &mut standing_y,
-            &manifest,
-            &geometry,
-            phys.wade_depth_m(&geometry),
-            step_limits,
-            wall_friction,
-            lunge,
-        );
-        standing_y
-    };
-    {
-        let a = &mut fauna.animals[i];
-        if let Some((cx, cz)) = a.pose.column(view.config.voxel_m, view.config.depth) {
-            a.site = Site {
-                x: cx.rem_euclid(i64::from(view.config.width)) as u32,
-                y: standing_y,
-                z: cz,
-            };
-        }
-    }
+    advance_lunge(&fauna.config, view, &mut fauna.animals[i], phys, &h, &geometry);
     s.ticks_left = s.ticks_left.saturating_sub(1);
     if s.ticks_left > 0 {
         fauna.animals[i].strike = Some(s);
@@ -3711,16 +3769,7 @@ fn strike_tick(
     }
     // Contact: the jaw's sweep from where the lunge began to where it ended.
     let a = fauna.animals[i];
-    let heading = a.pose.heading_rad;
-    let jaw_from = jaw_of(s.from_x, s.from_z, heading, geometry.length_m, h.jaw_forward_length_fraction);
-    let jaw_to = if perched {
-        (
-            jaw_from.0 + reach * heading.sin(),
-            jaw_from.1 + reach * heading.cos(),
-        )
-    } else {
-        jaw_of(a.pose.x, a.pose.z, heading, geometry.length_m, h.jaw_forward_length_fraction)
-    };
+    let (jaw_from, jaw_to) = lunge_jaws(&a, &geometry, &h, (s.from_x, s.from_z));
     let prey = fauna
         .animals
         .binary_search_by_key(&s.prey, |p| p.id)
@@ -3729,6 +3778,11 @@ fn strike_tick(
     if let Some(p) = prey {
         let contact = meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p)
             && (founder != crate::Founder::Seedporter || crate::is_prey_of(&fauna.config, &a, &p));
+        if sp_miss_tap(&a, &p) {
+            let pg = crate::body_of(&fauna.config, &p).unwrap();
+            let horizontal = segment_distance(jaw_from, jaw_to, (p.pose.x, p.pose.z), f64::from(view.config.width) * view.config.voxel_m);
+            eprintln!("SPMISS contact tick={} hunter={} prey={} contact={} fled={} lure={} distance={} radius={} band={} takeable={} ax={} az={} ay={} px={} pz={} py={} mode={:?} reach={} length={}", tick, a.id, p.id, contact, crate::flush::fled(fauna, p.id), s.lure, horizontal, geometry.footprint_radius() + pg.footprint_radius(), in_strike_band(view, &a, &geometry, &h, &p, &pg), crate::is_prey_of(&fauna.config, &a, &p), a.pose.x, a.pose.z, a.pose.y_m, p.pose.x, p.pose.z, p.pose.y_m, p.mobility.mode, h.strike_reach_length_fraction * geometry.length_m, geometry.length_m);
+        }
         // FLUSH: a jaw that closed on air because its prey had burst away from it.
         if !contact && crate::flush::fled(fauna, p.id) {
             if let Some(pf) = p.founder {
@@ -3784,6 +3838,9 @@ fn strike_tick(
             // Its own keyed draw avoids changing the existing shield/dodge draws.
             let exposure = crate::vigil::shelter_exposure(fauna, &p, &a, f64::from(view.config.width) * view.config.voxel_m, view.config.voxel_m);
             let covered = crate::dodges(1.0 - exposure, seed ^ 0x5348_454C_5445_5200, a.id, p.id, tick);
+            if sp_miss_tap(&a, &p) {
+                eprintln!("SPMISS defence tick={} hunter={} prey={} chance={} awareness={} agility={} aspect={} condition={} covered={} glanced={} dodged={}", tick, a.id, p.id, chance, awareness, pp.agility, from_rear, condition, covered, glanced, crate::dodges(chance, seed, a.id, p.id, tick));
+            }
             if covered {
                 // A missed reach: no damage, no body transfers, and normal recovery below.
             } else if glanced {
@@ -3813,6 +3870,9 @@ fn strike_tick(
                 });
             }
         }
+    }
+    if prey.is_none() && founder == crate::Founder::Seedporter && sp_miss_enabled() {
+        eprintln!("SPMISS missing tick={} hunter={} prey={} lure={}", tick, a.id, s.prey, s.lure);
     }
     fauna.animals[i].strike = Some(Strike {
         phase: StrikePhase::Recovery,
@@ -3928,6 +3988,7 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
         } else if prey.hunkered { 2 } else if fauna.percept(prey.id).is_some_and(|p| p.vigil.running(fauna.tick)) { 3 } else { 4 };
         fauna.ledger.vigil.grazer_kills_by_posture[by.index()][posture] += 1;
     }
+    sp_miss_depart(fauna, &fauna.animals[j], cause);
     let a = fauna.animals.remove(j);
     fauna.controllers.take(a.id);
     fauna.trapped.remove(&a.id);
@@ -6455,6 +6516,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
         fauna.nest_trips.remove(id);
     }
     for (a, cause) in &dead {
+        sp_miss_depart(fauna, a, *cause);
         if a.pack.is_some_and(|m| m.pup) {
             if *cause == Departure::Starved {
                 fauna.ledger.pups_starved += 1;
@@ -6681,6 +6743,13 @@ fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
             }
         }
     }
+    if let Ok(j) = fauna.animals.binary_search_by_key(&prey, |p| p.id) {
+        let a = &fauna.animals[i];
+        let p = &fauna.animals[j];
+        if sp_miss_tap(a, p) {
+            eprintln!("SPMISS start tick={} hunter={} prey={} lure={} ax={} az={} ay={} px={} pz={} py={} mode={:?} hbody={} pbody={}", fauna.tick, a.id, p.id, lure, a.pose.x, a.pose.z, a.pose.y_m, p.pose.x, p.pose.z, p.pose.y_m, p.mobility.mode, a.body, p.body);
+        }
+    }
     // R3: a pack member calls as it strikes.
     crate::pack::call(fauna, i);
 }
@@ -6694,3 +6763,34 @@ mod roles5_tests;
 #[cfg(test)]
 #[path = "size_not_mass_step_tests.rs"]
 mod size_not_mass_tests;
+
+#[cfg(test)]
+#[path = "sp_loop_tests.rs"]
+mod sp_loop_tests;
+
+fn sp_miss_tap(a: &Animal, p: &Animal) -> bool {
+    sp_miss_enabled()
+        && a.founder == Some(crate::Founder::Seedporter)
+        && p.founder == Some(crate::Founder::Bellwing)
+}
+
+fn sp_miss_depart(fauna: &Fauna, a: &Animal, cause: Departure) {
+    if !sp_miss_enabled() { return; }
+    if a.founder == Some(crate::Founder::Bellwing) {
+        eprintln!("SPMISS departure tick={} prey={} cause={:?}", fauna.tick, a.id, cause);
+    }
+    if a.founder == Some(crate::Founder::Seedporter) {
+        if let Some(s) = a.strike.filter(|s| s.phase != StrikePhase::Recovery) {
+            eprintln!("SPMISS abort tick={} hunter={} prey={} cause={:?}", fauna.tick, a.id, s.prey, cause);
+        }
+    }
+}
+
+/// Opt-in strike outcome diagnostic (`SP_MISS_TAP=1`, unset by default). Records
+/// seedporter/bellwing starts, contact geometry/mobility, defence, damage and
+/// departures to stderr. The environment is read once; the disabled path is a
+/// cached boolean check. Used by `runs/sp-miss/summarize.py` for local probes.
+fn sp_miss_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SP_MISS_TAP").is_some())
+}
