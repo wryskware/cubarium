@@ -7,8 +7,9 @@ RIG-STATES round 2: add `--sleep-only` to port the committed model and rig witho
 voxelizing or writing any `.cvm` or manifest. Existing feed keys are copied exactly.
 RIG-STATES round 3: the Veilhound, lanternjaw and perched seedporter (`seedporter-stand`)
 end their asleep track on a sleep pose (`SLEEP_POSES`, `animal_models.posed_sleep_rig`).
-RIG-STATES round 4: the loftstrider's rig carries an `idle` loop (`animal_models.ls_idle_clip`);
-`LS_IDLE=A|B|C` in the environment picks the candidate (A when unset).
+RIG-STATES round 5: the frondgrazer's and the loftstrider's rigs carry idle actions,
+`idle.<name>` clips of mode 2 played once on the idle schedule (`animal_models.fg_state_rig`'s
+dips, `animal_models.ls_idle_actions`).
 
 Reads **only** `assets/voxel-models/source.json` for numbers (crown ranges, stage
 profiles, founder bodies, voxel sizes; `design/handoffs/voxel-organism-models-2026-09-23.md`

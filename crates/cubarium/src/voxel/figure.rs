@@ -224,6 +224,9 @@ pub struct FigureConfig {
     /// `"turn"` (the default) or `"off"` ([`RigDraw`]): whether a rigged animal's clip is
     /// drawn, each cube turned with its bone.
     pub rig: RigDraw,
+    /// `[figures.idle.<founder>]` (RIG-STATES round 5): how often each founder's idle
+    /// actions come and how likely each is ([`idle::IdleActions`]).
+    pub idle: idle::IdleConfig,
 }
 
 fn positive_supersample<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
@@ -249,6 +252,7 @@ impl Default for FigureConfig {
             supersample: 2,
             plants: PlantDraw::Models,
             rig: RigDraw::Turn,
+            idle: idle::IdleConfig::default(),
         }
     }
 }
@@ -410,6 +414,7 @@ mod preset_tests {
             supersample: 3,
             plants: PlantDraw::Models,
             rig: super::RigDraw::Off,
+            idle: super::idle::IdleConfig::default(),
         }
     }
 
@@ -655,6 +660,9 @@ struct ModelInfo {
     rig: Option<(Arc<AnimalRig>, usize)>,
     /// Loop-only cells, face masks and bounds while every track has zero weight.
     without_tracks: Option<ModelId>,
+    /// Per rig clip: an idle action that moves a bone the loop-only drawing folds away
+    /// (`AnimalRig::action_needs_tracks`), so the whole drawing plays it.
+    action_tracks: Vec<bool>,
 }
 
 /// Every model the figures have drawn with, interned: its cells in the GPU's layout, once.
@@ -785,8 +793,10 @@ impl FigureModels {
         let half = [0, 1, 2].map(|i| 0.5 * (hi[i] - lo[i]));
         // A margin of a voxel: a settling head dips below the body's box.
         let mut radius = (half[0] * half[0] + half[1] * half[1] + half[2] * half[2]).sqrt() + 1.0;
+        // the states' reach: an idle action stays inside it and the voxel's margin
+        // (`an_idle_action_stays_inside_the_figures_tile`), so it changes no other frame
         if let Some((rig, bin)) = &rig {
-            radius = radius.max(rig_reach(&cells, centre, rig, *bin) + 1.0);
+            radius = radius.max(rig_reach(&cells, centre, rig, *bin, false) + 1.0);
         }
         let id = ModelId(self.models.len() as u32);
         self.models.push(ModelInfo {
@@ -798,6 +808,9 @@ impl FigureModels {
             drop,
             rig: rig.clone(),
             without_tracks: None,
+            action_tracks: rig.as_ref().map_or_else(Vec::new, |(r, bin)| {
+                (0..r.clips.len()).map(|c| r.clips[c].mode == rig::ClipMode::Action && r.action_needs_tracks(*bin, c)).collect()
+            }),
         });
         self.by_key.insert(key, id);
         if let Some((rig, bin)) = rig && let Some(rest) = rig.without_tracks(bin) {
@@ -945,7 +958,7 @@ impl RigStates {
     pub fn of(rig: &AnimalRig) -> RigStates {
         RigStates {
             asleep: rig.clip("asleep").is_some(),
-            idle: rig.clip("idle").is_some(),
+            idle: rig.clip("idle").is_some() || !rig.actions().is_empty(),
             hunker: rig.clip("hunker").is_some(),
         }
     }
@@ -1005,7 +1018,8 @@ pub struct Spec {
 
 /// One of a figure's rig clips at a tick: which clip of its rig, its weight (before the
 /// ease) and change per tick, and how far a loop runs ahead of the frame clock (its own
-/// phase; 0 for a track).
+/// phase; 0 for a track); for an idle action (RIG-STATES round 5), the tick it starts and
+/// the ticks it plays (its weight the idle's).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClipSpec {
     pub clip: u8,
@@ -1013,6 +1027,7 @@ pub struct ClipSpec {
     pub weight: f32,
     pub rate: f32,
     pub phase_s: f64,
+    pub action: Option<(i64, i64)>,
 }
 
 impl ClipSpec {
@@ -1025,8 +1040,9 @@ impl ClipSpec {
 /// How far any cell of a rigged model reaches from `centre` over its clips, voxels: each
 /// clip alone at every sampled frame, at the full weight and on the way to it, and each
 /// loop over the others' last frames; an aimed clip also at each of its state's aims, at
-/// every step of the rig's symmetry.
-fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f32 {
+/// every step of the rig's symmetry. Its idle actions (each variant, as a loop is) only
+/// with `actions`.
+fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize, actions: bool) -> f32 {
     let mut bones = Vec::new();
     let mut reach = 0.0f32;
     let mut poses: Vec<(Vec<rig::ClipAt>, Option<rig::Aim>)> = Vec::new();
@@ -1043,8 +1059,11 @@ fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f
             .flat_map(|h| (0..steps).map(move |m| Some(rig::Aim { weight: 1.0, height_m: h, bearing_rad: m as f64 * step })))
             .collect()
     };
+    // a state's first clip (an aimed state's others are blended in by the aim), and every
+    // idle action's every variant; an action is never one of a loop's others
+    let first = |o: usize| rig.clips[o].mode != rig::ClipMode::Action && rig.clip(&rig.clips[o].state) == Some(o);
     for (c, clip) in rig.clips.iter().enumerate() {
-        if rig.clip(&clip.state) != Some(c) {
+        if if clip.mode == rig::ClipMode::Action { !actions } else { !first(c) } {
             continue;
         }
         let aims = aims_of(c);
@@ -1053,7 +1072,7 @@ fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f
             for w in [0.25, 0.5, 0.75, 1.0] {
                 // a track's frame f is where its weight reaches it
                 let w = match clip.mode {
-                    rig::ClipMode::Loop => w,
+                    rig::ClipMode::Loop | rig::ClipMode::Action => w,
                     rig::ClipMode::Track if w < 1.0 => continue,
                     rig::ClipMode::Track => f as f64 / (clip.frames.max(2) - 1) as f64,
                 };
@@ -1064,8 +1083,8 @@ fn rig_reach(cells: &[Cell], centre: [f32; 3], rig: &AnimalRig, bin: usize) -> f
                     poses.extend(aims.iter().map(|&aim| (at.clone(), aim)));
                 }
             }
-            if clip.mode == rig::ClipMode::Loop {
-                let others = (0..rig.clips.len()).filter(|&o| o != c && rig.clip(&rig.clips[o].state) == Some(o));
+            if clip.mode != rig::ClipMode::Track {
+                let others = (0..rig.clips.len()).filter(|&o| o != c && first(o));
                 poses.push((
                     others
                         .map(|o| rig::ClipAt { clip: o, time_s: 0.0, weight: 1.0 })
@@ -1344,7 +1363,8 @@ pub fn specs(
             };
             let head = idling
                 .filter(|_| idle::moves_head(founder))
-                .and_then(|_| idle::move_near(a.id, view.tick, DT))
+                .and_then(|_| idle::move_near(a.id, view.tick, DT, &animals.idle_actions().of(founder)))
+                .filter(|m| animals.idle_full_at(a, m.start_tick))
                 .map(|m| PoseEntry { head: m.relative_to(view.tick), ..body });
             PoseSpec {
                 tick: view.tick,
@@ -1376,12 +1396,12 @@ pub fn specs(
         // while it crops, the rest while it sleeps, idle while it idles, the hunker while it
         // is hunkered, each with that state's eased weight; a state the renderer keeps no
         // weight for has none.
-        let clips = rigged.as_ref().map_or_else(Vec::new, |(r, _)| {
+        let mut clips = rigged.as_ref().map_or_else(Vec::new, |(r, _)| {
             r.clips
                 .iter()
                 .enumerate()
                 // one per state: an aimed state's other clips are blended in by the aim
-                .filter(|(c, clip)| r.clip(&clip.state) == Some(*c))
+                .filter(|(c, clip)| clip.mode != rig::ClipMode::Action && r.clip(&clip.state) == Some(*c))
                 .filter_map(|(c, clip)| {
                     let (weight, rate) = match clip.state.as_str() {
                         "cropping" => animals.feed_weight(a),
@@ -1392,12 +1412,40 @@ pub fn specs(
                     }?;
                     let phase_s = match clip.mode {
                         rig::ClipMode::Loop => rig::phase_offset_s(a.id, r.loop_s(c)),
-                        rig::ClipMode::Track => 0.0,
+                        rig::ClipMode::Track | rig::ClipMode::Action => 0.0,
                     };
-                    Some(ClipSpec { clip: c as u8, tick: view.tick, weight, rate, phase_s })
+                    Some(ClipSpec { clip: c as u8, tick: view.tick, weight, rate, phase_s, action: None })
                 })
                 .collect()
         });
+        // Its idle actions (RIG-STATES round 5, `idle`): while it idles, those of its
+        // schedule near this tick that started with its idle weight full, each its
+        // scheduled variant, at the idle's weight.
+        if let (Some((r, _)), Some((weight, rate))) = (&rigged, idling) {
+            let actions = r.actions();
+            if !actions.is_empty() {
+                let knobs = animals.idle_actions().of(founder);
+                let kinds: Vec<idle::Kind> = actions
+                    .iter()
+                    .map(|x| idle::Kind { weight: knobs.weight(&x.name), variants: x.clips.len(), length_s: x.length_s })
+                    .collect();
+                for s in idle::near(a.id, view.tick, DT, knobs.apart_s, &kinds) {
+                    if !animals.idle_full_at(a, s.start_tick) {
+                        continue;
+                    }
+                    let c = actions[s.kind].clips[s.variant];
+                    let ticks = (r.action_s(c) / DT).round() as i64;
+                    clips.push(ClipSpec {
+                        clip: c as u8,
+                        tick: view.tick,
+                        weight,
+                        rate,
+                        phase_s: 0.0,
+                        action: Some((s.start_tick, ticks)),
+                    });
+                }
+            }
+        }
         // Where its aimed clips reach: its last bite, eased (FEED-ROLLOUT round 2).
         let aim = rigged
             .as_ref()
@@ -1778,18 +1826,21 @@ impl FigureTrack {
             clip_ats.clear();
             if rig_on {
                 let older = before.map(|a| a.clips.as_slice()).unwrap_or_default();
-                let newer = spec.clips.iter().filter(|c| !older.iter().any(|o| o.clip == c.clip));
+                let newer = spec.clips.iter().filter(|c| !older.iter().any(|o| o.clip == c.clip && o.action == c.action));
                 let ats = older
                     .iter()
                     .map(|c| (c, c.at(td - c.tick as f64)))
                     .chain(newer.map(|c| (c, c.at((td - c.tick as f64).max(0.0)))));
+                let hz = f64::from(cubarium_voxel::TICK_HZ);
                 for (c, w) in ats {
+                    // an idle action only between its start and its end (rest outside)
+                    let time_s = match c.action {
+                        Some((start, ticks)) if td < start as f64 || td > (start + ticks) as f64 => continue,
+                        Some((start, _)) => (td - start as f64) / hz,
+                        None => td / hz + c.phase_s,
+                    };
                     if w > 0.0 {
-                        clip_ats.push(rig::ClipAt {
-                            clip: usize::from(c.clip),
-                            time_s: td / f64::from(cubarium_voxel::TICK_HZ) + c.phase_s,
-                            weight: w,
-                        });
+                        clip_ats.push(rig::ClipAt { clip: usize::from(c.clip), time_s, weight: w });
                     }
                 }
                 // layered in the rig's clip order, whichever tick each came from
@@ -1836,7 +1887,12 @@ impl FigureTrack {
             let mut tile_of = |model: ModelId, palette: &[PaletteEntry], axes: [[f64; 3]; 3], frame: &mut FigureFrame| {
                 let info = models.info(model);
                 let drawing = match (&info.rig, info.without_tracks) {
-                    (Some((rig, bin)), Some(rest)) if !rig.tracks_playing(*bin, &clip_ats, aim) => models.info(rest),
+                    (Some((rig, bin)), Some(rest))
+                        if !rig.tracks_playing(*bin, &clip_ats, aim)
+                            && !clip_ats.iter().any(|at| info.action_tracks.get(at.clip).copied().unwrap_or(false)) =>
+                    {
+                        models.info(rest)
+                    }
                     _ => info,
                 };
                 let at = frame.palette.len() as u32;
@@ -2308,3 +2364,34 @@ mod rider_tests;
 #[cfg(test)]
 #[path = "rig_states_tests.rs"]
 mod rig_states_tests;
+
+#[cfg(test)]
+mod action_reach_tests {
+    use super::*;
+
+    /// An idle action (RIG-STATES round 5) never grows a figure's tile: the frondgrazer's
+    /// and the loftstrider's actions, with the idle breath on top, stay inside the tile
+    /// their states' clips size, so the tile (and every frame drawn without the action) is
+    /// what it was without them.
+    #[test]
+    fn an_idle_action_stays_inside_the_figures_tile() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/voxel-models");
+        for voxel_m in [0.125, 0.25] {
+            let lib = ModelLibrary::load(&root, voxel_m).expect("the baked library");
+            for founder in [Founder::Browser, Founder::Loftstrider] {
+                let rig = lib.rig(founder).expect("its rig").clone();
+                assert!(!rig.actions().is_empty(), "{founder:?}: idle actions");
+                let model = lib.animal(founder).expect("its model");
+                for (bin, b) in model.bins.iter().enumerate() {
+                    let (cells, _) = baked(&b.cells, None, Some((&rig, bin)));
+                    let mut models = FigureModels::default();
+                    let id = models.intern_rigged(1, Some((rig.clone(), bin)), || (cells.clone(), 0)).unwrap();
+                    let info = models.info(id);
+                    let with = rig_reach(&cells, info.centre, &rig, bin, true);
+                    let breath = idle::BREATH_AMP_VOXELS;
+                    assert!(with + breath <= info.radius, "{founder:?} bin {bin}: {with} + {breath} > {}", info.radius);
+                }
+            }
+        }
+    }
+}
