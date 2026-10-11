@@ -28,9 +28,16 @@
 //! [`CandidateSource`] on a thread of its own and drawn the same way; its clock stands
 //! still, and it redraws only when the view turns or the highlight moves. The stager holds
 //! the candidate's world by its own handle, never the session's candidate list (which the
-//! picker reads every frame). Two still worlds stage at once, in request order. Their
-//! sky bakes share one bounded worker pool. A first picture is published immediately,
-//! then refreshed when the full lighting arrives.
+//! picker reads every frame). Two still worlds stage at once, in request order, and each
+//! gives its turn up once its first picture is installed.
+//!
+//! **A still world's fast tier** ([`StillLighting`]): its renderer builds only the
+//! pipelines a still terrain draws with ([`Pipelines::Still`]; a driver meeting this
+//! build's shaders for the first time compiles a few of them, not all of them), and its
+//! first picture is drawn at once under open sky, with no sky-occlusion bake and no light
+//! shafts. Refined (the default), the exact sky plane is then baked in turn behind the
+//! other previews' and eases in over `[light] sky_fade_s`; fast, that first picture is the
+//! last. A new live world eases its first sky plane in the same way.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -49,7 +56,7 @@ use cubarium_voxel_flora::Flora;
 use rustc_hash::FxHashMap;
 
 use super::snapshot::{PackSnapshot, SnapshotCopier};
-use super::{Offscreen, VoxelGpuSink};
+use super::{Offscreen, OffscreenOptions, Pipelines, SkyBake, VoxelGpuSink};
 use crate::voxel::figure::{AnimalDraw, EnvPins, FigureMotion, FigurePick};
 use crate::voxel::project::Projection;
 use crate::voxel::{PX_AUTO, VoxelConfig, cover_px_per_voxel, load_config, load_models};
@@ -61,9 +68,14 @@ const STATIC_STAGERS: usize = 2;
 /// How often a waiting stager looks at its quit flag (a shutdown joins it, on the app's
 /// thread).
 const STAGE_SLICE: Duration = Duration::from_millis(10);
-/// How often a still world waiting only for the light shafts' first bake packs again (the
-/// bake lands only through a pack); the pack thread's wait for the lit tier's sky plane too.
+/// How often a still world looks whether its lighting has been baked (the look itself is
+/// cheap; the world is packed again only once, to take the sky plane in); the pack
+/// thread's wait for the lit tier's sky plane too.
 const RESTAGE_EVERY: Duration = Duration::from_millis(50);
+/// How long a still world waits for its lighting after its first picture, its turn
+/// behind other previews' included, before that picture is left as the last one and its
+/// renderer let go. Generous: four wide previews bake in turn well inside it.
+const STATIC_LIGHT_WAIT: Duration = Duration::from_secs(120);
 /// How soon the pack thread tries a snapshot again that the renderer refused (every staging
 /// buffer was still being read).
 const REFUSED_RETRY: Duration = Duration::from_millis(2);
@@ -532,8 +544,13 @@ pub struct HostedFrame {
     pub base_rise: u32,
     pub ring_width: u32,
     pub full_height: u32,
-    /// Whether the final terrain and shaft lighting is in this frame.
+    /// Whether the final lighting is in this frame: the sky plane and the light shafts
+    /// baked, and their ease finished.
     pub lighting_ready: bool,
+    /// Whether nothing more is coming for a still world: its lighting is ready, it is the
+    /// fast tier alone, or the wait for its lighting gave up. A thumbnail may let its
+    /// renderer go then.
+    pub settled: bool,
     /// The world's tick it shows, and which world (counts installs).
     pub tick: u64,
     pub generation: u64,
@@ -565,8 +582,22 @@ pub struct HostedStats {
     pub packs_refused: u64,
     /// Frames posted over an untaken one.
     pub displaced: u64,
-    /// The first picture is visible while its sky shading is still being baked.
+    /// The picture is visible while its sky shading is still being baked or eased in.
     pub unlit: bool,
+}
+
+/// **How a still world (a new-world preview) is lit**: a renderer option a lighting
+/// setting can switch ([`Hosted::set_still_lighting`]). Both draw the first picture with
+/// the fast tier: only the pipelines a still terrain draws with, under open sky, at once.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StillLighting {
+    /// The fast tier alone: the first picture is the last (no sky-occlusion bake, no light
+    /// shafts).
+    Fast,
+    /// The fast tier, then the exact sky plane and shafts baked in turn behind other
+    /// previews' and eased in over `[light] sky_fade_s`.
+    #[default]
+    Refined,
 }
 
 struct Clock {
@@ -657,6 +688,20 @@ struct SinkState {
     proj: Projection,
     overview: Projection,
     factor: u32,
+    /// `CUBARIUM_RENDER_TIMING`'s name for this renderer, and which of its first frames
+    /// (any, lit) have been handed over.
+    trace: u64,
+    traced: (bool, bool),
+    /// A still world whose wait for its lighting gave up ([`STATIC_LIGHT_WAIT`]): every
+    /// frame from now on is [`HostedFrame::settled`].
+    gave_up: bool,
+}
+
+/// Names renderers in the `CUBARIUM_RENDER_TIMING` log across every host in the process.
+static TRACE_IDS: AtomicU64 = AtomicU64::new(0);
+
+fn timing(what: std::fmt::Arguments<'_>) {
+    super::super::pack_timer::render_timing(what);
 }
 
 // The state is genuinely `Send`: the loop's pack and the presenter's record take it in
@@ -685,6 +730,11 @@ struct Shared {
     quit: AtomicBool,
     /// [`HostedStats::unlit`].
     unlit: AtomicBool,
+    /// [`StillLighting`] as a number (0 fast, 1 refined), read when a still world stages.
+    still_lighting: std::sync::atomic::AtomicU8,
+    /// The newest still world asked for: an older stager still opening its renderer
+    /// installs nothing over it.
+    still_asked: AtomicU64,
     /// The presenter, the pack thread, the still-world stagers and renderers being
     /// released: joined by [`Shared::shutdown`].
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -703,8 +753,9 @@ impl Shared {
         }
     }
 
-    /// The renderer for a world of `world`'s shape.
-    fn open(&self, world: &cubarium_voxel::Config) -> Result<(VoxelGpuSink<Offscreen>, Projection)> {
+    /// The renderer for a world of `world`'s shape: a live world's, or a still world's
+    /// lit as `still` says.
+    fn open(&self, world: &cubarium_voxel::Config, still: Option<StillLighting>) -> Result<(VoxelGpuSink<Offscreen>, Projection)> {
         let started = Instant::now();
         let mut cfg = self.cfg.clone();
         cfg.sim.world = world.clone();
@@ -715,10 +766,18 @@ impl Shared {
         super::check(proj)?;
         let models = load_models(&cfg);
         let model_time = started.elapsed();
-        let sink = VoxelGpuSink::offscreen(&cfg, proj, models)?;
-        if std::env::var_os("CUBARIUM_RENDER_TIMING").is_some() {
-            eprintln!("cubarium preview: models={:.3}s renderer={:.3}s", model_time.as_secs_f64(), (started.elapsed() - model_time).as_secs_f64());
-        }
+        let fade = cfg.light.sky_fade_s;
+        let options = match still {
+            None => OffscreenOptions { pipelines: Pipelines::All, sky: SkyBake::Now, sky_fade_s: fade },
+            Some(StillLighting::Refined) => {
+                OffscreenOptions { pipelines: Pipelines::Still, sky: SkyBake::Queued, sky_fade_s: fade }
+            }
+            Some(StillLighting::Fast) => {
+                OffscreenOptions { pipelines: Pipelines::Still, sky: SkyBake::Never, sky_fade_s: 0.0 }
+            }
+        };
+        let sink = VoxelGpuSink::offscreen_with(&cfg, proj, models, options)?;
+        timing(format_args!("opened: models {:.0} ms, sink {:.0} ms", model_time.as_secs_f64() * 1e3, (started.elapsed() - model_time).as_secs_f64() * 1e3));
         Ok((sink, proj))
     }
 
@@ -727,7 +786,12 @@ impl Shared {
         let ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), RING)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.baseline_s.store(proj.s, Ordering::SeqCst);
+        let trace = TRACE_IDS.fetch_add(1, Ordering::Relaxed) + 1;
+        timing(format_args!("r{trace} installed ({}x{} raster, lighting pending {})", proj.raster_w, proj.raster_h, sink.light_pending()));
         let state = SinkState {
+            trace,
+            traced: (false, false),
+            gave_up: false,
             ring,
             sink,
             generation,
@@ -810,7 +874,7 @@ impl Shared {
             };
             self.publish_pick(&st.sink, &st.proj, bits);
             let pending = st.sink.light_pending();
-            self.unlit.store(pending, Ordering::SeqCst);
+            self.unlit.store(pending || st.sink.light_fading(), Ordering::SeqCst);
             packed = if pending { Packed::AwaitingLight } else { Packed::Done };
         }
         drop(guard);
@@ -844,6 +908,7 @@ impl Shared {
         let gpu = st.sink.gpu.clone();
         {
             let flight = &mut st.flight;
+            let (trace, traced) = (st.trace, &mut st.traced);
             st.ring.poll(&mut st.sink.renderer, |tag, bytes| {
                 let at = Instant::now();
                 let mut buf = self.spare.lock().ok().and_then(|mut s| s.pop()).unwrap_or_default();
@@ -852,6 +917,11 @@ impl Shared {
                 copy_ms += at.elapsed().as_secs_f64() * 1e3;
                 while let Some((t, mut meta)) = flight.pop_front() {
                     if t == tag {
+                        if !traced.0 || (meta.lighting_ready && !traced.1) {
+                            timing(format_args!("r{trace} frame handed over (lighting ready {})", meta.lighting_ready));
+                            traced.0 = true;
+                            traced.1 |= meta.lighting_ready;
+                        }
                         meta.rgba = std::mem::take(&mut buf);
                         out.push(meta);
                         break;
@@ -929,6 +999,10 @@ impl Shared {
             let version = st.sink.renderer.content_version();
             if st.drawn_version != Some(version) {
                 let at = Instant::now();
+                let lit = !st.sink.light_pending() && !st.sink.light_fading();
+                if lit && self.unlit.load(Ordering::Relaxed) {
+                    self.unlit.store(false, Ordering::SeqCst);
+                }
                 if let Some(sv) = &mut st.sink.sunvis {
                     sv.frame(st.sink.clock_s, st.sink.renderer.params().sun, &mut st.sink.renderer);
                 }
@@ -940,7 +1014,8 @@ impl Shared {
                         view_x: st.sink.renderer.view_x(), view_y: st.sink.renderer.view_y(),
                         s: st.proj.s, rise: st.proj.rise, base_s: st.overview.s, base_rise: st.overview.rise,
                         ring_width: u32::from(st.overview.raster_w), full_height: u32::from(st.overview.raster_h),
-                        lighting_ready: !st.sink.light_pending(),
+                        lighting_ready: lit,
+                        settled: lit || st.gave_up,
                         tick: t.floor() as u64, generation: st.generation, ..Default::default()
                     }));
                     st.drawn_version = Some(st.sink.renderer.content_version());
@@ -1083,6 +1158,8 @@ impl Hosted {
             baseline_s: std::sync::atomic::AtomicU32::new(1),
             quit: AtomicBool::new(false),
             unlit: AtomicBool::new(false),
+            still_lighting: std::sync::atomic::AtomicU8::new(1),
+            still_asked: AtomicU64::new(0),
             threads: Mutex::new(Vec::new()),
             lane: PackLane::default(),
             packing: AtomicBool::new(false),
@@ -1124,11 +1201,26 @@ impl Hosted {
     /// stagers of the process ([`StageTurns`]); one that is not (a candidate opened large,
     /// asked for by hand) starts at once.
     pub fn show_static(&self, source: CandidateSource, index: usize, queued: bool) {
+        let asked = self.shared.still_asked.fetch_add(1, Ordering::SeqCst) + 1;
+        let lighting = match self.shared.still_lighting.load(Ordering::SeqCst) {
+            0 => StillLighting::Fast,
+            _ => StillLighting::Refined,
+        };
         self.spawn("cubarium-hosted-static", move |shared| {
-            if let Err(e) = stage_static(shared, &source, index, queued) {
+            if let Err(e) = stage_static(shared, &source, index, queued, asked, lighting) {
                 shared.fail(e);
             }
         });
+    }
+
+    /// How still worlds shown from now on are lit ([`StillLighting`]); one already shown
+    /// keeps its own.
+    pub fn set_still_lighting(&self, lighting: StillLighting) {
+        let n = match lighting {
+            StillLighting::Fast => 0,
+            StillLighting::Refined => 1,
+        };
+        self.shared.still_lighting.store(n, Ordering::SeqCst);
     }
 
     /// Run `work` on a thread of this renderer's own, joined by [`Shared::shutdown`]. Nothing
@@ -1305,44 +1397,80 @@ impl Drop for Hosted {
 }
 
 /// Stage candidate `index` of `source` as a still world: wait for a turn
-/// ([`STAGE_TURNS`]) when `queued`, open a renderer for it, pack it, wait for the lit tier's sky plane
-/// in the background after installing its first frame. The candidate's world is held by its own
-/// handle throughout, never under the session's candidate list.
-fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, queued: bool) -> Result<()> {
+/// ([`STAGE_TURNS`]) when `queued`, open a fast-tier renderer for it, pack it, install its
+/// first picture and give the turn up. Then, `Refined`, look every [`RESTAGE_EVERY`] for its
+/// lighting (packing the world once more when the sky plane lands, which then eases in) for
+/// up to [`STATIC_LIGHT_WAIT`]. The candidate's world is held by its own handle throughout,
+/// never under the session's candidate list. `asked` orders the requests: a stager overtaken
+/// by a newer one installs nothing.
+fn stage_static(
+    shared: &Arc<Shared>,
+    source: &CandidateSource,
+    index: usize,
+    queued: bool,
+    asked: u64,
+    lighting: StillLighting,
+) -> Result<()> {
     let quit = || shared.quit.load(Ordering::SeqCst);
-    let turn = if queued { STAGE_TURNS.take(quit) } else { None };
+    let overtaken = || shared.still_asked.load(Ordering::SeqCst) != asked;
+    timing(format_args!("candidate {index} asked (queued {queued}, {lighting:?})"));
+    let turn = if queued { STAGE_TURNS.take(|| quit() || overtaken()) } else { None };
     if queued && turn.is_none() {
         return Ok(());
     }
+    timing(format_args!("candidate {index} has its turn"));
     let p = source.get(index).context("the candidate is not ready")?;
     let (world, flora, fauna) = (&p.world, &p.flora, &p.fauna);
-    let (mut sink, proj) = shared.open(world.config())?;
+    let (mut sink, proj) = shared.open(world.config(), Some(lighting))?;
     sink.set_clock(world.tick(), 0.0);
+    let packed = Instant::now();
     sink.stage_world(world, flora, fauna);
+    timing(format_args!("candidate {index} packed in {:.0} ms", packed.elapsed().as_secs_f64() * 1e3));
     let (tick, solid) = (world.tick(), Arc::new(PickMap::solid_bits(world)));
-    if quit() {
+    if quit() || overtaken() {
         // Dropping the renderer here cancels its sky plane and joins that worker.
         return Ok(());
     }
-    shared.unlit.store(sink.light_pending(), Ordering::SeqCst);
+    let pending = sink.light_pending();
+    shared.unlit.store(pending, Ordering::SeqCst);
     shared.publish_pick(&sink, &proj, solid);
     if let Ok(mut c) = shared.clock.lock() {
         *c = Clock::still(tick);
     }
     let generation = shared.install(sink, proj, true)?;
+    // The first picture is up: the next preview may open its renderer.
+    drop(turn);
+    let started = Instant::now();
     loop {
-        if quit() { return Ok(()); }
-        let pending = {
+        if quit() {
+            return Ok(());
+        }
+        let waiting = {
             let mut guard = shared.sink.lock().map_err(|_| anyhow::anyhow!("the renderer's lock is poisoned"))?;
             let Some(st) = guard.as_mut().filter(|st| st.generation == generation) else { return Ok(()) };
-            // Zero-time poll: the presenter never waits behind the lighting worker.
-            if st.sink.wait_sky(Duration::ZERO) {
+            // Polls without waiting: the presenter never waits behind the lighting worker.
+            if st.sink.sky_landed() {
+                // The one pack after the first: it takes the sky plane in.
+                let at = Instant::now();
                 st.sink.stage_world(world, flora, fauna);
+                timing(format_args!("r{} restaged in {:.0} ms (pending {})", st.trace, at.elapsed().as_secs_f64() * 1e3, st.sink.light_pending()));
+            } else {
+                st.sink.land_shafts();
             }
-            st.sink.light_pending()
+            // Once nothing is pending the presenter eases the sky in and reports the last
+            // frame itself.
+            let pending = st.sink.light_pending();
+            if pending && started.elapsed() >= STATIC_LIGHT_WAIT {
+                timing(format_args!("r{} gave up waiting for its lighting", st.trace));
+                // The picture drawn next is the last; a frame is owed so the view hears it.
+                st.gave_up = true;
+                st.drawn_version = None;
+            }
+            pending && !st.gave_up
         };
-        shared.unlit.store(pending, Ordering::SeqCst);
-        if !pending { return Ok(()); }
+        if !waiting {
+            return Ok(());
+        }
         // Parked, so shutdown wakes and joins this stager promptly.
         std::thread::park_timeout(RESTAGE_EVERY);
     }
@@ -1399,7 +1527,7 @@ impl LoopHook for LiveHook {
             *c = Clock::still(clock.tick);
         }
         self.clock(clock);
-        match self.shared.open(world.config()) {
+        match self.shared.open(world.config(), None) {
             Ok((mut sink, proj)) => {
                 sink.set_clock(world.tick(), 0.0);
                 let staged = sink.stage_world(world, flora, fauna);

@@ -2198,6 +2198,11 @@ pub struct VoxelRenderer {
     set: vk::DescriptorSet,
     pool: vk::DescriptorPool,
     pipeline_layout: vk::PipelineLayout,
+    /// Which walk variants were built ([`Pipelines`]).
+    pipelines: Pipelines,
+    /// How far the sky's occlusion is lifted toward open sky (0: the sky plane as it is,
+    /// 1: open sky everywhere): [`VoxelRenderer::set_sky_lift`].
+    sky_lift: f32,
     pipeline: vk::Pipeline,
     /// The lit walk that also writes its end depth for the weather pass (null in the flat
     /// tier): bound instead of `pipeline` on frames that draw weather.
@@ -2222,6 +2227,21 @@ pub struct VoxelRenderer {
     queries: vk::QueryPool,
 }
 
+/// Which of the walk's pipelines a renderer builds. Each is `voxel.frag` specialised again,
+/// and a driver that has not seen this build's shaders compiles every one from scratch:
+/// tens of seconds each, minutes for the lot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pipelines {
+    /// Every variant: what a living world draws with.
+    #[default]
+    All,
+    /// What a still terrain draws with (a new-world preview): the walk, its weather depth
+    /// variant, the backdrop and the weather pass. No posing animals and no emitting plants,
+    /// so their variants are not built; a frame that would want one draws with the plain
+    /// walk instead.
+    Still,
+}
+
 impl VoxelRenderer {
     /// Build the pass and allocate every texture for a world of this shape. One call per
     /// process; the world's *contents* arrive through [`VoxelRenderer::stage`].
@@ -2229,6 +2249,16 @@ impl VoxelRenderer {
     /// `textures` is the face-texture atlas at this projection's level, uploaded here and
     /// never again; [`VoxelTextures::empty`] draws every face as before textures.
     pub fn new(gpu: &Gpu, params: VoxelParams, textures: &VoxelTextures) -> Result<VoxelRenderer> {
+        Self::with_pipelines(gpu, params, textures, Pipelines::All)
+    }
+
+    /// [`VoxelRenderer::new`] building only `pipelines`.
+    pub fn with_pipelines(
+        gpu: &Gpu,
+        params: VoxelParams,
+        textures: &VoxelTextures,
+        pipelines: Pipelines,
+    ) -> Result<VoxelRenderer> {
         params.validate()?;
         if (textures.s, textures.rise) != (params.s, params.rise)
             || textures.rgba.len() != {
@@ -2717,28 +2747,85 @@ impl VoxelRenderer {
                 3,
             )
         };
-        let pipeline = walk(false, false, false)?;
-        let pose_pipeline = walk(false, true, false)?;
-        let (depth_pipeline, depth_pose_pipeline) = if params.lit {
-            (walk(true, false, false)?, walk(true, true, false)?)
-        } else {
-            (vk::Pipeline::null(), vk::Pipeline::null())
-        };
-        let plant_light_pipelines = [
-            walk(false, false, true)?,
-            walk(false, true, true)?,
-            if params.lit { walk(true, false, true)? } else { vk::Pipeline::null() },
-            if params.lit { walk(true, true, true)? } else { vk::Pipeline::null() },
-        ];
-        let backdrop = if params.lit {
-            backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)?
-        } else {
-            backdrop
-        };
-        let weather_pass = if params.lit {
-            Some(WeatherPass::new(gpu, &params, raster_view, pipeline_layout, vs, &constants)?)
-        } else {
-            None
+        // **Every variant is compiled on a thread of its own.** A driver meeting this build's
+        // shaders for the first time compiles each pipeline from scratch, tens of seconds
+        // apiece for `voxel.frag`; one after another that was minutes before a first frame.
+        // Pipeline creation is free-threaded in Vulkan, so the renderer waits for the
+        // slowest one instead of their sum. A driver that has them cached returns at once.
+        let timing = std::env::var_os("CUBARIUM_RENDER_TIMING").is_some();
+        let all = pipelines == Pipelines::All;
+        let lit = params.lit;
+        let none = vk::Pipeline::null();
+        let timed = |what: &'static str, started: std::time::Instant| (what, started.elapsed().as_secs_f64() * 1e3);
+        let built = std::thread::scope(|sc| -> Result<_> {
+            let walk = &walk;
+            let spawn = |what: &'static str, depth: bool, pose: bool, plant_light: bool, want: bool| {
+                want.then(|| {
+                    sc.spawn(move || {
+                        let started = std::time::Instant::now();
+                        walk(depth, pose, plant_light).map(|p| (p, timed(what, started)))
+                    })
+                })
+            };
+            let base = spawn("walk", false, false, false, true);
+            let pose = spawn("walk pose", false, true, false, all);
+            let depth = spawn("walk depth", true, false, false, lit);
+            let depth_pose = spawn("walk depth pose", true, true, false, lit && all);
+            let plant_light = [
+                spawn("walk plant-light", false, false, true, all),
+                spawn("walk plant-light pose", false, true, true, all),
+                spawn("walk plant-light depth", true, false, true, lit && all),
+                spawn("walk plant-light depth pose", true, true, true, lit && all),
+            ];
+            let backdrop = sc.spawn(move || {
+                let started = std::time::Instant::now();
+                let b = if lit { backdrop.with_pipeline(gpu, pipeline_layout, vs, fs)? } else { backdrop };
+                Ok::<_, anyhow::Error>((b, timed("backdrop", started)))
+            });
+            let constants = &constants;
+            let weather = lit.then(|| {
+                sc.spawn(move || {
+                    let started = std::time::Instant::now();
+                    WeatherPass::new(gpu, &params, raster_view, pipeline_layout, vs, constants)
+                        .map(|w| (w, timed("weather", started)))
+                })
+            });
+            let mut laps: Vec<(&'static str, f64)> = Vec::new();
+            let mut take = |h: Option<std::thread::ScopedJoinHandle<'_, Result<(vk::Pipeline, (&'static str, f64))>>>| -> Result<vk::Pipeline> {
+                match h {
+                    Some(h) => {
+                        let (p, lap) = h.join().map_err(|_| anyhow::anyhow!("a pipeline's thread panicked"))??;
+                        laps.push(lap);
+                        Ok(p)
+                    }
+                    None => Ok(none),
+                }
+            };
+            let pipeline = take(base)?;
+            let pose_pipeline = take(pose)?;
+            let depth_pipeline = take(depth)?;
+            let depth_pose_pipeline = take(depth_pose)?;
+            let [a, b, c, e] = plant_light;
+            let plant_light_pipelines = [take(a)?, take(b)?, take(c)?, take(e)?];
+            let (backdrop, lap) = backdrop.join().map_err(|_| anyhow::anyhow!("the backdrop's thread panicked"))??;
+            laps.push(lap);
+            let weather_pass = match weather {
+                Some(h) => {
+                    let (w, lap) = h.join().map_err(|_| anyhow::anyhow!("the weather pass's thread panicked"))??;
+                    laps.push(lap);
+                    Some(w)
+                }
+                None => None,
+            };
+            Ok((pipeline, pose_pipeline, depth_pipeline, depth_pose_pipeline, plant_light_pipelines, backdrop, weather_pass, laps))
+        });
+        let (pipeline, pose_pipeline, depth_pipeline, depth_pose_pipeline, plant_light_pipelines, backdrop, weather_pass, mut laps) = built?;
+        let mut lap = std::time::Instant::now();
+        let mut mark = |what: &'static str| {
+            if timing {
+                laps.push((what, lap.elapsed().as_secs_f64() * 1e3));
+                lap = std::time::Instant::now();
+            }
         };
         unsafe {
             d.destroy_shader_module(vs, None);
@@ -2755,6 +2842,7 @@ impl VoxelRenderer {
             STAGING_RING,
             (params.width, params.height, params.depth),
         )?;
+        mark("figures");
         let plants = match params.plants {
             Some(motion) => {
                 let pass = crate::plants::PlantPass::new(
@@ -2778,6 +2866,11 @@ impl VoxelRenderer {
             }
             None => None,
         };
+        mark("plants");
+        if timing {
+            let line: Vec<String> = laps.iter().map(|(w, ms)| format!("{w} {ms:.0}")).collect();
+            eprintln!("cubarium timing: renderer pipelines (lit {}) ms: {}", params.lit, line.join(", "));
+        }
         let isun = image_info(figures.sun_view);
         unsafe { d.update_descriptor_sets(&[sampled_write(set, 13, &isun)], &[]) };
         if params.lit {
@@ -2891,6 +2984,8 @@ impl VoxelRenderer {
             set,
             pool,
             pipeline_layout,
+            pipelines,
+            sky_lift: 0.0,
             pipeline,
             depth_pipeline,
             pose_pipeline,
@@ -2908,6 +3003,28 @@ impl VoxelRenderer {
 
     pub fn params(&self) -> VoxelParams {
         self.params
+    }
+
+    /// Which walk variants this renderer built.
+    pub fn pipelines(&self) -> Pipelines {
+        self.pipelines
+    }
+
+    /// Lift the sky's occlusion toward open sky by `lift` (0..1): `voxel.frag` reads each
+    /// open cell's sky as `mix(plane, 1, lift)`. A picture first drawn before its sky plane
+    /// existed (open sky everywhere) eases the plane in by moving this from 1 to 0 on the
+    /// frame clock. 0, the default, is the plane as it is.
+    pub fn set_sky_lift(&mut self, lift: f32) {
+        let lift = lift.clamp(0.0, 1.0);
+        if lift != self.sky_lift {
+            self.sky_lift = lift;
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+
+    pub fn sky_lift(&self) -> f32 {
+        self.sky_lift
     }
 
     /// Change the shading knobs an operator can move — the haze, the water opacity and
@@ -3356,6 +3473,7 @@ impl VoxelRenderer {
             block.poses = pose_rows(&self.drawn_poses, self.clock.time, self.params.s);
         }
         block.vol[3] = self.sunvis.fade();
+        block.clock[3] = self.sky_lift;
         block.view[0] = self.view_x;
         block.camera = [self.view_y, self.projection_height as i32, 0, 0];
         if let Some(h) = &self.highlight {
@@ -3595,6 +3713,15 @@ impl VoxelRenderer {
                         (true, false) => self.depth_pipeline,
                         (true, true) => self.depth_pose_pipeline,
                     }
+                };
+                // A variant [`Pipelines::Still`] did not build: the plain walk, with the
+                // weather's depth when the weather is drawn.
+                let walk = if walk != vk::Pipeline::null() {
+                    walk
+                } else if weather {
+                    self.depth_pipeline
+                } else {
+                    self.pipeline
                 };
                 d.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, walk);
                 d.cmd_draw(cb, 3, 1, 0, 0);

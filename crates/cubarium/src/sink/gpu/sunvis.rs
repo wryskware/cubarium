@@ -485,6 +485,10 @@ impl Worker {
                         _ => None,
                     };
                     let ms = started.elapsed().as_secs_f64() * 1e3;
+                    super::pack_timer::render_timing(format_args!(
+                        "shafts bake on {threads} threads: {ms:.0} ms{}",
+                        if out.is_some() { "" } else { " (unchanged)" }
+                    ));
                     if outbox.send((out, ms)).is_err() {
                         break;
                     }

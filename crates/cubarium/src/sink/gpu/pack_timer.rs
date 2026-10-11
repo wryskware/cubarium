@@ -63,3 +63,19 @@ pub fn phases() -> Vec<(&'static str, f64)> {
     #[cfg(not(feature = "pack-profile"))]
     Vec::new()
 }
+
+/// `CUBARIUM_RENDER_TIMING`: whether a renderer's start-up stages (device, textures,
+/// pack, sky plane, shafts, first frames) are written to stderr.
+pub fn render_timing_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("CUBARIUM_RENDER_TIMING").is_some())
+}
+
+/// One line of [`render_timing_on`]'s log: milliseconds since the first line, then `what`.
+pub fn render_timing(what: std::fmt::Arguments<'_>) {
+    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    if render_timing_on() {
+        let at = ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1e3;
+        eprintln!("cubarium timing +{at:.0}ms {what}");
+    }
+}
