@@ -5,7 +5,7 @@ The neon UI (`game/ui/neon/`) uses two fonts. The font files are never committed
 | File | Font | Source | Import |
 |---|---|---|---|
 | `PixelifySans[wght].ttf` | Pixelify Sans (variable weight), OFL | https://github.com/google/fonts/tree/main/ofl/pixelifysans | antialiasing gray, hinting light |
-| `GridlitePEVFTRIAL-All.ttf` | Gridlite PE variable, Rosetta Type | Rosetta's trial download, copied from `~/Downloads/` | antialiasing gray, hinting light (matches the browser mockups; none renders dimmer and blurrier), subpixel positioning off, no mipmaps, no MSDF |
+| `GridlitePEVFTRIAL-All.ttf` | Gridlite PE variable, Rosetta Type | Rosetta's trial download, copied from `~/Downloads/` | antialiasing gray, hinting normal (keeps the 26 px chrome's dot columns distinct; light collapses them into horizontal stripes), subpixel positioning off, no mipmaps, no MSDF |
 
 Gridlite PE:
 - The game needs a Rosetta Type licence before it ships (design/ui/design-language.md, "Gridlite licensing").
