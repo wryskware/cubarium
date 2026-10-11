@@ -113,6 +113,9 @@ mass_scale = 60.0
 capgnawer_stay_worth = 0.25
 
 [fauna.founders.loftstrider]
+# LS-TOGETHER, Wrysk 2026-10-11: "those loftstriders can never meet each other to breed".
+founding_together = true
+founding_min_region_faces = 500
 founding_count = 2
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.4934555320156417

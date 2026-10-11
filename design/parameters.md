@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2842 rows)
+**`fauna.*`** (2860 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1646,6 +1646,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.littershredder.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.littershredder.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.littershredder.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.littershredder.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.littershredder.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.littershredder.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.littershredder.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -1937,6 +1939,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.frondgrazer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.frondgrazer.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.frondgrazer.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.frondgrazer.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.frondgrazer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.frondgrazer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.frondgrazer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2228,6 +2232,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.lanternjaw.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.lanternjaw.founding_count` | 3 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.lanternjaw.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.lanternjaw.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.lanternjaw.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.lanternjaw.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.lanternjaw.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2519,6 +2525,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.capgnawer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.capgnawer.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.capgnawer.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.capgnawer.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.capgnawer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.capgnawer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.capgnawer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2810,6 +2818,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.mouth_floor_fraction` | 0.235 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.loftstrider.bite_spill_fraction` | 0.25 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.loftstrider.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.loftstrider.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.loftstrider.founding_min_region_faces` | 500 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.loftstrider.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.loftstrider.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.loftstrider.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3101,6 +3111,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.ripple-snail.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.ripple-snail.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.ripple-snail.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.ripple-snail.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.ripple-snail.water_margin_m` | 0.25 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.ripple-snail.amphibious.dry_ground_s` | 2400.0 | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.ripple-snail.amphibious.wet_ground_s` | 21600.0 | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3392,6 +3404,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.bellwing.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.bellwing.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.bellwing.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.bellwing.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.bellwing.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.bellwing.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.bellwing.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3683,6 +3697,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.seedporter.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.seedporter.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.seedporter.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.seedporter.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.seedporter.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.seedporter.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.seedporter.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3974,6 +3990,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.chorister.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.chorister.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.chorister.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.chorister.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.chorister.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.chorister.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.chorister.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
