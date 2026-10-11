@@ -756,6 +756,8 @@ pub struct Animals {
     sleep_blend: FxHashMap<u64, (f32, bool)>,
     /// Each animal's idle memory by id at the last rebuild ([`Idle`]), kept the same way.
     idle_blend: FxHashMap<u64, Idle>,
+    /// The idle actions' knobs (`[figures.idle]`): how often each founder's come, and which.
+    idle_actions: idle::IdleConfig,
     /// Each animal's hunker weight (0 standing to 1 clamped down) and whether it was
     /// hunkered, by id, at the last rebuild ([`hunker`]), kept the same way; and the seconds
     /// a hunker takes ([`Animals::set_hunker_s`]).
@@ -856,13 +858,34 @@ fn bite_aim(a: &Animal, voxel_m: f64, width: u32) -> Option<[f32; 2]> {
 }
 
 /// One animal's idle memory ([`idle`]): its idle weight (0 moving to 1 idling) and whether
-/// it was idling, at the last rebuild; the ticks it has stood still; where it stood.
+/// it was idling, at the last rebuild; the ticks it has stood still; where it stood; and its
+/// latest **full runs**, the ticks `[from, until)` over which its weight was full while it
+/// idled (`until` `u64::MAX` while one lasts), latest first: an idle action plays only if it
+/// started in one ([`Animals::idle_full_at`]). Four, so an action under way survives three
+/// interruptions of its idling before it would be forgotten.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Idle {
     weight: f32,
     idle: bool,
     still: u64,
     at: [f64; 3],
+    full: [(u64, u64); 4],
+}
+
+/// No full run.
+const NO_RUN: (u64, u64) = (0, 0);
+
+/// The full runs one rebuild on, at `tick`: one opens when the weight is full while idling,
+/// and the open one closes when either stops.
+fn advance_runs(mut full: [(u64, u64); 4], full_now: bool, tick: u64) -> [(u64, u64); 4] {
+    let open = full[0].1 == u64::MAX;
+    if full_now && !open {
+        full.rotate_right(1);
+        full[0] = (tick, u64::MAX);
+    } else if !full_now && open {
+        full[0].1 = tick;
+    }
+    full
 }
 
 /// One posing body's pose: each cell's pose byte (beside its cells), its torso row, the rows
@@ -898,6 +921,7 @@ impl Animals {
             entry_of: FxHashMap::default(),
             sleep_blend: FxHashMap::default(),
             idle_blend: FxHashMap::default(),
+            idle_actions: idle::IdleConfig::default(),
             hunker_blend: FxHashMap::default(),
             hunker_s: hunker::DEFAULT_S,
             flash_blend: FxHashMap::default(),
@@ -1073,13 +1097,17 @@ impl Animals {
                 && hunkered == 0.0
                 && last.is_some_and(|m| m.at == at);
             let still = if quiet { last.map_or(0, |m| m.still) + dt_ticks } else { 0 };
+            let weight = last.map_or(0.0, |m| idle::advance_blend(m.weight, m.idle, dt));
+            let idling = still >= hold;
+            let full = last.map_or([NO_RUN; 4], |m| m.full);
             idle.insert(
                 a.id,
                 Idle {
-                    weight: last.map_or(0.0, |m| idle::advance_blend(m.weight, m.idle, dt)),
-                    idle: still >= hold,
+                    weight,
+                    idle: idling,
                     still,
                     at,
+                    full: advance_runs(full, idling && weight >= 1.0, tick),
                 },
             );
         }
@@ -1160,6 +1188,26 @@ impl Animals {
             0.0
         };
         (m.weight > 0.0 || rate != 0.0).then_some((m.weight, rate))
+    }
+
+    /// Whether an idle action of `animal` starting at `tick` plays: its idle weight was full
+    /// then, while it idled ([`Idle`]'s full runs). One under way when it leaves idling
+    /// plays on, eased out with the idle weight.
+    pub(crate) fn idle_full_at(&self, animal: &Animal, tick: i64) -> bool {
+        let Ok(t) = u64::try_from(tick) else { return false };
+        self.idle_blend
+            .get(&animal.id)
+            .is_some_and(|m| m.full.iter().any(|&(from, until)| from <= t && t < until))
+    }
+
+    /// The idle actions' knobs (`[figures.idle]`, [`Animals::set_idle_actions`]).
+    pub(crate) fn idle_actions(&self) -> &idle::IdleConfig {
+        &self.idle_actions
+    }
+
+    /// Set the idle actions' knobs (`[figures.idle]`) from the next rebuild on.
+    pub fn set_idle_actions(&mut self, cfg: idle::IdleConfig) {
+        self.idle_actions = cfg;
     }
 
     /// One animal's sleep weight at this rebuild and its change per tick from here, or
@@ -1280,8 +1328,10 @@ impl Animals {
         };
         let entry = self.intern(body);
         let head_move = idling
-            .filter(|_| animal.founder.is_some_and(idle::moves_head))
-            .and_then(|_| idle::move_near(id, tick, DT))
+            .and(animal.founder)
+            .filter(|&f| idle::moves_head(f))
+            .and_then(|f| idle::move_near(id, tick, DT, &self.idle_actions.of(f)))
+            .filter(|m| self.idle_full_at(animal, m.start_tick))
             .map(|m| m.relative_to(tick));
         let head_entry = head_move.map(|m| (self.intern(PoseEntry { head: m, ..body }), m));
         let bytes = k
@@ -2400,7 +2450,7 @@ mod tests {
         let c = w.config().clone();
         let mut grid = Animals::empty(c.width, c.height, c.depth);
         // Longer than two head-move slots, so a browser would have moved its head.
-        for tick in 100..(100 + (3.0 * idle::MOVE_EVERY_S / DT) as u64) {
+        for tick in 100..(100 + (3.0 * idle::IdleConfig::default().frondgrazer.apart_s[1] / DT) as u64) {
             stamp_at(&mut grid, &w, &fauna, &a, tick);
             assert!(grid.pose_entries().iter().all(|e| e.head == HeadMove::NONE));
         }

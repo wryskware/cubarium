@@ -25,7 +25,14 @@
 //!   displacement by the weight, so the weight's ease is the reach and the return to rest;
 //! - a **track** ([`ClipMode::Track`]) is walked by its weight, its first frame (the rest
 //!   pose) at 0 and its last at 1: a transition whose every step was solved (feet planted)
-//!   rather than blended.
+//!   rather than blended;
+//! - an **action** ([`ClipMode::Action`], RIG-STATES round 5) plays once, from its first
+//!   frame to its last, both the rest pose, from the tick the idle schedule starts it
+//!   (`idle::schedule`), blended from rest by the idle weight as a loop is. Its state is
+//!   `idle.<name>`; several clips of one name are that action's variants
+//!   ([`AnimalRig::actions`]). An action is no state's clip: it leaves the class path's lips
+//!   ([`AnimalRig::lip_bones`]) and the rest drawing's folded bones
+//!   ([`AnimalRig::without_tracks`]) as they are, so no other frame changes for it.
 //!
 //! Each clip's weight eases 0 → 1 while its state holds and back after (the feeding clip's
 //! over [`FEED_EASE_S`], `Animals::feed_weight`; the rest's with the sleep blend,
@@ -72,8 +79,8 @@
 //! n_bones u8, then per bone: len u8, name bytes, parent u8 (255: none; before the bone)
 //! order u8 (the turn symmetry about up; 0 or 1: none), and when it is 2 or more, per
 //!     bone its image u8 (the bone one step of 2π / order about +y carries it onto)
-//! n_clips u8, then per clip: len u8, state name bytes, mode u8 (0 loop, 1 track),
-//!     fps f32, n_frames u16
+//! n_clips u8, then per clip: len u8, state name bytes, mode u8 (0 loop, 1 track,
+//!     2 action: its state `idle.<name>`), fps f32, n_frames u16
 //! n_bins u8, then per bin: length_m f64, scale f32 (voxels per metre of its pivots),
 //!     per clip its aim f32 (the bite height above the feet it reaches for, the bin's
 //!     metres; NaN: not aimed) and its lower f32 (the share of the `asleep` track it holds
@@ -114,6 +121,20 @@ pub enum ClipMode {
     Loop,
     /// Walked by its weight, first frame to last.
     Track,
+    /// Played once from its start, blended from rest by its weight (the idle's).
+    Action,
+}
+
+/// The state prefix of an idle action's clips: `idle.<name>`.
+pub const ACTION_PREFIX: &str = "idle.";
+
+/// One idle action of a rig: its name, its variants' clips, and its length (seconds, the
+/// longest variant's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RigAction {
+    pub name: String,
+    pub clips: Vec<usize>,
+    pub length_s: f64,
 }
 
 /// One clip: the animal state it plays in, how, its frame rate and frames.
@@ -262,6 +283,42 @@ impl AnimalRig {
         self.clips.get(clip).map_or(0.0, |c| c.frames as f64 / c.fps)
     }
 
+    /// Seconds action clip `clip` plays: its first frame to its last.
+    pub fn action_s(&self, clip: usize) -> f64 {
+        self.clips.get(clip).map_or(0.0, |c| c.frames.saturating_sub(1) as f64 / c.fps)
+    }
+
+    /// The rig's idle actions in clip order, each with its variants (the module header).
+    pub fn actions(&self) -> Vec<RigAction> {
+        let mut out: Vec<RigAction> = Vec::new();
+        for (c, clip) in self.clips.iter().enumerate() {
+            if clip.mode != ClipMode::Action {
+                continue;
+            }
+            let name = clip.state.strip_prefix(ACTION_PREFIX).unwrap_or(&clip.state);
+            let s = self.action_s(c);
+            match out.iter_mut().find(|a| a.name == name) {
+                Some(a) => {
+                    a.clips.push(c);
+                    a.length_s = a.length_s.max(s);
+                }
+                None => out.push(RigAction { name: name.to_string(), clips: vec![c], length_s: s }),
+            }
+        }
+        out
+    }
+
+    /// Whether action clip `clip` moves, in bin `bin`, a bone the rest drawing folds into
+    /// its parent ([`Self::without_tracks`]): then the rig's whole drawing plays it.
+    pub fn action_needs_tracks(&self, bin: usize, clip: usize) -> bool {
+        let Some(b) = self.bins.get(bin) else { return false };
+        let owner = self.owners(b);
+        let n = self.bones.len();
+        b.keys.get(clip).is_some_and(|keys| {
+            keys.iter().enumerate().any(|(i, key)| owner[i % n] != i % n && !still(key))
+        })
+    }
+
     /// The bin of the model cells `length_m` selects (`AnimalModel::select`'s rule).
     pub fn select(&self, length_m: f64) -> Option<usize> {
         super::model::nearest(self.bins.iter().map(|b| b.length_m), length_m)
@@ -311,50 +368,26 @@ impl AnimalRig {
     /// those children are their parent's cells: even their internal faces and the atlas
     /// bounds must be the parent's, rather than merely applying an identity transform.
     pub fn without_tracks(&self, bin: usize) -> Option<AnimalRig> {
-        let n = self.bones.len();
-        let aliases = |b: &RigBin| {
-            let (mut loops, mut tracks) = (vec![false; n], vec![false; n]);
-            for (c, clip) in self.clips.iter().enumerate() {
-                for (i, key) in b.keys[c].iter().enumerate() {
-                    let still =
-                        (key.q[0].abs() - 1.0).abs() < 1e-6 && key.d.iter().all(|v| v.abs() < 1e-7);
-                    let moved = if clip.mode == ClipMode::Loop {
-                        &mut loops
-                    } else {
-                        &mut tracks
-                    };
-                    moved[i % n] |= !still;
-                }
-            }
-            let mut owner: Vec<usize> = (0..n).collect();
-            for (k, bone) in self.bones.iter().enumerate() {
-                if tracks[k]
-                    && !loops[k]
-                    && let Some(p) = bone.parent
-                {
-                    owner[k] = owner[p];
-                }
-            }
-            owner
-        };
         let b = self.bins.get(bin)?;
-        let owner = aliases(b);
+        let owner = self.owners(b);
         if b.bones
             .values()
             .all(|&k| owner[usize::from(k)] == usize::from(k))
         {
             return None;
         }
+        // the loops, and the actions (one that moves a folded bone is drawn on the whole
+        // rig instead: `action_needs_tracks`)
         let keep: Vec<usize> = self
             .clips
             .iter()
             .enumerate()
-            .filter_map(|(c, clip)| (clip.mode == ClipMode::Loop).then_some(c))
+            .filter_map(|(c, clip)| (clip.mode != ClipMode::Track).then_some(c))
             .collect();
         let mut rest = self.clone();
         rest.clips = keep.iter().map(|&c| self.clips[c].clone()).collect();
         for (b, original) in rest.bins.iter_mut().zip(&self.bins) {
-            let owner = aliases(original);
+            let owner = self.owners(original);
             for k in b.bones.values_mut() {
                 *k = owner[usize::from(*k)] as u8;
             }
@@ -363,6 +396,34 @@ impl AnimalRig {
             b.keys = keep.iter().map(|&c| original.keys[c].clone()).collect();
         }
         Some(rest)
+    }
+
+    /// Each bone's owner in the rest drawing of bin `b` ([`Self::without_tracks`]): a bone
+    /// only a track moves (no loop) is its parent's owner's, the rest their own. Actions
+    /// count for neither.
+    fn owners(&self, b: &RigBin) -> Vec<usize> {
+        let n = self.bones.len();
+        let (mut loops, mut tracks) = (vec![false; n], vec![false; n]);
+        for (c, clip) in self.clips.iter().enumerate() {
+            let moved = match clip.mode {
+                ClipMode::Loop => &mut loops,
+                ClipMode::Track => &mut tracks,
+                ClipMode::Action => continue,
+            };
+            for (i, key) in b.keys[c].iter().enumerate() {
+                moved[i % n] |= !still(key);
+            }
+        }
+        let mut owner: Vec<usize> = (0..n).collect();
+        for (k, bone) in self.bones.iter().enumerate() {
+            if tracks[k]
+                && !loops[k]
+                && let Some(p) = bone.parent
+            {
+                owner[k] = owner[p];
+            }
+        }
+        owner
     }
 
     /// Tracks can also be walked by an aimed loop's lowering, without a state weight.
@@ -455,6 +516,11 @@ impl AnimalRig {
             }
             ClipMode::Track => {
                 let t = at.weight.clamp(0.0, 1.0) * (c.frames - 1) as f64;
+                let i0 = (t.floor() as usize).min(c.frames - 1);
+                (i0, (i0 + 1).min(c.frames - 1), t - i0 as f64)
+            }
+            ClipMode::Action => {
+                let t = (at.time_s * c.fps).clamp(0.0, (c.frames - 1) as f64);
                 let i0 = (t.floor() as usize).min(c.frames - 1);
                 (i0, (i0 + 1).min(c.frames - 1), t - i0 as f64)
             }
@@ -561,7 +627,7 @@ impl AnimalRig {
             None => self.frame_key(b, at.clip, at, k)?,
         };
         let blend = match clip.mode {
-            ClipMode::Loop => w,
+            ClipMode::Loop | ClipMode::Action => w,
             ClipMode::Track => 1.0,
         };
         Some(Key {
@@ -679,6 +745,7 @@ impl AnimalRig {
             let mode = match r.u8()? {
                 0 => ClipMode::Loop,
                 1 => ClipMode::Track,
+                2 => ClipMode::Action,
                 m => bail!("clip {state}'s mode {m}"),
             };
             let fps = r.f32()?;
@@ -743,6 +810,11 @@ impl AnimalRig {
         }
         Ok(AnimalRig { bones, clips, bins, symmetry })
     }
+}
+
+/// Whether a sampled key is the rest: no turn, no displacement.
+fn still(key: &Key) -> bool {
+    (key.q[0].abs() - 1.0).abs() < 1e-6 && key.d.iter().all(|v| v.abs() < 1e-7)
 }
 
 /// The smoothstep a clip weight is drawn at: the reach and return start and stop gently.
@@ -1419,5 +1491,112 @@ mod tests {
             }
         }
         println!("the feet's worst drift, voxels: fully on {:.3}, easing {:.3}", worst[0], worst[1]);
+    }
+
+    /// The arm's quarter turn about +y over a second, from rest, as an idle action.
+    fn turn_action() -> (&'static str, ClipMode, Vec<[Key; 2]>) {
+        ("idle.turn", ClipMode::Action, vec![[rest(), rest()], [rest(), key(quat_of(QUARTER_Y), [0.0; 3])]])
+    }
+
+    /// An action clip plays once from its start: its time is clamped to its first and last
+    /// frames, and its weight blends it from rest as a loop's does.
+    #[test]
+    fn an_action_plays_once_and_holds_its_ends() {
+        let r = rig(1.0, vec![turn_action()]);
+        assert_eq!(r.actions(), vec![RigAction { name: "turn".into(), clips: vec![0], length_s: 1.0 }]);
+        let at = |t: f64, w: f64| {
+            let mut out = Vec::new();
+            r.pose(0, &[on(0, t, w)], &mut out);
+            apply(&out[1], [2.0, 0.0, 0.0])
+        };
+        // before its start the rest, after its end its last frame (held, not wrapped)
+        assert!(near(at(-3.0, 1.0), at(0.0, 1.0)));
+        assert!(near(at(7.5, 1.0), at(1.0, 1.0)));
+        assert!(!near(at(0.5, 1.0), at(0.0, 1.0)));
+        assert!(near(at(0.5, 0.0), at(0.0, 1.0)), "weight 0 is the rest");
+    }
+
+    /// An action leaves the rest of the rig's drawing alone: it moves no lip and folds no
+    /// bone of the loop-only drawing (only a track moves the second bone here).
+    #[test]
+    fn an_action_changes_no_lip_and_no_folded_bone() {
+        // a track that folds the arm alone
+        let fold = ("asleep", ClipMode::Track, vec![[rest(), rest()], [rest(), key(IDENTITY, [0.0, -0.5, 0.0])]]);
+        let mut base = rig(1.0, vec![fold.clone()]);
+        let mut with = rig(1.0, vec![fold, turn_action()]);
+        for r in [&mut base, &mut with] {
+            r.bins[0].bones.insert([0, 0, 0], 0);
+            r.bins[0].bones.insert([1, 0, 0], 1);
+        }
+        assert!(base.without_tracks(0).is_some(), "the arm folds into the root");
+        assert_eq!(with.lip_bones(0), base.lip_bones(0));
+        let (a, b) = (with.without_tracks(0), base.without_tracks(0));
+        assert_eq!(a.as_ref().map(|r| r.bins[0].bones.clone()), b.as_ref().map(|r| r.bins[0].bones.clone()));
+        assert!(with.action_needs_tracks(0, 1), "it moves the folded bone: the whole drawing plays it");
+    }
+
+    /// The loftstrider's idle actions (RIG-STATES round 5): each variant starts and ends at
+    /// the rest; the whole body takes part (the root moves) while every foot stays where
+    /// it stood and level, at the full idle weight and easing; a look moves no frond's
+    /// bend, and a scratch moves one frond only.
+    #[test]
+    fn the_loftstriders_actions_move_the_body_over_planted_feet() {
+        let Some(r) = loftstrider() else { return };
+        let actions = r.actions();
+        let names: Vec<&str> = actions.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names, ["look", "scratch"]);
+        let feet: Vec<usize> = (0..r.bones.len()).filter(|&k| r.bones[k].name.starts_with("foot")).collect();
+        let fronds = |c: usize| -> Vec<usize> {
+            (0..6)
+                .filter(|f| {
+                    r.bins.iter().any(|b| {
+                        (0..r.clips[c].frames).any(|i| {
+                            (0..r.bones.len())
+                                .filter(|&k| r.bones[k].name.starts_with(&format!("f{f}_")) && !r.bones[k].name.ends_with("_a"))
+                                .any(|k| {
+                                    // more than a tenth of a degree, or a tenth of a millimetre
+                                    let key = &b.keys[c][i * r.bones.len() + k];
+                                    key.q[0].abs() < (0.1f64.to_radians() / 2.0).cos() || key.d.iter().any(|v| v.abs() > 1e-4)
+                                })
+                        })
+                    })
+                })
+                .collect()
+        };
+        let mut out = Vec::new();
+        for a in &actions {
+            for &c in &a.clips {
+                let moved = fronds(c);
+                match a.name.as_str() {
+                    "look" => assert!(moved.is_empty(), "a look bends fronds {moved:?}"),
+                    _ => assert_eq!(moved.len(), 1, "a scratch moves one frond: {moved:?}"),
+                }
+                let end = r.action_s(c);
+                for bin in 0..r.bins.len() {
+                    let b = &r.bins[bin];
+                    let rest = |t: f64| {
+                        let mut o = Vec::new();
+                        r.pose(bin, &[on(c, t, 1.0)], &mut o);
+                        o.iter().all(|m| (0..3).all(|i| (0..4).all(|j| (f64::from(m[i][j]) - if i == j { 1.0 } else { 0.0 }).abs() < 1e-5 || j == 3 && f64::from(m[i][3]).abs() < 1e-5)))
+                    };
+                    assert!(rest(0.0) && rest(end), "{} clip {c} bin {bin}: from and to the rest", a.name);
+                    let mut body = 0.0f64;
+                    for f in 0..=(end * 10.0) as usize {
+                        for w in [1.0, 0.5] {
+                            r.pose(bin, &[on(c, f as f64 / 10.0, w)], &mut out);
+                            body = body.max((0..3).map(|i| f64::from(out[0][i][3]).abs()).fold(0.0, f64::max));
+                            for &k in &feet {
+                                let h = b.heads[k].map(|v| v * b.scale);
+                                let p = apply(&out[k], h);
+                                let drift = (0..3).map(|i| (p[i] - h[i]).powi(2)).sum::<f64>().sqrt();
+                                assert!(drift < 0.5, "{} bin {bin} t {f} w {w}: foot {k} moved {drift:.3}", a.name);
+                                assert!(f64::from(out[k][1][1]) > 0.995, "foot {k} tilted");
+                            }
+                        }
+                    }
+                    assert!(body > 0.05, "{} bin {bin}: the body takes part ({body:.3} voxels)", a.name);
+                }
+            }
+        }
     }
 }

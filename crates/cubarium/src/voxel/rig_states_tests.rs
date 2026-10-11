@@ -58,12 +58,15 @@ fn figure(lib: &ModelLibrary, models: &mut FigureModels, a: &Animal, from: u64, 
     out.into_iter().find(|s| s.key == (a.id, 0)).expect("its figure")
 }
 
-/// Asleep, idling and hunkered, the figure carries its rig's clip for that state (eased
-/// in from its weight), and its pose says the rig plays it, so the class path stands down.
+/// Asleep and hunkered, the figure carries its rig's clip for that state (eased in from
+/// its weight); idling, its rig's idle actions stand for the idle (round 5: they come on
+/// their schedule, `an_idle_action_starts_on_a_full_idle_and_eases_out_with_it`); and its
+/// pose says the rig plays each, so the class path stands down.
 #[test]
 fn a_rigged_frondgrazer_plays_sleep_idle_and_hunker_as_clips() {
     let lib = library();
     let rig = lib.rig(Founder::Browser).expect("the frondgrazer's rig");
+    assert!(!rig.actions().is_empty(), "the frondgrazer's idle actions");
     let (_, _, standing) = grown();
     for (name, state, hunkered, ticks) in [
         ("asleep", State::Asleep, false, 1),
@@ -74,12 +77,87 @@ fn a_rigged_frondgrazer_plays_sleep_idle_and_hunker_as_clips() {
         let a = Animal { state, hunkered, ..standing };
         let mut models = FigureModels::default();
         let s = figure(&lib, &mut models, &a, 100, 100 + ticks);
-        let clip = rig.clip(name).unwrap_or_else(|| panic!("a {name} clip"));
-        let on = s.clips.iter().find(|c| usize::from(c.clip) == clip).unwrap_or_else(|| panic!("{name}: no clip"));
-        assert!(on.weight > 0.0 || on.rate > 0.0, "{name}: its weight eases in");
+        if name != "idle" {
+            let clip = rig.clip(name).unwrap_or_else(|| panic!("a {name} clip"));
+            let on = s.clips.iter().find(|c| usize::from(c.clip) == clip).unwrap_or_else(|| panic!("{name}: no clip"));
+            assert!(on.weight > 0.0 || on.rate > 0.0, "{name}: its weight eases in");
+        }
         let pose = s.pose.expect("a pose");
         assert_eq!(pose.rig, RigStates { asleep: true, idle: true, hunker: true }, "{name}");
     }
+}
+
+/// The figure of `a` at each tick of `from..=to` as the grid follows it, `state_at` its
+/// state at a tick.
+fn figures(lib: &ModelLibrary, a: &Animal, from: u64, to: u64, state_at: impl Fn(u64) -> State) -> Vec<Spec> {
+    let (w, fauna, _) = grown();
+    let c = w.config().clone();
+    let mut grid = Animals::empty(c.width, c.height, c.depth);
+    let mut models = FigureModels::default();
+    let mut out = Vec::new();
+    let mut seen = Vec::new();
+    for tick in from..=to {
+        let mut view = w.view();
+        view.tick = tick;
+        let b = Animal { state: state_at(tick), ..*a };
+        let fv = FaunaView { animals: std::slice::from_ref(&b), ..fauna.view() };
+        grid.rebuild_with(&view, Some(fv), lib);
+        specs(&grid, &view, fv, Some(lib), &Default::default(), &mut models, &mut out);
+        seen.push(out.iter().find(|s| s.key == (a.id, 0)).expect("its figure").clone());
+    }
+    seen
+}
+
+/// An idling rigged animal plays its idle actions on the schedule (`idle::near`), but only
+/// one that starts once its idle weight is full, never two at once, each at the idle's
+/// weight; one under way when it walks off plays on, easing out with the idle weight. For
+/// the frondgrazer and the loftstrider, on their own rigs.
+#[test]
+fn an_idle_action_starts_on_a_full_idle_and_eases_out_with_it() {
+    let lib = library();
+    let (_, _, standing) = grown();
+    for founder in [Founder::Browser, Founder::Loftstrider] {
+        let rig = lib.rig(founder).expect("its rig");
+        let actions = rig.actions();
+        let is_action = |c: u8| rig.clips[usize::from(c)].mode == super::super::rig::ClipMode::Action;
+        let a = Animal { founder: Some(founder), body: fauna_body_max(founder), ..standing };
+        let knobs = idle::IdleConfig::default().of(founder);
+        let kinds: Vec<idle::Kind> = actions
+            .iter()
+            .map(|x| idle::Kind { weight: knobs.weight(&x.name), variants: x.clips.len(), length_s: x.length_s })
+            .collect();
+        let (t0, t1) = (100u64, 100 + (60.0 / DT) as u64);
+        // the first scheduled action that starts after the idle is full, and walking
+        // off half way through it
+        let full = t0 + ((idle::HOLD_S + idle::BLEND_S) / DT).floor() as u64;
+        let first = idle::between(a.id, full + 5, t1, DT, knobs.apart_s, &kinds)[0];
+        let leave = (first.start_tick + first.ticks / 2) as u64;
+        let seen = figures(&lib, &a, t0, leave + 20, |t| if t < leave { State::Resting } else { State::Walking });
+        let mut played = false;
+        for (i, s) in seen.iter().enumerate() {
+            let tick = t0 + i as u64;
+            let acts: Vec<&ClipSpec> = s.clips.iter().filter(|c| is_action(c.clip)).collect();
+            assert!(acts.len() <= 2, "at most the one under way and the next");
+            for c in &acts {
+                let (start, ticks) = c.action.expect("an action's span");
+                assert!(start as u64 >= full, "{founder:?}: an action starting before the idle was full ({start})");
+                assert!(start + ticks > tick as i64 && start <= tick as i64 + idle::LOOKAHEAD_TICKS);
+                let idle_on = s.pose.map_or(0.0, |p| p.body.idle);
+                assert_eq!(c.weight, idle_on, "at the idle's weight");
+                played |= start == first.start_tick;
+            }
+            if tick >= leave && tick < (first.start_tick + first.ticks) as u64 {
+                let w = s.pose.map_or(0.0, |p| p.body.idle);
+                let on = acts.iter().any(|c| c.action.unwrap().0 == first.start_tick);
+                assert_eq!(on, w > 0.0 || s.pose.is_some_and(|p| p.body.idle_rate < 0.0), "it plays on while the idle eases out");
+            }
+        }
+        assert!(played, "{founder:?}: the action played");
+    }
+}
+
+fn fauna_body_max(founder: Founder) -> f64 {
+    FaunaConfig::placeholder().founder(founder).core.body_max
 }
 
 /// Every port's sleep uses the state weight and leaves the class breath in place.
@@ -340,6 +418,7 @@ fn zero_sleep_weight_draws_the_original_feed_rig_cell_for_cell() {
                             weight: feed_weight,
                             rate: 0.0,
                             phase_s: 0.37 * r.loop_s(r.clip("cropping").unwrap()),
+                            action: None,
                         }];
                         if let Some(clip) = r.clip("asleep") {
                             clips.push(ClipSpec {
@@ -348,6 +427,7 @@ fn zero_sleep_weight_draws_the_original_feed_rig_cell_for_cell() {
                                 weight: sleep_weight,
                                 rate: 0.0,
                                 phase_s: 0.0,
+                                action: None,
                             });
                         }
                         let s = Spec {
