@@ -6,8 +6,7 @@
 RIG-STATES round 2: add `--sleep-only` to port the committed model and rig without
 voxelizing or writing any `.cvm` or manifest. Existing feed keys are copied exactly.
 RIG-STATES round 3: the Veilhound, lanternjaw and perched seedporter (`seedporter-stand`)
-end their asleep track on a sleep pose (`SLEEP_POSES`, `animal_models.posed_sleep_rig`);
-`CH_SLEEP_POSE=B` in the environment bakes the Veilhound's curled candidate instead of A.
+end their asleep track on a sleep pose (`SLEEP_POSES`, `animal_models.posed_sleep_rig`).
 
 Reads **only** `assets/voxel-models/source.json` for numbers (crown ranges, stage
 profiles, founder bodies, voxel sizes; `design/handoffs/voxel-organism-models-2026-09-23.md`

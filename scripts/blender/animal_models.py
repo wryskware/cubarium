@@ -1372,29 +1372,20 @@ def turns(u, seq, after=None):
     return Matrix.Translation((after or Vector((0, 0, 0))) * u) @ m
 
 
-# The Veilhound (`chorister`): two candidates (CH_SLEEP_POSE, A by default).
-#
-# - **A, lying down**: the body comes down to the ground (its torso row onto the ground row),
-#   the legs fold under it (swung about their hips and sunk under the ground line, as round
-#   1's legs), the front paws slide forward on the ground, the head drops and comes forward
-#   to rest on them, and the tail curls along its side (`CH_SLEEP_SIDE`): its base turned a
-#   quarter, the rest a half, lying forward along the flank.
-# - **B, curled up**: it rolls onto its side (`CH_SLEEP_SIDE` down) as it comes down, the legs
-#   fold away on the belly side, and the body bends into a ring toward its belly: the head and
-#   neck turn a quarter in, the hindquarters a quarter in the other way, the tail a half,
-#   lying back along the inside toward the nose.
-CH_SLEEP_POSE = os.environ.get("CH_SLEEP_POSE", "A")
+# The Veilhound (`chorister`) lies down (Wrysk picked A, 2026-10-11; B, curled into a ring,
+# "doesnt really work"): the body comes down to the ground (its torso row onto the ground
+# row), the legs fold under it (swung about their hips and sunk under the ground line, as
+# round 1's legs), the front paws slide forward on the ground, the head drops and comes
+# forward to rest on them, and the tail curls along its side (`CH_SLEEP_SIDE`): its base
+# turned a quarter, the rest a half, lying forward along the flank.
 CH_SLEEP_SIDE = -1          # -1: the right side (Blender -y), +1 the left
 CH_TAIL_X = -0.70           # the tail: behind this, at or over the torso row (reference metres)
 CH_TAIL_BEND_X = -0.82      # its base ahead of this, the rest behind
-CH_TAIL_TIP_X = -1.20       # B: its tip behind this turns in by the nose
 CH_PAW_X = 0.44             # the front paws: the lowest row ahead of this
-CH_HIND_X = -0.25           # B: the hindquarters behind this bend in
 CH_LEG_SWING = math.radians(50)
 
 
 def ch_sleep_plan(cells, bones, scale):
-    pose = CH_SLEEP_POSE
     s = CH_SLEEP_SIDE
     torso, lowest = body_rows(cells)
     drop = torso - lowest
@@ -1402,119 +1393,59 @@ def ch_sleep_plan(cells, bones, scale):
     legs = sleep_legs("chorister")
     hips = {name: path[0] for name, path in legs}
     head = [k for k, o in bones.items() if o in ("neck", "head")]
-    head_x = min((k[0] for k in head), default=0)
     owners, groups = {}, {}
     for key, owner in bones.items():
         p = m(key)
         if key[2] < torso:
-            if pose == "A" and key[2] == lowest and p.x > CH_PAW_X:
+            if key[2] == lowest and p.x > CH_PAW_X:
                 name = f"sleep_paw_{'l' if key[1] > 0 else 'r'}"
             else:
                 name = nearest_leg(p, legs)
         elif owner == "root" and p.x < CH_TAIL_X:
-            # B's tail is one piece to its tip
-            name = ("sleep_tail0" if p.x >= CH_TAIL_BEND_X or (pose == "B" and p.x >= CH_TAIL_TIP_X) else
-                    "sleep_tail1" if pose == "A" else "sleep_tail2")
-        elif pose == "B" and owner == "root" and p.x < CH_HIND_X:
-            name = "sleep_hind"
-        elif pose == "B" and owner == "root" and key[0] >= head_x:
-            name = "sleep_fore"
+            name = "sleep_tail0" if p.x >= CH_TAIL_BEND_X else "sleep_tail1"
         else:
             continue
         owners[key] = name
         groups.setdefault(name, []).append(key)
     of = lambda name: groups.get(name, [])  # noqa: E731
-    tail0, tail1, tail2 = of("sleep_tail0"), of("sleep_tail1"), of("sleep_tail2")
+    tail0, tail1 = of("sleep_tail0"), of("sleep_tail1")
     # the tail's joints (cells): its root at the rump, its bend
-    root_x = max((k[0] for k in tail0 + tail1 + tail2), default=0) + 0.5
+    root_x = max((k[0] for k in tail0 + tail1), default=0) + 0.5
     bend_x = min((k[0] for k in tail0), default=root_x) - 0.5
-    tip_x = min((k[0] for k in tail0 + tail1), default=bend_x) - 0.5
     leg_names = [n for n, _ in legs]
     added = [(n, "root", Vector(hips[n]) * scale) for n in leg_names]
-    if pose == "A":
-        added += [(f"sleep_paw_{x}", "root", (CH_PAW_X * scale, 0, lowest)) for x in "lr"]
-    else:
-        added += [("sleep_fore", "root", (head_x - 0.5, 0, torso)),
-                  ("sleep_hind", "root", (CH_HIND_X * scale, 0, torso))]
-    if pose == "A":
-        added += [("sleep_tail0", "root", (root_x, 0, torso + 0.5)),
-                  ("sleep_tail1", "sleep_tail0", (bend_x, 0, torso + 0.5))]
-    else:
-        added += [("sleep_tail0", "sleep_hind", (root_x, 0, torso + 0.5)),
-                  ("sleep_tail2", "sleep_tail0", (tip_x, 0, torso + 0.5))]
+    added += [(f"sleep_paw_{x}", "root", (CH_PAW_X * scale, 0, lowest)) for x in "lr"]
+    added += [("sleep_tail0", "root", (root_x, 0, torso + 0.5)),
+              ("sleep_tail1", "sleep_tail0", (bend_x, 0, torso + 0.5))]
     swing = lambda name: CH_LEG_SWING * (-1 if name.startswith("sleep_leg0") else 1)  # noqa: E731
     q = -s * math.pi / 2
-    if pose == "A":
-        leg = fold_legs({n: of(n) for n in leg_names}, hips,
-                        lambda u: Matrix.Translation((0, 0, -drop * u)), scale, swing)
-        # the head comes down onto the paws (its lowest row one over the ground row) and one
-        # cell forward; the paws slide forward on the ground until their front is under its
-        hb = min((k[2] for k in head), default=torso)
-        hx, hd = 1, hb - lowest - 1
-        paws = of("sleep_paw_l") + of("sleep_paw_r")
-        px = (max(k[0] for k in head) + hx - max(k[0] for k in paws)) if paws and head else 0
-        curl0 = [("Z", q, (root_x, s * 0.5, 0))]
-        curl1 = curl0 + [("Z", q, (bend_x, s * 0.5, 0))]
-        down = Matrix.Translation((0, 0, -drop))
-        snap0 = lattice_snap(down @ turns(1, curl0), tail0)
-        snap1 = lattice_snap(down @ turns(1, curl1), tail1)
+    leg = fold_legs({n: of(n) for n in leg_names}, hips,
+                    lambda u: Matrix.Translation((0, 0, -drop * u)), scale, swing)
+    # the head comes down onto the paws (its lowest row one over the ground row) and one
+    # cell forward; the paws slide forward on the ground until their front is under its
+    hb = min((k[2] for k in head), default=torso)
+    hx, hd = 1, hb - lowest - 1
+    paws = of("sleep_paw_l") + of("sleep_paw_r")
+    px = (max(k[0] for k in head) + hx - max(k[0] for k in paws)) if paws and head else 0
+    curl0 = [("Z", q, (root_x, s * 0.5, 0))]
+    curl1 = curl0 + [("Z", q, (bend_x, s * 0.5, 0))]
+    down = Matrix.Translation((0, 0, -drop))
+    snap0 = lattice_snap(down @ turns(1, curl0), tail0)
+    snap1 = lattice_snap(down @ turns(1, curl1), tail1)
 
-        def moves(u):
-            d, h, c = stage(u, 0.0, 0.7), stage(u, 0.35, 1.0), stage(u, 0.4, 1.0)
-            low = Matrix.Translation((0, 0, -drop * d))
-            out = {"root": low}
-            for n in leg_names:
-                out[n] = leg(n, d)
-            for x in "lr":
-                out[f"sleep_paw_{x}"] = Matrix.Translation((px * h, 0, 0))
-            out["neck"] = out["head"] = Matrix.Translation((hx * h, 0, -hd * h))
-            out["sleep_tail0"] = Matrix.Translation(snap0 * c) @ low @ turns(c, curl0)
-            out["sleep_tail1"] = Matrix.Translation(snap1 * c) @ low @ turns(c, curl1)
-            return out
-        note = f"A: torso row {torso}, down {drop}, head down {hd} forward {hx}, paws forward {px}"
-    elif pose == "B":
-        # the roll: a quarter turn about the edge of its `s` flank at the foot of the torso
-        # row, laying that flank on the torso row's floor, then down onto the ground row
-        upper = [k for k, o in bones.items() if o == "root" and k[2] > torso and k[0] >= root_x]
-        w = max(abs(k[1]) for k in upper if k[1] * s >= 0) if upper else 0
-        roll = [("X", -s * math.pi / 2, (0, s * (w + 0.5), torso))]
-        # the ring, bent in the body's own up-down plane before it is rolled: about side axes
-        # on the belly's face, the fore end a quarter down, the hind end a quarter the other
-        # way round, the tail a further quarter, so it comes back under the belly to the nose
-        hind_x = max((k[0] for k in of("sleep_hind")), default=root_x) + 0.5
-        half = math.pi / 2
-        bends = {"fore": [("Y", half, (head_x - 0.5, 0, torso))],
-                 "hind": [("Y", -half, (hind_x, 0, torso))]}
-        bends["tail0"] = bends["hind"] + [("Y", -half, (root_x, 0, torso))]
-        bends["tail2"] = bends["tail0"] + [("Y", -half, (tip_x, 0, torso + 0.5))]
-        mid = [k for k, o in bones.items() if o == "root" and k not in owners]
-        keys = {"fore": of("sleep_fore") + head, "hind": of("sleep_hind"), "tail0": tail0, "tail2": tail2}
-        body = Matrix.Translation((0, 0, -torso)) @ turns(1, roll)
-        snap = lattice_snap(body, mid)
-        inv = body.to_3x3().inverted()
-        extra = {n: inv @ (lattice_snap(body @ turns(1, seq), keys[n]) - snap) for n, seq in bends.items()}
-        # a body too short for the tip to turn in beside the nose keeps it straight
-        end = Matrix.Translation(snap + Vector((0, 0, -torso))) @ turns(1, roll)
-        at = lambda n, ks: [end @ turns(1, bends[n], extra[n]) @ Vector((i, j, k + 0.5)) for i, j, k in ks]  # noqa: E731
-        if any((a - b).length <= 0.5 for a in at("tail2", tail2) for b in at("fore", keys["fore"])):
-            bends["tail2"], extra["tail2"] = bends["tail0"], extra["tail0"]
-        leg = fold_legs({n: of(n) for n in leg_names}, hips,
-                        lambda u: Matrix.Translation(snap * u + Vector((0, 0, -torso * u))) @ turns(u, roll),
-                        scale, swing)
-
-        def moves(u):
-            r, c = stage(u, 0.0, 0.5), stage(u, 0.45, 1.0)
-            base = Matrix.Translation(snap * r + Vector((0, 0, -torso * r))) @ turns(r, roll)
-            out = {"root": base}
-            for n in leg_names:
-                out[n] = leg(n, r)
-            for name, seq in bends.items():
-                out[f"sleep_{name}"] = base @ turns(c, seq, extra[name])
-            out["neck"] = out["head"] = out["sleep_fore"]
-            return out
-        note = f"B: torso row {torso}, rolled onto its {'right' if s < 0 else 'left'} side (flank {w}), down {torso}"
-    else:
-        raise ValueError(f"no Veilhound sleep pose {pose}")
+    def moves(u):
+        d, h, c = stage(u, 0.0, 0.7), stage(u, 0.35, 1.0), stage(u, 0.4, 1.0)
+        low = Matrix.Translation((0, 0, -drop * d))
+        out = {"root": low}
+        for n in leg_names:
+            out[n] = leg(n, d)
+        for x in "lr":
+            out[f"sleep_paw_{x}"] = Matrix.Translation((px * h, 0, 0))
+        out["neck"] = out["head"] = Matrix.Translation((hx * h, 0, -hd * h))
+        out["sleep_tail0"] = Matrix.Translation(snap0 * c) @ low @ turns(c, curl0)
+        out["sleep_tail1"] = Matrix.Translation(snap1 * c) @ low @ turns(c, curl1)
+        return out
+    note = f"torso row {torso}, down {drop}, head down {hd} forward {hx}, paws forward {px}"
     return added, owners, moves, note
 
 
