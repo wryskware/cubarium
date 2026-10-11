@@ -67,24 +67,30 @@ pub(crate) fn take_notices() -> Vec<SaveNotice> {
 }
 
 /// Ask off Godot's thread; the result appears through `take_notices` after disk commit.
+///
+/// A request made while an earlier one is still writing (or has reported but not yet
+/// exited) is queued behind it, never refused: each request reports exactly once, in order.
 pub(crate) fn request(session: SessionStop) -> Result<(), String> {
     let mut request = REQUEST.lock().unwrap_or_else(|e| e.into_inner());
-    if request.as_ref().is_some_and(|h| !h.is_finished()) {
-        return Err("an autosave is already writing".into());
+    let previous = request.take();
+    let spawned = std::thread::Builder::new()
+        .name("cubarium-save-request".into())
+        .spawn(move || {
+            if let Some(previous) = previous {
+                let _ = previous.join();
+            }
+            let outcome = save_running(&[session], SAVE_TIMEOUT);
+            report(&outcome, true);
+        });
+    match spawned {
+        Ok(handle) => {
+            *request = Some(handle);
+            Ok(())
+        }
+        // The closure (and the earlier handle in it) is gone; that thread still runs and
+        // reports on its own, it is just no longer joined at teardown.
+        Err(e) => Err(format!("starting the autosave: {e}")),
     }
-    if let Some(h) = request.take() {
-        let _ = h.join();
-    }
-    *request = Some(
-        std::thread::Builder::new()
-            .name("cubarium-save-request".into())
-            .spawn(move || {
-                let outcome = save_running(&[session], SAVE_TIMEOUT);
-                report(&outcome, true);
-            })
-            .map_err(|e| format!("starting the autosave: {e}"))?,
-    );
-    Ok(())
 }
 
 pub(crate) fn report(outcome: &Outcome, requested: bool) {
@@ -326,6 +332,14 @@ fn replace_slot(staging: &Path, slot: &Path, expected_existing: bool) -> Result<
         }
         return Err(format!("moving the save into its slot: {e}"));
     }
+    // Make both renames durable before the previous save goes: a crash from here on finds
+    // the new slot, and a crash before it finds `.previous-<name>`, which `saves.gd`
+    // restores at start-up when the slot is missing.
+    for dir in [slot.parent(), backup.parent()].into_iter().flatten() {
+        if let Err(e) = sync_dir(dir) {
+            eprintln!("cubarium: saved, but syncing {} failed: {e}", dir.display());
+        }
+    }
     if had_slot {
         // A cleanup failure must not report the completed new save as a failed commit.
         if let Err(e) = std::fs::remove_dir_all(&backup) {
@@ -336,6 +350,11 @@ fn replace_slot(staging: &Path, slot: &Path, expected_existing: bool) -> Result<
         }
     }
     Ok(())
+}
+
+/// Flush a directory's entries (the renames in it) to disk.
+fn sync_dir(dir: &Path) -> std::io::Result<()> {
+    std::fs::File::open(dir)?.sync_all()
 }
 
 /// The library is being unloaded: a save under way stops waiting. Before the sessions stop.
@@ -462,11 +481,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn automatic_saves_preserve_player_files_and_keep_the_right_thumbnail() {
-        use cubarium_session::{Session, SessionOptions, SimParams, WorldSpec, prepare_new, store};
+    /// A paused tiny world in a fresh scratch directory.
+    fn tiny_world(tag: &str) -> (Scratch, cubarium_session::Session) {
+        use cubarium_session::{Session, SessionOptions, SimParams, WorldSpec, prepare_new};
         let scratch = Scratch(std::env::temp_dir().join(format!(
-            "cubarium-autosave-{}-{}",
+            "cubarium-{tag}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         )));
@@ -484,6 +503,43 @@ mod tests {
         session.install(prepare_new(&spec.sim_params().unwrap(), &spec).unwrap());
         session.command(cubarium_observatory::Command::Pause);
         idle(&session);
+        (scratch, session)
+    }
+
+    /// (d) A save asked for while the previous requested save is still writing (a Quit right
+    /// after a switch or load save) is queued behind it and completes, never refused.
+    #[test]
+    fn a_request_while_another_is_writing_is_queued_not_refused() {
+        let (scratch, session) = tiny_world("request-queue");
+        let root = scratch.0.join("saves");
+        std::fs::create_dir_all(&root).unwrap();
+        let home = root.join("World 1 (autosave)");
+        session.attach_home(&home);
+        let stop = session.stopper();
+        assert_eq!(request(stop.clone()), Ok(()), "the first save is accepted");
+        assert_eq!(request(stop.clone()), Ok(()), "a second save while the first writes is accepted");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut mine = Vec::new();
+        while mine.len() < 2 {
+            assert!(Instant::now() < deadline, "both requested saves report");
+            let home_text = home.display().to_string();
+            mine.extend(take_notices().into_iter().filter(|n| n.path.as_deref() == Some(home_text.as_str())));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for n in &mine {
+            assert_eq!((n.kind, n.requested), ("autosaved", true), "{}", n.text);
+        }
+        assert!(cubarium_session::store::read_meta(&home).unwrap().loadable());
+        if let Some(h) = REQUEST.lock().unwrap().take() {
+            h.join().unwrap();
+        }
+        stop.shutdown();
+    }
+
+    #[test]
+    fn automatic_saves_preserve_player_files_and_keep_the_right_thumbnail() {
+        use cubarium_session::store;
+        let (scratch, session) = tiny_world("autosave");
         let stop = session.stopper();
         let timeout = Duration::from_secs(10);
         let root = scratch.0.join("saves");
