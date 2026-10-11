@@ -239,3 +239,78 @@ Wrysk: "veilhound sleep A is great. B doesnt really work for me"; lanternjaw and
 seedporter "yah both are good". Merged A (B removed from the bake), the lanternjaw arm fold
 and the perched seedporter hunch. Videos `art/gen/runs/sleep-poses-2026-10-11/`. Open, not
 raised by him: the fall-asleep blend is the shared 1 s (`sleep::BLEND_S`).
+
+## Round 4: loftstrider idle candidates (renderer-worker, opus-high; 2026-10-11)
+
+Wrysk (2026-10-11), offered sleep and idle looks for the animals that still only sink in
+place: "loftstrider idle animations would be good". These are **candidates for his look**:
+build them, show them, and don't merge.
+
+Worktree `.claude/worktrees/ls-idle`, branch `ls-idle`, from main 176f89db. The bake is
+reproducible: rebaking an untouched species must leave its files byte-identical, and you
+commit only the loftstrider's files.
+
+**First, a short survey.** How does the loftstrider idle today: the class-path idle
+(`crates/cubarium/src/voxel/idle.rs`: the breath and head dips), or nothing on the rig? How
+often does it idle in a live world? It walks stop-and-go, so the clip may play a lot. Is the
+calf rigged, and does it need its own clip?
+
+**Three candidates**, each an `idle` loop on its rig, played as the frondgrazer's is
+(`fg_state_rig` ~879 in `scripts/blender/animal_models.py`; the state weights in
+`crates/cubarium/src/voxel/figure.rs`):
+- **A, fronds drifting:** the fronds stir slowly, each on its own long wave, half-furling and
+  unfurling out of step with each other, like weed in a current. The body stays still apart
+  from the breath.
+- **B, looking about:** the head and neck lift and turn slowly to one side, hold, and come
+  round to the other, like a browser scanning. The fronds stay furled, with a slight stir.
+- **C, grooming:** now and then one pair of fronds curls in to the mouth and back out, the
+  feeding clip's curl without a bite. The others stay still between.
+Base them on what the rig already has: the frond bones and curls from the feed rounds
+(`design/handoffs/feed-rollout-2026-10-10.md`, the loftstrider sections), and Wrysk's
+anatomy notes there.
+
+### Rules
+
+- **The loop:**
+  - It is seamless and at least 20 s long, so its repeat doesn't read.
+  - Each animal plays at its own phase, from a hash of its id as `idle.rs`'s head moves
+    are, so a family never moves in step.
+  - Entering and leaving idle ease with the idle weight, and so do the hand-overs to
+    walking, cropping and sleep. Nothing pops.
+- **Feet stay planted:** no foot slides while it idles.
+- **The rest of the look doesn't change.**
+  - Walking, cropping (all three reach heights) and the asleep rest draw exactly as on main:
+    `cmp` rest frames at px 6 and 12, side-on and three-quarter, and run the feed checks, as
+    round 3 did.
+  - The awake model gains no visible cell; nested hidden cells are fine.
+  - No new colours.
+- If more than one candidate is worth keeping, build them so one bake setting picks among
+  them, as round 3's Veilhound did. When Wrysk picks, the others come out.
+- Read `design/handoffs/worker-rules-2026-10-07.md`.
+  - **Windows:** no windows; Blender only with `-b`.
+  - **Time:** no tool call over 5 minutes (`timeout 270`). A longer bake, build or capture
+    batch runs as one detached chain (`setsid nohup`, `chrt -i 0 nice -n 19`) to a DONE
+    marker. Then hand back: what is running, where it lands, and what's left.
+  - **Builds:** seed `target/` by reflink from a recent release build. No worktrees or
+    targets under `/tmp`.
+  - **Commits:** explicit paths only.
+  - **Unsafe:** only the `ash` FFI calls in `cubarium-gpu`.
+  - **Tests:** they check mechanisms, never tuned numbers.
+
+### Evidence
+
+Two grown loftstriders (and the calf, if rigged) standing in an idle bout of 30 s or more,
+lit, real time, today | candidate, side-on and three-quarter, at px 6 and 12.
+- Use the state scripting in `voxel_feed_capture`.
+- Write to `/home/wrysk/wryskware/cubarium/art/gen/runs/ls-idle-2026-10-11/loftstrider-idle-{A,B,C}-px{6,12}.mp4`.
+- Add one short clip of the hand-over from idle to cropping and back.
+
+### Return (40 lines or fewer)
+
+- The survey answers.
+- Per candidate: what moves, the bones, the loop length.
+- The unchanged-look checks, with raw `cmp` output.
+- MP4 paths.
+- Tests.
+- Commits.
+- Anything that doesn't read at px 6.
