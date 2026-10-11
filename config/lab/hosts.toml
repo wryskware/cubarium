@@ -71,6 +71,9 @@ types = ["c7g.4xlarge", "c7g.8xlarge", "c7g.12xlarge", "c7g.16xlarge"]
 cost_tolerance = 0.10
 suggest_after_h = 4   # offer EC2 when the local queue estimate exceeds this many hours
 setup_h = 0.25        # boot + bootstrap + transfer allowance in the estimate
+tail_fraction = 0.25  # move a tail at or below this share of charged usable threads, with no eligible pending task
+tail_min_remaining_h = 0.5 # minimum remaining EC2 wall hours, after charging checkpoint replay against the move
+tail_hold_min = 10    # low-fill condition must persist for these wall minutes before moving tasks
 reserve_mem_gb = 4    # usable memory = the type's memory less this (no 64 GB desktop ceiling)
 # Dedicated instance: labd's work here is ssh polls and tiny wrappers.
 # 2026-10-11: 16 voxel_census tasks x 2 threads averaged load 29.6 on 64 vCPU;

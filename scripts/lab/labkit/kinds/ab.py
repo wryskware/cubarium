@@ -129,6 +129,8 @@ class AB(Kind):
                 if binaries[name] == arm.get("bin"):
                     files[arm["bin"]] = "{job}/inputs/" + name + "/binary"
                 argv = abtool.census_argv(binaries[name], hours, source, root, spec["threads"], spec["segment_min"])
+                start_minute = float((Path(checkpoint) / "minute").read_text()) if starts else 0
+                resume = ["{python}", "{lab}/census_resume.py", binaries[name], "{out}", str(spec["threads"]), *argv[1:]]
                 tasks.append(Task(name=f"{stage}-{name}-s{seed}", argv=argv, threads=spec["threads"],
                                   mem_gb=spec["mem_gb"], l3=True, arch=job.state.get("arch", ctx.arch),
                                   hosts=spec.get("hosts"), files=files,
@@ -136,7 +138,9 @@ class AB(Kind):
                                   stdout=str(root / "census.csv"), stderr=str(root / "err.log"),
                                   inputs=[binaries[name][7:-1]] if binaries[name].startswith("{input:") else [],
                                   liveness=dict(minute_file="run/status", stall_min=spec["stall_min"]),
-                                  est_h=spec.get("est_h"), meta=dict(stage=stage, arm=name, seed=seed)))
+                                  retries=1, resume_argv=resume, est_h=spec.get("est_h"),
+                                  meta=dict(stage=stage, arm=name, seed=seed, start_minute=start_minute,
+                                            total_minutes=hours * 60)))
         return tasks
 
     def binaries(self, job, ctx, placeholders=True):

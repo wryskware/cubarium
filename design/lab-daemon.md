@@ -362,16 +362,19 @@ sleep loop costs nothing.
 
 The `hosts.toml` EC2 types are candidate sizes, smallest first. labd compares total
 cost and ETA for candidates that can host every eligible task and required build,
-scaling simulation thread capacity by usable memory / summed simulation memory when
-memory limits concurrency. It picks the shortest ETA within `cost_tolerance`
+using a longest-first greedy schedule within usable threads and memory. It picks the
+shortest ETA within `cost_tolerance`
 (default 10%) of the cheapest cost, then the fewest CPUs. Approval requests include
 the comparisons and the chosen type's fallback; `--type` overrides the choice and
 uses that type's own fallback. The actual launched type sets capacity and cost.
+Each option and the chosen approval report `fill_profile`, `fill_mean` and `idle_usd`,
+including setup and serial builds. `lab status` prints fill segments and idle cost;
+unknown task durations leave fill unknown. These add information, no approval gate.
 
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
-   `max(longest simulation task, simulation thread-hours / capacity)` plus the estimated
+   the greedy simulation makespan plus the estimated
    time of all uncached native builds, then `setup_h`. Required builds count once per
    binary key, even before their provider tasks are planned; cached binaries add no build
    time. Distinct builds are estimated serially, conservatively. A simulation job's
@@ -395,6 +398,17 @@ uses that type's own fallback. The actual launched type sets capacity and cost.
      artifact cache and job directory through the same transport as eidolon.
    - When the queue drains (nothing eligible pending, nothing running there), it runs
      `down`.
+   - With no eligible pending work, charged use ≤ `tail_fraction` (0.25) of usable
+     threads for `tail_hold_min` (10 wall minutes) moves checkpointed tails home only
+     when placement has room now. Remaining wall time from stage progress and `est_h`,
+     less checkpoint replay, must exceed `tail_min_remaining_h` (0.5). The same commit's
+     x86_64 binary is reused or built by the normal provider before stopping the task.
+     The loss/fetch/requeue path then launches it immediately on the selected local host;
+     A/B and batch children resume their own newest checkpoints and stitch census stdout
+     by minute. Each
+     `tail-moved` reports the checkpoint, estimated task hours and marginal instance
+     dollars saved (zero when drain progress is unknown); `lab status` summarizes moves.
+     The existing queue drain downs EC2.
    - On spot loss (`status` no longer lists the instance), it emits `host-down`, requeues
      the lost tasks with `resume_argv` from fetched checkpoints, and opens a new request.
      A replacement needs its own go.
