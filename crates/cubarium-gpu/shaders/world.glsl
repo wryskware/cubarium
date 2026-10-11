@@ -91,7 +91,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     // How much of each rain mode's haze hangs in the air (drizzle, shower, downpour; eased
     // far slower than `rainK`, so the veil gathers and thins rather than switching).
     vec4 rainH;
-    ivec4 camera; // vertical origin and full projected height (independent of crop)
+    ivec4 camera; // vertical origin, full projected height, weather planes (plant=1, figure=2), -
 } u;
 
 // The lighting tier (`lighting = "flat" | "lit"`), fixed when the pipeline is built. The

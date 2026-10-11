@@ -275,6 +275,8 @@ fn main() -> Result<()> {
     let mut draw_total = 0.0;
     let film0 = Instant::now();
     let (frames0, gpu0) = sink.gpu_stage_totals();
+    let animal_start: std::collections::BTreeMap<_, _> = sim.fauna().view().animals.iter()
+        .map(|a| (a.id, (a.pose.x, a.pose.z))).collect();
     for k in 0..frames {
         let video_s = k as f64 / a.fps;
         let t = video_s * a.speed * tick_hz;
@@ -350,6 +352,10 @@ fn main() -> Result<()> {
         ff.wait()?;
     }
     let (frames1, gpu1) = sink.gpu_stage_totals();
+    let animals_moved = sim.fauna().view().animals.iter().filter(|a| {
+        animal_start.get(&a.id).is_some_and(|&p| p != (a.pose.x, a.pose.z))
+    }).count();
+    eprintln!("fog_capture: liveness animals_moved={animals_moved}/{}", animal_start.len());
     let n = (frames1 - frames0).max(1) as f64;
     eprintln!(
         "fog_capture: {frames} frames, mean draw+readback {:.2} ms, GPU walk stage (walk, plants, \

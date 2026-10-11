@@ -1805,8 +1805,18 @@ void over(inout vec3 c, inout float a, vec3 lc, float la) {
 // What the weather lays over the raster at pixel px, premultiplied (colour, coverage): fog
 // (unless the volumetric march carries it), the rain's haze, splashes, the streaks far to
 // near, then the bolt, added.
+#ifdef FOG_OCCLUDE
+// Only the weather module reads these. The walk, sky and flat modules keep their
+// original shader interface and arithmetic, including their no-weather frame path.
+layout(set = 0, binding = 15) uniform sampler2D weatherPlantZ;
+layout(set = 0, binding = 16) uniform sampler2D weatherFigureZ;
+layout(set = 0, binding = 17) uniform sampler2D weatherPlantSurface;
+layout(set = 0, binding = 18) uniform sampler2D weatherFigureSurface;
+vec4 weatherAt(ivec2 px, float zEnd) {
+#else
 vec4 weatherOver(ivec2 px) {
     float zEnd = floor(texelFetch(depthTex, px, 0).a * 255.0 + 0.5);
+#endif
     float k = float(RISE) / float(S);
     float xw = (float(PX) + 0.5) / float(S);
     float y0 = (float(BASE - px.y - 1) + 0.5) / float(S);
@@ -1886,6 +1896,49 @@ vec4 weatherOver(ivec2 px) {
     }
     return vec4(c, a);
 }
+
+#ifdef FOG_OCCLUDE
+vec4 weatherOver(ivec2 px) {
+    // The walk already clamps to wEntry (the first water surface). Its emission alpha
+    // encodes an integer slab; plant shade resolves front/cap z in the same slab units.
+    // The figure depth is the inverse of composite.frag's gl_FragDepth, without rounding.
+    float walkZ = floor(texelFetch(depthTex, px, 0).a * 255.0 + 0.5);
+    vec4 plant = vec4(0.0);
+    vec4 figure = vec4(0.0);
+    float plantZ = walkZ;
+    float figureZ = walkZ;
+    if ((u.camera.z & 1) != 0) {
+        plant = texelFetch(weatherPlantSurface, px, 0);
+        if (plant.a > 0.0) { plantZ = max(0.0, min(walkZ, texelFetch(weatherPlantZ, px, 0).r)); }
+    }
+    if ((u.camera.z & 2) != 0) {
+        figure = texelFetch(weatherFigureSurface, px, 0);
+        if (figure.a > 0.0) {
+            figureZ = max(0.0, min(plantZ,
+                texelFetch(weatherFigureZ, px, 0).r * (float(D) + 32.0) - 16.0));
+        }
+    }
+    // Opaque interiors do just one integration, to the nearest of the three ends. Empty
+    // pixels retain the original arithmetic, as do objects behind the walk/water end.
+    float zEnd = min(walkZ, min(plantZ, figureZ));
+    if (figure.a >= 1.0 || (figure.a == 0.0 && plant.a >= 1.0) || zEnd == walkZ) {
+        return weatherAt(px, zEnd);
+    }
+    vec4 farWeather = weatherAt(px, walkZ);
+    vec4 plantWeather = plantZ == walkZ ? farWeather : weatherAt(px, plantZ);
+    vec4 figureWeather = figureZ == plantZ ? plantWeather : weatherAt(px, figureZ);
+    // Apply weather separately to the foreground and the visible background, then mix
+    // by the ORIGINAL coverage. Interpolating depth (or just fog alpha) would attenuate
+    // the already-mixed foreground/background colour and leave a fringe.
+    // Raster = figure.rgb + (1-figure.a)*(plant.rgb + (1-plant.a)*background).
+    float behindFigure = 1.0 - figure.a;
+    vec3 light = behindFigure * mix(farWeather.rgb, plantWeather.rgb, plant.a)
+        + figure.a * figureWeather.rgb;
+    light += behindFigure * plant.rgb * (farWeather.a - plantWeather.a)
+        + figure.rgb * (farWeather.a - figureWeather.a);
+    return vec4(light, farWeather.a);
+}
+#endif
 
 // The flat tier's rain (the panel's): one layer of streaks, the heaviest mode's look, in the
 // rain's colour over the whole picture, faded by the modes' weights; on the look's clock,
