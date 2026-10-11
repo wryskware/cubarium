@@ -237,16 +237,19 @@ impl CellSet {
         if self.plane != 0 {
             let rows = self.n.div_ceil(self.plane);
             for k in 0..self.words {
-                let any = self.cols.chunks_exact(self.words).fold(0u128, |a, m| a | m[k]);
-            for bit in 0..crate::world::MASK_ROWS.min(rows - k * crate::world::MASK_ROWS) {
-                if (any >> bit) & 1 == 0 {
-                    continue;
-                }
+                let any = self
+                    .cols
+                    .chunks_exact(self.words)
+                    .fold(0u128, |a, m| a | m[k]);
+                for bit in 0..crate::world::MASK_ROWS.min(rows - k * crate::world::MASK_ROWS) {
+                    if (any >> bit) & 1 == 0 {
+                        continue;
+                    }
                     let y = k * crate::world::MASK_ROWS + bit;
                     let base = y * self.plane;
-                for (col, m) in self.cols.chunks_exact(self.words).enumerate() {
-                    if (m[k] >> bit) & 1 != 0 && base + col < self.n {
-                        out.push(base + col);
+                    for (col, m) in self.cols.chunks_exact(self.words).enumerate() {
+                        if (m[k] >> bit) & 1 != 0 && base + col < self.n {
+                            out.push(base + col);
                         }
                     }
                 }
@@ -318,7 +321,10 @@ mod tests {
         }
         assert_eq!(masks.len(), list.len());
         assert_eq!(masks.members(), list.members());
-        assert_eq!(masks.members(), [0, 6, 7, 63 * 7 + 2, 64 * 7 + 2, 127 * 7 + 6]);
+        assert_eq!(
+            masks.members(),
+            [0, 6, 7, 63 * 7 + 2, 64 * 7 + 2, 127 * 7 + 6]
+        );
         assert!(masks.contains(127 * 7 + 6) && !masks.contains(300));
         assert_eq!(masks, list);
         masks.insert(8);

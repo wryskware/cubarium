@@ -219,7 +219,12 @@ fn cap_flux(cap: f64, q: f64) -> f64 {
 /// stack and displaced slivers up the neighbour's column (the census at 382ef3a: 78 % of
 /// a shower's active wet cells, 96 % of its proposals).
 #[inline]
-pub fn column_heads(grid: Grid, col: usize, wet: u128, free: &[f64], mut head: impl FnMut(usize, f64),
+pub fn column_heads(
+    grid: Grid,
+    col: usize,
+    wet: u128,
+    free: &[f64],
+    mut head: impl FnMut(usize, f64),
 ) -> u128 {
     let plane = grid.plane();
     let mut full = 0u128;
@@ -348,17 +353,17 @@ pub fn walk(f: &Field, n: usize, y: usize, q: f64, mut take: impl FnMut(usize, f
     // Preserve the original packed-word walk for the common short-world case.
     if void.len() == 1 {
         let run_len = (void[0] >> y).trailing_ones() as usize;
-    if run_len == 0 {
-        return 0.0;
-    }
-    let available = run_bits(y, run_len) & !full[0];
-    if available == 0 {
-        return 0.0;
-    }
-    let plane = f.grid.plane();
-    let top = y + run_len - 1;
-    let mut at = available.trailing_zeros() as usize;
-    let (mut left, mut placed) = (q, 0.0);
+        if run_len == 0 {
+            return 0.0;
+        }
+        let available = run_bits(y, run_len) & !full[0];
+        if available == 0 {
+            return 0.0;
+        }
+        let plane = f.grid.plane();
+        let top = y + run_len - 1;
+        let mut at = available.trailing_zeros() as usize;
+        let (mut left, mut placed) = (q, 0.0);
         while left > 0.0 && at <= top {
             let room = (1.0 - f.free[at * plane + n]).max(0.0);
             if room > 0.0 {
@@ -454,7 +459,11 @@ fn row_offers(f: &Field, p: &Params, col: usize, nb: &[usize; 4], y: usize) -> R
 /// of faces the stack offers across, and the giver's own stock.
 /// `emit(from_row, to_col, to_row, q)`, `q` in cell units, only for `q > 0`.
 #[inline]
-pub fn column_edges(f: &Field, p: &Params, col: usize, mut emit: impl FnMut(usize, usize, usize, f64),
+pub fn column_edges(
+    f: &Field,
+    p: &Params,
+    col: usize,
+    mut emit: impl FnMut(usize, usize, usize, f64),
 ) {
     let plane = f.grid.plane();
     let nb = f.grid.neighbours(col);
@@ -588,7 +597,12 @@ pub fn moved(q: f64, proposed_to: f64, free_to: f64) -> f64 {
 /// Phase C's **credits**, one column: every touched row's proposals times its
 /// acceptance, `out(cell, credit)`.
 #[inline]
-pub fn column_credits(f: &Field, col: usize, touched: u128, proposed: &[f64], mut out: impl FnMut(usize, f64),
+pub fn column_credits(
+    f: &Field,
+    col: usize,
+    touched: u128,
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
 ) {
     let plane = f.grid.plane();
     let mut m = touched;
@@ -632,14 +646,34 @@ pub fn column_credits_words(
 /// proposals, in the world's index order. A driver that kept phase B's proposals debits
 /// them with [`moved`] instead of recomputing them.
 #[inline]
-pub fn column_delta(f: &Field, p: &Params, col: usize, touched: u128, proposed: &[f64], mut out: impl FnMut(usize, f64),
+pub fn column_delta(
+    f: &Field,
+    p: &Params,
+    col: usize,
+    touched: u128,
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
 ) {
-    column_delta_words(f, p, col, core::slice::from_ref(&touched), proposed, &mut out);
+    column_delta_words(
+        f,
+        p,
+        col,
+        core::slice::from_ref(&touched),
+        proposed,
+        &mut out,
+    );
 }
 
 /// Phase C's net change over every word of a column.
 #[inline]
-pub fn column_delta_words(f: &Field, p: &Params, col: usize, touched: &[u128], proposed: &[f64], mut out: impl FnMut(usize, f64)) {
+pub fn column_delta_words(
+    f: &Field,
+    p: &Params,
+    col: usize,
+    touched: &[u128],
+    proposed: &[f64],
+    mut out: impl FnMut(usize, f64),
+) {
     let plane = f.grid.plane();
     column_credits_words(f, col, touched, proposed, &mut out);
     if f.grid.column(f.wet, col).iter().all(|&m| m == 0) {

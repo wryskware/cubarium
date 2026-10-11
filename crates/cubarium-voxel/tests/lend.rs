@@ -9,7 +9,11 @@ fn same_water(live: &World, copy: &World, what: &str) {
     let (a, b) = (live.view(), copy.view());
     let free = a.free.iter().zip(b.free).filter(|(x, y)| x != y).count();
     let pore = a.pore.iter().zip(b.pore).filter(|(x, y)| x != y).count();
-    assert_eq!((free, pore), (0, 0), "{what}: cells that differ (free, pore)");
+    assert_eq!(
+        (free, pore),
+        (0, 0),
+        "{what}: cells that differ (free, pore)"
+    );
 }
 
 #[test]
@@ -99,19 +103,33 @@ fn partial_lends_restore_water_in_every_column_word() {
 fn wet_views_return_cell_indices_from_every_mask_word() {
     for height in [128, 129, 138, 168, 256, 259] {
         let mut world = World::empty(Config {
-            width: 3, depth: 2, height, voxel_m: 1.0,
+            width: 3,
+            depth: 2,
+            height,
+            voxel_m: 1.0,
             ..Config::default()
         });
         for y in [63, 127, 128, 255, 256, height - 1] {
-            if y >= height { continue; }
+            if y >= height {
+                continue;
+            }
             for (x, z) in [(0, 0), (2, 1)] {
-                world.apply(Command::AddWater { x, y, z, volume_m3: 0.3 });
+                world.apply(Command::AddWater {
+                    x,
+                    y,
+                    z,
+                    volume_m3: 0.3,
+                });
             }
         }
         cubarium_voxel::water::begin(&mut world);
         let view = world.view();
-        let expected: Vec<_> = view.free.iter().enumerate()
-            .filter_map(|(i, &free)| (free > 0.0).then_some(i)).collect();
+        let expected: Vec<_> = view
+            .free
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &free)| (free > 0.0).then_some(i))
+            .collect();
         let mut found = Vec::new();
         assert!(view.wet_cells(&mut found));
         found.sort_unstable();

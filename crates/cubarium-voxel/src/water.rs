@@ -165,7 +165,6 @@
 //!   quantization term: the ledger residual `stored - initial_stored - net_in` is the
 //!   raw conservation error and nothing corrects it.
 
-
 use cubarium_rules::water::column::{Ground, Table};
 use cubarium_rules::water::host::{self, Exec, Water};
 
@@ -179,10 +178,10 @@ use crate::{Command, Config, DT, Material, World};
 // one substep), `ROOM_EPS` and `HEAD_PASSES` (4) are the exchange's own numbers and live
 // with its rule in `cubarium_rules::water` (the single-source trial). Both are
 // **placeholders** (`design/backlog.md`).
-#[cfg(test)]
-use cubarium_rules::water::{FLOW_PER_SUBSTEP, ROOM_EPS};
 #[cfg(any(test, feature = "profile"))]
 use cubarium_rules::water::HEAD_PASSES;
+#[cfg(test)]
+use cubarium_rules::water::{FLOW_PER_SUBSTEP, ROOM_EPS};
 
 /// **Minimum spreading depth** (package C, agreed by Wrysk 2026-09-22): free water
 /// shallower than this — metres of depth in its own cell, so `free < MIN_SPREAD_DEPTH_M /
@@ -241,7 +240,10 @@ fn voxel(w: &World) -> f64 {
 /// per area (`rain_m_per_s · DT · cell_area()`) and are untouched.
 #[inline]
 fn pore_flux_m3(m: Material, c: &Config, dt: f64) -> f64 {
-    c.materials.permeability_per_s(m) * dt * c.materials.pore_capacity(m) * (c.cell_area() * REFERENCE_VOXEL_M)
+    c.materials.permeability_per_s(m)
+        * dt
+        * c.materials.pore_capacity(m)
+        * (c.cell_area() * REFERENCE_VOXEL_M)
 }
 
 fn free_m3(w: &World, i: usize) -> f64 {
@@ -446,12 +448,14 @@ fn sky_tops(w: &mut World) -> Vec<u32> {
                 for (k, &word) in column.iter().enumerate().rev() {
                     let base = k * MASK_ROWS;
                     let floor = floor as usize;
-                    let open = if floor >= base + MASK_ROWS { 0 } else if floor > base {
+                    let open = if floor >= base + MASK_ROWS {
+                        0
+                    } else if floor > base {
                         word >> (floor - base) << (floor - base)
                     } else {
                         word
                     };
-                if open != 0 {
+                    if open != 0 {
                         return (base + MASK_ROWS - 1 - open.leading_zeros() as usize) as u32;
                     }
                 }
@@ -849,33 +853,33 @@ fn column_phase(w: &mut World, threads: usize, phase: ColumnPhase, dt: f64) -> f
     let ground = |i: usize| table[material[i] as usize];
 
     let (deltas, volume) = with_exec(plane, threads, |exec| {
-            let water = Water {
-                grid,
-                voxel,
-                free,
-                pore,
-                wet: wet.columns_mut().expect("water sets use column masks"),
-                damp: damp.columns_mut().expect("water sets use column masks"),
-                drainable: drainable
-                    .columns_mut()
-                    .expect("water sets use column masks"),
-            };
-            match phase {
-                ColumnPhase::Fall => (host::fall(exec, water, &ground), 0.0),
-                ColumnPhase::Infiltrate => (host::infiltrate(exec, water, &ground), 0.0),
-                ColumnPhase::Drain => host::drain(exec, water, &ground, voxel_m, level),
-                ColumnPhase::WaterTable => host::water_table(
-                    exec,
-                    water,
-                    &ground,
-                    Table::new(level, voxel_m, height),
-                    charged,
-                ),
-            }
-        });
-        wet.adjust(deltas[0]);
-        damp.adjust(deltas[1]);
-        drainable.adjust(deltas[2]);
+        let water = Water {
+            grid,
+            voxel,
+            free,
+            pore,
+            wet: wet.columns_mut().expect("water sets use column masks"),
+            damp: damp.columns_mut().expect("water sets use column masks"),
+            drainable: drainable
+                .columns_mut()
+                .expect("water sets use column masks"),
+        };
+        match phase {
+            ColumnPhase::Fall => (host::fall(exec, water, &ground), 0.0),
+            ColumnPhase::Infiltrate => (host::infiltrate(exec, water, &ground), 0.0),
+            ColumnPhase::Drain => host::drain(exec, water, &ground, voxel_m, level),
+            ColumnPhase::WaterTable => host::water_table(
+                exec,
+                water,
+                &ground,
+                Table::new(level, voxel_m, height),
+                charged,
+            ),
+        }
+    });
+    wet.adjust(deltas[0]);
+    damp.adjust(deltas[1]);
+    drainable.adjust(deltas[2]);
     volume
 }
 
@@ -1072,7 +1076,10 @@ impl Scratch {
                 + self.col_stamp.capacity()
                 + self.full.capacity()
                 + self.rows.capacity())
-            + 8 * (self.active.capacity() + self.columns.capacity() + self.touched.capacity() + self.bits.capacity())
+            + 8 * (self.active.capacity()
+                + self.columns.capacity()
+                + self.touched.capacity()
+                + self.bits.capacity())
             + size_of::<(u32, u32, f64)>() * self.edges.capacity()
             + size_of::<(u32, f64, u8)>() * self.offer_list.capacity()
             + size_of::<Giver>() * self.givers.capacity()
@@ -1270,7 +1277,11 @@ fn exchange_inner(w: &mut World, threads: usize) {
     #[cfg(feature = "parallel")]
     if pooled(w.config.width as usize * w.config.depth as usize, threads) {
         held.serial = None;
-        if held.parallel.as_ref().is_none_or(|p| p.threads() != threads) {
+        if held
+            .parallel
+            .as_ref()
+            .is_none_or(|p| p.threads() != threads)
+        {
             held.parallel = Some(Parallel::new(threads));
         }
         exchange_with(w, held.parallel.as_mut().expect("just made"));
@@ -1321,7 +1332,9 @@ pub fn exchange_with(w: &mut World, backend: &mut dyn ExchangeBackend) {
         w.config.depth as usize,
         w.config.height as usize,
     );
-    debug_assert_eq!(w.wet.columns().map_or(0, <[u128]>::len), width * depth * height.div_ceil(MASK_ROWS)
+    debug_assert_eq!(
+        w.wet.columns().map_or(0, <[u128]>::len),
+        width * depth * height.div_ceil(MASK_ROWS)
     );
     w.ensure_void_runs();
     let grid = cubarium_rules::water::Grid {
@@ -2113,7 +2126,9 @@ pub fn reentry(w: &mut World) {
         // every drop of its own store. It stops at the floor the world set, so it cannot
         // pump the water table out from under the lake.
         if w.config.reentry_from_aquifer {
-            let floor = w.config.aquifer_volume_for_head(w.config.reentry_floor_head_m);
+            let floor = w
+                .config
+                .aquifer_volume_for_head(w.config.reentry_floor_head_m);
             let spare = w.aquifer_m3 - floor;
             if spare <= 0.0 {
                 return;
@@ -5120,6 +5135,7 @@ mod scratch_tests {
         exchange(&mut w, 2);
         assert!(
             w.water_scratch.parallel.is_some() && w.water_scratch.serial.is_none(),
-            "and the serial one's");
+            "and the serial one's"
+        );
     }
 }

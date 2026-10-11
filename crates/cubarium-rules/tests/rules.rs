@@ -14,7 +14,10 @@ fn fill_and_empty_stop_at_the_store_bounds_and_return_what_moved() {
     assert!((moved - 0.25).abs() < 1e-15);
     let (after, moved) = water::empty(0.25, 0.5, 2.0);
     assert!((after - 0.0).abs() < 1e-15);
-    assert!((moved - 0.5).abs() < 1e-15, "a quarter of a 2 m³ store is 0.5 m³");
+    assert!(
+        (moved - 0.5).abs() < 1e-15,
+        "a quarter of a 2 m³ store is 0.5 m³"
+    );
     assert_eq!(water::transfer_want(3.0, 2.0, 1.0), 1.0);
 }
 // ------------------------------------------------------------------ the exchange
@@ -51,11 +54,18 @@ impl Pond {
         let before: u32 = self.wet.iter().map(|m| m.count_ones()).sum();
         let delta = b.exchange(self.grid, &mut self.free, &self.void, &mut self.wet, p);
         let after: u32 = self.wet.iter().map(|m| m.count_ones()).sum();
-        assert_eq!(after as isize - before as isize, delta, "the reported count change");
+        assert_eq!(
+            after as isize - before as isize,
+            delta,
+            "the reported count change"
+        );
     }
     /// Seeded rock and water: a floor, rock pillars and ledges, fills in `0..=1`.
     fn seeded(width: usize, depth: usize, height: usize, seed: u64) -> Pond {
-        let grid = Grid { width, depth, height,
+        let grid = Grid {
+            width,
+            depth,
+            height,
         };
         let plane = grid.plane();
         let mut s = seed;
@@ -85,7 +95,11 @@ impl Pond {
                 void[i % plane] |= 1u128 << (i / plane);
             }
         }
-        let mut pond = Pond { grid, free, void, wet: Vec::new(),
+        let mut pond = Pond {
+            grid,
+            free,
+            void,
+            wet: Vec::new(),
         };
         pond.wet = pond.masks_from_free();
         pond
@@ -104,14 +118,29 @@ fn the_serial_exchange_conserves_water_and_keeps_the_wet_masks() {
     let mut serial = Serial::default();
     for step in 0..150 {
         pond.step(&mut serial, &P);
-        assert!(pond.free.iter().all(|f| (0.0..=1.0).contains(f)), "step {step}: a fill left 0..=1");
-        assert_eq!(pond.wet, pond.masks_from_free(), "step {step}: the driver kept the wet masks");
+        assert!(
+            pond.free.iter().all(|f| (0.0..=1.0).contains(f)),
+            "step {step}: a fill left 0..=1"
+        );
+        assert_eq!(
+            pond.wet,
+            pond.masks_from_free(),
+            "step {step}: the driver kept the wet masks"
+        );
         let drift = (pond.total() - total).abs();
-        assert!(drift <= 1e-12 * total, "step {step}: water drifted by {drift}");
+        assert!(
+            drift <= 1e-12 * total,
+            "step {step}: water drifted by {drift}"
+        );
     }
     // It moved: the water is not where it started.
     let start = Pond::seeded(12, 5, 16, 7);
-    let moved: f64 = pond.free.iter().zip(&start.free).map(|(a, b)| (a - b).abs()).sum();
+    let moved: f64 = pond
+        .free
+        .iter()
+        .zip(&start.free)
+        .map(|(a, b)| (a - b).abs())
+        .sum();
     assert!(moved > 1.0, "the exchange moved water ({moved})");
 }
 
@@ -162,10 +191,25 @@ fn the_parallel_exchange_agrees_with_the_serial_one() {
     for step in 0..120 {
         a.step(&mut serial, &P);
         b.step(&mut parallel, &P);
-        let worst = a.free.iter().zip(&b.free).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max);
-        assert!(worst <= 1e-9, "step {step}: serial and parallel differ by {worst}");
-        assert!((b.total() - total).abs() <= 1e-12 * total, "step {step}: parallel drifted");
-        assert_eq!(b.wet, b.masks_from_free(), "step {step}: parallel wet masks");
+        let worst = a
+            .free
+            .iter()
+            .zip(&b.free)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            worst <= 1e-9,
+            "step {step}: serial and parallel differ by {worst}"
+        );
+        assert!(
+            (b.total() - total).abs() <= 1e-12 * total,
+            "step {step}: parallel drifted"
+        );
+        assert_eq!(
+            b.wet,
+            b.masks_from_free(),
+            "step {step}: parallel wet masks"
+        );
     }
 }
 
@@ -176,8 +220,7 @@ fn parallel_exchange_keeps_serial_proposal_order_on_different_pools() {
     let mut expected = Pond::seeded(24, 6, 20, 11);
     let mut four = expected.clone();
     let mut eight = expected.clone();
-    let (mut serial, mut p4, mut p8) =
-        (Serial::default(), Parallel::new(4), Parallel::new(8));
+    let (mut serial, mut p4, mut p8) = (Serial::default(), Parallel::new(4), Parallel::new(8));
     for tick in 0..40 {
         expected.step(&mut serial, &P);
         four.step(&mut p4, &P);
@@ -202,7 +245,12 @@ fn parallel_exchange_keeps_serial_proposal_order_on_different_pools() {
 fn worlds_of_different_sizes_exchange_at_once_on_one_pool() {
     use cubarium_rules::water::host::Parallel;
     const STEPS: usize = 80;
-    let sizes = [(24, 6, 20, 11), (40, 3, 30, 12), (9, 11, 12, 13), (70, 5, 64, 14), (33, 7, 128, 15),
+    let sizes = [
+        (24, 6, 20, 11),
+        (40, 3, 30, 12),
+        (9, 11, 12, 13),
+        (70, 5, 64, 14),
+        (33, 7, 128, 15),
     ];
     let alone: Vec<Pond> = sizes
         .iter()
@@ -226,17 +274,32 @@ fn worlds_of_different_sizes_exchange_at_once_on_one_pool() {
                     for step in 0..STEPS {
                         pond.step(&mut parallel, &P);
                         let drift = (pond.total() - total).abs();
-                        assert!(drift <= 1e-12 * total, "{w}x{d}x{h} step {step}: drifted by {drift}");
+                        assert!(
+                            drift <= 1e-12 * total,
+                            "{w}x{d}x{h} step {step}: drifted by {drift}"
+                        );
                     }
                     pond
                 })
             })
             .collect();
-        handles.into_iter().map(|h| h.join().expect("a world's thread")).collect()
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("a world's thread"))
+            .collect()
     });
     for (a, b) in alone.iter().zip(&together) {
-        let worst = a.free.iter().zip(&b.free).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max);
-        assert!(worst <= 1e-9, "{:?}: alone and together differ by {worst}", a.grid);
+        let worst = a
+            .free
+            .iter()
+            .zip(&b.free)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            worst <= 1e-9,
+            "{:?}: alone and together differ by {worst}",
+            a.grid
+        );
         assert_eq!(b.wet, b.masks_from_free(), "{:?}: wet masks", b.grid);
     }
 
@@ -248,8 +311,17 @@ fn worlds_of_different_sizes_exchange_at_once_on_one_pool() {
         small.step(&mut shared, &P);
     }
     for (a, b) in [(&alone[3], &big), (&alone[2], &small)] {
-        let worst = a.free.iter().zip(&b.free).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max);
-        assert!(worst <= 1e-9, "{:?}: one backend for two worlds differs by {worst}", a.grid);
+        let worst = a
+            .free
+            .iter()
+            .zip(&b.free)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max);
+        assert!(
+            worst <= 1e-9,
+            "{:?}: one backend for two worlds differs by {worst}",
+            a.grid
+        );
     }
 }
 
@@ -259,9 +331,9 @@ fn worlds_of_different_sizes_exchange_at_once_on_one_pool() {
 /// through `cubarium-voxel`'s default `parallel`).
 #[cfg(feature = "par")]
 mod columns {
-    use cubarium_rules::water::{self, Grid};
     use cubarium_rules::water::column::{Ground, Table};
     use cubarium_rules::water::host::{self, Exec, Water};
+    use cubarium_rules::water::{self, Grid};
 
     /// Air, bedrock, rock and soil, as the column phases see them, fluxes over `dt`: soil
     /// drains fast enough to cross its field capacity within a few steps, rock barely.
@@ -306,7 +378,10 @@ mod columns {
 
     impl Land {
         fn seeded(width: usize, depth: usize, height: usize, seed: u64) -> Land {
-            let grid = Grid { width, depth, height,
+            let grid = Grid {
+                width,
+                depth,
+                height,
             };
             let (plane, n) = (grid.plane(), grid.cells());
             let mut s = seed;
@@ -351,8 +426,10 @@ mod columns {
             let plane = self.grid.plane();
             let words = self.grid.mask_words();
             let g = grounds(1.0);
-            let (mut wet, mut damp, mut drainable) =
-                (vec![0u128; plane * words], vec![0u128; plane * words], vec![0u128; plane * words],
+            let (mut wet, mut damp, mut drainable) = (
+                vec![0u128; plane * words],
+                vec![0u128; plane * words],
+                vec![0u128; plane * words],
             );
             for i in 0..self.grid.cells() {
                 let y = i / plane;
@@ -365,7 +442,9 @@ mod columns {
                 if k.capacity > 0.0 && self.pore[i] > 0.0 {
                     damp[col] |= bit;
                     let unit = k.capacity * VOXEL;
-                    if k.permeable && self.pore[i] * VOXEL * k.capacity - k.field_capacity * unit > 0.0 {
+                    if k.permeable
+                        && self.pore[i] * VOXEL * k.capacity - k.field_capacity * unit > 0.0
+                    {
                         drainable[col] |= bit;
                     }
                 }
@@ -397,12 +476,18 @@ mod columns {
             };
             let check = |before: [isize; 3], after: [isize; 3], d: [isize; 3], phase: &str| {
                 for k in 0..3 {
-                    assert_eq!(after[k] - before[k], d[k], "{phase}: set {k}'s reported count");
+                    assert_eq!(
+                        after[k] - before[k],
+                        d[k],
+                        "{phase}: set {k}'s reported count"
+                    );
                 }
             };
             let kind = self.kind.clone();
             let (sub, tick) = (grounds(0.25), grounds(1.0));
-            let (sub, ground) = (|i: usize| sub[kind[i] as usize], |i: usize| tick[kind[i] as usize],
+            let (sub, ground) = (
+                |i: usize| sub[kind[i] as usize],
+                |i: usize| tick[kind[i] as usize],
             );
             for _ in 0..4 {
                 let before = counts(self);
@@ -439,7 +524,10 @@ mod columns {
     }
 
     fn worst(a: &[f64], b: &[f64]) -> f64 {
-        a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0, f64::max)
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0, f64::max)
     }
 
     /// Fall, infiltration, drainage and the water table on a pool follow the same phases
@@ -464,20 +552,38 @@ mod columns {
                 assert_eq!(land.damp, damp, "tick {tick}: damp set");
                 assert_eq!(land.drainable, drainable, "tick {tick}: drainable set");
                 let drift = (land.total() - total).abs();
-                assert!(drift <= 1e-12 * total, "tick {tick}: water drifted by {drift}");
+                assert!(
+                    drift <= 1e-12 * total,
+                    "tick {tick}: water drifted by {drift}"
+                );
             }
             // Rounding, not bits: what drainage hands the aquifer is summed per chunk.
-            assert!(worst(&serial.free, &pooled.free) <= 1e-9, "tick {tick}: free");
-            assert!(worst(&serial.pore, &pooled.pore) <= 1e-9, "tick {tick}: pore");
+            assert!(
+                worst(&serial.free, &pooled.free) <= 1e-9,
+                "tick {tick}: free"
+            );
+            assert!(
+                worst(&serial.pore, &pooled.pore) <= 1e-9,
+                "tick {tick}: pore"
+            );
             assert!(
                 (serial.aquifer - pooled.aquifer).abs() <= 1e-9 * serial.aquifer.max(1.0),
                 "tick {tick}: aquifer"
             );
         }
         // The phases did something: free water fell and soaked in, pores drained.
-        assert!(worst(&serial.free, &start.free) > 0.1, "free water never moved");
-        assert!(worst(&serial.pore, &start.pore) > 0.1, "pore water never moved");
-        assert!((serial.aquifer - start.aquifer).abs() > 1.0, "the aquifer never moved");
+        assert!(
+            worst(&serial.free, &start.free) > 0.1,
+            "free water never moved"
+        );
+        assert!(
+            worst(&serial.pore, &start.pore) > 0.1,
+            "pore water never moved"
+        );
+        assert!(
+            (serial.aquifer - start.aquifer).abs() > 1.0,
+            "the aquifer never moved"
+        );
     }
 
     /// A dense walk of the same primitives, independent of the host's word masks.
@@ -665,7 +771,11 @@ mod columns {
     #[test]
     fn worlds_of_different_sizes_run_the_column_phases_at_once_on_one_pool() {
         const TICKS: usize = 30;
-        let sizes = [(70, 5, 12, 3), (130, 4, 20, 4), (17, 9, 9, 5), (64, 8, 128, 6),
+        let sizes = [
+            (70, 5, 12, 3),
+            (130, 4, 20, 4),
+            (17, 9, 9, 5),
+            (64, 8, 128, 6),
         ];
         let alone: Vec<Land> = sizes
             .iter()
@@ -690,7 +800,10 @@ mod columns {
                         for tick in 0..TICKS {
                             land.tick(Exec::on(&pool));
                             let drift = (land.total() - total).abs();
-                            assert!(drift <= 1e-12 * total, "{w}x{d}x{h} tick {tick}: drifted by {drift}");
+                            assert!(
+                                drift <= 1e-12 * total,
+                                "{w}x{d}x{h} tick {tick}: drifted by {drift}"
+                            );
                             assert_eq!(
                                 (land.wet.clone(), land.damp.clone(), land.drainable.clone()),
                                 land.sets_from_arrays(),
@@ -701,12 +814,19 @@ mod columns {
                     })
                 })
                 .collect();
-            handles.into_iter().map(|h| h.join().expect("a world's thread")).collect()
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("a world's thread"))
+                .collect()
         });
         for (a, b) in alone.iter().zip(&together) {
             assert!(worst(&a.free, &b.free) <= 1e-9, "{:?}: free", a.grid);
             assert!(worst(&a.pore, &b.pore) <= 1e-9, "{:?}: pore", a.grid);
-            assert!((a.aquifer - b.aquifer).abs() <= 1e-9 * a.aquifer.max(1.0), "{:?}: aquifer", a.grid);
+            assert!(
+                (a.aquifer - b.aquifer).abs() <= 1e-9 * a.aquifer.max(1.0),
+                "{:?}: aquifer",
+                a.grid
+            );
         }
     }
 
@@ -733,16 +853,25 @@ mod columns {
         };
         let (serial, taken_serial) = run(Exec::serial());
         let (pooled, taken_pooled) = run(Exec::on(&pool));
-        assert!((taken_serial - charged).abs() <= 1e-12, "the stock was not spent: {taken_serial}");
+        assert!(
+            (taken_serial - charged).abs() <= 1e-12,
+            "the stock was not spent: {taken_serial}"
+        );
         assert!((taken_pooled - taken_serial).abs() <= 1e-12);
-        assert!(worst(&serial.pore, &pooled.pore) <= 1e-12, "the pool shared it differently");
+        assert!(
+            worst(&serial.pore, &pooled.pore) <= 1e-12,
+            "the pool shared it differently"
+        );
         assert!(worst(&serial.free, &pooled.free) <= 1e-12);
         // Index order: the first cell the table filled is the lowest-indexed one it reaches.
         let filled: Vec<usize> = (0..land.grid.cells())
             .filter(|&i| serial.pore[i] > land.pore[i])
             .collect();
         let plane = land.grid.plane();
-        assert!(filled.iter().all(|&i| i / plane < t.band), "a cell above the band filled");
+        assert!(
+            filled.iter().all(|&i| i / plane < t.band),
+            "a cell above the band filled"
+        );
         assert!(
             filled.last().copied().unwrap_or(0) < land.grid.cells() / 2,
             "a scarce stock reached the upper rows: {:?}",
