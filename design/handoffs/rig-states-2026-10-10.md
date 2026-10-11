@@ -151,3 +151,84 @@ Return (40 lines or fewer):
 - tests;
 - commits, signed `Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`;
 - the list of looks left for Wrysk.
+
+## Round 2 result (merged bec3674b)
+
+Today's sleep settle is on the rig for the Veilhound, lanternjaw, seedporter-ground and the
+grounded bellwing. Skipped: the perched seedporter (hanging tail, no ground plane), and the
+capgnawer, littershredder and ripple-snail (0 settle rows). Wrysk saw every video
+(2026-10-11): "frondgrazer animations look fine", no objections.
+
+## Round 3: sleep poses (renderer-worker, opus-high; 2026-10-11)
+
+Wrysk (2026-10-11), on the sleep looks left after round 2: "yeah those different sleep poses
+sound like theyd be cute to try out". These are **candidates for his look**: build each one,
+show it, and don't merge.
+
+Worktree `.claude/worktrees/sleep-poses`, branch `sleep-poses`, from main after the full
+rebake (bc7ce1cd). The bake is reproducible now (f75b48e7): rebaking an untouched species
+must leave its files byte-identical, and you commit only the files of the species you change.
+
+### The poses
+
+- **Veilhound** (`chorister`; a wolf-like hunter). Today it only sinks a few rows. Two
+  candidates, both played by its `asleep` track:
+  - **A, lying down:** the body comes down to the ground, the legs fold under it, the head
+    drops to rest on the forepaws, and the tail curls along its side.
+  - **B, curled up:** it lies on its side curled into a ring, nose to tail.
+  It has no tail bone today; add the bones the pose needs.
+- **Lanternjaw:** it folds its striking arms against its front while asleep, on top of
+  today's settle.
+- **Seedporter, perched:** it sleeps on its perch. The body hunches down onto the perch,
+  the fruit arms tuck in against the chest, and the head tucks. The tail hangs as it does
+  today. First say how it perches now: which pose model, what it stands on, and why round 2
+  couldn't use the ground pattern.
+
+The loftstrider's rest pose (body lowered to the ground, legs bent like a spider's, flat feet)
+is the precedent for a real lying-down pose on the rig.
+
+### Rules
+
+- **Asleep only.** Falling asleep and waking ease in and out over the track's weight, as the
+  frondgrazer's do. The breath stays on the class path.
+- **The rest of the look doesn't change.**
+  - Standing, idle, feeding and hunkering draw exactly as on main: `cmp` the rest frames at
+    px 6 and 12, side-on and three-quarter, as rounds 1 and 2 did, and run the feed checks.
+  - The awake model gains no visible cell. A part that needs cells only while asleep (a tail
+    end, say) can carry nested hidden cells, as the frondgrazer's `neck_in` does.
+  - No new colours.
+- **The ground.** A lying body rests on the ground line, never sinks through it, and leaves
+  no see-through holes or flat lids (round 1's lesson: legs fold on leg bones, and cut cells
+  tuck on tuck bones).
+- Round 1's bake-time end-pose check needs a new reference. The sleep end pose is no longer
+  today's settle, so check instead that the asleep end pose is gap-free and on the ground.
+- Read `design/handoffs/worker-rules-2026-10-07.md`.
+  - **Windows:** no windows, and Blender only with `-b`.
+  - **Time:** no tool call over 5 minutes (`timeout 270`). A longer bake or capture batch runs
+    as one detached chain (`setsid nohup`, `chrt -i 0 nice -n 19`) ending in a DONE marker,
+    and you hand back what is running, where it lands, and what's left.
+  - **Locations:** seed your `target/` by reflink from a recent build. Don't put worktrees or
+    targets under `/tmp`.
+  - **Commits:** use explicit paths. Copy MP4s out of the worktree before you hand back.
+  - **Unsafe:** only the `ash` FFI calls in `cubarium-gpu`.
+  - **Tests:** they check mechanisms, never tuned numbers.
+
+### Evidence
+
+For each species: two grown animals falling asleep, sleeping and waking, today | candidate,
+real time, lit, side-on and three-quarter, at px 6 and 12. Use the state scripting in
+`voxel_feed_capture`.
+- Write to `/home/wrysk/wryskware/cubarium/art/gen/runs/sleep-poses-2026-10-11/<species>-sleep-px{6,12}.mp4`.
+  The Veilhound gets `chorister-sleep-A-…` and `chorister-sleep-B-…`.
+- Make one still sheet of every end pose at px 12 (`end-poses.png`), so they can be compared
+  at a glance.
+
+### Return (40 lines or fewer)
+
+- Per pose: what moves, its bones and cells per bone, at both voxel sizes.
+- The perch survey answer.
+- The unchanged-look checks, with raw `cmp` output.
+- MP4 and sheet paths.
+- Tests.
+- Commits.
+- Anything that looks wrong at px 6.
