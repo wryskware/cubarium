@@ -209,3 +209,5 @@ example), on `c8b1ac84` (VAULT-COUNT's `vault_count`, cherry-picked).
     Use it if it still loads; otherwise found a fresh world.
 - Run the observatory's tests and `guide_test.gd`.
 - Sign commits `Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`. Don't merge.
+
+**VAULT-GUIDE MERGED** main bb6b1295 (2026-10-11): stage counts from `profile_index`; Wrysk: "im sure its fine".
