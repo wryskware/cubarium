@@ -169,11 +169,10 @@ pub const LANTERNJAW_BROOD_SHARE: f64 = 0.75;
 /// What a grazer builds out of a unit of foliage — and, by the decision, what a
 /// shredder builds out of a unit of glowcap cap tissue.
 const FOLIAGE_YIELD: f64 = 0.5;
-/// Nectar's assimilation yield (F1): fresh plant matter's (the foliage yield). A
-/// placeholder; at bloomcrown's `nectar_mineral_fraction` (0.01) against the bellwing's
-/// `n_tissue` (0.02) the mineral binds at the same 0.5. Kept within 2/3 so the search's
-/// ×1.5 yield gene stays a fraction.
-const NECTAR_YIELD: f64 = 0.5;
+/// Nectar sugar absorption: real hummingbirds absorb about 0.97 of sucrose.
+/// Mineral limits building tissue; the unfunded absorbed share fuels running costs.
+/// The serde-visible `yield_by_food.nectar` can be tuned; search clamps yields to 0.99.
+const NECTAR_YIELD: f64 = 0.95;
 
 /// The yield of **fruit** (F3, the seedporter): soft, energy-rich flesh digests better
 /// than leaf, so a little over the foliage yield; kept under 2/3 so cubarium-search's ×1.5
@@ -2023,6 +2022,7 @@ impl FounderPhysiology {
                     birth_body: 0.0125,
                     birth_cost: 0.00625,
                     reserve_cap: 0.5,
+                    fuel_cap: crate::default_fuel_cap(),
                     // Unused by the founder path: feeding is local and there is no
                     // target search. Recorded at the frondgrazer's placeholders so a
                     // founder body is a complete animal under the same validators.
@@ -2260,6 +2260,7 @@ impl FounderPhysiology {
                     // pays a clutch sized by body above the floor
                     // ([`Reproduction::DORMANT_EGGS_PLACEHOLDER`]).
                     reserve_cap: 0.6,
+                    fuel_cap: crate::default_fuel_cap(),
                     drown_depth_m: 0.2,
                     energy_density: 2.0,
                     // LJ-GROW (d): a new adult earmarks three quarters of its net income for

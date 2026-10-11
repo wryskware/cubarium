@@ -73,7 +73,7 @@ pub struct BandSpec {
     pub required_loss_weight: f64,
     /// Disable absolute penalties only for diagnostic maps with deliberate omissions.
     pub absolute_persistence: bool,
-    /// Experimental reward uses body + reserve + escrow + digestible stomach.
+    /// Experimental reward uses body + reserve + fuel + escrow + digestible stomach.
     /// False preserves the current reward; both deltas are always recorded.
     pub stomach_aware_reward: bool,
     /// The lanternjaws' share of the animals over the second half.
@@ -581,7 +581,7 @@ impl Snap {
         for a in view.animals.iter() {
             let Some(f) = a.founder else { continue };
             biomass[f.index()] +=
-                a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic);
+                a.body + a.reserve + a.fuel + a.reproduction.escrow.map_or(0.0, |e| e.organic);
             stomach[f.index()] +=
                 super::targets::digestible_stomach(a, sim.fauna().config().founder(f));
         }

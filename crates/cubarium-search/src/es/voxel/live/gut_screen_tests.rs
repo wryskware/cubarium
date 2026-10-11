@@ -200,35 +200,39 @@ fn the_food_screen_judges_supply_against_the_daily_need() {
     assert!(r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")));
 }
 
-/// Vine products carry the vine's mineral (repair 3 item 2), and what a product's mineral
-/// cannot fund passes undigested (item 1). The seedporter on latticevine fruit alone, at a
-/// vine mineral set by hand: the fruit funds `min(yield, mineral / n_tissue)` of what the
-/// seedporter would digest; mineral-free, it feeds nothing and the seedporter is refused.
+/// Product mineral limits tissue, while its absorbed sugar can pay running costs.
+/// The basal food screen must still refuse absent food or a mineral-free diet with
+/// fuel disabled, but it can fund upkeep from mineral-free fruit with fuel enabled.
 #[test]
-fn vine_fruit_feeds_at_the_yield_its_mineral_funds() {
-    assert!((mineral_limited_yield(0.6, 0.01, 0.05) - 0.2).abs() < 1e-15);
-    assert_eq!(mineral_limited_yield(0.5, 0.01, 0.02), 0.5, "the bellwing's nectar is fully funded");
-    assert_eq!(mineral_limited_yield(0.6, 0.0, 0.05), 0.0);
+fn vine_fruit_funds_running_costs_with_fuel() {
+    let (yield_, mineral, tissue) = (0.8, 0.02, 0.1);
+    let funded = mineral_limited_yield(yield_, mineral, tissue, 0.0);
+    let fueled = mineral_limited_yield(yield_, mineral, tissue, 0.3);
+    assert!(fueled > funded);
+    assert_eq!(fueled, yield_);
+    assert_eq!(mineral_limited_yield(yield_, 0.0, tissue, 0.0), 0.0);
+    assert_eq!(mineral_limited_yield(yield_, 0.0, tissue, 0.3), yield_);
+    assert_eq!(mineral_limited_yield(yield_, tissue, tissue, 0.0), yield_);
     let w = world();
-    let fauna = only(Founder::Seedporter, 1);
+    let mut fauna = only(Founder::Seedporter, 1);
+    let p = &mut fauna.founders[Founder::Seedporter.index()];
+    p.yield_by_food[Food::Fruit.index()] = yield_;
+    p.core.n_tissue = tissue;
+    p.core.fuel_cap = 0.3;
     let mut vine_only = FloraConfig::for_voxel_size(VOXEL_M);
     for sp in Species::ALL {
         vine_only.species_mut(sp).fruit_per_s = 0.0;
     }
-    vine_only.latticevine.mineral_fraction = 0.01;
+    vine_only.latticevine.mineral_fraction = 0.0;
     let r = roster(&vine_only, &fauna, &w, &food_spec());
     let row = r.food.iter().find(|x| x.lineage == "seedporter").expect("a row");
     let fruit = row.foods.iter().find(|x| x.food == Food::Fruit.name()).expect("fruit supply");
-    assert!(fruit.per_day > 0.0, "{row:?}");
-    let p = fauna.founder(Founder::Seedporter);
-    let funded = mineral_limited_yield(p.yield_by_food[Food::Fruit.index()], 0.01, p.core.n_tissue);
-    assert!((fruit.assimilable_per_day - funded * fruit.per_day).abs() < 1e-12 * fruit.per_day, "{row:?}");
-    assert!(row.ratio > 0.0, "{row:?}");
-    assert!(!r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")), "{:?}", r.refusals());
-    let mut bare = vine_only.clone();
-    bare.latticevine.mineral_fraction = 0.0;
-    let r = roster(&bare, &fauna, &w, &food_spec());
-    assert!(r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")), "{:?}", r.refusals());
+    assert!(fruit.per_day > 0.0);
+    assert!((fruit.assimilable_per_day - yield_ * fruit.per_day).abs() < 1e-12 * fruit.per_day);
+    assert!(row.ratio > 0.0);
+    fauna.founders[Founder::Seedporter.index()].core.fuel_cap = 0.0;
+    let r = roster(&vine_only, &fauna, &w, &food_spec());
+    assert!(r.refusals().iter().any(|x| x.starts_with("food") && x.contains("seedporter")));
 }
 
 // --- Replenishment: reserve plus digestible stomach -----------------------------------
@@ -279,7 +283,7 @@ fn flat_world() -> World {
 
 /// A founded chorister arrives with `s0 K` of carrion at its tissue's mineral density:
 /// worth `s0 x k x B x y` to its reserve (gut and yield set by hand). Short of mineral, the
-/// yield is what the mineral can fund, as digestion counts it.
+/// reserve share is what the mineral can fund; fuel preserves the remaining energy.
 #[test]
 fn a_bodys_digestible_stomach_is_its_pools_at_their_effective_yield() {
     let world = flat_world();
@@ -297,12 +301,27 @@ fn a_bodys_digestible_stomach_is_its_pools_at_their_effective_yield() {
         }
     ));
     let mut a = fauna.view().animals[0].clone();
+    config.founders[Founder::Chorister.index()].core.fuel_cap = 0.3;
     let p = config.founder(Founder::Chorister);
     let want = 0.15 * 0.2 * a.body * 0.5;
     let got = digestible_stomach(&a, p);
     assert!((got - want).abs() < 1e-12, "{got} vs {want}");
-    // A quarter of the mineral funds a quarter of the tissue: yield 0.25, not 0.5.
+    // Reducing mineral changes the tissue share, while fuel keeps the energy usable.
     a.stomach.pools[Food::Carrion.index()].mineral *= 0.25;
     let short = digestible_stomach(&a, p);
-    assert!((short - want / 2.0).abs() < 1e-12, "{short} vs {}", want / 2.0);
+    assert!((short - want).abs() < 1e-12, "{short} vs {want}");
+    config.founders[Founder::Chorister.index()].core.fuel_cap = 0.0;
+    let unfueled = digestible_stomach(&a, config.founder(Founder::Chorister));
+    assert!((unfueled - want / 2.0).abs() < 1e-12);
+    let before = super::window::body_energy(&a);
+    let stores = super::balance::stores(std::slice::from_ref(&a), &config, Founder::Chorister);
+    a.fuel = 0.03 * a.body;
+    assert!((super::window::body_energy(&a) - before - a.fuel).abs() < 1e-12);
+    assert!(
+        (super::balance::stores(std::slice::from_ref(&a), &config, Founder::Chorister)
+            - stores
+            - a.fuel)
+            .abs()
+            < 1e-12
+    );
 }

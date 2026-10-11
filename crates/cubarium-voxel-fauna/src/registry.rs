@@ -134,6 +134,8 @@ fn species_rows() -> Vec<Row> {
             .evolve().grade("B"),
         r("reserve_cap", "fraction of body", nonneg, "ceiling on new intake into the reserve")
             .search(0.2, 5.0).grade("A"),
+        r("fuel_cap", "fraction of body", nonneg, "nitrogen-free fat/sugar capacity; birds carry roughly 10–40% of lean mass as fat")
+            .evolve().grade("A").prov("derived"),
         r("drown_depth_m", "m", nonneg, "standing water that kills the heuristic body and a clutch").grade("D"),
         r("energy_density", "energy per org-unit", nonneg, "energy an introduced animal arrives with").grade("N"),
         r("lifespan_median_s", "s", nonneg, "median lifespan (0: none)")
@@ -254,7 +256,7 @@ fn founder_rows() -> Vec<Row> {
         r("contact_height_fraction", "x body height", nonneg, "the contact receptors' height").digest(),
         r("mouth_reach_length_fraction", "x body length", nonneg, "the mouth's reach ahead of the footprint")
             .evolve().digest(),
-        r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.9),
+        r("yield_by_food.*", "fraction", fraction, "assimilation yield of one food class").search(0.05, 0.99),
         r("organ_structure_fraction", "fraction of body", Range::closed(0.0, 1.0).open_hi(), "sensor/organ share of structure")
             .grade("N"),
         r("flower_ambush_m", "m", nonneg, "MIMIC: holds an ambush this close to a flower"),

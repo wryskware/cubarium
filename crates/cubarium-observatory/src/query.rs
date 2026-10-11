@@ -599,7 +599,7 @@ pub fn animal_row(fauna: &Fauna, a: &Animal) -> AnimalRow {
         body: a.body,
         size: if core.body_max > 0.0 { a.body / core.body_max } else { 1.0 },
         fullness: if cap > 0.0 { (a.reserve / cap).clamp(0.0, 1.0) } else { 0.0 },
-        energy: a.energy,
+        energy: a.energy + a.fuel_energy,
         wound: a.wound,
         dryness: a.mobility.dryness,
         activity: activity_of(a),

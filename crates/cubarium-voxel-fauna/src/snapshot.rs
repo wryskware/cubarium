@@ -168,7 +168,9 @@ use crate::{Fauna, FaunaConfig};
 //     `counters_by_founder` and `counter_wound_by_founder` (a state layout change). The
 //     `Flight::flush_*` knobs and the lanternjaw's `counter` are config, not bumps; the
 //     flushes in progress are session state.
-pub const SCHEMA: u32 = 77;
+// 78: FUEL — `Animal::{fuel, fuel_energy}` (a state layout change). The relative
+//     `SpeciesConfig::fuel_cap` is named config, not itself a schema bump.
+pub const SCHEMA: u32 = 78;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -303,6 +305,8 @@ fn validate(fauna: &Fauna) -> Result<(), String> {
         for (field, value) in [
             ("body", a.body),
             ("reserve", a.reserve),
+            ("fuel", a.fuel),
+            ("fuel energy", a.fuel_energy),
             ("mineral", a.mineral),
             ("energy", a.energy),
         ] {
@@ -587,6 +591,8 @@ mod tests {
             reproduction: crate::ReproductionState::default(),
             body,
             reserve: 0.5 * body,
+            fuel: 0.0,
+            fuel_energy: 0.0,
             mineral: 0.05 * body,
             energy: 2.0 * body,
             age_ticks: 0,
@@ -687,6 +693,22 @@ mod tests {
         let err = format!("{:#}", decode(&older).expect_err("an older world"));
         assert!(err.contains("start a fresh world"), "{err}");
         assert!(err.contains(&format!("is not {SCHEMA}")), "{err}");
+    }
+
+    #[test]
+    fn fuel_round_trip_refuses_schema_77() {
+        let mut a = animal(0, 0.02);
+        a.fuel = layer(Vec::new(), 0).config.frondgrazer.fuel_cap * a.body;
+        a.fuel_energy = a.fuel * a.energy / (a.body + a.reserve);
+        let fauna = layer(vec![a], 1);
+        let mut bytes = encode(&fauna);
+        let back = decode(&bytes).expect("fuel world round trip");
+        assert_eq!(back.animals[0].fuel, a.fuel);
+        assert_eq!(back.animals[0].fuel_energy, a.fuel_energy);
+        assert_eq!(back.view().energy(), fauna.view().energy());
+        bytes[0] = 77;
+        let err = format!("{:#}", decode(&bytes).expect_err("schema 77 refused"));
+        assert!(err.contains("start a fresh world"), "{err}");
     }
 
     fn with_doc(fauna: &Fauna, doc: Vec<u8>) -> Vec<u8> {
