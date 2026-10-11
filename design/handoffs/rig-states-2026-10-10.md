@@ -232,3 +232,10 @@ real time, lit, side-on and three-quarter, at px 6 and 12. Use the state scripti
 - Tests.
 - Commits.
 - Anything that looks wrong at px 6.
+
+## Round 3 result (merged 2026-10-11)
+
+Wrysk: "veilhound sleep A is great. B doesnt really work for me"; lanternjaw and perched
+seedporter "yah both are good". Merged A (B removed from the bake), the lanternjaw arm fold
+and the perched seedporter hunch. Videos `art/gen/runs/sleep-poses-2026-10-11/`. Open, not
+raised by him: the fall-asleep blend is the shared 1 s (`sleep::BLEND_S`).
