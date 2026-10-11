@@ -161,7 +161,10 @@ fn set_reserve(fauna: &mut Fauna, id: u64, fraction: f64) {
     let want = fraction * cap;
     let d = want - a.reserve;
     // Mineral and energy at the body's own density, so its composition does not move.
-    let (dm, de) = (a.mineral / a.organic() * d, a.energy / a.organic() * d);
+    let (dm, de) = (
+        a.mineral / (a.body + a.reserve) * d,
+        a.energy / (a.body + a.reserve) * d,
+    );
     let a = animal_mut(fauna, id);
     a.reserve = want;
     a.mineral += dm;
@@ -789,6 +792,7 @@ fn mineral_free_food_passes_and_frees_the_stomach() {
     let mut flora = Flora::new(FloraConfig::default());
     let mut config = carrion_config(f);
     let p = &mut config.founders[f.index()];
+    p.core.fuel_cap = 0.0; // Exercise overflow without any fuel room.
     p.core.maintenance_per_s = 0.0;
     p.motor_respiration_per_s = 0.0;
     p.gut.digestion_s[Food::Nectar.index()] = 2.0;
@@ -862,6 +866,7 @@ fn a_two_pool_digestion_by_the_numbers() {
     let mut flora = Flora::new(FloraConfig::default());
     let mut config = carrion_config(f);
     let p = &mut config.founders[f.index()];
+    p.core.fuel_cap = 0.0; // Exercise overflow without any fuel room.
     p.core.maintenance_per_s = 0.0;
     p.motor_respiration_per_s = 0.0;
     p.yield_by_food[Food::Foliage.index()] = 0.5;

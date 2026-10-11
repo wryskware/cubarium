@@ -187,7 +187,31 @@ impl EcologyParams {
         match self {
             EcologyParams::Genome(g) => {
                 let mut p = base_of(&g.rest)?;
-                p.apply_genome(g)?;
+                // Clamp every yield this search writes before validating its decode. A
+                // multiplier may take an already efficient nectar diet above a fraction.
+                // The registry owns the ceiling, so it remains the single tuning knob.
+                let flora = cubarium_voxel::registry::to_value(&p.flora)?;
+                let fauna = cubarium_voxel::registry::to_value(&p.fauna)?;
+                let fr = cubarium_voxel_flora::registry();
+                let ar = cubarium_voxel_fauna::registry();
+                let mut edits = g.resolve(&[(fr, &flora), (ar, &fauna)])?;
+                for (path, value) in &mut edits[1] {
+                    if path.contains(".yield_by_food.") {
+                        let hi = ar
+                            .row_for(path)
+                            .and_then(|r| r.search)
+                            .map(|(_, hi)| hi)
+                            .ok_or_else(|| format!("yield path `{path}` has no search ceiling"))?;
+                        if let toml::Value::Float(v) = value {
+                            *v = v.min(hi);
+                        }
+                    }
+                }
+                fr.apply(&mut p.flora, &edits[0])
+                    .map_err(|e| format!("genome: {e}"))?;
+                ar.apply(&mut p.fauna, &edits[1])
+                    .map_err(|e| format!("genome: {e}"))?;
+                p.validate()?;
                 Ok(p)
             }
             EcologyParams::Resolved { flora, fauna } => Ok(Params {

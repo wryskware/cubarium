@@ -444,6 +444,6 @@ pub(crate) fn catch_worthwhile(config: &FaunaConfig, hunter: &Animal, prey: &Ani
     }
     let strikes = ((1.0 - prey.wound).max(0.0) / damage).ceil().max(1.0);
     let cost = strikes * h.strike_cost_s * p.core.maintenance_per_s * hunter.body;
-    let meal = (prey.body + prey.reserve) * p.yield_by_food[crate::Food::Carrion.index()];
+    let meal = prey.organic() * p.yield_by_food[crate::Food::Carrion.index()];
     meal - cost > p.catch_gain_min
 }

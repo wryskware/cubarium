@@ -448,11 +448,11 @@ fn terrain(fauna: &mut Fauna, view: &VoxelView<'_>) {
     }
 }
 
-/// Step 2: the upkeep, out of the reserve and then out of the body.
+/// Step 2: the upkeep, out of fuel, reserve and then body.
 ///
 /// Respiration is one helper shared with the motor budget: organic matter from the
-/// reserve and then from the body, the energy leaving with it at the animal's own
-/// current density, the mineral it held shed to the gut. It returns what was paid and how much
+/// fuel, then reserve and body, each stock's energy leaving at its own density.
+/// Only tissue sheds mineral to the gut. It returns what was paid and how much
 /// of it came out of the body — the body's share is the structural loss a founder's
 /// `Self` channel reports, and it is internal tissue loss, not a fictitious injury
 /// model.
@@ -466,6 +466,7 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
         0.0
     };
     let a = &mut fauna.animals[i];
+    let reserve_before = a.reserve;
     let (out, from_body) = withdraw(a, want);
     let paid = out.organic;
     if !(paid > 0.0) {
@@ -474,7 +475,8 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
     // The brood pays its share of what the reserve respired (D1b): the κ-rule splits net
     // income, so the soma's share of upkeep is not charged to the eggs.
     if brood_share > 0.0 {
-        a.reproduction.brood = (a.reproduction.brood - brood_share * (paid - from_body)).max(0.0);
+        a.reproduction.brood =
+            (a.reproduction.brood - brood_share * (reserve_before - a.reserve)).max(0.0);
     }
     // The mineral that organic matter held is shed to the gut, so a body's mineral stays
     // in proportion to its tissue instead of banking for life; the energy leaves as heat.
@@ -494,8 +496,8 @@ fn respire(fauna: &mut Fauna, i: usize, want: f64, kind: Respiration) -> (f64, f
 }
 
 /// **Organic matter out of a body**, the one pro-rata rule respiration and a parasite's
-/// drain share: from the reserve and then from the structure, with the mineral and energy
-/// it held at the body's own current density — the rule the plant layer's dead pools use,
+/// drain share: nitrogen-free fuel first at its own energy density, then reserve and
+/// structure at their tissue density — the rule the plant layer's dead pools use,
 /// so a body half respired is the same stuff it was. A body taken down to nothing hands
 /// over every unit of its mineral and energy rather than keeping float dust. Returns the
 /// three currencies that left and how much organic matter came out of the structure.
@@ -503,14 +505,15 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
     if !(want > 0.0) {
         return (Taken::default(), 0.0);
     }
-    let before = a.organic();
+    let fuel = take_fuel(a, want);
+    let before = a.body + a.reserve;
     // The organism budget's upkeep with no income at this point of the tick: the reserve
     // first, and what it cannot pay is the body's dieback, respired out of the structure.
-    let up = Budget::default().upkeep(&mut a.reserve, want);
+    let up = Budget::default().upkeep(&mut a.reserve, (want - fuel.organic).max(0.0));
     let from_body = up.unpaid.min(a.body);
     let paid = up.from_reserve + from_body;
     if !(paid > 0.0) {
-        return (Taken::default(), 0.0);
+        return (fuel, 0.0);
     }
     a.body -= from_body;
     let share = |stock: f64| {
@@ -526,18 +529,47 @@ fn withdraw(a: &mut Animal, want: f64) -> (Taken, f64) {
     a.mineral -= m;
     (
         Taken {
-            organic: paid,
+            organic: fuel.organic + paid,
             mineral: m,
-            energy: e,
+            energy: fuel.energy + e,
         },
         from_body,
     )
 }
 
+/// Nitrogen-free fuel out at its own stored energy density.
+fn take_fuel(a: &mut Animal, want: f64) -> Taken {
+    let organic = want.max(0.0).min(a.fuel);
+    let energy = if organic >= a.fuel {
+        a.fuel_energy
+    } else {
+        pro_rata(a.fuel_energy, organic, a.fuel)
+    };
+    a.fuel -= organic;
+    a.fuel_energy -= energy;
+    Taken {
+        organic,
+        mineral: 0.0,
+        energy,
+    }
+}
+
+/// A reduced config cap returns excess fuel as digestion heat, conserving all stocks.
+pub(crate) fn cap_fuel(fauna: &mut Fauna, i: usize) {
+    let cap =
+        body::effective_config(&fauna.config, &fauna.animals[i]).fuel_cap * fauna.animals[i].body;
+    let excess = (fauna.animals[i].fuel - cap).max(0.0);
+    if excess > 0.0 {
+        let out = take_fuel(&mut fauna.animals[i], excess);
+        book_respired(fauna, out.organic, Respiration::Digestion);
+        fauna.ledger.heat_out += out.energy;
+    }
+}
+
 /// `organic` out of the reserve, which must hold it, with the mineral and energy at the
 /// body's own density: a gestation instalment's and a clutch's one pro-rata rule.
 pub(crate) fn take_from_reserve(a: &mut Animal, organic: f64) -> Taken {
-    let before = a.organic();
+    let before = a.body + a.reserve;
     let mineral = pro_rata(a.mineral, organic, before);
     let energy = pro_rata(a.energy, organic, before);
     a.reserve -= organic;
@@ -575,7 +607,10 @@ fn drain_riders(fauna: &mut Fauna) {
             .min(bear_per_s * fauna.animals[h].body);
         let want = rate * DT;
         let host = &mut fauna.animals[h];
+        let (fuel_before, energy_before) = (host.fuel, host.fuel_energy);
         let (taken, from_body) = withdraw(host, want);
+        let fuel_taken = fuel_before - host.fuel;
+        let fuel_energy = energy_before - host.fuel_energy;
         if host.founder.is_some() && from_body > 0.0 {
             host.founder_state.feedback.structural_loss += from_body;
         }
@@ -583,10 +618,17 @@ fn drain_riders(fauna: &mut Fauna) {
         if let Some(f) = fauna.animals[h].founder {
             fauna.ledger.rider_take_lost_by_founder[f.index()] += taken.organic;
         }
+        let fuel_cap = body::effective_config(&fauna.config, &fauna.animals[r]).fuel_cap;
         let rider = &mut fauna.animals[r];
-        rider.reserve += taken.organic;
+        let fuel_kept = fuel_taken.min((fuel_cap * rider.body - rider.fuel).max(0.0));
+        let kept_energy = pro_rata(fuel_energy, fuel_kept, fuel_taken);
+        rider.fuel += fuel_kept;
+        rider.fuel_energy += kept_energy;
+        rider.reserve += taken.organic - fuel_taken;
         rider.mineral += taken.mineral;
-        rider.energy += taken.energy;
+        rider.energy += taken.energy - fuel_energy;
+        book_respired(fauna, fuel_taken - fuel_kept, Respiration::Digestion);
+        fauna.ledger.heat_out += fuel_energy - kept_energy;
     }
 }
 
@@ -1109,10 +1151,10 @@ fn gut_bite(a: &Animal, phys: &crate::FounderPhysiology, food: Food, period_s: f
 /// yields: the assimilable classes' raw digestion is scaled down together so that their
 /// effective, mineral-limited yields `y_eff` sum to at most `room = reserve cap −
 /// reserve`. A class whose `y_eff` is zero (no mineral) **passes** at `S_c · dt / τ_c`
-/// whatever the room: it places nothing, so the cap does not apply to it. Everything
+/// whatever the room: it places no reserve, so reserve room does not throttle it. Everything
 /// digested or passed goes through the one assimilation rule ([`assimilate`]): the yield
 /// into the reserve as far as its mineral funds it, the undigested share to egesta, the
-/// unfunded share respired; what is not digested stays in the stomach. No mineral is
+/// unfunded share to fuel and its overflow respired; what is not digested stays in the stomach. No mineral is
 /// invented.
 fn digest(fauna: &mut Fauna) {
     for i in 0..fauna.animals.len() {
@@ -1163,7 +1205,9 @@ fn digest(fauna: &mut Fauna) {
             l.digested.mineral += t.mineral;
             l.digested.energy += t.energy;
             l.digested_by_founder[f.index()] += t.organic;
-            let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food));
+            let fuel_before = fauna.animals[i].fuel;
+            let placed = assimilate(fauna, i, &sc, t, phys.yield_for(food)) + fauna.animals[i].fuel
+                - fuel_before;
             fauna.ledger.assimilated_by_founder[f.index()] += placed;
             if fauna.animals[i].mobility.ashore {
                 fauna.ledger.ashore_assimilated += placed;
@@ -3171,7 +3215,7 @@ fn flyer_act(
     // overnight, woke hungry and could never take off again: it sat perched beside full
     // blooms until it starved (s1 minute 120: 3045 of ~3200 juvenile samples perched,
     // eating latch and emergency on, stomach empty, lift up, never airborne).
-    let can_pay = |a: &Animal| a.reserve + (a.body - sc.body_min).max(0.0) >= takeoff_cost;
+    let can_pay = |a: &Animal| a.fuel + a.reserve + (a.body - sc.body_min).max(0.0) >= takeoff_cost;
     let puddle = phys.drown_depth_m(&phys.body_at(fauna.animals[i].body));
     // FLUSH (HUNT-ESCAPE, `crate::flush`): a hunter sensed coming sends it off in a burst.
     let escape = {
@@ -4039,7 +4083,11 @@ fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departur
         Taken {
             organic: a.organic() + a.gut.organic + a.gut_seeds.total().organic + fed.organic,
             mineral: a.mineral + a.gut.mineral + a.gut_seeds.total().mineral + fed.mineral,
-            energy: a.energy + a.gut.energy + a.gut_seeds.total().energy + fed.energy,
+            energy: a.energy
+                + a.fuel_energy
+                + a.gut.energy
+                + a.gut_seeds.total().energy
+                + fed.energy,
         },
     );
     let l = &mut fauna.ledger;
@@ -4553,9 +4601,9 @@ fn founder_feed(
     true
 }
 
-/// A bite becoming tissue: the food class's own yield of it is stored **as far as the
+/// A bite becoming tissue and fuel: the food class's own yield is stored **as far as the
 /// bite's own mineral pays for**, the undigested `(1 − yield)` share is egested, the
-/// unfunded rest is respired, the energy follows the organic matter at the bite's own
+/// unfunded rest fills fuel, its overflow is respired, and energy follows at the bite's own
 /// density, and the undigested share and the mineral that came with more tissue than was
 /// built go to the gut, voided later as dung ([`void_guts`]).
 ///
@@ -4564,8 +4612,8 @@ fn founder_feed(
 /// placeholders that binds on every bite: a plant's foliage carries `n_tissue` 0.02 and
 /// this animal's tissue wants 0.05, so a `1e-4` bite brings `2e-6` of mineral and funds
 /// `4e-5` of the `5e-5` a yield of 0.5 would otherwise have built. The unfunded
-/// organic matter is **respired with its energy as heat**, exactly like the fraction a
-/// full body and a full reserve cannot hold.
+/// organic matter fills nitrogen-free fuel up to `fuel_cap · body`; overflow leaves
+/// with its energy as heat.
 ///
 /// **The yield is the food's, not the eater's**: the caller hands in
 /// [`crate::FounderPhysiology::yield_for`] for what was actually eaten, because a
@@ -4575,9 +4623,8 @@ fn founder_feed(
 /// in the tissue and not a stock growth may draw on — the plant layer's `Stand::mineral`
 /// is the same — so an animal holding mineral still builds nothing out of a mineral-free
 /// bite.
-/// Returns the organic matter actually **placed** — into the reserve — which is
-/// what a founder's prior-interval intake feedback records, and not the bite's whole
-/// organic matter.
+/// Returns the organic matter placed into the reserve. The caller adds the fuel gained
+/// when recording total assimilation and prior-interval intake feedback.
 fn assimilate(
     fauna: &mut Fauna,
     i: usize,
@@ -4591,8 +4638,8 @@ fn assimilate(
     let funded = tissue_funded(t.mineral, sc.n_tissue);
     let assimilated = (yield_fraction * t.organic).min(funded);
     // Egested: the share the yield never absorbs goes to the gut, not to heat. Only the
-    // absorbed matter the bite's mineral cannot fund (and the reserve backstop) is
-    // respired.
+    // absorbed matter the bite's mineral cannot fund fills fuel; cap overflow and
+    // the reserve backstop are respired.
     // The absorbed share its mineral cannot fund, exactly zero when the mineral pays for
     // the whole yield; the egested share is the remainder, so the three add up.
     let unfunded = (yield_fraction * t.organic - assimilated).clamp(0.0, t.organic - assimilated);
@@ -4615,17 +4662,22 @@ fn assimilate(
             a.reproduction.brood = (a.reproduction.brood + rule.brood_share * placed).min(target);
         }
     }
-    let respired = unfunded + budget.close();
+    let fuel_kept = unfunded.min((sc.fuel_cap * a.body - a.fuel).max(0.0));
+    a.fuel += fuel_kept;
+    let respired = unfunded - fuel_kept + budget.close();
 
     // Energy: the density of what was eaten, so nothing is created for any food.
     let kept_energy = pro_rata(t.energy, placed, t.organic);
     a.energy += kept_energy;
+    let fuel_energy =
+        pro_rata(t.energy, fuel_kept, t.organic).min((t.energy - kept_energy).max(0.0));
+    a.fuel_energy += fuel_energy;
     let egested_energy = if t.organic > 0.0 {
-        (t.energy * (egested / t.organic)).min(t.energy - kept_energy)
+        (t.energy * (egested / t.organic)).min((t.energy - kept_energy - fuel_energy).max(0.0))
     } else {
         0.0
     };
-    let heat = t.energy - kept_energy - egested_energy;
+    let heat = (t.energy - kept_energy - fuel_energy - egested_energy).max(0.0);
 
     // Mineral: what the new tissue needs is kept and the excess joins the gut, voided
     // with the undigested matter as dung. An animal draws mineral from nothing but its
@@ -5090,6 +5142,8 @@ fn newborn(
         },
         body: body_min,
         reserve: parcel.organic - body_min,
+        fuel: 0.0,
+        fuel_energy: 0.0,
         mineral: parcel.mineral,
         energy: parcel.energy,
         age_ticks: 0,
@@ -6469,6 +6523,7 @@ fn deaths(fauna: &mut Fauna, view: &VoxelView<'_>, flora: &mut Flora) {
             let pup_spent = a.pack.is_some_and(|m| m.pup)
                 && a.founder.and_then(|f| fauna.config.founder(f).pack).is_some_and(|t| t.pup_starves_on_empty)
                 && !(a.reserve > 0.0)
+                && !(a.fuel > 0.0)
                 && !(a.stomach.organic() > 0.0);
             if a.body < sc.body_min || pup_spent {
                 Some((i, Departure::Starved))
@@ -6590,6 +6645,10 @@ mod night_survival_tests;
 #[cfg(test)]
 #[path = "gut_tests.rs"]
 mod gut_tests;
+
+#[cfg(test)]
+#[path = "fuel_tests.rs"]
+mod fuel_tests;
 #[cfg(test)]
 #[path = "hunt_tests.rs"]
 mod hunt_tests;

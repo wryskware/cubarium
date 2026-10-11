@@ -248,7 +248,7 @@ fn distance(a: [f64; 3], b: [f64; 3], ring_m: f64) -> f64 {
     (dx * dx + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 fn organic_store(a: &Animal) -> f64 {
-    a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic)
+    a.organic() + a.reproduction.escrow.map_or(0.0, |e| e.organic)
 }
 fn stomach_pools(a: &Animal) -> [f64; Food::COUNT] {
     a.stomach.pools.map(|p| p.organic)

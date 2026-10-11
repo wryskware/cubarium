@@ -7,6 +7,24 @@ use cubarium_voxel_fauna::{FaunaConfig, Founder};
 use super::ecology::EcologyParams;
 use super::search::species_lost;
 
+#[test]
+fn yield_genes_cannot_write_above_the_registry_ceiling() {
+    let mut e = EcologyParams::legacy();
+    e.set("founder.yield_by_food", 1.5).expect("in range");
+    let decoded = e.fauna();
+    for f in Founder::ALL {
+        for food in cubarium_voxel_fauna::Food::ALL {
+            let path = format!("fauna.founders.{}.yield_by_food.{}", f.name(), food.name());
+            let (_, hi) = cubarium_voxel_fauna::registry()
+                .row_for(&path)
+                .expect("yield row")
+                .search
+                .expect("search ceiling");
+            assert!(decoded.founder(f).yield_for(food) <= hi, "{path}");
+        }
+    }
+}
+
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("cub-lineage-params-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");

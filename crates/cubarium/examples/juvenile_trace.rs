@@ -234,9 +234,16 @@ fn main() {
                 if !(p.organic > 0.0) {
                     continue;
                 }
-                let funded = if phys.core.n_tissue > 0.0 { p.mineral / (phys.core.n_tissue * p.organic) } else { f64::INFINITY };
-                let y = phys.yield_for(food).min(funded).max(0.0);
-                e.intake += p.organic * speed / phys.gut.digestion_s[food.index()] * y * dt_tick;
+                let funded = if phys.core.n_tissue > 0.0 {
+                    p.mineral / (phys.core.n_tissue * p.organic)
+                } else {
+                    f64::INFINITY
+                };
+                let y = phys.yield_for(food).max(0.0);
+                let raw = p.organic * speed / phys.gut.digestion_s[food.index()] * dt_tick;
+                let tissue = raw * y.min(funded);
+                let fuel_room = (phys.core.fuel_cap * a.body - a.fuel).max(0.0);
+                e.intake += tissue + (raw * y - tissue).min(fuel_room);
             }
             if a.body > prev_body {
                 e.grown += a.body - prev_body;

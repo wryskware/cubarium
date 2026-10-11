@@ -81,10 +81,10 @@ pub struct Placed {
     pub x_m: f64,
 }
 
-/// A body's energy: tissue, reserve and the gestation escrow it is filling (still its own
+/// A body's energy: tissue, reserve, fuel and the gestation escrow it is filling (still its own
 /// until the birth), organic units.
 pub fn body_energy(a: &cubarium_voxel_fauna::Animal) -> f64 {
-    a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic)
+    a.body + a.reserve + a.fuel + a.reproduction.escrow.map_or(0.0, |e| e.organic)
 }
 
 /// One body's score for one window and its parts, each over the lineage's

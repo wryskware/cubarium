@@ -400,10 +400,10 @@ fn feed_directly(fauna: &mut Fauna, i: usize, t: Taken, y: f64) -> f64 {
 }
 
 /// A bite with no mineral in it builds nothing: the share the yield never absorbs is
-/// egested to the gut with its energy, the absorbed share no mineral funds is respired
-/// with its energy as heat, and the body's own mineral is not drawn on.
+/// egested to the gut with its energy, the absorbed share fills fuel,
+/// and the body's own mineral is not drawn on.
 #[test]
-fn a_mineral_free_bite_stores_nothing_and_egests_its_undigested_share() {
+fn a_mineral_free_bite_builds_no_tissue_and_stores_fuel() {
     let world = plain(6);
     let mut fauna = Fauna::new(config_with(|s| s.maintenance_per_s = 0.0));
     let i = grazer(&mut fauna, &world, 2);
@@ -421,13 +421,15 @@ fn a_mineral_free_bite_stores_nothing_and_egests_its_undigested_share() {
     assert_eq!(a.mineral, before.mineral, "its own mineral is not a reserve");
     assert!((a.gut.organic - (1.0 - y) * bite).abs() <= 1e-18);
     assert!((a.gut.energy - (1.0 - y) * bite).abs() <= 1e-18);
-    assert!((fauna.ledger.respired_digestion_out - y * bite).abs() <= 1e-18);
-    assert!((fauna.ledger.heat_out - y * bite).abs() <= 1e-18);
+    assert!((a.fuel - before.fuel - y * bite).abs() <= 1e-18);
+    assert!((a.fuel_energy - before.fuel_energy - y * bite).abs() <= 1e-18);
+    assert_eq!(fauna.ledger.respired_digestion_out, 0.0);
+    assert!(fauna.ledger.heat_out.abs() <= 1e-18);
     assert_fauna_closes(&fauna, "after a mineral-free bite");
 }
 
 /// A bite whose mineral funds less than the yield would build stores exactly
-/// `mineral / n_tissue`, keeps all of that mineral, and respires the unfunded absorbed
+/// `mineral / n_tissue`, keeps all of that mineral, and fuels the unfunded absorbed
 /// share; one carrying more mineral than its tissue needs sends the excess to the gut.
 #[test]
 fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut() {
@@ -453,8 +455,8 @@ fn a_bite_stores_what_its_mineral_funds_and_the_excess_mineral_goes_to_the_gut()
     assert_eq!(a.gut.mineral, 0.0, "no bite mineral is left over");
     assert!((a.gut.organic - (1.0 - y) * bite).abs() <= 1e-18);
     assert!(
-        (fauna.ledger.respired_digestion_out - (y * bite - funded)).abs() <= 1e-12 * bite,
-        "the unfunded absorbed share is respired"
+        (a.fuel - before.fuel - (y * bite - funded)).abs() <= 1e-12 * bite,
+        "the unfunded absorbed share fills fuel"
     );
 
     // Carries twice what its tissue needs: the yield binds, the excess is dung.

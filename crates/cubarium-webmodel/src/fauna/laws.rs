@@ -22,9 +22,14 @@ use cubarium_voxel_fauna::{DT, Food, FounderPhysiology, SpeciesConfig};
 pub struct Body {
     pub body: f64,
     pub reserve: f64,
+    /// Absorbed organic without mineral, reserved for running costs.
+    pub fuel: f64,
     /// The brood (D1b), held inside the reserve: `brood ≤ reserve` always.
     pub brood: f64,
     pub stomach: [f64; Food::COUNT],
+    /// Mineral carried by each pool. Unspecified open-loop pools retain the model's
+    /// fully funded assumption; a specified zero is genuinely mineral-free food.
+    pub stomach_mineral: [Option<f64>; Food::COUNT],
     pub eating: bool,
     pub emergency: bool,
 }
@@ -35,9 +40,17 @@ impl Body {
         self.stomach.iter().sum()
     }
 
-    /// The organic matter the body holds: structure, reserve and stomach (what a corpse is).
+    /// The organic matter held: structure, reserve, fuel and stomach (what a corpse is).
     pub fn organic(&self) -> f64 {
-        self.body + self.reserve + self.stomach_total()
+        self.body + self.reserve + self.fuel + self.stomach_total()
+    }
+
+    /// Tissue and recorded gut mineral; fuel contributes none.
+    pub fn mineral(&self, n_tissue: f64) -> f64 {
+        let gut: f64 = Food::ALL.iter().map(|food| {
+            self.stomach_mineral[food.index()].unwrap_or(n_tissue * self.stomach[food.index()])
+        }).sum();
+        n_tissue * (self.body + self.reserve) + gut
     }
 }
 
@@ -46,7 +59,7 @@ impl Body {
 pub struct Flows {
     /// Raw food out of the stomach, digested or passed.
     pub digested: f64,
-    /// Into the reserve (the sim's `assimilated_by_founder`).
+    /// Absorbed into reserve or fuel (the sim's `assimilated_by_founder`).
     pub assimilated: f64,
     /// Out of the gut as dung (to the litter pool).
     pub egested: f64,
@@ -122,21 +135,23 @@ pub fn full(phys: &FounderPhysiology, b: &Body) -> bool {
 }
 
 /// **Respiration out of a body** (`step.rs:355-390` with `withdraw`, `step.rs:398-431`): the
-/// reserve first, then the structure; the brood pays its share `brood_share` of what the
+/// fuel first, then reserve and structure; the brood pays its share `brood_share` of what the
 /// reserve paid (D1b). Returns (paid, of which from the structure).
 pub fn respire(sc: &SpeciesConfig, b: &mut Body, want: f64) -> (f64, f64) {
     if !(want > 0.0) {
         return (0.0, 0.0);
     }
-    let from_reserve = want.min(b.reserve.max(0.0));
-    let from_body = (want - from_reserve).min(b.body.max(0.0));
+    let from_fuel = want.min(b.fuel.max(0.0));
+    let from_reserve = (want - from_fuel).min(b.reserve.max(0.0));
+    let from_body = (want - from_fuel - from_reserve).min(b.body.max(0.0));
+    b.fuel -= from_fuel;
     b.reserve -= from_reserve;
     b.body -= from_body;
     if b.brood > 0.0 {
         b.brood = (b.brood - sc.reproduction.brood_share * from_reserve).max(0.0);
     }
     b.brood = b.brood.min(b.reserve.max(0.0));
-    (from_reserve + from_body, from_body)
+    (from_fuel + from_reserve + from_body, from_body)
 }
 
 /// **Basal upkeep wanted**, organic units per second (`step.rs:878-898`):
@@ -171,8 +186,9 @@ pub fn digested_share(tau: f64, dt: f64) -> f64 {
 /// absorb is dung; a mature body earmarks `brood_share` of what was placed as its brood,
 /// up to `Reproduction::brood_target`.
 ///
-/// **Mineral is assumed to fund every yield** (the sim's `min(yield · organic, mineral /
-/// n_tissue)` is not modelled: the pools' mineral is the other half's), so `y_eff = yield`.
+/// Mineral limits the reserve share. Unfunded absorption fills mineral-free fuel to
+/// `fuel_cap · body`; only overflow heats digestion. Fully funded open-loop inputs may
+/// omit their mineral amount. Fuel pays respiration and never builds tissue or brood.
 pub fn digest(phys: &FounderPhysiology, b: &mut Body, dt: f64) -> Flows {
     let sc = &phys.core;
     let mut f = Flows::default();
@@ -183,6 +199,7 @@ pub fn digest(phys: &FounderPhysiology, b: &mut Body, dt: f64) -> Flows {
     let room = (sc.reserve_of(b.body) - b.reserve).max(0.0);
     let mut raw = [0.0f64; Food::COUNT];
     let mut yields = 0.0;
+    let mut funded = [0.0; Food::COUNT];
     for food in Food::ALL {
         let p = b.stomach[food.index()];
         if !(p > 0.0) {
@@ -190,18 +207,38 @@ pub fn digest(phys: &FounderPhysiology, b: &mut Body, dt: f64) -> Flows {
         }
         let tau = phys.gut.digestion_s[food.index()] / speed;
         raw[food.index()] = p * digested_share(tau, dt);
-        yields += raw[food.index()] * phys.yield_for(food);
+        let mineral = b.stomach_mineral[food.index()].unwrap_or(sc.n_tissue * p);
+        let mineral_share = if sc.n_tissue > 0.0 {
+            mineral / (sc.n_tissue * p)
+        } else {
+            f64::INFINITY
+        };
+        funded[food.index()] = phys
+            .yield_for(food)
+            .clamp(0.0, 1.0)
+            .min(mineral_share.max(0.0));
+        yields += raw[food.index()] * funded[food.index()];
     }
     let scale = if yields > room && yields > 0.0 { room / yields } else { 1.0 };
     for food in Food::ALL {
-        let d = raw[food.index()] * scale;
+        // A pool with no mineral-funded share does not compete for reserve room.
+        // The sim passes its full gut throughput to fuel or digestion overflow.
+        let pool_scale = if funded[food.index()] > 0.0 { scale } else { 1.0 };
+        let d = raw[food.index()] * pool_scale;
         if !(d > 0.0) {
             continue;
         }
-        b.stomach[food.index()] = (b.stomach[food.index()] - d).max(0.0);
+        let before = b.stomach[food.index()];
+        b.stomach[food.index()] = (before - d).max(0.0);
+        if let Some(mineral) = &mut b.stomach_mineral[food.index()] {
+            *mineral *= (1.0 - d / before).max(0.0);
+        }
         let y = phys.yield_for(food).clamp(0.0, 1.0);
-        let placed = (y * d).min((sc.reserve_of(b.body) - b.reserve).max(0.0));
+        let tissue = funded[food.index()] * d;
+        let placed = tissue.min((sc.reserve_of(b.body) - b.reserve).max(0.0));
+        let fuel = ((y * d - tissue).max(0.0)).min((sc.fuel_cap * b.body - b.fuel).max(0.0));
         b.reserve += placed;
+        b.fuel += fuel;
         let rule = sc.reproduction;
         if rule.brood_share > 0.0 && b.body >= sc.birth_body {
             let target = rule.brood_target(sc, b.body);
@@ -210,8 +247,8 @@ pub fn digest(phys: &FounderPhysiology, b: &mut Body, dt: f64) -> Flows {
             }
         }
         f.digested += d;
-        f.assimilated += placed;
-        f.digestion_heat += y * d - placed;
+        f.assimilated += placed + fuel;
+        f.digestion_heat += y * d - placed - fuel;
         f.egested += (1.0 - y) * d;
     }
     f
@@ -249,13 +286,14 @@ pub fn bite_want(phys: &FounderPhysiology, b: &Body, dt: f64) -> f64 {
 
 /// **The gut ceiling**: assimilation per second of a body whose stomach is full and whose
 /// reserve has room, `yield · k · body · throughput / τ` for one food class. The yardstick a
-/// realized intake is measured against.
+/// realized intake is measured against. This is the absorbed-energy ceiling: mineral
+/// limits its tissue share, while the remaining share can pay running costs from fuel.
 pub fn gut_ceiling_per_s(phys: &FounderPhysiology, body: f64, food: Food) -> f64 {
     let tau = phys.gut.digestion_s[food.index()];
     if !(tau > 0.0) {
         return 0.0;
     }
-    phys.yield_for(food) * phys.gut.capacity(body) * phys.gut.throughput_factor(body, phys.core.body_max) / tau
+    phys.yield_for(food).clamp(0.0, 1.0) * phys.gut.capacity(body) * phys.gut.throughput_factor(body, phys.core.body_max) / tau
 }
 
 /// **The wound one strike makes** (`hunt::profitability`, `hunt.rs:218-224`, the wound

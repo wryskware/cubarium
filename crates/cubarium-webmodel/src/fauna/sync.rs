@@ -182,6 +182,7 @@ impl FaunaModel {
                 let mut kills = 0.0;
                 let mut corpses = 0.0;
                 let mut meals = 0.0;
+                let mut meal_mineral = 0.0;
                 for pf in [Founder::Browser, bw] {
                     if !h.hunts(pf) || !self.enabled[pf.index()] {
                         continue;
@@ -250,6 +251,8 @@ impl FaunaModel {
                         let meal = (rule.reach.clamp(0.0, 1.0) * corpse).min(rule.meal_cap);
                         corpses += dead * corpse;
                         meals += dead * meal;
+                        let mineral = c.b.mineral(pp.core.n_tissue) + pp.core.n_tissue * (esc - lost);
+                        meal_mineral += dead * mineral * meal / corpse.max(f64::MIN_POSITIVE);
                         kills += dead;
                         let l = &mut self.ledger[pf.index()];
                         l.killed_by[hf.index()] += dead;
@@ -265,7 +268,7 @@ impl FaunaModel {
                         }
                     }
                 }
-                self.pops[hf.index()][k].carcass += meals;
+                self.pops[hf.index()][k].add_carcass(meals, meal_mineral, hp.core.n_tissue);
                 self.carcass_laid += meals;
                 self.carcass_out += corpses - meals;
                 ret.carrion += corpses - meals;

@@ -539,8 +539,8 @@ pub struct NightRow {
 }
 
 /// One food of a lineage's diet: its optimistic supply over a day, food units, and what
-/// that supply is worth assimilated: the lineage's yield, limited for nectar and fruit by
-/// the mineral each source's product carries ([`mineral_limited_yield`]).
+/// that supply is worth as energy: mineral funds tissue, and the unfunded absorbed share
+/// can pay running costs when the lineage stores fuel ([`mineral_limited_yield`]).
 #[derive(Clone, Debug, Serialize)]
 pub struct FoodSupply {
     pub food: &'static str,
@@ -548,12 +548,22 @@ pub struct FoodSupply {
     pub assimilable_per_day: f64,
 }
 
-/// **The yield a product's mineral can fund** (the minimal gut's digestion rule): `min(y,
-/// mineral_fraction / n_tissue)`. Food whose mineral funds nothing passes undigested
-/// (repair 3 item 1), so a mineral-free product feeds nothing.
-pub fn mineral_limited_yield(yield_: f64, mineral_fraction: f64, n_tissue: f64) -> f64 {
+/// **The yield usable as energy**: mineral funds `min(y, mineral_fraction / n_tissue)`
+/// of tissue; with fuel storage the remaining absorbed share can pay running costs.
+/// This optimistic supply screen assumes spending opens fuel room. It does not credit
+/// fuel as tissue or breeding material; without fuel storage the mineral cap still holds.
+pub fn mineral_limited_yield(
+    yield_: f64,
+    mineral_fraction: f64,
+    n_tissue: f64,
+    fuel_cap: f64,
+) -> f64 {
+    let absorbed = yield_.clamp(0.0, 1.0);
+    if fuel_cap > 0.0 {
+        return absorbed;
+    }
     let funded = if n_tissue > 0.0 { mineral_fraction.max(0.0) / n_tissue } else { f64::INFINITY };
-    yield_.min(funded).max(0.0)
+    absorbed.min(funded).max(0.0)
 }
 
 /// One lineage's food access: its founders' basal need and its foods' supply over a day,
@@ -799,9 +809,10 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         let mut reach = None;
         for fd in p.diet.foods() {
             let y = p.yield_by_food[fd.index()];
-            // Nectar and fruit carry their sources' mineral fractions (stands' own, the
-            // vine's `mineral_fraction` since repair 3): the yield they fund per source.
-            let y_of = |fraction: f64| mineral_limited_yield(y, fraction, p.core.n_tissue);
+            // Product mineral funds tissue; sugar can cover the basal demand screened here.
+            let y_of = |fraction: f64| {
+                mineral_limited_yield(y, fraction, p.core.n_tissue, p.core.fuel_cap)
+            };
             let (per_day, assimilable) = match fd {
                 Food::Foliage => with_yield(y, Species::ALL
                     .iter()
