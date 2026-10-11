@@ -8,7 +8,8 @@ extends SceneTree
 ## the running world: the Field guide tab from G, the pause menu, the Settings tab from
 ## the menu's shortcut (Movement focused, then Stepped with Subpixel focused), the Field
 ## guide tab from the menu, the tab strip focused. With `--no-world` instead of `--open`:
-## the pause menu and the Settings tab with no world (Field guide off).
+## the pause menu and the Settings tab with no world (Field guide off). `--dots VARIANT`
+## draws Gridlite's unlit dots another way (tests/dot_variants.gd).
 
 var main
 var out := ""
@@ -26,6 +27,7 @@ func _initialize() -> void:
 			"--out": out = args[i + 1]
 			"--open": save = args[i + 1]
 			"--no-world": no_world = true
+			"--dots": preload("res://tests/dot_variants.gd").apply_neon(args[i + 1])
 	DirAccess.make_dir_recursive_absolute(out)
 	if save == "" and not no_world:
 		push_error("tabs_shots: needs --open SAVE or --no-world")

@@ -279,6 +279,8 @@ func _draw() -> void:
 		for i in names.size():
 			draw_string(stop_font, Vector2(roundf(x), baseline), names[i], HORIZONTAL_ALIGNMENT_LEFT, -1,
 					stop_font_size, stop_on_color if i == index else stop_color)
+			NeonDotField.draw_string_field(self, stop_font, Vector2(roundf(x), baseline), names[i],
+					HORIZONTAL_ALIGNMENT_LEFT, -1, stop_font_size, stop_on_color if i == index else stop_color)
 			x += widths[i] + between
 	draw_set_transform(Vector2.ZERO)
 	if (has_focus() or preview_focus) and not disabled and focus_style != null:

@@ -5,7 +5,8 @@ extends SceneTree
 ## in-memory theme; the game's defaults stay as they are. Runs on a private display:
 ##   CUBARIUM_GODOT_GPU=1 scripts/hidden.sh godot --path game --resolution 1920x1080 \
 ##       --script res://tests/font_trial_shots.gd -- --out DIR --variant C [--field-alpha T,C]
-## Variants: A Gridlite today (its own unlit dots), B Gridlite lit only + field, C Doto
+## Variants: A Gridlite before the drawn field (its own unlit dots: tests/dot_variants.gd
+## "A"; the game now draws them with NeonDotField), B Gridlite lit only + field, C Doto
 ## (chrome 30 px, 1 px dots), C2 Doto (chrome 40 px, 2 px dots), D Punctum, E Matrix Mono
 ## Screen. The candidate fonts are not in git: see
 ## fonts/README.md. Writes DIR/hub-<variant>.png and DIR/hub-<variant>.json (each target
@@ -92,6 +93,8 @@ func _font(spec: Dictionary, role: String) -> FontVariation:
 func run() -> void:
 	DirAccess.make_dir_recursive_absolute(out)
 	theme = load("res://ui/neon/neon_theme.tres")
+	if variant == "A":
+		preload("res://tests/dot_variants.gd").apply(theme, "A")
 	var spec: Dictionary = FONTS.get(variant, {})
 	if not spec.is_empty():
 		theme.set_font("font", "TitleLabel", _font(spec, "title"))

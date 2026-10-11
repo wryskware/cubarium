@@ -150,3 +150,5 @@ func _draw() -> void:
 		var baseline := roundf(size.y / 2.0 + (font.get_ascent(font_size) - font.get_descent(font_size)) / 2.0)
 		draw_string(font, Vector2(size.x - percent_width, baseline), text, HORIZONTAL_ALIGNMENT_RIGHT,
 				percent_width, font_size, percent_color)
+		NeonDotField.draw_string_field(self, font, Vector2(size.x - percent_width, baseline), text,
+				HORIZONTAL_ALIGNMENT_RIGHT, percent_width, font_size, percent_color)

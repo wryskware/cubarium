@@ -5,10 +5,12 @@
 [resource]
 base_font = ExtResource("1_5h3y8")
 variation_opentype = {
-1111573323: 135.0,
+1111573323: 1.0,
 1162629960: 2.65,
-1380270932: 71.0,
+1380270932: 1.0,
 2003265652: 691.0
 }
 spacing_glyph = 2
 baseline_offset = -0.0765
+metadata/dot_back = 135.0
+metadata/dot_rect = 71.0

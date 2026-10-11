@@ -140,6 +140,7 @@ These come from `round2/godot/specimen.gd`.
 - **Fonts:**
   - One `FontVariation` per role with `variation_opentype`, keyed by `TextServer.name_to_tag`. Fractional axis values work.
   - Gridlite: antialiasing gray, hinting light (none renders dimmer and blurrier than the mockups), subpixel positioning off. Use whole multiples of 13 px.
+  - Gridlite's unlit dots are drawn by the game, not the font (chrome-dots, 2026-10-11): its dot centres fall on pixel corners, where hinting turned them into stripes. Each Gridlite font keeps `wght` and `ELSH`, sets `BACK` and `RECT` to 1, and carries the role's `BACK` and `RECT` above as metadata. `NeonDotField` draws both zones cell for cell where the font would, one whole-pixel dot per cell with the light of the font's own dot (`game/ui/neon/README.md`).
   - Pixelify: default antialiasing and light hinting.
   - Letter spacing: `FontVariation.spacing_glyph`.
   - Godot draws Pixelify almost exactly like Chrome.

@@ -2,21 +2,25 @@ extends SceneTree
 ## Pictures of the start-up hub (main.tscn over an empty saves dir) at the window size, for
 ## the chrome dot rendering. Runs on a private display, never on Wrysk's screen:
 ##   CUBARIUM_GODOT_GPU=1 scripts/hidden.sh godot --path game --gpu-index 1 --resolution 1920x1080 \
-##       --script res://tests/hub_shots.gd -- --out DIR --sizes 1920x1080
+##       --script res://tests/hub_shots.gd -- --out DIR --sizes 1920x1080 [--dots VARIANT]
+## --dots draws Gridlite's unlit dots another way (tests/dot_variants.gd).
 ## Writes DIR/hub-WxH.png and prints the UI scale and the title label's transform. One size per
 ## run: an X11 window resized in place keeps its old framebuffer for the capture.
 var out := ""
 var sizes := "1920x1080"
+var dots := ""
 
 func _initialize() -> void:
 	var args := OS.get_cmdline_user_args()
 	for i in args.size() - 1:
 		if args[i] == "--out": out = args[i + 1]
 		if args[i] == "--sizes": sizes = args[i + 1]
+		if args[i] == "--dots": dots = args[i + 1]
 	run()
 
 func run() -> void:
 	DirAccess.make_dir_recursive_absolute(out)
+	preload("res://tests/dot_variants.gd").apply_neon(dots)
 	var saves := out.path_join("hub-saves")
 	preload("res://ui/saves.gd").remove_tree(saves)
 	var main = load("res://main.tscn").instantiate()
