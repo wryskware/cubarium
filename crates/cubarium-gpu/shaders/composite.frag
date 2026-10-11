@@ -32,6 +32,7 @@ layout(location = 0) flat in int vFig;
 
 layout(location = 0) out vec4 outColour;
 layout(location = 1) out vec4 outEmit;
+layout(location = 2) out vec4 figureWeatherSurface;
 
 // One tile's coverage of this pixel: premultiplied colour and coverage, and emission.
 // `zNear` keeps the nearest z of the texels that count.
@@ -115,5 +116,6 @@ void main() {
     em *= fade;
     col.rgb = mix(col.rgb, vec3(col.a), clamp(f.k.x, 0.0, 1.0));
     outColour = col;
+    figureWeatherSurface = col;
     outEmit = vec4(em, col.a);
 }

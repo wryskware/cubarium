@@ -106,6 +106,7 @@ layout(set = 2, binding = 1) uniform sampler2D plantDepths;
 layout(set = 2, binding = 2) uniform sampler2D walkDepth;
 
 layout(location = 2) out float plantOccluder;
+layout(location = 3) out vec4 plantWeatherSurface;
 
 // The most layer samples a pixel takes (`plants::MAX_SUPERSAMPLE` squared).
 const int PLANT_SAMPLES = 16;
@@ -122,6 +123,7 @@ void main() {
     plantOccluder = wz;
     outColour = vec4(0.0);
     emitOut = vec4(0.0);
+    plantWeatherSurface = vec4(0.0);
     int aa = clamp(pc.k.y, 1, 4);
     uint ids[PLANT_SAMPLES];
     float counts[PLANT_SAMPLES];
@@ -181,6 +183,7 @@ void main() {
     if (cover <= 0.0) { return; }
     float inv = 1.0 / float(aa * aa);
     outColour = vec4(col * inv, cover * inv);
+    plantWeatherSurface = outColour;
     emitOut = vec4(em * inv, cover * inv);
     plantOccluder = min(wz, zNear);
 }

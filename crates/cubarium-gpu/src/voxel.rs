@@ -54,6 +54,7 @@ use crate::vk::{Gpu, HostBuffer, barrier};
 
 const FULLSCREEN_VERT: &[u8] = include_bytes!("../shaders/fullscreen.vert.spv");
 const VOXEL_FRAG: &[u8] = include_bytes!("../shaders/voxel.frag.spv");
+const WEATHER_FRAG: &[u8] = include_bytes!("../shaders/voxel_weather.frag.spv");
 /// `voxel.frag`'s SMOOTH_SUN: the sun's share of the light when it is smooth.
 const SMOOTH_SUN: f32 = 1.0 / 3.0;
 /// The lit tier's sky image (`voxel.frag` specialised `SKY`): linear light, with the
@@ -62,12 +63,14 @@ const BACKDROP_FORMAT: vk::Format = vk::Format::R16G16B16A16_SFLOAT;
 
 /// Timestamp slots: top of pipe, after the uploads, after the world raster, bottom; either
 /// side of the model pass; after the plant pass's visibility layer; either side of its
-/// shade; and just before the walk.
-const QUERY_SLOTS: u32 = 10;
+/// shade; just before the walk; and either side of the weather overlay.
+const QUERY_SLOTS: u32 = 12;
 const Q_PLANT_VIS: u32 = 6;
 const Q_SHADE_END: u32 = 7;
 const Q_WALK_START: u32 = 8;
 const Q_SHADE_START: u32 = 9;
+const Q_WEATHER_START: u32 = 10;
+const Q_WEATHER_END: u32 = 11;
 
 /// How many plant styles one frame may paint with.
 ///
@@ -2531,7 +2534,7 @@ impl VoxelRenderer {
             )
         }?;
 
-        let bindings = [
+        let mut bindings = vec![
             vk::DescriptorSetLayoutBinding::default()
                 .binding(0)
                 // Dynamic: one descriptor over the whole ring, the frame's slot chosen at
@@ -2561,6 +2564,7 @@ impl VoxelRenderer {
                 .descriptor_count(1)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT),
         ];
+        if params.lit { bindings.extend([sampled(15), sampled(16), sampled(17), sampled(18)]); }
         let set_layout = unsafe {
             d.create_descriptor_set_layout(
                 &vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings),
@@ -2573,7 +2577,7 @@ impl VoxelRenderer {
                 .descriptor_count(1),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(13),
+                .descriptor_count(if params.lit { 17 } else { 13 }),
             vk::DescriptorPoolSize::default()
                 .ty(vk::DescriptorType::STORAGE_BUFFER)
                 .descriptor_count(1),
@@ -2732,7 +2736,7 @@ impl VoxelRenderer {
             backdrop
         };
         let weather_pass = if params.lit {
-            Some(WeatherPass::new(gpu, &params, raster_view, pipeline_layout, vs, fs, &constants)?)
+            Some(WeatherPass::new(gpu, &params, raster_view, pipeline_layout, vs, &constants)?)
         } else {
             None
         };
@@ -2776,6 +2780,15 @@ impl VoxelRenderer {
         };
         let isun = image_info(figures.sun_view);
         unsafe { d.update_descriptor_sets(&[sampled_write(set, 13, &isun)], &[]) };
+        if params.lit {
+            let (pz, pc) = plants.as_ref().and_then(|p| p.weather_views()).unwrap_or((backdrop.view, backdrop.view));
+            let (fz, fc) = figures.weather_views().unwrap_or((backdrop.view, backdrop.view));
+            let (ipz, ipc, ifz, ifc) = (image_info(pz), image_info(pc), image_info(fz), image_info(fc));
+            unsafe { d.update_descriptor_sets(&[
+                sampled_write(set, 15, &ipz), sampled_write(set, 16, &ifz),
+                sampled_write(set, 17, &ipc), sampled_write(set, 18, &ifc),
+            ], &[]) };
+        }
         let raster_framebuffer = match &bloom {
             Some(b) => framebuffer_n(
                 d,
@@ -3387,6 +3400,10 @@ impl VoxelRenderer {
                 }
             }
         }
+        // Never sample a skipped figure pass's stale depth/coverage (including the first
+        // frame), or the flat tier's dummy descriptors. Plant shade writes every pixel.
+        block.camera[2] = i32::from(self.params.lit && self.plants.is_some())
+            | (i32::from(self.params.lit && self.figures.drawing(frame.slot)) << 1);
         self.uniforms.write_bytes_at(self.uniform_stride * frame.slot as u64, &[block]);
         // and its own four timestamps.
         let q = frame.slot as u32 * QUERY_SLOTS;
@@ -3597,9 +3614,11 @@ impl VoxelRenderer {
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_SHADE_END);
                 self.figures.record(d, cb, frame.slot, self.set, offset, p.s, p.rise);
                 d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + 5);
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_WEATHER_START);
                 if let Some(w) = &self.weather_pass
                     && weather
                 {
+                    if self.figures.drawing(frame.slot) { self.figures.weather_to_read(d, cb); }
                     w.record(
                         d,
                         cb,
@@ -3608,6 +3627,7 @@ impl VoxelRenderer {
                         (self.uniform_stride * frame.slot as u64) as u32,
                     );
                 }
+                d.cmd_write_timestamp(cb, vk::PipelineStageFlags::BOTTOM_OF_PIPE, self.queries, q + Q_WEATHER_END);
                 if let Some(b) = &self.bloom
                     && self.params.bloom > 0.0
                 {
@@ -3673,6 +3693,16 @@ impl VoxelRenderer {
             gpu.device.get_query_pool_results(self.queries, base + 4, &mut ts, vk::QueryResultFlags::TYPE_64)
         };
         read.ok()?;
+        Some(ts[1].wrapping_sub(ts[0]) as f64 * f64::from(gpu.timestamp_period) / 1.0e6)
+    }
+
+    /// The last retired frame's weather overlay, including its read barriers, milliseconds.
+    pub fn weather_gpu_ms(&self, gpu: &Gpu) -> Option<f64> {
+        let base = self.last_done? as u32 * QUERY_SLOTS;
+        let mut ts = [0u64; 2];
+        unsafe {
+            gpu.device.get_query_pool_results(self.queries, base + Q_WEATHER_START, &mut ts, vk::QueryResultFlags::TYPE_64)
+        }.ok()?;
         Some(ts[1].wrapping_sub(ts[0]) as f64 * f64::from(gpu.timestamp_period) / 1.0e6)
     }
 
@@ -4183,7 +4213,9 @@ fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -> bool {
 /// (constant_id 7), drawn over the raster with premultiplied blending between the walk and
 /// the bloom. It reads the walk's end depth (the emission's alpha) so the fog thickens with
 /// the ray's length through low air, rain layers stop at nearer terrain, and the bolt hides
-/// behind what stands in front of it. Kept out of the walk's pipeline, like the sky, for
+/// behind terrain, plants and figures. Partial object coverage retains the background's
+/// weather response, including its transmission, at silhouette edges. Kept out of the
+/// walk's pipeline, like the sky, for
 /// the walk's occupancy; skipped outright when there is nothing to draw.
 struct WeatherPass {
     pass: vk::RenderPass,
@@ -4200,7 +4232,6 @@ impl WeatherPass {
         raster_view: vk::ImageView,
         layout: vk::PipelineLayout,
         vs: vk::ShaderModule,
-        fs: vk::ShaderModule,
         walk: &[u32],
     ) -> Result<WeatherPass> {
         let d = &gpu.device;
@@ -4228,7 +4259,10 @@ impl WeatherPass {
         let spec = vk::SpecializationInfo::default()
             .map_entries(&entries)
             .data(bytemuck::cast_slice(&flags));
-        let pipeline = crate::render::fullscreen_pipeline_n(d, pass, layout, vs, fs, true, Some(&spec), 1)?;
+        let fs = gpu.shader(WEATHER_FRAG)?;
+        let pipeline = crate::render::fullscreen_pipeline_n(d, pass, layout, vs, fs, true, Some(&spec), 1);
+        unsafe { d.destroy_shader_module(fs, None) };
+        let pipeline = pipeline?;
         Ok(WeatherPass { pass, framebuffer, pipeline, w: params.raster_w, h: params.raster_h })
     }
 
@@ -4260,6 +4294,10 @@ impl WeatherPass {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fog_occlude_tests.rs"]
+mod fog_occlude_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

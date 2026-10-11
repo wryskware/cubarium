@@ -804,6 +804,8 @@ pub struct FigurePass {
     depth: Plane,
     /// The composite's depth: figures against each other, per raster pixel.
     comp_depth: Plane,
+    /// Premultiplied figures alone, including their coverage at silhouette rims.
+    weather_surface: Option<Plane>,
     depth_format: vk::Format,
     tile_pass: vk::RenderPass,
     tile_fb: vk::Framebuffer,
@@ -940,7 +942,7 @@ impl FigurePass {
             raster.0,
             raster.1,
             depth_format,
-            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+            vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
             vk::ImageAspectFlags::DEPTH,
         )?;
         let mut comp_formats = vec![raster_format];
@@ -963,16 +965,31 @@ impl FigurePass {
                     .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
             })
             .collect();
+        let weather_surface = if emit.is_some() {
+            let plane = Plane::new(gpu, raster.0, raster.1, vk::Format::R16G16B16A16_SFLOAT,
+                colour_usage, colour_aspect)?;
+            comp_formats.push(vk::Format::R16G16B16A16_SFLOAT);
+            comp_views.push(plane.view);
+            comp_atts.push(vk::AttachmentDescription::default()
+                .format(vk::Format::R16G16B16A16_SFLOAT)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL));
+            Some(plane)
+        } else { None };
         comp_atts.push(
             vk::AttachmentDescription::default()
                 .format(depth_format)
                 .samples(vk::SampleCountFlags::TYPE_1)
                 .load_op(vk::AttachmentLoadOp::CLEAR)
-                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .store_op(if emit.is_some() { vk::AttachmentStoreOp::STORE } else { vk::AttachmentStoreOp::DONT_CARE })
                 .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
                 .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
                 .initial_layout(vk::ImageLayout::UNDEFINED)
-                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+                .final_layout(if emit.is_some() { vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL }
+                    else { vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL }),
         );
         comp_views.push(comp_depth.view);
         let comp_refs: Vec<_> = (0..comp_formats.len() as u32).map(at).collect();
@@ -1126,7 +1143,12 @@ impl FigurePass {
         let composite_pipeline = {
             let vs = gpu.shader(COMPOSITE_VERT)?;
             let fs = gpu.shader(COMPOSITE_FRAG)?;
-            let blend = vec![over(); comp_formats.len()];
+            let mut blend = vec![over(); comp_formats.len()];
+            if weather_surface.is_some() {
+                let last = blend.last_mut().expect("weather surface attachment");
+                *last = last.src_alpha_blend_factor(vk::BlendFactor::ONE)
+                    .dst_alpha_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA);
+            }
             let p = pipeline(d, composite_pass, layout, vs, fs, None, vk::PrimitiveTopology::TRIANGLE_STRIP, &blend, true);
             unsafe { d.destroy_shader_module(vs, None) };
             unsafe { d.destroy_shader_module(fs, None) };
@@ -1194,6 +1216,7 @@ impl FigurePass {
             z,
             depth,
             comp_depth,
+            weather_surface,
             depth_format,
             tile_pass,
             tile_fb,
@@ -1444,7 +1467,11 @@ impl FigurePass {
 
         let (rw, rh) = self.raster;
         // The colour planes load (their clear values go unread); the depth clears to far.
-        let comp_clears = [vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 } }; 3];
+        let mut comp_clears = vec![vk::ClearValue { color: vk::ClearColorValue { float32: [0.0; 4] } };
+            if self.weather_surface.is_some() { 4 } else if self.lit { 3 } else { 2 }];
+        *comp_clears.last_mut().expect("composite depth") = vk::ClearValue {
+            depth_stencil: vk::ClearDepthStencilValue { depth: 1.0, stencil: 0 }
+        };
         let begin = vk::RenderPassBeginInfo::default()
             .render_pass(self.composite_pass)
             .framebuffer(self.composite_fb)
@@ -1488,6 +1515,21 @@ impl FigurePass {
         self.lit
     }
 
+    pub(crate) fn weather_views(&self) -> Option<(vk::ImageView, vk::ImageView)> {
+        self.weather_surface.as_ref().map(|p| (self.comp_depth.view, p.view))
+    }
+
+    /// The pass transitions its stored depth to read-only. Publish early and late depth
+    /// writes to the weather shader; colour writes use the weather's existing barrier.
+    pub(crate) fn weather_to_read(&self, d: &ash::Device, cb: vk::CommandBuffer) {
+        let barrier = [vk::MemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
+            .dst_access_mask(vk::AccessFlags::SHADER_READ)];
+        unsafe { d.cmd_pipeline_barrier(cb,
+            vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS,
+            vk::PipelineStageFlags::FRAGMENT_SHADER, vk::DependencyFlags::empty(), &barrier, &[], &[]) };
+    }
+
     /// The depth format the tiles are tested with.
     pub fn depth_format(&self) -> vk::Format {
         self.depth_format
@@ -1512,6 +1554,7 @@ impl FigurePass {
         unsafe { d.destroy_render_pass(self.tile_pass, None) };
         unsafe { d.destroy_render_pass(self.composite_pass, None) };
         self.models.destroy(gpu);
+        if let Some(p) = &self.weather_surface { p.destroy(d); }
         for f in &self.frames {
             f.destroy(gpu);
         }

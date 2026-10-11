@@ -8,6 +8,9 @@ for s in background.frag water.frag sprite.vert sprite.frag present.frag fullscr
     glslc --target-env=vulkan1.1 -O -I. -o "$s.spv" "$s"
     echo "  $s -> $s.spv"
 done
+# Weather's extra depth/coverage reads stay out of the walk and flat shader modules.
+glslc --target-env=vulkan1.1 -O -I. -fshader-stage=frag -DFOG_OCCLUDE -o voxel_weather.frag.spv voxel.frag
+echo "  voxel.frag (FOG_OCCLUDE) -> voxel_weather.frag.spv"
 # The plant pass (`crate::plants`): its vertex stage, and `voxel.frag` again as its two
 # fragment stages, so they share the walk's face functions.
 glslc --target-env=vulkan1.1 -O -I. -o plant.vert.spv plant.vert
