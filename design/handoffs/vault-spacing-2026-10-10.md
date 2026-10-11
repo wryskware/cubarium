@@ -74,6 +74,10 @@ What it found, in the save at 1270d05c:
 
 ## VAULT-GUIDE (small; any lane, opus-medium or Codex high)
 
+**Taken by the art thread (Wrysk, 2026-10-11: "you can take up the VAULT-GUIDE thread"):**
+Codex high, worktree `.claude/worktrees/vault-guide`, branch `vault-guide`. The ecology thread
+doesn't need to do it.
+
 The field guide's live line for a plant shows its stands by stage, in the same form the
 animals use (`"%s · %s"` with `_plural`). For example "47 mature · 53 saplings · 342
 seedlings", with the head number still the total.
@@ -177,3 +181,31 @@ example), on `c8b1ac84` (VAULT-COUNT's `vault_count`, cherry-picked).
   - `/tmp/claude-1000/-home-wrysk-wryskware-cubarium/f216c350-6b0e-45f5-8e01-9b322c2e7f2c/scratchpad/shade-real-ab.toml`:
     8 seeds × 60 min.
   - `.../scratchpad/shade-real-ab-6h.toml`: 4 seeds × 6 h, for stage counts and spacing.
+
+## VAULT-GUIDE worker notes (2026-10-11)
+
+- **Where it lives today:**
+  - The field guide's live line is `game/ui/field_guide/field_guide.gd` `_live()` (~309):
+    plants show `_plural(stands, "stand")`, and animals already show
+    `"%s · %s" % [adults, juveniles]`.
+  - The count comes from `crates/cubarium-observatory/src/query.rs` `PlantPopulation`
+    (~380) and the loop at ~474. Add the per-stage counts there.
+- **The sim's stage:**
+  - Find the definition the flora sim uses. VAULT-COUNT's tool (`vault_count.rs`, on branch
+    `vault-count`) read stages 0/1/2.
+  - Name the stages with the sim's own terms. Order the line largest stage first, with the
+    head number still the total.
+  - A species without stages keeps "N stands".
+- **The Godot extension:**
+  - Build it only in your worktree (`scripts/build-godot-ext.sh` writes that tree's
+    `game/bin/`).
+  - **Never in the main checkout**: Wrysk's app runs from it, and rebuilding the library
+    under a running app crashed it (SIGBUS).
+- **The picture:**
+  - Take it headless or through `scripts/hidden.sh`, never in a window.
+  - `game/tests/guide_test.gd` opens a save. Add a `--shots DIR` option there, or use the
+    pattern in `game/tests/*_shots.gd`. Show the Vaulttree page and one plant without stages.
+  - `/home/wrysk/wryskware/cubarium/runs/vault-count-2026-10-10/` holds a copy of his save.
+    Use it if it still loads; otherwise found a fresh world.
+- Run the observatory's tests and `guide_test.gd`.
+- Sign commits `Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`. Don't merge.
