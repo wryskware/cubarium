@@ -632,6 +632,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
                 awaiting_light: &mut self.awaiting_light,
                 sky_fade: (self.sky_fade_s, &mut self.sky_fade),
                 presenter_now: self.presenter_now,
+                drawn: self.frames > 0,
                 figure_tick: &mut self.figure_tick,
                 packs_skipped: &mut self.packs_skipped,
                 ticks_staged: &mut self.ticks_staged,
@@ -1332,6 +1333,8 @@ struct Stager<'a> {
     awaiting_light: &'a mut bool,
     sky_fade: (f32, &'a mut Option<Instant>),
     presenter_now: Option<Instant>,
+    /// Whether a frame has been drawn yet: a plane that lands before any is not eased in.
+    drawn: bool,
     figure_tick: &'a mut Option<u64>,
     packs_skipped: &'a mut u64,
     ticks_staged: &'a mut u64,
@@ -1366,7 +1369,7 @@ impl Stager<'_> {
             view.tick as f64 / f64::from(cubarium_voxel::TICK_HZ)
         };
         let slow = self.packer.prepare_with(view, flora, fauna, candle_s, hint);
-        if std::mem::take(&mut self.packer.fresh_sky) && self.sky_fade.0 > 0.0 {
+        if std::mem::take(&mut self.packer.fresh_sky) && self.sky_fade.0 > 0.0 && self.drawn {
             // The first plane over the open sky drawn so far: it eases in from that sky.
             self.renderer.set_sky_lift(1.0);
             *self.sky_fade.1 = Some(self.presenter_now.unwrap_or_else(Instant::now));
