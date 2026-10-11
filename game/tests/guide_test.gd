@@ -71,7 +71,15 @@ func run(save: String) -> void:
 	root.add_child(main)
 	await frames(3)
 	guide = main.guide
-	check(await until(func(): return main.has_world() and main.busy() == "", 120.0), "the save opens")
+	var opened: bool = await until(func(): return main.has_world() and main.busy() == "", 120.0)
+	check(opened, "the save opens")
+	if not opened:
+		print("GUIDE TEST FAIL (save did not open)")
+		for l in errors.lines:
+			print("     ", l)
+		preload("res://ui/saves.gd").remove_tree(saves)
+		quit(2)
+		return
 	await seconds(1.0)
 
 	# The pause menu's item opens it in place of the menu; back goes back to the menu.
@@ -154,6 +162,34 @@ func run(save: String) -> void:
 			counts_ok = false
 			print("     %s row %s, populations %d" % [a["species"], r.count if r != null else "missing", want])
 	check(counts_ok, "each animal row shows adults plus juveniles from populations")
+	# Use one census for both the totals and stage text; the running world can change
+	# between independent queries. Restore the guide's live feed afterwards.
+	var live_pops = guide._populations
+	guide._populations = pops
+	for p in pops.get("plants", []):
+		var id: String = p["species"]
+		var live: Dictionary = guide._live(id)
+		var stages: Array = p.get("stages", [])
+		check(int(live["count"]) == int(p["stands"]), "%s head count is the total" % id)
+		if stages.is_empty():
+			check(live["sub"] == guide._plural(int(p["stands"]), "stand"), "%s keeps stands without stages" % id)
+		else:
+			var total := 0
+			for n in stages:
+				total += int(n)
+			check(total == int(p["stands"]), "%s stages sum to the total" % id)
+		print("LIVE %s: %s (%s total)" % [id, live["sub"], live["count"]])
+	# Hand-built counts check ordering, stage names, zero counts and singulars.
+	for fixture in [
+		["vaulttree", [2, 1, 3], "3 mature · 1 sapling · 2 seedlings"],
+		["bloomcrown", [1, 2, 0], "0 mature · 2 juveniles · 1 seedling"],
+		["umbrellafrond", [0, 1, 2], "2 mature · 1 juvenile · 0 seedlings"],
+		["lanternberry", [2, 1], "1 mature · 2 seedlings"],
+		["springturf", [], "1 stand"],
+	]:
+		guide._populations = {"plants": [{"species": fixture[0], "stands": 1, "stages": fixture[1]}]}
+		check(guide._live(fixture[0])["sub"] == fixture[2], "%s stage wording and pluralization" % fixture[0])
+	guide._populations = live_pops
 	var table = main.session.query("guide", null)
 	var lj: Dictionary = {}
 	for e in table.get("animals", []):
@@ -166,6 +202,8 @@ func run(save: String) -> void:
 	check(guide._chips.get_child_count() == lj["prey"].size() + lj["diet"].size(), "Eats has one chip per prey lineage and food class")
 	check(guide._caption.text.begins_with("Plate 01"), "the plate caption numbers by list order (%s)" % guide._caption.text)
 	if shots != "":
+		main.session.pause()
+		await seconds(1.0)
 		var r = guide._rows.get("lanternjaw")
 		r.grab_focus()
 		await shot("guide-lanternjaw")
@@ -177,6 +215,10 @@ func run(save: String) -> void:
 		await frames(2)
 		guide._rows["vaulttree"].grab_focus()
 		await shot("guide-vaulttree")
+		guide.select("springturf")
+		await frames(2)
+		guide._rows["springturf"].grab_focus()
+		await shot("guide-springturf")
 		guide.select("latticevine")
 		await frames(2)
 		guide._rows["latticevine"].grab_focus()
@@ -279,7 +321,9 @@ func shot(name: String) -> void:
 	await RenderingServer.frame_post_draw
 	var img := root.get_texture().get_image()
 	DirAccess.make_dir_recursive_absolute(shots)
-	img.save_png(shots.path_join(name + ".png"))
+	var err := img.save_png(shots.path_join(name + ".png"))
+	check(err == OK, "saved %s" % name)
+	print("SHOT LIVE %s: %s (%s total)" % [guide.selected, guide._stages.text, guide._count.text])
 	print("SHOT ", shots.path_join(name + ".png"))
 
 
