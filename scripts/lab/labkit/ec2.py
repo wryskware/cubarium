@@ -215,6 +215,7 @@ class Ec2Pool:
             self.save()
             return
         match = re.search(r"\bi-[0-9a-f]+\b", done.stdout)
+        self.forget_host()
         self.s.update(state="launching", instance=match[0] if match else None, launched=self.d.clock(), ip=None)
         self.d.events.emit("ec2-launching", approval=self.s.get("approval"), instance=self.s["instance"],
                            instance_type=self.s["type"])
@@ -265,12 +266,19 @@ class Ec2Pool:
             return False
         for row in self.on_ec2():
             self.d.task_lost(row, f"ec2 down: {reason}")
+        self.forget_host()
         self.host = None
         self.d.events.emit("host-down", host="ec2", reason=reason, instance=self.s.get("instance"),
                            hours=round(hours, 3), est_usd=round(usd, 2))
         self.s = dict(state="idle", last=dict(reason=reason, hours=hours, usd=usd))
         self.save()
         return True
+
+    def forget_host(self):
+        """A new instance has none of the last one's uploads: drop the persistent upload marks
+        and the tools cache for `ec2` (launch 2 of 2026-10-10 found no source archive)."""
+        self.d.store.x("DELETE FROM kv WHERE key LIKE 'uploaded:ec2:%'")
+        self.d.tools.discard("ec2")
 
     def open_request(self, details):
         request_id = f"ec2-{secrets.token_hex(3)}"

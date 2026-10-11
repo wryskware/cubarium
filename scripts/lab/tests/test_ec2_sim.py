@@ -117,6 +117,9 @@ cp "$source" "$CARGO_TARGET_DIR/release/examples/voxel_census"
         job = daemon.job(job_id)
         builds = self.builds(daemon, "aarch64")
         self.assertEqual(len(builds), 2)
+        # The drained host went down and forgot its uploads: the next instance starts empty.
+        self.assertEqual(daemon.store.q("SELECT key FROM kv WHERE key LIKE 'uploaded:ec2:%'"), [])
+        self.assertNotIn("ec2", daemon.tools)
         for build in builds:
             view = build.tasks["build"]
             self.assertEqual(view.host, "ec2")
