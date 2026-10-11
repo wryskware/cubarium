@@ -462,7 +462,8 @@ fn posed_cells(rig: &AnimalRig, bin: usize, cells: &[ModelCell], clip: usize) ->
 /// RIG-STATES round 3's sleep poses (the Veilhound lying down, the lanternjaw's folded arms,
 /// the seedporter hunched on its perch) no longer end on the class path's settle; in every
 /// size bin at both voxel sizes they end gap-free and resting where they sleep. On the
-/// ground each cell ends wholly under the ground line (folded away) or wholly over it, the
+/// ground each cell ends wholly under the ground line (folded away, its top at least half a
+/// cell under: a top on the line would show through) or wholly over it, the
 /// lowest shown resting on it; on the perch nothing hides and the feet and the hanging tail
 /// (the cells at and under the perch's row) keep their places. Either way the shown cells
 /// are one piece and no two take one place facing the same way (their faces would fight).
@@ -488,9 +489,11 @@ fn the_sleep_poses_end_gap_free_and_on_the_ground() {
                     let lo = corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min);
                     let hi = corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
                     if ground {
-                        if hi <= 0.02 {
+                        if hi <= -0.5 {
                             continue;
                         }
+                        // a top left on the ground line would show through it
+                        assert!(hi > 0.02, "{what}: cell {:?} folded onto the ground line, not under it", c.offset);
                         assert!(lo >= -EPS, "{what}: cell {:?} ends across the ground line ({lo:.2} .. {hi:.2})", c.offset);
                     } else if c.offset[1] <= 0 {
                         let rest = [f64::from(c.offset[0]), f64::from(c.offset[1]) + 0.5, f64::from(c.offset[2])];

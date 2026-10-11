@@ -1116,7 +1116,8 @@ def sleep_state_rig(shared, cells, bones, scale, pose=None, legs=()):
 # pose the body sleeps in stands on whole cells.
 #
 # The end pose is checked at the bake (`sleep_pose_check`). On the ground: every cell ends
-# wholly under the ground line (folded away, hidden) or wholly over it, the lowest resting on
+# wholly under the ground line (folded away, hidden: its top half a cell or more under it,
+# never on it, where it would show through) or wholly over it, the lowest resting on
 # it, and a cell that shows at the end never dips under the line on the way; the cells that
 # show are one piece (26-connected, no gap) and no two take one place facing the same way
 # (their faces would fight; a turned cube resting into another at a bent joint is fine). On a perch (`ground`
@@ -1170,8 +1171,11 @@ def sleep_pose_check(cells, bones, index, track, ground):
         b = index[bones[key]]
         zs = [p.z for p in cell_corners(end[b], key)]
         if ground:
-            if max(zs) <= 0.02:
+            if max(zs) <= -0.5:
                 continue                                # folded away under the ground line
+            if max(zs) <= 0.02:
+                # a top left on the ground line would show through it
+                bad.append(f"cell {key} on {bones[key]} lies on the ground line ({max(zs):.2f})")
             if min(zs) < -SLEEP_EPS:
                 bad.append(f"cell {key} on {bones[key]} ends across the ground line ({min(zs):.2f} .. {max(zs):.2f})")
             dips = [f for f, moves in enumerate(track)
@@ -1209,7 +1213,7 @@ def sleep_pose_view(cells, bones, index, end):
     at = {}
     for key in cells:
         b = index[bones[key]]
-        if max(p.z for p in cell_corners(end[b], key)) <= 0.02:
+        if max(p.z for p in cell_corners(end[b], key)) <= -0.5:
             continue
         p = end[b] @ Vector((key[0], key[1], key[2] + 0.5))
         at[(round(p.x), round(p.y), math.floor(p.z))] = sym[b % 36]
@@ -1247,15 +1251,38 @@ def posed_sleep_rig(shared, cells, bones, scale, plan, ground=True):
     assert len(names) <= 64, "the renderer's bone limit"
     bones.update(owners)
 
+    # every bone gets a sink child (on the ground; the same bones in every bin, the bake
+    # trims the ones no bin uses)
+    sinks = set()
+    if ground:
+        for k, (name, _) in enumerate(list(names)):
+            sink = "sleep_sink_" + name.removeprefix("sleep_")
+            index[sink] = len(names)
+            names.append((sink, k))
+            heads.append(heads[k])
+            sinks.add(sink)
+        assert len(names) <= 64, "the renderer's bone limit"
+
     def armature(u):
         given = moves(u)
         out = []
         for name, parent in names:
             m = given.get(name)
+            if name in sinks:
+                m = Matrix.Translation((0, 0, -smooth(u))) @ out[parent]
             out.append(m if m is not None else (out[parent] if parent is not None else Matrix.Identity(4)))
         return out
 
     track = [armature(f / (SLEEP_POSE_FRAMES - 1)) for f in range(SLEEP_POSE_FRAMES)]
+    if ground:
+        # a cell the pose leaves on the ground line (its top on it: it would show through
+        # the ground) sinks one cell further on a child of its bone
+        on_line = [key for key in cells
+                   if -0.5 < max(p.z for p in cell_corners(track[-1][index[bones[key]]], key)) <= 0.02]
+        for key in on_line:
+            bones[key] = "sleep_sink_" + bones[key].removeprefix("sleep_")
+        if on_line:
+            track = [armature(f / (SLEEP_POSE_FRAMES - 1)) for f in range(SLEEP_POSE_FRAMES)]
     # an added bone that never moves off its parent hands its cells back: with no track
     # playing the renderer folds only moving track bones into their parents (`rig.rs`
     # `without_tracks`), so a still one would draw its faces apart from them
@@ -1302,7 +1329,9 @@ def posed_sleep_rig(shared, cells, bones, scale, plan, ground=True):
 
 
 def _same(a, b):
-    return all(abs(a[i][j] - b[i][j]) < 1e-9 for i in range(4) for j in range(4))
+    """Two moves the renderer cannot tell apart (looser than `rig.rs`'s still key, 1e-6, so a
+    bone the renderer would fold away as still is still here too)."""
+    return all(abs(a[i][j] - b[i][j]) < 1e-5 for i in range(4) for j in range(4))
 
 
 def body_rows(cells):
@@ -1383,8 +1412,9 @@ def ch_sleep_plan(cells, bones, scale):
             else:
                 name = nearest_leg(p, legs)
         elif owner == "root" and p.x < CH_TAIL_X:
-            name = ("sleep_tail0" if p.x >= CH_TAIL_BEND_X else
-                    "sleep_tail1" if pose == "A" or p.x >= CH_TAIL_TIP_X else "sleep_tail2")
+            # B's tail is one piece to its tip
+            name = ("sleep_tail0" if p.x >= CH_TAIL_BEND_X or (pose == "B" and p.x >= CH_TAIL_TIP_X) else
+                    "sleep_tail1" if pose == "A" else "sleep_tail2")
         elif pose == "B" and owner == "root" and p.x < CH_HIND_X:
             name = "sleep_hind"
         elif pose == "B" and owner == "root" and key[0] >= head_x:
@@ -1398,7 +1428,7 @@ def ch_sleep_plan(cells, bones, scale):
     # the tail's joints (cells): its root at the rump, its bend
     root_x = max((k[0] for k in tail0 + tail1 + tail2), default=0) + 0.5
     bend_x = min((k[0] for k in tail0), default=root_x) - 0.5
-    tip_x = min((k[0] for k in tail1), default=bend_x) - 0.5
+    tip_x = min((k[0] for k in tail0 + tail1), default=bend_x) - 0.5
     leg_names = [n for n, _ in legs]
     added = [(n, "root", Vector(hips[n]) * scale) for n in leg_names]
     if pose == "A":
@@ -1406,9 +1436,12 @@ def ch_sleep_plan(cells, bones, scale):
     else:
         added += [("sleep_fore", "root", (head_x - 0.5, 0, torso)),
                   ("sleep_hind", "root", (CH_HIND_X * scale, 0, torso))]
-    added += [("sleep_tail0", "root" if pose == "A" else "sleep_hind", (root_x, 0, torso + 0.5)),
-              ("sleep_tail1", "sleep_tail0", (bend_x, 0, torso + 0.5)),
-              ("sleep_tail2", "sleep_tail1", (tip_x, 0, torso + 0.5))]
+    if pose == "A":
+        added += [("sleep_tail0", "root", (root_x, 0, torso + 0.5)),
+                  ("sleep_tail1", "sleep_tail0", (bend_x, 0, torso + 0.5))]
+    else:
+        added += [("sleep_tail0", "sleep_hind", (root_x, 0, torso + 0.5)),
+                  ("sleep_tail2", "sleep_tail0", (tip_x, 0, torso + 0.5))]
     swing = lambda name: CH_LEG_SWING * (-1 if name.startswith("sleep_leg0") else 1)  # noqa: E731
     q = -s * math.pi / 2
     if pose == "A":
@@ -1453,11 +1486,9 @@ def ch_sleep_plan(cells, bones, scale):
         bends = {"fore": [("Y", half, (head_x - 0.5, 0, torso))],
                  "hind": [("Y", -half, (hind_x, 0, torso))]}
         bends["tail0"] = bends["hind"] + [("Y", -half, (root_x, 0, torso))]
-        bends["tail1"] = bends["tail0"]
-        bends["tail2"] = bends["tail1"] + [("Y", -half, (tip_x, 0, torso + 0.5))]
+        bends["tail2"] = bends["tail0"] + [("Y", -half, (tip_x, 0, torso + 0.5))]
         mid = [k for k, o in bones.items() if o == "root" and k not in owners]
-        keys = {"fore": of("sleep_fore") + head, "hind": of("sleep_hind"), "tail0": tail0, "tail1": tail1,
-                "tail2": tail2}
+        keys = {"fore": of("sleep_fore") + head, "hind": of("sleep_hind"), "tail0": tail0, "tail2": tail2}
         body = Matrix.Translation((0, 0, -torso)) @ turns(1, roll)
         snap = lattice_snap(body, mid)
         inv = body.to_3x3().inverted()
@@ -1466,7 +1497,7 @@ def ch_sleep_plan(cells, bones, scale):
         end = Matrix.Translation(snap + Vector((0, 0, -torso))) @ turns(1, roll)
         at = lambda n, ks: [end @ turns(1, bends[n], extra[n]) @ Vector((i, j, k + 0.5)) for i, j, k in ks]  # noqa: E731
         if any((a - b).length <= 0.5 for a in at("tail2", tail2) for b in at("fore", keys["fore"])):
-            bends["tail2"], extra["tail2"] = bends["tail1"], extra["tail1"]
+            bends["tail2"], extra["tail2"] = bends["tail0"], extra["tail0"]
         leg = fold_legs({n: of(n) for n in leg_names}, hips,
                         lambda u: Matrix.Translation(snap * u + Vector((0, 0, -torso * u))) @ turns(u, roll),
                         scale, swing)
@@ -1523,7 +1554,9 @@ def lj_sleep_plan(cells, bones, scale):
     added += [("sleep_tuck_root", "root", (0, 0, torso)), ("sleep_tuck_head", "head", (0, 0, torso))]
     down = lambda u: Matrix.Translation((0, 0, -drop * u))  # noqa: E731
     leg = fold_legs({n: groups.get(n, []) for n in leg_names}, hips, down, scale, lambda name: 0.0)
-    sink = {n: hide_sink(down(1.0), groups.get(n, [])) + 1.0 for n in ("sleep_tuck_root", "sleep_tuck_head")}
+    # under the settle, as far again as a cut cell needs to lie wholly under the ground
+    # line, and one cell more (a top left on the line would show through it)
+    sink = {n: drop + hide_sink(down(1.0), groups.get(n, [])) + 1.0 for n in ("sleep_tuck_root", "sleep_tuck_head")}
     arms = {LJ_SIDE[sy]: (Vector(lj_mirror(LJ_HIP, sy)) * scale, Vector(lj_mirror(LJ_KNEE, sy)) * scale, sy)
             for sy in (1, -1)}
 
