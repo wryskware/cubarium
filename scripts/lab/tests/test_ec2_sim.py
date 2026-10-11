@@ -123,6 +123,9 @@ cp "$source" "$CARGO_TARGET_DIR/release/examples/voxel_census"
             self.assertEqual(view.task.arch, "aarch64")
             self.assertEqual(view.task.inputs, [f"source:{build.spec['commit']}"])
             self.assertIn("--source-tar", view.task.argv)
+            # The same rustc as the local build: a newer one's deprecations fail `warnings = "deny"`.
+            from labkit.kinds.build import local_toolchain
+            self.assertIn(f"export RUSTUP_TOOLCHAIN={local_toolchain()}", view.task.argv[2])
             self.assertTrue(daemon.ctx.artifact(view.task.meta["key"]).is_file())
             log = (view.out / "stdout.log").read_text()
             self.assertIn("mock cargo", log)
