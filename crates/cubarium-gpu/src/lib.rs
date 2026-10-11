@@ -54,6 +54,7 @@ mod cord_tests;
 mod figures_order_tests;
 pub mod voxel;
 pub mod weather;
+pub mod wgpu_backend;
 
 pub use adapter::{MAX_POSES, PoseRef, ScratchFrame, Stamp, StampMask, StampTone};
 pub use atlas::{Atlas, Clip, FrameRect, PlantClip};
