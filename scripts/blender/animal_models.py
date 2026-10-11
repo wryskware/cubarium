@@ -3437,10 +3437,11 @@ def ls_lean(bones, lean_deg, crouch):
     return turn, shift, rise
 
 
-def ls_frond_keys(bones, k, mouth_z, reach_e):
+def ls_frond_keys(bones, k, mouth_z, reach_e, own=False):
     """Frond `k`'s key poses (swing about z degrees, each bone's elevation degrees in its
     own plane, the head's frame), made with the reference frond's lengths (the fronds'
-    mean size) so the six share them: rest (its droop), unfurled (straight, half way to the
+    mean size) so the six share them, or with `own` its own lengths (the idle's grooming,
+    which no symmetry hands round): rest (its droop), unfurled (straight, half way to the
     reach), reached (straight at `reach_e`), grabbed (curled inward on the reach, the other
     way to the droop), brought (curled on over the head, its tip just over the mouth: a
     two-bone reach for its outer bones, the joint on the upper side), each angle unwrapped
@@ -3451,7 +3452,7 @@ def ls_frond_keys(bones, k, mouth_z, reach_e):
     def rz_(v):                         # (radius, height) in the frond's own plane
         return Vector((math.hypot(v.x, v.y), v.z))
     segs = [(rz_(by[n][0]), rz_(by[n][1])) for n in names]
-    ref = sum(LS_FROND) / len(LS_FROND) / LS_FROND[k]
+    ref = 1.0 if own else sum(LS_FROND) / len(LS_FROND) / LS_FROND[k]
     lens = [(t - h).length * ref for h, t in segs]
     elev = [math.degrees(math.atan2((t - h).y, (t - h).x)) for h, t in segs]
     b = 30 + 60 * k
@@ -3606,6 +3607,146 @@ def ls_rest_clip(p, drop):
     return sample_clip(ob, bones, LS_REST_FRAMES, LS_FEED_FPS)
 
 
+# --- the loftstrider's idle (RIG-STATES round 4, 2026-10-11) -------------------------------
+#
+# `design/handoffs/rig-states-2026-10-10.md` §Round 4: an `idle` loop on the rig, eased by
+# the idle weight (`Animals::idle_weight`), each animal at its own phase (`rig.rs`'s
+# `phase_offset_s`). Three candidates for Wrysk's look; `LS_IDLE=A|B|C` at bake picks one
+# (A when unset). Nothing below the head moves: the root, thighs, shins and feet keep no
+# turn, so the feet stay where they stand and the body keeps its place (the class path's
+# idle breath stays on top). Every wave has a whole number of cycles in the loop, so it
+# repeats seamlessly.
+#
+# - **A, fronds drifting:** each frond's curl drifts on its own long wave (a main wave and a
+#   smaller ripple, whole cycles per loop, each frond's phases its own), from part way to
+#   straight (unfurled) to part way further into its droop (furled), and its root sways a
+#   little about the head's axis on a third wave: weed in a current.
+# - **B, looking about:** the neck bends toward one side, the head tips back on it so its
+#   crown lifts toward that side, and the neck's top and the head turn toward it; held,
+#   then round through the middle to the other side, held, and back to the middle. The
+#   fronds drift as A's at a fraction.
+# - **C, grooming:** now and then one pair of fronds (either side of the heading, the back
+#   pair, the side pair) unfurls a little, curls inward and brings its tips to the mouth on
+#   top (the feeding clip's curl, at the fronds' own lengths, with no reach to a bite and no
+#   chew), strokes there, and relaxes back to its droop. The others stay still.
+
+LS_IDLE = os.environ.get("LS_IDLE", "A").upper()
+LS_IDLE_FPS = 10
+LS_IDLE_LOOP_S = {"A": 24.0, "B": 24.0, "C": 27.0}
+# A: per frond, (main wave cycles, ripple cycles, sway cycles) per loop
+LS_DRIFT_CYCLES = ((2, 5, 3), (3, 7, 2), (2, 7, 4), (3, 5, 2), (2, 9, 3), (3, 8, 4))
+LS_DRIFT_RIPPLE = 0.3       # the ripple's share of the curl (the main wave's the rest)
+LS_DRIFT_FURL = 0.45        # the curl's reach either way: a share of the droop-to-straight bend
+LS_DRIFT_SWAY_DEG = 6.0     # the root's sway about the head's axis, either way
+# B: (seconds, side: +1 the left, -1 the right, 0 the middle) knots, eased between
+LS_LOOK = ((0.0, 0.0), (2.5, 0.0), (6.0, 1.0), (9.5, 1.0), (14.5, -1.0), (18.0, -1.0),
+           (21.0, 0.0), (24.0, 0.0))
+LS_LOOK_BEND_DEG = 5.0      # each neck bone toward the side it looks
+LS_LOOK_TILT_DEG = 18.0     # the head tipped back on the neck: its crown lifts that side
+LS_LOOK_TURN_DEG = (10.0, 20.0)     # the neck's top and the head turning toward it
+LS_LOOK_STIR = 0.25         # the fronds' drift, a share of A's
+# C: (start seconds, the frond pair)
+LS_GROOMS = ((1.5, (0, 5)), (10.5, (2, 3)), (18.5, (1, 4)))
+LS_GROOM_REACH_E = 45.0     # the unfurl's lift before the curl, degrees (the feed's reach)
+LS_GROOM_S = (0.5, 0.5, 0.6, 1.0, 0.9)      # unfurl, curl closed, bring, stroke, relax
+LS_GROOM_STROKE_DEG = 10.0  # the tips' stroke at the mouth, twice, out and back
+
+
+def ls_frond_turns(k, th, elev, swing_deg, turns):
+    """Frond `k`'s bone turns into `turns` for elevations `th` (degrees, each bone in its
+    plane) against its rest `elev`, its root swung `swing_deg` about the head's axis: as
+    `ls_feed_clip` keys them."""
+    b = math.radians(30 + 60 * k)
+    s_ = Vector((-math.sin(b), math.cos(b), 0))
+    dth = [math.radians(x - e) for x, e in zip(th, elev)]
+    rel = [dth[0], dth[1] - dth[0], dth[2] - dth[1]]
+    # + about the frond's side axis lowers it: a lift is a negative turn
+    for x, a in zip("abc", rel):
+        turns[f"f{k}_{x}"] = Matrix.Rotation(-a, 3, s_)
+    turns[f"f{k}_a"] = Matrix.Rotation(math.radians(swing_deg), 3, "Z") @ turns[f"f{k}_a"]
+
+
+def ls_drift(elev, k, t, loop_s, share=1.0):
+    """Frond `k`'s drift (A) `t` seconds into the loop: its elevations and its root's sway,
+    degrees; `share` scales both."""
+    n1, n2, n3 = LS_DRIFT_CYCLES[k]
+    # each frond's phases its own: golden-ratio steps round the circle
+    g = 0.6180339887
+    p1, p2, p3 = (2 * math.pi * ((k * g + j * 0.37) % 1.0) for j in range(3))
+    w = 2 * math.pi * t / loop_s
+    curl = (1 - LS_DRIFT_RIPPLE) * math.sin(n1 * w + p1) + LS_DRIFT_RIPPLE * math.sin(n2 * w + p2)
+    straight = sum(elev) / 3
+    th = [e + share * LS_DRIFT_FURL * curl * (straight - e) for e in elev]
+    return th, share * LS_DRIFT_SWAY_DEG * math.sin(n3 * w + p3)
+
+
+def ls_look_side(t):
+    """B's side `t` seconds into the loop (+1 the left, -1 the right), eased between knots."""
+    for (t0, s0), (t1, s1) in zip(LS_LOOK, LS_LOOK[1:]):
+        if t0 <= t < t1:
+            return s0 + (s1 - s0) * smooth((t - t0) / (t1 - t0))
+    return LS_LOOK[-1][1]
+
+
+def ls_groom_at(keys, elev, u):
+    """A grooming frond's elevations `u` seconds into its groom (C), or None when still."""
+    lerp = lambda a, b, w: [x + (y - x) * smooth(w) for x, y in zip(a, b)]  # noqa: E731
+    unfurl, grab, bring = (list(keys[n][1:]) for n in ("unfurl", "grab", "bring"))
+    relax = list(keys["relax"][1:])
+    t = 0.0
+    for a, b, d in ((list(elev), unfurl, LS_GROOM_S[0]), (unfurl, grab, LS_GROOM_S[1]),
+                    (grab, bring, LS_GROOM_S[2])):
+        if u < t + d:
+            return lerp(a, b, (u - t) / d)
+        t += d
+    if u < t + LS_GROOM_S[3]:
+        # the stroke: the tip bone out and back twice, the middle bone a little with it
+        x = math.sin(2 * math.pi * 2 * (u - t) / LS_GROOM_S[3]) * math.sin(math.pi * (u - t) / LS_GROOM_S[3])
+        return [bring[0], bring[1] + 0.3 * LS_GROOM_STROKE_DEG * x, bring[2] + LS_GROOM_STROKE_DEG * x]
+    t += LS_GROOM_S[3]
+    if u < t + LS_GROOM_S[4]:
+        return lerp(bring, relax, (u - t) / LS_GROOM_S[4])
+    return None
+
+
+def ls_idle_clip(p, which=None):
+    """The idle loop at part sizes `p`, candidate `which` (`LS_IDLE`), sampled at
+    `LS_IDLE_FPS` (`sample_clip`)."""
+    which = which or LS_IDLE
+    loop_s = LS_IDLE_LOOP_S[which]
+    bones = ls_bones(p)
+    fr = ls_frame(p)
+    n = round(loop_s * LS_IDLE_FPS)
+    ob = rig_armature("ls_idle", bones, LS_IDLE_FPS)
+    elev = {k: ls_frond_keys(bones, k, fr["mouth_z"], LS_GROOM_REACH_E, own=True) for k in range(6)}
+    for f in range(n):
+        t = f / LS_IDLE_FPS
+        turns = {}
+        if which in ("A", "B"):
+            share = 1.0 if which == "A" else LS_LOOK_STIR
+            for k in range(6):
+                th, sway = ls_drift(elev[k][0], k, t, loop_s, share)
+                ls_frond_turns(k, th, elev[k][0], sway, turns)
+        if which == "B":
+            s = ls_look_side(t)
+            # the left is +y: a bend toward it is a negative turn about x
+            bend = Matrix.Rotation(math.radians(-LS_LOOK_BEND_DEG * s), 3, "X")
+            turn_b, turn_h = (Matrix.Rotation(math.radians(d * s), 3, "Z") for d in LS_LOOK_TURN_DEG)
+            turns["neck_a"] = bend
+            turns["neck_b"] = bend @ turn_b
+            # tipped back against the bend (its axis, then the tilt): the crown lifts on the
+            # side it looks to
+            turns["head"] = Matrix.Rotation(math.radians(LS_LOOK_TILT_DEG * s), 3, "X") @ turn_h
+        if which == "C":
+            for start, pair in LS_GROOMS:
+                for k in pair:
+                    th = ls_groom_at(elev[k][1], elev[k][0], t - start)
+                    if th is not None and t >= start:
+                        ls_frond_turns(k, th, elev[k][0], 0.0, turns)
+        key_turns(ob, bones, f, turns, Vector((0, 0, 0)))
+    return sample_clip(ob, bones, n, LS_IDLE_FPS)
+
+
 def lowest_corner(clip, frame, cells, vox, names):
     """The lowest corner (model metres above the feet) at sampled `frame` of the cells
     `cells` ({(i, j, k) Blender cell: bone name}, the bake's, built a half cell off the
@@ -3651,6 +3792,8 @@ def ls_rig_clips(p, cells=None, vox=None):
     clips = [dict(state="cropping", mode=CLIP_LOOP, fps=f["fps"], frames=f["frames"], aim=h, lower=lw)
              for f, h, lw in feeds]
     clips.append(dict(state="asleep", mode=CLIP_TRACK, fps=rest["fps"], frames=rest["frames"]))
+    idle = ls_idle_clip(p)
+    clips.append(dict(state="idle", mode=CLIP_LOOP, fps=idle["fps"], frames=idle["frames"]))
     return {"bones": rest["bones"], "heads": heads, "symmetry": (order, image), "clips": clips}
 
 

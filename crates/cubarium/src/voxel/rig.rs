@@ -1420,4 +1420,49 @@ mod tests {
         }
         println!("the feet's worst drift, voxels: fully on {:.3}, easing {:.3}", worst[0], worst[1]);
     }
+
+    /// The loftstrider's idle (RIG-STATES round 4) is a loop that moves nothing below the
+    /// neck — the body and every leg bone keep their place at any weight, so the feet stay
+    /// planted — and repeats seamlessly: the step from its last frame round to its first is
+    /// no bigger than its largest step between neighbouring frames.
+    #[test]
+    fn the_loftstriders_idle_loops_seamlessly_with_its_feet_planted() {
+        let Some(r) = loftstrider() else { return };
+        let idle = r.clip("idle").expect("the loftstrider's idle loop");
+        let c = &r.clips[idle];
+        assert_eq!(c.mode, ClipMode::Loop);
+        let still: Vec<usize> = (0..r.bones.len())
+            .filter(|&k| ["root", "thigh", "shin", "foot"].iter().any(|p| r.bones[k].name.starts_with(p)))
+            .collect();
+        assert_eq!(still.len(), 1 + 3 * 6);
+        let mut out = Vec::new();
+        for bin in 0..r.bins.len() {
+            let b = &r.bins[bin];
+            let heads: Vec<[f64; 3]> = b.heads.iter().map(|h| h.map(|v| v * b.scale)).collect();
+            let at = |t: f64, w: f64, out: &mut Vec<BoneRows>| -> Vec<[f64; 3]> {
+                r.pose(bin, &[on(idle, t, w)], out);
+                (0..heads.len()).map(|k| apply(&out[k], heads[k])).collect()
+            };
+            let step = |a: &[[f64; 3]], z: &[[f64; 3]]| {
+                a.iter().zip(z).map(|(p, q)| (0..3).map(|i| (p[i] - q[i]).powi(2)).sum::<f64>().sqrt()).fold(0.0, f64::max)
+            };
+            let frames: Vec<Vec<[f64; 3]>> = (0..=c.frames).map(|f| at(f as f64 / c.fps, 1.0, &mut out)).collect();
+            let inner = frames[..c.frames].windows(2).map(|w| step(&w[0], &w[1])).fold(0.0, f64::max);
+            let wrap = step(&frames[c.frames - 1], &frames[c.frames]);
+            assert!(inner > 0.0, "bin {bin}: the idle moves");
+            assert!(wrap <= inner + 1e-9, "bin {bin}: the loop's seam steps {wrap:.4} voxels, its frames at most {inner:.4}");
+            for f in (0..c.frames).step_by(7) {
+                for w in [1.0, 0.4] {
+                    let p = at(f as f64 / c.fps, w, &mut out);
+                    for &k in &still {
+                        let d = (0..3).map(|i| (p[k][i] - heads[k][i]).powi(2)).sum::<f64>().sqrt();
+                        // f32 rows: nothing beyond their rounding
+                        assert!(d < 1e-4, "bin {bin} frame {f} w {w}: {} moved {d:.2e}", r.bones[k].name);
+                        let up = [out[k][0][1], out[k][1][1], out[k][2][1]];
+                        assert!((f64::from(up[1]) - 1.0).abs() < 1e-5, "{} turned", r.bones[k].name);
+                    }
+                }
+            }
+        }
+    }
 }
