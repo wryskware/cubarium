@@ -66,6 +66,15 @@ def source_key(ctx, repo, commit):
     return key
 
 
+def simulation_arch(spec, ctx):
+    """Keep a simulation job on one platform; an EC2 opt-in selects its native arch."""
+    if "ec2" not in (spec.get("hosts") or []):
+        return ctx.arch
+    cfg = ctx.inventory.ec2 if ctx.inventory else {}
+    instance = (cfg.get("types") or ["c7g.16xlarge"])[0]
+    return cfg.get("instance_types", {}).get(instance, {}).get("arch", "aarch64")
+
+
 class Build(Kind):
     name = "build"
     description = "cargo build at a commit into the artifact cache"
