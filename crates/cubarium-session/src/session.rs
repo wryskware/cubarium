@@ -1192,6 +1192,9 @@ struct Loop {
     /// paused until the menu resumes it); the first world runs.
     paused: bool,
     writer: Option<JoinHandle<()>>,
+    /// Whether the writer is still writing: cleared by the writer before it replies, so a
+    /// caller that has its reply can save again at once (the thread may not have exited yet).
+    writing: Arc<AtomicBool>,
     next: Instant,
     /// What follows the world on this thread ([`Session::set_hook`]), and whether the world
     /// moved since it was last called.
@@ -1215,6 +1218,7 @@ impl Loop {
             speed,
             paused: false,
             writer: None,
+            writing: Arc::new(AtomicBool::new(false)),
             next: Instant::now(),
             hook: None,
             hook_moved: false,
@@ -1407,7 +1411,7 @@ impl Loop {
             }
             None => s.running.store(false, Ordering::SeqCst),
         }
-        s.saving.store(self.writer.as_ref().is_some_and(|w| !w.is_finished()), Ordering::SeqCst);
+        s.saving.store(self.save_in_flight(), Ordering::SeqCst);
     }
 
     fn notice(&self, n: Notice) {
@@ -1591,6 +1595,12 @@ impl Loop {
         self.next = Instant::now() + PERIOD;
     }
 
+    /// A save is still writing: its writer has not replied yet (a writer that died without
+    /// replying counts as done).
+    fn save_in_flight(&self) -> bool {
+        self.writing.load(Ordering::SeqCst) && self.writer.as_ref().is_some_and(|w| !w.is_finished())
+    }
+
     /// Save the running world into `dir`; with `home`, a written save makes `dir` its home
     /// ([`Session::home`]) unless another world was installed meanwhile.
     fn save(&mut self, dir: PathBuf, reply: Option<Sender<Result<SaveMeta, String>>>, home: bool) {
@@ -1604,7 +1614,7 @@ impl Loop {
             refuse("no world is running".into(), self);
             return;
         };
-        if self.writer.as_ref().is_some_and(|w| !w.is_finished()) {
+        if self.save_in_flight() {
             refuse("the last save is still writing; ask again".into(), self);
             return;
         }
@@ -1617,6 +1627,8 @@ impl Loop {
         r.held.restore_copies(&mut flora, &mut fauna);
         let out = self.out.clone();
         let (shared, generation) = (self.shared.clone(), self.generation);
+        let writing = self.writing.clone();
+        writing.store(true, Ordering::SeqCst);
         self.writer = Some(std::thread::spawn(move || {
             let result = store::save_whole(&dir, &world, &flora, &fauna).map_err(|e| format!("{e:#}"));
             if home && result.is_ok() {
@@ -1625,6 +1637,7 @@ impl Loop {
                     *h = Some((generation, dir.clone()));
                 }
             }
+            writing.store(false, Ordering::SeqCst);
             let path = Some(dir.display().to_string());
             let notice = match &result {
                 Ok(meta) => Notice { path, meta: Some(meta.clone()), ..Notice::say("saved", "saved") },
