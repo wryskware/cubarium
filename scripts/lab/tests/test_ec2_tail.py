@@ -54,7 +54,7 @@ class Ec2TailTests(unittest.TestCase):
         self.d.fetch_task = Mock()
         self.d.cleanup_task = Mock()
         self.d.local_load = Mock()
-        self.d._due = Mock(return_value=False)
+        self.d._due = Mock(side_effect=lambda name, interval: name == "ec2-tail-check")
         self.pool.script = Mock(return_value=subprocess.CompletedProcess([], 0, "", ""))
         commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True,
                                 text=True, check=True, timeout=5).stdout.strip()

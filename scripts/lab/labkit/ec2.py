@@ -441,6 +441,9 @@ class Ec2Pool:
             self.save()
         if now - self.s["tail_since"] < float(self.cfg.get("tail_hold_min", 10)) * 60:
             return
+        # Each check rsyncs every EC2 task's output in the daemon loop; not every 2 s tick.
+        if not self.d._due("ec2-tail-check", float(self.cfg.get("tail_check_s", 120))):
+            return
         self.d.local_load()
         usage, live_mem = self.d.usage(), mem_available_gb()
         for row in rows:
