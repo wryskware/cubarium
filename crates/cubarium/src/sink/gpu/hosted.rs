@@ -663,6 +663,7 @@ struct Shared {
     stats: Mutex<HostedStats>,
     error: Mutex<Option<String>>,
     generation: AtomicU64,
+    baseline_s: std::sync::atomic::AtomicU32,
     quit: AtomicBool,
     /// [`HostedStats::unlit`].
     unlit: AtomicBool,
@@ -701,6 +702,7 @@ impl Shared {
     fn install(&self, sink: VoxelGpuSink<Offscreen>, proj: Projection, ready: bool) -> Result<u64> {
         let ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), RING)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        self.baseline_s.store(proj.s, Ordering::SeqCst);
         let state = SinkState {
             ring,
             sink,
@@ -1061,6 +1063,7 @@ impl Hosted {
             stats: Mutex::new(HostedStats::default()),
             error: Mutex::new(None),
             generation: AtomicU64::new(0),
+            baseline_s: std::sync::atomic::AtomicU32::new(1),
             quit: AtomicBool::new(false),
             unlit: AtomicBool::new(false),
             threads: Mutex::new(Vec::new()),
@@ -1208,27 +1211,37 @@ impl Hosted {
     /// ([`FigurePick::hit`], [`PickMap::terrain_z`]), else the one with a cell nearest within
     /// `radius`; with stamped animals, [`PickMap::pick`].
     pub fn pick(&self, px: i32, py: i32, radius: f32) -> Option<u64> {
+        // Picking must stay independent of the render lock: a detail-tier allocation
+        // can take longer than a frame, while the old raster remains interactive.
+        let base = self.shared.baseline_s.load(Ordering::SeqCst).max(1) as f32;
         let map = self.pick_map();
-        let factor = self.shared.sink.lock().ok().and_then(|s| s.as_ref().map(|s| s.factor)).unwrap_or(1) as f32;
-        let (px, py, radius) = ((px as f32 * factor).round() as i32, (py as f32 * factor).round() as i32, radius * factor);
+        let mf = map.as_ref().map_or(1.0, |m| m.s as f32 / base);
+        let (mx, my) = ((px as f32 * mf).round() as i32, (py as f32 * mf).round() as i32);
         if let Some(f) = self.figure_pick() {
-            let ground = map.as_ref().map_or(f32::MAX, |m| m.terrain_z(px, py));
-            if let Some((z, id)) = f.hit(px, py)
+            let ff = f.s as f32 / base;
+            let (fx, fy) = ((px as f32 * ff).round() as i32, (py as f32 * ff).round() as i32);
+            let ground = map.as_ref().map_or(f32::MAX, |m| m.terrain_z(mx, my));
+            if let Some((z, id)) = f.hit(fx, fy)
                 && z <= ground + cubarium_gpu::figures::DEPTH_BIAS
             {
                 return Some(id);
             }
-            return map.and_then(|m| m.pick(px, py, 0.0)).or_else(|| f.nearest(px, py, radius));
+            return map.and_then(|m| m.pick(mx, my, 0.0)).or_else(|| f.nearest(fx, fy, radius * ff));
         }
-        map?.pick(px, py, radius)
+        map?.pick(mx, my, radius * mf)
     }
 
-    /// Where animal `id` is drawn, world raster pixels ([`FigurePick::animal_at`] with the
-    /// model pass, [`PickMap::animal_at`] without).
+    /// Where animal `id` is drawn, in baseline overview pixels.
     pub fn animal_at(&self, id: u64) -> Option<(f32, f32)> {
-        let factor = self.shared.sink.lock().ok().and_then(|s| s.as_ref().map(|s| s.factor)).unwrap_or(1) as f32;
-        let pos = self.figure_pick().and_then(|f| f.animal_at(id)).or_else(|| self.pick_map()?.animal_at(id))?;
-        Some((pos.0 / factor, pos.1 / factor))
+        let base = self.shared.baseline_s.load(Ordering::SeqCst).max(1) as f32;
+        if let Some(f) = self.figure_pick() && let Some((x, y)) = f.animal_at(id) {
+            let scale = base / f.s as f32;
+            return Some((x * scale, y * scale));
+        }
+        let map = self.pick_map()?;
+        let (x, y) = map.animal_at(id)?;
+        let scale = base / map.s as f32;
+        Some((x * scale, y * scale))
     }
 
     fn figure_pick(&self) -> Option<Arc<FigurePick>> {
