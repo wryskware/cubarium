@@ -315,6 +315,18 @@ func _live(id: String) -> Dictionary:
 	for p in _populations.get("plants", []):
 		if p.get("species", "") == id:
 			var n: int = int(p.get("stands", 0))
+			var stages: Array = p.get("stages", [])
+			if not stages.is_empty():
+				var parts := PackedStringArray()
+				for i in range(stages.size() - 1, -1, -1):
+					var count := int(stages[i])
+					if i == stages.size() - 1:
+						parts.append("%d mature" % count)
+					elif i == 0:
+						parts.append(_plural(count, "seedling"))
+					else:
+						parts.append(_plural(count, "sapling" if id == "vaulttree" else "juvenile"))
+				return {"count": n, "sub": " · ".join(parts)}
 			return {"count": n, "sub": _plural(n, "stand")}
 	if id == "latticevine":
 		var v: Dictionary = _populations.get("vines", {})
