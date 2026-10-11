@@ -68,6 +68,7 @@ struct Args {
     frame_times: bool,
     repack: bool,
     weather: Option<cubarium::sink::gpu::weather::WeatherPreview>,
+    view_x: i32,
 }
 
 fn args() -> Result<Args> {
@@ -91,6 +92,7 @@ fn args() -> Result<Args> {
         frame_times: false,
         repack: false,
         weather: None,
+        view_x: 0,
     };
     let mut out = None;
     let mut it = std::env::args().skip(1);
@@ -118,6 +120,7 @@ fn args() -> Result<Args> {
             "--frame-times" => a.frame_times = true,
             "--repack" => a.repack = true,
             "--weather-preview" => a.weather = Some(v()?.parse()?),
+            "--view-x" => a.view_x = v()?.parse()?,
             "--crop" => {
                 let s = v()?;
                 let (name, rect) = s.split_once('=').context("--crop NAME=X0,Y0,X1,Y1")?;
@@ -283,6 +286,7 @@ fn capture(
     )?;
     sink.set_force_rain(a.rain);
     sink.set_weather_preview(a.weather);
+    sink.set_view_x(a.view_x);
     // The lit tier's sky plane is computed off this thread: pack until it has arrived,
     // so the picture shows the finished light.
     let started = Instant::now();
