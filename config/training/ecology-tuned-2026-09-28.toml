@@ -6,7 +6,8 @@
 # Settled 2026-09-28: lifespan x0.50 is the lever (Spearman +0.80 over es3); the senescence and maintenance floors are incidental.
 [ecology]
 "flora.foliage_rate" = 1.309107867133004
-"flora.senescence" = 0.25
+# LEAF-LIFE, Wrysk 2026-10-10: restore the growth-form leaf lifetime (historical leaf multiplier replaced).
+"flora.senescence" = 1.0
 "flora.decomposition" = 2.6619945982697515
 "founder.yield_by_food" = 0.945685148680746
 "founder.reproduction.surplus_floor" = 0.7616524935594057

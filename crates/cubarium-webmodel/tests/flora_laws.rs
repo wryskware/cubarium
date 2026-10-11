@@ -94,14 +94,24 @@ fn the_stand_law_is_the_sims_on_a_one_stand_fixture() {
 /// model cures and wakes on the same ticks as `study::probe` and ends on the same stocks.
 #[test]
 fn the_curing_clock_is_the_sims_through_a_cure_and_a_wake() {
-    let (p, fc) = resolved();
+    let (p, mut fc) = resolved();
+    let turf = fc.species_mut(Species::Springturf);
+    turf.cure_water = turf.wilt_water;
+    turf.cure_resume_water = turf.full_water;
+    turf.cure_after_s = 2.0 * cubarium_voxel::DT;
+    turf.propagule_rate = 0.0;
     let dm = DayModel::of(&p.world, fc.upkeep_q10);
     let sc = fc.species(Species::Springturf);
     assert!(sc.cure_after_s > 0.0 && sc.cure_cover > 0.0, "fixture: turf cures on the budget");
     let t0 = 0.2 * dm.day_s();
-    let ticks = (0.6 * dm.day_s() / cubarium_voxel::DT) as usize;
+    let ticks = 200;
     let wet_at = ticks / 2;
-    let dry = (sc.cure_water + sc.cure_resume_water) / 2.0;
+    // Make a genuine budget shortfall from the configured leaf replacement cost.
+    let full_cover = (1.0 - sc.reserve_share) * cubarium_voxel_flora::break_even_cover(
+        sc, sc.wood_max, sc.alpha * sc.wood_max, light_response(sc, 0.9), 1.0,
+        0.6 / (0.6 + sc.nutrient_half),
+    );
+    let dry = sc.wilt_water + (sc.full_water - sc.wilt_water) * 0.25 * sc.cure_cover / full_cover;
     let water = |k: usize| if k < wet_at { dry } else { sc.cure_resume_water };
     let held = |k: usize| Held { water: water(k), saturated: 0.0, light: 0.9, mineral: 0.6 };
     let clim = clock(&dm, t0, ticks);
@@ -460,8 +470,17 @@ fn a_water_seed_comes_up_only_where_its_gates_pass() {
 /// seedlings up through a shaded mat, and lets fewer when some came up.
 #[test]
 fn the_canopy_margin_gates_the_seedlings() {
-    let (p, base) = resolved();
+    let (p, mut base) = resolved();
     let sp = Species::Lanternberry;
+    // Put the two margins around this fixture's newborn cover, so retuning leaf
+    // lifetime cannot make both arms trivially pass every shaded face.
+    let sc = base.species(sp);
+    let nb = start_stand(&base, sp, Start::Newborn);
+    let cover = cubarium_voxel_flora::break_even_cover(
+        sc, nb.wood, nb.foliage, light_response(sc, 0.9 * (-0.8f64).exp()),
+        sc.moisture_at(1.0), 1.0 / (1.0 + sc.nutrient_half),
+    );
+    base.species_mut(sp).establish_light_margin = 0.5 * cover;
     let k = cubarium_webmodel::flora::census::PHOTO.iter().position(|&s| s == sp).unwrap();
     let go = |fc: &FloraConfig| {
         let (_, mut faces) = one_zone(fc, 300, 0.9, 1.0, &[(Species::Springturf, 1.0, 300)]);

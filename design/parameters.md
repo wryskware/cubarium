@@ -408,7 +408,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.wood_max` | 0.6 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.bloomcrown.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.bloomcrown.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.bloomcrown.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.bloomcrown.senescence` | 0.00011265432098765431 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.bloomcrown.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.bloomcrown.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.bloomcrown.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -526,7 +526,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.wood_max` | 0.6 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.umbrellafrond.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.umbrellafrond.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.umbrellafrond.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.umbrellafrond.senescence` | 0.00011265432098765431 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.umbrellafrond.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.umbrellafrond.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.umbrellafrond.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -644,7 +644,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.springturf.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.springturf.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.springturf.senescence` | 0.00167 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.springturf.senescence` | 0.000337962962962963 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.springturf.foliage_rate` | 0.06 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.springturf.wood_rate` | 0.01 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.springturf.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -762,7 +762,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.wood_max` | 0.1 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.stonecushion.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.stonecushion.maintenance` | 0.00005 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.stonecushion.senescence` | 0.0003 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.stonecushion.senescence` | 0.00002777777777777778 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.stonecushion.foliage_rate` | 0.0005 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.stonecushion.wood_rate` | 0.0002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.stonecushion.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -880,7 +880,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.wood_max` | 0.2 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.velvetpad.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.velvetpad.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.velvetpad.senescence` | 0.0005 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.velvetpad.senescence` | 0.00002777777777777778 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.velvetpad.foliage_rate` | 0.004 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.velvetpad.wood_rate` | 0.002 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.velvetpad.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -1116,7 +1116,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.wood_max` | 5.0 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.vaulttree.reserve_cap` | 1.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.vaulttree.maintenance` | 0.0001 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.vaulttree.senescence` | 0.0005 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.vaulttree.senescence` | 0.00011265432098765431 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.vaulttree.foliage_rate` | 0.001 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.vaulttree.wood_rate` | 0.0003 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.vaulttree.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -1234,7 +1234,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.wood_max` | 1.0 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.lanternberry.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.lanternberry.maintenance` | 0.0002 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.lanternberry.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.lanternberry.senescence` | 0.00011265432098765431 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.lanternberry.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.lanternberry.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.lanternberry.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |
@@ -1352,7 +1352,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.wood_max` | 0.3 | org-units | (0, inf) | yes | D | placeholder | the most living wood one stand holds |
 | `flora.siphonreed.reserve_cap` | 0.5 | reserve per unit wood | [0, inf) | 0.1–2 log | B | placeholder | Q_max = q_cap * W |
 | `flora.siphonreed.maintenance` | 0.0004 | /s per unit wood | [0, inf) | yes | B | placeholder | wood upkeep m_w |
-| `flora.siphonreed.senescence` | 0.001 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
+| `flora.siphonreed.senescence` | 0.00011265432098765431 | /s of foliage | [0, inf) | yes | B | placeholder | leaf fall m_p, to litter |
 | `flora.siphonreed.foliage_rate` | 0.002 | organic/s per unit wood | [0, inf) | yes | D | placeholder | foliage regrowth cap r_p |
 | `flora.siphonreed.wood_rate` | 0.001 | /s per unit wood | [0, inf) | yes | C | placeholder | wood growth cap r_w |
 | `flora.siphonreed.build` | 0.2 | fraction | [0, inf) | 0.1–0.5 log | A | placeholder | construction respiration c_g: a unit built costs 1 + c_g |

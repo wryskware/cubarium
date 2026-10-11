@@ -155,26 +155,30 @@ what = "foliage regrowth cap; real: x1 by the clock (herb regrowth 2-4 weeks)"
 [[gene]]
 name = "leaf_fall@turf"
 path = "flora.@turf.senescence"
+# LEAF-LIFE, Wrysk 2026-10-10: multipliers of the new leaf-life base; x1 is inside these bounds.
 range = [0.05, 4.0]
-what = "leaf fall rate (1 / leaf life); real: herbs x0.25-0.8"
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@mat"
 path = "flora.@mat.senescence"
+# LEAF-LIFE, Wrysk 2026-10-10: multipliers of the new leaf-life base; x1 is inside these bounds.
 range = [0.05, 4.0]
-what = "leaf fall rate (1 / leaf life); real: mats x0.07-0.5"
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@shrub"
 path = "flora.@shrub.senescence"
+# LEAF-LIFE, Wrysk 2026-10-10: multipliers of the new leaf-life base; x1 is inside these bounds.
 range = [0.05, 4.0]
-what = "leaf fall rate (1 / leaf life); real: tropical shrubs x0.06-0.25"
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "leaf_fall@tree"
 path = "flora.@tree.senescence"
+# LEAF-LIFE, Wrysk 2026-10-10: multipliers of the new leaf-life base; x1 is inside these bounds.
 range = [0.05, 4.0]
-what = "leaf fall rate (1 / leaf life); real: x0.06-0.25"
+what = "leaf fall multiplier over the LEAF-LIFE growth-form baseline"
 
 [[gene]]
 name = "alpha@turf"

@@ -187,9 +187,10 @@ fn a_stand_whose_water_pays_never_cures_and_shade_is_not_drought() {
     }
 
     // The pure test on hand-built reads: dim light, a dry root box.
+    let dry_mu = mu_at_cover(sc, 0.5 * sc.cure_cover / usable(sc));
     let dim = CureRead {
-        available: water_for(sc, 0.2),
-        moisture: 0.2,
+        available: water_for(sc, dry_mu),
+        moisture: dry_mu,
         light_eff: 0.0,
         stress: 0.0,
         mineral: RICH,
@@ -301,13 +302,16 @@ fn the_ledgers_close_through_a_budget_cure_and_a_wake() {
     t.cure_resume_water = 0.6;
     t.cure_after_s = 1.0;
     t.cure_max_s = 0.0;
+    // Hand-built upkeep: dry water cannot pay, full water can, regardless of the
+    // default leaf turnover. This tests the cure ledger rather than tuned solvency.
+    t.maintenance = 0.004;
     let mut world = slab(3, 0.2);
     let mut flora = Flora::new(c.clone());
     let wood = c.springturf.wood_max;
     assert!(flora.apply(&world, Command::SeedOnFace { site: face(1), species: TURF, wood }));
     let turf = |f: &Flora| f.view().stand_at(face(1)).copied();
     let mut cured = None;
-    for _ in 0..2000 {
+    for _ in 0..200 {
         let litter0 = flora.view().ground_at(face(1)).map_or(0.0, |g| g.litter);
         flora.step(&mut world);
         assert_conserved(&flora, "short");

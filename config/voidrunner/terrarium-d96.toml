@@ -332,7 +332,8 @@ maintenance = 0.0003279210074532441
 propagule_rate = 0.0006558420149064882
 seed_attrition_per_s = 0.00005693073046063266
 seed_max_age_s = 17565.20585470962
-senescence = 0.0017932039887126894
+# LEAF-LIFE, Wrysk 2026-10-10: 90 days; 1 / (90 * 36000 / 365) per second.
+senescence = 0.00011265432098765431
 wood_rate = 0.0016396050372662204
 
 [flora.glowcap]
@@ -370,7 +371,8 @@ maintenance = 0.0003279210074532441
 propagule_rate = 0.001967526044719464
 seed_attrition_per_s = 0.00005693073046063266
 seed_max_age_s = 17565.20585470962
-senescence = 0.0017932039887126894
+# LEAF-LIFE, Wrysk 2026-10-10: 90 days; 1 / (90 * 36000 / 365) per second.
+senescence = 0.00011265432098765431
 wood_rate = 0.0016396050372662204
 
 [flora.latticevine]
@@ -399,7 +401,8 @@ maintenance = 0.0006558420149064882
 propagule_rate = 0.000491881511179866
 seed_attrition_per_s = 0.00004554458436850613
 seed_max_age_s = 21956.507318387026
-senescence = 0.0015582388047764115
+# LEAF-LIFE, Wrysk 2026-10-10: 90 days; 1 / (90 * 36000 / 365) per second.
+senescence = 0.00011265432098765431
 wood_rate = 0.0016396050372662204
 
 [flora.springturf]
@@ -422,7 +425,8 @@ maintenance = 0.0006558420149064882
 propagule_rate = 0.003279210074532441
 seed_attrition_per_s = 0.000018977
 seed_max_age_s = 52696.0
-senescence = 0.0026
+# LEAF-LIFE, Wrysk 2026-10-10: 30 days; 1 / (30 * 36000 / 365) per second.
+senescence = 0.000337962962962963
 wood_rate = 0.016396050372662202
 
 [flora.stonecushion]
@@ -435,7 +439,8 @@ maintenance = 0.00008198025186331102
 propagule_rate = 0.00008198025186331102
 seed_attrition_per_s = 0.00003795382030708844
 seed_max_age_s = 26347.80878206443
-senescence = 0.00034846728275725504
+# LEAF-LIFE, Wrysk 2026-10-10: 365 days; 1 / (365 * 36000 / 365) per second.
+senescence = 2.777777777777778e-05
 wood_rate = 0.0003279210074532441
 
 [flora.umbrellafrond]
@@ -448,7 +453,8 @@ maintenance = 0.0003279210074532441
 propagule_rate = 0.0003279210074532441
 seed_attrition_per_s = 0.00011386146092126532
 seed_max_age_s = 8782.60292735481
-senescence = 0.0017932039887126894
+# LEAF-LIFE, Wrysk 2026-10-10: 90 days; 1 / (90 * 36000 / 365) per second.
+senescence = 0.00011265432098765431
 wood_rate = 0.0016396050372662204
 
 [flora.vaulttree]
@@ -461,7 +467,8 @@ maintenance = 0.00016396050372662204
 propagule_rate = 0.0013116840298129763
 seed_attrition_per_s = 0.00007590764061417688
 seed_max_age_s = 13173.904391032214
-senescence = 0.0009469072535054164
+# LEAF-LIFE, Wrysk 2026-10-10: 90 days; 1 / (90 * 36000 / 365) per second.
+senescence = 0.00011265432098765431
 wood_rate = 0.000491881511179866
 
 [flora.velvetpad]
@@ -474,7 +481,8 @@ maintenance = 0.0003279210074532441
 propagule_rate = 0.0008198025186331102
 seed_attrition_per_s = 0.00015181528122835375
 seed_max_age_s = 6586.952195516107
-senescence = 0.0005807788045954251
+# LEAF-LIFE, Wrysk 2026-10-10: 365 days; 1 / (365 * 36000 / 365) per second.
+senescence = 2.777777777777778e-05
 wood_rate = 0.003279210074532441
 
 [fauna.founders.littershredder]
