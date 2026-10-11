@@ -1280,6 +1280,9 @@ pub struct BodyPlacement {
     pub ids: Vec<u64>,
     /// Starter litter tiles laid (a litter-bed lineage's).
     pub litter_tiles: usize,
+    /// The shared region fell below the requested minimum; the largest food-covering
+    /// region was used and the shortfall logged instead of dropping the family.
+    pub region_fallback: bool,
 }
 
 /// One introduction on `site` of body `k` of `want`, if the attempt budget allows:
@@ -1568,12 +1571,14 @@ pub fn place_bodies(
                 meadow.retain(|f| first.get(f).is_none_or(|&i| wettest[i] <= drown));
             }
             meadow.retain(|f| found.contains(f));
-            let chosen = place(
-                &meadow,
-                want,
-                |s| map.component_of(s),
-                |c, k| covers(&phys, food.get(&c).copied().unwrap_or_default(), need, k),
-            );
+            let (chosen, fallback) = place_at_food(&meadow, want, &graph, &phys, &food, need);
+            out.region_fallback = fallback;
+            if fallback {
+                eprintln!(
+                    "founding {}: no food-covering region meets {} walkable faces; using the largest food-covering region",
+                    founder.name(), phys.founding_min_region_faces,
+                );
+            }
             out.chosen = chosen.len();
             for (k, site) in chosen.into_iter().enumerate() {
                 match attempt(
@@ -1689,6 +1694,51 @@ fn place(
         }
     }
     chosen
+}
+
+/// Preserve the AtFood face order and spacing, optionally restricting it to one
+/// family range. Region rank is the first eligible face's existing food/random rank.
+fn place_at_food(
+    pool: &[Site],
+    want: usize,
+    graph: &RouteGraph,
+    phys: &FounderPhysiology,
+    food: &BTreeMap<usize, ComponentFood>,
+    need: f64,
+) -> (Vec<Site>, bool) {
+    let fits = |c, k| covers(phys, food.get(&c).copied().unwrap_or_default(), need, k);
+    let size = |site| graph.face(site).map_or(0, |i| graph.component_len(i));
+    let minimum = phys.founding_min_region_faces as usize;
+    if !phys.founding_together {
+        let pool: Vec<_> = pool.iter().copied().filter(|&s| size(s) >= minimum).collect();
+        return (place(&pool, want, |s| graph.component_of(s), fits), false);
+    }
+
+    // Visit components in face rank order. Food must carry the entire group before
+    // any body is placed; the individual gate below remains unchanged.
+    let mut seen = std::collections::HashSet::new();
+    let mut selected = None;
+    let mut largest = None;
+    for &site in pool {
+        let Some(c) = graph.component_of(site) else { continue };
+        if !seen.insert(c) || !fits(c, want) {
+            continue;
+        }
+        let faces = size(site);
+        if faces >= minimum {
+            selected = Some(c);
+            break;
+        }
+        if largest.is_none_or(|(_, n)| faces > n) {
+            largest = Some((c, faces));
+        }
+    }
+    let fallback = selected.is_none() && largest.is_some();
+    let selected = selected.or(largest.map(|(c, _)| c));
+    let pool: Vec<_> = pool.iter().copied()
+        .filter(|&s| selected.is_some() && graph.component_of(s) == selected)
+        .collect();
+    (place(&pool, want, |s| graph.component_of(s), fits), fallback)
 }
 
 /// A lineage's adult **basal upkeep per hour**, organic units:
@@ -3141,6 +3191,160 @@ mod tests {
             0,
             "a single stocked patch can cover the requested founders: {out:?}"
         );
+    }
+
+    /// Two stocked ranges separated by full-height walls, one smaller than the other.
+    fn family_fixture(seed: u64) -> (World, Flora, cubarium_voxel_fauna::FaunaConfig) {
+        let cfg = Config { width: 24, height: 16, depth: 6, seed, ..Config::default() };
+        let mut world = plain_with(cfg.clone());
+        for x in [0i64, 8] {
+            for z in 0..cfg.depth {
+                for y in 3..cfg.height {
+                    world.apply(cubarium_voxel::Command::SetMaterial { x, y, z, material: Material::Rock });
+                }
+            }
+        }
+        let mut flora = Flora::new(cubarium_voxel_flora::FloraConfig::for_voxel_size(cfg.voxel_m));
+        plant(&mut flora, &world, 4, 3, Species::Springturf, 0.8);
+        plant(&mut flora, &world, 16, 3, Species::Springturf, 0.8);
+        let mut config = cubarium_voxel_fauna::FaunaConfig::placeholder();
+        let phys = config.founder(Founder::Browser);
+        let graph = RouteGraph::for_founder(&world.view(), phys, config.founding.clearance_margin_m);
+        let (_, food) = food_on_graph(&world.view(), &flora.view(), phys, &graph);
+        // The reach map also labels faces outside the body-clear graph with MAX;
+        // those are never founding regions, even if their mouth can reach foliage.
+        let stocked: Vec<_> = food.iter()
+            .filter(|(c, f)| **c != usize::MAX && f.stock > 0.0)
+            .map(|(_, f)| f).collect();
+        assert_eq!(graph.components.iter().copied().collect::<std::collections::HashSet<_>>().len(), 2);
+        assert_eq!(stocked.len(), 2);
+        let least_stock = stocked.iter().map(|f| f.stock).fold(f64::INFINITY, f64::min);
+        assert!(least_stock > 0.0);
+        // Either range can carry the test's two bodies, regardless of tuned upkeep.
+        config.founding.accept_founder_hours = least_stock / (4.0 * founding_upkeep_per_hour(phys));
+        (world, flora, config)
+    }
+
+    fn place_family(
+        world: &World,
+        flora: &mut Flora,
+        config: cubarium_voxel_fauna::FaunaConfig,
+    ) -> (BodyPlacement, Vec<Site>, RouteGraph) {
+        let graph = RouteGraph::for_founder(
+            &world.view(), config.founder(Founder::Browser), config.founding.clearance_margin_m,
+        );
+        let stores = vec![founder_arrival(&config.founding); 2];
+        let mut fauna = Fauna::new(config);
+        install_heuristics(&mut fauna);
+        let sites = support_sites(world);
+        let wettest = vec![0.0; sites.len()];
+        let out = place_bodies(world, flora, &mut fauna, Founder::Browser, &stores,
+            &sites, &wettest, &mut Vec::new(), usize::MAX);
+        let bodies = fauna.view().animals.iter().map(|a| a.site).collect();
+        (out, bodies, graph)
+    }
+
+    #[test]
+    fn founding_together_keeps_every_body_in_one_region_across_seeds() {
+        let mut selected = std::collections::HashSet::new();
+        for seed in 1..=8 {
+            let (world, mut flora, mut config) = family_fixture(seed);
+            config.founders[Founder::Browser.index()].founding_together = true;
+            let (out, bodies, graph) = place_family(&world, &mut flora, config);
+            assert_eq!(out.placed, 2, "seed {seed}: {out:?}");
+            let c = graph.component_of(bodies[0]).unwrap();
+            assert!(bodies.iter().all(|&s| graph.component_of(s) == Some(c)), "seed {seed}");
+            selected.insert(c);
+        }
+        assert!(selected.len() > 1, "the seeded rank still varies the selected range");
+    }
+
+    #[test]
+    fn founding_min_region_faces_rejects_the_tiny_first_ranked_region() {
+        for together in [false, true] {
+            let (world, mut flora, mut config) = family_fixture(1);
+            let graph = RouteGraph::for_founder(&world.view(), config.founder(Founder::Browser), config.founding.clearance_margin_m);
+            let small = Site { x: 4, y: 2, z: 3 };
+            let large = Site { x: 16, y: 2, z: 3 };
+            let tiny_size = graph.component_len(graph.face(small).unwrap());
+            assert!(graph.component_len(graph.face(large).unwrap()) > tiny_size);
+            let phys = &mut config.founders[Founder::Browser.index()];
+            phys.founding_together = together;
+            phys.founding_min_region_faces = (tiny_size + 1) as u32;
+            let (map, food) = food_on_graph(&world.view(), &flora.view(), phys, &graph);
+            let need = config.founding.accept_founder_hours * founding_upkeep_per_hour(phys);
+            // Give the tiny range the best rank, independent of today's random seed.
+            let pool = [small, Site { x: 3, ..small }, large, Site { x: 15, ..large }];
+            assert!(pool.iter().all(|&s| map.component_of(s).is_some()));
+            let (chosen, fallback) = place_at_food(&pool, 2, &graph, phys, &food, need);
+            assert_eq!(chosen.len(), 2);
+            assert!(!fallback);
+            assert!(chosen.iter().all(|&s| graph.component_of(s) == graph.component_of(large)));
+            let (out, bodies, graph) = place_family(&world, &mut flora, config);
+            assert_eq!(out.placed, 2);
+            assert!(bodies.iter().all(|&s| graph.component_len(graph.face(s).unwrap()) > tiny_size));
+        }
+    }
+
+    #[test]
+    fn default_founding_region_knobs_preserve_the_old_placement() {
+        let mut split = false;
+        for seed in 1..=8 {
+            let (world, mut flora, mut config) = family_fixture(seed);
+            // Old named-field configs omit both knobs; serde restores the old rule.
+            let mut encoded = serde_json::to_value(config.founder(Founder::Browser)).unwrap();
+            let table = encoded.as_object_mut().unwrap();
+            table.remove("founding_together");
+            table.remove("founding_min_region_faces");
+            config.founders[Founder::Browser.index()] = serde_json::from_value(encoded).unwrap();
+            let phys = config.founder(Founder::Browser);
+            let graph = RouteGraph::for_founder(&world.view(), phys, config.founding.clearance_margin_m);
+            let (map, food) = food_on_graph(&world.view(), &flora.view(), phys, &graph);
+            let nearest = nearest_food_faces(&graph, &food_faces(&map, &world.view(), &flora.view(), phys.diet), seed);
+            let mut pool: Vec<_> = nearest.keys().copied().collect();
+            pool.sort_by_key(|s| nearest[s]);
+            let need = config.founding.accept_founder_hours * founding_upkeep_per_hour(phys);
+            let old = place(&pool, 2, |s| map.component_of(s), |c, k| covers(phys, food[&c], need, k));
+            let (out, bodies, graph) = place_family(&world, &mut flora, config);
+            assert_eq!(out.placed, 2);
+            assert!(!out.region_fallback);
+            assert_eq!(bodies, old, "seed {seed}: preserve the old rank and faces");
+            split |= graph.component_of(bodies[0]) != graph.component_of(bodies[1]);
+        }
+        assert!(split, "independent founding may split the bodies across regions");
+    }
+
+    #[test]
+    fn founding_region_fallback_places_the_group_and_reports_the_shortfall() {
+        let (world, mut flora, mut config) = family_fixture(1);
+        let graph = RouteGraph::for_founder(&world.view(), config.founder(Founder::Browser), config.founding.clearance_margin_m);
+        let largest = graph.faces.iter().enumerate().map(|(i, _)| graph.component_len(i)).max().unwrap();
+        let phys = &mut config.founders[Founder::Browser.index()];
+        phys.founding_together = true;
+        phys.founding_min_region_faces = (largest + 1) as u32;
+        let (out, bodies, graph) = place_family(&world, &mut flora, config);
+        assert_eq!(out.placed, 2, "the requested bodies are still founded: {out:?}");
+        assert!(out.region_fallback, "the unmet minimum is reported: {out:?}");
+        assert!(bodies.iter().all(|&s| graph.component_len(graph.face(s).unwrap()) == largest));
+    }
+
+    #[test]
+    fn founding_together_requires_food_for_the_whole_group() {
+        let (world, flora, config) = family_fixture(1);
+        let mut phys = *config.founder(Founder::Browser);
+        phys.founding_together = true;
+        let graph = RouteGraph::for_founder(&world.view(), &phys, config.founding.clearance_margin_m);
+        let (_, mut food) = food_on_graph(&world.view(), &flora.view(), &phys, &graph);
+        let small = Site { x: 4, y: 2, z: 3 };
+        let large = Site { x: 16, y: 2, z: 3 };
+        let c = graph.component_of(small).unwrap();
+        let need = food[&c].stock;
+        food.get_mut(&graph.component_of(large).unwrap()).unwrap().stock = 2.0 * need;
+        let pool = [small, large, Site { x: 15, ..large }];
+        let (chosen, fallback) = place_at_food(&pool, 2, &graph, &phys, &food, need);
+        assert_eq!(chosen.len(), 2);
+        assert!(!fallback);
+        assert!(chosen.iter().all(|&s| graph.component_of(s) == graph.component_of(large)));
     }
 
     fn config() -> Config {

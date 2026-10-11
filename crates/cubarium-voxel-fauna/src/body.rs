@@ -555,6 +555,14 @@ pub struct FounderPhysiology {
     pub founding: Founding,
     /// Where a founding body is placed ([`FoundingSite`]); unread for [`Founding::Clutches`].
     pub founding_site: FoundingSite,
+    /// AtFood founding puts this lineage's bodies in one component of its walk graph.
+    /// Real world: a giraffe herd or family shares a range.
+    #[serde(default)]
+    pub founding_together: bool,
+    /// Minimum walkable faces in an AtFood founding region; 0 admits any size.
+    /// Real world: a home range must be big enough to live in.
+    #[serde(default)]
+    pub founding_min_region_faces: u32,
     /// **How many** a fresh world founds: bodies, or for [`Founding::Clutches`] clutches.
     /// The code default of a new lineage is 0, so training worlds are unchanged until a
     /// preset turns it on (`[fauna.founders.<lineage>] founding_count = N`). Shredder 8,
@@ -2120,6 +2128,8 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::LitterBed,
                 founding_count: 8,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2213,6 +2223,8 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 8,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2351,6 +2363,8 @@ impl FounderPhysiology {
                 founding: Founding::Clutches,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2491,6 +2505,10 @@ impl FounderPhysiology {
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
                     founding_per_world: true,
+                    // LS-TOGETHER, Wrysk 2026-10-11: "those loftstriders can never meet
+                    // each other to breed". Found one family on a shared home range.
+                    founding_together: true,
+                    founding_min_region_faces: 500,
                     motor_respiration_per_s: DAILY_LOFTSTRIDER / DAY_S,
                     // Foliage: k 0.05, τ 120 s (one or two long browses a day).
                     gut: Gut::of(0.05, 120.0),

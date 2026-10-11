@@ -225,6 +225,10 @@ fn founder_rows() -> Vec<Row> {
             .prov("decision"),
         r("founding_count", "bodies (clutches for an egg bank)", nonneg, "how many a fresh world founds (a new lineage's default 0)")
             .prov("decision"),
+        r("founding_together", "switch", fraction, "AtFood bodies share one walkable region; a giraffe herd or family shares a range")
+            .optional().prov("decision"),
+        r("founding_min_region_faces", "walkable faces", nonneg, "minimum AtFood founding region size; a home range must be big enough to live in")
+            .prov("decision"),
         r("water_margin_m", "m", nonneg, "an aquatic body's step needs standing water within this of its destination face")
             .prov("decision"),
         // The amphibious table (`Amphibious`, AMPHIBIOUS-SNAIL): the ripple-snail's only,
