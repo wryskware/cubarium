@@ -139,7 +139,7 @@ These come from `round2/godot/specimen.gd`.
 
 - **Fonts:**
   - One `FontVariation` per role with `variation_opentype`, keyed by `TextServer.name_to_tag`. Fractional axis values work.
-  - Gridlite: antialiasing gray, hinting normal, subpixel positioning off. Light hinting collapses the dotted columns into horizontal stripes at the native 26 px chrome size. Use whole multiples of 13 px.
+  - Gridlite: antialiasing gray, hinting light (none renders dimmer and blurrier than the mockups), subpixel positioning off. Use whole multiples of 13 px.
   - Pixelify: default antialiasing and light hinting.
   - Letter spacing: `FontVariation.spacing_glyph`.
   - Godot draws Pixelify almost exactly like Chrome.
