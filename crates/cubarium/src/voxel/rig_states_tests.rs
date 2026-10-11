@@ -87,20 +87,22 @@ fn a_rigged_frondgrazer_plays_sleep_idle_and_hunker_as_clips() {
 fn the_sleep_ports_play_their_track_with_the_states_eased_weight() {
     let lib = library();
     let (_, _, standing) = grown();
-    for founder in [
-        Founder::Chorister,
-        Founder::Lanternjaw,
-        Founder::Seedporter,
-        Founder::Bellwing,
+    for (founder, mode) in [
+        (Founder::Chorister, MobilityMode::Ground),
+        (Founder::Lanternjaw, MobilityMode::Ground),
+        (Founder::Seedporter, MobilityMode::Ground),
+        (Founder::Seedporter, MobilityMode::Perched),
+        (Founder::Bellwing, MobilityMode::Ground),
     ] {
-        let a = Animal {
+        let mut a = Animal {
             founder: Some(founder),
             state: State::Asleep,
             ..standing
         };
+        a.mobility.mode = mode;
         let rig = lib
-            .rig_in_mode(founder, MobilityMode::Ground)
-            .expect("ground rig")
+            .rig_in_mode(founder, mode)
+            .expect("its rig in the mode")
             .0;
         let clip = rig.clip("asleep").expect("sleep track");
         let mut models = FigureModels::default();
@@ -223,20 +225,15 @@ fn places(posed: &[[i32; 3]], what: &str) -> FxHashSet<[i32; 3]> {
 }
 
 /// In every size bin, the rig's asleep and hunker tracks at full weight show what the
-/// class path's poses show: asleep, the torso row and all over it lowered by its settle,
+/// class path's poses show (for the rigs whose sleep is still today's settle; the sleep
+/// poses of RIG-STATES round 3 end on their own pose, `the_sleep_poses_end_gap_free_and_on_the_ground`): asleep, the torso row and all over it lowered by its settle,
 /// its cut leg rows gone and unclassified rows kept; hunkered, the same where the baked hunker holds a cell (the
 /// neck, scoop and stalks inside the shield or under the ground line).
 #[test]
 fn the_rigs_asleep_and_hunker_end_on_the_class_paths_poses() {
     for voxel_m in [0.125, 0.25] {
         let lib = library_at(voxel_m);
-        for founder in [
-            Founder::Browser,
-            Founder::Chorister,
-            Founder::Lanternjaw,
-            Founder::Seedporter,
-            Founder::Bellwing,
-        ] {
+        for founder in [Founder::Browser, Founder::Seedporter, Founder::Bellwing] {
             let (rig, model) = lib
                 .rig_in_mode(founder, MobilityMode::Ground)
                 .expect("ground rig and model");
@@ -312,15 +309,16 @@ fn the_rigs_asleep_and_hunker_end_on_the_class_paths_poses() {
 fn zero_sleep_weight_draws_the_original_feed_rig_cell_for_cell() {
     for voxel_m in [0.125, 0.25] {
         let lib = library_at(voxel_m);
-        for founder in [
-            Founder::Chorister,
-            Founder::Lanternjaw,
-            Founder::Seedporter,
-            Founder::Bellwing,
+        for (founder, mode) in [
+            (Founder::Chorister, MobilityMode::Ground),
+            (Founder::Lanternjaw, MobilityMode::Ground),
+            (Founder::Seedporter, MobilityMode::Ground),
+            (Founder::Seedporter, MobilityMode::Perched),
+            (Founder::Bellwing, MobilityMode::Ground),
         ] {
             let (rig, model) = lib
-                .rig_in_mode(founder, MobilityMode::Ground)
-                .expect("ground rig");
+                .rig_in_mode(founder, mode)
+                .expect("its rig in the mode");
             let original = Arc::new(rig.before_sleep_port());
             for (bin, b) in model.bins.iter().enumerate() {
                 let mut models = FigureModels::default();
@@ -432,6 +430,100 @@ fn zero_sleep_weight_draws_the_original_feed_rig_cell_for_cell() {
                         );
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Each cell of bin `bin` posed by `clip` at full weight: its 8 corners and its centre
+/// (model offsets, voxels; y up) and its turn (the bone's 3 x 3 rows).
+fn posed_cells(rig: &AnimalRig, bin: usize, cells: &[ModelCell], clip: usize) -> Vec<([[f64; 3]; 8], [f64; 3], [[f64; 3]; 3])> {
+    let mut pose = Vec::new();
+    rig.pose(bin, &[ClipAt { clip, time_s: 0.0, weight: 1.0 }], &mut pose);
+    cells
+        .iter()
+        .map(|c| {
+            let m = &pose[usize::from(rig.bone_of(bin, c.offset))];
+            let at = |p: [f64; 3]| -> [f64; 3] {
+                [0, 1, 2].map(|i| (0..3).map(|j| f64::from(m[i][j]) * p[j]).sum::<f64>() + f64::from(m[i][3]))
+            };
+            let o = c.offset.map(f64::from);
+            let mut corners = [[0.0; 3]; 8];
+            for (k, corner) in corners.iter_mut().enumerate() {
+                let d = [if k & 1 == 0 { -0.5 } else { 0.5 }, if k & 2 == 0 { 0.0 } else { 1.0 }, if k & 4 == 0 { -0.5 } else { 0.5 }];
+                *corner = at([o[0] + d[0], o[1] + d[1], o[2] + d[2]]);
+            }
+            let turn = [0, 1, 2].map(|i| [0, 1, 2].map(|j| f64::from(m[i][j])));
+            (corners, at([o[0], o[1] + 0.5, o[2]]), turn)
+        })
+        .collect()
+}
+
+/// RIG-STATES round 3's sleep poses (the Veilhound lying down, the lanternjaw's folded arms,
+/// the seedporter hunched on its perch) no longer end on the class path's settle; in every
+/// size bin at both voxel sizes they end gap-free and resting where they sleep. On the
+/// ground each cell ends wholly under the ground line (folded away, its top at least half a
+/// cell under: a top on the line would show through) or wholly over it, the
+/// lowest shown resting on it; on the perch nothing hides and the feet and the hanging tail
+/// (the cells at and under the perch's row) keep their places. Either way the shown cells
+/// are one piece and no two take one place facing the same way (their faces would fight).
+#[test]
+fn the_sleep_poses_end_gap_free_and_on_the_ground() {
+    const EPS: f64 = 0.15;
+    let dist = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt();
+    for voxel_m in [0.125, 0.25] {
+        let lib = library_at(voxel_m);
+        for (founder, mode) in [
+            (Founder::Chorister, MobilityMode::Ground),
+            (Founder::Lanternjaw, MobilityMode::Ground),
+            (Founder::Seedporter, MobilityMode::Perched),
+        ] {
+            let ground = mode == MobilityMode::Ground;
+            let (rig, model) = lib.rig_in_mode(founder, mode).expect("its rig in the mode");
+            let asleep = rig.clip("asleep").expect("a sleep track");
+            for (bin, b) in model.bins.iter().enumerate() {
+                let what = format!("{voxel_m} {} {mode:?} bin {bin}", founder.name());
+                let posed = posed_cells(rig, bin, &b.cells, asleep);
+                let mut shown = Vec::new();
+                for (c, (corners, centre, turn)) in b.cells.iter().zip(&posed) {
+                    let lo = corners.iter().map(|p| p[1]).fold(f64::MAX, f64::min);
+                    let hi = corners.iter().map(|p| p[1]).fold(f64::MIN, f64::max);
+                    if ground {
+                        if hi <= -0.5 {
+                            continue;
+                        }
+                        // a top left on the ground line would show through it
+                        assert!(hi > 0.02, "{what}: cell {:?} folded onto the ground line, not under it", c.offset);
+                        assert!(lo >= -EPS, "{what}: cell {:?} ends across the ground line ({lo:.2} .. {hi:.2})", c.offset);
+                    } else if c.offset[1] <= 0 {
+                        let rest = [f64::from(c.offset[0]), f64::from(c.offset[1]) + 0.5, f64::from(c.offset[2])];
+                        assert!(dist(*centre, rest) < 1e-4, "{what}: perch cell {:?} moved", c.offset);
+                    }
+                    shown.push((lo, *centre, *turn));
+                }
+                if ground {
+                    let lowest = shown.iter().map(|s| s.0).fold(f64::MAX, f64::min);
+                    assert!(lowest.abs() <= EPS, "{what}: the sleeping body floats ({lowest:.2})");
+                }
+                for (i, a) in shown.iter().enumerate() {
+                    for c in &shown[i + 1..] {
+                        let same_turn = (0..3).all(|r| (0..3).all(|k| (a.2[r][k] - c.2[r][k]).abs() < 0.17));
+                        assert!(!(dist(a.1, c.1) <= 0.5 && same_turn), "{what}: two cells share {:?}", a.1);
+                    }
+                }
+                let mut joined = vec![false; shown.len()];
+                let mut todo = vec![0];
+                joined[0] = true;
+                while let Some(i) = todo.pop() {
+                    for (k, s) in shown.iter().enumerate() {
+                        if !joined[k] && dist(shown[i].1, s.1) <= 1.8 {
+                            joined[k] = true;
+                            todo.push(k);
+                        }
+                    }
+                }
+                assert!(joined.iter().all(|&j| j), "{what}: the sleeping body is in pieces");
+                println!("{what}: {} cells show, {} folded away", shown.len(), b.cells.len() - shown.len());
             }
         }
     }

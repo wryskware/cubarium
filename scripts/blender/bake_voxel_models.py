@@ -5,6 +5,8 @@
 
 RIG-STATES round 2: add `--sleep-only` to port the committed model and rig without
 voxelizing or writing any `.cvm` or manifest. Existing feed keys are copied exactly.
+RIG-STATES round 3: the Veilhound, lanternjaw and perched seedporter (`seedporter-stand`)
+end their asleep track on a sleep pose (`SLEEP_POSES`, `animal_models.posed_sleep_rig`).
 
 Reads **only** `assets/voxel-models/source.json` for numbers (crown ranges, stage
 profiles, founder bodies, voxel sizes; `design/handoffs/voxel-organism-models-2026-09-23.md`
@@ -814,6 +816,13 @@ STATE_RIGS = {"frondgrazer": (A.fg_state_rig, "frondgrazer-hunker")}
 SLEEP_PORTS = ("chorister", "lanternjaw", "seedporter-ground", "bellwing")
 for _name in SLEEP_PORTS:
     STATE_RIGS[_name] = (lambda *args, name=_name: A.sleep_state_rig(*args, legs=A.sleep_legs(name)), None)
+# RIG-STATES round 3: the ports whose asleep track ends on a sleep pose (`posed_sleep_rig`)
+SLEEP_POSES = {"chorister": (A.ch_sleep_plan, True), "lanternjaw": (A.lj_sleep_plan, True),
+               "seedporter-stand": (A.sp_sleep_plan, False)}
+SLEEP_PORTS += ("seedporter-stand",)
+for _name, (_plan, _ground) in SLEEP_POSES.items():
+    STATE_RIGS[_name] = (lambda shared, cells, bones, scale, pose=None, plan=_plan, ground=_ground:
+                         A.posed_sleep_rig(shared, cells, bones, scale, plan, ground), None)
 
 
 def model_cells(path):
@@ -1042,6 +1051,11 @@ def write_rig_of(name, out_dir, rig_bins, vox, states_done=False):
     if name in SLEEP_PORTS:
         # Keep the feed skeleton, but discard sleep children empty in every bin.
         used = {c[3] for *_, cells in bins for c in cells}
+        # and every bone a used one hangs from (a sleep pose's chain)
+        for b in list(used):
+            while bins[0][2]["bones"][b][1] is not None:
+                b = bins[0][2]["bones"][b][1]
+                used.add(b)
         keep = [i for i, (bone, _) in enumerate(bins[0][2]["bones"])
                 if i in used or not bone.startswith("sleep_")]
         index = {old: new for new, old in enumerate(keep)}
