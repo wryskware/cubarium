@@ -4,7 +4,7 @@ extends Node
 ## tabbed page (Field guide / Populations / Settings) and the animal inspect panel. Rust is the simulation (`CubariumSession`); this file owns the
 ## flow between screens and the one reader of the session's notices.
 ##
-## Start-up opens the last save if there is one, else the new-world picker.
+## Start-up opens the title menu. Continue opens the latest attached autosave; --new opens the picker.
 ## Esc: closes a dialog, then the open screen, then the inspect panel, then toggles the
 ## pause menu. Esc never quits; only the menu's Quit does. Gamepad: Start toggles the
 ## menu, B goes back, Select (or P) pauses the world without a menu. F3 opens the dev
@@ -16,7 +16,7 @@ extends Node
 ## resumes the world (unless the player paused it), and back to the menu pauses it again.
 ##
 ## Command line (after `--`): `--saves DIR` (the slots' root, default `user://saves`),
-## `--no-autoload` (don't open the last save), `--new` (open the picker at start-up).
+## `--no-autoload` (accepted for older launchers; startup always waits), `--new` (open the picker at start-up).
 
 const WindowFit := preload("res://ui/window_fit.gd")
 const WorldViews := preload("res://ui/world_views.gd")
@@ -77,12 +77,19 @@ var paused_label: Control
 var player_paused := false
 var pending_save := {}
 var pending_load := ""
+var pending_autosave := ""
+var queued_load := ""
+var pending_thumbnail := {}
+var thumbnail_handoff := {}
+var quit_after_save := false
+var quit_save_done := false
 var _hovered := -1
 
 
 func _ready() -> void:
 	_read_args()
 	_actions()
+	get_tree().auto_accept_quit = false
 	if not quit_hook.is_valid():
 		quit_hook = func(): get_tree().quit()
 	settings.load(settings_path)
@@ -107,11 +114,8 @@ func _ready() -> void:
 	if world_view.has_method("set_scope_enabled"):
 		world_view.set_scope_enabled(settings.get_value("view", "zoom_scope", true))
 
-	var last := _last_slot() if autoload and not start_new else ""
-	if last != "":
-		load_slot(last)
-	else:
-		open_menu()
+	open_menu()
+	if start_new:
 		open_picker()
 
 
@@ -241,10 +245,15 @@ func has_world() -> bool:
 
 ## "saving", "loading" or "".
 func busy() -> String:
+	if pending_autosave != "":
+		return "saving"
 	if not pending_save.is_empty():
 		return "saving"
 	if pending_load != "":
 		return "loading"
+	var status: Dictionary = session.status()
+	if status.get("saving", false):
+		return "saving"
 	return ""
 
 
@@ -260,12 +269,13 @@ func species_label(name: String) -> String:
 func _last_slot() -> String:
 	var slots_now: Array = saves.list(session)
 	var named: String = settings.get_value("shell", "last_slot", "")
-	var suffix := " (autosave)"
-	while named.ends_with(suffix):
-		named = named.trim_suffix(suffix)
-	# The list is newest first: Continue prefers the latest loadable member of the pair.
+	var home: String = saves.home_of(named) if named != "" else ""
+	# Continue resumes the attached autosave even when a newer manual snapshot exists.
 	for s in slots_now:
-		if s["name"] in [named, named + suffix] and s.get("loadable", false):
+		if s["name"] == home and s.get("loadable", false):
+			return s["name"]
+	for s in slots_now:
+		if saves.is_autosave(s["name"]) and s.get("loadable", false):
 			return s["name"]
 	for s in slots_now:
 		if s.get("loadable", false):
@@ -386,7 +396,7 @@ func set_player_paused(on: bool) -> void:
 
 func open_menu() -> void:
 	session.pause()
-	menu.open(has_world())
+	menu.open(has_world(), _last_slot() if not has_world() else "")
 	world_view.set("input_enabled", false)
 	_hover_off()
 
@@ -403,7 +413,12 @@ func close_menu() -> void:
 func _on_menu(item: String) -> void:
 	match item:
 		"resume":
-			close_menu()
+			if has_world():
+				close_menu()
+			else:
+				var last := _last_slot()
+				if last != "":
+					load_slot(last)
 		"save":
 			slots.open("save")
 		"load":
@@ -417,10 +432,12 @@ func _on_menu(item: String) -> void:
 		"guide":
 			open_guide()
 		"quit":
-			quit_hook.call()
+			request_quit()
 
 
 func open_picker() -> void:
+	if has_world() and busy() == "":
+		_request_autosave("switch")
 	picker.open()
 
 
@@ -449,9 +466,18 @@ func close_all() -> void:
 func _process(_delta: float) -> void:
 	for n in session.take_notices():
 		_on_notice(n)
+	for n in session.take_save_notices():
+		_on_autosave_notice(n)
+	_refresh_autosave_thumbnail()
+	if quit_after_save and busy() == "":
+		if quit_save_done or not has_world():
+			quit_after_save = false
+			quit_hook.call()
+		else:
+			_request_autosave("quit")
 	world_view.set("input_enabled", not overlay_open() and busy() != "loading" and not _typing())
 	paused_label.visible = player_paused and not overlay_open()
-	busy_panel.visible = pending_load != "" and not slots.visible
+	busy_panel.visible = (pending_load != "" or pending_autosave in ["initial", "attach", "quit"]) and not slots.visible
 	if tooltip.visible:
 		var at := ui.get_local_mouse_position() + Vector2(18, 18)
 		at.x = clampf(at.x, 8.0, maxf(8.0, ui.size.x - tooltip.size.x - 8))
@@ -589,12 +615,14 @@ func save_slot(name: String) -> String:
 	var problem: String = saves.name_problem(name)
 	if problem != "":
 		return problem
+	if saves.is_autosave(name):
+		return "This name belongs to a world autosave. Choose a snapshot name."
 	# `--headless` renders nothing: no thumbnail rather than a blank one.
 	var thumb: Image = null
 	if world_view.has_method("capture") and DisplayServer.get_name() != "headless":
-		thumb = world_view.capture(THUMB)
+		thumb = _current_thumbnail()
 	var dir: String = saves.begin(name)
-	pending_save = {"name": name, "dir": dir, "thumb": thumb}
+	pending_save = {"name": name, "dir": dir, "thumb": thumb, "home": String(session.home()).get_file()}
 	session.save(dir)
 	slots.say("Saving \"%s\"…" % name)
 	return ""
@@ -604,34 +632,149 @@ func load_slot(name: String) -> void:
 	if busy() != "":
 		notices.add("Wait for the %s to finish." % busy(), true)
 		return
+	if has_world():
+		queued_load = name
+		_request_autosave("load")
+		return
+	_load_now(name)
+
+
+func _load_now(name: String) -> void:
+	thumbnail_handoff = {"session": session.status()["generation"], "frame": world_view.get("frame_generation")}
 	pending_load = name
 	busy_label.text = "Opening \"%s\"…" % name
 	if slots.visible:
 		slots.say("Loading \"%s\"…" % name)
-	session.load(saves.path_of(name))
+	session.load_with_home(saves.path_of(name), saves.path_of(saves.home_of(name)))
 
 
 func renamed_slot(from: String, to: String) -> void:
+	if String(session.home()).get_file() == from:
+		session.attach_home(saves.path_of(to))
 	if settings.get_value("shell", "last_slot", "") == from:
 		_remember_slot(to)
 	notices.add("Renamed \"%s\" to \"%s\"." % [from, to])
 
 
+func deleting_active_world(name: String) -> bool:
+	return has_world() and String(session.home()).get_file() == name
+
+
 func deleted_slot(name: String) -> void:
+	if deleting_active_world(name):
+		session.close()
+		inspect.close()
+		close_all()
+		# The close command takes effect on the sim thread; title mode is immediate.
+		menu.open(false, _last_slot())
+	if settings.get_value("shell", "last_slot", "") == name:
+		_remember_slot("")
 	notices.add("Deleted \"%s\"." % name)
+
+
+func _request_autosave(reason: String) -> void:
+	var problem: String = session.autosave()
+	if problem != "":
+		quit_after_save = false
+		queued_load = ""
+		notices.add("Autosave failed: " + problem, true)
+		return
+	pending_autosave = reason
+	busy_label.text = "Saving the world before quitting…" if reason == "quit" else "Saving the world…"
+
+
+func _on_autosave_notice(n: Dictionary) -> void:
+	var requested: bool = n.get("requested", false)
+	var reason := pending_autosave if requested else ""
+	if requested:
+		pending_autosave = ""
+	if n.get("kind", "") == "autosave_failed":
+		quit_after_save = false
+		quit_save_done = false
+		queued_load = ""
+		notices.add("Autosave failed: %s" % n.get("text", ""), true)
+		slots.say("Autosave failed: %s" % n.get("text", ""))
+		if reason == "quit":
+			open_menu()
+		return
+	if DisplayServer.get_name() != "headless" and n.get("path", "") == String(session.home()):
+		pending_thumbnail = {"path": n["path"], "generation": session.status()["generation"]}
+	if reason == "load" and not quit_after_save:
+		var name := queued_load
+		queued_load = ""
+		_load_now(name)
+	if reason == "quit":
+		quit_save_done = true
+	if reason == "initial":
+		notices.add("A new world. Autosave ready.")
+	if slots.visible:
+		slots.refresh()
+
+
+## Never capture the previous world's frame while its replacement is still rendering.
+func _current_thumbnail() -> Image:
+	var generation = world_view.get("frame_generation")
+	if generation == null or int(generation) < 0 or not world_view.get("lighting_ready"):
+		return null
+	# Hosted has its own generation counter; compare it to the frame before the handoff,
+	# while the session counter tells us whether that handoff has installed a world yet.
+	if not thumbnail_handoff.is_empty() and session.status()["generation"] > thumbnail_handoff["session"]:
+		if generation == thumbnail_handoff["frame"]:
+			return null
+		thumbnail_handoff = {}
+	return world_view.capture(THUMB)
+
+
+## A thumbnail follows a completed save once its current world is visible; saving and
+## quitting keep progressing independently of the renderer.
+func _refresh_autosave_thumbnail() -> void:
+	if pending_thumbnail.is_empty():
+		return
+	var path: String = pending_thumbnail["path"]
+	if String(session.home()) != path or session.status().get("generation", -1) != pending_thumbnail["generation"] or not DirAccess.dir_exists_absolute(path):
+		pending_thumbnail = {}
+		return
+	if busy() != "":
+		return
+	var thumb := _current_thumbnail()
+	if thumb == null:
+		return
+	pending_thumbnail = {}
+	var temporary := path.path_join(Saves.THUMB + ".next")
+	var err := thumb.save_png(temporary)
+	if err == OK:
+		err = DirAccess.rename_absolute(temporary, path.path_join(Saves.THUMB))
+	if err != OK:
+		DirAccess.remove_absolute(temporary)
+		notices.add("Thumbnail could not be saved: " + error_string(err), true)
+	elif slots.visible:
+		slots.refresh()
+
+
+func request_quit() -> void:
+	if quit_after_save:
+		return
+	session.cancel()
+	session.pause()
+	quit_after_save = true
+	quit_save_done = false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		request_quit()
 
 
 func _on_notice(n: Dictionary) -> void:
 	var kind: String = n.get("kind", "")
 	match kind:
 		"saved":
-			if pending_save.is_empty():
+			if pending_save.is_empty() or n.get("path", "") != pending_save["dir"]:
 				return
 			var name: String = pending_save["name"]
-			var problem: String = saves.commit(name, pending_save["thumb"])
+			var problem: String = saves.commit(name, pending_save["thumb"], pending_save["home"])
 			pending_save = {}
 			if problem == "":
-				_remember_slot(name)
 				notices.add("Saved \"%s\"." % name)
 				slots.say("Saved \"%s\"." % name)
 			else:
@@ -640,6 +783,8 @@ func _on_notice(n: Dictionary) -> void:
 			if slots.visible:
 				slots.refresh()
 		"save_failed":
+			if pending_save.is_empty() or n.get("path", "") != pending_save["dir"]:
+				return
 			var name: String = pending_save.get("name", "")
 			if not pending_save.is_empty():
 				Saves.remove_tree(pending_save["dir"])
@@ -652,12 +797,14 @@ func _on_notice(n: Dictionary) -> void:
 			var name := pending_load
 			pending_load = ""
 			if name != "":
-				_remember_slot(name)
+				_remember_slot(saves.home_of(name))
 			notices.add("Loaded \"%s\"." % name if name != "" else "Loaded.")
 			inspect.close()
 			close_all()
 			world_view.reset_framing()
 			set_player_paused(false)
+			if not DirAccess.dir_exists_absolute(String(session.home())):
+				_request_autosave("attach")
 		"load_failed":
 			var name := pending_load
 			pending_load = ""
@@ -668,7 +815,6 @@ func _on_notice(n: Dictionary) -> void:
 				slots.refresh()
 			elif not has_world() and not picker.visible:
 				open_menu()
-				open_picker()
 
 
 # --- New worlds ---------------------------------------------------------------------
@@ -676,7 +822,13 @@ func _on_notice(n: Dictionary) -> void:
 ## Found candidate `i` on its own terrain: "" once it has started, or why not. The
 ## picker follows it (`session.founding()`) and calls `on_founded` when it runs.
 func found_candidate(i: int) -> String:
-	return session.promote(i)
+	if busy() != "":
+		return "Wait for the %s to finish." % busy()
+	var before := {"session": session.status()["generation"], "frame": world_view.get("frame_generation")}
+	var problem: String = session.promote_into(i, saves.path_of(saves.new_home()))
+	if problem == "":
+		thumbnail_handoff = before
+	return problem
 
 
 ## The picked world is founded and installed: close everything over it and run it.
@@ -685,7 +837,8 @@ func on_founded(_founding: Dictionary) -> void:
 	close_all()
 	world_view.reset_framing()
 	set_player_paused(false)
-	notices.add("A new world.")
+	_remember_slot(String(session.home()).get_file())
+	_request_autosave("initial")
 
 
 # --- Inspect ------------------------------------------------------------------------
@@ -711,6 +864,9 @@ func _hover_off() -> void:
 
 func _on_clicked(id: int) -> void:
 	if overlay_open():
+		return
+	if id < 0:
+		inspect.close()
 		return
 	inspect.open(id)
 	world_view.set_highlight(id)

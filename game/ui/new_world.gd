@@ -48,6 +48,7 @@ var _generating := false
 var _large_index := -1
 var _founding := false
 var _found_index := -1
+var _found_generation := 0
 
 @onready var _world_picture: Control = $World
 @onready var _page: Control = $Center
@@ -56,6 +57,8 @@ var _found_index := -1
 @onready var _terrain: NeonArrows = %Terrain
 @onready var _climate: NeonArrows = %Climate
 @onready var _size_note: Label = %SizeNote
+@onready var _dimensions: Control = %Dimensions
+@onready var _dimension_inputs: Array[LineEdit] = [%Width, %Height, %Depth]
 @onready var _terrain_note: Label = %TerrainNote
 @onready var _climate_note: Label = %ClimateNote
 @onready var _water_box: Control = %WaterField
@@ -101,6 +104,8 @@ func _ready() -> void:
 	_status.text = ""
 	_water.changed.connect(func(_i): _water_changed())
 	_size.changed.connect(func(_i): _notes(); _sync_water())
+	for input in _dimension_inputs:
+		input.text_changed.connect(func(_text): _notes())
 	_terrain.changed.connect(func(_i): _notes(); _sync_water())
 	_climate.changed.connect(func(_i): _notes())
 	_found.pressed.connect(func(): _pick(_selected))
@@ -213,6 +218,7 @@ func back_one() -> bool:
 
 func _notes() -> void:
 	var s = _selected_entry(sizes, _size)
+	_dimensions.visible = s != null and s.get("custom", false)
 	_size_note.text = s.get("description", "") if s else ""
 	var t = _selected_entry(terrains, _terrain)
 	_terrain_note.text = t.get("description", "") if t else ""
@@ -220,6 +226,29 @@ func _notes() -> void:
 	_climate_note.text = c.get("description", "") if c else ""
 	for note in [_size_note, _terrain_note, _climate_note]:
 		note.visible = note.text != ""
+	if _dimensions.visible:
+		_size_note.text = "Width × height × depth in cells (0.125 m each). " + dimensions_problem()
+
+
+func world_dimensions() -> Array:
+	var s = _selected_entry(sizes, _size)
+	if s.get("custom", false):
+		return _dimension_inputs.map(func(input): return int(input.text))
+	return s["size"].map(func(v): return int(v))
+
+
+func dimensions_problem() -> String:
+	var s = _selected_entry(sizes, _size)
+	if s == null or not s.get("custom", false):
+		return ""
+	for input in _dimension_inputs:
+		var text := input.text.strip_edges()
+		if not text.is_valid_int() or int(text) < 1:
+			return "Dimensions must be positive whole numbers."
+	var dims := world_dimensions()
+	if dims[0] > 2048 or dims[1] > 512 or dims[2] > 256 or dims[0] * dims[1] * dims[2] > 16_777_216:
+		return "Use up to 2048 × 512 × 256, within 16 million cells."
+	return ""
 
 
 func _selected_entry(list: Array, choice: NeonArrows):
@@ -277,6 +306,8 @@ func _water_text() -> void:
 ## nothing yet when no candidates are shown.
 func _water_changed() -> void:
 	_water_text()
+	if dimensions_problem() != "":
+		return
 	if _cards.is_empty() or _founding:
 		return
 	var seeds := []
@@ -299,7 +330,7 @@ func _water_changed() -> void:
 func spec(with_water := true) -> Dictionary:
 	var s = _selected_entry(sizes, _size)
 	var root := ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
-	var dims: Array = s["size"].map(func(v): return int(v))  # JSON numbers are floats
+	var dims: Array = world_dimensions()
 	var out := {"config": root.path_join(s["config"]), "size": dims}
 	var t = _selected_entry(terrains, _terrain)
 	if t and t["name"] != s.get("terrain", ""):
@@ -335,6 +366,10 @@ func generate(count := 0) -> String:
 	var s = _selected_entry(sizes, _size)
 	if s == null:
 		return "no size to make"
+	var dimension_error := dimensions_problem()
+	if dimension_error != "":
+		_status.text = dimension_error
+		return dimension_error
 	if count <= 0:
 		count = int(s.get("candidates", 4))
 	var seed := _seed.text.strip_edges()
@@ -359,7 +394,8 @@ func _start_batch(count: int, says: String) -> void:
 	_batch_key = "terrain/%s/%s" % [s["id"], count]
 	_started_ms = Time.get_ticks_msec()
 	_generating = true
-	var aspect := float(s["size"][0]) / float(s["size"][1])
+	var dims := world_dimensions()
+	var aspect := float(dims[0]) / (float(dims[1]) + float(dims[2]) * 0.5)
 	_grid.columns = 2 if aspect <= 3.0 else 1
 	for i in count:
 		_cards.append(_card(i, aspect))
@@ -466,6 +502,8 @@ func _lock_form(locked: bool) -> void:
 	_seed.editable = not locked
 	_seed.focus_mode = Control.FOCUS_NONE if locked else Control.FOCUS_ALL
 	_seed.mouse_filter = Control.MOUSE_FILTER_IGNORE if locked else Control.MOUSE_FILTER_STOP
+	for input in _dimension_inputs:
+		input.editable = not locked
 
 
 func _process(_delta: float) -> void:
@@ -499,14 +537,18 @@ func _process(_delta: float) -> void:
 			"ready":
 				if not _ready_ms.has(i):
 					_ready_ms[i] = now
-				_set_card_state(card, "Ready", false)
-				card["bar"].indeterminate = false
-				card["bar"].value = 1.0
 				if not card["shown"]:
 					_set_card_note(card, "")
 					_show_candidate(i, c)
-				elif not card.get("framed", false):
+				if card["shown"] and not card.get("framed", false):
 					_follow_thumbnail(card)
+				if card.get("framed", false):
+					_set_card_state(card, "Ready" if not card.get("picture_failed", false) else "No picture", false)
+					card["bar"].indeterminate = false
+					card["bar"].value = 1.0
+				else:
+					_set_card_state(card, "Rendering preview…", true)
+					card["bar"].indeterminate = true
 			"failed":
 				_set_card_state(card, "No terrain", false)
 				card["bar"].indeterminate = false
@@ -560,6 +602,7 @@ func _follow_thumbnail(card: Dictionary) -> void:
 	var problem: String = wv.problem()
 	if problem != "":
 		card["framed"] = true
+		card["picture_failed"] = true
 		_set_card_note(card, "No picture: " + problem)
 
 
@@ -621,6 +664,7 @@ func ready_count() -> int:
 func _pick(i: int) -> void:
 	if not _pickable(i):
 		return
+	_found_generation = int(shell.session.status().get("generation", 0))
 	var problem: String = shell.found_candidate(i)
 	if problem != "":
 		_status.text = "Can't pick it: " + problem
@@ -629,6 +673,7 @@ func _pick(i: int) -> void:
 	_founding = true
 	_found_index = i
 	_found_phase.text = "Starting…"
+	_found_bar.indeterminate = false
 	_found_bar.value = 0.0
 	_found_detail.text = ""
 	_status.text = ""
@@ -653,6 +698,12 @@ func _follow_founding() -> void:
 				detail += "  ·  placing the founders again, try %d of %d" % [f["attempt"], f["attempts"]]
 			_found_detail.text = detail
 		"done":
+			# Founding completes on its worker before the session installs the world.
+			# Wait for that handoff before attaching UI/save actions to the new home.
+			if int(shell.session.status().get("generation", 0)) <= _found_generation:
+				_found_phase.text = "Opening world…"
+				_found_bar.indeterminate = true
+				return
 			_end_founding()
 			_clear_cards()
 			_status.text = ""

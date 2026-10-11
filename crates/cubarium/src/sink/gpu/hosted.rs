@@ -28,10 +28,9 @@
 //! [`CandidateSource`] on a thread of its own and drawn the same way; its clock stands
 //! still, and it redraws only when the view turns or the highlight moves. The stager holds
 //! the candidate's world by its own handle, never the session's candidate list (which the
-//! picker reads every frame), and still worlds stage one at a time across the process, in
-//! the order they were asked for ([`StageTurns`]): each one's sky plane takes every core
-//! but one, so the first thumbnail is drawn in one plane's time rather than all of them
-//! together in four's.
+//! picker reads every frame). Two still worlds stage at once, in request order. Their
+//! sky bakes share one bounded worker pool. A first picture is published immediately,
+//! then refreshed when the full lighting arrives.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -57,10 +56,8 @@ use crate::voxel::{PX_AUTO, VoxelConfig, cover_px_per_voxel, load_config, load_m
 
 /// Read-back slots: one being copied out while the GPU draws the next.
 const RING: usize = 2;
-/// How long a static world waits for the lit tier's sky plane before it is drawn anyway.
-const STATIC_LIGHT_WAIT: Duration = Duration::from_secs(20);
 /// How many still worlds stage at once in this process ([`StageTurns`]).
-const STATIC_STAGERS: usize = 1;
+const STATIC_STAGERS: usize = 2;
 /// How often a waiting stager looks at its quit flag (a shutdown joins it, on the app's
 /// thread).
 const STAGE_SLICE: Duration = Duration::from_millis(10);
@@ -77,9 +74,8 @@ static STAGE_TURNS: StageTurns = StageTurns::new(STATIC_STAGERS);
 // --- turns ----------------------------------------------------------------------------------
 
 /// **Still worlds stage a few at a time, first asked first served.** A stager's work is
-/// opening a renderer, packing the world and waiting for its sky plane, which is computed
-/// on every core but one; several at once only share the cores, so all of them finish late
-/// together. A stager that is told to quit while it waits leaves the queue at once.
+/// opening a renderer, packing the world and refining its sky plane. Concurrent planes
+/// share a bounded pool. A stager told to quit while waiting leaves the queue at once.
 pub struct StageTurns {
     state: Mutex<TurnQueue>,
     moved: Condvar,
@@ -536,6 +532,8 @@ pub struct HostedFrame {
     pub base_rise: u32,
     pub ring_width: u32,
     pub full_height: u32,
+    /// Whether the final terrain and shaft lighting is in this frame.
+    pub lighting_ready: bool,
     /// The world's tick it shows, and which world (counts installs).
     pub tick: u64,
     pub generation: u64,
@@ -567,8 +565,7 @@ pub struct HostedStats {
     pub packs_refused: u64,
     /// Frames posted over an untaken one.
     pub displaced: u64,
-    /// A still world was drawn before its lit tier's sky plane arrived (it waited
-    /// [`STATIC_LIGHT_WAIT`] and gave up), so its picture lacks the sky's shading.
+    /// The first picture is visible while its sky shading is still being baked.
     pub unlit: bool,
 }
 
@@ -606,6 +603,27 @@ struct Camera { zoom: f32, center: [f32; 2], screen: (u32, u32) }
 // both projection axes by the same integer; 64 is a detail ceiling, not an overview cap.
 fn detail_factor(base_s: u32, zoom: f32) -> u32 {
     [4, (64 / base_s.max(1)).clamp(1, 4), 2, 1].into_iter().find(|&f| f as f32 <= zoom + 0.001 && (f == 1 || base_s * f <= 64)).unwrap_or(1)
+}
+
+/// A detail tier covers the fitted screen at its entry zoom. Extra room allows
+/// fractional panning without a new allocation on every wheel or mouse event.
+fn detail_projection(overview: Projection, factor: u32, screen: (u32, u32)) -> Result<(Projection, Projection)> {
+    let mut full = overview;
+    full.s *= factor;
+    full.rise *= factor;
+    full.base *= factor as i32;
+    full.raster_w = u16::try_from(u32::from(full.raster_w) * factor)?;
+    full.raster_h = u16::try_from(u32::from(full.raster_h) * factor)?;
+    let mut target = full;
+    if factor > 1 {
+        let (w, h) = (screen.0.max(1), screen.1.max(1));
+        let step = (f64::from(overview.raster_w) / f64::from(w))
+            .max(f64::from(overview.raster_h) / f64::from(h));
+        let pad = 4 * full.s;
+        target.raster_w = ((f64::from(w) * step).ceil() as u32 + pad).min(u32::from(full.raster_w)) as u16;
+        target.raster_h = ((f64::from(h) * step).ceil() as u32 + pad).min(u32::from(full.raster_h)) as u16;
+    }
+    Ok((full, target))
 }
 
 struct Controls {
@@ -687,6 +705,7 @@ impl Shared {
 
     /// The renderer for a world of `world`'s shape.
     fn open(&self, world: &cubarium_voxel::Config) -> Result<(VoxelGpuSink<Offscreen>, Projection)> {
+        let started = Instant::now();
         let mut cfg = self.cfg.clone();
         cfg.sim.world = world.clone();
         if cfg.px_per_voxel == PX_AUTO {
@@ -694,7 +713,12 @@ impl Shared {
         }
         let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, world)?;
         super::check(proj)?;
-        let sink = VoxelGpuSink::offscreen(&cfg, proj, load_models(&cfg))?;
+        let models = load_models(&cfg);
+        let model_time = started.elapsed();
+        let sink = VoxelGpuSink::offscreen(&cfg, proj, models)?;
+        if std::env::var_os("CUBARIUM_RENDER_TIMING").is_some() {
+            eprintln!("cubarium preview: models={:.3}s renderer={:.3}s", model_time.as_secs_f64(), (started.elapsed() - model_time).as_secs_f64());
+        }
         Ok((sink, proj))
     }
 
@@ -774,9 +798,7 @@ impl Shared {
         let pack_ms = if staged { started.elapsed().as_secs_f64() * 1e3 } else { 0.0 };
         let mut packed = Packed::Refused;
         if staged {
-            if !st.ready && !st.sink.light_pending() {
-                st.ready = true;
-            }
+            st.ready = true;
             let key = (snap.generation, snap.terrain_version());
             let bits = match solid {
                 Some((g, v, bits)) if (*g, *v) == key => bits.clone(),
@@ -787,7 +809,9 @@ impl Shared {
                 }
             };
             self.publish_pick(&st.sink, &st.proj, bits);
-            packed = if st.ready { Packed::Done } else { Packed::AwaitingLight };
+            let pending = st.sink.light_pending();
+            self.unlit.store(pending, Ordering::SeqCst);
+            packed = if pending { Packed::AwaitingLight } else { Packed::Done };
         }
         drop(guard);
         if staged && let Ok(mut k) = self.clock.lock() {
@@ -843,19 +867,12 @@ impl Shared {
         let gpu_ms = (!out.is_empty()).then(|| st.sink.renderer.gpu_split(&gpu)).flatten();
         let camera = self.controls.lock().ok().and_then(|c| c.camera);
         let factor = camera.map_or(1, |c| detail_factor(st.overview.s, c.zoom));
-        if due && st.ready && factor != st.factor {
+        let (proj, target) = detail_projection(st.overview, factor, camera.map_or((1, 1), |c| c.screen))?;
+        let p = st.sink.renderer.params();
+        if due && st.ready && (factor != st.factor || u32::from(target.raster_w) != p.raster_w || u32::from(target.raster_h) != p.raster_h) {
             // Retire readbacks before replacing their renderer's command pool.
             st.ring.drain(&mut st.sink.renderer, |_, _| {})?;
             st.flight.clear();
-            let mut proj = st.overview;
-            proj.s *= factor; proj.rise *= factor; proj.base *= factor as i32;
-            proj.raster_w = u16::try_from(u32::from(proj.raster_w) * factor)?;
-            proj.raster_h = u16::try_from(u32::from(proj.raster_h) * factor)?;
-            let mut target = proj;
-            if factor > 1 {
-                target.raster_w = (u32::from(st.overview.raster_w) + 4 * proj.s).min(u32::from(proj.raster_w)) as u16;
-                target.raster_h = (u32::from(st.overview.raster_h) + 4 * proj.s).min(u32::from(proj.raster_h)) as u16;
-            }
             let mut next = st.sink.projected_renderer(&self.cfg, target)?;
             let ring = match ReadbackRing::new(gpu.clone(), &next, next.raster_image(), RING) {
                 Ok(ring) => ring,
@@ -892,7 +909,6 @@ impl Shared {
             }
             let p = st.sink.renderer.params();
             let (x, y) = camera.map_or((view_x, 0), |c| {
-                let _screen = c.screen;
                 let f = st.factor as f32;
                 let x = (c.center[0] * f - p.raster_w as f32 * 0.5).floor() as i32;
                 let y = (c.center[1] * f - p.raster_h as f32 * 0.5).floor() as i32;
@@ -924,6 +940,7 @@ impl Shared {
                         view_x: st.sink.renderer.view_x(), view_y: st.sink.renderer.view_y(),
                         s: st.proj.s, rise: st.proj.rise, base_s: st.overview.s, base_rise: st.overview.rise,
                         ring_width: u32::from(st.overview.raster_w), full_height: u32::from(st.overview.raster_h),
+                        lighting_ready: !st.sink.light_pending(),
                         tick: t.floor() as u64, generation: st.generation, ..Default::default()
                     }));
                     st.drawn_version = Some(st.sink.renderer.content_version());
@@ -1289,7 +1306,7 @@ impl Drop for Hosted {
 
 /// Stage candidate `index` of `source` as a still world: wait for a turn
 /// ([`STAGE_TURNS`]) when `queued`, open a renderer for it, pack it, wait for the lit tier's sky plane
-/// (up to [`STATIC_LIGHT_WAIT`]) and install it. The candidate's world is held by its own
+/// in the background after installing its first frame. The candidate's world is held by its own
 /// handle throughout, never under the session's candidate list.
 fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, queued: bool) -> Result<()> {
     let quit = || shared.quit.load(Ordering::SeqCst);
@@ -1303,19 +1320,6 @@ fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, qu
     sink.set_clock(world.tick(), 0.0);
     sink.stage_world(world, flora, fauna);
     let (tick, solid) = (world.tick(), Arc::new(PickMap::solid_bits(world)));
-    let started = Instant::now();
-    while sink.light_pending() && started.elapsed() < STATIC_LIGHT_WAIT && !quit() {
-        // Wait for the sky plane without packing again; a pack takes it in once it is done.
-        // (The light shafts' first bake lands only through packs: with only that pending,
-        // this packs every slice.)
-        if sink.wait_sky(STAGE_SLICE) && !quit() {
-            sink.stage_world(world, flora, fauna);
-            if sink.light_pending() {
-                // Parked, not slept: a shutdown unparks it and it gives up at once.
-                std::thread::park_timeout(RESTAGE_EVERY);
-            }
-        }
-    }
     if quit() {
         // Dropping the renderer here cancels its sky plane and joins that worker.
         return Ok(());
@@ -1325,7 +1329,23 @@ fn stage_static(shared: &Arc<Shared>, source: &CandidateSource, index: usize, qu
     if let Ok(mut c) = shared.clock.lock() {
         *c = Clock::still(tick);
     }
-    shared.install(sink, proj, true).map(|_| ())
+    let generation = shared.install(sink, proj, true)?;
+    loop {
+        if quit() { return Ok(()); }
+        let pending = {
+            let mut guard = shared.sink.lock().map_err(|_| anyhow::anyhow!("the renderer's lock is poisoned"))?;
+            let Some(st) = guard.as_mut().filter(|st| st.generation == generation) else { return Ok(()) };
+            // Zero-time poll: the presenter never waits behind the lighting worker.
+            if st.sink.wait_sky(Duration::ZERO) {
+                st.sink.stage_world(world, flora, fauna);
+            }
+            st.sink.light_pending()
+        };
+        shared.unlit.store(pending, Ordering::SeqCst);
+        if !pending { return Ok(()); }
+        // Parked, so shutdown wakes and joins this stager promptly.
+        std::thread::park_timeout(RESTAGE_EVERY);
+    }
 }
 
 /// The live hook: on the session's loop, it copies what the pack reads and hands it to the
@@ -1383,7 +1403,8 @@ impl LoopHook for LiveHook {
             Ok((mut sink, proj)) => {
                 sink.set_clock(world.tick(), 0.0);
                 let staged = sink.stage_world(world, flora, fauna);
-                let ready = staged && !sink.light_pending();
+                let pending = sink.light_pending();
+                let ready = staged;
                 self.proj = Some(proj);
                 let solid = Arc::new(PickMap::solid_bits(world));
                 self.shared.publish_pick(&sink, &proj, solid);
@@ -1393,7 +1414,8 @@ impl LoopHook for LiveHook {
                 }
                 // Not ready yet (the sky plane is coming): the pack thread packs the next
                 // snapshot until it is.
-                self.owed = !ready;
+                self.shared.unlit.store(pending, Ordering::SeqCst);
+                self.owed = !ready || pending;
             }
             Err(e) => {
                 self.proj = None;
@@ -1418,6 +1440,25 @@ impl LoopHook for LiveHook {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detail_crop_covers_the_fitted_screen_when_aspects_differ() {
+        let c = cubarium_voxel::Config { width: 128, height: 64, depth: 1, ..Default::default() };
+        let overview = Projection::new(30.0, 2, 0, &c).unwrap();
+        for screen in [(1600, 900), (900, 1600), (900, 900)] {
+            for factor in [2, 4] {
+                let (full, target) = super::detail_projection(overview, factor, screen).unwrap();
+                let step = (f64::from(overview.raster_w) / f64::from(screen.0))
+                    .max(f64::from(overview.raster_h) / f64::from(screen.1));
+                assert!(f64::from(target.raster_w) >= (step * f64::from(screen.0)).min(f64::from(full.raster_w)));
+                assert!(f64::from(target.raster_h) >= (step * f64::from(screen.1)).min(f64::from(full.raster_h)));
+                assert_eq!(full.s, overview.s * factor);
+                assert_eq!(full.rise, overview.rise * factor);
+            }
+        }
+        let (_, target) = super::detail_projection(overview, 1, (1600, 900)).unwrap();
+        assert_eq!((target.raster_w, target.raster_h), (overview.raster_w, overview.raster_h));
+    }
+
     #[test]
     fn detail_preserves_overview_and_scales_both_axes() {
         assert_eq!(super::detail_factor(13, 4.0), 4);

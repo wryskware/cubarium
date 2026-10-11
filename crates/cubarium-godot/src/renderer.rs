@@ -106,6 +106,7 @@ impl WorldRenderer {
         d.set("ring_width", frame.ring_width as i64); d.set("full_height", frame.full_height as i64);
         d.set("tick", &(frame.tick as i64).to_variant());
         d.set("generation", &(frame.generation as i64).to_variant());
+        d.set("lighting_ready", frame.lighting_ready);
         h.recycle(frame);
         d.to_variant()
     }

@@ -56,9 +56,10 @@ func run() -> void:
 	root.add_child(main)
 	await frames(3)
 
-	# Start-up without a save: the picker, over the menu.
-	check(main.picker.visible, "start-up with no save opens the new-world picker")
+	# Start-up without a save: the title hub offers an explicit New world action.
+	check(main.menu.visible and main.menu.startup and not main.picker.visible, "start-up with no save opens the title menu")
 	check(not main.has_world(), "no world runs yet")
+	main._on_menu("new")
 
 	# Esc never quits; with no world it closes the picker to the menu and the menu stays.
 	esc()
@@ -192,7 +193,7 @@ func run() -> void:
 	check(progress.size() > 3 and progress.any(func(p): return p > 0.0 and p < 1.0), "the bar moved with the founding: %d readings, %s" % [progress.size(), phases])
 	check(bar.any(func(v): return v > 0.0 and v < 1.0), "the picker's bar showed it")
 	check(str(fd.get("terrain", "")) == terrain0, "the founded world kept the picked terrain")
-	await until(func(): return main.has_world(), 20.0)
+	await until(func(): return main.has_world() and not main.picker.visible and main.busy() == "", 30.0)
 	check(main.has_world(), "picking candidate 0 runs it")
 	check(not main.picker.visible and not main.menu.visible, "picking closes the picker and the menu")
 	check(main.session.candidates().size() == 0, "the other candidate is dropped")
@@ -332,7 +333,7 @@ func run() -> void:
 	check(not main.slots.visible and not main.menu.visible, "a load closes the menus")
 	check(quits == 0, "no quit through the whole run")
 	main._on_menu("quit")
-	check(quits == 1, "the menu's Quit quits")
+	check(await until(func(): return quits == 1, 30.0), "the menu's Quit saves before quitting")
 	finish()
 
 

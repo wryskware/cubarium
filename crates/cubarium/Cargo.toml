@@ -53,6 +53,7 @@ cubarium-voxel-sim = { workspace = true, features = ["profile"] }
 anyhow = { workspace = true }
 clap = { workspace = true }
 rustc-hash = { workspace = true }
+rayon = "1"
 minifb = { workspace = true }
 # The development window's raw handles, which `minifb` 0.28 hands out as
 # raw-window-handle 0.6 types but does not re-export: the swapchain is made on them

@@ -50,6 +50,66 @@ static ROOT: OnceLock<PathBuf> = OnceLock::new();
 /// One save at a time from this module's threads.
 static SAVING: Mutex<()> = Mutex::new(());
 
+/// The app's explicit initial/quit save, joined during teardown.
+static REQUEST: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+static NOTICES: Mutex<Vec<SaveNotice>> = Mutex::new(Vec::new());
+
+#[derive(serde::Serialize)]
+pub(crate) struct SaveNotice {
+    pub kind: &'static str,
+    pub text: String,
+    pub path: Option<String>,
+    pub requested: bool,
+}
+
+pub(crate) fn take_notices() -> Vec<SaveNotice> {
+    std::mem::take(&mut *NOTICES.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// Ask off Godot's thread; the result appears through `take_notices` after disk commit.
+pub(crate) fn request(session: SessionStop) -> Result<(), String> {
+    let mut request = REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+    if request.as_ref().is_some_and(|h| !h.is_finished()) {
+        return Err("an autosave is already writing".into());
+    }
+    if let Some(h) = request.take() {
+        let _ = h.join();
+    }
+    *request = Some(
+        std::thread::Builder::new()
+            .name("cubarium-save-request".into())
+            .spawn(move || {
+                let outcome = save_running(&[session], SAVE_TIMEOUT);
+                report(&outcome, true);
+            })
+            .map_err(|e| format!("starting the autosave: {e}"))?,
+    );
+    Ok(())
+}
+
+pub(crate) fn report(outcome: &Outcome, requested: bool) {
+    let (kind, text, path) = match outcome {
+        Outcome::Saved { slot, .. } => {
+            ("autosaved", String::new(), Some(slot.display().to_string()))
+        }
+        Outcome::Nothing(why) => ("autosave_failed", why.clone(), None),
+        Outcome::Failed { slot, why } => (
+            "autosave_failed",
+            why.clone(),
+            Some(slot.display().to_string()),
+        ),
+    };
+    NOTICES
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(SaveNotice {
+            kind,
+            text,
+            path,
+            requested,
+        });
+}
+
 /// Set once the library is being torn down: the threads stop waiting.
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
@@ -176,8 +236,14 @@ pub(crate) fn slot_of(home: Option<PathBuf>, root: Option<&Path>) -> Option<Path
     };
     let name = home.file_name()?;
     let parent = home.parent()?;
-    match parent.file_name().and_then(|p| p.to_str()).and_then(|p| p.strip_suffix(".staging")) {
-        Some(root_name) if !root_name.is_empty() => Some(parent.with_file_name(root_name).join(name)),
+    match parent
+        .file_name()
+        .and_then(|p| p.to_str())
+        .and_then(|p| p.strip_suffix(".staging"))
+    {
+        Some(root_name) if !root_name.is_empty() => {
+            Some(parent.with_file_name(root_name).join(name))
+        }
         _ => Some(home.clone()),
     }
 }
@@ -209,6 +275,8 @@ pub(crate) fn staging_of(slot: &Path) -> Option<PathBuf> {
 /// Save without changing the session's home, keeping the slot's thumbnail or falling back
 /// to the home's, then rename the clean staging directory over `slot`.
 fn save_into(session: &SessionStop, slot: &Path, home: Option<&Path>, timeout: Duration) -> Result<SaveMeta, String> {
+    let generation = session.status().ok_or("the session closed")?.generation;
+    let had_slot = slot.exists();
     let staging = staging_of(slot).ok_or("the slot has no name")?;
     if staging.exists() {
         std::fs::remove_dir_all(&staging).map_err(|e| format!("clearing {}: {e}", staging.display()))?;
@@ -220,11 +288,54 @@ fn save_into(session: &SessionStop, slot: &Path, home: Option<&Path>, timeout: D
     if let Some(thumb) = thumb {
         std::fs::copy(&thumb, staging.join(THUMB)).map_err(|e| format!("copying {}: {e}", thumb.display()))?;
     }
-    if slot.exists() {
-        std::fs::remove_dir_all(slot).map_err(|e| format!("clearing the old slot: {e}"))?;
+    if !session.status().is_some_and(|st| st.running && st.generation == generation) {
+        return Err("the world closed or changed while saving".into());
     }
-    std::fs::rename(&staging, slot).map_err(|e| format!("moving the save into its slot: {e}"))?;
+    if autosave_slot_of(session.home(), slot.parent()).as_deref() != Some(slot) {
+        return Err("the world's autosave home changed while saving".into());
+    }
+    replace_slot(&staging, slot, had_slot)?;
     Ok(meta)
+}
+
+/// Keep the previous completed save until its replacement has moved successfully.
+fn replace_slot(staging: &Path, slot: &Path, expected_existing: bool) -> Result<(), String> {
+    let name = slot
+        .file_name()
+        .ok_or("the slot has no name")?
+        .to_string_lossy();
+    let backup = staging
+        .parent()
+        .ok_or("the staging directory has no parent")?
+        .join(format!(".previous-{name}"));
+    if backup.exists() {
+        std::fs::remove_dir_all(&backup).map_err(|e| format!("clearing the previous save: {e}"))?;
+    }
+    let had_slot = slot.exists();
+    if expected_existing && !had_slot {
+        return Err("the autosave was removed or renamed while saving".into());
+    }
+    if had_slot {
+        std::fs::rename(slot, &backup).map_err(|e| format!("keeping the previous save: {e}"))?;
+    }
+    if let Err(e) = std::fs::rename(staging, slot) {
+        if had_slot {
+            std::fs::rename(&backup, slot).map_err(|restore| {
+                format!("moving the save: {e}; restoring the previous save: {restore}")
+            })?;
+        }
+        return Err(format!("moving the save into its slot: {e}"));
+    }
+    if had_slot {
+        // A cleanup failure must not report the completed new save as a failed commit.
+        if let Err(e) = std::fs::remove_dir_all(&backup) {
+            eprintln!(
+                "cubarium: saved, but clearing {} failed: {e}",
+                backup.display()
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The library is being unloaded: a save under way stops waiting. Before the sessions stop.
@@ -236,6 +347,9 @@ pub(crate) fn stopping() {
 /// a `SIGTERM`, `SIGINT` or `SIGUSR1` has its default action.
 pub(crate) fn stop() {
     stopping();
+    if let Some(request) = REQUEST.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        let _ = request.join();
+    }
     for flag in [TERM_NOW.get(), USR1_DEFAULT.get()].into_iter().flatten() {
         flag.store(true, Ordering::SeqCst);
     }
@@ -289,6 +403,40 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn a_failed_slot_replacement_restores_the_previous_completed_save() {
+        let scratch = Scratch(std::env::temp_dir().join(format!(
+                "cubarium-replace-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            )));
+        let slot = scratch.0.join("saves/World (autosave)");
+        let staging = staging_of(&slot).unwrap();
+        std::fs::create_dir_all(&slot).unwrap();
+        std::fs::create_dir_all(staging.parent().unwrap()).unwrap();
+        std::fs::write(slot.join("completed"), b"previous world").unwrap();
+        assert!(
+            replace_slot(&staging, &slot, true).is_err(),
+            "missing replacement must fail"
+        );
+        assert_eq!(
+            std::fs::read(slot.join("completed")).unwrap(),
+            b"previous world"
+        );
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("completed"), b"new world").unwrap();
+        replace_slot(&staging, &slot, true).unwrap();
+        assert_eq!(std::fs::read(slot.join("completed")).unwrap(), b"new world");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("completed"), b"late autosave").unwrap();
+        std::fs::remove_dir_all(&slot).unwrap();
+        assert!(replace_slot(&staging, &slot, true).is_err());
+        assert!(!slot.exists(), "a late autosave must not recreate a deleted home");
     }
 
     fn files(dir: &Path) -> std::collections::BTreeMap<PathBuf, Vec<u8>> {

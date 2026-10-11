@@ -148,7 +148,7 @@ func _update_busy() -> void:
 	for name in _rows:
 		var r = _rows[name]
 		r["load"].disabled = busy != "" or not r["loadable"]
-		r["overwrite"].disabled = busy != "" or not shell.has_world()
+		r["overwrite"].disabled = busy != "" or not shell.has_world() or shell.saves.is_autosave(name)
 		r["rename"].disabled = busy != ""
 		r["delete"].disabled = busy != ""
 
@@ -249,15 +249,19 @@ func _overwrite(name: String) -> void:
 
 func _rename(name: String) -> void:
 	shell.dialog.ask("Rename \"%s\" to:" % name, "Rename", func(to):
-		var problem: String = shell.saves.rename(name, to.strip_edges())
+		var target: String = shell.saves.rename_target(name, to.strip_edges())
+		var problem: String = shell.saves.rename(name, target)
 		if problem == "":
-			shell.renamed_slot(name, to.strip_edges())
+			shell.renamed_slot(name, target)
 			refresh()
 		return problem, true, name)
 
 
 func _delete(name: String) -> void:
-	shell.dialog.ask("Delete \"%s\"? This can't be undone." % name, "Delete", func(_t):
+	var question := "Delete \"%s\"? This can't be undone." % name
+	if shell.deleting_active_world(name):
+		question += " The running world will close and return to the title menu."
+	shell.dialog.ask(question, "Delete", func(_t):
 		var problem: String = shell.saves.delete(name)
 		if problem == "":
 			shell.deleted_slot(name)

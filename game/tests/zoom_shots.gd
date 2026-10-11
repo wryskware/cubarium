@@ -58,8 +58,12 @@ func run() -> void:
 	view = View.new()
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	root.add_child(view)
+	var preview_at := Time.get_ticks_msec()
 	view.show_view(session.candidate_ref(0))
 	check(await until(func(): return view.frames_shown > 0), "overview frame rendered")
+	print("TIMING preview first frame ", Time.get_ticks_msec() - preview_at, " ms; lighting_ready=", view.lighting_ready)
+	check(await until(func(): return view.lighting_ready), "overview lighting finishes after first picture")
+	print("TIMING preview lighting ", Time.get_ticks_msec() - preview_at, " ms")
 	if view.frames_shown == 0:
 		print("RENDERER ERROR ", view.problem())
 		return finish()
@@ -72,6 +76,7 @@ func run() -> void:
 		var before: int = view.frames_shown
 		check(await until(func(): return is_equal_approx(view._zoom, zoom) and view.frames_shown > before and view.frame_factor >= zoom and view.frame_s > previous_s), "zoom %.0fx increases detail tier" % zoom)
 		check(view.renderer.error() == "", "zoom %.0fx renderer has no error" % zoom)
+		check_crop(zoom)
 		previous_s = view.frame_s
 		print("DETAIL zoom=", zoom, " s=", view.frame_s, " base_s=", view.frame_base_s, " factor=", view.frame_factor, " baseline=", view.baseline_size, " crop=", view.raster_size)
 		await shot("02-square-zoom%d" % zoom)
@@ -95,9 +100,14 @@ func run() -> void:
 	canvas.add_child(inspector)
 	inspector.visible = false
 	for screen in [Vector2i(1000, 1000), Vector2i(720, 1000)]:
+		var resized: bool = root.size != screen
 		root.size = screen
 		for i in 3:
 			await process_frame
+		var changed: int = view.frames_shown
+		if resized:
+			check(await until(func(): return view.frames_shown > changed), "resized viewport gets a frame")
+		check_crop(view._zoom)
 		Fit.apply(canvas, Vector2(root.size))
 		Fit.fit_inspector(inspector, canvas)
 		page.visible = true
@@ -108,6 +118,14 @@ func run() -> void:
 		inspector.visible = false
 		await shot("06-world-%dx%d" % [screen.x, screen.y])
 	finish()
+
+
+func check_crop(zoom: float) -> void:
+	var step := maxf(float(view.baseline_size.x) / view.size.x, float(view.baseline_size.y) / view.size.y)
+	var needed: Vector2 = view.size * step / zoom * view.frame_factor
+	var full: Vector2 = Vector2(view.baseline_size) * view.frame_factor
+	check(view.raster_size.x >= minf(needed.x, full.x) and view.raster_size.y >= minf(needed.y, full.y),
+		"detail crop covers viewport at %.1fx (%s)" % [zoom, view.size])
 
 
 func shot(name: String) -> void:

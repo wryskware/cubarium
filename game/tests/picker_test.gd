@@ -140,11 +140,15 @@ func every_card_shown(what: String) -> void:
 	for c in ready:
 		var i: int = c["index"]
 		var wv = card_view(i)
+		# A usable preview appears before the full sky bake; wait for its refinement
+		# separately rather than requiring the first picture to block on lighting.
+		if wv != null:
+			check(await until(func(): return wv.lighting_ready, bound_s), "%s: card %d lighting finishes" % [what, i])
 		var renderer_error: String = wv.renderer.error() if wv != null and wv.renderer != null else ""
 		check(wv != null and wv.frames_shown > 0,
 			"%s: ready card %d shows a frame within %d s of Ready (%s)" % [what, i, int(bound_s), renderer_error])
 		check(renderer_error == "", "%s: card %d's renderer reports no error" % [what, i])
-		check(wv != null and wv.renderer != null and not wv.renderer.stats().get("unlit", false),
+		check(wv != null and wv.lighting_ready,
 			"%s: card %d's thumbnail was drawn with its sky plane (lit)" % [what, i])
 		check(p._cards[i].get("ready", false) and p.can_open(i),
 			"%s: card %d can be opened" % [what, i])

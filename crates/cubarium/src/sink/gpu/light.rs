@@ -32,6 +32,8 @@ use std::time::Duration;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 
+use rayon::prelude::*;
+
 use cubarium_gpu::voxel::{CANOPY_STEPS, GLOW_CELL};
 use cubarium_voxel::{Config, Ledger, Material, VoxelView};
 use cubarium_voxel_flora::FloraView;
@@ -112,25 +114,24 @@ pub(crate) fn sky_plane_until(
             bands.push((z as u32, b * rows_per_band, rows));
         }
     }
-    // Reversed, so `pop` hands out the front slabs first.
-    bands.reverse();
-    let threads = threads.min(bands.len().max(1));
-    let queue = Mutex::new(bands);
-    std::thread::scope(|s| {
-        for _ in 0..threads {
-            let (band, queue) = (&band, &queue);
-            s.spawn(move || {
-                loop {
-                    let next = queue.lock().unwrap_or_else(|e| e.into_inner()).pop();
-                    let Some((z, y0, rows)) = next else { return };
-                    if !band(z, y0, rows) {
-                        return;
-                    }
-                }
-            });
-        }
-    });
-    !cancel.load(Ordering::Relaxed)
+    // Concurrent previews share these workers instead of each spawning a full-machine
+    // pool. Rayon can interleave bands from several callers of the same pool.
+    sky_pool(threads).install(|| bands.into_par_iter().all(|(z, y0, rows)| band(z, y0, rows)))
+}
+
+fn sky_pool(threads: usize) -> Arc<rayon::ThreadPool> {
+    static POOLS: Mutex<Vec<(usize, Arc<rayon::ThreadPool>)>> = Mutex::new(Vec::new());
+    let threads = threads.max(1);
+    let mut pools = POOLS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, pool)) = pools.iter().find(|(n, _)| *n == threads) {
+        return pool.clone();
+    }
+    let pool = Arc::new(rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("cubarium-sky-{i}"))
+        .build().expect("the shared sky pool"));
+    pools.push((threads, pool.clone()));
+    pool
 }
 
 /// Rows in one band of the sky plane's work ([`sky_plane_until`]).
@@ -210,12 +211,12 @@ pub(crate) struct SkyWorker {
 
 impl SkyWorker {
     pub(crate) fn spawn() -> SkyWorker {
-        // Every core the process may use but one, which the loop keeps: this runs once
-        // at start-up and again only when the terrain is edited.
+        // One shared bounded pool across live worlds and all previews. Leave a core for
+        // the app, and avoid occupying the whole desktop during a batch of thumbnails.
         let threads = std::thread::available_parallelism()
             .map_or(1, |n| n.get())
             .saturating_sub(1)
-            .max(1);
+            .clamp(1, 8);
         SkyWorker::with_threads(threads)
     }
 
