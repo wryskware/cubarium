@@ -65,12 +65,18 @@ enabled = true
 # docs/graviton-training.md. A launch needs `lab approve ec2 ID --max-hours H --max-usd D`
 # every time; labd calls `down` when the queue drains or a limit is hit.
 script = "scripts/aws-graviton.sh"
-types = ["c7g.16xlarge", "c6g.16xlarge"]
+# Candidate sizes, smallest first; each has a same-size c6g fallback below.
+# Choose the shortest ETA within 10% of the cheapest estimated total cost.
+types = ["c7g.4xlarge", "c7g.8xlarge", "c7g.12xlarge", "c7g.16xlarge"]
+cost_tolerance = 0.10
 suggest_after_h = 4   # offer EC2 when the local queue estimate exceeds this many hours
 setup_h = 0.25        # boot + bootstrap + transfer allowance in the estimate
 max_mem_gb = 64
-max_cpu_fraction = 0.9
-reserve_cpus = 1
+# Dedicated instance: labd's work here is ssh polls and tiny wrappers.
+# 2026-10-11: 16 voxel_census tasks x 2 threads averaged load 29.6 on 64 vCPU;
+# each used ~1.8 cores / 1.1 GB RSS. Let 32 charged threads fill a 32-vCPU size.
+max_cpu_fraction = 1.0
+reserve_cpus = 0
 user = "ec2-user"
 ssh_key = "~/.ssh/cubarium-aws.pem"
 root = "/home/ec2-user/cubarium-train/lab"
@@ -80,13 +86,61 @@ ready_file = "/var/tmp/ready"
 status_s = 60
 launch_timeout_s = 900
 
-# Spot prices are planning assumptions from the 2026-09-28 sample, not quotes.
+# Spot prices are planning assumptions: the 2026-09-28 sample's $0.75/h
+# scaled proportionally as 0.75 * cpus / 64, not live quotes.
+[ec2.instance_types."c7g.4xlarge"]
+arch = "aarch64"
+cpus = 16
+mem_gb = 32
+spot_usd_h = 0.1875
+speed = 1.0
+fallback = "c6g.4xlarge"
+
+[ec2.instance_types."c7g.8xlarge"]
+arch = "aarch64"
+cpus = 32
+mem_gb = 64
+spot_usd_h = 0.375
+speed = 1.0
+fallback = "c6g.8xlarge"
+
+[ec2.instance_types."c7g.12xlarge"]
+arch = "aarch64"
+cpus = 48
+mem_gb = 96
+spot_usd_h = 0.5625
+speed = 1.0
+fallback = "c6g.12xlarge"
+
 [ec2.instance_types."c7g.16xlarge"]
 arch = "aarch64"
 cpus = 64
 mem_gb = 128
 spot_usd_h = 0.75
 speed = 1.0
+fallback = "c6g.16xlarge"
+
+# Fallbacks only, never candidates in the cost/ETA comparison.
+[ec2.instance_types."c6g.4xlarge"]
+arch = "aarch64"
+cpus = 16
+mem_gb = 32
+spot_usd_h = 0.1875
+speed = 0.9
+
+[ec2.instance_types."c6g.8xlarge"]
+arch = "aarch64"
+cpus = 32
+mem_gb = 64
+spot_usd_h = 0.375
+speed = 0.9
+
+[ec2.instance_types."c6g.12xlarge"]
+arch = "aarch64"
+cpus = 48
+mem_gb = 96
+spot_usd_h = 0.5625
+speed = 0.9
 
 [ec2.instance_types."c6g.16xlarge"]
 arch = "aarch64"

@@ -24,7 +24,7 @@ import subprocess
 import time
 from types import SimpleNamespace
 
-from .hosts import Host, allowed
+from .hosts import Host, allowed, could_ever_fit
 from .core import Task
 from . import providers
 from .kinds.build import Build
@@ -88,10 +88,9 @@ class Ec2Pool:
 
     def make_host(self, ip):
         name, info = self.type_info(self.s.get("type"))
-        template = next((h for h in self.potential_hosts()), None)
         host = Host(name="ec2", kind="ec2", arch=info.get("arch", "aarch64"), cpus=info.get("cpus", 64),
                     groups=None, mem_gb=info.get("mem_gb", 128),
-                    max_mem_gb=template.max_mem_gb if template else 64,
+                    max_mem_gb=min(info.get("mem_gb", 128), self.cfg.get("max_mem_gb", 64)),
                     max_cpu_fraction=self.cfg.get("max_cpu_fraction", 0.9),
                     reserve_cpus=self.cfg.get("reserve_cpus", 1), idle=False,
                     launcher=self.cfg.get("launcher", "setsid"), root=self.cfg.get("root"),
@@ -135,7 +134,7 @@ class Ec2Pool:
     def pending_builds(self, tasks):
         """Include required builds before the provider jobs have been planned, once per key."""
         builds = {t.meta["key"]: t for t in tasks if t.meta.get("kind") == "build" and t.meta.get("key")}
-        hosts = self.potential_hosts()[:1]
+        hosts = self.potential_hosts()
         for key in {key for task in tasks for key in task.inputs if key.startswith("binary:")}:
             if key in builds or self.d.ctx.artifact(key):
                 continue
@@ -155,21 +154,41 @@ class Ec2Pool:
     def worth(self, tasks):
         local = [h for h in self.d.inv.hosts.values() if h.kind != "ec2"]
         only_ec2 = [t for t in tasks if not any(allowed(t, h) for h in local)]
-        name, info = self.type_info()
         local_h, _ = self.d.eta()
-        hosts = self.potential_hosts()[:1]
         builds = self.pending_builds(tasks)
         simulations = [t for t in tasks if t.meta.get("kind") != "build"]
-        ec2_h, unknown = estimate(simulations, [], hosts)
-        # Builds precede sims, so add their time rather than treating both as parallel work.
-        # Serializing distinct commits is conservative even if a large host overlaps builds.
-        build_h = sum(t.est_h or 0 for t in builds) / max((h.speed for h in hosts), default=1.0)
-        unknown += sum(t.est_h is None for t in builds)
         setup = float(self.cfg.get("setup_h", 0.25))
-        ec2_total = None if ec2_h is None else ec2_h + build_h + setup
+        memory = sum(t.mem_gb for t in simulations)
+        options = []
+        for name, host in zip(self.cfg.get("types", []), self.potential_hosts()):
+            if not all(could_ever_fit(t, host) for t in [*tasks, *builds]):
+                continue
+            # Memory limits concurrency as well as individual task placement. Scale only
+            # thread capacity: a task's own wall time still uses the type's actual speed.
+            fraction = min(1.0, host.max_mem_gb / memory) if memory else 1.0
+            effective = SimpleNamespace(usable=host.usable * fraction, speed=host.speed, up=host.up)
+            ec2_h, unknown = estimate(simulations, [], [effective])
+            # Builds precede sims; distinct commits are conservatively serialized.
+            build_h = sum(t.est_h or 0 for t in builds) / host.speed
+            unknown += sum(t.est_h is None for t in builds)
+            total = None if ec2_h is None else ec2_h + build_h + setup
+            options.append(dict(type=name, eta_h=total,
+                                est_usd=None if total is None else total * host.price_usd_h,
+                                cpus=host.cpus, unknown=unknown))
+        if not options:
+            return False, {}
+        cheapest = min(o["est_usd"] for o in options if o["est_usd"] is not None)
+        limit = cheapest * (1 + float(self.cfg.get("cost_tolerance", 0.10)))
+        choice = min((o for o in options if o["est_usd"] is not None and o["est_usd"] <= limit),
+                     key=lambda o: (o["eta_h"], o["cpus"]))
+        name, info = self.type_info(choice["type"])
+        ec2_total, unknown = choice["eta_h"], choice["unknown"]
         estimate_info = dict(instance_type=name, price_usd_h=info.get("spot_usd_h"), local_eta_h=local_h,
                              ec2_eta_h=ec2_total, unknown_estimates=unknown,
-                             est_usd=None if ec2_total is None else round(ec2_total * info.get("spot_usd_h", 0), 2),
+                             est_usd=round(choice["est_usd"], 2), fallback=info.get("fallback"),
+                             options=[dict(type=o["type"], eta_h=o["eta_h"],
+                                           est_usd=None if o["est_usd"] is None else round(o["est_usd"], 2))
+                                      for o in options],
                              only_ec2_tasks=len(only_ec2), eligible_tasks=len(tasks))
         if only_ec2:
             return True, estimate_info
@@ -200,7 +219,9 @@ class Ec2Pool:
         self.launch()
 
     def launch(self):
-        done = self.script("up", "-n", "1", "-t", self.s["type"], "--hours", str(math.ceil(self.s["max_hours"])))
+        name, info = self.type_info(self.s["type"])
+        types = ",".join(filter(None, [name, info.get("fallback")]))
+        done = self.script("up", "-n", "1", "-t", types, "--hours", str(math.ceil(self.s["max_hours"])))
         text = done.stdout + done.stderr
         if done.returncode:
             if AUTH.search(text):
@@ -215,6 +236,9 @@ class Ec2Pool:
             self.save()
             return
         match = re.search(r"\bi-[0-9a-f]+\b", done.stdout)
+        launched_type = re.search(r"\blaunched\s+([^\s;]+);", done.stderr)
+        if launched_type:
+            self.s["type"] = launched_type[1]
         self.forget_host()
         self.s.update(state="launching", instance=match[0] if match else None, launched=self.d.clock(), ip=None)
         self.d.events.emit("ec2-launching", approval=self.s.get("approval"), instance=self.s["instance"],

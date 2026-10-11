@@ -144,8 +144,9 @@ def print_hosts(store, paths, brief=False):
     if not brief:
         for name in inventory.ec2.get("types", []):
             info = inventory.instance_type(name)
+            fallback = f"; fallback {info['fallback']}" if info.get("fallback") else ""
             print(f"{'ec2':10} {'ec2':6} {info.get('arch', '?'):8} {'-':6} {info.get('cpus', '?'):>12} "
-                  f"{info.get('mem_gb', '?'):>10}  {name}: ~${info.get('spot_usd_h')}/h spot (assumed), approval per launch")
+                  f"{info.get('mem_gb', '?'):>10}  {name}: ~${info.get('spot_usd_h')}/h spot (assumed), approval per launch{fallback}")
 
 
 def cmd_hosts(args, paths):
