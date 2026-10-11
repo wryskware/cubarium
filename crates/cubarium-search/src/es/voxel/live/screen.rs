@@ -686,7 +686,7 @@ fn carrion_per_adult_s(p: &FounderPhysiology) -> f64 {
     let (young, interval) = match (p.pack, r.mode) {
         (Some(k), _) => (f64::from(k.litter_size_max), k.litter_interval_s.max(r.birth_interval_s) + r.gestation_s),
         (None, BirthMode::Eggs) => (f64::from(r.clutch_size.max(1)), r.birth_interval_s + r.incubation_s),
-        (None, BirthMode::Gestation) => (1.0, r.birth_interval_s + r.gestation_s),
+        (None, BirthMode::Gestation) => (f64::from(r.young_per_birth.max(1)), r.birth_interval_s + r.gestation_s),
     };
     carcass * (death + if interval > 0.0 { young / interval } else { 0.0 })
 }
@@ -904,4 +904,34 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
         }
     }
     out
+}
+
+#[cfg(test)]
+mod birth_rate_tests {
+    use super::*;
+
+    #[test]
+    fn nonpack_carrion_birth_rate_counts_each_young() {
+        let mut p = *FaunaConfig::default().founder(Founder::Seedporter);
+        p.core.lifespan_median_s = 0.0;
+        p.core.reproduction.young_per_birth = 1;
+        let single = carrion_per_adult_s(&p);
+        for young in [2, 3] {
+            p.core.reproduction.young_per_birth = young;
+            let got = carrion_per_adult_s(&p);
+            assert!((got - f64::from(young) * single).abs() < 1e-14);
+        }
+        p.core.reproduction.young_per_birth = 0;
+        assert_eq!(carrion_per_adult_s(&p), single);
+    }
+
+    #[test]
+    fn pack_carrion_birth_rate_ignores_nonpack_young() {
+        let mut p = *FaunaConfig::default().founder(Founder::Chorister);
+        let base = carrion_per_adult_s(&p);
+        for young in [1, 2, u32::MAX] {
+            p.core.reproduction.young_per_birth = young;
+            assert_eq!(carrion_per_adult_s(&p), base);
+        }
+    }
 }

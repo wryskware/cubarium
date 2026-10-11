@@ -122,6 +122,17 @@ const REFILL_GAP: f64 = 0.1;
 /// The ecological day the daily needs and lifespans below are written in, seconds
 /// ([`crate::LifeConfig::ecological_day_s`]'s default): a unit for stating defaults.
 const DAY_S: f64 = 7200.0;
+/// The reference dry-season year (five ecological days), seconds: a unit for
+/// stating config defaults, rather than a separate runtime calendar.
+///
+/// **Seedporter calendar and twins** (SP-TWINS, Wrysk 2026-10-11):
+/// "sure calendar. have them do twins. veilhounds already have litters, so it makes sense."
+/// Common marmosets (Callithrix jacchus) carry for about 145 days, usually bear twins,
+/// and have about two litters a year. Gestation is rounded to 0.4 of the reference
+/// year; a 0.04-year postpartum refractory plus the surplus hold gives about two
+/// litters a year at most. These numbers are adjustable; ecology training will
+/// settle them. The serde reproduction knobs carry the timings and young count.
+const YEAR_S: f64 = 5.0 * DAY_S;
 
 /// **Daily need `f`**: the share of its adult body a lineage burns per world day awake
 /// and at rest (`design/metabolism-meals-2026-10-02.md` §1; `maintenance_per_s = f /
@@ -2611,6 +2622,9 @@ impl FounderPhysiology {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let mut core = grazer.core;
                 core.scale_mass(SEEDPORTER_VOLUME_RATIO);
+                core.reproduction.gestation_s = 0.4 * YEAR_S;
+                core.reproduction.birth_interval_s = 0.04 * YEAR_S;
+                core.reproduction.young_per_birth = 2;
                 core.maintenance_per_s = DAILY_SEEDPORTER / DAY_S;
                 core.lifespan_median_s = LIFE_GRAZER_DAYS * DAY_S;
                 FounderPhysiology {

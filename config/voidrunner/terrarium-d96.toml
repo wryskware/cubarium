@@ -249,8 +249,11 @@ give_up_fraction = 0.05
 founding_count = 4
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.0002215288583684138
-core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.gestation_s = 109.78253659193513
+# SP-TWINS: postpartum refractory, 0.04 of the 36,000 s year.
+core.reproduction.birth_interval_s = 1440.0
+# SP-TWINS: carry for 0.4 year; common marmosets usually bear twins.
+core.reproduction.gestation_s = 14400.0
+core.reproduction.young_per_birth = 2
 core.reproduction.surplus_hold_s = 548.9126829596756
 # GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 60.0 (x2 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.
