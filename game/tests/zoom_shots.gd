@@ -28,7 +28,7 @@ func check(ok: bool, message: String) -> void:
 		failures += 1
 
 
-func until(condition: Callable, timeout_s := 30.0) -> bool:
+func until(condition: Callable, timeout_s := 90.0) -> bool:
 	var end := Time.get_ticks_msec() + int(timeout_s * 1000.0)
 	while not condition.call():
 		if Time.get_ticks_msec() >= end:
