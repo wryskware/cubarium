@@ -72,6 +72,15 @@ class Ec2Pool:
         info = self.d.inv.instance_type(name)
         return name, info
 
+    def mem_limit(self, info):
+        """A dedicated instance may use its memory less `reserve_mem_gb`; `max_mem_gb`, when set,
+        is an extra ceiling (the desktop's 64 GB limit halved what a 128 GB host could run)."""
+        mem = info.get("mem_gb", 128)
+        limit = mem - float(self.cfg.get("reserve_mem_gb", 0))
+        if "max_mem_gb" in self.cfg:
+            limit = min(limit, self.cfg["max_mem_gb"])
+        return max(0, limit)
+
     def potential_hosts(self):
         if not self.cfg:
             return []
@@ -80,7 +89,7 @@ class Ec2Pool:
             info = self.d.inv.instance_type(name)
             hosts.append(Host(name="ec2", kind="ec2", arch=info.get("arch", "aarch64"), cpus=info.get("cpus", 64),
                               groups=None, mem_gb=info.get("mem_gb", 128),
-                              max_mem_gb=min(info.get("mem_gb", 128), self.cfg.get("max_mem_gb", 64)),
+                              max_mem_gb=self.mem_limit(info),
                               max_cpu_fraction=self.cfg.get("max_cpu_fraction", 0.9),
                               reserve_cpus=self.cfg.get("reserve_cpus", 1), speed=info.get("speed", 1.0),
                               price_usd_h=info.get("spot_usd_h", 0.0)))
@@ -90,7 +99,7 @@ class Ec2Pool:
         name, info = self.type_info(self.s.get("type"))
         host = Host(name="ec2", kind="ec2", arch=info.get("arch", "aarch64"), cpus=info.get("cpus", 64),
                     groups=None, mem_gb=info.get("mem_gb", 128),
-                    max_mem_gb=min(info.get("mem_gb", 128), self.cfg.get("max_mem_gb", 64)),
+                    max_mem_gb=self.mem_limit(info),
                     max_cpu_fraction=self.cfg.get("max_cpu_fraction", 0.9),
                     reserve_cpus=self.cfg.get("reserve_cpus", 1), idle=False,
                     launcher=self.cfg.get("launcher", "setsid"), root=self.cfg.get("root"),
@@ -177,15 +186,17 @@ class Ec2Pool:
                                 cpus=host.cpus, unknown=unknown))
         if not options:
             return False, {}
-        cheapest = min(o["est_usd"] for o in options if o["est_usd"] is not None)
-        limit = cheapest * (1 + float(self.cfg.get("cost_tolerance", 0.10)))
-        choice = min((o for o in options if o["est_usd"] is not None and o["est_usd"] <= limit),
-                     key=lambda o: (o["eta_h"], o["cpus"]))
+        costed = [o for o in options if o["est_usd"] is not None]
+        if costed:
+            limit = min(o["est_usd"] for o in costed) * (1 + float(self.cfg.get("cost_tolerance", 0.10)))
+            choice = min((o for o in costed if o["est_usd"] <= limit), key=lambda o: (o["eta_h"], o["cpus"]))
+        else:  # no capacity estimate at all: the smallest type that fits
+            choice = options[0]
         name, info = self.type_info(choice["type"])
         ec2_total, unknown = choice["eta_h"], choice["unknown"]
         estimate_info = dict(instance_type=name, price_usd_h=info.get("spot_usd_h"), local_eta_h=local_h,
                              ec2_eta_h=ec2_total, unknown_estimates=unknown,
-                             est_usd=round(choice["est_usd"], 2), fallback=info.get("fallback"),
+                             est_usd=None if choice["est_usd"] is None else round(choice["est_usd"], 2), fallback=info.get("fallback"),
                              options=[dict(type=o["type"], eta_h=o["eta_h"],
                                            est_usd=None if o["est_usd"] is None else round(o["est_usd"], 2))
                                       for o in options],

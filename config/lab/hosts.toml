@@ -71,7 +71,7 @@ types = ["c7g.4xlarge", "c7g.8xlarge", "c7g.12xlarge", "c7g.16xlarge"]
 cost_tolerance = 0.10
 suggest_after_h = 4   # offer EC2 when the local queue estimate exceeds this many hours
 setup_h = 0.25        # boot + bootstrap + transfer allowance in the estimate
-max_mem_gb = 64
+reserve_mem_gb = 4    # usable memory = the type's memory less this (no 64 GB desktop ceiling)
 # Dedicated instance: labd's work here is ssh polls and tiny wrappers.
 # 2026-10-11: 16 voxel_census tasks x 2 threads averaged load 29.6 on 64 vCPU;
 # each used ~1.8 cores / 1.1 GB RSS. Let 32 charged threads fill a 32-vCPU size.
