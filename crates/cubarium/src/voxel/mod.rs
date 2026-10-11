@@ -523,7 +523,7 @@ pub enum CordShapeConfig {
 /// lantern_flicker = 0.2  # a ripe lantern's candle flicker, a share of its glow either way (0: none)
 /// lantern_flicker_s = 0.9  # seconds the flicker's slowest wave takes, about
 /// flower_nectar_glow = true  # a latticevine flower glows by its nectar fill (false: full while open)
-/// flower_cycle = false  # candidate: each flower's glow also cycles on and off on its own phase
+/// flower_cycle = true  # each flower's glow also cycles on and off on its own phase (Wrysk, 2026-10-11)
 /// flower_cycle_s = 90.0  # flower_cycle: seconds from on to off and on again
 /// colour_fade_s = 4.0  # seconds a plant cell's colour or vine tile takes to change (0: at once)
 /// # FOG-MOTION (2026-10-10, Wrysk picked "deep"): "fixed", "breathing", "flowing", "deep"
@@ -686,7 +686,7 @@ pub struct LightConfig {
     /// (`flora.latticevine`'s `nectar_per_flower`, at most 1), eased over `emit_fade_s`. A flower with no
     /// nectar shows its mouth's pigment. `false`: every open flower glows full, as before.
     pub flower_nectar_glow: bool,
-    /// **Flower cycle** (GLOW-EASE, a candidate for Wrysk to compare, off by default): each
+    /// **Flower cycle** (GLOW-EASE; on by default, Wrysk's pick 2026-10-11): each
     /// flower's glow also swells and fades through `flower_cycle_s`, each flower on its own
     /// phase, times its nectar glow.
     pub flower_cycle: bool,
@@ -783,7 +783,7 @@ impl Default for LightConfig {
             lantern_flicker: 0.2,
             lantern_flicker_s: 0.9,
             flower_nectar_glow: true,
-            flower_cycle: false,
+            flower_cycle: true,
             flower_cycle_s: 90.0,
             colour_fade_s: 4.0,
             fog_motion: FogMotionKind::Deep,

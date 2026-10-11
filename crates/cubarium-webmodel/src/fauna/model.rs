@@ -60,6 +60,9 @@ pub struct Cohort {
     /// its mouth, which it alone eats (at a full bite) while it stays, which decay at the
     /// carrion rate, and which it leaves at `1 / carcass_stay_s` to the carrion pool.
     pub carcass: f64,
+    /// Mineral in the fresh kill, excluding its fuel. Unspecified authored carcasses
+    /// retain the former fully-funded open-loop assumption.
+    pub carcass_mineral: Option<f64>,
     /// **Young per body of an open gestation**: 1 for an ordinary live-bearer, a pack
     /// breeder's litter size (`litter_size`, `step.rs:3000-3035`) for a pack lineage.
     pub litter: f64,
@@ -77,6 +80,25 @@ pub struct Cohort {
 }
 
 impl Cohort {
+    pub(super) fn held_carcass_mineral(&self, n_tissue: f64) -> f64 {
+        self.carcass_mineral.unwrap_or(n_tissue * self.carcass)
+    }
+
+    pub(super) fn add_carcass(&mut self, organic: f64, mineral: f64, n_tissue: f64) {
+        self.carcass_mineral = Some(self.held_carcass_mineral(n_tissue) + mineral);
+        self.carcass += organic;
+    }
+
+    /// Withdraw fresh kill organic and its proportionate mineral together.
+    pub(super) fn take_carcass(&mut self, organic: f64, n_tissue: f64) -> f64 {
+        let share = if self.carcass > 0.0 { (organic / self.carcass).clamp(0.0, 1.0) } else { 0.0 };
+        let before = self.held_carcass_mineral(n_tissue);
+        let mineral = before * share;
+        self.carcass = (self.carcass - organic).max(0.0);
+        self.carcass_mineral = Some((before - mineral).max(0.0));
+        mineral
+    }
+
     /// `n` bodies of `body` and `reserve`, nothing else.
     pub fn new(n: f64, body: f64, reserve: f64) -> Cohort {
         Cohort {
@@ -94,6 +116,7 @@ impl Cohort {
             window: SurplusWindow::default(),
             escrow: None,
             carcass: 0.0,
+            carcass_mineral: None,
             litter: 1.0,
             breeder_of: None,
             rank: 0,
@@ -237,6 +260,9 @@ pub struct FaunaModel {
     /// The carrion pool's decomposition rate, per second (`flora.carrion_decomposition`): the
     /// fresh-kill carcass decays at it.
     pub carrion_decomposition: f64,
+    /// Conservative configured product densities for open-loop supplies: nectar, fruit.
+    /// Closed-loop supplies carry their actual weighted densities.
+    pub product_mineral_fraction: [f64; 2],
     pub day: DayClock,
     /// The world's climate: its season period is the Cubarium year (LIFE-HISTORY).
     pub climate: cubarium_voxel::weather::Climate,
@@ -271,9 +297,9 @@ pub struct FaunaModel {
     /// [`FaunaModel::area_scale`] (the open-loop clamps give no areas).
     pub ref_area: [f64; Food::COUNT],
     /// **The animals' mineral** (closed loop): what their tissue holds, `n_tissue` per unit of
-    /// organic matter held, topped up only by the mineral in the living tissue they eat
-    /// ([`FaunaModel::settle_mineral`]). The half itself runs no mineral budget (every yield
-    /// is taken as funded); this inventory is the glue that returns what passes through.
+    /// organic tissue held, topped up only by the mineral in the food they eat
+    /// ([`FaunaModel::settle_mineral`]). Product mineral constrains tissue; fuel holds none. This inventory is the glue
+    /// that returns what passes through.
     pub mineral: f64,
     /// **The cohort bound** (numerics, not ecology): a merge pass keeps at most this many
     /// cohorts per lineage, merging the closest compatible pair until it holds. Every clutch a
@@ -363,6 +389,37 @@ impl FaunaModel {
         FaunaModel {
             config: params.fauna.clone(),
             carrion_decomposition: params.flora.carrion_decomposition,
+            product_mineral_fraction: std::array::from_fn(|k| {
+                let vine = &params.flora.latticevine;
+                let mut densities = Vec::new();
+                if (if k == 0 {
+                    vine.nectar_per_face_s
+                } else {
+                    vine.fruit_per_face_s
+                }) > 0.0
+                {
+                    densities.push(vine.mineral_fraction);
+                }
+                for sp in Species::ALL {
+                    let sc = params.flora.species(sp);
+                    if (if k == 0 {
+                        sc.nectar_per_s
+                    } else {
+                        sc.fruit_per_s
+                    }) > 0.0
+                    {
+                        densities.push(if k == 0 {
+                            sc.nectar_mineral_fraction
+                        } else {
+                            sc.fruit_mineral_fraction
+                        });
+                    }
+                }
+                densities
+                    .into_iter()
+                    .reduce(f64::min)
+                    .unwrap_or(vine.mineral_fraction)
+            }),
             day: params.world.day.clone(),
             climate: params.world.climate,
             fits,
@@ -747,14 +804,29 @@ impl FaunaModel {
                     }
                     let spill = phys.bite_spill_fraction.clamp(0.0, 1.0);
                     let all = bite * c.n;
-                    if from_carcass {
-                        c.carcass = (c.carcass - all).max(0.0);
+                    let carcass_fraction = if from_carcass {
+                        Some(c.take_carcass(all, phys.core.n_tissue) / all)
                     } else {
                         left[food.index()] -= all;
                         book_take(&mut take, food, all, &foliage_share);
-                    }
+                        None
+                    };
                     ret.litter += all * spill;
-                    c.b.stomach[food.index()] += bite * (1.0 - spill);
+                    let swallowed = bite * (1.0 - spill);
+                    let fraction = carcass_fraction.unwrap_or_else(|| match food {
+                        Food::Nectar => supply
+                            .nectar_mineral_fraction
+                            .unwrap_or(self.product_mineral_fraction[0]),
+                        Food::Fruit => supply
+                            .fruit_mineral_fraction
+                            .unwrap_or(self.product_mineral_fraction[1]),
+                        // The other food classes retain the model's fully-funded closure.
+                        _ => phys.core.n_tissue,
+                    });
+                    let old_mineral = c.b.stomach_mineral[food.index()]
+                        .unwrap_or(phys.core.n_tissue * c.b.stomach[food.index()]);
+                    c.b.stomach_mineral[food.index()] = Some(old_mineral + fraction * swallowed);
+                    c.b.stomach[food.index()] += swallowed;
                     if food == Food::Film {
                         if let (Some(fill), Some(env)) = (&mut c.film_patch, &habitat) {
                             *fill = (*fill - bite/env.film_reference.max(f64::MIN_POSITIVE)).max(0.0);
@@ -795,14 +867,15 @@ impl FaunaModel {
     fn carcasses(&mut self, dt: f64, ret: &mut Returns) {
         let k = self.carrion_decomposition.max(0.0);
         let r = if self.fits.carcass_stay_s > 0.0 { 1.0 / self.fits.carcass_stay_s } else { f64::INFINITY };
-        for v in self.pops.iter_mut() {
+        for (fi, v) in self.pops.iter_mut().enumerate() {
+            let nt = self.config.founders[fi].core.n_tissue;
             for c in v.iter_mut().filter(|c| c.carcass > 0.0) {
                 let (gone, left_share) = if r.is_infinite() {
                     (c.carcass, 1.0)
                 } else {
                     (c.carcass * (1.0 - (-(k + r) * dt).exp()), if k + r > 0.0 { r / (k + r) } else { 0.0 })
                 };
-                c.carcass -= gone;
+                c.take_carcass(gone, nt);
                 self.carcass_decayed += gone * (1.0 - left_share);
                 self.carcass_left += gone * left_share;
                 ret.carrion += gone * left_share;
@@ -839,16 +912,30 @@ impl FaunaModel {
                 // From the host lineage pro rata to its bodies.
                 let hsc = self.phys(host).core;
                 let mut got = 0.0;
+                let mut fuel_taken = 0.0;
                 for h in self.pops[host.index()].iter_mut() {
                     let share = h.n / hc.n;
                     let each = want * share / h.n.max(1e-12);
+                    let fuel_before = h.b.fuel;
                     let (paid, _) = laws::respire(&hsc, &mut h.b, each);
+                    fuel_taken += (fuel_before - h.b.fuel) * h.n;
                     got += paid * h.n;
                 }
                 self.ledger[host.index()].rider_loss += got;
                 self.ledger[f.index()].rider_take += got;
+                let rsc = self.phys(f).core;
                 let r = &mut self.pops[f.index()][k];
-                r.b.reserve += got / riders.max(1e-12);
+                let each = got / riders.max(1e-12);
+                let mineral = (got - fuel_taken).max(0.0) * hsc.n_tissue / riders.max(1e-12);
+                let funded = if rsc.n_tissue > 0.0 {
+                    (mineral / rsc.n_tissue).min(each)
+                } else {
+                    each
+                };
+                let fuel = (each - funded).min((rsc.fuel_cap * r.b.body - r.b.fuel).max(0.0));
+                r.b.reserve += funded;
+                r.b.fuel += fuel;
+                self.ledger[f.index()].flows.digestion_heat += (each - funded - fuel) * riders;
                 if r.b.body >= detach || !cubarium_voxel_fauna::host_bears(&self.config, r.b.body, hc.mean_body) {
                     r.host = None;
                     self.ledger[f.index()].dropoffs += r.n;
@@ -928,6 +1015,7 @@ impl FaunaModel {
                 let mut kills_here = 0.0;
                 let mut laid_here = 0.0;
                 let mut meal_here = 0.0;
+                let mut meal_mineral = 0.0;
                 for pf in Founder::ALL {
                     if !h.hunts(pf) || !self.enabled[pf.index()] {
                         continue;
@@ -957,7 +1045,7 @@ impl FaunaModel {
                             let strikes = (1.0 / damage.max(f64::MIN_POSITIVE)).ceil().max(1.0);
                             let cost = strikes * h.strike_cost_s * hp.core.maintenance_per_s * hb;
                             let meal =
-                                (c.b.body + c.b.reserve) * hp.yield_by_food[Food::Carrion.index()];
+                                (c.b.body + c.b.reserve + c.b.fuel) * hp.yield_by_food[Food::Carrion.index()];
                             if meal - cost <= hp.catch_gain_min {
                                 continue;
                             }
@@ -978,12 +1066,14 @@ impl FaunaModel {
                         let meal = (rule.reach.clamp(0.0, 1.0) * corpse).min(cap);
                         laid_here += dead * corpse;
                         meal_here += dead * meal;
+                        let mineral = c.b.mineral(pp.core.n_tissue) + pp.core.n_tissue * esc_body;
+                        meal_mineral += dead * mineral * meal / corpse.max(f64::MIN_POSITIVE);
                         self.ledger[pf.index()].killed_by[hf.index()] += dead;
                         kills_here += dead;
                     }
                 }
                 // Its meal is its carcass; the rest of the corpses is carrion now.
-                self.pops[hf.index()][k].carcass += meal_here;
+                self.pops[hf.index()][k].add_carcass(meal_here, meal_mineral, hp.core.n_tissue);
                 self.carcass_laid += meal_here;
                 ret.carrion += laid_here - meal_here;
                 self.carcass_out += laid_here - meal_here;
@@ -1013,12 +1103,15 @@ impl FaunaModel {
             }
             let who: Vec<bool> = self.pops[f.index()].iter().map(|c| c.host.is_none() && !self.is_pup(f, c) && c.n > 0.0).collect();
             let total: f64 = self.pops[f.index()].iter().map(|c| c.carcass).sum();
+            let nt = self.phys(f).core.n_tissue;
+            let mineral: f64 = self.pops[f.index()].iter().map(|c| c.held_carcass_mineral(nt)).sum();
             let n: f64 = self.pops[f.index()].iter().zip(&who).filter(|(_, w)| **w).map(|(c, _)| c.n).sum();
             if !(total > 0.0) || !(n > 0.0) {
                 continue;
             }
             for (c, w) in self.pops[f.index()].iter_mut().zip(&who) {
                 c.carcass = if *w { total * c.n / n } else { 0.0 };
+                c.carcass_mineral = Some(if *w { mineral * c.n / n } else { 0.0 });
             }
         }
     }
@@ -1330,7 +1423,8 @@ impl FaunaModel {
                             r.n = refused;
                             r.retry_s = rule.nest_retry_s;
                             r.carcass = c.carcass * refused / c.n;
-                            c.carcass -= r.carcass;
+                            r.carcass_mineral = c.carcass_mineral.map(|mineral| mineral * refused / c.n);
+                            c.take_carcass(r.carcass, sc.n_tissue);
                             c.n -= refused;
                             self.ledger[f.index()].nest_refusals += refused;
                             split.push(r);
@@ -1486,7 +1580,8 @@ impl FaunaModel {
             let mut b = c.clone();
             b.n = take;
             b.carcass = c.carcass * take / c.n;
-            c.carcass -= b.carcass;
+            b.carcass_mineral = c.carcass_mineral.map(|mineral| mineral * take / c.n);
+            c.take_carcass(b.carcass, sc.n_tissue);
             c.n -= take;
             b.escrow = Some((0.0, 0.0));
             b.litter = young;
@@ -1514,8 +1609,11 @@ impl FaunaModel {
                 let (esc_body, esc_loss) = escrow_split(c, sc.reproduction.gestation_loss_fraction);
                 // PUP: a pup of a lineage whose pups live on their reserve starves when it is
                 // spent and its stomach empty (`pup_starves_on_empty`).
-                let pup = self.phys(f).pack.is_some_and(|t| t.pup_starves_on_empty && c.native && c.host.is_none() && c.age_s < t.independence_age_s);
-                let spent = pup && !(c.b.reserve > 0.0) && !(c.b.stomach_total() > 0.0);
+                let pup = self.phys(f).pack.is_some_and(|t| {
+                    t.pup_starves_on_empty && c.native && c.host.is_none() && c.age_s < t.independence_age_s
+                });
+                let spent = pup && !(c.b.reserve > 0.0)
+                    && !(c.b.fuel > 0.0) && !(c.b.stomach_total() > 0.0);
                 if spent {
                     self.ledger[f.index()].pups_starved += c.n;
                 }
@@ -1524,6 +1622,7 @@ impl FaunaModel {
                     ret.carrion += c.n * (c.b.organic() + esc_body) + c.carcass;
                     self.carcass_left += c.carcass;
                     c.carcass = 0.0;
+                    c.carcass_mineral = Some(0.0);
                     self.ledger[f.index()].starved += c.n;
                     c.n = 0.0;
                     continue;
@@ -1538,7 +1637,7 @@ impl FaunaModel {
                         self.ledger[f.index()].gestation_loss += died * esc_loss;
                         ret.carrion += died * (c.b.organic() + esc_body) + kill_share;
                         self.carcass_left += kill_share;
-                        c.carcass -= kill_share;
+                        c.take_carcass(kill_share, sc.n_tissue);
                         self.ledger[f.index()].aged += died;
                         c.n -= died;
                     }
@@ -1598,7 +1697,8 @@ impl FaunaModel {
         for f in Founder::ALL {
             let nt = self.phys(f).core.n_tissue;
             for c in &self.pops[f.index()] {
-                s += nt * (c.n * (c.b.organic() + c.escrow.map_or(0.0, |e| e.0)) + c.carcass);
+                s += c.n * (c.b.mineral(nt) + nt * c.escrow.map_or(0.0, |e| e.0))
+                    + c.held_carcass_mineral(nt);
             }
         }
         for e in &self.eggs {
@@ -1705,7 +1805,7 @@ fn escrow_split(c: &Cohort, loss_fraction: f64) -> (f64, f64) {
     (e - loss, loss)
 }
 
-fn absorb(a: &mut Cohort, b: &Cohort) {
+fn absorb(a: &mut Cohort, b: &Cohort, n_tissue: f64) {
     let n = a.n + b.n;
     if !(n > 0.0) {
         return;
@@ -1717,8 +1817,16 @@ fn absorb(a: &mut Cohort, b: &Cohort) {
     let w = |x: f64, y: f64| (x * wa + y * wb).clamp(x.min(y), x.max(y));
     a.b.body = w(a.b.body, b.b.body);
     a.b.reserve = w(a.b.reserve, b.b.reserve);
+    a.b.fuel = w(a.b.fuel, b.b.fuel);
     a.b.brood = w(a.b.brood, b.b.brood).min(a.b.reserve);
     for i in 0..Food::COUNT {
+        a.b.stomach_mineral[i] = match (a.b.stomach_mineral[i], b.b.stomach_mineral[i]) {
+            (None, None) => None,
+            (x, y) => Some(w(
+                x.unwrap_or(n_tissue * a.b.stomach[i]),
+                y.unwrap_or(n_tissue * b.b.stomach[i]),
+            )),
+        };
         a.b.stomach[i] = w(a.b.stomach[i], b.b.stomach[i]);
     }
     a.age_s = w(a.age_s, b.age_s);
@@ -1729,6 +1837,10 @@ fn absorb(a: &mut Cohort, b: &Cohort) {
     a.response.flight = w(a.response.flight, b.response.flight);
     a.film_patch = match (a.film_patch,b.film_patch) { (Some(x),Some(y))=>Some(w(x,y)), (x,y)=>x.or(y) };
     a.film_travel_s = w(a.film_travel_s,b.film_travel_s);
+    a.carcass_mineral = match (a.carcass_mineral, b.carcass_mineral) {
+        (None, None) => None,
+        _ => Some(a.held_carcass_mineral(n_tissue) + b.held_carcass_mineral(n_tissue)),
+    };
     a.carcass += b.carcass;
     if b.n > a.n {
         a.window = b.window;
@@ -1784,7 +1896,7 @@ fn merge_lineage(mut v: Vec<Cohort>, phys: &FounderPhysiology, max: usize, min_n
         let Some((_, a, b)) = pair else { break };
         let (keep, gone) = if v[a].n >= v[b].n { (a, b) } else { (b, a) };
         let g = v[gone].clone();
-        absorb(&mut v[keep], &g);
+        absorb(&mut v[keep], &g, phys.core.n_tissue);
         alive[gone] = false;
         count -= 1;
         for j in 0..n {

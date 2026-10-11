@@ -2210,6 +2210,10 @@ impl Model {
                     s.area.foliage[k] += c.n * cell;
                     s.nectar += c.n * c.st.nectar;
                     s.fruit += c.n * c.st.fruit;
+                    *s.nectar_mineral_fraction.get_or_insert(0.0) +=
+                        c.n * c.st.nectar * sc.nectar_mineral_fraction;
+                    *s.fruit_mineral_fraction.get_or_insert(0.0) +=
+                        c.n * c.st.fruit * sc.fruit_mineral_fraction;
                     if c.st.nectar > 0.0 {
                         s.area.nectar += c.n * cell;
                     }
@@ -2222,6 +2226,12 @@ impl Model {
                 }
             }
         }
+        s.nectar_mineral_fraction = s
+            .nectar_mineral_fraction
+            .map(|n| if s.nectar > 0.0 { n / s.nectar } else { 0.0 });
+        s.fruit_mineral_fraction = s
+            .fruit_mineral_fraction
+            .map(|n| if s.fruit > 0.0 { n / s.fruit } else { 0.0 });
         s
     }
 
@@ -2430,9 +2440,20 @@ impl Model {
                     s.foliage[k] += c.n * edible(&self.config, sp, c.st.wood, c.st.foliage);
                     s.nectar += c.n * c.st.nectar;
                     s.fruit += c.n * c.st.fruit;
+                    let sc = self.config.species(sp);
+                    *s.nectar_mineral_fraction.get_or_insert(0.0) +=
+                        c.n * c.st.nectar * sc.nectar_mineral_fraction;
+                    *s.fruit_mineral_fraction.get_or_insert(0.0) +=
+                        c.n * c.st.fruit * sc.fruit_mineral_fraction;
                 }
             }
         }
+        s.nectar_mineral_fraction = s
+            .nectar_mineral_fraction
+            .map(|n| if s.nectar > 0.0 { n / s.nectar } else { 0.0 });
+        s.fruit_mineral_fraction = s
+            .fruit_mineral_fraction
+            .map(|n| if s.fruit > 0.0 { n / s.fruit } else { 0.0 });
         s
     }
 

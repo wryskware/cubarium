@@ -43,8 +43,13 @@ pub struct Supply {
     pub film: f64,
     /// Nectar: latticevine flowers and bloomcrown stock.
     pub nectar: f64,
+    /// Mineral per nectar organic unit, weighted over the supplied products. An open-loop
+    /// supply may omit this and use the configured producing sources' conservative density.
+    pub nectar_mineral_fraction: Option<f64>,
     /// Fruit: latticevine fruit and lanternberry stock.
     pub fruit: f64,
+    /// Mineral per fruit organic unit, weighted over the supplied products.
+    pub fruit_mineral_fraction: Option<f64>,
     /// Seedlings a browser could take: stands under `donor_min` per species (count).
     pub seedlings: [f64; Species::COUNT],
     /// The area each class is spread over.
