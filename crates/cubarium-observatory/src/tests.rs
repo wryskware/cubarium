@@ -126,7 +126,7 @@ fn plant_counts_follow_configured_profile_boundaries() {
             for (fraction, stage) in samples {
                 assert!(flora.apply(&world, FloraCommand::Seed {
                     x: site % 12,
-                    z: site / 12,
+                    z: (site / 12) as u32,
                     species,
                     wood: fraction * sc.wood_max,
                 }), "{} fixture at {fraction}", species.name());
