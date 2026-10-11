@@ -91,6 +91,110 @@ cp "$source" "$CARGO_TARGET_DIR/release/examples/voxel_census"
         return [daemon.job(row["id"]) for row in daemon.store.q("SELECT id FROM jobs WHERE kind='build'")
                 if daemon.job(row["id"]).spec["arch"] == arch]
 
+    def size_inventory(self, cpus=(8, 16, 32)):
+        cfg = self.data["ec2"]
+        cfg.update(types=[f"size{n}" for n in cpus], max_mem_gb=128,
+                   max_cpu_fraction=1.0, reserve_cpus=0)
+        cfg["instance_types"] = {
+            f"size{n}": dict(arch="aarch64", cpus=n, mem_gb=128,
+                              speed=1.0, spot_usd_h=n / 32) for n in cpus}
+        return cfg
+
+    def size_request(self, count=8, threads=2, est_h=2, mem_gb=1):
+        daemon = self.daemon(self.data, clock=lambda: self.now[0])
+        for _ in range(count):
+            self.submit(dict(kind="command", hosts=["ec2"], arch="aarch64", argv=["true"],
+                             threads=threads, est_h=est_h, mem_gb=mem_gb))
+        daemon.step()
+        self.assertEqual(self.log.read_text() if self.log.exists() else "", "")
+        return daemon, self.events("approval-needed")[0]
+
+    def test_size_choice_fills_sixteen_cpus(self):
+        self.size_inventory()
+        daemon, event = self.size_request()
+        self.assertEqual(event["instance_type"], "size16")
+        self.assertEqual([o["type"] for o in event["options"]], ["size8", "size16", "size32"])
+        self.assertAlmostEqual(event["ec2_eta_h"], 2 + daemon.ec2.cfg["setup_h"])
+
+    def test_work_bound_queue_chooses_fastest_within_tolerance(self):
+        self.size_inventory()
+        _, event = self.size_request(count=128)
+        costs = [o["est_usd"] for o in event["options"]]
+        self.assertLessEqual(max(costs), min(costs) * 1.10)
+        self.assertEqual(event["instance_type"], "size32")
+
+    def test_memory_pressure_scales_thread_capacity(self):
+        cfg = self.size_inventory((16,))
+        cfg["types"] = ["tight", "roomy"]
+        cfg["instance_types"] = {
+            name: dict(arch="aarch64", cpus=16, mem_gb=memory, spot_usd_h=0.5)
+            for name, memory in [("tight", 8), ("roomy", 32)]}
+        _, event = self.size_request(mem_gb=3)
+        options = {o["type"]: o for o in event["options"]}
+        self.assertEqual(event["instance_type"], "roomy")
+        self.assertAlmostEqual(options["tight"]["eta_h"], 6 + cfg["setup_h"])
+        self.assertAlmostEqual(options["roomy"]["eta_h"], 2 + cfg["setup_h"])
+
+    def test_fallback_launch_records_actual_type_capacity_and_cost(self):
+        cfg = self.size_inventory()
+        cfg["instance_types"]["size16"]["fallback"] = "fallback16"
+        cfg["instance_types"]["fallback16"] = dict(arch="aarch64", cpus=12,
+                                                    mem_gb=24, speed=0.9, spot_usd_h=0.9)
+        self.script.write_text(self.script.read_text().replace(
+            "up) touch", "up) echo 'launched fallback16; fixture' >&2; touch"))
+        daemon, event = self.size_request()
+        self.assertEqual(event["fallback"], "fallback16")
+        self.assertNotIn("fallback16", [o["type"] for o in event["options"]])
+        self.approve_mock(daemon, event)
+        self.assertIn("-t size16,fallback16", self.log.read_text())
+        self.assertEqual(daemon.ec2.s["type"], "fallback16")
+        self.assertEqual(daemon.store.kv_get("ec2")["type"], "fallback16")
+        self.assertEqual(self.events("ec2-launching")[-1]["instance_type"], "fallback16")
+        self.now[0] += 3600
+        self.assertEqual(daemon.ec2.cost(), (1, 0.9))
+        host = daemon.ec2.make_host("127.0.0.1")
+        self.assertEqual((host.cpus, host.max_mem_gb, host.price_usd_h), (12, 24, 0.9))
+
+    def test_type_override_uses_its_own_fallback(self):
+        cfg = self.size_inventory()
+        cfg["instance_types"]["size16"]["fallback"] = "fallback16"
+        cfg["instance_types"]["size8"]["fallback"] = "fallback8"
+        daemon, event = self.size_request()
+        self.assertEqual(event["instance_type"], "size16")
+        daemon.ec2.approve(event["approval"], max_hours=2, max_usd=5, instance_type="size8")
+        self.assertIn("-t size8,fallback8", self.log.read_text())
+        # The existing mock has no launched-type report: retain the override.
+        self.assertEqual(daemon.ec2.s["type"], "size8")
+
+    def test_candidate_must_fit_each_task(self):
+        self.size_inventory()
+        _, event = self.size_request(count=1, threads=12)
+        self.assertEqual(event["instance_type"], "size16")
+        self.assertEqual([o["type"] for o in event["options"]], ["size16", "size32"])
+
+    def test_cost_tolerance_is_configurable(self):
+        cfg = self.size_inventory()
+        cfg["cost_tolerance"] = 0
+        _, event = self.size_request(count=128)
+        self.assertEqual(event["instance_type"], "size8")
+
+    def test_equal_eta_and_cost_choose_fewest_cpus(self):
+        cfg = self.size_inventory((32, 8))
+        for info in cfg["instance_types"].values():
+            info["spot_usd_h"] = 0.5
+        _, event = self.size_request(count=1)
+        self.assertEqual(event["instance_type"], "size8")
+
+    def test_required_builds_fit_larger_candidate(self):
+        self.size_inventory((1, 16))
+        daemon = self.daemon(self.data)
+        self.submit(self.ab_spec())
+        daemon.step()
+        event = self.events("approval-needed")[0]
+        self.assertEqual(event["instance_type"], "size16")
+        self.assertEqual([o["type"] for o in event["options"]], ["size16"])
+        self.assertAlmostEqual(event["ec2_eta_h"], 0.6 + 2 * 0.25 + daemon.ec2.cfg["setup_h"])
+
     def test_ec2_ab_plans_and_estimate_includes_both_uncached_builds(self):
         daemon = self.daemon(self.data)
         job = self.submit(self.ab_spec())

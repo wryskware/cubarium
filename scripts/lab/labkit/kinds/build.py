@@ -94,6 +94,7 @@ def simulation_arch(spec, ctx):
     if "ec2" not in (spec.get("hosts") or []):
         return ctx.arch
     cfg = ctx.inventory.ec2 if ctx.inventory else {}
+    # All candidate sizes share an arch, so the first also represents the whole pool.
     instance = (cfg.get("types") or ["c7g.16xlarge"])[0]
     return cfg.get("instance_types", {}).get(instance, {}).get("arch", "aarch64")
 

@@ -360,6 +360,14 @@ sleep loop costs nothing.
 
 `labkit/ec2.py`, driving `scripts/aws-graviton.sh up|status|down`.
 
+The `hosts.toml` EC2 types are candidate sizes, smallest first. labd compares total
+cost and ETA for candidates that can host every eligible task and required build,
+scaling simulation thread capacity by usable memory / summed simulation memory when
+memory limits concurrency. It picks the shortest ETA within `cost_tolerance`
+(default 10%) of the cheapest cost, then the fewest CPUs. Approval requests include
+the comparisons and the chosen type's fallback; `--type` overrides the choice and
+uses that type's own fallback. The actual launched type sets capacity and cost.
+
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
@@ -372,7 +380,7 @@ sleep loop costs nothing.
    × the assumed spot price in `hosts.toml`. One request opens with
    `lab approve ec2 <id> --max-hours H --max-usd D`, and labd never calls `up` without
    it. The request is withdrawn if the eligible tasks go away.
-2. **Approve → launching.** labd runs `up -n 1 -t TYPE --hours ceil(H)`, so the host's own
+2. **Approve → launching.** labd runs `up -n 1 -t TYPE,FALLBACK --hours ceil(H)`, so the host's own
    shutdown timer backs up the limit. One approval buys one launch.
 3. **launching → up.** Once `status` shows the instance running with an IP and the host
    is bootstrapped, the instance becomes the schedulable host `ec2` over ssh (key
