@@ -112,7 +112,7 @@ both: legs fold on leg bones, and cut cells sink under the ground line on tuck b
 Port round 1's `asleep` track to each rigged species whose class-path sleep settle is more
 than 0 rows. Find each species' settle rows the way round 1 did, from `sleep::classify` per
 bin. Expected from round 1's survey:
-- **Veilhound** (`chorister`) and **lanternjaw:** port both.
+- **Veilhound** and **lanternjaw:** port both.
 - **Seedporter:** port its ground pose (`seedporter-ground`). Sleep while perched only if the
   same pattern fits; otherwise say why.
 - **Bellwing:** port it only if it settles when grounded.
@@ -171,7 +171,7 @@ must leave its files byte-identical, and you commit only the files of the specie
 
 ### The poses
 
-- **Veilhound** (`chorister`; a wolf-like hunter). Today it only sinks a few rows. Two
+- **Veilhound** (a wolf-like hunter). Today it only sinks a few rows. Two
   candidates, both played by its `asleep` track:
   - **A, lying down:** the body comes down to the ground, the legs fold under it, the head
     drops to rest on the forepaws, and the tail curls along its side.
@@ -219,7 +219,7 @@ For each species: two grown animals falling asleep, sleeping and waking, today |
 real time, lit, side-on and three-quarter, at px 6 and 12. Use the state scripting in
 `voxel_feed_capture`.
 - Write to `/home/wrysk/wryskware/cubarium/art/gen/runs/sleep-poses-2026-10-11/<species>-sleep-px{6,12}.mp4`.
-  The Veilhound gets `chorister-sleep-A-…` and `chorister-sleep-B-…`.
+  The Veilhound gets `veilhound-sleep-A-…` and `veilhound-sleep-B-…`.
 - Make one still sheet of every end pose at px 12 (`end-poses.png`), so they can be compared
   at a glance.
 
