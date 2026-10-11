@@ -259,8 +259,9 @@ hunter.prey = [true, false, true, false, false, false, true, false, false]
 # GUT-MASS-2 (Wrysk's decision A: seedporters eat shredders, adults included): sizes compare
 # as body / mass_scale, so the catch window, not a mass, covers a grown littershredder.
 hunter.prey_max_ratio = 1.25
-# Fruit at the mouth is 1e-4..1e-3 ou: K is about a third of a ripe vine patch.
-fruit_bite_half_stock = 0.0005
+# FRUIT-FAST (Wrysk 2026-10-11: "monkeys can pick off berries and eat tons"): picking
+# runs near gut speed until a face is nearly stripped; K is ~1/8 of an average vine face's fruit.
+fruit_bite_half_stock = 0.00001
 # Leave below ~2 upkeep rates (5% of the ~45-upkeep full gut rate).
 give_up_fraction = 0.05
 founding_count = 3

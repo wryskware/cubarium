@@ -2661,9 +2661,11 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     glider: Some(Glider::SEEDPORTER),
                     gut_seeds: Some(GutSeeds::SEEDPORTER),
-                    // Vine fruit at the mouth is 1e-4..1e-3 ou, not foliage's 0.005:
-                    // K is about a third of a ripe patch. Carrion keeps the inherited K.
-                    fruit_bite_half_stock: Some(0.0005),
+                    // FRUIT-FAST (Wrysk 2026-10-11: "monkeys can pick off berries and eat
+                    // tons"): picking runs near gut speed until a face is nearly stripped.
+                    // An average fruiting vine face holds ~8e-5 ou, so K is ~1/8 of it (was
+                    // 5e-4: bites at 0.14 of the gut rate). Carrion keeps the inherited K.
+                    fruit_bite_half_stock: Some(0.00001),
                     // A fruit patch worth ~2 upkeep rates is still food: the full gut
                     // rate is ~45 upkeep rates, so leave below 5%, not the grazer's 50%.
                     give_up_fraction: Some(0.05),
