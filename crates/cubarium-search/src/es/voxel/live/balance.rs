@@ -195,13 +195,13 @@ pub fn is_adult(a: &Animal, config: &FaunaConfig) -> bool {
     a.founder.is_some_and(|f| a.attached.is_none() && a.body >= config.founder(f).core.birth_body)
 }
 
-/// A lineage's stores now: reserve plus digestible stomach over its bodies.
+/// A lineage's stores now: reserve, fuel and digestible stomach over its bodies.
 pub fn stores(animals: &[Animal], config: &FaunaConfig, f: Founder) -> f64 {
     let p = config.founder(f);
     animals
         .iter()
         .filter(|a| a.founder == Some(f))
-        .map(|a| a.reserve + super::targets::digestible_stomach(a, p))
+        .map(|a| a.reserve + a.fuel + super::targets::digestible_stomach(a, p))
         .sum()
 }
 

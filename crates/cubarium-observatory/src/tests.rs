@@ -94,6 +94,63 @@ fn populations_count_each_body_in_the_stage_its_config_puts_it() {
 }
 
 #[test]
+fn plant_counts_follow_configured_profile_boundaries() {
+    let world = plain(DayClock::default());
+    let mut config = FloraConfig::default();
+    // Keep boundary fractions exact after conversion to wood and back.
+    for species in Species::ALL {
+        config.species_mut(species).wood_max = 1.0;
+    }
+    let fauna = Fauna::new(FaunaConfig::default());
+    let empty = query::populations(&Flora::new(config.clone()), &fauna);
+    let mut flora = Flora::new(config.clone());
+    let mut site = 0;
+    for species in Species::ALL {
+        let sc = config.species(species);
+        let p = &empty.plants[species.index()];
+        assert_eq!(p.stands, 0);
+        assert_eq!(p.stages.len(), if sc.profile.len() > 1 { sc.profile.len() } else { 0 });
+        assert!(p.stages.iter().all(|&n| n == 0));
+        // Inside each configured profile, at its upper boundary, and just beyond
+        // that boundary. The upper profile is inclusive; no tuned fractions pinned.
+        let mut lower = 0.0;
+        let mut expected = vec![0; sc.profile.len()];
+        let mut stands = 0;
+        for (i, profile) in sc.profile.iter().enumerate() {
+            let upper = profile.wood_fraction_max.min(1.0);
+            let mut samples = vec![((lower + upper) / 2.0, i), (upper, i)];
+            if i + 1 < sc.profile.len() {
+                let next = sc.profile[i + 1].wood_fraction_max.min(1.0);
+                samples.push((upper + (next - upper) * 1e-6, i + 1));
+            }
+            for (fraction, stage) in samples {
+                assert!(flora.apply(&world, FloraCommand::Seed {
+                    x: site % 12,
+                    z: (site / 12) as u32,
+                    species,
+                    wood: fraction * sc.wood_max,
+                }), "{} fixture at {fraction}", species.name());
+                site += 1;
+                stands += 1;
+                expected[stage] += 1;
+            }
+            lower = upper;
+        }
+        let pops = query::populations(&flora, &fauna);
+        let p = &pops.plants[species.index()];
+        assert_eq!(p.stands, stands, "{} total", species.name());
+        if sc.profile.len() > 1 {
+            assert_eq!(p.stages, expected, "{} profiles", species.name());
+            assert_eq!(p.stages.iter().sum::<u32>(), p.stands);
+        } else {
+            assert!(p.stages.is_empty(), "{} has no staged anatomy", species.name());
+        }
+        let json = serde_json::to_value(p).unwrap();
+        assert_eq!(json["stages"], serde_json::json!(p.stages));
+    }
+}
+
+#[test]
 fn an_animal_query_finds_the_living_and_only_them() {
     let (_, _, fauna) = small_world();
     let id = fauna.view().animals[0].id;

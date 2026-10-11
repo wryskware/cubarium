@@ -378,6 +378,9 @@ pub struct AnimalPopulation {
 pub struct PlantPopulation {
     pub species: String,
     pub stands: u32,
+    /// Counts in the species' anatomy-profile order (youngest first), selected by
+    /// `SpeciesConfig::profile_index`. Empty when there is no staged anatomy.
+    pub stages: Vec<u32>,
     /// Organic matter in the stands' tissue (wood + foliage + reserve), and the foliage
     /// and wood on their own.
     pub organic: f64,
@@ -465,6 +468,11 @@ pub fn populations(flora: &Flora, fauna: &Fauna) -> Populations {
         .map(|s| PlantPopulation {
             species: s.name().to_string(),
             stands: 0,
+            stages: if fv.config.species(s).profile.len() > 1 {
+                vec![0; fv.config.species(s).profile.len()]
+            } else {
+                Vec::new()
+            },
             organic: 0.0,
             foliage: 0.0,
             wood: 0.0,
@@ -474,6 +482,9 @@ pub fn populations(flora: &Flora, fauna: &Fauna) -> Populations {
     for s in fv.stands {
         let p = &mut plants[s.species.index()];
         p.stands += 1;
+        if !p.stages.is_empty() {
+            p.stages[fv.config.species(s.species).profile_index(s.wood)] += 1;
+        }
         p.organic += s.organic();
         p.foliage += s.foliage;
         p.wood += s.wood;
@@ -599,7 +610,7 @@ pub fn animal_row(fauna: &Fauna, a: &Animal) -> AnimalRow {
         body: a.body,
         size: if core.body_max > 0.0 { a.body / core.body_max } else { 1.0 },
         fullness: if cap > 0.0 { (a.reserve / cap).clamp(0.0, 1.0) } else { 0.0 },
-        energy: a.energy,
+        energy: a.energy + a.fuel_energy,
         wound: a.wound,
         dryness: a.mobility.dryness,
         activity: activity_of(a),

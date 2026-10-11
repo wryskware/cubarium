@@ -318,10 +318,9 @@ impl LineageOutcome {
     }
 }
 
-/// **What a body's stomach is worth to its reserve** (the minimal gut), organic units: each
-/// food class's raw organic times the yield it digests at, mineral-limited as digestion
-/// limits it (`min(yield, mineral / (n_tissue · organic))`). Zero for a body with no
-/// lineage.
+/// **What a body's stomach can supply as energy**, organic units: mineral funds tissue,
+/// and with fuel storage the remaining absorbed share can pay running costs. Like the
+/// supply screen, this potential assumes spending makes room while the stomach digests.
 pub fn digestible_stomach(a: &Animal, p: &FounderPhysiology) -> f64 {
     let n = p.core.n_tissue;
     Food::ALL
@@ -331,8 +330,8 @@ pub fn digestible_stomach(a: &Animal, p: &FounderPhysiology) -> f64 {
             if !(pool.organic > 0.0) {
                 return 0.0;
             }
-            let funded = if n > 0.0 { pool.mineral / (n * pool.organic) } else { f64::INFINITY };
-            pool.organic * p.yield_for(f).min(funded).max(0.0)
+            let fraction = pool.mineral / pool.organic;
+            pool.organic * super::screen::mineral_limited_yield(p.yield_for(f), fraction, n, p.core.fuel_cap)
         })
         .sum()
 }

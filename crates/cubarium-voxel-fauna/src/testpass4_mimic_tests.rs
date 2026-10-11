@@ -122,7 +122,7 @@ fn worth(c: &FaunaConfig, h: &crate::Animal, p: &crate::Animal) -> f64 {
     let damage = t.strike_power * h.body / p.body * (1.0 - armour);
     let strikes = ((1.0 - p.wound).max(0.0) / damage).ceil().max(1.0);
     let cost = strikes * t.strike_cost_s * phys.core.maintenance_per_s * h.body;
-    (p.body + p.reserve) * phys.yield_by_food[Food::Carrion.index()] - cost
+    p.organic() * phys.yield_by_food[Food::Carrion.index()] - cost
 }
 
 #[test]

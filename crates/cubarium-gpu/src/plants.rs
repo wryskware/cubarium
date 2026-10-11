@@ -330,6 +330,8 @@ pub struct PlantPass {
     vis_fb: vk::Framebuffer,
     vis_pipeline: vk::Pipeline,
     occluder: Plane,
+    /// Premultiplied plant colour/coverage, for weather at soft crown edges.
+    weather_surface: Option<Plane>,
     shade_pass: vk::RenderPass,
     shade_fb: vk::Framebuffer,
     shade_pipeline: vk::Pipeline,
@@ -478,11 +480,25 @@ impl PlantPass {
                 .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL),
         );
         shade_views.push(occluder.view);
+        let weather_surface = if emit.is_some() {
+            let plane = Plane::new(gpu, raster.0, raster.1, vk::Format::R16G16B16A16_SFLOAT,
+                vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::SAMPLED,
+                vk::ImageAspectFlags::COLOR)?;
+            shade_atts.push(vk::AttachmentDescription::default()
+                .format(vk::Format::R16G16B16A16_SFLOAT)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL));
+            shade_views.push(plane.view);
+            Some(plane)
+        } else { None };
         let at = |i: u32| vk::AttachmentReference::default().attachment(i).layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL);
-        // `[raster, emit, occluder]`, or `[raster, -, occluder]` in the flat tier, as the
+        // `[raster, emit, occluder, weather_surface]`, or `[raster, -, occluder]` in the flat tier, as the
         // shader writes them.
         let shade_refs = if emit.is_some() {
-            vec![at(0), at(1), at(2)]
+            vec![at(0), at(1), at(2), at(3)]
         } else {
             vec![at(0), vk::AttachmentReference::default().attachment(vk::ATTACHMENT_UNUSED), at(1)]
         };
@@ -625,7 +641,8 @@ impl PlantPass {
         let shade_pipeline = {
             let vs = gpu.shader(FULLSCREEN_VERT)?;
             let fs = gpu.shader(PLANT_SHADE_FRAG).context("the plant pass's shading shader")?;
-            let blend = [over(), over(), plain()];
+            let blend = if emit.is_some() { vec![over(), over(), plain(), plain()] }
+                else { vec![over(), over(), plain()] };
             let p = pipeline(d, shade_pass, layout, vs, fs, Some(&spec), vk::PrimitiveTopology::TRIANGLE_LIST, &blend, false);
             unsafe { d.destroy_shader_module(vs, None) };
             unsafe { d.destroy_shader_module(fs, None) };
@@ -643,6 +660,7 @@ impl PlantPass {
             vis_fb,
             vis_pipeline,
             occluder,
+            weather_surface,
             shade_pass,
             shade_fb,
             shade_pipeline,
@@ -754,6 +772,10 @@ impl PlantPass {
     /// front of it, per raster pixel. Written every frame the world is drawn.
     pub(crate) fn occluder_view(&self) -> vk::ImageView {
         self.occluder.view
+    }
+
+    pub(crate) fn weather_views(&self) -> Option<(vk::ImageView, vk::ImageView)> {
+        self.weather_surface.as_ref().map(|p| (self.occluder.view, p.view))
     }
 
     /// Record the visibility layer for ring slot `slot` (after [`PlantPass::prepare`]):
@@ -892,6 +914,7 @@ impl PlantPass {
         unsafe { d.destroy_framebuffer(self.shade_fb, None) };
         unsafe { d.destroy_render_pass(self.shade_pass, None) };
         self.occluder.destroy(d);
+        if let Some(p) = &self.weather_surface { p.destroy(d); }
         for f in &self.frames {
             f.destroy(gpu);
         }

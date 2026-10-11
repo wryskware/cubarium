@@ -18,6 +18,144 @@ use super::model::{Cohort, FaunaModel};
 use super::rng::{Draws, Rng};
 use crate::exchange::Supply;
 
+// Fuel checks use hand-built food and physiology, never a shipped nectar yield.
+fn fuel_fixture(cap: f64) -> (cubarium_voxel_fauna::FounderPhysiology, Body) {
+    let mut p = *FaunaConfig::default().founder(Founder::Bellwing);
+    p.core.body_max = 1.0;
+    p.core.birth_body = 0.5;
+    p.core.reserve_cap = 1.0;
+    p.core.n_tissue = 0.1;
+    p.core.fuel_cap = cap;
+    p.core.growth_max_per_s = 1.0;
+    p.gut.mass_exponent = 0.0;
+    p.gut.digestion_s[Food::Nectar.index()] = cubarium_voxel_fauna::DT;
+    p.yield_by_food[Food::Nectar.index()] = 0.8;
+    let mut b = Body {
+        body: 1.0,
+        reserve: 0.1,
+        ..Body::default()
+    };
+    b.stomach[Food::Nectar.index()] = 0.5;
+    b.stomach_mineral[Food::Nectar.index()] = Some(0.01);
+    (p, b)
+}
+
+#[test]
+fn unfunded_absorption_is_fuel_and_cannot_build_tissue() {
+    let (p, mut b) = fuel_fixture(0.4);
+    let before = b.organic();
+    let tissue_before = b.body + b.reserve;
+    let mineral = b.stomach_mineral[Food::Nectar.index()].unwrap();
+    let f = laws::digest(&p, &mut b, cubarium_voxel_fauna::DT);
+    assert!(b.fuel > 0.0);
+    assert!((b.body + b.reserve - tissue_before - mineral / p.core.n_tissue).abs() < 1e-12);
+    assert!((b.organic() + f.egested + f.digestion_heat - before).abs() < 1e-12);
+    assert!((f.assimilated - (b.reserve - 0.1 + b.fuel)).abs() < 1e-12);
+    let brood = b.brood;
+    let reserve = b.reserve;
+    let fuel = b.fuel;
+    let (paid, from_body) = laws::respire(&p.core, &mut b, fuel / 2.0);
+    assert!(paid > 0.0 && b.fuel < fuel && from_body == 0.0);
+    assert_eq!(b.reserve, reserve);
+    assert_eq!(b.brood, brood);
+}
+
+#[test]
+fn fuel_cap_books_only_overflow_as_digestion_heat() {
+    let (p, mut b) = fuel_fixture(0.05);
+    let before = b.organic();
+    let f = laws::digest(&p, &mut b, cubarium_voxel_fauna::DT);
+    assert!(b.fuel <= p.core.fuel_cap * b.body);
+    assert!(f.digestion_heat > 0.0);
+    assert!((b.organic() + f.egested + f.digestion_heat - before).abs() < 1e-12);
+    let (mut funded, mut b) = fuel_fixture(0.4);
+    b.stomach_mineral[Food::Nectar.index()] =
+        Some(funded.core.n_tissue * b.stomach[Food::Nectar.index()]);
+    funded.core.birth_body = b.body + 1.0;
+    let f = laws::digest(&funded, &mut b, cubarium_voxel_fauna::DT);
+    assert_eq!(b.fuel, 0.0);
+    assert_eq!(f.digestion_heat, 0.0);
+}
+
+#[test]
+fn fuel_preserves_tissue_under_the_same_running_costs() {
+    let run = |cap| {
+        let (p, mut b) = fuel_fixture(cap);
+        laws::digest(&p, &mut b, cubarium_voxel_fauna::DT);
+        let cost = 0.2;
+        let (paid, _) = laws::respire(&p.core, &mut b, cost);
+        assert!((paid - cost).abs() < 1e-12);
+        b.body + b.reserve
+    };
+    assert!(run(0.4) > run(0.0));
+}
+
+#[test]
+fn mineral_free_food_digests_beside_a_reserve_blocked_pool() {
+    let (mut p, mut b) = fuel_fixture(0.4);
+    b.reserve = p.core.reserve_of(b.body);
+    b.stomach_mineral[Food::Nectar.index()] = Some(0.0);
+    p.yield_by_food[Food::Foliage.index()] = p.yield_for(Food::Nectar);
+    p.gut.digestion_s[Food::Foliage.index()] = cubarium_voxel_fauna::DT;
+    b.stomach[Food::Foliage.index()] = 0.5;
+    b.stomach_mineral[Food::Foliage.index()] = Some(p.core.n_tissue * b.stomach[Food::Foliage.index()]);
+    let reserve = b.reserve;
+    let foliage = b.stomach[Food::Foliage.index()];
+    let nectar = b.stomach[Food::Nectar.index()];
+    let f = laws::digest(&p, &mut b, cubarium_voxel_fauna::DT);
+    assert_eq!(b.reserve, reserve);
+    assert_eq!(b.stomach[Food::Foliage.index()], foliage);
+    assert_eq!(b.stomach[Food::Nectar.index()], 0.0);
+    assert!((f.digested - nectar).abs() < 1e-12);
+    assert!(b.fuel > 0.0);
+}
+
+#[test]
+fn fresh_carcass_fuel_does_not_turn_into_mineral_or_tissue() {
+    let (mut p, mut prey) = fuel_fixture(0.4);
+    let mineral = prey.mineral(p.core.n_tissue);
+    prey.fuel = p.core.fuel_cap * prey.body;
+    assert_eq!(prey.mineral(p.core.n_tissue), mineral);
+    let mut hunter = Cohort::new(1.0, p.core.body_max, 0.0);
+    hunter.add_carcass(prey.organic(), mineral, p.core.n_tissue);
+    assert_eq!(hunter.held_carcass_mineral(p.core.n_tissue), mineral);
+    let bite = hunter.carcass / 2.0;
+    let swallowed_mineral = hunter.take_carcass(bite, p.core.n_tissue);
+    assert!((hunter.held_carcass_mineral(p.core.n_tissue) + swallowed_mineral - mineral).abs() < 1e-12);
+    hunter.b.stomach[Food::Carrion.index()] = bite;
+    hunter.b.stomach_mineral[Food::Carrion.index()] = Some(swallowed_mineral);
+    p.yield_by_food[Food::Carrion.index()] = p.yield_for(Food::Nectar);
+    p.gut.digestion_s[Food::Carrion.index()] = cubarium_voxel_fauna::DT;
+    laws::digest(&p, &mut hunter.b, cubarium_voxel_fauna::DT);
+    assert!(hunter.b.reserve <= swallowed_mineral / p.core.n_tissue + 1e-12);
+    assert!(hunter.b.fuel > 0.0);
+}
+
+#[test]
+fn fuel_carries_no_mineral_and_returns_with_a_corpse() {
+    let mut p = Params::defaults();
+    p.world.day.mode = DayMode::Off;
+    let f = Founder::Bellwing;
+    p.fauna.founders[f.index()].core.maintenance_per_s = 0.0;
+    p.fauna.founders[f.index()].motor_respiration_per_s = 0.0;
+    let sc = p.fauna.founder(f).core;
+    let run = |fuel| {
+        let mut m = FaunaModel::new(&p, Fits::unfitted(), cubarium_voxel_fauna::DT);
+        m.enabled = std::array::from_fn(|i| i == f.index());
+        let mut c = Cohort::new(1.0, sc.body_min / 2.0, 0.0);
+        c.b.fuel = fuel;
+        m.add(f, c);
+        let mineral = m.mineral_wanted();
+        let (_, ret) = m.step(&Supply::default());
+        (mineral, ret.carrion + ret.litter)
+    };
+    let (bare_m, bare_org) = run(0.0);
+    let fuel = sc.body_min;
+    let (fueled_m, fueled_org) = run(fuel);
+    assert_eq!(fueled_m, bare_m);
+    assert!((fueled_org - bare_org - fuel).abs() < 1e-12);
+}
+
 // --- The sim side: a one-body fixture on a litter plain (the young_budget probe's plain) ---
 
 struct StandAndFeed;
@@ -212,7 +350,9 @@ fn lifespan_survival_matches_the_sims_draw() {
     for arriving in [false, true] {
         let n = 4000u64;
         let draws: Vec<f64> = (0..n)
-            .map(|id| cubarium_voxel_fauna::draw_lifespan_ticks(&life, median, id, 0xABCD, arriving) as f64 / f64::from(TICK_HZ))
+            .map(|id| {
+                cubarium_voxel_fauna::draw_lifespan_ticks(&life, median, id, 0xABCD, arriving) as f64 / f64::from(TICK_HZ)
+            })
             .collect();
         for t in [0.3 * median, 0.6 * median, 0.9 * median, 1.1 * median] {
             let sim = draws.iter().filter(|d| **d > t).count() as f64 / n as f64;
@@ -288,7 +428,9 @@ fn busy(draws: Draws) -> (FaunaModel, Supply) {
 fn respired(m: &FaunaModel) -> f64 {
     m.ledger
         .iter()
-        .map(|l| l.flows.upkeep + l.flows.motor + l.flows.digestion_heat + l.gestation_loss + l.bank_upkeep)
+        .map(|l| {
+            l.flows.upkeep + l.flows.motor + l.flows.digestion_heat + l.gestation_loss + l.bank_upkeep
+        })
         .sum()
 }
 

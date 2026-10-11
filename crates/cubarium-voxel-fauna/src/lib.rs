@@ -951,8 +951,9 @@ impl WallClimb {
 /// One animal: an identity, the support face it stands on, and the three currencies it
 /// holds.
 ///
-/// `body` is structure and `reserve` is what maintenance is paid out of; `mineral` and
-/// `energy` are the stocks that came in with its food. Energy is a **stock and not
+/// `body` is structure, `reserve` is mineral-funded tissue, and `fuel` is nitrogen-free
+/// sugar/fat spent first. `mineral` and `energy` belong to body plus reserve;
+/// `fuel_energy` belongs to fuel. Energy is a **stock and not
 /// `energy_density · organic`** (the flora's dead pools are kept the same way and for the
 /// same reason): a bite carries the energy the plant layer handed over at *its* density,
 /// so holding that number is what makes the energy residual close for any food, instead of
@@ -980,8 +981,12 @@ pub struct Animal {
     pub reproduction: ReproductionState,
     /// Organic structure. Below `body_min` it is dead.
     pub body: f64,
-    /// Organic matter maintenance is paid from before the body is.
+    /// Mineral-funded organic matter paid after fuel and before the body.
     pub reserve: f64,
+    /// Nitrogen-free organic fuel (fat and sugar), spent before reserve or structure.
+    pub fuel: f64,
+    /// Energy carried by the fuel at its food's density; fuel holds no mineral.
+    pub fuel_energy: f64,
     /// The mineral in its tissue: an inventory, moved by the same fraction rule the plant
     /// layer uses for every outflow, never created and never respired.
     pub mineral: f64,
@@ -1462,11 +1467,11 @@ impl Animal {
         (f64::from(self.site.y) + offset / voxel_m).round().max(0.0) as u32
     }
 
-    /// Organic matter in the animal: structure plus reserve. What a corpse deposits —
+    /// Organic matter in the animal: structure, reserve and fuel. What a corpse deposits —
     /// a gestation is always resolved before a body dies, so its escrow is back in the
     /// reserve by the time this is read for a corpse.
     pub fn organic(&self) -> f64 {
-        self.body + self.reserve
+        self.body + self.reserve + self.fuel
     }
 
     /// Organic matter this body **holds**, the escrowed offspring included: what the
@@ -1497,6 +1502,7 @@ impl Animal {
     /// Energy in this body, its gut and the escrowed offspring's included.
     pub fn stored_energy(&self) -> f64 {
         self.energy
+            + self.fuel_energy
             + self.gut.energy
             + self.reproduction.escrow.map_or(0.0, |e| e.energy)
             + self.gut_seeds.total().energy
@@ -2217,7 +2223,7 @@ pub struct FounderState {
 /// built from, and zeroed once when it is consumed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct IntervalFeedback {
-    /// Organic matter assimilated into body and reserve over the interval.
+    /// Organic matter assimilated into reserve and fuel over the interval.
     pub intake: f64,
     /// Internal tissue lost over the interval: the share of upkeep and motor
     /// respiration that came out of the body itself once the reserve was empty.
@@ -2233,7 +2239,7 @@ pub struct IntervalFeedback {
     pub delivered_forward: f64,
     /// Radians actually turned over the interval, signed.
     pub delivered_turn: f64,
-    /// Organic matter the interval's paid motion respired, reserve and body together —
+    /// Organic matter the interval's paid motion respired, fuel, reserve and body together —
     /// the per-interval motor-respiration counter, alongside the ledger's cumulative
     /// `respired_motor_out`. Zero for a resting interval.
     pub motor_respiration: f64,
@@ -2244,7 +2250,7 @@ pub struct IntervalFeedback {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SpeciesConfig {
     /// Organic matter respired per unit of body per second, standing still. Paid from the
-    /// reserve, then from the body.
+    /// fuel, then reserve, then body.
     pub maintenance_per_s: f64,
     /// **`K`, the stock at which a bite is half of what the mouth asked for** (package G,
     /// decision 2): a bite from food holding `E` at the mouth — a plant's edible foliage
@@ -2254,7 +2260,7 @@ pub struct SpeciesConfig {
     /// Mineral per unit of tissue built — the density of what it builds, and therefore the
     /// **budget** its growth fits inside: a bite can build at most `mineral / n_tissue` of
     /// tissue, whatever its food's yield would otherwise have assimilated, and the
-    /// unfunded organic matter is respired with its energy. Mineral a bite
+    /// unfunded absorbed organic matter fills fuel, whose overflow is respired. Mineral a bite
     /// carries in excess of what was built is excreted as a litter deposit.
     ///
     /// There is **no mineral reserve**: [`Animal::mineral`] is an inventory of the tissue's
@@ -2294,6 +2300,11 @@ pub struct SpeciesConfig {
     /// spends it exactly as it spends any other reserve, so the excess is transient and
     /// never grows.
     pub reserve_cap: f64,
+    /// Nitrogen-free fuel capacity as a fraction of body (org-units/org-unit).
+    /// Birds carry fat loads of roughly 10–40% of lean mass; this relative cap needs
+    /// no mass scaling. Absorbed food beyond it is respired as digestion heat.
+    #[serde(default = "default_fuel_cap")]
+    pub fuel_cap: f64,
     /// The depth of standing water on its own face that kills it.
     pub drown_depth_m: f64,
     /// Energy per unit of organic matter an **introduced** animal arrives with. Used for
@@ -2320,6 +2331,10 @@ pub struct SpeciesConfig {
     /// 6 h a census runs, so a world turns over within one run.
     #[serde(default)]
     pub lifespan_median_s: f64,
+}
+
+pub(crate) fn default_fuel_cap() -> f64 {
+    0.2
 }
 
 impl SpeciesConfig {
@@ -2351,6 +2366,7 @@ impl SpeciesConfig {
             birth_body: 0.03,
             birth_cost: 0.01,
             reserve_cap: 0.5,
+            fuel_cap: default_fuel_cap(),
             drown_depth_m: 0.2,
             energy_density: 2.0,
             reproduction: Reproduction::LIVE_BIRTH_PLACEHOLDER,
@@ -3113,12 +3129,12 @@ pub struct FaunaLedger {
     pub bites_by_plant: [u64; cubarium_voxel_flora::Species::COUNT],
     pub eaten_by_plant: [f64; cubarium_voxel_flora::Species::COUNT],
     /// Local founder bites and the organic matter they actually **placed** into body
-    /// and reserve, by lineage, indexed by [`Founder::index`].
+    /// and reserve or fuel, by lineage, indexed by [`Founder::index`].
     ///
     /// The same kind of measurement as `bites_by_plant`, taken at the other end of the
     /// transfer: what a lineage got, not what a species lost. `assimilated_by_founder`
     /// is the placed figure and not the bite's gross organic matter, because that is
-    /// what became tissue — it is the same number the body's own `Self`
+    /// what became tissue or usable fuel — it is the same number the body's own `Self`
     /// `assimilated_intake` channel reports.
     pub bites_by_founder: [u64; Founder::COUNT],
     pub assimilated_by_founder: [f64; Founder::COUNT],
@@ -4914,6 +4930,8 @@ impl Fauna {
             let before = [a.stored_organic(), a.stored_mineral(), a.stored_energy()];
             a.body *= k;
             a.reserve *= k;
+            a.fuel *= k;
+            a.fuel_energy *= k;
             a.mineral *= k;
             a.energy *= k;
             // Brood is a label inside the reserve, not additional matter.
@@ -4953,6 +4971,9 @@ impl Fauna {
             self.ledger.introduced_energy_in += c.energy - before[2];
         }
         self.config = config;
+        for i in 0..self.animals.len() {
+            step::cap_fuel(self, i);
+        }
         self.pack_routes.clear();
         self.pack_paths.clear();
         self.den_paths.clear();
@@ -5093,7 +5114,7 @@ impl Fauna {
         let sc = body::effective_config(&self.config, &self.animals[i]);
         let a = &mut self.animals[i];
         let want = fraction.max(0.0) * sc.reserve_of(a.body);
-        let held = a.organic();
+        let held = a.body + a.reserve;
         let d = want - a.reserve;
         let (dm, de) = if held > 0.0 { (a.mineral * d / held, a.energy * d / held) } else { (0.0, 0.0) };
         a.reserve = want;
@@ -5563,6 +5584,8 @@ impl Fauna {
             reproduction: ReproductionState::default(),
             body,
             reserve,
+            fuel: 0.0,
+            fuel_energy: 0.0,
             mineral: sc.n_tissue * organic,
             energy: sc.energy_density * organic,
             age_ticks: 0,

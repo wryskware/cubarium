@@ -223,6 +223,7 @@ gut.digestion_s.fruit = 308.57134040818846
 mass_scale = 60.0
 
 [fauna.founders.bellwing]
+yield_by_food.nectar = 0.95
 founding_count = 4
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.000026758354208184715

@@ -663,7 +663,7 @@ pub struct StartRecord {
 pub struct Baseline {
     pub tick: u64,
     pub phase: f64,
-    /// Bodies, eggs, body + reserve + escrow, and assimilated (cumulative) per lineage.
+    /// Bodies, eggs, body + reserve + fuel + escrow, and assimilated (cumulative) per lineage.
     pub bodies: [usize; Founder::COUNT],
     pub eggs: [usize; Founder::COUNT],
     pub biomass: [f64; Founder::COUNT],
@@ -692,7 +692,7 @@ impl Baseline {
         for a in v.animals.iter() {
             let Some(f) = a.founder else { continue };
             b.bodies[f.index()] += 1;
-            b.biomass[f.index()] += a.body + a.reserve + a.reproduction.escrow.map_or(0.0, |e| e.organic);
+            b.biomass[f.index()] += a.body + a.reserve + a.fuel + a.reproduction.escrow.map_or(0.0, |e| e.organic);
         }
         for f in Founder::ALL {
             b.eggs[f.index()] = v.eggs_by_founder(f) as usize;
