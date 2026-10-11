@@ -52,6 +52,9 @@ fn stage(r: &mut VoxelRenderer, plant: bool) {
             VoxelTexel::pack(0, PART_TRUNK, 0.0, true, 0.0, 1);
     }
     assert!(r.stage([1; SLOW_PLANES], |st| {
+        // This fixture replaces the whole volume, including adding/removing the plant.
+        // After the first frame the renderer owes no bricks unless the caller marks them.
+        st.owed.mark_full();
         write_upload(
             &cells, p.width, p.height, p.depth, st.owed, st.voxels, st.carried,
         );
@@ -201,6 +204,7 @@ fn the_plant_pass_hides_the_fog_behind_its_front_face() {
     let mut r = VoxelRenderer::new(&gpu, p.clone(), &VoxelTextures::empty(p.s, p.rise)).unwrap();
     stage(&mut r, false);
     let mut target = Headless::new(&gpu, &r).unwrap();
+    let clear_bg = draw(&gpu, &mut r, &mut target, false);
     let fog_bg = draw(&gpu, &mut r, &mut target, true);
     stage(&mut r, true);
     let clear = draw(&gpu, &mut r, &mut target, false);
@@ -209,8 +213,13 @@ fn the_plant_pass_hides_the_fog_behind_its_front_face() {
         as usize
         * 4;
     assert_ne!(
-        &clear[centre..centre + 3],
+        &clear_bg[centre..centre + 3],
         &fog_bg[centre..centre + 3],
+        "background has fog"
+    );
+    assert_ne!(
+        &clear[centre..centre + 3],
+        &clear_bg[centre..centre + 3],
         "plant covers the bank"
     );
     assert_eq!(
@@ -218,6 +227,19 @@ fn the_plant_pass_hides_the_fog_behind_its_front_face() {
         &fog[centre..centre + 3],
         "plant front at slab zero sees no rear fog"
     );
+    for (i, (a, b)) in clear
+        .chunks_exact(4)
+        .zip(clear_bg.chunks_exact(4))
+        .enumerate()
+    {
+        if a == b {
+            assert_eq!(
+                &fog[i * 4..i * 4 + 4],
+                &fog_bg[i * 4..i * 4 + 4],
+                "surrounding bank stays unchanged"
+            );
+        }
+    }
     stage(&mut r, false);
     assert_eq!(
         draw(&gpu, &mut r, &mut target, true),
