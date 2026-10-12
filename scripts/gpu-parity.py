@@ -76,6 +76,29 @@ def capture(args):
     (out / f"{args.suite}-commands.json").write_text(json.dumps(dict(commands=records, images=images), indent=2) + "\n")
 
 
+def smoke(args):
+    import re
+    import shutil
+    import tempfile
+    fixture = Path(args.fixture).resolve()
+    with tempfile.TemporaryDirectory(prefix="smoke-", dir=fixture) as temporary:
+        state = Path(temporary)
+        for source, target in (("world.voxel", "world-0.voxel"),
+                               ("flora.bin", "flora-0.bin"), ("fauna.bin", "fauna-0.bin")):
+            shutil.copyfile(fixture / "state" / source, state / target)
+        config = (fixture / "terrarium.toml").read_text()
+        config, count = re.subn(r"(?m)^px_per_voxel\s*=.*$", "px_per_voxel = 4", config, count=1)
+        if count != 1:
+            raise RuntimeError("smoke config must declare px_per_voxel")
+        cfg = state / "smoke.toml"
+        cfg.write_text(config)
+        subprocess.run([args.binary, "voxel", "--config", str(cfg), "--load", str(state),
+                        "--sink", "gpu", "--gpu-target", args.target, "--seconds", "0.1",
+                        "--fps", "60", "--serve", "127.0.0.1:0", "--set", "world.width = 128",
+                        "--set", "world.height = 64", "--set", "world.depth = 32"],
+                       cwd=Path(args.tree).resolve(), check=True, timeout=300)
+
+
 def gallery(path, rows, baseline, candidate):
     import base64
     import html
@@ -159,7 +182,13 @@ def main():
     comp.add_argument("--diff")
     comp.add_argument("--gallery", help="standalone screenshot comparison HTML")
     comp.add_argument("--report", help="machine-readable comparison summary")
+    sm = sub.add_parser("smoke", help="bounded startup/shutdown with a disposable world copy")
+    for key in ("binary", "tree", "fixture"):
+        sm.add_argument("--" + key, required=True)
+    sm.add_argument("--target", choices=("headless", "window"), required=True)
     args = parser.parse_args()
+    if args.command == "smoke":
+        return smoke(args)
     return capture(args) if args.command == "capture" else compare(args)
 
 

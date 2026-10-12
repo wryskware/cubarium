@@ -44,7 +44,8 @@ letterbox, downscale and portrait presentation.
 revisions `dc439d11` / `5116f722`, cache revision `61017541`, and final Rust
 verification revision `3650682e` have the same GPU source tree. Main/Godot
 verification includes the final cross-platform explicit-save import fix.
-The branch also includes main's later Godot chrome work.
+The final rebase includes main at `9455ef0c`, including its later Godot chrome
+and fauna fixes. These introduce no GPU source changes.
 
 All Rust builds, tests and captures ran through labd, with at most eight build
 jobs and serial GPU tests. Completed checks:
