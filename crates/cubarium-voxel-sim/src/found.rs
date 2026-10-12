@@ -645,11 +645,20 @@ pub fn draw_terrain(
         eprintln!("cubarium voxel: terrain timing seed={seed} generation={:.3}s", started.elapsed().as_secs_f64());
         let short = water.and_then(|w| features_short(&w, report.as_ref()));
         let mut probe = world.clone();
+        let settling = std::time::Instant::now();
         probe.settle(GATE_SETTLE_TICKS);
         let lake = cubarium_voxel::hydrate::lake(&probe);
         let tiers = cubarium_voxel::hydrate::tier_pools(&cubarium_voxel::hydrate::pools(&probe), lake.level_y);
+        let settled = settling.elapsed();
         let feasible = check.map(|(layers, counts)| feasibility(&mut probe, layers, counts).acceptance);
         drop(probe);
+        if std::env::var_os("CUBARIUM_RENDER_TIMING").is_some() {
+            eprintln!(
+                "cubarium voxel: terrain timing seed={seed} gate settle={:.3}s feasibility={:.3}s",
+                settled.as_secs_f64(),
+                (settling.elapsed() - settled).as_secs_f64()
+            );
+        }
         (world, short, lake.visible_m2, tiers, feasible)
     };
     let terrain = |world, seed, lake_m2, tier_pools, feasibility, warnings| Terrain {

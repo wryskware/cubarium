@@ -32,7 +32,7 @@ layout(set = 0, binding = 0, std140) uniform VoxelScene {
     vec4 ambientC;      // lit: the ambient light's colour, the sky's hue at unit luminance
     vec4 sunK;          // lit: the unit direction toward the sun (zero: none), sun tint
     vec4 waterL;        // lit: absorption per voxel of path, reflection gain, ripple tilt, reflection cells
-    vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, -, -
+    vec4 clock;         // sim time in ticks (tick + the fraction elapsed), the water's animation step, flow debug, sky lift
     vec4 waterM;        // lit: foam, glint, rain rings, highlight (toward white)
     vec4 volK;          // lit: light shafts' density, glow weight, falloff (voxels), fade
     // The weather and the time of day (`cubarium_gpu::weather::Look`, package WX2). At a
@@ -622,10 +622,12 @@ float aoTop(int x, int y, int z, int dx, int dy) {
 
 // The sky plane at open cell (x, y, z). Above the world, and in front of it (a front
 // face at z = 0, whose fan leaves through the world's near side at once), is open sky.
+// The plane is lifted toward open sky by clock.w (`VoxelRenderer::set_sky_lift`): a
+// picture first drawn under open sky eases its plane in rather than switching to it.
 float skyOpen(int x, int y, int z) {
     if (y >= H || z < 0) { return 1.0; }
     if (y < 0 || z >= D) { return 0.0; }
-    return float(texelFetch(skyTex, ivec3(wrapX(x), y, z), 0).r) / 255.0;
+    return mix(float(texelFetch(skyTex, ivec3(wrapX(x), y, z), 0).r) / 255.0, 1.0, u.clock.w);
 }
 
 // The model's canopy over column (x, z) for a face of a voxel at height yv: the product

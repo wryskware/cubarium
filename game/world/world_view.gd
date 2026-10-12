@@ -11,8 +11,11 @@ extends Control
 ##   `detach()` stops (the last frame stays).
 ## - `show_view(view)` draws a candidate: `view` is `candidate_ref(i)` (or `candidate_view(i)`),
 ##   which names its session and index (`source`, `candidate`); the candidate's own world is
-##   rendered. With input off (a thumbnail), up to two stage together. A first picture
-##   appears while lighting finishes; its renderer is freed after the fully lit frame.
+##   rendered. With input off (a thumbnail), up to two stage together, each until its first
+##   picture is up. That picture is the fast tier (open sky, no shading bake); with
+##   `still_lighting` "refined" (the default) the exact sky shading follows and eases in,
+##   with "fast" the first picture is the last. A thumbnail's renderer is freed once its
+##   frame is `settled` (nothing more is coming).
 ## - `input_enabled`: false ignores pointer and pan input (a menu is open).
 ## - `reset_framing()`: the whole strip in view, the ring unturned.
 ## - Signals `animal_hovered(id)` (−1 for none) and `animal_clicked(id)` (−1 for empty
@@ -149,6 +152,12 @@ var frame_generation := -1
 var frame_tick := -1
 var frames_shown := 0
 var lighting_ready := false
+## The last frame is a still world's last picture: lit and eased in, the fast tier alone, or
+## the wait for its lighting given up.
+var settled := false
+## How a candidate shown here is lit: "refined" or "fast" (a renderer option a lighting
+## setting can switch; read when the view starts drawing).
+var still_lighting := "refined"
 ## Milliseconds spent turning frames into the texture (create + upload), cumulative.
 var upload_ms := 0.0
 
@@ -362,6 +371,9 @@ func _begin() -> void:
 		if highlighted >= 0:
 			renderer.set_highlight(highlighted)
 		_apply_motion()
+	var lighting_refused: String = renderer.set_still_lighting(still_lighting)
+	if lighting_refused != "":
+		push_warning("WorldView: " + lighting_refused)
 	match what[0]:
 		"live":
 			renderer.attach(what[1])
@@ -398,12 +410,13 @@ func _take_frame() -> void:
 	frame_tick = int(f["tick"])
 	frames_shown += 1
 	lighting_ready = bool(f.get("lighting_ready", true))
+	settled = bool(f.get("settled", lighting_ready))
 	if fresh:
 		reset_framing()
 	_material.set_shader_parameter("raster_size", Vector2(raster_size))
 	queue_redraw()
-	# A still thumbnail is drawn once; its renderer's GPU memory goes.
-	if _static and not input_enabled and lighting_ready:
+	# A still thumbnail's last picture is kept; its renderer's GPU memory goes.
+	if _static and not input_enabled and settled:
 		renderer.release()
 
 

@@ -114,8 +114,9 @@ pub(crate) fn sky_plane_until(
             bands.push((z as u32, b * rows_per_band, rows));
         }
     }
-    // Concurrent previews share these workers instead of each spawning a full-machine
-    // pool. Rayon can interleave bands from several callers of the same pool.
+    // Every plane of the process with this many threads shares one pool rather than each
+    // spawning its own: a live world's edit and a preview's plane never take twice the
+    // machine between them.
     sky_pool(threads).install(|| bands.into_par_iter().all(|(z, y0, rows)| band(z, y0, rows)))
 }
 
@@ -136,6 +137,72 @@ fn sky_pool(threads: usize) -> Arc<rayon::ThreadPool> {
 
 /// Rows in one band of the sky plane's work ([`sky_plane_until`]).
 const SKY_BAND_ROWS: usize = 8;
+
+/// **Previews' sky planes are baked one at a time, first asked first baked**
+/// ([`SkyWorker::preview`]). Planes baked together share the cores, so all of them land
+/// late together; in turn, the first card is lit in one plane's time.
+static PLANE_TURNS: PlaneTurns = PlaneTurns {
+    queue: Mutex::new(VecDeque::new()),
+    moved: std::sync::Condvar::new(),
+    next: std::sync::atomic::AtomicU64::new(0),
+};
+
+struct PlaneTurns {
+    /// Tickets waiting, the one baking at the front.
+    queue: Mutex<VecDeque<u64>>,
+    moved: std::sync::Condvar,
+    next: std::sync::atomic::AtomicU64,
+}
+
+/// A turn from [`PlaneTurns::take`]; dropping it hands the turn on.
+struct PlaneTurn(u64);
+
+impl PlaneTurns {
+    /// Wait for the front of the queue; `None` once `cancel` is set (looked at every 10 ms
+    /// at least: a dropped renderer joins this thread).
+    fn take(&'static self, cancel: &AtomicBool) -> Option<PlaneTurn> {
+        let ticket = self.next.fetch_add(1, Ordering::Relaxed);
+        let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.push_back(ticket);
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                q.retain(|&t| t != ticket);
+                drop(q);
+                self.moved.notify_all();
+                return None;
+            }
+            if q.front() == Some(&ticket) {
+                return Some(PlaneTurn(ticket));
+            }
+            q = self.moved.wait_timeout(q, Duration::from_millis(10)).unwrap_or_else(|e| e.into_inner()).0;
+        }
+    }
+}
+
+/// Test-only: hold the previews' plane queue as a plane being baked would; every preview's
+/// plane waits behind the turn until it is dropped.
+#[cfg(test)]
+pub(crate) fn hold_plane_turns() -> impl Sized + Send {
+    PLANE_TURNS.take(&AtomicBool::new(false)).expect("a turn")
+}
+
+/// Test-only: the tests that hold or watch the process's preview queues
+/// ([`PLANE_TURNS`], the still-world stagers' turns) take this first, so no two of them
+/// run into each other in one test process.
+#[cfg(test)]
+pub(crate) fn preview_queues() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Drop for PlaneTurn {
+    fn drop(&mut self) {
+        let mut q = PLANE_TURNS.queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.retain(|&t| t != self.0);
+        drop(q);
+        PLANE_TURNS.moved.notify_all();
+    }
+}
 
 /// Sky planes already computed, kept for a terrain that comes back: a candidate's thumbnail,
 /// then the same candidate opened large, then the world founded on it, each open a renderer
@@ -207,20 +274,35 @@ pub(crate) struct SkyWorker {
     /// Set on drop: the plane being computed is given up.
     cancel: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    /// The threads its planes are baked on.
+    #[cfg_attr(not(test), allow(dead_code))]
+    threads: usize,
 }
 
 impl SkyWorker {
+    /// A live world's worker: its plane on every core the process may use but one, which
+    /// the loop keeps. It runs once at start-up and again only when the terrain is edited.
     pub(crate) fn spawn() -> SkyWorker {
-        // One shared bounded pool across live worlds and all previews. Leave a core for
-        // the app, and avoid occupying the whole desktop during a batch of thumbnails.
         let threads = std::thread::available_parallelism()
             .map_or(1, |n| n.get())
             .saturating_sub(1)
-            .clamp(1, 8);
-        SkyWorker::with_threads(threads)
+            .max(1);
+        SkyWorker::with_threads(threads, false)
     }
 
-    fn with_threads(threads: usize) -> SkyWorker {
+    /// A still world's worker (a new-world preview): its plane waits its turn behind the
+    /// other previews' ([`PLANE_TURNS`]), so one plane is baked at a time, on the cores a
+    /// live world's would take: a batch of thumbnails takes no more of the machine than one
+    /// plane does, and the first asked is lit first instead of all of them late together.
+    pub(crate) fn preview() -> SkyWorker {
+        let threads = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .saturating_sub(1)
+            .max(1);
+        SkyWorker::with_threads(threads, true)
+    }
+
+    fn with_threads(threads: usize, queued: bool) -> SkyWorker {
         let (jobs, inbox) = mpsc::channel::<(u64, Config, Vec<Material>)>();
         let (outbox, done) = mpsc::channel();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -233,10 +315,23 @@ impl SkyWorker {
                         job = newer;
                     }
                     let (id, config, material) = job;
+                    let started = std::time::Instant::now();
                     let (dims, solid) = (dims_of(&config), solid_bits(&material));
+                    let mut how = "cached";
+                    let mut waited = 0.0;
+                    let turn = if queued && known_plane(dims, &solid).is_none() {
+                        let Some(turn) = PLANE_TURNS.take(&stop) else { break };
+                        waited = started.elapsed().as_secs_f64() * 1e3;
+                        Some(turn)
+                    } else {
+                        None
+                    };
+                    // Looked up again after a turn: another preview of the same terrain (a
+                    // card, then that card opened large) may have baked it meanwhile.
                     let plane = match known_plane(dims, &solid) {
                         Some(known) => known.as_ref().clone(),
                         None => {
+                            how = "baked";
                             let mut plane = vec![0u8; material.len()];
                             if !sky_plane_until(&config, &material, threads, &mut plane, &stop) {
                                 break;
@@ -245,6 +340,12 @@ impl SkyWorker {
                             plane
                         }
                     };
+                    drop(turn);
+                    super::pack_timer::render_timing(format_args!(
+                        "sky plane {}x{}x{} on {threads} threads: {how}, {:.0} ms after {waited:.0} ms waiting its turn",
+                        config.width, config.height, config.depth,
+                        started.elapsed().as_secs_f64() * 1e3 - waited,
+                    ));
                     if outbox.send((id, plane)).is_err() {
                         break;
                     }
@@ -257,6 +358,7 @@ impl SkyWorker {
             landed: None,
             cancel,
             thread: Some(thread),
+            threads,
         }
     }
 
@@ -1431,7 +1533,7 @@ mod tests {
         let view = world.view();
         let mut whole = vec![0u8; view.material.len()];
         sky_plane(&c, view.material, 1, &mut whole);
-        let mut worker = SkyWorker::with_threads(1);
+        let mut worker = SkyWorker::with_threads(1, false);
         assert!(!worker.wait(Duration::from_millis(1)), "nothing submitted, nothing finishes");
         worker.submit(7, &c, view.material);
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -1462,7 +1564,7 @@ mod tests {
         sky_plane(&c, view.material, 1, &mut full);
         let whole = at.elapsed();
 
-        let worker = SkyWorker::with_threads(1);
+        let worker = SkyWorker::with_threads(1, false);
         // The thread holds its own clone of the cancel flag for as long as it runs.
         let thread_alive = Arc::downgrade(&worker.cancel);
         worker.submit(1, &c, view.material);
@@ -1475,6 +1577,76 @@ mod tests {
             "the drop gave the plane up ({dropped:?}, the whole plane takes {whole:?})"
         );
         assert!(thread_alive.upgrade().is_none(), "the worker's thread has ended");
+    }
+
+    /// Planes waiting in the previews' queue, the one baking included.
+    fn plane_queue() -> usize {
+        PLANE_TURNS.queue.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    /// **Previews' sky planes bake one at a time, first asked first baked.** Three
+    /// previews ask, largest terrain first, while another plane holds the queue: none
+    /// lands meanwhile, and once it goes they land in the order asked. Baked together, the
+    /// smallest would land first.
+    #[test]
+    fn preview_planes_bake_one_at_a_time_in_request_order() {
+        let _queues = preview_queues();
+        // Terrains no other test bakes, so none is already known.
+        let shapes = [(150u32, 40u32, 20u32), (60, 20, 10), (20, 10, 5)];
+        let worlds: Vec<(Config, World)> = shapes
+            .iter()
+            .map(|&(width, height, depth)| {
+                let c = Config { width, height, depth, ..Config::default() };
+                let w = roofed(&c);
+                (c, w)
+            })
+            .collect();
+        let held = hold_plane_turns();
+        let before = plane_queue();
+        let mut workers: Vec<SkyWorker> = Vec::new();
+        for (k, (c, w)) in worlds.iter().enumerate() {
+            let worker = SkyWorker::preview();
+            worker.submit(1, c, w.view().material);
+            // Each asks only once the one before is in the queue.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while plane_queue() != before + k + 1 {
+                assert!(Instant::now() < deadline, "preview {k} never joined the queue ({} queued)", plane_queue());
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            workers.push(worker);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        for (k, w) in workers.iter_mut().enumerate() {
+            assert!(!w.wait(Duration::ZERO), "preview {k}'s plane landed while another held the queue");
+        }
+        drop(held);
+        let mut landed: Vec<usize> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while landed.len() < workers.len() {
+            assert!(Instant::now() < deadline, "only {landed:?} landed");
+            for (k, w) in workers.iter_mut().enumerate() {
+                if !landed.contains(&k) && w.wait(Duration::ZERO) {
+                    landed.push(k);
+                }
+            }
+            std::thread::yield_now();
+        }
+        assert_eq!(landed, vec![0, 1, 2], "planes landed out of request order");
+        for ((c, w), worker) in worlds.iter().zip(workers.iter_mut()) {
+            let view = w.view();
+            let mut whole = vec![0u8; view.material.len()];
+            sky_plane(c, view.material, 1, &mut whole);
+            assert_eq!(worker.poll(), Some((1, whole)), "a queued plane is the whole plane");
+        }
+    }
+
+    /// **A live world's plane is baked on every core the process may use but one**, not
+    /// a capped pool: it runs only at start-up and on an edit, and the loop keeps the one.
+    #[test]
+    fn a_live_worlds_plane_takes_every_core_but_one() {
+        let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+        let worker = SkyWorker::spawn();
+        assert_eq!(worker.threads, cores.saturating_sub(1).max(1), "{cores} cores");
     }
 
     fn flora(world: &World, stands: &[(i64, u32, Species)]) -> Flora {
