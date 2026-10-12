@@ -1428,10 +1428,63 @@ fn build_pipeline(
         .layout(layout)
         .render_pass(pass)
         .subpass(0)];
-    unsafe { d.create_graphics_pipelines(vk::PipelineCache::null(), &info, None) }
+    compile_turn(|| unsafe { d.create_graphics_pipelines(vk::PipelineCache::null(), &info, None) })
         .map_err(|(_, e)| anyhow!("vkCreateGraphicsPipelines: {e}"))
         .map(|p| p[0])
         .context("build a graphics pipeline")
+}
+
+/// **The driver's first compile from scratch runs alone.** Every pipeline creation goes
+/// through here.
+///
+/// NVIDIA's driver (seen on 615.71.09) loads its shader compiler (`libnvidia-rtcore`)
+/// the first time a creation misses its disk cache. It guards that load with an
+/// unsynchronised once-flag. Two threads that miss at the same moment can both run
+/// the load: one clears the compiler's function table while the other is about to call
+/// through it, and the process dies with a SIGSEGV at address 8 in
+/// `libnvidia-eglcore`/`glcore` (`call *0x8(%rax)`, rax = 0). Vulkan makes pipeline
+/// creation free-threaded, so this is the driver's bug. The renderer's parallel compile
+/// ([`crate::voxel::VoxelRenderer::with_pipelines`]) reaches it whenever its variants
+/// are the first misses in the process. That happens for a flat renderer on a cold
+/// cache, and for a lit one whose bloom pipeline is cached but whose walk variants are not.
+///
+/// So creations take turns until one returns with the compiler loaded. After that, or
+/// when NVIDIA's driver isn't in the process, they run free. A creation the cache
+/// holds passes its turn in well under a millisecond. On a cold cache the cost is that
+/// the first variant compiles alone, before the rest start together.
+///
+/// Limits:
+/// - The once-flag may belong to the device, not the process. A process that opens a
+///   second device after the compiler has loaded is not covered.
+/// - A process whose NVIDIA driver is mapped but which renders on another vendor's GPU
+///   keeps taking turns.
+pub(crate) fn compile_turn<R>(create: impl FnOnce() -> R) -> R {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static FREE: AtomicBool = AtomicBool::new(false);
+    if FREE.load(Ordering::Acquire) {
+        return create();
+    }
+    let turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    if FREE.load(Ordering::Acquire) {
+        drop(turn);
+        return create();
+    }
+    let made = create();
+    if !nvidia_compiler_pending() {
+        FREE.store(true, Ordering::Release);
+    }
+    made
+}
+
+/// Whether NVIDIA's driver is mapped into this process while its shader compiler is not
+/// yet loaded. False when the map can't be read.
+fn nvidia_compiler_pending() -> bool {
+    let Ok(maps) = std::fs::read_to_string("/proc/self/maps") else {
+        return false;
+    };
+    (maps.contains("libnvidia-glcore") || maps.contains("libnvidia-eglcore"))
+        && !maps.contains("libnvidia-rtcore")
 }
 
 #[cfg(test)]
