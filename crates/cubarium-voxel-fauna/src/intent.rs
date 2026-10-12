@@ -682,3 +682,40 @@ pub(crate) fn body_mask(fauna: &crate::Fauna, i: usize, founder: Founder) -> Vec
     let c = crate::subjects::candidates(fauna, i, founder, a.intent.subject);
     intent_mask(menu, young(fauna, a, founder), |f| c.any(f))
 }
+
+/// **Write a brain's decision** into body `i`'s record: its proposal (the most probable
+/// intent), its held intent and the subject its row stands for (`prep`'s candidates), the
+/// executed actions and any physical override. The brain ran its own hold.
+pub(crate) fn record_brain(
+    fauna: &mut crate::Fauna,
+    i: usize,
+    src: crate::Steer,
+    decision: &crate::Decision,
+    prep: &crate::subjects::DecisionPrep,
+    executed: Executed,
+) {
+    let now = fauna.tick;
+    let a = &fauna.animals[i];
+    let mut rec = a.intent;
+    let hit = a.wound > rec.last_wound + 1e-12;
+    rec.overridden = match Override::of_steer(src) {
+        Override::None if hit => Override::Hit,
+        o => o,
+    };
+    let n = prep.menu.min(MAX_MENU);
+    let proposal = (0..n).fold(0, |b, k| if decision.proposal[k] > decision.proposal[b] { k } else { b });
+    rec.proposal = proposal as u8;
+    let subject = decision.subject.and_then(|r| prep.candidates.rows.get(r)).map_or(Subject::None, |c| c.subject);
+    rec.proposal_subject = subject;
+    let held = decision.intent.min(n.saturating_sub(1));
+    if usize::from(rec.held) != held || rec.sample_tick == 0 {
+        rec.since_tick = now;
+    }
+    rec.held = held as u8;
+    rec.subject = subject;
+    rec.ended = prep.early_end;
+    rec.executed = executed;
+    rec.sample_tick = now;
+    rec.last_wound = fauna.animals[i].wound;
+    fauna.animals[i].intent = rec;
+}

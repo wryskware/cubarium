@@ -140,7 +140,7 @@ pub use edit::{BodySpec, BodyStage, Group, Lifted, Placed, Spot};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, Seek, heuristic, resolve_actions,
-    BodyActions, Layer, Resolved, resolve,
+    BodyActions, Layer, Resolved, resolve, BrainMemory, Decision, DecisionInput,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
@@ -4222,6 +4222,10 @@ pub struct Fauna {
     /// name of the Veilhound's menu), the label its intent record takes. Session state.
     #[serde(skip)]
     pub(crate) pack_hint: FxHashMap<u64, &'static str>,
+    /// CONTRACTS: brains' memories read from a save, each handed back to its body's
+    /// controller ([`Controller::restore`]) before the body's next sample.
+    #[serde(skip)]
+    pub(crate) brain_memory: FxHashMap<u64, BrainMemory>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4456,13 +4460,42 @@ pub struct TapSample {
     pub steer: Steer,
 }
 
+/// **One decision sample in the tap** (CONTRACTS, the cloning record of §10.2 and §11.3): the
+/// inputs a menu brain would get ([`subjects::DecisionPrep`]: mask, candidates, row masks, the
+/// held row and the early end), the intent held before the sample, the label **before** the
+/// hold (`proposal`, its subject's row), and what was held after it, with the executed
+/// actions and any physical override.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapDecision {
+    pub tick: u64,
+    pub prep: subjects::DecisionPrep,
+    pub held_before: u8,
+    pub proposal: u8,
+    pub proposal_row: Option<usize>,
+    pub held: u8,
+    pub held_row: Option<usize>,
+    pub executed: Executed,
+    pub overridden: Override,
+}
+
 /// The tap's recording: one stream per body, by id ([`Fauna::tap`]).
 #[derive(Clone, Debug, Default)]
 pub struct ActionTap {
     streams: std::collections::BTreeMap<u64, (Founder, Vec<TapSample>)>,
+    /// CONTRACTS: the menu bodies' decision samples, by id.
+    decisions: std::collections::BTreeMap<u64, (Founder, Vec<TapDecision>)>,
 }
 
 impl ActionTap {
+    /// Body `id`'s decision samples so far (menu lineages only).
+    pub fn decisions(&self, id: u64) -> Option<&[TapDecision]> {
+        self.decisions.get(&id).map(|(_, s)| s.as_slice())
+    }
+
+    pub(crate) fn push_decision(&mut self, id: u64, founder: Founder, sample: TapDecision) {
+        self.decisions.entry(id).or_insert_with(|| (founder, Vec::new())).1.push(sample);
+    }
+
     /// Body `id`'s stream so far.
     pub fn stream(&self, id: u64) -> Option<&[TapSample]> {
         self.streams.get(&id).map(|(_, s)| s.as_slice())
@@ -4475,7 +4508,7 @@ impl ActionTap {
 
     /// A recording from per-body streams (tools and tests that read a saved one).
     pub fn from_streams(streams: impl IntoIterator<Item = (u64, Founder, Vec<TapSample>)>) -> ActionTap {
-        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect() }
+        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect(), decisions: Default::default() }
     }
 
     /// Finalize only this tick's sample, after the motor's stamina gate runs.
@@ -4759,6 +4792,7 @@ impl Fauna {
             face_sky: (None, FxHashMap::default()),
             steer: FxHashMap::default(),
             pack_hint: FxHashMap::default(),
+            brain_memory: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),

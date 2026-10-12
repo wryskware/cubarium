@@ -1514,6 +1514,10 @@ struct Sensed {
     tapped: Option<Vec<f64>>,
     /// Body actions are held even when no tap records.
     body: crate::controller::BodyActions,
+    /// CONTRACTS: a menu brain's decision, and the decision sample's inputs (built for a
+    /// menu lineage's brain, or while the tap records a menu body).
+    decision: Option<crate::Decision>,
+    prep: Option<crate::subjects::DecisionPrep>,
 }
 
 /// The fewest due bodies one observation job takes.
@@ -1678,6 +1682,16 @@ fn controllers(
         s.index_light(view);
     }
     let ids: Vec<u64> = due.iter().map(|&i| fauna.animals[i].id).collect();
+    // CONTRACTS: a loaded brain's memory goes back to its controller before it samples.
+    if !fauna.brain_memory.is_empty() {
+        for &id in &ids {
+            if fauna.controllers.has(id) {
+                if let Some(m) = fauna.brain_memory.remove(&id) {
+                    fauna.controllers.restore(id, &m);
+                }
+            }
+        }
+    }
     let tap = fauna.tap.is_some();
     let mut table = std::mem::take(&mut fauna.controllers);
     let sensed: Vec<Sensed> = {
@@ -1721,9 +1735,25 @@ fn controllers(
                     .collect::<Vec<f64>>();
                 &masked
             };
+            // CONTRACTS: a menu lineage's brain decides with its intent mask and candidates; a
+            // plain lineage (and every heuristic) is driven exactly as before.
+            let menu_body = !manifest.menu.plain();
+            let mut decision = None;
+            let mut prep = None;
             let (resolved, seek, body_controlled, driven) = match slot.as_deref_mut() {
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
-                    let response = c.drive(seen);
+                    let brain = c.layer() == crate::Layer::Brain;
+                    if menu_body && (brain || tap) {
+                        prep = Some(crate::subjects::decision_prep(fauna, i, founder));
+                    }
+                    let response = match prep.as_ref() {
+                        Some(p) if brain => {
+                            let (r, d) = c.decide(seen, &p.input());
+                            decision = d;
+                            r
+                        }
+                        _ => c.drive(seen),
+                    };
                     {
                         let body_controlled = match response {
                             crate::Response::Body(_, _) => true,
@@ -1742,7 +1772,7 @@ fn controllers(
                 _ => (crate::controller::Resolved::default(), crate::Seek::Unknown, false, false),
             };
             let tapped = tap.then_some(obs);
-            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body }
+            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body, decision, prep }
         };
         // Several jobs per worker: one body's observation can cost many another's (a
         // flyer's fan), and the pool evens that out as workers come free.
@@ -2195,14 +2225,50 @@ fn controllers(
         fauna.walk_commit(id, founder, src);
         // CONTRACTS: the intent record (records only; no rule reads it).
         if driven {
-            let teach = if heuristic {
-                crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
-            } else {
-                crate::intent::Teach::default()
-            };
-            let valid = crate::intent::body_mask(fauna, i, founder);
-            let executed = crate::Executed { actions, ..crate::Executed::default() };
-            crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
+            let held_before = fauna.animals[i].intent;
+            match (sensed[k].decision, sensed[k].prep.as_ref()) {
+                (Some(d), Some(prep)) => {
+                    let executed = crate::Executed {
+                        actions,
+                        kick: false,
+                        call: d.call,
+                        rest: if d.rest { crate::RestAsk::Rest } else { crate::RestAsk::Default },
+                    };
+                    crate::intent::record_brain(fauna, i, src, &d, prep, executed);
+                }
+                _ => {
+                    let teach = if heuristic {
+                        crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
+                    } else {
+                        crate::intent::Teach::default()
+                    };
+                    let valid = match sensed[k].prep.as_ref() {
+                        Some(p) => p.intent_mask.clone(),
+                        None => crate::intent::body_mask(fauna, i, founder),
+                    };
+                    let executed = crate::Executed { actions, ..crate::Executed::default() };
+                    crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
+                }
+            }
+            // The decision tap: the sample's inputs, the label before the hold and what was
+            // held, for cloning (§10.2, §11.3).
+            if let (Some(prep), true) = (sensed[k].prep.as_ref(), fauna.tap.is_some()) {
+                let rec = fauna.animals[i].intent;
+                let sample = crate::TapDecision {
+                    tick: fauna.tick,
+                    prep: prep.clone(),
+                    held_before: held_before.held,
+                    proposal: rec.proposal,
+                    proposal_row: prep.candidates.row_of(rec.proposal_subject),
+                    held: rec.held,
+                    held_row: prep.candidates.row_of(rec.subject),
+                    executed: rec.executed,
+                    overridden: rec.overridden,
+                };
+                if let Some(t) = fauna.tap.as_mut() {
+                    t.push_decision(id, founder, sample);
+                }
+            }
         }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;

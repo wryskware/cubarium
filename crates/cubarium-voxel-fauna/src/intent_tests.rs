@@ -319,3 +319,121 @@ fn plain_manifests_carry_no_intent_contract_and_menu_ones_add_it_after_the_v3_te
         }
     }
 }
+
+// ---- Step 3: the brain boundary ----
+
+use crate::{Actions, BrainMemory, Controller, Decision, DecisionInput, Response};
+use std::sync::{Arc, Mutex};
+
+/// A brain that answers rest, records what each decision sample gave it, and answers a fixed
+/// decision; `drive` alone counts too.
+#[derive(Clone)]
+struct Probe {
+    seen: Arc<Mutex<Vec<(usize, usize, usize, usize, usize)>>>,
+    drives: Arc<Mutex<usize>>,
+    answer: Decision,
+    memory: Option<BrainMemory>,
+}
+
+impl Controller for Probe {
+    fn drive(&mut self, _o: &[f64]) -> Response {
+        *self.drives.lock().unwrap() += 1;
+        Response::Bounded(Actions::REST)
+    }
+    fn reset(&mut self) {}
+    fn decide(&mut self, _o: &[f64], input: &DecisionInput<'_>) -> (Response, Option<Decision>) {
+        self.seen.lock().unwrap().push((input.menu, input.intent_mask.len(), input.rows(), input.candidates.len(), input.candidate_mask.len()));
+        (Response::Bounded(Actions::REST), Some(self.answer))
+    }
+    fn memory(&self) -> Option<BrainMemory> {
+        self.memory.clone()
+    }
+    fn restore(&mut self, m: &BrainMemory) -> bool {
+        self.memory = Some(m.clone());
+        true
+    }
+}
+
+fn probe(answer: Decision) -> Probe {
+    Probe { seen: Arc::default(), drives: Arc::default(), answer, memory: None }
+}
+
+#[test]
+fn a_plain_lineage_brain_is_driven_as_before_and_a_menu_brain_decides_with_the_manifest_dims() {
+    let w = clock_off(3);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(quiet_config());
+    let plain = introduce(&mut f, &w, Founder::Browser, StartingStores::FULL);
+    let menu = introduce(&mut f, &w, Founder::Loftstrider, StartingStores::FULL);
+    place(&mut f, plain, 2.0, LANE_Z, EAST);
+    place(&mut f, menu, 8.0, LANE_Z, EAST);
+    let (p, m) = (probe(Decision::default()), probe(Decision { intent: 0, ..Decision::default() }));
+    f.controllers.set(plain, Box::new(p.clone()));
+    f.controllers.set(menu, Box::new(m.clone()));
+    for _ in 0..40 {
+        f.step(&w, &mut flora);
+    }
+    assert!(p.seen.lock().unwrap().is_empty(), "a plain brain never gets a decision sample");
+    assert!(*p.drives.lock().unwrap() > 0);
+    let seen = m.seen.lock().unwrap();
+    assert!(!seen.is_empty());
+    let man = f.config.manifest(Founder::Loftstrider);
+    let (n, k, fw) = (man.menu.len(), man.candidates(), man.row_width());
+    for &(menu_len, mask_len, rows, flat, cmask) in seen.iter() {
+        assert_eq!((menu_len, mask_len, rows, flat, cmask), (n, n, k, k * fw, k * n));
+    }
+}
+
+#[test]
+fn a_brains_subject_row_is_recorded_as_the_body_it_stands_for() {
+    let (w, mut f, me, ids) = observer_world(&[Founder::Chorister]);
+    let mut flora = Flora::new(FloraConfig::default());
+    let hound = ids[0];
+    let lm = menu_of(Founder::Loftstrider);
+    let watch = lm.index("watch").unwrap();
+    // Its threat slot is the first after the kin slots.
+    let row = f.config.manifest(Founder::Loftstrider).kin_slots;
+    let mut proposal = [0.0; intent::MAX_MENU];
+    proposal[watch] = 1.0;
+    let m = probe(Decision { intent: watch, subject: Some(row), proposal, ..Decision::default() });
+    f.controllers.set(me, Box::new(m));
+    for _ in 0..8 {
+        let now = f.tick;
+        set_tracks(&mut f, me, &[track(hound, class::THREAT, 7.0, 1.0, now)]);
+        f.step(&w, &mut flora);
+    }
+    let r = f.view().animal(me).unwrap().intent;
+    assert_eq!(usize::from(r.held), watch);
+    assert_eq!(usize::from(r.proposal), watch);
+    assert_eq!(r.subject.body(), Some(hound));
+}
+
+#[test]
+fn the_tap_records_a_menu_teachers_decision_samples_with_the_label_before_the_hold() {
+    let (w, mut flora, mut f, ids) = mixed_world(quiet_config());
+    f.start_tap();
+    for _ in 0..120 {
+        f.step(&w, &mut flora);
+    }
+    let tap = f.take_tap().unwrap();
+    let mut n = 0;
+    for &id in &ids {
+        let Some(founder) = f.view().animal(id).and_then(|a| a.founder) else { continue };
+        let man = f.config.manifest(founder);
+        let ds = tap.decisions(id).unwrap_or(&[]);
+        if man.menu.plain() {
+            assert!(ds.is_empty());
+            continue;
+        }
+        for d in ds {
+            n += 1;
+            assert_eq!(d.prep.kinds.len(), man.candidates());
+            assert_eq!(d.prep.intent_mask.len(), man.menu.len());
+            assert!(d.prep.intent_mask[usize::from(d.held)], "a held intent is valid");
+            if let Some(r) = d.held_row {
+                assert!(d.prep.candidate_mask[r * man.menu.len() + usize::from(d.held)], "a held subject's row is valid for it");
+            }
+        }
+    }
+    assert!(n > 0);
+}

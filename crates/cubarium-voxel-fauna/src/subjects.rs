@@ -325,3 +325,63 @@ pub fn candidates(fauna: &Fauna, i: usize, founder: Founder, held: Subject) -> C
     rows.extend(std::iter::repeat_n(Candidate::default(), nplace - n));
     Candidates { rows }
 }
+
+/// **One decision sample's inputs beyond the observation** for body `i` (the producer of
+/// [`crate::DecisionInput`]): its intent mask, candidates, row masks, the held subject's row
+/// and the early-end flag, read from its record before this sample.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DecisionPrep {
+    pub menu: usize,
+    pub intent_mask: Vec<bool>,
+    pub candidates: Candidates,
+    pub flat: Vec<f64>,
+    pub kinds: Vec<RowKind>,
+    pub candidate_mask: Vec<bool>,
+    pub held_row: Option<usize>,
+    pub early_end: Option<crate::EarlyEnd>,
+}
+
+impl DecisionPrep {
+    /// The borrowed view a controller gets.
+    pub fn input(&self) -> crate::DecisionInput<'_> {
+        crate::DecisionInput {
+            menu: self.menu,
+            intent_mask: &self.intent_mask,
+            candidates: &self.flat,
+            row_width: ROW_WIDTH,
+            kinds: &self.kinds,
+            candidate_mask: &self.candidate_mask,
+            held_row: self.held_row,
+            early_end: self.early_end,
+        }
+    }
+}
+
+/// Body `i`'s [`DecisionPrep`] (read only).
+pub fn decision_prep(fauna: &Fauna, i: usize, founder: Founder) -> DecisionPrep {
+    let a = &fauna.animals[i];
+    let menu = crate::intent::menu_of(founder);
+    let knobs = fauna.config.founder(founder).intent;
+    let rec = a.intent;
+    let held_subject = crate::intent::check_subject(fauna, a.id, rec.subject, knobs.subject_lost_s);
+    let candidates = candidates(fauna, i, founder, held_subject.unwrap_or(Subject::None));
+    let young = crate::intent::young(fauna, a, founder);
+    let intent_mask = crate::intent::intent_mask(menu, young, |f| candidates.any(f));
+    let early_end = match held_subject {
+        Err(why) => Some(why),
+        Ok(_) if !intent_mask.get(usize::from(rec.held)).copied().unwrap_or(false) => Some(crate::EarlyEnd::Masked),
+        Ok(_) if rec.overridden != crate::Override::None => Some(crate::EarlyEnd::Emergency),
+        Ok(_) => None,
+    };
+    let held_row = held_subject.ok().and_then(|s| candidates.row_of(s));
+    DecisionPrep {
+        menu: menu.len(),
+        candidate_mask: candidates.mask(menu),
+        flat: candidates.flat(),
+        kinds: candidates.rows.iter().map(|c| c.kind).collect(),
+        intent_mask,
+        candidates,
+        held_row,
+        early_end,
+    }
+}
