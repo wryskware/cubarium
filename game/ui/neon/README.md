@@ -7,7 +7,7 @@ Where to edit what:
 | Piece | Resource | Inspector |
 |---|---|---|
 | Type roles, axes, letter spacing | `fonts/*.tres` (FontVariation) | Variation > OpenType (wght, ELSH; Gridlite's own BACK and RECT stay at 1), Spacing > Glyph, Baseline Offset; Metadata dot_back, dot_rect (the role's BACK and RECT) |
-| Gridlite's unlit dots, drawn on whole pixels | `neon_dot_field.gd` (NeonDotField), added to every Gridlite label by the `NeonDots` autoload (`neon_dots.gd`); geometry in `gridlite.gd` | `neon_theme.tres` Label constants dot_light (percent of the font's light, 100), dot_min_gap (px between dots, 0), dot_fill_spacing (fill letter spacing, 0) |
+| Gridlite's unlit dots, drawn on whole pixels | `neon_dot_field.gd` (NeonDotField), added to every Gridlite label by the `NeonDots` autoload (`neon_dots.gd`); geometry in `gridlite.gd` | `neon_theme.tres` Label constants dot_light (percent of the font's light, 100), dot_min_gap (px between dots, 0), dot_fill_spacing (fill letter spacing, 0), dot_scaled_keep_pitch (below UI scale 1 everything draws solid unless the role's on-screen pitch is at least this many tenths of a px, 45: the title stays dotted down to about 0.64) |
 | Sizes and colours per role | `neon_theme.tres` | Theme editor: Label variations (TitleLabel, BigNumber, Kicker, FactLabel, ChromeLabel, BodyText, ListText, SmallText, Keycap...) |
 | Main panel: ring, glow, fill | `styles/main_panel.tres` (StyleBoxNeonFrame) | Ring, Glow, Fill Style |
 | Dithered bands | `styles/panel_bands.tres` (StyleBoxNeonBands) | Colors, Edges, Cell, Blend |

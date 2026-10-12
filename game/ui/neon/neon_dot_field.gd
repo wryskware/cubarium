@@ -34,6 +34,22 @@ extends Control
 ## - dot_fill_spacing: 1 also fills the letter-spacing columns (spacing_glyph) with RECT
 ##   dots; 0 leaves them empty, as the font does.
 ##
+## - dot_scaled_keep_pitch: see "Scaled UI" below, in tenths of a px; 0 never keeps the dots.
+##
+## Scaled UI (ui-scale, 2026-10-11; Wrysk: "when we scale, we default back to solid"):
+## whenever the label (or the control drawing text) is drawn at a scale other than 1
+## (WindowFit shrinks the whole UI on small windows), the dots' pitch turns fractional and
+## the plates and the font's own lit dots beat into stripes. So it is drawn solid instead:
+## every cell of each zone (BACK, RECT, and the lit letters) is filled flat, carrying the
+## same light per area as its dotted cell (the dot, plus its gap fill; for the letters the
+## font's lit dot at its wght), and the label's own glyphs are hidden (self_modulate alpha
+## 0) so only the solid cells show. Letters become solid pixel strokes on the cell grid; a
+## negative label stays a plate with its letters cut out. dot_scaled_keep_pitch (tenths of
+## a px on screen) keeps a role dotted when scaled as long as its on-screen pitch is at least
+## that: 45 (Wrysk, 2026-10-11) keeps the 91 px title dotted at 0.667 (pitch 4.67 px) and
+## makes it solid at 0.6 (4.2 px, where its dots clump in pairs); chrome is always solid
+## when scaled. At scale 1 nothing changes.
+##
 ## Uniform mode (follow_label off; the chrome-dots trial, tests/font_trial_shots.gd): a
 ## `dot_size` square of `color` at `first` + k × `pitch` across the control's rect.
 
@@ -43,6 +59,9 @@ const LIGHT_DEFAULT := 100
 const MIN_GAP_DEFAULT := 0
 const FILL_SPACING_DEFAULT := 0
 const GAP_FILL_DEFAULT := 0
+const SCALED_KEEP_PITCH_DEFAULT := 0
+## The label's own glyphs are hidden by us (solid when scaled).
+const _HIDDEN := &"_neon_solid_hidden"
 
 @export var color := Color(0.97, 0.94, 1.0, 0.5):
 	set(v):
@@ -125,11 +144,14 @@ func _draw() -> void:
 
 
 func _draw_label(l: Label) -> void:
-	if not l.is_visible_in_tree() or l.text == "":
-		return
 	var font := l.get_theme_font("font")
 	var spec := Gridlite.field_spec(font)
-	if spec.is_empty():
+	var font_size := l.get_theme_font_size("font_size")
+	var knobs := _knobs(l, true, _button_state(l))
+	var solid := not spec.is_empty() and solid_at(l, font_size, knobs)
+	if layer == Layer.TEXT:
+		_hide_glyphs(l, solid)
+	if not l.is_visible_in_tree() or l.text == "" or spec.is_empty():
 		return
 	var c := l.get_theme_color("font_color")
 	var off := Vector2.ZERO
@@ -138,7 +160,6 @@ func _draw_label(l: Label) -> void:
 		off = Vector2(l.get_theme_constant("shadow_offset_x"), l.get_theme_constant("shadow_offset_y"))
 	if c.a <= 0.0:
 		return
-	var font_size := l.get_theme_font_size("font_size")
 	var text := l.text.to_upper() if l.uppercase else l.text
 	var glyphs := _glyphs(font, font_size, text)
 	# each glyph's pen position from the label's own layout (alignment, wrapping)
@@ -147,8 +168,42 @@ func _draw_label(l: Label) -> void:
 		var b := l.get_character_bounds(g.start)
 		if b.size == Vector2.ZERO:
 			g.index = -1  # not shown (clipped, trimmed or past visible_characters)
-		g.pen = _pen(Vector2(b.position.x, b.position.y + asc) + g.offset, l)
-	draw_glyph_zones(self, font, font_size, glyphs, c, off, _knobs(l, true, _button_state(l)))
+			g.rid = RID()
+		var pen: Vector2 = Vector2(b.position.x, b.position.y + asc) + g.offset
+		g.pen = pen if solid else _pen(pen, l)
+	if solid:
+		draw_glyph_cells_solid(self, font, font_size, glyphs, c, off, knobs)
+	else:
+		draw_glyph_zones(self, font, font_size, glyphs, c, off, knobs)
+
+
+## Whether `ci` draws Gridlite text at `font_size` solid (see "Scaled UI" above): it is
+## drawn at a scale other than 1, and the role doesn't keep its dots there.
+static func solid_at(ci: CanvasItem, font_size: int, knobs: Dictionary) -> bool:
+	var s := ci.get_global_transform_with_canvas().get_scale().abs()
+	if absf(s.x - 1.0) <= 0.001 and absf(s.y - 1.0) <= 0.001:
+		return false
+	var keep: int = knobs.get("keep_pitch", SCALED_KEEP_PITCH_DEFAULT)
+	return keep <= 0 or Gridlite.pitch_px(font_size) * minf(s.x, s.y) * 10.0 < keep
+
+
+## Whether draw_string_field() draws the letters too (solid), so the caller must not
+## draw_string() them itself.
+static func draws_letters(ci: CanvasItem, font: Font, font_size: int) -> bool:
+	if Gridlite.field_spec(font).is_empty():
+		return false
+	return solid_at(ci, font_size, _knobs(ci as Control, false) if ci is Control else _knobs(null, false))
+
+
+## Hides (or shows again) the label's own glyphs while its field draws them solid. Only a
+## label this hid is ever shown again, so at scale 1 nothing is touched.
+static func _hide_glyphs(l: Label, hide: bool) -> void:
+	if hide:
+		l.set_meta(_HIDDEN, true)
+		l.self_modulate = Color(1, 1, 1, 0)
+	elif l.has_meta(_HIDDEN):
+		l.remove_meta(_HIDDEN)
+		l.self_modulate = Color.WHITE
 
 
 ## The drawn Gridlite field for text a control draws itself with draw_string(): call it
@@ -159,6 +214,8 @@ static func draw_string_field(ci: CanvasItem, font: Font, pos: Vector2, text: St
 		modulate := Color.WHITE) -> void:
 	if Gridlite.field_spec(font).is_empty() or text == "":
 		return
+	var knobs := _knobs(ci as Control, false) if ci is Control else _knobs(null, false)
+	var solid := solid_at(ci, font_size, knobs)
 	var glyphs := _glyphs(font, font_size, text)
 	var w := 0.0
 	for g in glyphs:
@@ -169,10 +226,12 @@ static func draw_string_field(ci: CanvasItem, font: Font, pos: Vector2, text: St
 			HORIZONTAL_ALIGNMENT_CENTER: x += floorf((width - w) / 2.0)
 			HORIZONTAL_ALIGNMENT_RIGHT: x += width - w
 	for g in glyphs:
-		g.pen = _pen(Vector2(x, pos.y) + g.offset, ci)
+		g.pen = Vector2(x, pos.y) + g.offset if solid else _pen(Vector2(x, pos.y) + g.offset, ci)
 		x += g.advance
-	var knobs := _knobs(ci as Control, false) if ci is Control else _knobs(null, false)
-	draw_glyph_zones(ci, font, font_size, glyphs, modulate, Vector2.ZERO, knobs)
+	if solid:
+		draw_glyph_cells_solid(ci, font, font_size, glyphs, modulate, Vector2.ZERO, knobs)
+	else:
+		draw_glyph_zones(ci, font, font_size, glyphs, modulate, Vector2.ZERO, knobs)
 
 
 ## Draws the zones behind `glyphs` (from _glyphs, each with its `pen`: the pen position on
@@ -230,6 +289,82 @@ static func draw_glyph_zones(ci: CanvasItem, font: Font, font_size: int, glyphs:
 						ci.draw_rect(Rect2(dot_at + r2.position, r2.size), gap_col)
 
 
+## The scaled-UI fallback of draw_glyph_zones(): every cell of `glyphs` filled flat, in
+## all three zones, each at the light per area its dotted cell carries, so nothing is left
+## to beat against the screen. RECT and BACK: the whole-pixel dot draw_glyph_zones() would
+## draw (Gridlite.whole_dot) plus its gap fill, over the cell. Lit: the font's own lit dot
+## at its wght (Gridlite.dot_light), over the cell. Runs of one zone in a row are one
+## rect. Glyphs from a fallback font are drawn as glyphs.
+static func draw_glyph_cells_solid(ci: CanvasItem, font: Font, font_size: int, glyphs: Array,
+		c: Color, off: Vector2, knobs: Dictionary) -> void:
+	var alpha := cell_alphas(font, font_size, knobs)
+	if alpha.is_empty():
+		return
+	var spec := Gridlite.field_spec(font)
+	var base: Font = (font as FontVariation).base_font
+	var p := Gridlite.pitch_px(font_size)
+	var fill_spacing: bool = knobs.fill_spacing or spec.uniform >= 0.0
+	var ts := TextServerManager.get_primary_interface()
+	for g in glyphs:
+		if g.index < 0:
+			if g.rid.is_valid() and g.glyph > 0:
+				ts.font_draw_glyph(g.rid, ci.get_canvas_item(), font_size, g.pen + off, g.glyph, c)
+			continue
+		var cells := Gridlite.cells(base, g.index)
+		var cols: int = Gridlite.COLUMNS
+		if fill_spacing:
+			# whole cells only: a cell past the advance would overlap the next glyph's
+			cols = maxi(cols, int(floorf(g.advance / p + 0.01)))
+		for r in Gridlite.ROWS:
+			var top: float = g.pen.y - (r + Gridlite.ROW_LOW) * p - p / 2.0 + off.y
+			var k := 0
+			while k < cols:
+				var z: int = cells[r * Gridlite.COLUMNS + k] if k < Gridlite.COLUMNS else Gridlite.Zone.RECT
+				var run := 1
+				while k + run < cols:
+					var z2: int = cells[r * Gridlite.COLUMNS + k + run] if k + run < Gridlite.COLUMNS else Gridlite.Zone.RECT
+					if z2 != z:
+						break
+					run += 1
+				var a: float = alpha[z]
+				if a > 0.0:
+					var left: float = g.pen.x + k * p - p / 2.0 + off.x
+					ci.draw_rect(Rect2(left, top, run * p, p), Color(c, c.a * a))
+				k += run
+
+
+## The light per area (an alpha, 0..1) of one cell of each zone at `font_size`, as the
+## dotted field (and the font's lit dots) carry it: {Zone: alpha}. Empty for a font
+## without a drawn field.
+static func cell_alphas(font: Font, font_size: int, knobs: Dictionary) -> Dictionary:
+	var spec := Gridlite.field_spec(font)
+	if spec.is_empty():
+		return {}
+	var base: Font = (font as FontVariation).base_font
+	var p := Gridlite.pitch_px(font_size)
+	var pi := maxi(1, int(roundf(p)))
+	var area := p * p
+	var res := {}
+	if spec.uniform >= 0.0:
+		res[Gridlite.Zone.RECT] = spec.uniform / area
+		res[Gridlite.Zone.BACK] = spec.uniform / area
+	else:
+		var light_scale: float = knobs.light / 100.0
+		for z in [[Gridlite.Zone.BACK, spec.back], [Gridlite.Zone.RECT, spec.rect]]:
+			var light: float = Gridlite.dot_light(base, z[1], spec.elsh, font_size) * light_scale
+			var cell := 0.0
+			if light > 0.0:
+				var d := Gridlite.whole_dot(light, pi, knobs.min_gap)
+				var n: int = d.size
+				cell = d.alpha * n * n
+				if knobs.min_gap > 0 and n < pi:
+					cell += d.alpha * knobs.gap_fill / 100.0 * (pi * pi - n * n)
+			res[z[0]] = minf(1.0, cell / area)
+	var wght := Gridlite.axis(font as FontVariation, "wght", 400.0)
+	res[Gridlite.Zone.LIT] = minf(1.0, Gridlite.dot_light(base, wght, spec.elsh, font_size) / area)
+	return res
+
+
 ## The rest of a `pitch` x `pitch` cell around an `n` x `n` dot, as rects relative to the
 ## dot's top-left: the cell lies (pitch - n) / 2 px out from the dot on each side, rounded
 ## the way the dot's own centre rounds (an odd remainder puts the extra pixel left/above).
@@ -267,7 +402,8 @@ static func _glyphs(font: Font, font_size: int, text: String) -> Array:
 		# a glyph from a fallback font, or .notdef, keeps its advance but gets no dots
 		var gridlite: bool = g.font_rid == own and g.index != 0
 		res.append({"index": g.index if gridlite else -1, "start": g.start,
-			"advance": g.advance * g.repeat, "offset": g.offset})
+			"advance": g.advance * g.repeat, "offset": g.offset,
+			"rid": RID() if gridlite else g.font_rid, "glyph": g.index})
 	return res
 
 
@@ -286,7 +422,7 @@ static func _button_state(c: Control) -> StringName:
 
 static func _knobs(c: Control, own_type: bool, state := &"") -> Dictionary:
 	var k := {"light": LIGHT_DEFAULT, "min_gap": MIN_GAP_DEFAULT, "fill_spacing": FILL_SPACING_DEFAULT != 0,
-		"gap_fill": GAP_FILL_DEFAULT}
+		"gap_fill": GAP_FILL_DEFAULT, "keep_pitch": SCALED_KEEP_PITCH_DEFAULT}
 	if c == null:
 		return k
 	var t: StringName = &"" if own_type else &"Label"
@@ -304,4 +440,6 @@ static func _knobs(c: Control, own_type: bool, state := &"") -> Dictionary:
 		k.gap_fill = clampi(c.get_theme_constant(fill, t), 0, 100)
 	if c.has_theme_constant("dot_fill_spacing", t):
 		k.fill_spacing = c.get_theme_constant("dot_fill_spacing", t) != 0
+	if c.has_theme_constant("dot_scaled_keep_pitch", t):
+		k.keep_pitch = c.get_theme_constant("dot_scaled_keep_pitch", t)
 	return k

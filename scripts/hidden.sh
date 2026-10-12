@@ -7,6 +7,8 @@
 # Default: the command runs on its own Xvfb display with Wayland unset, so no number of
 # windows it opens can appear anywhere. Its output, exit status and environment are this
 # shell's. Use this for everything that doesn't need the real compositor.
+# CUBARIUM_HIDDEN_SCREEN=WxH sets that display's size (default 3840x2160), e.g. 2560x720
+# to see how the app starts on a short, wide screen.
 #
 # --hyprland: for the rare test that needs Hyprland itself (Wayland presentation, a
 # hidden window's frame pacing). Hyprland launches the command with a rule that puts its
@@ -28,7 +30,7 @@ export CUBARIUM_HIDDEN_LAUNCH=1
 if [ "$mode" = xvfb ]; then
   exec env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u HYPRLAND_INSTANCE_SIGNATURE \
     XDG_SESSION_TYPE=x11 \
-    xvfb-run -a -s "-screen 0 3840x2160x24" "$@"
+    xvfb-run -a -s "-screen 0 ${CUBARIUM_HIDDEN_SCREEN:-3840x2160}x24" "$@"
 fi
 
 # The live Hyprland: the exported signature if its socket answers, otherwise the newest
