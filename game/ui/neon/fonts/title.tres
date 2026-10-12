@@ -5,9 +5,11 @@
 [resource]
 base_font = ExtResource("1_rp2pt")
 variation_opentype = {
-1111573323: 90.0,
+1111573323: 1.0,
 1162629960: 3.5,
-1380270932: 120.0,
+1380270932: 1.0,
 2003265652: 700.0
 }
 baseline_offset = -0.038
+metadata/dot_back = 90.0
+metadata/dot_rect = 120.0
