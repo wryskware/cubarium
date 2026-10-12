@@ -458,6 +458,7 @@ fn founder_rows() -> Vec<Row> {
         r("rest.rush_over_cruise", "x cruise", nonneg, "CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no)"),
         r("rest.bed_scent", "x smell_min", nonneg, "CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands)"),
         r("rest.bed_search_s", "s", nonneg, "CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset"),
+        r("rest.brain_bout_s", "s", nonneg, "BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
