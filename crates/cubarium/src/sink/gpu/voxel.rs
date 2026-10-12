@@ -539,6 +539,11 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         self.figure_tick = None;
     }
 
+    /// Resident compiled-pipeline reuse counters for this sink's device.
+    pub fn pipeline_cache_stats(&self) -> cubarium_gpu::pipeline_cache::Stats {
+        self.gpu.pipeline_cache_stats()
+    }
+
     pub fn params(&self) -> VoxelParams {
         self.renderer.params()
     }

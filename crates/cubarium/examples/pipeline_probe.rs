@@ -88,7 +88,7 @@ fn open(cfg: &VoxelConfig, proj: Projection, kind: Pipelines) -> Result<f64> {
     let o = OffscreenOptions { pipelines: kind, sky: SkyBake::Never, sky_fade_s: 0.0 };
     let sink: VoxelGpuSink<Offscreen> = VoxelGpuSink::offscreen_with(cfg, proj, models, o)?;
     let ms = started.elapsed().as_secs_f64() * 1e3;
-    let cache = sink.gpu.pipeline_cache_stats();
+    let cache = sink.pipeline_cache_stats();
     println!("PROBE resident pipelines={} shader_modules={} layouts={} hits={} misses={}",
         cache.pipelines, cache.shader_modules, cache.layouts, cache.hits, cache.misses);
     drop(sink);
