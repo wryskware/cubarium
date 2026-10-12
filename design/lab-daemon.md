@@ -231,6 +231,13 @@ end to end with no core edit.
   that arm's config bundle, and only its own load checkpoint. `ab.early_read` is the
   identical-results tripwire. Continuations load only their own checkpoints, after
   `ab.unchanged`. `ab.py` stays a working CLI.
+  A run that is lost after its retry, fails, or stalls does not abort the job (2026-10-11:
+  one eidolon reboot had killed eight healthy desktop runs). The stage waits for its other
+  runs. A lost early run drops that seed from every arm's continuation (logged in
+  `early.log`); a lost continuation leaves the rest running. The job finishes `done`, and
+  the first line of its summary, which is its reason in `lab status`/`lab wait`, names the
+  missing runs; the summary then lists each one (arm, seed, stage, state, reason). A stage
+  with no seed whose every arm finished aborts: there is nothing to compare.
 - **batch**: `scripts/studies/batch.py` as one L3 task, charged `parallel × threads`,
   on desktop or eidolon by default, or the configured EC2 architecture when `hosts`
   names `ec2`. EC2 batches use `binary = {tree, commit}` for the native cached build;
@@ -298,6 +305,10 @@ On start the daemon:
 - probes hosts;
 - polls every running task: `rc.json` means ended, a live unit or process means still
   running, and neither means `lost` (requeued if retries remain).
+
+A host reboot today: its tasks are lost, then retried once from their latest fetched
+checkpoint (`ab` and `batch` set `retries = 1` with a resume form). A task lost again is
+final. For `ab` that run is dropped and the job keeps the rest; other kinds abort on it.
 
 `lab status` reads sqlite directly, so it works with the daemon down.
 
