@@ -111,7 +111,8 @@ impl Young {
 ///   year (marmoset juveniles forage on their own by five to six months); the troop's half
 ///   turn.
 /// - **Excursions**: a calf sets off about once an hour at birth and four times an hour at
-///   independence, for a place 20 m off (beyond its 12 m day sight, so it can lose its family),
+///   independence, for a place 40 m off (BALANCE 2026-10-12, from 20: beyond its 12 m day
+///   sight, so it can lose its family, and far enough that a stray meets the pack),
 ///   arriving within 1.5 m, for at most two minutes; a weaned seedporter twice an hour at
 ///   weaning and six at independence, 12 m off (inside its 16 m sight), within 0.5 m, two
 ///   minutes. Balance knobs (§6, topic 8): the pack's calf kills should come from strays.
@@ -124,7 +125,7 @@ pub fn young_of(founder: Founder) -> Young {
             roam_m: 10.0,
             follow_pull: 0.5,
             excursion_per_h: [1.0, 4.0],
-            excursion_m: 20.0,
+            excursion_m: 40.0,
             arrive_m: 1.5,
             excursion_s: 120.0,
             ..d
