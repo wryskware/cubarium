@@ -8,6 +8,9 @@ extends RefCounted
 ##   set back from the metadata) and nothing is drawn for it.
 ## - B: the trial's variant B rule: lit dots only over one flat 1 px field across the whole
 ##   advance (letter spacing too), alpha 0.86 for the title font, 0.51 for the chrome fonts.
+## Since Wrysk's picks (2026-10-11) "new" fills the letter spacing and keeps some plates
+## dotted (neon_theme.tres: dot_min_gap per type, dot_min_gap_pressed / _disabled); gap1
+## and fill below set Label's value only, so types with their own value keep it.
 ## - gap1: new, with dots kept a pixel apart (dot_min_gap 1): plates stay dotted at a 2 px
 ##   pitch, but too dim to carry the font's light.
 ## - fill: new, with the letter-spacing columns filled with RECT dots (dot_fill_spacing 1).

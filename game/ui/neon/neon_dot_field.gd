@@ -20,6 +20,10 @@ extends Control
 ## - dot_light: percent of the font's light each drawn dot carries (100).
 ## - dot_min_gap: px kept between neighbouring dots; a dot's side is at most the pitch less
 ##   this (0: at a 2 px pitch a dot may fill its cell, so a plate turns solid).
+## - dot_min_gap_pressed, dot_min_gap_disabled: dot_min_gap while the NeonButton the label
+##   sits in is pressed (held or toggled on) or disabled; dot_min_gap where unset. They let
+##   one label (the main button's keycap) be a solid plate at rest and dotted pressed or
+##   disabled (Wrysk's picks, 2026-10-11).
 ## - dot_fill_spacing: 1 also fills the letter-spacing columns (spacing_glyph) with RECT
 ##   dots; 0 leaves them empty, as the font does.
 ##
@@ -136,7 +140,7 @@ func _draw_label(l: Label) -> void:
 		if b.size == Vector2.ZERO:
 			g.index = -1  # not shown (clipped, trimmed or past visible_characters)
 		g.pen = _pen(Vector2(b.position.x, b.position.y + asc) + g.offset, l)
-	draw_glyph_zones(self, font, font_size, glyphs, c, off, _knobs(l, true))
+	draw_glyph_zones(self, font, font_size, glyphs, c, off, _knobs(l, true, _button_state(l)))
 
 
 ## The drawn Gridlite field for text a control draws itself with draw_string(): call it
@@ -234,15 +238,31 @@ static func _glyphs(font: Font, font_size: int, text: String) -> Array:
 	return res
 
 
-static func _knobs(c: Control, own_type: bool) -> Dictionary:
+## The state of the button `c` sits in: &"disabled", &"pressed" or &"" (none, or at rest).
+static func _button_state(c: Control) -> StringName:
+	var n := c.get_parent()
+	while n != null:
+		var b := n as BaseButton
+		if b != null:
+			if b.disabled:
+				return &"disabled"
+			return &"pressed" if b.is_pressed() else &""
+		n = n.get_parent()
+	return &""
+
+
+static func _knobs(c: Control, own_type: bool, state := &"") -> Dictionary:
 	var k := {"light": LIGHT_DEFAULT, "min_gap": MIN_GAP_DEFAULT, "fill_spacing": FILL_SPACING_DEFAULT != 0}
 	if c == null:
 		return k
 	var t: StringName = &"" if own_type else &"Label"
 	if c.has_theme_constant("dot_light", t):
 		k.light = c.get_theme_constant("dot_light", t)
-	if c.has_theme_constant("dot_min_gap", t):
-		k.min_gap = c.get_theme_constant("dot_min_gap", t)
+	var gap := &"dot_min_gap"
+	if state != &"" and c.has_theme_constant(StringName("dot_min_gap_" + state), t):
+		gap = StringName("dot_min_gap_" + state)
+	if c.has_theme_constant(gap, t):
+		k.min_gap = c.get_theme_constant(gap, t)
 	if c.has_theme_constant("dot_fill_spacing", t):
 		k.fill_spacing = c.get_theme_constant("dot_fill_spacing", t) != 0
 	return k

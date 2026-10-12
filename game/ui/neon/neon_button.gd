@@ -95,6 +95,8 @@ func _apply_state() -> void:
 	for l in find_children("*", "Label", true, false):
 		if l.has_method("set_pressed_look"):
 			l.set_pressed_look(on)
+		# drawn dot fields read the button's state (dot_min_gap_pressed / _disabled)
+		l.queue_redraw()
 	update_minimum_size()
 	_layout()
 
