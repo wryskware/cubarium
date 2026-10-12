@@ -30,7 +30,8 @@ def main():
             '--seeds', f"1-{cfg['episodes']}", '--hours', str(cfg['duration_s'] / 3600), '--threads', '1']
     for arm in cfg['arms']:
         extra = shlex.join([f"arm={arm['name']}", f'probe={probe}', f'probe_sha256={digest}',
-                            f'film_seed={options.film_seed}', f'film_out={movie}'])
+                            f'film_seed={options.film_seed}', f'film_out={movie}',
+                            'render_tree=/home/wrysk/wryskware/cubarium'])
         args += ['--arm', f"{arm['name']}={extra}"]
     text = f'''# ENGAGE source commit {commit}; binary sha256 {digest}
 kind = "batch"

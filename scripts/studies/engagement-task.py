@@ -84,7 +84,7 @@ def main(argv=None):
                 film.parent.mkdir(parents=True, exist_ok=True)
                 movie = subprocess.run([str(probe), f'config={config_path}',
                     f"seed={values['film_seed']}", 'arm=family-3', 'episodes=1',
-                    f'video={film}'], capture_output=True, text=True)
+                    f'video={film}'], cwd=values['render_tree'], capture_output=True, text=True)
                 atomic(root / 'video.log', movie.stdout + movie.stderr)
                 if movie.returncode:
                     atomic(root / 'VIDEO_FAILED', f'exit {movie.returncode}; see video.log\n')
