@@ -4,7 +4,7 @@
 //! speed and steering; and every pack event as it happens. A diagnostic, not a readout.
 //!
 //! `cargo run --release -p cubarium-voxel-sim --example engage_trace -- arm=calf-3 seed=1`
-use cubarium_voxel_fauna::intent::VEILHOUND;
+use cubarium_voxel_fauna::intent::{LOFTSTRIDER, VEILHOUND};
 use cubarium_voxel_sim::engagement::{self, Config};
 
 fn main() -> Result<(), String> {
@@ -39,12 +39,13 @@ fn main() -> Result<(), String> {
                 let sp = ((a.pose.x - px).powi(2) + (a.pose.z - pz).powi(2)).sqrt() / every;
                 last.insert(id, (a.pose.x, a.pose.z));
                 println!(
-                    "{t:7.1} prey {id} body {:.2} at ({:.1},{:.1}) hd {:.0} v {sp:.2} steer {:?} wound {:.2} held {:?}",
+                    "{t:7.1} prey {id} body {:.2} at ({:.1},{:.1}) hd {:.0} v {sp:.2} steer {:?} defend {} wound {:.2} held {:?}",
                     a.body,
                     a.pose.x,
                     a.pose.z,
                     a.pose.heading_rad.to_degrees(),
                     fauna.steer_of(id),
+                    LOFTSTRIDER.name(usize::from(fauna.percept(id).map_or(0, |p| p.vigil.defend_held))),
                     a.wound,
                     a.founder_state.held
                 );

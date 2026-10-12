@@ -5945,7 +5945,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `engagement.voxel_m` | 0.25 | m | (0, inf) | Voxel pitch |
 | `engagement.soil_layers` | 2 | voxel | [1, inf) | Soil thickness |
 | `engagement.distance_m.*` | 4.0, 6.0 | m | (0, inf) | Family to pack centre distance |
-| `engagement.spacing_m` | 1.5 | m | (0, inf) | Body separation |
+| `engagement.spacing_m` | 1.5 | m | [0, inf) | Clear gap between neighbouring bodies |
 | `engagement.depth_jitter_m` | 1.0 | m | [0, inf) | Centre depth jitter |
 | `engagement.adult_body.*` | 0.9, 1.0 | fraction | (0, 1] | Adult structure |
 | `engagement.calf_body.*` | 0.16, 0.22 | fraction | (0, 1] | Calf structure |

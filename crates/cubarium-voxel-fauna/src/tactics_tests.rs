@@ -1104,3 +1104,46 @@ fn a_test_breaks_off_when_the_value_falls_below_zero() {
     assert_eq!(f.ledger.hound_give_ups, 1);
     assert!(f.take_pack_events().iter().any(|e| matches!(e, crate::PackEvent::ChaseEnd { why: crate::ChaseEnd::BrokeOff, .. })), "logged as a break-off");
 }
+
+// ------------------------------------------------------------------ facing (BALANCE step 1)
+
+/// **A hound reads facing from the body's own heading at its last sighting** (BALANCE, the
+/// `facing 0` trace): the engagement traces showed `facing 0` only while the adults had truly
+/// turned their backs (`move_off`, or turning into `guard`), and for at most one sight interval
+/// (`perception.remote_hz`) after a turn. This fixes the cause found: the heading `faces()`
+/// judges is the body's own, as the senses wrote it at the hound's last sighting; a body that
+/// turns to face the hound reads as facing from the hound's next sighting on, and a
+/// neighbour's heading never stands in for it.
+#[test]
+fn a_body_that_turns_to_face_the_hound_reads_facing_from_its_next_sighting() {
+    let w = arena(11);
+    let mut f = Fauna::new(config());
+    let h = pack(&mut f, &w, 1)[0];
+    let hound = (10.0, MID_Z);
+    place(&mut f, h, hound.0, hound.1, EAST);
+    let at = (15.0, MID_Z);
+    let beside = (15.0, MID_Z + 1.5 * f.config.founder(LS).adult_length_m);
+    let away = bearing(hound, at);
+    let a = strider(&mut f, &w, false, at.0, at.1, away);
+    let b = strider(&mut f, &w, false, beside.0, beside.1, bearing(hound, beside));
+    let stagger = f.config.perception.stagger_ticks();
+    let sight = |f: &mut Fauna| {
+        for _ in 0..stagger {
+            f.tick += 1;
+            crate::perception::sense_pass(f, &w.view(), false, 1.0, 1);
+        }
+    };
+    let i = index(&f, h);
+    sight(&mut f);
+    let turned_away = assess_of(&f, i, a).expect("the hound sees it");
+    assert_eq!(turned_away.assess.facing, 0, "both backs to the hound");
+    // It turns to face the hound; its neighbour keeps its back turned.
+    animal_mut(&mut f, a).pose.heading_rad = bearing(at, hound);
+    sight(&mut f);
+    let p = assess_of(&f, i, a).expect("the hound sees it");
+    assert_eq!(p.track.heading, animal(&f, a).pose.heading_rad, "the track carries the body's own heading");
+    assert_eq!(p.assess.facing, 1, "it faces the hound, its neighbour does not");
+    assert!(p.assess.guards >= 1, "the neighbour stands by it");
+    // The neighbour's assessment counts the same one facing body.
+    assert_eq!(assess_of(&f, i, b).expect("seen").assess.facing, 1);
+}
