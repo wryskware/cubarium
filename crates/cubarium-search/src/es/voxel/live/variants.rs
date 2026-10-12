@@ -17,7 +17,18 @@ use cubarium_voxel_fauna::{Controller, Founder};
 #[derive(Clone)]
 pub struct VariantTable {
     founder: Founder,
-    policies: Arc<[Arc<EpisodeGru>]>,
+    policies: Policies,
+}
+
+/// A table's networks: today's GRU, or two-layer brains (KIN-TRAIN, §10.4) with the
+/// lineage's holding knobs.
+#[derive(Clone)]
+enum Policies {
+    Plain(Arc<[Arc<EpisodeGru>]>),
+    TwoLayer {
+        nets: Arc<[Arc<crate::es::voxel::two_layer::TwoLayerNet>]>,
+        arbitration: crate::es::voxel::two_layer::IntentArbitration,
+    },
 }
 
 impl VariantTable {
@@ -29,8 +40,36 @@ impl VariantTable {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             founder,
-            policies: Arc::from(policies),
+            policies: Policies::Plain(Arc::from(policies)),
         })
+    }
+
+    /// A two-layer lineage's generation from its centre file at `stage` (stage 1: only
+    /// the top perturbed, [`crate::es::voxel::kin::stage`]), in candidate order.
+    pub fn antithetic_two_layer(
+        file: &crate::es::voxel::two_layer::TwoLayerPolicyFile,
+        stage: crate::es::voxel::kin::BrainStage,
+        arbitration: crate::es::voxel::two_layer::IntentArbitration,
+        train_seed: u64,
+        sigma: f64,
+        generation: u32,
+        pairs: usize,
+    ) -> Result<VariantTable, String> {
+        arbitration.validate()?;
+        let founder = crate::es::voxel::parse_founder(&file.founder)?;
+        let nets = crate::es::voxel::kin::stage::two_layer_variants(file, stage, train_seed, sigma, generation, pairs)?;
+        Ok(Self {
+            founder,
+            policies: Policies::TwoLayer { nets: Arc::from(nets), arbitration },
+        })
+    }
+
+    /// Candidate `index`'s weights (for checks and reports).
+    pub fn theta(&self, index: usize) -> &[f64] {
+        match &self.policies {
+            Policies::Plain(p) => p[index].theta(),
+            Policies::TwoLayer { nets, .. } => nets[index].theta(),
+        }
     }
 
     /// The generation's table from the lineage centre: `2·pairs` antithetic variants in
@@ -56,14 +95,22 @@ impl VariantTable {
         self.founder
     }
     pub fn len(&self) -> usize {
-        self.policies.len()
+        match &self.policies {
+            Policies::Plain(p) => p.len(),
+            Policies::TwoLayer { nets, .. } => nets.len(),
+        }
     }
     pub fn is_empty(&self) -> bool {
-        self.policies.is_empty()
+        self.len() == 0
     }
 
     /// A fresh controller with shared weights and independent memory.
     pub fn controller(&self, index: usize) -> Box<dyn Controller> {
-        Box::new(self.policies[index].controller(false))
+        match &self.policies {
+            Policies::Plain(p) => Box::new(p[index].controller(false)),
+            Policies::TwoLayer { nets, arbitration } => Box::new(
+                nets[index].brain(*arbitration, self.founder.manifest().controller_period_s),
+            ),
+        }
     }
 }
