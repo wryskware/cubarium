@@ -1996,8 +1996,8 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
 /// `i`, by the fruit walk's own machinery: her centre `(x, z)`, base height `y_m`, base over
 /// her support `lift_m` and support face `site`, as it senses or remembers her.
 ///
-/// - **Off her support** (more than half a voxel up), the climbable stand whose crown holds
-///   her is its target, as a fruiting one is: it walks to the stem by its route graph
+/// - **Off her support** (more than half a voxel up), the climbable stand whose stem or crown
+///   holds her is its target, as a fruiting one is: it walks to the stem by its route graph
 ///   ([`walk_to_stand`]) and walking into it climbs it. Up a wall or a ledge with no stand,
 ///   it walks to the face under her.
 /// - **On the ground** it walks to her face by its route graph, and straight at her once
@@ -2023,7 +2023,7 @@ pub(super) fn to_mother(
     let s = shape(&phys, a.body);
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
     let dg = dx.hypot(dz);
-    // The stand she is up: a climbable one whose crown spans her height over her column.
+    // The stand she is up: a climbable one whose stem or crown holds her at her height.
     let her_stand: Option<(f64, u64, Site)> = if lift_m > 0.5 * v {
         let mut best: Option<(f64, u64, Site)> = None;
         let mut consider = |st: &cubarium_voxel_flora::Stand| {
@@ -2034,7 +2034,8 @@ pub(super) fn to_mother(
             let (sx, sz) = ((f64::from(st.site.x) + 0.5) * v, (f64::from(st.site.z) + 0.5) * v);
             let (ex, ez) = crate::pose::wrapped_delta(sx, sz, x, z, ring);
             let reach = (s.r + 0.5 * v).max(low.radius_m).max(high.radius_m) + v;
-            let (bottom, top) = (low.cell as f64 * v - s.h - EPS, (high.cell + 1) as f64 * v + EPS);
+            // From its foot (she may hang on the stem, eating) to its crown top.
+            let (bottom, top) = (crate::surface_m(st.site.y, v) - EPS, (high.cell + 1) as f64 * v + EPS);
             let d = ex.hypot(ez);
             if d <= reach && (bottom..=top).contains(&y_m) && best.is_none_or(|(b, id, _)| d < b || (d == b && st.id < id)) {
                 best = Some((d, st.id, st.site));
