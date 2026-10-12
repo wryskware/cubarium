@@ -1327,6 +1327,10 @@ impl FaunaModel {
                 }
                 match rule.mode {
                     BirthMode::Gestation => {
+                        // Preserve a held litter; only a new non-pack conception reads the knob.
+                        if c.escrow.is_none() && pack.is_none() {
+                            c.litter = f64::from(rule.young_per_birth.max(1));
+                        }
                         let (mut esc, mut ran) = c.escrow.unwrap_or((0.0, 0.0));
                         ran += dt;
                         let litter = c.litter.max(1e-9);

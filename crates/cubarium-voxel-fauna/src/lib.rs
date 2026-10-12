@@ -1697,6 +1697,10 @@ pub struct Reproduction {
     /// Seconds a gestation takes, over which the escrow is filled in equal instalments.
     /// [`BirthMode::Eggs`] does not read it.
     pub gestation_s: f64,
+    /// Young per live birth for a non-pack lineage (count; at most 1 means one).
+    /// Pack lineages ignore this knob and use their pack litter rule; eggs ignore it.
+    #[serde(default = "default_young_per_birth")]
+    pub young_per_birth: u32,
     /// The share of an interrupted gestation's escrowed **organic matter** that is
     /// respired; the rest returns to the parent, and the mineral all returns, because
     /// respiration in this layer never takes mineral.
@@ -1824,6 +1828,10 @@ fn default_gestation_upkeep_factor() -> f64 {
     1.0
 }
 
+fn default_young_per_birth() -> u32 {
+    1
+}
+
 fn default_surplus_share() -> f64 {
     SURPLUS_SHARE
 }
@@ -1947,6 +1955,7 @@ impl Reproduction {
         surplus_floor: 0.005,
         surplus_hold_s: 900.0,
         gestation_s: 180.0,
+        young_per_birth: 1,
         gestation_loss_fraction: 0.25,
         birth_interval_s: 1800.0,
         clutch_size: 0,
@@ -1991,6 +2000,7 @@ impl Reproduction {
         surplus_floor: 0.000_625,
         surplus_hold_s: 900.0,
         gestation_s: 0.0,
+        young_per_birth: 1,
         gestation_loss_fraction: 0.25,
         birth_interval_s: 1800.0,
         clutch_size: 1,
@@ -2040,6 +2050,7 @@ impl Reproduction {
         surplus_floor: 0.002,
         surplus_hold_s: 900.0,
         gestation_s: 0.0,
+        young_per_birth: 1,
         gestation_loss_fraction: 0.25,
         birth_interval_s: 7200.0,
         clutch_size: 3,

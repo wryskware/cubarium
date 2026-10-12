@@ -654,3 +654,245 @@ fn a_pack_on_the_roof_above_its_cave_den_walks_the_route_down() {
     assert!(routed);
     assert!((x - xz.0).hypot(z - xz.1) > 0.0, "it steers along its route, not at its own column");
 }
+
+// Birth fixtures exercise only the reproduction functions: no food, upkeep or movement.
+fn nonpack_birth_fixture(young: Option<u32>) -> (Fauna, World, crate::SpeciesConfig) {
+    let world = plain();
+    let f = Founder::Browser;
+    let mut config = FaunaConfig::default();
+    let sc = &mut config.founders[f.index()].core;
+    sc.reserve_cap = 10.0;
+    sc.reproduction.surplus_hold_s = crate::DT;
+    sc.reproduction.surplus_share = 1.0;
+    sc.reproduction.gestation_s = 4.0 * crate::DT;
+    if let Some(n) = young {
+        sc.reproduction.young_per_birth = n;
+    }
+    let sc = *sc;
+    let mut fauna = Fauna::new(config);
+    assert!(fauna.apply(
+        &world,
+        Command::IntroduceFounderOnFace {
+            site: site(8, 6),
+            founder: f,
+            stores: StartingStores::FULL,
+            heading_rad: 0.0,
+        }
+    ));
+    (fauna, world, sc)
+}
+
+fn nonpack_birth_conserves(young: Option<u32>, expected: usize) {
+    let (mut fauna, world, sc) = nonpack_birth_fixture(young);
+    let rule = sc.reproduction;
+    let before = fauna.animals[0].clone();
+    let mut newborns = Vec::new();
+    for tick in 1..=rule.gestation_ticks() {
+        fauna.tick = tick;
+        advance_eligibility(&mut fauna, 0, &sc, &rule);
+        gestate(
+            &mut fauna,
+            0,
+            &sc,
+            &rule,
+            (world.config().seed, None),
+            &mut newborns,
+        );
+    }
+    assert_eq!(newborns.len(), expected);
+    let after = &fauna.animals[0];
+    let paid = before.reserve - after.reserve;
+    assert!((paid - sc.birth_cost * expected as f64).abs() < 1e-14);
+    let organic: f64 = newborns.iter().map(|a| a.body + a.reserve).sum();
+    let mineral: f64 = newborns.iter().map(|a| a.mineral).sum();
+    let energy: f64 = newborns.iter().map(|a| a.energy).sum();
+    assert!((organic - paid).abs() < 1e-14);
+    assert!((mineral - (before.mineral - after.mineral)).abs() < 1e-14);
+    assert!((energy - (before.energy - after.energy)).abs() < 1e-14);
+    assert!(after.reproduction.escrow.is_none());
+}
+
+#[test]
+fn nonpack_twins_split_the_paid_parcel_without_loss() {
+    nonpack_birth_conserves(Some(2), 2);
+}
+
+#[test]
+fn default_nonpack_live_birth_still_has_one_newborn() {
+    nonpack_birth_conserves(None, 1);
+    let mut doc = serde_json::to_value(Reproduction::LIVE_BIRTH_PLACEHOLDER).unwrap();
+    doc.as_object_mut().unwrap().remove("young_per_birth");
+    let old: Reproduction = serde_json::from_value(doc).unwrap();
+    nonpack_birth_conserves(Some(old.young_per_birth), 1);
+}
+
+#[test]
+fn pack_litter_rule_ignores_young_per_birth() {
+    let world = plain();
+    let (mut fauna, pack) = found(&world, site(8, 6));
+    let id = fauna.animals[0].id;
+    fauna.pack_mut(pack).unwrap().breeder = Some(id);
+    let sc = fauna.config.founder(C).core;
+    let mut rule = sc.reproduction;
+    let mut counts = Vec::new();
+    for knob in [1, 2, u32::MAX] {
+        rule.young_per_birth = knob;
+        let super::Litter::Of(n) = super::litter_size(&fauna, 0, &sc, &rule, world.config().seed)
+        else {
+            panic!("fixture breeder must qualify for a pack litter");
+        };
+        counts.push(n);
+    }
+    assert!(counts[0] > 0);
+    assert!(counts.iter().all(|&n| n == counts[0]));
+}
+
+#[test]
+fn an_unpaid_twin_instalment_returns_escrow_and_books_the_loss() {
+    let (mut fauna, world, sc) = nonpack_birth_fixture(Some(2));
+    let rule = sc.reproduction;
+    let mut newborns = Vec::new();
+    advance_eligibility(&mut fauna, 0, &sc, &rule);
+    gestate(
+        &mut fauna,
+        0,
+        &sc,
+        &rule,
+        (world.config().seed, None),
+        &mut newborns,
+    );
+    let escrow = fauna.animals[0].reproduction.escrow.unwrap();
+    assert_eq!(escrow.young, 2);
+    assert!(escrow.organic > 0.0);
+    fauna.animals[0].reserve = 0.0;
+    let before = fauna.animals[0].clone();
+    let heat_before = fauna.ledger.heat_out;
+    let respired_before = fauna.ledger.respired_gestation_out;
+    gestate(
+        &mut fauna,
+        0,
+        &sc,
+        &rule,
+        (world.config().seed, None),
+        &mut newborns,
+    );
+    let after = &fauna.animals[0];
+    let lost = rule.gestation_loss_fraction;
+    assert!(newborns.is_empty());
+    assert!(after.reproduction.escrow.is_none());
+    assert_eq!(fauna.ledger.gestations_failed, 1);
+    assert!((after.reserve - escrow.organic * (1.0 - lost)).abs() < 1e-14);
+    assert!(
+        (after.mineral + after.gut.mineral - before.mineral - before.gut.mineral - escrow.mineral)
+            .abs()
+            < 1e-14
+    );
+    assert!(
+        (after.energy - before.energy + fauna.ledger.heat_out - heat_before - escrow.energy).abs()
+            < 1e-14
+    );
+    assert!(
+        (fauna.ledger.respired_gestation_out - respired_before - escrow.organic * lost).abs()
+            < 1e-14
+    );
+}
+
+// Materialize a constant-surplus history at a boundary, rather than simulate a year.
+fn surplus_history(ticks: u64, hold: u64) -> crate::SurplusWindow {
+    let bucket = hold.div_ceil(crate::SURPLUS_BUCKETS as u64).max(1);
+    let full = ticks / bucket;
+    let mut w = crate::SurplusWindow::default();
+    for k in 0..full as usize {
+        w.buckets[k] = bucket as u32;
+    }
+    w.filled = full as u32;
+    w.pos = full as u32;
+    w.cur_ticks = (ticks % bucket) as u32;
+    w.cur_eligible = w.cur_ticks;
+    assert_eq!(w.count_for(hold), ticks);
+    w
+}
+
+#[test]
+fn seedporter_birth_spacing_includes_the_wait_hold_and_gestation() {
+    let (mut fauna, world, _) = nonpack_birth_fixture(None);
+    let sc = FaunaConfig::default().founder(Founder::Seedporter).core;
+    fauna.animals[0].founder = Some(Founder::Seedporter);
+    fauna.animals[0].body = sc.body_max;
+    fauna.animals[0].reserve = 10.0 * sc.birth_cost;
+    let rule = sc.reproduction;
+    let mut newborns = Vec::new();
+    let mut births = Vec::new();
+    for birth in 0..2 {
+        if birth > 0 {
+            assert_eq!(
+                fauna.animals[0].reproduction.refractory_ticks,
+                rule.interval_ticks()
+            );
+            // Jump to the last refractory tick and verify it still clears surplus.
+            fauna.tick += rule.interval_ticks();
+            fauna.animals[0].reproduction.refractory_ticks = 1;
+            advance_eligibility(&mut fauna, 0, &sc, &rule);
+            gestate(
+                &mut fauna,
+                0,
+                &sc,
+                &rule,
+                (world.config().seed, None),
+                &mut newborns,
+            );
+            assert!(fauna.animals[0].reproduction.escrow.is_none());
+            assert_eq!(fauna.animals[0].reproduction.surplus_ticks, 0);
+        }
+        fauna.tick += rule.hold_required() - 1;
+        fauna.animals[0].reproduction.window =
+            surplus_history(rule.hold_required() - 1, rule.hold_ticks());
+        fauna.animals[0].reproduction.surplus_ticks = rule.hold_required() - 1;
+        fauna.animals[0].reproduction.eligible_now = true;
+        gestate(
+            &mut fauna,
+            0,
+            &sc,
+            &rule,
+            (world.config().seed, None),
+            &mut newborns,
+        );
+        assert!(
+            fauna.animals[0].reproduction.escrow.is_none(),
+            "hold not yet met"
+        );
+        fauna.tick += 1;
+        advance_eligibility(&mut fauna, 0, &sc, &rule);
+        gestate(
+            &mut fauna,
+            0,
+            &sc,
+            &rule,
+            (world.config().seed, None),
+            &mut newborns,
+        );
+        assert!(fauna.animals[0].reproduction.escrow.is_some());
+        // The cumulative target lets the final tick pay the skipped instalments.
+        fauna.tick += rule.gestation_ticks() - 2;
+        fauna.animals[0].reproduction.escrow.as_mut().unwrap().ticks = rule.gestation_ticks() - 1;
+        fauna.tick += 1;
+        gestate(
+            &mut fauna,
+            0,
+            &sc,
+            &rule,
+            (world.config().seed, None),
+            &mut newborns,
+        );
+        assert_eq!(
+            newborns.len(),
+            (birth + 1) * rule.young_per_birth.max(1) as usize
+        );
+        births.push(fauna.tick);
+    }
+    // Conception pays instalment 1 on the hold's last tick: the spans share that tick.
+    assert_eq!(
+        births[1] - births[0] + 1,
+        rule.interval_ticks() + rule.hold_required() + rule.gestation_ticks()
+    );
+}

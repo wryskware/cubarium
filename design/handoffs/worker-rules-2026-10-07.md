@@ -8,6 +8,9 @@ date: 2026-10-07
 Every brief dated 2026-10-07 points here. AGENTS.md and WORKING_POLICY.md (repo root) are
 the full rules; this is what matters for these packages.
 
+- **Say "Veilhound", never "chorister"**, in replies, docs, commits and the names of files you
+  make. `chorister` is only the old code identifier; type it only where code needs it
+  (AGENTS.md).
 - **No window on Wrysk's screen, ever.** Pictures headless: `--gpu-target headless
   --gpu-capture DIR`. A window that is truly needed goes through `scripts/hidden.sh <cmd>`.
   Browsers run headless (`--headless --screenshot`).

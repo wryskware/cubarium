@@ -9,6 +9,7 @@ the first poll reconciles them from their rc.json files and unit states.
 from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import glob
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,8 @@ import time
 import traceback
 
 from .core import Abort, Context, Job, Spawn, SpecError, Task, TaskView, load_kinds
-from .hosts import Host, Inventory, Usage, allowed, could_ever_fit, fits, mem_available_gb
+from .hosts import (Host, Inventory, Usage, allowed, could_ever_fit, fits, mem_available_gb, prefers_local,
+                    quick_timeout_h)
 from .launch import LAUNCHERS, LocalTransport, SshTransport, systemd_user_works, write_file
 from .store import TERMINAL, Events, Store, atomic_write, new_id
 from .ec2 import Ec2Pool, estimate
@@ -30,7 +32,15 @@ from . import providers
 from .stops import evaluate, run_hook, validate_rules
 
 ACTIVE = ("submitted", "inputs", "preflight", "running", "aborting")
-TOOLS = ("taskwrap.py", "snaprun.py")
+QUICK_LIMIT = "exceeded the quick limit"
+QUICK_SLACK_S = 5    # an end this close to the cap counts as the cap (systemd RuntimeMaxSec vs our tick)
+
+
+def quick_limit_reason(task, elapsed_s):
+    return (f"{QUICK_LIMIT}: ran {elapsed_s / 60:.1f} min against a {task.timeout_h * 60:g} min cap "
+            f"([lab] quick_timeout_min or the task's timeout_h); this was not a quick task, "
+            f"resubmit it without quick")
+TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py")
 
 
 def unit_name(job, task):
@@ -382,29 +392,12 @@ class Daemon:
                 continue
             missing, problem = [], None
             for key in keys:
-                if self.ctx.artifact(key):
-                    continue
-                missing.append(key)
-                provider = self.store.one("SELECT job FROM providers WHERE key=?", key)
-                if provider:
-                    state = self.store.one("SELECT state, reason FROM jobs WHERE id=?", provider["job"])
-                    if state and state["state"] in TERMINAL:
-                        problem = f"input {key}: provider job {provider['job']} ended {state['state']} ({state['reason']})"
-                        self.store.x("DELETE FROM providers WHERE key=?", key)
-                        break
-                    continue
-                recipe = self.store.one("SELECT spec FROM recipes WHERE key=?", key)
-                if not recipe:
-                    problem = f"no artifact and no recipe for input {key}"
-                    break
                 try:
-                    spec = providers.spec_for(key, json.loads(recipe["spec"]), self.ctx)
-                    child = self.insert_job(new_id(spec["kind"], spec.get("name")), spec, parent=job.id)
+                    if not self.ensure_input(key, job.id):
+                        missing.append(key)
                 except Exception as error:  # noqa: BLE001
-                    problem = f"input {key}: cannot submit provider: {error}"
+                    problem = str(error)
                     break
-                self.store.x("INSERT OR REPLACE INTO providers(key, job) VALUES(?, ?)", key, child)
-                self.events.emit("input-wait", job=job.id, key=key, provider=child)
             if problem:
                 self.abort(job.id, problem)
             elif not missing:
@@ -414,6 +407,51 @@ class Daemon:
                 job.inputs = {k: str(self.ctx.artifact(k)) for k in keys}
                 self.store.update("jobs", dict(id=job.id), state="preflight")
                 self.preflights[job.id] = (self.pool.submit(self.call, job, "preflight"), job)
+
+    def ensure_input(self, key, parent):
+        """Use the normal provider path; return whether the artifact is ready now."""
+        if self.ctx.artifact(key):
+            return True
+        provider = self.store.one("SELECT job FROM providers WHERE key=?", key)
+        if provider:
+            state = self.store.one("SELECT state, reason FROM jobs WHERE id=?", provider["job"])
+            if state and state["state"] in TERMINAL:
+                self.store.x("DELETE FROM providers WHERE key=?", key)
+                raise SpecError(f"input {key}: provider job {provider['job']} ended {state['state']} ({state['reason']})")
+            return False
+        recipe = self.store.one("SELECT spec FROM recipes WHERE key=?", key)
+        if not recipe:
+            raise SpecError(f"no artifact and no recipe for input {key}")
+        spec = providers.spec_for(key, json.loads(recipe["spec"]), self.ctx)
+        child = self.insert_job(new_id(spec["kind"], spec.get("name")), spec, parent=parent)
+        self.store.x("INSERT OR REPLACE INTO providers(key, job) VALUES(?, ?)", key, child)
+        self.events.emit("input-wait", job=parent, key=key, provider=child)
+        return False
+
+    def home_task(self, task):
+        """Retarget only task placement and binaries, preserving each input's source commit."""
+        keys = {}
+        for key in task.inputs:
+            if not key.startswith("binary:"):
+                continue
+            row = self.store.one("SELECT spec FROM recipes WHERE key=?", key)
+            if not row:
+                return None
+            recipe = json.loads(row["spec"])
+            keys[key] = self.ctx.binary(recipe["repo"], recipe["commit"], recipe["name"], arch="x86_64",
+                                        **{k: recipe[k] for k in ("package", "example", "bin", "features", "dirty")
+                                           if k in recipe})
+        if not keys:
+            return None
+        encoded = json.dumps(task.to_dict())
+        for old, new in keys.items():
+            encoded = encoded.replace(old, new)
+        home = Task.from_dict(json.loads(encoded))
+        home.arch = "x86_64"
+        home.hosts = [name for name in (task.hosts or []) if name != "ec2"] or None
+        home.remote_argv = None
+        home.meta["moved_binaries"] = keys
+        return home
 
     def collect_preflights(self):
         for job_id, (future, job) in list(self.preflights.items()):
@@ -481,6 +519,10 @@ class Daemon:
                     self.register_artifact(key, view.out / relative, job.id)
                 except OSError as error:
                     state, reason = "failed", f"artifact {key}: {error}"
+        elapsed = rc.get("ended", self.clock()) - (row["started"] or self.clock())
+        if task.quick and state != "done" and task.timeout_h \
+                and elapsed >= task.timeout_h * 3600 - QUICK_SLACK_S:
+            state, reason = "failed", quick_limit_reason(task, elapsed)  # systemd's RuntimeMaxSec got there first
         if reason is None and state != "done":
             reason = f"exit {code}"
         self.store.update("tasks", dict(job=row["job"], name=row["name"]), state=state, rc=code,
@@ -491,26 +533,38 @@ class Daemon:
                          host=row["host"], rc=code, reason=reason)
         self.after_task(job.id, row["name"])
 
-    def task_lost(self, row, reason):
+    def task_lost(self, row, reason, *, replacement=None):
+        moving, fetched = replacement is not None, True
         task = Task.from_dict(json.loads(row["spec"]))
         host = self.host(row["host"])
+        if moving:
+            try:
+                self.launchers[row["host"]].stop(row["unit"], self.lab_dir(row))
+            except Exception as error:  # noqa: BLE001
+                self.log(f"tail stop {row['job']}/{row['name']}: {error}")
+                return False
         if host and host.kind != "local" and host.up:
             try:
                 self.fetch_task(row)  # Retain the latest checkpoint before a retry changes hosts.
                 self.cleanup_task(row)
             except Exception as error:  # noqa: BLE001
                 self.log(f"lost task fetch {row['job']}/{row['name']}: {error}")
-        if row["attempts"] <= task.retries:
+                fetched = False
+        if moving and fetched:
+            task = replacement
+        if moving or row["attempts"] <= task.retries:
             if task.resume_argv:
                 task.argv = task.resume_argv
+            changes = dict(attempts=max(0, row["attempts"] - 1), finished=None) if moving else {}
             self.store.update("tasks", dict(job=row["job"], name=row["name"]), state="pending",
-                              spec=json.dumps(task.to_dict()), reason=f"requeued: {reason}")
+                              spec=json.dumps(task.to_dict()), reason=f"requeued: {reason}", **changes)
             self.events.emit("requeued", job=row["job"], task=row["name"], host=row["host"], reason=reason)
-            return
+            return fetched
         self.store.update("tasks", dict(job=row["job"], name=row["name"]), state="lost",
                           finished=self.clock(), reason=reason)
         self.events.emit("task-lost", job=row["job"], task=row["name"], host=row["host"], reason=reason)
         self.after_task(row["job"], row["name"])
+        return False
 
     def after_task(self, job_id, name):
         job = self.job(job_id)
@@ -618,6 +672,21 @@ class Daemon:
                 if not self.check_stops(job):
                     self.handle(job, self.call(job, "progress", None))
 
+    def quick_timeouts(self):
+        """Quick tasks end at their capped timeout on every launcher (setsid has no RuntimeMaxSec)."""
+        now = self.clock()
+        for row in self.store.q("SELECT * FROM tasks WHERE state='running'"):
+            task = Task.from_dict(json.loads(row["spec"]))
+            if not task.quick or not task.timeout_h or row["started"] is None:
+                continue
+            elapsed = now - row["started"]
+            if elapsed < task.timeout_h * 3600:
+                continue
+            reason = quick_limit_reason(task, elapsed)
+            self.stop_task(row, "failed", reason)
+            self.events.emit("task-failed", job=row["job"], task=row["name"], host=row["host"], reason=reason)
+            self.after_task(row["job"], row["name"])
+
     def check_liveness(self, job, view):
         row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
         spec = view.task.liveness
@@ -696,13 +765,18 @@ class Daemon:
         usage = self.usage()
         live_mem = mem_available_gb()
         rows = self.store.q(
-            "SELECT t.*, j.priority AS jp, j.kind AS jk FROM tasks t JOIN jobs j ON t.job=j.id "
+            "SELECT t.*, j.priority AS jp, j.kind AS jk, j.spec AS js FROM tasks t JOIN jobs j ON t.job=j.id "
             "WHERE t.state='pending' AND j.state='running' ORDER BY j.submitted, t.seq, j.id")
         # Stable sorting preserves FIFO when job + task priorities are equal.
         rows = [(row, Task.from_dict(json.loads(row["spec"]))) for row in rows]
         # Tasks planned before kinds marked themselves (build lane) take their job's kind.
+        quick_min = self.inv.get("quick_timeout_min", 15)
         for row, task in rows:
             task.meta.setdefault("kind", row["jk"])
+            # quick = true on the job spec applies to all its tasks; quick tasks get the time cap.
+            task.quick = bool(task.quick or json.loads(row["js"] or "{}").get("quick"))
+            if task.quick:
+                task.timeout_h = quick_timeout_h(task, quick_min)
         rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
         states = {}
         reservations = {}
@@ -716,13 +790,17 @@ class Daemon:
                     "SELECT name, state FROM tasks WHERE job=?", row["job"])}
             if any(states[row["job"]].get(d) != "done" for d in task.deps):
                 continue
-            candidates = sorted(self.hosts(), key=lambda h: h.usable - usage[h.name].threads -
-                                (h.external_threads if h.external_load else 0), reverse=True)
+            # Most free threads first; quick tasks and tasks with local inputs try local hosts first.
+            local_first = prefers_local(task)
+            candidates = sorted(self.hosts(), key=lambda h: (
+                local_first and h.kind != "local",
+                -(h.usable - usage[h.name].threads - (h.external_threads if h.external_load else 0))))
             for host in candidates:
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
-                if host.name in reservations:
+                # A quick task never waits behind a reservation (its own pool is above usable).
+                if host.name in reservations and not task.quick:
                     if any(priority >= reserved_priority or deadline is None or task.est_h is None
                            or task.est_h <= 0 or now + task.est_h * 3600 > deadline
                            for reserved_priority, deadline in reservations[host.name]):
@@ -733,7 +811,11 @@ class Daemon:
             else:
                 eligible = [h for h in candidates if h.up and could_ever_fit(task, h)
                             and (not task.l3 or h.groups)]
-                if eligible:
+                if eligible and task.quick:
+                    # Quick tasks hold no reservation: their pool turns over within the time cap.
+                    self.store.update("tasks", key, reason=f"waiting for {task.threads} threads on "
+                                      f"{eligible[0].name} (quick pool)")
+                elif eligible:
                     host = eligible[0]
                     reservations.setdefault(host.name, []).append(
                         (priority, self.reservation_start(task, host, live_mem, now)))
@@ -829,6 +911,20 @@ class Daemon:
             # Saved batch commands/identities contain absolute paths from the previous host.
             manifest_path = local_out / "batch/batch.json"
             current_paths = dict(replacements)
+            for previous_key, current_key in task.meta.get("moved_binaries", {}).items():
+                previous_binary = self.ctx.artifact(previous_key)
+                if previous_binary:
+                    current_paths[str(previous_binary)] = inputs[current_key]
+            # Staged census arguments carry vitals/config paths from the previous host.
+            for source, previous in task.meta.get("remote_paths", {}).items():
+                replacements[previous] = current_paths.get(source, source)
+            replacements.update(current_paths)
+            if task.resume_argv:
+                argfiles = [local_out / "run/args", *local_out.glob("batch/*/s*/run/args")]
+                for argfile in argfiles:
+                    if argfile.is_file():
+                        relocated = subst(argfile.read_text())
+                        write_file(transport, f"{out}/{argfile.relative_to(local_out)}", relocated)
             if task.meta.get("batch") and manifest_path.is_file():
                 manifest = json.loads(manifest_path.read_text())
                 for source, previous in manifest.get("lab_paths", task.meta.get("remote_paths", {})).items():
@@ -844,9 +940,13 @@ class Daemon:
                     return value
 
                 manifest = relocate(manifest)
+                if task.meta.get("moved_binaries"):
+                    # Only home_task can authorize this: the exact source commit is unchanged.
+                    binary = self.ctx.artifact(next(k for k in task.inputs if k.startswith("binary:")))
+                    manifest["binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
                 manifest["lab_paths"] = current_paths
                 write_file(transport, f"{out}/batch/batch.json", json.dumps(manifest, indent=2))
-            if task.meta.get("batch"):
+            if task.resume_argv:
                 task.meta["remote_paths"] = current_paths
 
             env = {}
@@ -898,8 +998,10 @@ class Daemon:
             for view in job.tasks.values():
                 host = self.host(view.host)
                 stopped = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
+                killed = view.state in ("cancelled", "stalled") or (
+                    view.state == "failed" and (view.reason or "").startswith(QUICK_LIMIT))
                 if not host or host.kind == "local" or not host.up or not stopped["unit"] \
-                        or view.state not in ("cancelled", "stalled") or view.rc is not None:
+                        or not killed or view.rc is not None:
                     continue
                 try:
                     rc, alive = self.launchers[host.name].poll([(stopped["unit"], self.lab_dir(stopped))])[stopped["unit"]]
@@ -978,6 +1080,7 @@ class Daemon:
         self.collect_preflights()
         self.probe_hosts()
         self.poll_tasks()
+        self.quick_timeouts()
         self.collect_stop_hooks()
         self.cadence()
         self.schedule()

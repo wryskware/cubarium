@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2842 rows)
+**`fauna.*`** (2870 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1565,7 +1565,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.frondgrazer.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.frondgrazer.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.frondgrazer.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.frondgrazer.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.frondgrazer.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.frondgrazer.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.frondgrazer.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.frondgrazer.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -1602,7 +1603,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.surplus_floor` | 0.01875 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.littershredder.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.littershredder.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.littershredder.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.littershredder.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.littershredder.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.littershredder.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.littershredder.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.littershredder.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -1646,6 +1648,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.littershredder.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.littershredder.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.littershredder.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.littershredder.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.littershredder.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.littershredder.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.littershredder.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -1893,7 +1897,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.surplus_floor` | 0.15 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.frondgrazer.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.frondgrazer.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.frondgrazer.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.frondgrazer.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.frondgrazer.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.frondgrazer.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.frondgrazer.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.frondgrazer.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -1937,6 +1942,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.frondgrazer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.frondgrazer.founding_count` | 8 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.frondgrazer.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.frondgrazer.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.frondgrazer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.frondgrazer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.frondgrazer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2184,7 +2191,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.surplus_floor` | 0.06 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.lanternjaw.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.lanternjaw.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.lanternjaw.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.lanternjaw.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.lanternjaw.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.lanternjaw.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.lanternjaw.core.reproduction.birth_interval_s` | 7200.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.lanternjaw.core.reproduction.clutch_size` | 3 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -2228,6 +2236,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.lanternjaw.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.lanternjaw.founding_count` | 3 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.lanternjaw.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.lanternjaw.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.lanternjaw.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.lanternjaw.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.lanternjaw.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2475,7 +2485,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.surplus_floor` | 0.031920000000000004 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.capgnawer.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.capgnawer.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.capgnawer.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.capgnawer.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.capgnawer.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.capgnawer.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.capgnawer.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.capgnawer.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -2519,6 +2530,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.capgnawer.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.capgnawer.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.capgnawer.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.capgnawer.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.capgnawer.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.capgnawer.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.capgnawer.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -2766,7 +2779,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.surplus_floor` | 0.528 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.loftstrider.core.reproduction.surplus_hold_s` | 1800.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.loftstrider.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.loftstrider.core.reproduction.gestation_s` | 3600.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.loftstrider.core.reproduction.gestation_s` | 3600.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.loftstrider.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.loftstrider.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.loftstrider.core.reproduction.birth_interval_s` | 21600.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.loftstrider.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -2810,6 +2824,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.mouth_floor_fraction` | 0.235 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.loftstrider.bite_spill_fraction` | 0.25 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.loftstrider.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.loftstrider.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.loftstrider.founding_min_region_faces` | 500 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.loftstrider.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.loftstrider.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.loftstrider.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3057,7 +3073,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.surplus_floor` | 0.00727776 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.ripple-snail.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.ripple-snail.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.ripple-snail.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.ripple-snail.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.ripple-snail.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.ripple-snail.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.ripple-snail.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.ripple-snail.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -3101,6 +3118,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.ripple-snail.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.ripple-snail.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.ripple-snail.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.ripple-snail.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.ripple-snail.water_margin_m` | 0.25 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.ripple-snail.amphibious.dry_ground_s` | 2400.0 | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.ripple-snail.amphibious.wet_ground_s` | 21600.0 | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3348,7 +3367,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.surplus_floor` | 0.0015 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.bellwing.core.reproduction.surplus_hold_s` | 300.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.bellwing.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.bellwing.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.bellwing.core.reproduction.gestation_s` | 0.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.bellwing.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.bellwing.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.bellwing.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.bellwing.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -3392,6 +3412,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.bellwing.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.bellwing.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.bellwing.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.bellwing.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.bellwing.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.bellwing.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.bellwing.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3639,9 +3661,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.surplus_floor` | 0.035555555555555556 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.seedporter.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.seedporter.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.seedporter.core.reproduction.gestation_s` | 180.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.seedporter.core.reproduction.gestation_s` | 14400.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.seedporter.core.reproduction.young_per_birth` | 2 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.seedporter.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
-| `fauna.founders.seedporter.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
+| `fauna.founders.seedporter.core.reproduction.birth_interval_s` | 1440.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.seedporter.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
 | `fauna.founders.seedporter.core.reproduction.egg_organic` | 0.0 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.seedporter.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
@@ -3660,7 +3683,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.breeding_phase` | 0.0 | year phase | [0, 1] |  | - | placeholder | breeding season: the year phase its window opens at (0: a dry season's start) |
 | `fauna.founders.seedporter.core.reproduction.breeding_window` | 0.0 | share of the year | [0, inf) |  | - | placeholder | breeding season: the window's width (1 or more: the whole year) |
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
-| `fauna.founders.seedporter.fruit_bite_half_stock` | 0.0005 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
+| `fauna.founders.seedporter.fruit_bite_half_stock` | 0.00001 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.seedporter.give_up_fraction` | 0.05 | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
 | `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
@@ -3683,6 +3706,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.seedporter.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.seedporter.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.seedporter.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.seedporter.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.seedporter.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.seedporter.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.seedporter.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |
@@ -3930,7 +3955,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.surplus_floor` | 0.2744 | org-units above the package | [0, inf) | yes | C | placeholder | reserve margin above the package that counts as surplus |
 | `fauna.founders.chorister.core.reproduction.surplus_hold_s` | 900.0 | s | [0, inf) | 60–3600 log | C | derived | the window a surplus is judged over |
 | `fauna.founders.chorister.core.reproduction.surplus_share` | 0.8 | fraction of the hold | [0, 1] |  | - | decision | share of the hold spent in surplus before breeding |
-| `fauna.founders.chorister.core.reproduction.gestation_s` | 6000.0 | s | [0, inf) | 60–6000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.gestation_s` | 6000.0 | s | [0, inf) | 60–36000 log | D | placeholder | a gestation's length |
+| `fauna.founders.chorister.core.reproduction.young_per_birth` | 1 | young | [0, inf) | yes | B | decision | young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins) |
 | `fauna.founders.chorister.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.chorister.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.chorister.core.reproduction.clutch_size` | 0 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
@@ -3974,6 +4000,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.mouth_floor_fraction` | 0.0 | x body height | [0, inf) |  | - | decision | the mouth band's floor (ground pools are taken whatever it is) |
 | `fauna.founders.chorister.bite_spill_fraction` | 0.0 | fraction of a bite | [0, 1] |  | - | decision | share of each bite's withdrawn tissue spilt as litter at the standing face |
 | `fauna.founders.chorister.founding_count` | 0 | bodies (clutches for an egg bank) | [0, inf) |  | - | decision | how many a fresh world founds (a new lineage's default 0) |
+| `fauna.founders.chorister.founding_together` | (absent) | switch | [0, 1] |  | - | decision | AtFood bodies share one walkable region; a giraffe herd or family shares a range |
+| `fauna.founders.chorister.founding_min_region_faces` | 0 | walkable faces | [0, inf) |  | - | decision | minimum AtFood founding region size; a home range must be big enough to live in |
 | `fauna.founders.chorister.water_margin_m` | 0.0 | m | [0, inf) |  | - | decision | an aquatic body's step needs standing water within this of its destination face |
 | `fauna.founders.chorister.amphibious.dry_ground_s` | (absent) | s | (0, inf) |  | - | decision | out of water, its drying clock fills in this on bone-dry ground (pore fill 0), by night in dry weather |
 | `fauna.founders.chorister.amphibious.wet_ground_s` | (absent) | s | (0, inf) |  | - | decision | ... and in this on saturated ground (pore fill 1, or a film of water) |

@@ -146,7 +146,9 @@ fn species_rows() -> Vec<Row> {
             .search(60.0, 3600.0).log().grade("C").prov("derived"),
         r("reproduction.surplus_share", "fraction of the hold", Range::fraction(), "share of the hold spent in surplus before breeding")
             .prov("decision"),
-        r("reproduction.gestation_s", "s", nonneg, "a gestation's length").search(60.0, 6000.0).log().grade("D"),
+        r("reproduction.gestation_s", "s", nonneg, "a gestation's length").search(60.0, 36000.0).log().grade("D"),
+        r("reproduction.young_per_birth", "young", nonneg, "young per live birth for a non-pack lineage; seedporter 2 (marmosets usually bear twins)")
+            .evolve().grade("B").prov("decision"),
         r("reproduction.gestation_loss_fraction", "fraction", Range::fraction(), "organic respired when a gestation fails")
             .search(0.0, 1.0).grade("C"),
         r("reproduction.birth_interval_s", "s", nonneg, "refractory after a birth or a laying")
@@ -222,6 +224,10 @@ fn founder_rows() -> Vec<Row> {
         r("bite_spill_fraction", "fraction of a bite", fraction, "share of each bite's withdrawn tissue spilt as litter at the standing face")
             .prov("decision"),
         r("founding_count", "bodies (clutches for an egg bank)", nonneg, "how many a fresh world founds (a new lineage's default 0)")
+            .prov("decision"),
+        r("founding_together", "switch", fraction, "AtFood bodies share one walkable region; a giraffe herd or family shares a range")
+            .optional().prov("decision"),
+        r("founding_min_region_faces", "walkable faces", nonneg, "minimum AtFood founding region size; a home range must be big enough to live in")
             .prov("decision"),
         r("water_margin_m", "m", nonneg, "an aquatic body's step needs standing water within this of its destination face")
             .prov("decision"),

@@ -31,6 +31,12 @@ relevant entries in design/0_Canon/DECISIONS.md.
   mapping. Consult its current contract and reuse its geometry helpers.
 - Keep the normal display free of analytical UI. Development diagnostics belong
   in explicit tools, captures, or logs.
+- **The pack predator is the Veilhound; never write "chorister".** Wrysk, 2026-10-11: no
+  "chorister" in anything forward facing, internal things included: replies, briefs, docs,
+  commit messages, and the names of files you make (MP4s, PNGs, `.glb`s, logs, folders).
+  `chorister` is only its old code identifier (`Founder::Chorister`, `chorister.cvm`,
+  config keys, `--founder chorister`). Type it only where code needs it, and never rename
+  existing code just to remove it.
 - **Windows: an agent never puts a window on Wrysk's screen.** This applies to every
   agent (Claude, Codex, subagents) and every program: cubarium, examples, Blender,
   image viewers, browsers.

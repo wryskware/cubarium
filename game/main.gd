@@ -632,14 +632,35 @@ func load_slot(name: String) -> void:
 	if busy() != "":
 		notices.add("Wait for the %s to finish." % busy(), true)
 		return
-	if has_world():
+	if saves.name_problem(name) != "" or not saves.exists(name):
+		notices.add("There is no save called \"%s\"." % name, true)
+		return
+	# The running world's own autosave is its restore point: saving first would write the
+	# world as it is now over it, and then load that.
+	if has_world() and name != running_autosave():
 		queued_load = name
 		_request_autosave("load")
 		return
 	_load_now(name)
 
 
+## The slot the running world's automatic saves go to, as world_save.rs
+## `autosave_slot_of` picks it: "" when that is not a slot under this root.
+func running_autosave() -> String:
+	var home := String(session.home())
+	if home == "":
+		return "Autosave"
+	if home.get_base_dir() not in [saves.root, saves.staging]:
+		return ""
+	var name := home.get_file()
+	return name if name.ends_with(Saves.AUTOSAVE_SUFFIX) else name + Saves.AUTOSAVE_SUFFIX
+
+
 func _load_now(name: String) -> void:
+	# Never an empty or invalid name: its path would be the saves root itself.
+	if saves.name_problem(name) != "":
+		notices.add("Couldn't load: no save was chosen.", true)
+		return
 	thumbnail_handoff = {"session": session.status()["generation"], "frame": world_view.get("frame_generation")}
 	pending_load = name
 	busy_label.text = "Opening \"%s\"…" % name
@@ -675,9 +696,7 @@ func deleted_slot(name: String) -> void:
 func _request_autosave(reason: String) -> void:
 	var problem: String = session.autosave()
 	if problem != "":
-		quit_after_save = false
-		queued_load = ""
-		notices.add("Autosave failed: " + problem, true)
+		_autosave_failed(reason, problem)
 		return
 	pending_autosave = reason
 	busy_label.text = "Saving the world before quitting…" if reason == "quit" else "Saving the world…"
@@ -689,13 +708,9 @@ func _on_autosave_notice(n: Dictionary) -> void:
 	if requested:
 		pending_autosave = ""
 	if n.get("kind", "") == "autosave_failed":
-		quit_after_save = false
-		quit_save_done = false
-		queued_load = ""
-		notices.add("Autosave failed: %s" % n.get("text", ""), true)
-		slots.say("Autosave failed: %s" % n.get("text", ""))
-		if reason == "quit":
-			open_menu()
+		# Only the save a load or quit asked for decides it; a periodic one failing leaves
+		# them waiting for their own.
+		_autosave_failed(reason, n.get("text", ""))
 		return
 	if DisplayServer.get_name() != "headless" and n.get("path", "") == String(session.home()):
 		pending_thumbnail = {"path": n["path"], "generation": session.status()["generation"]}
@@ -709,6 +724,31 @@ func _on_autosave_notice(n: Dictionary) -> void:
 		notices.add("A new world. Autosave ready.")
 	if slots.visible:
 		slots.refresh()
+
+
+## An autosave failed. `reason` is what asked for it ("" for a periodic one): only what
+## waited on that save is dropped. A failed quit save offers to quit without saving.
+func _autosave_failed(reason: String, text: String) -> void:
+	notices.add("Autosave failed: %s" % text, true)
+	slots.say("Autosave failed: %s" % text)
+	match reason:
+		"load":
+			queued_load = ""
+		"quit":
+			quit_after_save = false
+			quit_save_done = false
+			open_menu()
+			dialog.ask("The world couldn't be saved before quitting: %s\n\nQuit without saving?" % text,
+				"Quit without saving", func(_t):
+					quit_unsaved()
+					return "")
+
+
+## Quit at once, without saving the world.
+func quit_unsaved() -> void:
+	quit_after_save = false
+	quit_save_done = false
+	quit_hook.call()
 
 
 ## Never capture the previous world's frame while its replacement is still rendering.

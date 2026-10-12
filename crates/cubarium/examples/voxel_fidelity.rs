@@ -127,6 +127,7 @@ fn main() -> Result<()> {
             models: None,
             textures_under: None,
             specimens: Vec::new(),
+            pipelines: Default::default(),
         },
     ) {
         Ok(sink) => sink,

@@ -48,12 +48,23 @@
 //! `--asleep`: two grown animals standing, asleep and breathing, then awake; bellwing
 //! is grounded. `--voxel-m 0.25` shows the coarse bin (default 0.125).
 //!
+//! `--idle` (RIG-STATES rounds 4 and 5): two grown loftstriders and a newborn calf (or two
+//! grown frondgrazers) standing through one idle bout (`IDLE_LENGTH_S`, or `--length S`;
+//! they idle after `idle::HOLD_S`). `--one`: a single grown loftstrider, closer (for one
+//! action at a time, with `--figures-toml`).
+//! `--handover`: the three loftstriders idling, then cropping, idling, walking a few steps,
+//! idling, asleep and awake again (`HANDOVER`, or `--script T:STATE,...` with the states
+//! `rest`, `crop`, `walk` and `sleep`), so each hand-over to and from idle shows.
+//! `--figures-toml FILE` reads the `[figures]` table (as `FigureConfig`) from FILE: round 5
+//! sets the idle actions' knobs (`[idle.loftstrider]`) there.
+//!
 //! ```text
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --arm b \
 //!     [--px N] [--heading DEG] [--flipbook PATH]
 //!     [--founder frondgrazer|chorister|loftstrider|seedporter|lanternjaw|bellwing|capgnawer|
 //!                littershredder|ripple-snail] [--pose stand|ground]
-//!     [--aim] [--models DIR] [--states|--asleep] [--voxel-m N] [--stills S,S,...]
+//!     [--aim] [--models DIR] [--states|--asleep|--idle|--handover] [--voxel-m N]
+//!     [--stills S,S,...]
 //! cargo run -p cubarium --release --example voxel_feed_capture -- OUT_DIR --perf N [--arm b]
 //! ```
 //!
@@ -124,6 +135,21 @@ const STATES: [(f64, State, bool); 8] = [
 ];
 const STATES_LENGTH_S: f64 = 31.0;
 const ASLEEP_BOUT: (f64, f64) = (2.0, 8.0);
+/// The idle bout (`--idle`), seconds, unless `--length` says.
+const IDLE_LENGTH_S: f64 = 33.0;
+/// The hand-over script (`--handover`): from each time (seconds) the bodies' state. A
+/// `Walking` body steps forward at `WALK_MPS`; a still `Resting` one idles after the hold.
+const HANDOVER: [(f64, State); 7] = [
+    (0.0, State::Resting),
+    (6.0, State::Cropping),
+    (10.0, State::Resting),
+    (15.0, State::Walking),
+    (16.5, State::Resting),
+    (21.0, State::Asleep),
+    (26.0, State::Resting),
+];
+const HANDOVER_LENGTH_S: f64 = 31.0;
+const WALK_MPS: f64 = 0.5;
 const ASLEEP_LENGTH_S: f64 = 11.0;
 const VOXEL_M: f64 = 0.125;
 const HZ: f64 = cubarium_voxel::TICK_HZ as f64;
@@ -301,6 +327,12 @@ fn main() -> Result<()> {
     let mut models_dir = None;
     let mut states = false;
     let mut asleep_only = false;
+    let mut idle_bout = false;
+    let mut handover = false;
+    let mut one = false;
+    let mut length: Option<f64> = None;
+    let mut script: Option<Vec<(f64, State)>> = None;
+    let mut figures_toml: Option<PathBuf> = None;
     let mut voxel_m = VOXEL_M;
     let mut pose_set = false;
     let mut stills: Option<Vec<f64>> = None;
@@ -317,6 +349,31 @@ fn main() -> Result<()> {
             "--aim" => aiming = true,
             "--states" => states = true,
             "--asleep" => asleep_only = true,
+            "--idle" => idle_bout = true,
+            "--handover" => handover = true,
+            "--one" => one = true,
+            "--length" => length = Some(args.next().context("--length S")?.parse()?),
+            "--figures-toml" => figures_toml = Some(PathBuf::from(args.next().context("--figures-toml FILE")?)),
+            "--script" => {
+                handover = true;
+                script = Some(
+                    args.next()
+                        .context("--script T:STATE,...")?
+                        .split(',')
+                        .map(|v| {
+                            let (t, st) = v.split_once(':').context("T:STATE")?;
+                            let st = match st {
+                                "rest" => State::Resting,
+                                "crop" => State::Cropping,
+                                "walk" => State::Walking,
+                                "sleep" => State::Asleep,
+                                s => bail!("a state rest, crop, walk or sleep, not {s}"),
+                            };
+                            Ok((t.parse::<f64>()?, st))
+                        })
+                        .collect::<Result<_>>()?,
+                )
+            }
             "--voxel-m" => voxel_m = args.next().context("--voxel-m N")?.parse()?,
             "--stills" => {
                 stills = Some(
@@ -364,7 +421,10 @@ fn main() -> Result<()> {
             _ => bail!("unexpected argument {a}"),
         }
     }
-    anyhow::ensure!(!(states && asleep_only), "choose --states or --asleep");
+    anyhow::ensure!(
+        [states, asleep_only, idle_bout, handover].iter().filter(|&&x| x).count() <= 1,
+        "choose one of --states, --asleep, --idle or --handover"
+    );
     if asleep_only && founder == Founder::Bellwing && !pose_set {
         mode = MobilityMode::Ground;
     }
@@ -399,11 +459,20 @@ fn main() -> Result<()> {
     );
     let perched = sp && mode == MobilityMode::Perched;
     anyhow::ensure!(!aiming || ls, "--aim is the loftstrider's");
+    let idling = idle_bout || handover;
+    anyhow::ensure!(!handover || ls, "--handover is the loftstrider's");
+    anyhow::ensure!(!idle_bout || ls || founder == Founder::Browser, "--idle is the loftstrider's and the frondgrazer's");
+    anyhow::ensure!(!one || (ls && idle_bout), "--one is the loftstrider's, with --idle");
+    let script = script.unwrap_or_else(|| HANDOVER.to_vec());
     let world_of = |width, height, depth| world_of_at(width, height, depth, voxel_m);
     let world = |width, depth| world_of(width, 8, depth);
     let (mut w, xs, z) = match founder {
         Founder::Chorister => (world(48, 16), vec![15, 36], 8),
         Founder::Loftstrider if aiming => (world_of(52, 36, 20), vec![26], 10),
+        // one grown loftstrider, close
+        Founder::Loftstrider if one => (world_of(34, 34, 20), vec![17], 10),
+        // two adults and the calf, room to walk a few steps
+        Founder::Loftstrider if idling => (world_of(74, 36, 20), vec![12, 33, 54], 10),
         Founder::Loftstrider => (world_of(52, 36, 20), vec![16, 38], 10),
         // the ground pose is 1.14 m long with its tail; the perched one 1.04 m tall
         Founder::Seedporter => (world_of(26, 14, 9), vec![8, 18], 4),
@@ -457,7 +526,9 @@ fn main() -> Result<()> {
         // the loftstrider's second is a newborn calf (its own build, its own bin); the
         // seedporter's a newborn (its pose models are one bin: the adult's); the
         // lanternjaw's a newborn, the founder's smallest bin (its larva is the rider)
-        a.body = if !states && !asleep_only && (ls || sp || lj || bw || small) && i == 1 {
+        a.body = if idling && ls {
+            if i == 2 { newborn } else { adult }
+        } else if !states && !asleep_only && (ls || sp || lj || bw || small) && i == 1 {
             newborn
         } else {
             adult
@@ -506,6 +577,14 @@ fn main() -> Result<()> {
     if let Some(dir) = models_dir {
         cfg.models_dir = dir;
     }
+    if let Some(p) = &figures_toml {
+        let rig = cfg.figures.rig;
+        cfg.figures = toml::from_str(&std::fs::read_to_string(p)?).with_context(|| format!("{}", p.display()))?;
+        cfg.figures.rig = rig;
+    }
+    for a in &animals {
+        println!("animal {} body {:.3}", a.id, a.body);
+    }
     if flip.is_some() {
         // the flipbook swaps its model outright, as a flipbook does
         cfg.figures.swap_s = 0.0;
@@ -531,6 +610,9 @@ fn main() -> Result<()> {
 
     let length_s = match (ls, aiming) {
         _ if states => STATES_LENGTH_S,
+        _ if length.is_some() => length.unwrap_or_default(),
+        _ if idle_bout => IDLE_LENGTH_S,
+        _ if handover => HANDOVER_LENGTH_S,
         _ if asleep_only => ASLEEP_LENGTH_S,
         (true, true) => AIM_LENGTH_S,
         (true, false) => LS_LENGTH_S,
@@ -563,6 +645,20 @@ fn main() -> Result<()> {
                     STATES.iter().rev().find(|s| t >= s.0).unwrap_or(&STATES[0]);
                 a.state = state;
                 a.hunkered = hunkered;
+            }
+            if idle_bout {
+                a.state = State::Resting;
+            }
+            if handover {
+                let t = tick as f64 / HZ;
+                let &(_, state) = script.iter().rev().find(|s| t >= s.0).unwrap_or(&script[0]);
+                a.state = state;
+                if state == State::Walking {
+                    // a step forward along its heading each tick
+                    let (sh, ch) = a.pose.heading_rad.sin_cos();
+                    a.pose.x += WALK_MPS / HZ * sh;
+                    a.pose.z += WALK_MPS / HZ * ch;
+                }
             }
             if aiming {
                 let t = tick as f64 / HZ;

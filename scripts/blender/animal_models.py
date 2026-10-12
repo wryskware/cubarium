@@ -798,10 +798,11 @@ FG_STATE_FRAMES = 16
 # 0.12 m off the centre line against 0.155 m standing), turning about their hips
 FG_LEG_TUCK = 0.035
 FG_IDLE_FPS = 10
-FG_IDLE_LOOP_S = 21.0
 FG_IDLE_MOVE_S = 0.5
-# (start seconds, dip voxels): today's dips are 0.3-0.5 voxels, 4 to 10 s apart
-FG_IDLE_DIPS = ((1.2, 0.42), (9.4, 0.33), (15.1, 0.50))
+# RIG-STATES round 5: the idle is one action, a single dip (`idle.dip`), played on the
+# idle schedule (`crates/cubarium/src/voxel/idle.rs`); its variants are round 1's loop's
+# three dips, in voxels (today's dips are 0.3-0.5)
+FG_IDLE_DIPS = (0.42, 0.33, 0.50)
 FG_NECK_CHAIN = ("neck_a", "neck_b", "head", "eye_l", "eye_r")
 NEIGHBOURS = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
 
@@ -946,37 +947,36 @@ def fg_state_rig(shared, cells, bones, scale, hunker):
     hd = Vector((FG_NECK[4][0], FG_NECK[4][2])) - base
     reach, phi = hd.length, math.atan2(hd.y, hd.x)
 
-    def dip_at(t):
-        out = 0.0
-        for start, dip in FG_IDLE_DIPS:
-            x = (t - start) / FG_IDLE_MOVE_S
-            if 0.0 < x < 1.0:
-                out += dip * math.sin(math.pi * x) ** 2
-        return out
+    def dip_clip(dip):
+        # one dip, its first and last frames the rest: sampled as round 1's loop sampled
+        # each of its dips (from the dip's start, every tenth of a second)
+        frames = []
+        for f in range(round(FG_IDLE_MOVE_S * FG_IDLE_FPS) + 1):
+            x = f / FG_IDLE_FPS / FG_IDLE_MOVE_S
+            d = dip * math.sin(math.pi * x) ** 2 * v if 0.0 < x < 1.0 else 0.0
+            theta = phi - math.asin(max(-1.0, min(1.0, (hd.y - d) / reach)))
+            turn = side_turn(-theta, FG_NECK[0], FG_NECK[0])
+            h = Vector(FG_NECK[4])
+            level = Matrix.Translation(turn @ h - h)
+            moves = []
+            for name, _, _, _ in FG_BONES:
+                if d == 0.0:
+                    moves.append(Matrix.Identity(4))
+                elif name in ("neck_a", "neck_b"):
+                    moves.append(turn)
+                elif name in ("head", "eye_l", "eye_r"):
+                    moves.append(level)
+                else:
+                    moves.append(Matrix.Identity(4))
+            frames.append(moves)
+        return moves_clip(FG_BONES, frames, FG_IDLE_FPS)
 
-    frames = []
-    for f in range(round(FG_IDLE_LOOP_S * FG_IDLE_FPS)):
-        d = dip_at(f / FG_IDLE_FPS) * v
-        theta = phi - math.asin(max(-1.0, min(1.0, (hd.y - d) / reach)))
-        turn = side_turn(-theta, FG_NECK[0], FG_NECK[0])
-        h = Vector(FG_NECK[4])
-        level = Matrix.Translation(turn @ h - h)
-        moves = []
-        for name, _, _, _ in FG_BONES:
-            if name in ("neck_a", "neck_b"):
-                moves.append(turn)
-            elif name in ("head", "eye_l", "eye_r"):
-                moves.append(level)
-            else:
-                moves.append(Matrix.Identity(4))
-        frames.append(moves)
-    idle = moves_clip(FG_BONES, frames, FG_IDLE_FPS)
+    dips = [dip_clip(dip) for dip in FG_IDLE_DIPS]
     assert shared["bones"] == asleep["bones"] and names == [b[0] for b in shared["bones"]]
     clips = list(shared["clips"]) + [
         dict(state="asleep", mode=CLIP_TRACK, fps=asleep["fps"], frames=asleep["frames"]),
         dict(state="hunker", mode=CLIP_TRACK, fps=hunker_c["fps"], frames=hunker_c["frames"]),
-        dict(state="idle", mode=CLIP_LOOP, fps=idle["fps"], frames=idle["frames"]),
-    ]
+    ] + [dict(state="idle.dip", mode=CLIP_ACTION, fps=d["fps"], frames=d["frames"]) for d in dips]
     tucked = {e: sum(1 for b in bones.values() if b == f"tuck{e}") for e in (1, 2, 3)}
     return ({"bones": shared["bones"], "heads": shared["heads"], "clips": clips},
             f"torso row {torso}, settle {drop}, neck slide {n} (staying {sorted(stays)},"
@@ -3345,8 +3345,9 @@ LS_REST_FRAMES = 16
 # the six-fold turn symmetry (`rig.rs`'s `Symmetry`): one step is +60 degrees about the
 # model's up, which is -60 about Blender's z, so it carries frond and leg k onto k - 1
 LS_ORDER = 6
-# clip modes in the `.rig` (`crates/cubarium/src/voxel/rig.rs`)
-CLIP_LOOP, CLIP_TRACK = 0, 1
+# clip modes in the `.rig` (`crates/cubarium/src/voxel/rig.rs`); an action's state is
+# `idle.<name>` (RIG-STATES round 5)
+CLIP_LOOP, CLIP_TRACK, CLIP_ACTION = 0, 1, 2
 
 
 def ls_bones(p):
@@ -3437,10 +3438,11 @@ def ls_lean(bones, lean_deg, crouch):
     return turn, shift, rise
 
 
-def ls_frond_keys(bones, k, mouth_z, reach_e):
+def ls_frond_keys(bones, k, mouth_z, reach_e, own=False):
     """Frond `k`'s key poses (swing about z degrees, each bone's elevation degrees in its
     own plane, the head's frame), made with the reference frond's lengths (the fronds'
-    mean size) so the six share them: rest (its droop), unfurled (straight, half way to the
+    mean size) so the six share them, or with `own` its own lengths (the idle's scratch,
+    which no symmetry hands round): rest (its droop), unfurled (straight, half way to the
     reach), reached (straight at `reach_e`), grabbed (curled inward on the reach, the other
     way to the droop), brought (curled on over the head, its tip just over the mouth: a
     two-bone reach for its outer bones, the joint on the upper side), each angle unwrapped
@@ -3451,7 +3453,7 @@ def ls_frond_keys(bones, k, mouth_z, reach_e):
     def rz_(v):                         # (radius, height) in the frond's own plane
         return Vector((math.hypot(v.x, v.y), v.z))
     segs = [(rz_(by[n][0]), rz_(by[n][1])) for n in names]
-    ref = sum(LS_FROND) / len(LS_FROND) / LS_FROND[k]
+    ref = 1.0 if own else sum(LS_FROND) / len(LS_FROND) / LS_FROND[k]
     lens = [(t - h).length * ref for h, t in segs]
     elev = [math.degrees(math.atan2((t - h).y, (t - h).x)) for h, t in segs]
     b = 30 + 60 * k
@@ -3606,6 +3608,327 @@ def ls_rest_clip(p, drop):
     return sample_clip(ob, bones, LS_REST_FRAMES, LS_FEED_FPS)
 
 
+# --- the loftstrider's idle actions (RIG-STATES round 5, 2026-10-11) -------------------------
+#
+# `design/handoffs/rig-states-2026-10-10.md` §Round 5. The idle is a still base (the class
+# path's breath) and now and then one short **action**, played once on the idle schedule
+# (`crates/cubarium/src/voxel/idle.rs`) and eased by the idle weight: each is an `idle.<name>`
+# clip (`CLIP_ACTION`) whose first and last frames are the rest, its variants clips of the
+# same name. The whole body takes part over planted feet: the root shifts, leans and turns
+# (`ls_body`) and every leg is solved by `ls_legs` each frame, so the ankles stay where they
+# stand and the toes flat.
+#
+# - **look** (Wrysk's B, round 4, with the body; a variant per side, left and right): the
+#   body shifts its weight toward the side and leans and turns a little into the look; the
+#   neck bends toward it, the head tips back on it so its crown lifts that side, and the
+#   neck's top and the head turn toward it (B's own moves); held, then settled back. The
+#   fronds trail the turn a little (`LS_LOOK_TRAIL_S`).
+# - **scratch** (replaces round 4's C; a variant per frond, one frond only): the frond swings
+#   down and out and its tip scratches an itch on the body below it (the flank, or the upper
+#   flank or shoulder where a shorter frond reaches: `LS_SCRATCH_SPOTS`), the body leaning
+#   into it and rocking with each rub; then it swings up and curls over the head to the
+#   mouth on top (the feeding clip's bring, at the frond's own lengths), where the head
+#   works on it, twisting side to side as the frond is drawn through; then everything
+#   settles. No reach to a bite and no chew nod, so it does not read as feeding.
+
+LS_IDLE_FPS = 10
+# the body: its shift toward the side (a share of the hips' radius), its lean toward it and
+# its turn into it, degrees
+LS_LOOK_BODY = (0.12, 4.0, 8.0)
+LS_LOOK_BEND_DEG = 5.0      # each neck bone toward the side it looks
+LS_LOOK_TILT_DEG = 18.0     # the head tipped back on the neck: its crown lifts that side
+LS_LOOK_TURN_DEG = (10.0, 20.0)     # the neck's top and the head turning toward it
+LS_LOOK_S = (1.4, 1.8, 1.6)         # turning to look, the hold, settling back
+LS_LOOK_TRAIL_S = 0.12      # the fronds' roots trail the turn: its rate times this, degrees
+# the scratch's phases, seconds: the frond down to the itch, the rubs, up to the mouth, the
+# cleaning, everything settling
+LS_SCRATCH_S = (1.0, 1.6, 0.9, 1.8, 1.2)
+LS_SCRATCH_RUBS = 3
+LS_SCRATCH_RUB = 0.06       # each rub's reach along the body either way, metres at size 1
+LS_SCRATCH_GAP = 0.05       # the tip's centreline off the body's surface, metres at size 1
+# where on the body below a frond its itch is, from the lowest a frond reaches: heights on
+# the onion's profile (its adult metres, `loftstrider_rig`'s `body`)
+LS_SCRATCH_SPOTS = (1.50, 1.64, 1.78, 1.88)
+# the body: its shift toward the frond (a share of the hips' radius), its lean, and its rock
+# with each rub (degrees, about up)
+LS_SCRATCH_BODY = (0.10, 5.0, 2.0)
+LS_SCRATCH_NECK_DEG = (3.0, 6.0)    # each neck bone toward the frond: scratching, cleaning
+LS_CLEAN_TWIST_DEG = 7.0    # the head's twist side to side as it works on the frond
+LS_CLEAN_WORKS = 3          # twists while cleaning
+LS_CLEAN_STROKE_DEG = 10.0  # the frond's tip drawn back and forth through the mouth
+LS_CLEAN_DRAW_DEG = 15.0    # and drawn out over the cleaning
+
+
+def ls_frond_turns(k, th, elev, swing_deg, turns):
+    """Frond `k`'s bone turns into `turns` for elevations `th` (degrees, each bone in its
+    plane) against its rest `elev`, its root swung `swing_deg` about the head's axis: as
+    `ls_feed_clip` keys them."""
+    b = math.radians(30 + 60 * k)
+    s_ = Vector((-math.sin(b), math.cos(b), 0))
+    dth = [math.radians(x - e) for x, e in zip(th, elev)]
+    rel = [dth[0], dth[1] - dth[0], dth[2] - dth[1]]
+    # + about the frond's side axis lowers it: a lift is a negative turn
+    for x, a in zip("abc", rel):
+        turns[f"f{k}_{x}"] = Matrix.Rotation(-a, 3, s_)
+    turns[f"f{k}_a"] = Matrix.Rotation(math.radians(swing_deg), 3, "Z") @ turns[f"f{k}_a"]
+
+
+def ls_body(bones, az_deg, shift_share, lean_deg, yaw_deg):
+    """The root's turn (3x3) and its head's shift (metres) for the body shifting its weight
+    `shift_share` of the hips' radius toward azimuth `az_deg` (degrees about up from +x),
+    leaning `lean_deg` toward it and turning `yaw_deg` about up: lowered as far as it must
+    so no leg stretches past `LS_STRETCH` (`ls_lean`'s rule), never raised."""
+    h0 = Vector(bones[0][2])
+    by = {name: (Vector(h), Vector(t)) for name, _, h, t in bones}
+    az = math.radians(az_deg)
+    toward = Vector((math.cos(az), math.sin(az), 0.0))
+    # about this axis a turn tips the top toward `toward`
+    axis = Vector((0.0, 0.0, 1.0)).cross(toward)
+    turn = Matrix.Rotation(math.radians(lean_deg), 3, axis) @ Matrix.Rotation(math.radians(yaw_deg), 3, "Z")
+    hip_r = by["thigh0"][0].xy.length
+    shift = toward * shift_share * hip_r
+    rise = 0.0
+    for k in range(6):
+        hip0, knee0 = by[f"thigh{k}"]
+        _, ankle = by[f"shin{k}"]
+        lmax = LS_STRETCH * ((knee0 - hip0).length + (ankle - knee0).length)
+        v = h0 + shift + turn @ (hip0 - h0) - ankle
+        rise = min(rise, -v.z + math.sqrt(max(0.0, v.z * v.z - (v.length_squared - lmax * lmax))))
+    return turn, shift + Vector((0.0, 0.0, rise))
+
+
+def ls_pose_body(bones, turn, shift, turns):
+    """The root's `turn` and the legs solved under it into `turns`; the root's shift, or
+    no turns and no shift at rest (so a rest frame keys nothing)."""
+    if shift.length < 1e-12 and all(abs(turn[i][j] - (i == j)) < 1e-12 for i in range(3) for j in range(3)):
+        return Vector((0.0, 0.0, 0.0))
+    turns["root"] = turn
+    ls_legs(bones, turn, shift, turns)
+    return shift
+
+
+def ls_neck(bones, az_deg, bend_deg, turns):
+    """Each neck bone bent `bend_deg` toward azimuth `az_deg` into `turns` (composed after
+    any turn already there)."""
+    az = math.radians(az_deg)
+    axis = Vector((0.0, 0.0, 1.0)).cross(Vector((math.cos(az), math.sin(az), 0.0)))
+    bend = Matrix.Rotation(math.radians(bend_deg), 3, axis)
+    for name in ("neck_a", "neck_b"):
+        turns[name] = bend @ turns.get(name, Matrix.Identity(3))
+
+
+def ls_look_clip(p, side):
+    """The look action at part sizes `p` toward `side` (+1 the left, +y; -1 the right),
+    sampled at `LS_IDLE_FPS` (`sample_clip`)."""
+    bones = ls_bones(p)
+    ins, hold, out = LS_LOOK_S
+    total = ins + hold + out
+    n = round(total * LS_IDLE_FPS) + 1
+    ob = rig_armature("ls_look", bones, LS_IDLE_FPS)
+    shift_share, lean, yaw = LS_LOOK_BODY
+
+    def on(t):                      # how far into the look, 0 to 1 and back, eased
+        if t < ins:
+            return smooth(t / ins)
+        if t < ins + hold:
+            return 1.0
+        return 1.0 - smooth((t - ins - hold) / out)
+    whole = yaw + sum(LS_LOOK_TURN_DEG)     # the head's whole turn about up, degrees
+    for f in range(n):
+        t = f / LS_IDLE_FPS
+        u = on(t)
+        turns = {}
+        shift = Vector((0.0, 0.0, 0.0))
+        if u > 0.0:
+            turn, sh = ls_body(bones, 90.0 * side, shift_share * u, lean * u, yaw * side * u)
+            shift = ls_pose_body(bones, turn, sh, turns)
+            s = side * u
+            bend = Matrix.Rotation(math.radians(-LS_LOOK_BEND_DEG * s), 3, "X")
+            turn_b, turn_h = (Matrix.Rotation(math.radians(d * s), 3, "Z") for d in LS_LOOK_TURN_DEG)
+            turns["neck_a"] = bend
+            turns["neck_b"] = bend @ turn_b
+            # tipped back against the bend (its axis, then the tilt): the crown lifts on the
+            # side it looks to
+            turns["head"] = Matrix.Rotation(math.radians(LS_LOOK_TILT_DEG * s), 3, "X") @ turn_h
+            # the fronds trail the turn: their roots swing back against its rate
+            rate = (on(t + 0.5 / LS_IDLE_FPS) - on(t - 0.5 / LS_IDLE_FPS)) * LS_IDLE_FPS * whole * side
+            trail = Matrix.Rotation(math.radians(-LS_LOOK_TRAIL_S * rate), 3, "Z")
+            for k in range(6):
+                turns[f"f{k}_a"] = trail
+        key_turns(ob, bones, f, turns, shift)
+    return sample_clip(ob, bones, n, LS_IDLE_FPS)
+
+
+def ls_chain(bones, turns, names):
+    """The armature-space move (4x4) of the last of `names` (a chain from the root's child
+    down) under `turns` (each about its own head, relative to its parent)."""
+    by = {name: Vector(h) for name, _, h, _ in bones}
+    m = Matrix.Identity(4)
+    for name in names:
+        r = turns.get(name, Matrix.Identity(3)).to_4x4()
+        h = by[name]
+        m = m @ Matrix.Translation(h) @ r @ Matrix.Translation(-h)
+    return m
+
+
+def ls_reach2(j1, target, lb, lc):
+    """A two-bone reach in a frond's plane ((radius, height)) from `j1` to `target`, the joint
+    on the outer side: the two bones' elevations, degrees."""
+    to = target - j1
+    d = min(max(to.length, abs(lb - lc) + 1e-6), lb + lc - 1e-6)
+    base = math.atan2(to.y, to.x)
+    bend = math.acos(max(-1.0, min(1.0, (lb * lb + d * d - lc * lc) / (2 * lb * d))))
+    joint = max((j1 + Vector((math.cos(base + s * bend), math.sin(base + s * bend))) * lb for s in (1, -1)),
+                key=lambda j: j.x)
+    return (math.degrees(math.atan2((joint - j1).y, (joint - j1).x)),
+            math.degrees(math.atan2((target - joint).y, (target - joint).x)))
+
+
+def ls_scratch_clip(p, k):
+    """The scratch action of frond `k` at part sizes `p`, sampled at `LS_IDLE_FPS`. Also the
+    itch's height on the body (adult profile metres) and the root bone's elevation."""
+    bones = ls_bones(p)
+    fr = ls_frame(p)
+    B, F = p["body"], p["frond"]
+    names = [f"f{k}_{x}" for x in "abc"]
+    by = {name: (Vector(h), Vector(t)) for name, _, h, t in bones}
+    az = 30 + 60 * k
+    toward = Vector((math.cos(math.radians(az)), math.sin(math.radians(az)), 0.0))
+
+    def rz_(v):                         # (radius along the frond's azimuth, height)
+        return Vector((v.dot(toward), v.z))
+    lens = [(by[n][1] - by[n][0]).length for n in names]
+    root = rz_(by[names[0]][0])
+    elev, keys = ls_frond_keys(bones, k, fr["mouth_z"], 45.0, own=True)
+    # the onion's surface, (radius, height) at a height on its adult profile
+    prof = [(1.15, 0.05), (1.19, 0.30), (1.29, 0.47), (1.43, 0.555), (1.57, 0.56), (1.71, 0.50),
+            (1.84, 0.38), (1.96, 0.26)]
+
+    def surface(zp):
+        for (z0, r0), (z1, r1) in zip(prof, prof[1:]):
+            if z0 <= zp <= z1:
+                r = r0 + (r1 - r0) * (zp - z0) / (z1 - z0)
+                return Vector((r * B, fr["zb"] + (zp - 1.15) * B)), Vector((-(r1 - r0) * B, (z1 - z0) * B)).normalized()
+        raise ValueError(zp)
+    gap = LS_SCRATCH_GAP * F
+    neck_s, neck_c = LS_SCRATCH_NECK_DEG
+
+    def in_head(pt, neck_deg):
+        """A body point (radius, height on the frond's azimuth) in the head's rest frame with
+        the neck bent `neck_deg` a bone toward the frond."""
+        turns = {}
+        ls_neck(bones, az, neck_deg, turns)
+        m = ls_chain(bones, turns, ("neck_a", "neck_b", "head"))
+        q = m.inverted() @ (toward * pt.x + Vector((0.0, 0.0, pt.y)))
+        return rz_(q)
+
+    # the lowest spot it reaches: the root bone swung out as high as lets the other two reach
+    # it, their joint outside the body
+    plan = None
+    for zp in LS_SCRATCH_SPOTS:
+        surf, tangent = surface(zp)
+        normal = Vector((tangent.y, -tangent.x))
+        target = in_head(surf + normal * gap, neck_s)
+        for ea in range(20, -72, -2):
+            j1 = root + Vector((math.cos(math.radians(ea)), math.sin(math.radians(ea)))) * lens[0]
+            if (target - j1).length > 0.93 * (lens[1] + lens[2]):
+                continue
+            eb, ec = ls_reach2(j1, target, lens[1], lens[2])
+            joint = j1 + Vector((math.cos(math.radians(eb)), math.sin(math.radians(eb)))) * lens[1]
+            if joint.x < surface(min(max((joint.y - fr["zb"]) / B + 1.15, 1.16), 1.95))[0].x + gap:
+                continue
+            plan = (zp, ea, surf, tangent, normal)
+            break
+        if plan:
+            break
+    if plan is None:
+        raise ValueError(f"frond {k} reaches no itch at sizes {p}")
+    zp, ea, surf, tangent, normal = plan
+
+    def scratch_at(rub):
+        """The frond's elevations with its tip `rub` metres along the body from the itch."""
+        target = in_head(surf + normal * gap + tangent * rub, neck_s)
+        j1 = root + Vector((math.cos(math.radians(ea)), math.sin(math.radians(ea)))) * lens[0]
+        eb, ec = ls_reach2(j1, target, lens[1], lens[2])
+        return [ea, eb, ec]
+
+    def near(th, ref):                  # each angle the nearest way round to `ref`'s
+        return [x + 360.0 * round((r - x) / 360.0) for x, r in zip(th, ref)]
+    scratch = near(scratch_at(0.0), elev)
+    bring = list(keys["bring"][1:])
+    # up and over: from the scratch the curl only turns one way (up), never back down
+    # through the body
+    bring = [x + 360.0 * math.ceil((s_ - x) / 360.0) if x < s_ else x for x, s_ in zip(bring, scratch)]
+    relax = [e + 360.0 * round((x - e) / 360.0) for e, x in zip(elev, bring)]
+    t1 = LS_SCRATCH_S[0]
+    t2 = t1 + LS_SCRATCH_S[1]
+    t3 = t2 + LS_SCRATCH_S[2]
+    t4 = t3 + LS_SCRATCH_S[3]
+    t5 = t4 + LS_SCRATCH_S[4]
+    n = round(t5 * LS_IDLE_FPS) + 1
+    shift_share, lean, rock = LS_SCRATCH_BODY
+    rub_amp = LS_SCRATCH_RUB * B
+    lerp = lambda a_, b_, w: [x + (y - x) * smooth(w) for x, y in zip(a_, b_)]  # noqa: E731
+    # the cleaning's end: the tip drawn out of the mouth
+    bring_end = [bring[0], bring[1], bring[2] - LS_CLEAN_DRAW_DEG]
+    ob = rig_armature("ls_scratch", bones, LS_IDLE_FPS)
+    for f in range(n):
+        t = f / LS_IDLE_FPS
+        twist, rocking = 0.0, 0.0
+        if t <= 0.0 or t >= t5:
+            th, body, neck = None, 0.0, 0.0
+        elif t < t1:
+            w = t / LS_SCRATCH_S[0]
+            th, body, neck = lerp(elev, scratch, w), smooth(w), neck_s * smooth(w)
+        elif t < t2:
+            x = (t - t1) / LS_SCRATCH_S[1]
+            # the rubs, eased in and out at their ends
+            wave = math.sin(2 * math.pi * LS_SCRATCH_RUBS * x) * math.sin(math.pi * x) ** 0.5
+            th = near(scratch_at(rub_amp * wave), scratch)
+            body, neck, rocking = 1.0, neck_s, rock * wave
+        elif t < t3:
+            w = (t - t2) / LS_SCRATCH_S[2]
+            th, body, neck = lerp(scratch, bring, w), 1.0 - 0.6 * smooth(w), neck_s + (neck_c - neck_s) * smooth(w)
+        elif t < t4:
+            x = (t - t3) / LS_SCRATCH_S[3]
+            env = math.sin(math.pi * x)
+            work = math.sin(2 * math.pi * LS_CLEAN_WORKS * x)
+            stroke = math.sin(2 * math.pi * 2 * LS_CLEAN_WORKS * x) * env
+            draw = LS_CLEAN_DRAW_DEG * smooth(x)
+            th = [bring[0], bring[1] + 0.3 * LS_CLEAN_STROKE_DEG * stroke,
+                  bring[2] + LS_CLEAN_STROKE_DEG * stroke - draw]
+            body, neck, twist = 0.4, neck_c, LS_CLEAN_TWIST_DEG * work * env
+        else:
+            w = (t - t4) / LS_SCRATCH_S[4]
+            th = lerp(bring_end, relax, w)
+            body, neck = 0.4 * (1 - smooth(w)), neck_c * (1 - smooth(w))
+        turns = {}
+        shift = Vector((0.0, 0.0, 0.0))
+        if body > 0.0 or rocking != 0.0:
+            turn, sh = ls_body(bones, az, shift_share * body, lean * body, rocking)
+            shift = ls_pose_body(bones, turn, sh, turns)
+        if neck > 0.0:
+            ls_neck(bones, az, neck, turns)
+        if twist != 0.0:
+            turns["head"] = Matrix.Rotation(math.radians(twist), 3, "Z")
+        if th is not None:
+            ls_frond_turns(k, th, elev, 0.0, turns)
+        key_turns(ob, bones, f, turns, shift)
+    return sample_clip(ob, bones, n, LS_IDLE_FPS), zp, ea
+
+
+def ls_idle_actions(p):
+    """The loftstrider's idle actions at part sizes `p`: (state, clip) in the rig's order,
+    and a note for the bake's log."""
+    out = [("idle.look", ls_look_clip(p, side)) for side in (1, -1)]
+    spots = []
+    for k in range(6):
+        clip, zp, ea = ls_scratch_clip(p, k)
+        out.append(("idle.scratch", clip))
+        spots.append(f"f{k} at {zp:.2f} (root {ea} deg)")
+    return out, "scratch itches: " + ", ".join(spots)
+
+
 def lowest_corner(clip, frame, cells, vox, names):
     """The lowest corner (model metres above the feet) at sampled `frame` of the cells
     `cells` ({(i, j, k) Blender cell: bone name}, the bake's, built a half cell off the
@@ -3651,6 +3974,9 @@ def ls_rig_clips(p, cells=None, vox=None):
     clips = [dict(state="cropping", mode=CLIP_LOOP, fps=f["fps"], frames=f["frames"], aim=h, lower=lw)
              for f, h, lw in feeds]
     clips.append(dict(state="asleep", mode=CLIP_TRACK, fps=rest["fps"], frames=rest["frames"]))
+    actions, note = ls_idle_actions(p)
+    print(f"loftstrider {p.get('body', 1.0):.3f}: {note}", flush=True)
+    clips += [dict(state=state, mode=CLIP_ACTION, fps=c["fps"], frames=c["frames"]) for state, c in actions]
     return {"bones": rest["bones"], "heads": heads, "symmetry": (order, image), "clips": clips}
 
 

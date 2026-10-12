@@ -108,6 +108,9 @@ mass_scale = 60.0
 capgnawer_stay_worth = 0.25
 
 [fauna.founders.loftstrider]
+# LS-TOGETHER, Wrysk 2026-10-11: "those loftstriders can never meet each other to breed".
+founding_together = true
+founding_min_region_faces = 500
 founding_count = 2
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.4934555320156417
@@ -233,15 +236,19 @@ hunter.prey = [true, false, true, false, false, false, true, false, false]
 # GUT-MASS-2 (Wrysk's decision A: seedporters eat shredders, adults included): sizes compare
 # as body / mass_scale, so the catch window, not a mass, covers a grown littershredder.
 hunter.prey_max_ratio = 1.25
-# Fruit at the mouth is 1e-4..1e-3 ou: K is about a third of a ripe vine patch.
-fruit_bite_half_stock = 0.0005
+# FRUIT-FAST (Wrysk 2026-10-11: "monkeys can pick off berries and eat tons"): picking
+# runs near gut speed until a face is nearly stripped; K is ~1/8 of an average vine face's fruit.
+fruit_bite_half_stock = 0.00001
 # Leave below ~2 upkeep rates (5% of the ~45-upkeep full gut rate).
 give_up_fraction = 0.05
 founding_count = 4
 # The curiosity gate's ecology (the block at the end of this file).
 core.growth_max_per_s = 0.0002215288583684138
-core.reproduction.birth_interval_s = 1097.8253659193513
-core.reproduction.gestation_s = 109.78253659193513
+# SP-TWINS: postpartum refractory, 0.04 of the 36,000 s year.
+core.reproduction.birth_interval_s = 1440.0
+# SP-TWINS: carry for 0.4 year; common marmosets usually bear twins.
+core.reproduction.gestation_s = 14400.0
+core.reproduction.young_per_birth = 2
 core.reproduction.surplus_hold_s = 548.9126829596756
 # GUT-MASS (Wrysk 2026-10-09 Q10, shipped 2026-10-10): mass_scale 60.0 (x2 the old 30: the seven mass-tied quantities with it);
 # the gut ceiling at 7x maintenance (digestion_s / S, bite x S). Budget: training plan, GUT-MASS.

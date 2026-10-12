@@ -8,8 +8,13 @@ affinity (run-study.py semantics: the whole group, so the scheduler can balance 
 Other tasks float over the host and are charged to every group in proportion to its size,
 as is load from processes labd does not own (loadavg minus labd's own threads, when
 external_load is on). Memory is charged against max_mem_gb, and on the local host also
-against live MemAvailable minus reserve_mem_gb. Build and cargo-test tasks may use
-the host's build_overcommit_threads above usable; memory and L3 limits still apply.
+against live MemAvailable minus reserve_mem_gb.
+
+Lanes: build and cargo-test tasks may use the host's build_overcommit_threads above usable,
+and quick tasks (Task.quick) its quick_overcommit_threads. The two pools are separate: each
+lane's overflow above usable is capped by its own pool (and by its own running threads), so a
+build never takes a quick task's extra threads or the reverse. Normal tasks get neither and
+still need every charged thread to fit inside usable. Memory and L3 limits apply to all.
 """
 
 from dataclasses import dataclass, field
@@ -45,6 +50,7 @@ class Host:
     external_threads: float = 0.0    # last measured load not owned by labd
     price_usd_h: float = 0.0
     build_overcommit_threads: int = 0
+    quick_overcommit_threads: int = 0
 
     @property
     def usable(self):
@@ -53,18 +59,74 @@ class Host:
     def group_cap(self, index):
         return math.floor(len(self.groups[index]) * self.usable / self.cpus)
 
-    def thread_limit(self, task):
-        extra = self.build_overcommit_threads if task.meta.get("kind") in ("build", "cargo-test") else 0
-        return self.usable + max(0, extra)
+    def pool(self, which):
+        if which == "build":
+            return max(0, self.build_overcommit_threads)
+        if which == "quick":
+            return max(0, self.quick_overcommit_threads)
+        return 0
 
-    def thread_label(self, used):
+    def thread_limit(self, task):
+        return self.usable + self.pool(lane(task))
+
+    def threads_fit(self, task, usage, external=0):
+        """Charge every running task and outside load; a lane may overflow usable only into its
+        own pool, by at most its own running threads (outside load may fill an open pool)."""
+        total = usage.threads + task.threads + external
+        which = lane(task)
+        if which is None:
+            return total <= self.usable
+        build = usage.build + (task.threads if which == "build" else 0)
+        quick = usage.quick + (task.threads if which == "quick" else 0)
+        build_pool = self.pool("build") if build else 0
+        quick_pool = self.pool("quick") if quick else 0
+        overflow = min(build_pool + quick_pool, min(build, build_pool) + min(quick, quick_pool) + external)
+        return total <= self.usable + overflow
+
+    def thread_label(self, used, build=None, quick=0):
+        """used/usable, then threads above usable by pool. Without a split, overflow is build's."""
+        build = used - quick if build is None else build
         extra = max(0, used - self.usable)
-        return f"{min(used, self.usable):g}/{self.usable}" + (f" +{extra:g} build" if extra else "")
+        build_extra = min(extra, build, self.pool("build")) if quick else extra
+        quick_extra = min(extra - build_extra, quick)
+        other = extra - build_extra - quick_extra
+        label = f"{min(used, self.usable):g}/{self.usable}"
+        for amount, name in ((build_extra, "build"), (quick_extra, "quick"), (other, "over")):
+            if amount:
+                label += f" +{amount:g} {name}"
+        return label
 
     def order(self):
         indices = list(range(len(self.groups or [])))
         preferred = [g for g in self.prefer_groups if g in indices]
         return preferred + [g for g in indices if g not in preferred]
+
+
+BUILD_KINDS = ("build", "cargo-test")
+
+
+def lane(task):
+    """'build', 'quick' or None (normal). Accepts a Task or its dict. Build kinds keep the
+    build lane even when marked quick; quick's other rules (no reservation wait, local
+    first, the time cap) still apply to them."""
+    meta = task.get("meta", {}) if isinstance(task, dict) else task.meta
+    quick = task.get("quick", False) if isinstance(task, dict) else task.quick
+    if meta.get("kind") in BUILD_KINDS:
+        return "build"
+    return "quick" if quick else None
+
+
+def prefers_local(task):
+    """Try local hosts first: quick tasks, and tasks whose kind marked local inputs
+    (meta.local_inputs: the command kind sets it when argv names files in the local checkout or
+    home, or the spec gives a literal cwd). Everything else keeps the most-free-threads order."""
+    return bool(task.quick or task.meta.get("local_inputs"))
+
+
+def quick_timeout_h(task, limit_min):
+    """The effective timeout of a quick task: its own timeout_h, capped at the quick limit."""
+    limit = float(limit_min) / 60
+    return limit if not task.timeout_h or task.timeout_h > limit else task.timeout_h
 
 
 @dataclass
@@ -73,9 +135,14 @@ class Usage:
     floating: float = 0
     mem: float = 0
     l3: dict = field(default_factory=dict)
+    build: float = 0                 # threads of running build-lane tasks
+    quick: float = 0                 # threads of running quick-lane tasks
 
     def add(self, task, group):
         self.threads += task.threads
+        which = lane(task)
+        if which:
+            setattr(self, which, getattr(self, which) + task.threads)
         self.mem += task.mem_gb
         if group is None or group < 0:
             self.floating += task.threads
@@ -116,8 +183,8 @@ def fits(task, host, usage, live_mem=None):
     if live_mem is not None and task.mem_gb > live_mem - host.reserve_mem_gb:
         return None
     external = host.external_threads if host.external_load else 0
-    # Charge every running task: the allowance is shared across the host, not per build.
-    if usage.threads + task.threads + external > host.thread_limit(task):
+    # Charge every running task: each pool is shared across its lane on the host, not per task.
+    if not host.threads_fit(task, usage, external):
         return None
     if not task.l3:
         return -1

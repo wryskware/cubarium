@@ -160,7 +160,7 @@ fn main() -> Result<()> {
     let idle_ticks = (idle_s * hz) as u64;
     let stop = (40..2000u64)
         .find(|&s| {
-            let m = idle::moves_between(id, s + hz as u64, s + idle_ticks - 10, DT);
+            let m = idle::moves_between(id, s + hz as u64, s + idle_ticks - 10, DT, &idle::IdleConfig::default().frondgrazer);
             m.len() >= 2
         })
         .context("no stop with two dips")?;
@@ -168,7 +168,7 @@ fn main() -> Result<()> {
     let first = stop - walk_in;
     let go = stop + idle_ticks;
     let last = go + (2.5 * hz) as u64;
-    let moves = idle::moves_between(id, stop, go, DT);
+    let moves = idle::moves_between(id, stop, go, DT, &idle::IdleConfig::default().frondgrazer);
     eprintln!("stop at tick {stop}, walk off at {go}; head moves {moves:?}");
     let step_m = PACE_M_S * DT;
     let at_tick = |tick: u64| -> Animal {
@@ -382,7 +382,7 @@ fn run_bench(px: u32, lit: bool, glyphs: bool) -> Result<()> {
                 if frame >= 120 {
                     dipping += animals
                         .iter()
-                        .filter(|a| idle::move_near(a.id, tick, DT).is_some())
+                        .filter(|a| idle::move_near(a.id, tick, DT, &idle::IdleConfig::default().frondgrazer).is_some())
                         .count() as u32;
                 }
             }
