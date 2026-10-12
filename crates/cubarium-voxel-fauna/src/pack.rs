@@ -1389,8 +1389,17 @@ pub(crate) fn steer(
     held: Actions,
     occupancy: Option<crate::senses::Occ<'_>>,
 ) -> Option<Actions> {
+    let id = fauna.animals[i].id;
+    fauna.pack_hint.remove(&id);
     let act = tactic(fauna, i, view, fv, clock_on, daylight, held, occupancy)?;
+    fauna.pack_hint.entry(id).or_insert("search");
     Some(out_of_pit(fauna, i, view, act).unwrap_or(act))
+}
+
+/// CONTRACTS: what the tactic's answer was for, as a Veilhound intent name (the label its
+/// intent record takes; read by no rule).
+fn hint(fauna: &mut Fauna, id: u64, intent: &'static str) {
+    fauna.pack_hint.insert(id, intent);
 }
 
 /// **PIT, the way out** for the pack body at `i` whose tactic moves it (a walk, or a turn
@@ -1541,6 +1550,7 @@ fn tactic(
 
     // A pup: at the pack's carcass when it lies by the den, else at the den.
     if m.pup {
+        hint(fauna, a.id, "den");
         if let Some(fs) = rec.feast {
             let (fx, fz) = centre(fs, v);
             let (_, _, from_den) = {
@@ -1548,6 +1558,7 @@ fn tactic(
                 (dx, dz, (dx * dx + dz * dz).sqrt())
             };
             if from_den <= t.den_radius_m && feast_left(fs) && a.eating {
+                hint(fauna, a.id, "feed");
                 if at_feast(fs) {
                     return Some(eat);
                 }
@@ -1578,8 +1589,12 @@ fn tactic(
     if !a.emergency && (wants_rest(fauna, i, clock_on, daylight) || !a.eating) {
         if must_walk_home(fauna, i, view) {
             let (to, routed) = way_home(fauna, view, founder, &a, &geometry, &h, rec.den);
-            if routed { return Some(clamp(fauna, route_go(fauna, view, &a, founder, to, ring, 0.0))); }
+            if routed {
+                hint(fauna, a.id, "den");
+                return Some(clamp(fauna, route_go(fauna, view, &a, founder, to, ring, 0.0)));
+            }
         }
+        hint(fauna, a.id, "rest");
         return Some(Actions::REST);
     }
 
@@ -1590,6 +1605,7 @@ fn tactic(
     // could not cross (off the graph at a bend, or into water deeper than a pup wades) and
     // stood there for good.
     if t.whelp_at_den && rec.breeder == Some(a.id) && a.reproduction.escrow.is_some() && !a.emergency {
+        hint(fauna, a.id, "den");
         // FINDINGS-FIX-2: the hold yields to a meal at home — hungry, it eats a carcass (the
         // pack's feast or one it knows of) lying within the den radius, as its pups do, and
         // stays home: no hunting, no carcass beyond the den radius.
@@ -1601,6 +1617,7 @@ fn tactic(
             };
             if let Some(fs) = rec.feast.filter(|&fs| feast_left(fs) && in_den(fs)) {
                 if at_feast(fs) {
+                    hint(fauna, a.id, "feed");
                     return Some(clamp(fauna, eat));
                 }
             }
@@ -1881,6 +1898,7 @@ fn tactic(
         if feast_left(fs) {
             feast_usable = true;
             if joins {
+                hint(fauna, a.id, "feed");
                 if at_feast(fs) {
                     return Some(clamp(fauna, eat));
                 }
@@ -1914,6 +1932,7 @@ fn tactic(
     // carcass it can walk to and eats there before the pack takes a new target.
     if joins && fauna.pack(own).and_then(|p| p.target).is_none() {
         if let Some(go) = crate::hunt::meal_step(fauna, i, view, fv) {
+            hint(fauna, a.id, "feed");
             return Some(clamp(fauna, go));
         }
     }
@@ -1983,6 +2002,7 @@ fn tactic(
     if joins {
         if let Some(o) = fauna.pack(own).and_then(|p| p.target).and_then(|tid| knows_of(fauna, i, tid, ring)) {
             if let Some(act) = close_in(fauna, view, founder, &a, &o, &geometry, &h, &t, ring) {
+                hint(fauna, a.id, "drive");
                 return Some(clamp(fauna, act));
             }
         }
@@ -2081,8 +2101,14 @@ fn tactic(
             // S2, the stalk: under the prey's hearing beyond the commit distance, still while
             // it looks up, then the rush.
             let act = match crate::vigil::stalk(fauna, &a, &o, d_target, act.forward) {
-                Some(forward) => Actions { forward, ..act },
-                None => act,
+                Some(forward) => {
+                    hint(fauna, a.id, "stalk");
+                    Actions { forward, ..act }
+                }
+                None => {
+                    hint(fauna, a.id, "drive");
+                    act
+                }
             };
             return Some(clamp(fauna, act));
         }

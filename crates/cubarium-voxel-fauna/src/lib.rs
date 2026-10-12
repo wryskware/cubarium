@@ -51,6 +51,10 @@ pub use herding::{HerdTally, Herding};
 mod groom;
 pub use groom::Grooming;
 pub mod nurse;
+/// CONTRACTS (behaviour-AI §11): intents, subjects and their records.
+pub mod intent;
+#[cfg(test)]
+mod intent_tests;
 pub use nurse::Nursing;
 #[cfg(test)]
 mod nurse_tests;
@@ -162,6 +166,7 @@ pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
+pub use intent::{EarlyEnd, Executed, IntentKnobs, IntentRecord, Menu, Override, PlaceKind, RestAsk, Subject, menu_of};
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
 /// This is a read-only diagnostic projection of the same ray result the founder
@@ -1108,6 +1113,11 @@ pub struct Animal {
     /// while the young is dependent and the mother is alive.
     #[serde(default)]
     pub mother: Option<u64>,
+    /// **Its intent record** (CONTRACTS, [`crate::intent`]): the proposal, the held intent,
+    /// its subject and hold, the executed actions and any physical override. Records only:
+    /// no rule reads it.
+    #[serde(default)]
+    pub intent: IntentRecord,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -4172,6 +4182,10 @@ pub struct Fauna {
     /// actions ([`Steer`]). Session state for probes and studies: not saved.
     #[serde(skip)]
     steer: FxHashMap<u64, Steer>,
+    /// CONTRACTS: the pack tactic's own reading of what its last answer was for (an intent
+    /// name of the Veilhound's menu), the label its intent record takes. Session state.
+    #[serde(skip)]
+    pub(crate) pack_hint: FxHashMap<u64, &'static str>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4708,6 +4722,7 @@ impl Fauna {
             next_pack: 0,
             face_sky: (None, FxHashMap::default()),
             steer: FxHashMap::default(),
+            pack_hint: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),
@@ -5684,6 +5699,7 @@ impl Fauna {
             bout: None,
             hunt: crate::HuntMemory::default(),
             mother: None,
+            intent: IntentRecord::default(),
             bite: LastBite::default(),
         };
         let mut animal = animal;

@@ -647,6 +647,11 @@ pub struct FounderPhysiology {
     /// Picking attached larvae off another body of the same lineage; missing table is off.
     #[serde(default)]
     pub grooming: crate::Grooming,
+    /// **Its intent arbitration and slots** (CONTRACTS, [`crate::IntentKnobs`]): the hold,
+    /// margin and temperature its top layer and its rules' records share, the subject's
+    /// expiry and §11.1's bounded slots.
+    #[serde(default)]
+    pub intent: crate::IntentKnobs,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2026,6 +2031,7 @@ impl FounderPhysiology {
         p.herding = crate::herding::herding_of(founder);
         p.nursing = crate::nurse::nursing_of(founder);
         p.grooming = crate::groom::grooming_of(founder);
+        p.intent = crate::intent::intent_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2156,6 +2162,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
+                intent: crate::IntentKnobs::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2253,6 +2260,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
+                intent: crate::IntentKnobs::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2395,6 +2403,7 @@ impl FounderPhysiology {
                 herding: crate::Herding::default(),
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
+                intent: crate::IntentKnobs::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),

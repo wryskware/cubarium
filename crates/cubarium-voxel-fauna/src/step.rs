@@ -1822,6 +1822,8 @@ fn controllers(
         // below still wins; a layer that overrides a leg's steering ends it (below).
         // Brains share only LEADS-PAY here: brain_seek never requests no-signal search.
         let mut searched = None;
+        // CONTRACTS: the herd pull bent its walk (the intent record's label).
+        let mut herded = false;
         if driven && (forager || !heuristic) {
             let seek = sensed[k].seek;
             let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -1883,6 +1885,7 @@ fn controllers(
             let seek = fauna.controllers.seek(id);
             if let Some(go) = crate::herding::steer(fauna, i, actions, seek, ring) {
                 actions = go;
+                herded = true;
                 if src == crate::Steer::Search {
                     searched = Some(go);
                 }
@@ -2190,6 +2193,17 @@ fn controllers(
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
         fauna.walk_commit(id, founder, src);
+        // CONTRACTS: the intent record (records only; no rule reads it).
+        if driven {
+            let teach = if heuristic {
+                crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
+            } else {
+                crate::intent::Teach::default()
+            };
+            let valid = crate::intent::body_mask(fauna, i, founder);
+            let executed = crate::Executed { actions, ..crate::Executed::default() };
+            crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
+        }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
@@ -5286,6 +5300,7 @@ fn newborn(
         bout: None,
         hunt: crate::HuntMemory::default(),
         mother: None,
+        intent: crate::IntentRecord::default(),
         bite: crate::LastBite::default(),
     }
 }

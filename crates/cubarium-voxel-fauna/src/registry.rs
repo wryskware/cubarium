@@ -375,6 +375,16 @@ fn founder_rows() -> Vec<Row> {
         r("grooming.groom_radius_m", "m", nonneg, "SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length"),
         r("grooming.groom_s", "s", nonneg, "SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds"),
         r("grooming.groom_seek_m", "m", nonneg, "SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom"),
+        // CONTRACTS (`IntentKnobs`, behaviour-AI §2.2, §11.1, §11.3).
+        r("intent.hold_s", "s", nonneg, "CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples"),
+        r("intent.switch_margin", "probability", fraction, "CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable"),
+        r("intent.temperature", "logit units", Range::positive(), "CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at"),
+        r("intent.subject_lost_s", "s", nonneg, "CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes"),
+        r("intent.kin_slots", "slots", nonneg, "CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4)"),
+        r("intent.threat_slots", "slots", nonneg, "CONTRACTS: threat rows a menu lineage's brain sees"),
+        r("intent.prey_slots", "slots", nonneg, "CONTRACTS: prey rows a menu lineage's brain sees"),
+        r("intent.place_slots", "slots", nonneg, "CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees"),
+        r("intent.adult_fraction", "x body_max", fraction, "CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard)"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),

@@ -625,6 +625,7 @@ mod tests {
             bout: None,
             hunt: crate::HuntMemory::default(),
             mother: None,
+            intent: crate::IntentRecord::default(),
             bite: crate::LastBite::default(),
         }
     }
