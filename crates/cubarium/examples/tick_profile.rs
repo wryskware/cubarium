@@ -3,12 +3,14 @@
 //! Example: `tick_profile --config config/desktop/terrarium.toml --size 288x138x48
 //! --seeds 5,17,29 --threads 8 --warmup 10 --ticks 50 --windows 3`.
 //! JSONL goes to stdout; founding diagnostics go to stderr. `--found-save DIR` only
-//! founds and saves; both comparison arms then benchmark `--load-save DIR`.
+//! founds and saves, each seed into its own `DIR/seed-N`; both comparison arms then
+//! benchmark `--load-save DIR`, which reads `DIR/seed-N` for each seed (or `DIR` itself
+//! when it is one seed's snapshot).
 
 use std::collections::BTreeMap;
 use std::io::{BufWriter, Write};
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
@@ -30,10 +32,12 @@ struct Args {
     size: Option<[u32; 3]>,
     #[arg(long, value_delimiter = ',', default_value = "5")]
     seeds: Vec<u64>,
-    /// Found one seed, save its initial ecosystem, and exit without measured ticks.
+    /// Found each seed, save its initial ecosystem to `DIR/seed-N`, and exit without
+    /// measured ticks.
     #[arg(long, conflicts_with = "load_save")]
     found_save: Option<PathBuf>,
-    /// Benchmark a saved initial ecosystem; config, size, and seed must match.
+    /// Benchmark saved initial ecosystems from `DIR/seed-N` (or `DIR` itself when it holds
+    /// one seed's snapshot); config, size, and seed must match.
     #[arg(long)]
     load_save: Option<PathBuf>,
     #[arg(long, default_value = "8")]
@@ -92,12 +96,21 @@ fn roster(sim: &Sim) -> Value {
     })
 }
 
+/// The inputs file written beside each snapshot.
+const INPUTS: &str = "tick-profile-inputs.json";
+
+/// One seed's snapshot directory under a `--found-save` or `--load-save` DIR: `DIR/seed-N`.
+/// A `--load-save` DIR that is itself one seed's snapshot (it holds the inputs file) is
+/// used as is; its inputs still have to name the seed.
+fn seed_dir(dir: &Path, seed: u64, loading: bool) -> PathBuf {
+    if loading && dir.join(INPUTS).is_file() {
+        return dir.to_path_buf();
+    }
+    dir.join(format!("seed-{seed}"))
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    anyhow::ensure!(
-        (args.found_save.is_none() && args.load_save.is_none()) || args.seeds.len() == 1,
-        "snapshot modes require exactly one seed"
-    );
     if let Some(dir) = &args.found_save {
         anyhow::ensure!(
             !dir.exists(),
@@ -140,16 +153,20 @@ fn main() -> Result<()> {
         // Founding derives some water knobs from the terrain; keep the original inputs
         // beside the snapshot so checking them needs no second terrain generation.
         let inputs = json!({"seed": seed, "params": params});
-        if let Some(dir) = &args.load_save {
-            let saved: Value =
-                serde_json::from_slice(&std::fs::read(dir.join("tick-profile-inputs.json"))?)?;
+        let load_dir = args.load_save.as_deref().map(|d| seed_dir(d, seed, true));
+        let found_dir = args.found_save.as_deref().map(|d| seed_dir(d, seed, false));
+        if let Some(dir) = &load_dir {
+            let path = dir.join(INPUTS);
+            let saved: Value = serde_json::from_slice(
+                &std::fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+            )?;
             anyhow::ensure!(
                 saved == inputs,
                 "snapshot inputs differ from the requested config/size/seed/execution"
             );
         }
         let preparation_start = Instant::now();
-        let prepared = if let Some(dir) = &args.load_save {
+        let prepared = if let Some(dir) = &load_dir {
             let prepared = prepare_loaded(&params, dir).map_err(anyhow::Error::msg)?;
             let cfg = prepared.world.config();
             anyhow::ensure!(
@@ -173,13 +190,10 @@ fn main() -> Result<()> {
         let preparation_s = preparation_start.elapsed().as_secs_f64();
         let founding_s = args.load_save.is_none().then_some(preparation_s);
         let loading_s = args.load_save.is_some().then_some(preparation_s);
-        if let Some(dir) = &args.found_save {
+        if let Some(dir) = &found_dir {
             let save_start = Instant::now();
             let meta = store::save_whole(dir, &prepared.world, &prepared.flora, &prepared.fauna)?;
-            std::fs::write(
-                dir.join("tick-profile-inputs.json"),
-                serde_json::to_vec_pretty(&inputs)?,
-            )?;
+            std::fs::write(dir.join(INPUTS), serde_json::to_vec_pretty(&inputs)?)?;
             let mut files = std::fs::read_dir(dir)?
                 .map(|entry| {
                     let entry = entry?;

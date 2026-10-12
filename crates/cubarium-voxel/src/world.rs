@@ -403,7 +403,10 @@ impl<'a> VoxelView<'a> {
             }
             None => (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)),
         };
-        debug_assert_eq!(found, (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z)));
+        debug_assert_eq!(
+            found,
+            (lo..=hi).rev().find(|&y| self.is_support_direct(x, y, z))
+        );
         found
     }
 
@@ -597,7 +600,9 @@ impl<'a> VoxelView<'a> {
     /// capacity times the voxel volume. Zero in air and bedrock.
     pub fn pore_water_m3(&self, x: i64, y: u32, z: u32) -> f64 {
         let i = self.config.index(x, y, z);
-        self.pore[i] * self.config.materials.pore_capacity(self.material[i]) * self.config.voxel_volume()
+        self.pore[i]
+            * self.config.materials.pore_capacity(self.material[i])
+            * self.config.voxel_volume()
     }
 
     /// Geometric sky visibility of the top face of `(x, y, z)`: the cosine-weighted
@@ -938,7 +943,10 @@ impl SkyMemo {
             return None;
         }
         if self.version.load(Ordering::Acquire) != version {
-            let _held = self.reset.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let _held = self
+                .reset
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if self.version.load(Ordering::Acquire) != version {
                 for s in slots.iter() {
                     s.store(SKY_EMPTY, Ordering::Relaxed);
@@ -1398,7 +1406,10 @@ impl World {
     /// stops the settle after that tick, reported as not converged. A watcher that always
     /// says `true` is exactly [`World::settle_watching`]. What a founding that can be
     /// cancelled steps through.
-    pub fn settle_while(&mut self, cap_ticks: u32, mut watch: impl FnMut(&World) -> bool,
+    pub fn settle_while(
+        &mut self,
+        cap_ticks: u32,
+        mut watch: impl FnMut(&World) -> bool,
     ) -> Settle {
         let window = SETTLE_WINDOW as usize;
         let mut history: Vec<(f64, usize)> = Vec::with_capacity(window + 1);
@@ -1564,7 +1575,8 @@ impl World {
                 if !self.material[i].is_solid() && self.free[i] > 0.0 {
                     self.wet.insert_at(y, col);
                 }
-                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0 {
+                if self.config.materials.pore_capacity(self.material[i]) > 0.0 && self.pore[i] > 0.0
+                {
                     self.damp.insert_at(y, col);
                 }
                 if crate::water::drains(self, i) {
@@ -1734,7 +1746,10 @@ impl World {
             ensure!(flux.is_finite(), "the ledger's {name} is {flux}");
         }
         let drains = self.lake_drain.iter().map(|&c| ("lake drain", Some(c)));
-        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)].into_iter().chain(drains) {
+        for (name, cell) in [("outlet", self.outlet_cell), ("spring", self.spring_cell)]
+            .into_iter()
+            .chain(drains)
+        {
             if let Some((x, y, z)) = cell {
                 ensure!(
                     x < self.config.width && y < self.config.height && z < self.config.depth,

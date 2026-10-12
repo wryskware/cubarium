@@ -80,9 +80,7 @@ impl World {
         // The lend: partial only one tick after the last, on unchanged terrain, with row
         // masks this tick and last.
         let key = (live.tick, live.terrain_version);
-        let follows = lend
-            .last
-            .is_some_and(|(t, v)| t + 1 == key.0 && v == key.1);
+        let follows = lend.last.is_some_and(|(t, v)| t + 1 == key.0 && v == key.1);
         std::mem::swap(&mut lend.wet_then, &mut lend.wet_now);
         lend.wet_now.clear();
         match live.wet.columns() {
@@ -118,15 +116,16 @@ impl World {
         }
         // Free water: the cells wet then or now.
         lend.rows.clear();
-        lend.rows.extend(
-            lend.wet_then
-                .iter()
-                .zip(&lend.wet_now)
-                .map(|(a, b)| a | b));
+        lend.rows
+            .extend(lend.wet_then.iter().zip(&lend.wet_now).map(|(a, b)| a | b));
         let rows = &lend.rows;
         let words = self.config.height as usize;
         let words = words.div_ceil(crate::world::MASK_ROWS);
-        let any_word = if words == 1 { rows.iter().fold(0u128, |a, r| a | r) } else { 0 };
+        let any_word = if words == 1 {
+            rows.iter().fold(0u128, |a, r| a | r)
+        } else {
+            0
+        };
         // Short worlds keep the allocation-free one-word path.
         let any = &mut lend.any;
         any.clear();
