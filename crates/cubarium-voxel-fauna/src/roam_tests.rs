@@ -309,6 +309,11 @@ fn an_excursion_ends_on_alarm_on_its_mothers_call_and_on_losing_sight_and_the_yo
         assert!(f.excursions.get(&calf2).is_none(), "{name}: ended");
         assert_eq!(f.roam_tally(founder).ended[End::Alarmed.index()], 1);
         assert!(bleated(&f, calf2), "{name}: it bleats when alarmed");
+        // The bleat is an executed action of its intent record (kind 1 is `call` 2).
+        let i2 = index(&f, calf2);
+        let valid = vec![true; crate::intent::menu_of(founder).len()];
+        crate::intent::record(&mut f, i2, founder, crate::Steer::Heuristic, crate::intent::Teach::default(), &valid, crate::intent::Executed::default());
+        assert_eq!(animal(&f, calf2).intent.executed.call, 2, "{name}");
         // An alarm call heard since it set out, no threat in sight: alarmed too.
         let (_w, mut f, _, calf3) = out_on_excursion(founder, 8.0, 1.0);
         hears(&mut f, calf3, 0, (30.0, MID_Z), 0);

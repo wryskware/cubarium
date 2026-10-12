@@ -695,6 +695,14 @@ pub(crate) fn record(
     let mut executed = executed;
     if teach.call > 0 {
         executed.call = teach.call;
+    } else if executed.call == 0 {
+        // YOUNG-ROAM: a call its rules made this sample (a young's bleat at an excursion's
+        // end) is an executed action too.
+        let id = fauna.animals[i].id;
+        let n = crate::calls::kinds_of(founder).len();
+        if let Some(k) = (0..n).find(|&k| fauna.last_call.get(&(id, k as u8)) == Some(&now)) {
+            executed.call = k as u8 + 1;
+        }
     }
     executed.kick |= teach.kick;
     rec.executed = executed;
