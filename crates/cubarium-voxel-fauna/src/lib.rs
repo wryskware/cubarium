@@ -144,6 +144,9 @@ mod sp_shredder_tests;
 #[cfg(test)]
 mod roost_rain_tests;
 mod flight;
+pub mod larva;
+#[cfg(test)]
+mod larva_tests;
 /// FLUSH (HUNT-ESCAPE): a flyer's escape from a hunter it senses coming.
 pub(crate) mod flush;
 #[cfg(test)]
@@ -2938,10 +2941,15 @@ pub enum Food {
     /// stock ([`cubarium_voxel_flora::Flora::take_stand_fruit`]). Energy-rich, a little
     /// mineral. A fruit meal records the source species' seeds in the gut.
     Fruit,
+    /// **Larvae** (LARVA, `design/larva-nuts-plan-2026-10-12.md` §4): the bellwing's larvae
+    /// on a host's leaves ([`crate::larva::LarvaField`]), insect flesh at the larva's tissue
+    /// mineral. Taken from the field by a seedporter's [`crate::larva`] bite, never from a
+    /// plant-layer pool or a stand's tissue, so the generic mouth never offers it.
+    Larva,
 }
 
 impl Food {
-    pub const ALL: [Food; 7] = [
+    pub const ALL: [Food; 8] = [
         Food::Litter,
         Food::CapTissue,
         Food::Carrion,
@@ -2949,6 +2957,7 @@ impl Food {
         Food::Film,
         Food::Nectar,
         Food::Fruit,
+        Food::Larva,
     ];
     pub const COUNT: usize = Food::ALL.len();
 
@@ -2962,6 +2971,7 @@ impl Food {
             Food::Film => 4,
             Food::Nectar => 5,
             Food::Fruit => 6,
+            Food::Larva => 7,
         }
     }
 
@@ -2999,6 +3009,7 @@ impl Food {
             Food::Film => "film",
             Food::Nectar => "nectar",
             Food::Fruit => "fruit",
+            Food::Larva => "larva",
         }
     }
 }
@@ -3800,6 +3811,9 @@ pub struct FaunaLedger {
     pub counters_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub counter_wound_by_founder: [f64; Founder::COUNT],
+    /// **The larva field's books** (LARVA, [`larva::LarvaLedger`]).
+    #[serde(default)]
+    pub larva: larva::LarvaLedger,
 }
 
 impl FaunaLedger {
@@ -3855,6 +3869,8 @@ pub struct FaunaView<'a> {
     /// The clutches standing in the world, in the order they were laid. Not animals:
     /// stationary paid packages this layer still owns until they hatch.
     pub clutches: &'a [Clutch],
+    /// The larva field (LARVA): young this layer owns on their hosts' leaves.
+    pub larvae: &'a larva::LarvaField,
     pub ledger: &'a FaunaLedger,
 }
 
@@ -3881,18 +3897,21 @@ impl<'a> FaunaView<'a> {
     pub fn organic(&self) -> f64 {
         self.animals.iter().map(Animal::stored_organic).sum::<f64>()
             + self.clutches.iter().map(|c| c.organic).sum::<f64>()
+            + self.larvae.organic()
     }
 
     /// Mineral in every animal's tissue, its escrow and every standing clutch.
     pub fn mineral(&self) -> f64 {
         self.animals.iter().map(Animal::stored_mineral).sum::<f64>()
             + self.clutches.iter().map(|c| c.mineral).sum::<f64>()
+            + self.larvae.mineral()
     }
 
     /// Energy in every animal's tissue, its escrow and every standing clutch.
     pub fn energy(&self) -> f64 {
         self.animals.iter().map(Animal::stored_energy).sum::<f64>()
             + self.clutches.iter().map(|c| c.energy).sum::<f64>()
+            + self.larvae.energy()
     }
 
     /// Eggs of one lineage standing in the world, over every clutch.
@@ -4169,6 +4188,10 @@ pub struct Fauna {
     /// parent id order within a tick and tick order between ticks, so every pass over
     /// them is the same order however the world runs.
     clutches: Vec<Clutch>,
+    /// **The larva field** (LARVA): the larva lineages' young on their hosts' leaves, which
+    /// this layer owns until they emerge, die or are eaten.
+    #[serde(default)]
+    larvae: larva::LarvaField,
     ledger: FaunaLedger,
     /// Exact paid body creations since construction/load; runtime instrumentation only.
     #[serde(skip)]
@@ -4944,6 +4967,7 @@ impl Fauna {
             animals: Vec::new(),
             groom_contacts: std::collections::BTreeMap::new(),
             clutches: Vec::new(),
+            larvae: larva::LarvaField::default(),
             ledger: FaunaLedger::default(),
             born_by_founder: [0; Founder::COUNT],
             lay_refusals_by_founder: [[0; LAY_GATES.len()]; Founder::COUNT],
@@ -5672,12 +5696,33 @@ impl Fauna {
         }
     }
 
+    /// **Founding larvae** (LARVA §3): the lineage's founding cohorts on the hosts nearest its
+    /// living bodies ([`larva::found`]), introduced matter. How many larvae; 0 for a lineage
+    /// with no larva table or no host.
+    pub fn found_larvae(&mut self, world: &World, flora: &Flora, lineage: Founder) -> f64 {
+        larva::found(self, &world.view(), flora, lineage)
+    }
+
+    /// Put one cohort of `lineage`'s larvae on `host` (an introduction, booked
+    /// `introduced_*`): for tests, tools and editors.
+    pub fn introduce_larvae(
+        &mut self,
+        lineage: Founder,
+        host: larva::LarvaHost,
+        site: Site,
+        anchor: Option<cubarium_voxel_flora::Face>,
+        cohort: larva::Cohort,
+    ) {
+        larva::introduce(self, lineage, host, site, anchor, cohort);
+    }
+
     pub fn view(&self) -> FaunaView<'_> {
         FaunaView {
             config: &self.config,
             tick: self.tick,
             animals: &self.animals,
             clutches: &self.clutches,
+            larvae: &self.larvae,
             ledger: &self.ledger,
         }
     }

@@ -873,6 +873,9 @@ pub fn roster(flora: &FloraConfig, fauna: &FaunaConfig, world: &cubarium_voxel::
                     let d = carrion_of(f);
                     (d, d * y)
                 }
+                // LARVA: the larva field grows from the bellwing's own eggs, not a plant
+                // supply; the screen counts none of it (conservative).
+                Food::Larva => (0.0, 0.0),
             };
             foods.push(FoodSupply { food: fd.name(), per_day, assimilable_per_day: assimilable });
         }

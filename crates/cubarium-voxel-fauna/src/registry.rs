@@ -199,6 +199,21 @@ fn founder_rows() -> Vec<Row> {
     vec![
         r("fruit_bite_half_stock", "org-units at the mouth", nonneg, "fruit-only K override; absent uses core.bite_half_stock, other foods retain core K").optional().prov("derived"),
         r("give_up_fraction", "fraction of the fill rate", nonneg, "lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up").optional().prov("derived"),
+        // LARVA (design/larva-nuts-plan-2026-10-12.md §3-§4): the larva field's table (the bellwing's).
+        r("larva_bite_half_stock", "org-units of visible larvae", nonneg, "larva-only K override for a larva eater's bite; absent uses core.bite_half_stock").optional().prov("decision"),
+        r("larva_sight_m", "m", nonneg, "LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae)").prov("decision"),
+        r("larva.vaulttree_share", "chance", fraction, "LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5)").optional().prov("decision"),
+        r("larva.period_s", "s", Range::positive(), "LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h)").optional().log().prov("decision"),
+        r("larva.death_per_s", "1/s", nonneg, "LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults").optional().log(),
+        r("larva.emerge_body_fraction", "x body_max", Range::positive(), "LARVA: an adult emerges at this body (adult insects do not grow)").optional().prov("decision"),
+        r("larva.emerge_reserve_fraction", "x emerged body", nonneg, "LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this)").optional(),
+        r("larva.foliage_yield", "fraction", fraction, "LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower").optional(),
+        r("larva.cohorts_max", "cohorts", nonneg, "LARVA: cohorts a host holds; a new clutch merges the two oldest").optional(),
+        r("larva.visible_count", "larvae", nonneg, "LARVA: a host is food in sight with at least this many hatched larvae").optional(),
+        r("larva.step_s", "s", Range::positive(), "LARVA: the field's clock (deaths, growth, emergence run this often)").optional(),
+        r("larva.lay_reach_m", "m", nonneg, "LARVA: a layer lays at a vaulttree within this of its crown's disc and band").optional(),
+        r("larva.founding_emerge_per_h", "adults/h", nonneg, "LARVA: founding cohorts are sized for this many adults emerging an hour").optional(),
+        r("larva.founding_hosts", "hosts", nonneg, "LARVA: the nearest this many hosts to the founders take the founding cohorts").optional(),
         r("dispersal.group_max", "bodies", nonneg, "closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count"),
         r("dispersal.enabled", "switch", fraction, "closed-world dispersal switch (false by default; true enables it)").optional(),
         r("dispersal.at", "transition", nonneg, "closed-world dispersal transition: adult (breeding size) or independent (pack pup age)").optional(),
@@ -994,9 +1009,10 @@ fn knob_rows() -> Vec<Row> {
 /// The cross-field rules no single row can state: the body thresholds in an order that
 /// builds a living animal, and an egg-layer's clutch that can build a hatchling.
 pub(crate) fn cross_rules(c: &FaunaConfig) -> Result<(), String> {
-    species_rules("fauna.frondgrazer", &c.frondgrazer)?;
+    species_rules("fauna.frondgrazer", &c.frondgrazer, false)?;
     for f in Founder::ALL {
-        species_rules(&format!("fauna.founders.{}.core", f.name()), &c.founder(f).core)?;
+        // LARVA: a larva lineage's egg is a larva's start, grown on leaves, not a hatchling.
+        species_rules(&format!("fauna.founders.{}.core", f.name()), &c.founder(f).core, c.founder(f).larva.is_some())?;
     }
     knob_rules(c)
 }
@@ -1032,7 +1048,7 @@ fn knob_rules(c: &FaunaConfig) -> Result<(), String> {
     Ok(())
 }
 
-fn species_rules(at: &str, sc: &SpeciesConfig) -> Result<(), String> {
+fn species_rules(at: &str, sc: &SpeciesConfig, larva: bool) -> Result<(), String> {
     if sc.body_min > sc.birth_body || sc.birth_body > sc.body_max {
         return Err(format!(
             "{at} needs body_min <= birth_body <= body_max, not {} <= {} <= {}",
@@ -1050,7 +1066,7 @@ fn species_rules(at: &str, sc: &SpeciesConfig) -> Result<(), String> {
         if r.clutch_size == 0 {
             return Err(format!("{at}.reproduction.clutch_size must be at least one egg"));
         }
-        if r.egg_organic < sc.body_min {
+        if r.egg_organic < sc.body_min && !larva {
             return Err(format!(
                 "{at}.reproduction.egg_organic {} cannot build a hatchling of body_min {}",
                 r.egg_organic, sc.body_min

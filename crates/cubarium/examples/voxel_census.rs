@@ -2015,6 +2015,13 @@ fn print_header() {
     // commitment and hunts given up (the standoffs), and kicks landed by the loftstriders and
     // the kick-backs bites drew.
     header.push_str(",hound_tests,hound_test_commits,hound_give_ups,kicks_landed_loftstrider,kick_backs");
+    // LARVA (2026-10-12, design/larva-nuts-plan-2026-10-12.md §7): larvae standing on vines
+    // and vaulttrees now (eggs included) and their tissue; then cumulative: eggs laid into the
+    // field, adults emerged, larvae dead in the background, eaten by seedporters (count and
+    // organic) and by browsers, leaf the larvae ate (organic), and larvae lost with a host or
+    // starved.
+    header.push_str(",larvae_vine,larvae_vaulttree,larva_mass,larva_eggs_in,larvae_emerged,larva_died_background");
+    header.push_str(",larva_eaten_seedporter,larva_eaten_seedporter_organic,larva_eaten_browser,larva_leaf_eaten,larva_died_host,larva_died_starved");
     header.push_str(",seed");
     println!("{header}");
 }
@@ -2363,6 +2370,23 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(l.hound_give_ups.to_string());
         row.push(l.kicks_landed_by_founder[Founder::Loftstrider.index()].to_string());
         row.push(l.kick_backs.to_string());
+    }
+    {
+        let av = sim.fauna().view();
+        let (vine, tree) = av.larvae.count_by_kind();
+        let l = &av.ledger.larva;
+        row.push(format!("{vine:.3}"));
+        row.push(format!("{tree:.3}"));
+        row.push(format!("{:.6}", av.larvae.organic()));
+        row.push(l.eggs_laid.to_string());
+        row.push(l.emerged.to_string());
+        row.push(format!("{:.3}", l.died_background));
+        row.push(format!("{:.3}", l.eaten_seedporter));
+        row.push(format!("{:.6}", l.eaten_seedporter_out.organic));
+        row.push(format!("{:.3}", l.eaten_browser));
+        row.push(format!("{:.6}", l.leaf_in.organic));
+        row.push(format!("{:.3}", l.died_host));
+        row.push(format!("{:.3}", l.died_starved));
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());

@@ -342,6 +342,8 @@ pub fn stocks_of(s: &Supply) -> [f64; Food::COUNT] {
             Food::Film => s.film,
             Food::Nectar => s.nectar,
             Food::Fruit => s.fruit,
+            // LARVA: the larva field is not in the mean-field supply yet.
+            Food::Larva => 0.0,
         };
     }
     out
@@ -362,6 +364,7 @@ pub fn areas_of(s: &Supply) -> [f64; Food::COUNT] {
             Food::Film => a.film,
             Food::Nectar => a.nectar,
             Food::Fruit => a.fruit,
+            Food::Larva => 0.0,
         };
     }
     out
@@ -380,6 +383,8 @@ fn book_take(t: &mut Take, food: Food, amount: f64, foliage_share: &[f64; Specie
         Food::Film => t.film += amount,
         Food::Nectar => t.nectar += amount,
         Food::Fruit => t.fruit += amount,
+        // LARVA: no larva stock in the model; nothing to book against.
+        Food::Larva => {}
     }
 }
 

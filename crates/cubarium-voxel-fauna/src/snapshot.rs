@@ -198,7 +198,10 @@ use crate::{Fauna, FaunaConfig};
 // 86: NUTS — `Fauna::tree_checks` (each glider's tree-check memory, `TreeChecks`) and the
 //     ledger's `fruit_eaten_by_plant` (a state layout change). `Glider::{check_search_m,
 //     check_memory_s}` are named config, not bumps.
-pub const SCHEMA: u32 = 86;
+// 87: LARVA — `Fauna::larvae` (the larva field: hosts, cohorts), `FaunaLedger::larva` (its
+//     books) and `Food::Larva` (every per-food array gains an entry: a state layout change).
+//     `FounderPhysiology::{larva, larva_bite_half_stock, larva_sight_m}` are named config.
+pub const SCHEMA: u32 = 87;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

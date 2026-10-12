@@ -73,10 +73,10 @@ fn main() {
 /// scenario), the faces each food class stood on, m² (`web_model refarea`: the plant half on
 /// the patch foundings f1 and f3 at minute 120, the mean; 2026-10-05). Litter and carrion are
 /// the whole floor, so their ratio is the floor ratio.
-/// In [`Food::ALL`] order: litter, caps, carrion, foliage, film, nectar, fruit (f1 / f3: litter
+/// In [`Food::ALL`] order: litter, caps, carrion, foliage, film, nectar, fruit, larva (f1 / f3: litter
 /// 72.5 / 75.9, caps 29.9 / 31.4, foliage 31.3 / 34.1, film 15.6 / 14.6; no nectar or fruit
 /// stands yet, so those fall back to the floor ratio).
-const PATCH_REF_AREA: [f64; Food::COUNT] = [74.19, 30.66, 74.19, 32.69, 15.09, 0.0, 0.0];
+const PATCH_REF_AREA: [f64; Food::COUNT] = [74.19, 30.66, 74.19, 32.69, 15.09, 0.0, 0.0, 0.0];
 /// Patch's support faces (the floor the hunt's encounter rates and the nest crowding were
 /// fitted on), from the same run (4,638 / 4,858).
 const PATCH_FACES: f64 = 4748.0;
