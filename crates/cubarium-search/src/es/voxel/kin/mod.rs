@@ -6,12 +6,14 @@
 //! - [`score`]: the kin-weighted score and its parts.
 //! - [`compare`]: the comparison switch's scorers, family placement, the pair update.
 //! - [`matched`]: the matched-copies runner over any scene, and the null pair.
+//! - [`stage`]: stage 1 (the top only) and stage 2 perturbations.
 
 pub mod compare;
 pub mod config;
 pub mod matched;
 pub mod roster;
 pub mod score;
+pub mod stage;
 
 #[cfg(test)]
 mod tests;

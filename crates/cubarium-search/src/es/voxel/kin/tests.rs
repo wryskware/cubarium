@@ -462,3 +462,65 @@ fn a_saved_start_opens_into_copies() {
     }
     assert_eq!(n, 20, "a saved scene runs its window");
 }
+
+// ---- step 5: stage 1 perturbs only the top ----
+
+fn two_layer_file(f: Founder) -> crate::es::voxel::two_layer::TwoLayerPolicyFile {
+    use crate::es::voxel::two_layer::{TwoLayerNet, TwoLayerPolicyFile, TwoLayerShape, initial_center};
+    let mut shape = TwoLayerShape::plain_from_manifest(&f.manifest());
+    shape.menu = 3;
+    shape.spare = 2;
+    shape.top_hidden = 4;
+    let theta = initial_center(&shape, 11);
+    let net = TwoLayerNet::new(shape, theta).unwrap();
+    TwoLayerPolicyFile::new(f, &net, 3, "test")
+}
+
+#[test]
+fn stage_one_leaves_every_bottom_parameter_untouched() {
+    use super::config::BrainStage;
+    use crate::es::voxel::two_layer::Layer;
+    let file = two_layer_file(Founder::Loftstrider);
+    let layout = file.layout();
+    let (bottom, top) = (layout.range(Layer::Bottom), layout.range(Layer::Top));
+    assert!(!top.is_empty());
+    let one = super::stage::two_layer_variants(&file, BrainStage::Top, 3, 0.1, 0, 3).unwrap();
+    assert_eq!(one.len(), 6);
+    for v in &one {
+        assert_eq!(&v.theta()[bottom.clone()], &file.theta[bottom.clone()], "stage 1 never moves the bottom");
+        assert_ne!(&v.theta()[top.clone()], &file.theta[top.clone()], "stage 1 moves the top");
+    }
+    let two = super::stage::two_layer_variants(&file, BrainStage::Both, 3, 0.1, 0, 3).unwrap();
+    assert!(two.iter().all(|v| v.theta()[bottom.clone()] != file.theta[bottom.clone()]), "stage 2 moves both");
+    // The update draws the same restricted ε: a stage-1 step leaves the bottom where it is.
+    let p = super::stage::Perturber::two_layer(&layout, BrainStage::Top);
+    let mut theta = file.theta.clone();
+    let mut adam = crate::es::optimizer::Adam::new(theta.len());
+    let pairs = PairScores { pairs: vec![(0, 1.0, -1.0), (1, -0.5, 0.5), (2, 0.2, 0.1)], missing: 0 };
+    compare::ascend_pairs(&mut theta, &mut adam, &pairs, 0.1, |k, out| p.eps(3, 0, k, out));
+    assert_eq!(&theta[bottom.clone()], &file.theta[bottom], "the gradient is zero on the bottom");
+    assert_ne!(&theta[top.clone()], &file.theta[top]);
+    // A two-layer table drives bodies.
+    let t = crate::es::voxel::live::variants::VariantTable::antithetic_two_layer(
+        &file, BrainStage::Top, Default::default(), 3, 0.1, 0, 2).unwrap();
+    assert_eq!(t.len(), 4);
+    let obs = vec![0.1; Founder::Loftstrider.manifest().inputs()];
+    let _ = t.controller(1).drive(&obs);
+}
+
+#[test]
+fn plain_lineages_are_unchanged_by_the_stage() {
+    use super::config::BrainStage;
+    let f = Founder::Browser;
+    let m = f.manifest();
+    let centre = crate::es::tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 5);
+    let today = crate::es::voxel::live::variants::VariantTable::antithetic(f, &centre, 3, 0.05, 2, 3).unwrap();
+    let plain = super::stage::Perturber::plain().antithetic(&centre, 3, 0.05, 2, 3);
+    for (k, v) in plain.iter().enumerate() {
+        assert_eq!(today.theta(k), v.as_slice(), "candidate {k}");
+    }
+    // A plain shape has no top: its two-layer perturber does not restrict.
+    let shape = crate::es::voxel::two_layer::TwoLayerShape::plain_from_manifest(&m);
+    let layout = crate::es::voxel::two_layer::TwoLayerLayout::new(&shape);
+    assert_eq!(super::stage::Perturber::two_layer(&layout, BrainStage::Top), super::stage::Perturber::plain());
+}
