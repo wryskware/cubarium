@@ -34,7 +34,7 @@ extends Control
 ## - dot_fill_spacing: 1 also fills the letter-spacing columns (spacing_glyph) with RECT
 ##   dots; 0 leaves them empty, as the font does.
 ##
-## - dot_scaled_keep_pitch: see "Scaled UI" below; 0 (never keep the dots when scaled).
+## - dot_scaled_keep_pitch: see "Scaled UI" below, in tenths of a px; 0 never keeps the dots.
 ##
 ## Scaled UI (ui-scale, 2026-10-11; Wrysk: "when we scale, we default back to solid"):
 ## whenever the label (or the control drawing text) is drawn at a scale other than 1
@@ -44,10 +44,11 @@ extends Control
 ## same light per area as its dotted cell (the dot, plus its gap fill; for the letters the
 ## font's lit dot at its wght), and the label's own glyphs are hidden (self_modulate alpha
 ## 0) so only the solid cells show. Letters become solid pixel strokes on the cell grid; a
-## negative label stays a plate with its letters cut out. dot_scaled_keep_pitch (px on
-## screen) keeps a role dotted when scaled as long as its on-screen pitch is at least that
-## (e.g. 4 keeps the 91 px title dotted at 0.667, where its pitch is 4.67 px). At scale 1
-## nothing changes.
+## negative label stays a plate with its letters cut out. dot_scaled_keep_pitch (tenths of
+## a px on screen) keeps a role dotted when scaled as long as its on-screen pitch is at least
+## that: 45 (Wrysk, 2026-10-11) keeps the 91 px title dotted at 0.667 (pitch 4.67 px) and
+## makes it solid at 0.6 (4.2 px, where its dots clump in pairs); chrome is always solid
+## when scaled. At scale 1 nothing changes.
 ##
 ## Uniform mode (follow_label off; the chrome-dots trial, tests/font_trial_shots.gd): a
 ## `dot_size` square of `color` at `first` + k × `pitch` across the control's rect.
@@ -183,7 +184,7 @@ static func solid_at(ci: CanvasItem, font_size: int, knobs: Dictionary) -> bool:
 	if absf(s.x - 1.0) <= 0.001 and absf(s.y - 1.0) <= 0.001:
 		return false
 	var keep: int = knobs.get("keep_pitch", SCALED_KEEP_PITCH_DEFAULT)
-	return keep <= 0 or Gridlite.pitch_px(font_size) * minf(s.x, s.y) < keep
+	return keep <= 0 or Gridlite.pitch_px(font_size) * minf(s.x, s.y) * 10.0 < keep
 
 
 ## Whether draw_string_field() draws the letters too (solid), so the caller must not

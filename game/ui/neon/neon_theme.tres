@@ -476,6 +476,7 @@ Label/constants/dot_gap_fill_disabled = 0
 Label/constants/dot_light = 100
 Label/constants/dot_min_gap = 0
 Label/constants/dot_min_gap_disabled = 1
+Label/constants/dot_scaled_keep_pitch = 45
 Label/constants/line_spacing = 0
 Label/constants/shadow_outline_size = 0
 Label/font_sizes/font_size = 23
