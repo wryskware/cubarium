@@ -86,6 +86,27 @@ pub fn found_world_from(
     founder_counts: [usize; Founder::COUNT],
     ecology: &EcologyParams,
 ) -> (Sim, FoundInfo) {
+    try_found_world_from(cfg, seeds, founder_counts, ecology).unwrap_or_else(|why| panic!("{why}"))
+}
+
+/// [`found_world`], with a terrain the founding refuses returned as `Err` (its reason)
+/// rather than a panic: for tools that skip a refused seed with a note (BRAIN-NEXT).
+pub fn try_found_world(
+    cfg: &Config,
+    base: u64,
+    founder_counts: [usize; Founder::COUNT],
+    ecology: &EcologyParams,
+) -> Result<(Sim, FoundInfo), String> {
+    try_found_world_from(cfg, found::Seeds::from(base), founder_counts, ecology)
+}
+
+/// [`found_world_from`], refusing a rejected terrain by `Err`.
+pub fn try_found_world_from(
+    cfg: &Config,
+    seeds: found::Seeds,
+    founder_counts: [usize; Founder::COUNT],
+    ecology: &EcologyParams,
+) -> Result<(Sim, FoundInfo), String> {
     let Founded {
         world,
         flora,
@@ -106,7 +127,7 @@ pub fn found_world_from(
     );
     // A rejected terrain carries no founders; training on it would be silent nonsense.
     if let Some(why) = terrain_rejection {
-        panic!("terrain seed {seed} rejected: {why}");
+        return Err(format!("terrain seed {seed} rejected: {why}"));
     }
     let sim = Sim::ambient(
         world,
@@ -128,5 +149,5 @@ pub fn found_world_from(
         founders: seeded.founders,
         stands: seeded.stands,
     };
-    (sim, info)
+    Ok((sim, info))
 }

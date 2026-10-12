@@ -32,8 +32,11 @@
 //!
 //! [`RecordSource`] names the alternative-mode examples (staged scenes invoking a teacher
 //! skill in a mode it would not have chosen: `proposal` is `None`, `held` the invoked
-//! mode) and the closed-loop correction pass (the learner's own holds as `held`, the
-//! teacher's labels as `proposal` and actions). Producing them needs the fauna side.
+//! mode) and the closed-loop correction pass. BRAIN-NEXT's closed-loop records
+//! ([`super::record::closed_loop_records`]) are the learner's states (its observations and
+//! candidates) labelled by the dry-run teacher: its proposal as `proposal`, and — teacher
+//! forcing, as every other record — its own hold as `held` with its actions, so the bottom
+//! learns each mode's actions under that mode.
 
 use serde::{Deserialize, Serialize};
 
@@ -55,8 +58,8 @@ pub enum RecordSource {
     /// (§11.3): `held` is the invoked mode; `proposal` is `None` unless the teacher's own
     /// proposal is wanted as a label too.
     AlternativeMode,
-    /// The closed-loop correction pass: the learner picked the held intents, the teacher
-    /// labelled the states it reached.
+    /// The closed-loop correction pass: the learner picked its intents and reached the
+    /// states; the teacher labelled them (its proposal, hold and actions).
     ClosedLoop,
 }
 

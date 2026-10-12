@@ -1,36 +1,49 @@
 //! **Clone a menu lineage's heuristic into the two-layer brain** (TWO-LAYER half 2, step 6;
-//! `design/behaviour-ai-2026-10-11.md` §10.2, §11.3), beside a plain GRU cloned on the same
-//! data, then a first closed-loop read of each in a live world against the heuristic.
+//! BRAIN-NEXT steps 3–6; `design/behaviour-ai-2026-10-11.md` §10.2, §11.3), beside a plain
+//! GRU cloned on the same data; then a closed-loop correction round, per-mode readouts and
+//! per-mode competence on staged scenes, and a first closed-loop read in live worlds.
 //!
 //! ```text
 //! two_layer_clone founder=seedporter train_seeds=1,2,3 heldout_seed=9 record_s=600 \
+//!     scene_seeds=1,2,3,4,5,6,7,8 scene_heldout=101,102,103,104 refit_rounds=1 \
 //!     closed_seeds=21,22 closed_s=300 updates=300 workers=8 out=DIR
 //! ```
 //!
 //! 1. **Record** each seed's training world (`small`, still water, default founders) under
 //!    the heuristics with the tap on. Every `alt_period_s` half the lineage's bodies (by id
 //!    parity, alternating) are held to their own answer for `alt_len_s`
-//!    (`Fauna::force_own`): those stretches are alternative-mode records.
-//! 2. **Fit** the two-layer brain and a plain GRU on the training seeds' records
+//!    (`Fauna::force_own`): those stretches are alternative-mode records. A terrain seed the
+//!    training world refuses is skipped with a note.
+//! 2. **Staged scenes** (`cubarium_voxel_sim::mode_scenes`): every scene of the lineage on
+//!    `scene_seeds`, under its heuristic, recorded as teacher streams; `scene_heldout` seeds
+//!    are held out.
+//! 3. **Fit** the two-layer brain and a plain GRU on the training records
 //!    (`two_layer::clone::fit`, teacher-forced, the same spec).
-//! 3. **Held out**: per-intent agreement (two-layer) and per-mode action error (both) on the
-//!    held-out seed's teacher and alternative-mode records.
-//! 4. **Closed loop** on matched seeds: the lineage on its heuristic, on the two-layer
-//!    clone (loaded from its written file, a shadow teacher beside each body), and on the
-//!    plain clone; energy (the lineage's body + stores), deaths, bodies. A first read, not
-//!    a verdict.
+//! 4. **Closed-loop correction** (`refit_rounds`, §11.3): each clone drives the lineage in
+//!    the training worlds (`closed_record_s`) and the training scenes, the dry-run teacher
+//!    labelling the states it reaches (`Fauna::dry_teach`); each refits from where it stood
+//!    on its first records plus its own closed-loop records.
+//! 5. **Held out**: per-intent agreement (two-layer) and per-mode action error (both) on the
+//!    held-out seed's and held-out scenes' teacher records.
+//! 6. **Competence** (§11.3, "Competence before freezing"): every scene on the held-out
+//!    scene seeds, closed loop, under the heuristic, the two-layer clone and the plain clone,
+//!    on identical starts (`two_layer::scenes::competence`, with each arm's null pair).
+//! 7. **Live closed loop** on `closed_seeds` (skipped with `closed_s=0`): energy, deaths and
+//!    bodies of the lineage under each arm. A first read, not a verdict.
 //!
-//! One JSON summary on stdout and in `out/summary.json`; the two-layer file in `out/`.
+//! One JSON summary in `out/summary.json` and a per-mode table on stdout; the clones' files in
+//! `out/`.
 
-use std::sync::{Arc, Mutex};
 
 use cubarium_search::es::voxel::live::{self, balance, ecology::EcologyParams, world};
 use cubarium_search::es::voxel::store::load_brain_driver;
-use cubarium_search::es::voxel::two_layer::clone::{self, CloneSpec, RecordSource, RecordedSample, TrajectoryRecord};
-use cubarium_search::es::voxel::two_layer::record::{ShadowTeacher, per_mode, records_from_tap};
+use cubarium_search::es::voxel::two_layer::clone::{self, CloneSpec, RecordSource, TrajectoryRecord};
+use cubarium_search::es::voxel::two_layer::record::{closed_loop_records, per_mode, records_from_tap};
+use cubarium_search::es::voxel::two_layer::scenes;
 use cubarium_search::es::voxel::two_layer::{MenuHeads, TwoLayerNet, TwoLayerPolicyFile, TwoLayerShape};
 use cubarium_search::es::voxel::EpisodeDriver;
-use cubarium_voxel_fauna::{BodySpec, BodyStage, Controller, Founder, Placed, Spot};
+use cubarium_voxel_fauna::{BodySpec, BodyStage, DryScope, Founder, Placed, Spot};
+use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
 use serde_json::json;
 
 fn arg<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
@@ -48,10 +61,10 @@ const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 /// The training world (`small`, still water) with the ecology's own founders, then the
 /// lineage topped up to `bodies` grown bodies under its heuristic, placed on the faces
 /// other bodies stand on (the lanternjaw founds as an egg bank, the seedporter is off in
-/// the default roster).
-fn found(seed: u64, f: Founder, bodies: usize) -> cubarium_voxel_sim::Sim {
+/// the default roster). `Err` for a terrain seed the founding refuses.
+fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
-    let (mut sim, _) = world::found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco);
+    let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
     let have = lineage_ids(&sim, f).len();
     if have < bodies {
         let (w, flora) = (sim.world().clone(), sim.flora().clone());
@@ -69,7 +82,7 @@ fn found(seed: u64, f: Founder, bodies: usize) -> cubarium_voxel_sim::Sim {
             }
         }
     }
-    sim
+    Ok(sim)
 }
 
 fn lineage_ids(sim: &cubarium_voxel_sim::Sim, f: Founder) -> Vec<u64> {
@@ -77,8 +90,8 @@ fn lineage_ids(sim: &cubarium_voxel_sim::Sim, f: Founder) -> Vec<u64> {
 }
 
 /// Record one seed: the tap's records, teacher and alternative-mode.
-fn record(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: u64, alt_period_s: u64, alt_len_s: u64) -> Vec<TrajectoryRecord> {
-    let mut sim = found(seed, f, bodies);
+fn record(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: u64, alt_period_s: u64, alt_len_s: u64) -> Result<Vec<TrajectoryRecord>, String> {
+    let mut sim = found(seed, f, bodies)?;
     sim.fauna_mut().start_tap();
     let mut forced: Vec<(u64, u64, u64)> = Vec::new(); // (id, from tick, to tick)
     let mut on: Vec<(u64, u64)> = Vec::new();
@@ -106,9 +119,23 @@ fn record(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: 
     }
     let now = sim.fauna().tick();
     forced.extend(on.drain(..).map(|(id, from)| (id, from, now)));
-    let tap = sim.fauna_mut().take_tap().expect("tap");
+    let tap = sim.fauna_mut().take_tap().ok_or("tap")?;
     let is_forced = |id: u64, tick: u64| forced.iter().any(|&(b, from, to)| b == id && tick > from && tick <= to);
-    records_from_tap(&tap, f, shape, &is_forced, 8).into_iter().map(|(_, r)| r).collect()
+    Ok(records_from_tap(&tap, f, shape, &is_forced, 8).into_iter().map(|(_, r)| r).collect())
+}
+
+/// One live training world with the lineage on `driver` and the dry-run teacher beside it:
+/// its closed-loop records.
+fn record_closed(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: u64, driver: &EpisodeDriver) -> Result<Vec<TrajectoryRecord>, String> {
+    let mut sim = found(seed, f, bodies)?;
+    live::install_centres(sim.fauna_mut(), &[(f, driver.clone())]);
+    sim.fauna_mut().dry_teach(f, Some(DryScope::Brains));
+    sim.fauna_mut().start_tap();
+    for _ in 0..seconds * TICKS_PER_S {
+        sim.step();
+    }
+    let tap = sim.fauna_mut().take_tap().ok_or("tap")?;
+    Ok(closed_loop_records(&tap, f, shape, 8).into_iter().map(|(_, r)| r).collect())
 }
 
 /// A lineage's numbers in a live world.
@@ -121,39 +148,11 @@ fn tally(sim: &cubarium_voxel_sim::Sim, f: Founder) -> (usize, f64, u64) {
     (v.animals.iter().filter(|a| a.founder == Some(f)).count(), energy, deaths)
 }
 
-enum Arm {
-    Heuristic,
-    Driver(EpisodeDriver),
-    Shadow(Arc<TwoLayerNet>),
-}
-
-/// One closed-loop arm on one seed; the shadow's labelled samples come back for the
-/// closed-loop correction pass.
-fn closed(seed: u64, f: Founder, bodies: usize, arm: &Arm, seconds: u64) -> (serde_json::Value, Vec<TrajectoryRecord>) {
-    let mut sim = found(seed, f, bodies);
-    let logs: Arc<Mutex<Vec<Arc<Mutex<Vec<RecordedSample>>>>>> = Arc::default();
-    match arm {
-        Arm::Heuristic => {}
-        Arm::Driver(d) => live::install_centres(sim.fauna_mut(), &[(f, d.clone())]),
-        Arm::Shadow(net) => {
-            let fauna = sim.fauna_mut();
-            let teachers = fauna.config().teachers;
-            let arb = fauna.config().founder(f).brain;
-            let (net, logs) = (Arc::clone(net), Arc::clone(&logs));
-            fauna.set_founder_factory(
-                f,
-                Arc::new(move || -> Box<dyn Controller> {
-                    let log = Arc::new(Mutex::new(Vec::new()));
-                    logs.lock().unwrap().push(Arc::clone(&log));
-                    let brain = net.brain(arb, f.manifest().controller_period_s);
-                    Box::new(ShadowTeacher::new(brain, cubarium_voxel_fauna::heuristic(f, teachers), f, log))
-                }),
-            );
-            fauna.set_policy_driven(f, true);
-            for id in lineage_ids(&sim, f) {
-                sim.fauna_mut().install_founder_controller(id, f);
-            }
-        }
+/// One live closed-loop arm on one seed (`None`: the heuristic).
+fn closed(seed: u64, f: Founder, bodies: usize, arm: Option<&EpisodeDriver>, seconds: u64) -> Result<serde_json::Value, String> {
+    let mut sim = found(seed, f, bodies)?;
+    if let Some(d) = arm {
+        live::install_centres(sim.fauna_mut(), &[(f, d.clone())]);
     }
     let start = tally(&sim, f);
     let started_ids = lineage_ids(&sim, f);
@@ -162,19 +161,40 @@ fn closed(seed: u64, f: Founder, bodies: usize, arm: &Arm, seconds: u64) -> (ser
     }
     let end = tally(&sim, f);
     let born = lineage_ids(&sim, f).iter().filter(|id| !started_ids.contains(id)).count();
-    let period = f.manifest().controller_period_s;
-    let shadow: Vec<TrajectoryRecord> = logs
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|l| TrajectoryRecord { source: RecordSource::ClosedLoop, sample_period_s: period, samples: l.lock().unwrap().clone() })
-        .filter(|r| !r.samples.is_empty())
-        .collect();
-    (
-        json!({"seed": seed, "bodies_start": start.0, "bodies_end": end.0, "born": born,
-               "energy_start": start.1, "energy_end": end.1, "deaths": end.2 - start.2}),
-        shadow,
-    )
+    Ok(json!({"seed": seed, "bodies_start": start.0, "bodies_end": end.0, "born": born,
+               "energy_start": start.1, "energy_end": end.1, "deaths": end.2 - start.2}))
+}
+
+/// Run `f` on every item, one thread each, results in order.
+fn each<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = items.iter().map(|x| scope.spawn(|| f(x))).collect();
+        handles.into_iter().map(|h| h.join().expect("worker")).collect()
+    })
+}
+
+/// Keep the records, note every refused seed.
+fn keep(results: Vec<(u64, Result<Vec<TrajectoryRecord>, String>)>, skipped: &mut Vec<serde_json::Value>, what: &str) -> Vec<TrajectoryRecord> {
+    let mut out = Vec::new();
+    for (seed, r) in results {
+        match r {
+            Ok(rs) => out.extend(rs),
+            Err(why) => {
+                eprintln!("# skipped {what} seed {seed}: {why}");
+                skipped.push(json!({"what": what, "seed": seed, "why": why}));
+            }
+        }
+    }
+    out
+}
+
+fn samples(rs: &[TrajectoryRecord], src: RecordSource) -> usize {
+    rs.iter().filter(|r| r.source == src).map(|r| r.samples.len()).sum()
+}
+
+fn mean(xs: impl Iterator<Item = f64>) -> f64 {
+    let (s, n) = xs.fold((0.0, 0usize), |(s, n), x| (s + x, n + 1));
+    if n > 0 { s / n as f64 } else { f64::NAN }
 }
 
 fn main() {
@@ -193,107 +213,198 @@ fn main() {
         seed: num(&args, "fit_seed", 7u64),
         workers: num(&args, "workers", 8usize),
     };
+    let refit = CloneSpec { updates: num(&args, "refit_updates", spec.updates / 2), ..spec };
+    let refit_rounds = num(&args, "refit_rounds", 1usize);
+    let closed_record_s = num(&args, "closed_record_s", 300u64);
     let heads = MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: num(&args, "top_hidden", 32usize), pointer_width: num(&args, "pointer_width", 16usize) };
     let bodies = num(&args, "bodies", 8usize);
+    let mut scene_cfg = mode_scenes::Config::default();
+    if let Some(s) = arg(&args, "scene_s").and_then(|v| v.parse().ok()) {
+        scene_cfg.duration_s = s;
+    }
+    scene_cfg.validate().expect("scene config");
     let manifest = f.manifest();
     let two = TwoLayerShape::menu_from_manifest(&manifest, heads);
     let plain = TwoLayerShape::plain_from_manifest(&manifest);
     let arb = cubarium_voxel_fauna::FaunaConfig::default().founder(f).brain;
     let t0 = std::time::Instant::now();
+    let mut skipped = Vec::new();
+    let lineage_scenes = ModeScene::of(f);
 
-    // Every seed's recording on its own thread (each world single-threaded).
+    // 1. Live training worlds, each on its own thread (each world single-threaded).
     let train_seeds = seeds(&args, "train_seeds", "1,2,3");
     let heldout_seed = num(&args, "heldout_seed", 9u64);
-    let mut recorded: Vec<Vec<TrajectoryRecord>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = train_seeds
-            .iter()
-            .chain(std::iter::once(&heldout_seed))
-            .map(|&s| {
-                let two = &two;
-                scope.spawn(move || record(s, f, bodies, two, record_s, alt_period_s, alt_len_s))
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().expect("recording")).collect()
-    });
-    let held = recorded.pop().expect("held-out");
-    let train: Vec<TrajectoryRecord> = recorded.into_iter().flatten().collect();
-    let count = |rs: &[TrajectoryRecord], src: RecordSource| rs.iter().filter(|r| r.source == src).map(|r| r.samples.len()).sum::<usize>();
-    eprintln!("# recorded {:.0} s: train teacher {} alt {}; held-out teacher {} alt {}", t0.elapsed().as_secs_f64(),
-        count(&train, RecordSource::Teacher), count(&train, RecordSource::AlternativeMode),
-        count(&held, RecordSource::Teacher), count(&held, RecordSource::AlternativeMode));
+    let live_seeds: Vec<u64> = train_seeds.iter().copied().chain(std::iter::once(heldout_seed)).collect();
+    let mut recorded: Vec<(u64, Result<Vec<TrajectoryRecord>, String>)> =
+        live_seeds.iter().copied().zip(each(&live_seeds, |&s| record(s, f, bodies, &two, record_s, alt_period_s, alt_len_s))).collect();
+    let held_live = keep(vec![recorded.pop().expect("held-out")], &mut skipped, "held-out live");
+    let mut train = keep(recorded, &mut skipped, "live");
 
-    let (theta2, report2) = clone::fit(&two, &arb, &train, None, &spec).expect("two-layer fit");
-    eprintln!("# two-layer fitted {:.0} s", t0.elapsed().as_secs_f64());
-    let (theta_p, report_p) = clone::fit(&plain, &arb, &train, None, &spec).expect("plain fit");
-    eprintln!("# plain fitted {:.0} s", t0.elapsed().as_secs_f64());
-
-    let menu = manifest.menu;
-    let names: Vec<&str> = (0..menu.named.len()).map(|k| menu.name(k)).collect();
-    let split = |src: RecordSource| held.iter().filter(|r| r.source == src).cloned().collect::<Vec<_>>();
-    let mut held_out = serde_json::Map::new();
-    for (label, rs) in [("teacher", split(RecordSource::Teacher)), ("alternative_mode", split(RecordSource::AlternativeMode))] {
-        let m2 = per_mode(&two, &arb, &theta2, &rs, menu.named.len());
-        let mp = per_mode(&plain, &arb, &theta_p, &rs, menu.named.len());
-        let (agree, err2) = m2.rates(two.actions.len());
-        let (_, errp) = mp.rates(plain.actions.len());
-        let rows: Vec<_> = (0..names.len())
-            .map(|k| json!({"intent": names[k], "labels": m2.intent_labels[k], "agreement_two_layer": agree[k],
-                             "mode_samples": m2.mode_samples[k], "action_mse_two_layer": err2[k], "action_mse_plain": errp[k]}))
-            .collect();
-        held_out.insert(label.into(), json!(rows));
-    }
-
-    let net = Arc::new(TwoLayerNet::new(two.clone(), theta2).expect("net"));
-    let file = TwoLayerPolicyFile::new(f, &net, spec.seed, "clone");
-    let path = out.join(format!("{}-two-layer.json", f.name()));
-    file.write(&path).expect("write");
-    let two_driver = load_brain_driver(&path, f).expect("loads back");
-    let plain_driver = EpisodeDriver::gru(&theta_p, f).expect("plain driver");
-
-    let mut arms = serde_json::Map::new();
-    let mut shadow_samples = 0;
-    let closed_seeds = seeds(&args, "closed_seeds", "21,22");
-    let plan: Vec<(u64, &str, Arm)> = closed_seeds
+    // 2. Staged scenes: training seeds into the records, held-out seeds kept by scene.
+    let scene_seeds = seeds(&args, "scene_seeds", "1,2,3,4,5,6,7,8");
+    let scene_heldout = seeds(&args, "scene_heldout", "101,102,103,104");
+    let jobs: Vec<(ModeScene, u64)> = lineage_scenes.iter().flat_map(|&m| scene_seeds.iter().map(move |&s| (m, s))).collect();
+    let got = each(&jobs, |&(m, s)| scenes::record(&scene_cfg, m, s, &two, 8));
+    let train_scene: Vec<TrajectoryRecord> =
+        keep(jobs.iter().map(|j| j.1).zip(got).collect(), &mut skipped, "scene");
+    let held_scene: Vec<(ModeScene, Vec<TrajectoryRecord>)> = lineage_scenes
         .iter()
-        .flat_map(|&s| {
-            [
-                (s, "heuristic", Arm::Heuristic),
-                (s, "two_layer", Arm::Driver(two_driver.clone())),
-                (s, "two_layer_shadowed", Arm::Shadow(Arc::clone(&net))),
-                (s, "plain_gru", Arm::Driver(plain_driver.clone())),
-            ]
+        .map(|&m| {
+            let rs = each(&scene_heldout, |&s| scenes::record(&scene_cfg, m, s, &two, 8));
+            (m, keep(scene_heldout.iter().copied().zip(rs).collect(), &mut skipped, "held-out scene"))
         })
         .collect();
-    let results: Vec<(serde_json::Value, Vec<TrajectoryRecord>)> = std::thread::scope(|scope| {
-        let handles: Vec<_> = plan.iter().map(|(s, _, arm)| scope.spawn(move || closed(*s, f, bodies, arm, closed_s))).collect();
-        handles.into_iter().map(|h| h.join().expect("closed loop")).collect()
-    });
-    eprintln!("# closed loop {:.0} s", t0.elapsed().as_secs_f64());
-    for ((_, label, _), (mut row, shadow)) in plan.iter().zip(results) {
-        let n = shadow.iter().map(|r| r.samples.len()).sum::<usize>();
-        shadow_samples += n;
-        if *label == "two_layer_shadowed" {
-            let m = per_mode(&two, &arb, net.theta(), &shadow, menu.named.len());
-            let (_, err) = m.rates(two.actions.len());
-            row["shadow_samples"] = json!(n);
-            row["shadow_action_mse_by_held_mode"] =
-                json!(names.iter().zip(&err).zip(&m.mode_samples).map(|((n, e), c)| json!({"intent": n, "samples": c, "mse": e})).collect::<Vec<_>>());
+    train.extend(train_scene.iter().cloned());
+    eprintln!(
+        "# recorded {:.0} s: live teacher {} alt {}, scene teacher {}; held-out live {} scenes {}",
+        t0.elapsed().as_secs_f64(),
+        samples(&train, RecordSource::Teacher) - samples(&train_scene, RecordSource::Teacher),
+        samples(&train, RecordSource::AlternativeMode),
+        samples(&train_scene, RecordSource::Teacher),
+        held_live.iter().map(|r| r.samples.len()).sum::<usize>(),
+        held_scene.iter().flat_map(|(_, rs)| rs).map(|r| r.samples.len()).sum::<usize>()
+    );
+
+    // 3. The first fits.
+    let (theta2_first, report2) = clone::fit(&two, &arb, &train, None, &spec).expect("two-layer fit");
+    let (theta_p_first, report_p) = clone::fit(&plain, &arb, &train, None, &spec).expect("plain fit");
+    eprintln!("# fitted {:.0} s", t0.elapsed().as_secs_f64());
+
+    // 4. Closed-loop correction rounds: each clone drives, the dry teacher labels its states.
+    let driver_of = |shape: &TwoLayerShape, theta: &[f64], name: &str| -> EpisodeDriver {
+        if shape.is_plain() {
+            EpisodeDriver::gru(theta, f).expect("plain driver")
+        } else {
+            let net = TwoLayerNet::new(shape.clone(), theta.to_vec()).expect("net");
+            let file = TwoLayerPolicyFile::new(f, &net, spec.seed, name);
+            let path = out.join(format!("{}-{name}.json", f.name()));
+            file.write(&path).expect("write");
+            load_brain_driver(&path, f).expect("loads back")
         }
-        arms.entry(label.to_string()).or_insert_with(|| json!([])).as_array_mut().unwrap().push(row);
+    };
+    let (mut theta2, mut theta_p) = (theta2_first.clone(), theta_p_first.clone());
+    let mut rounds = Vec::new();
+    for round in 0..refit_rounds {
+        let mut row = serde_json::Map::new();
+        for (label, shape, theta) in [("two_layer", &two, &mut theta2), ("plain", &plain, &mut theta_p)] {
+            let d = driver_of(shape, theta, &format!("{label}-round{round}"));
+            let live_closed = each(&train_seeds, |&s| record_closed(s, f, bodies, &two, closed_record_s, &d));
+            let mut closed_rs = keep(train_seeds.iter().copied().zip(live_closed).collect(), &mut skipped, "closed-loop live");
+            let got = each(&jobs, |&(m, s)| scenes::closed_loop(&scene_cfg, m, s, &d, &two, 8));
+            closed_rs.extend(keep(jobs.iter().map(|j| j.1).zip(got).collect(), &mut skipped, "closed-loop scene"));
+            // The plain brain refits on the same labels: its shape reads only the bottom's.
+            let mut all = train.clone();
+            all.extend(closed_rs.iter().cloned());
+            let (next, rep) = clone::fit(shape, &arb, &all, Some(theta), &refit).expect("refit");
+            *theta = next;
+            row.insert(label.into(), json!({"closed_loop_samples": closed_rs.iter().map(|r| r.samples.len()).sum::<usize>(), "last": rep.last}));
+        }
+        eprintln!("# refit round {round} {:.0} s", t0.elapsed().as_secs_f64());
+        rounds.push(serde_json::Value::Object(row));
     }
+
+    // 5. Held out, per mode.
+    let menu = manifest.menu;
+    let names: Vec<&str> = (0..menu.named.len()).map(|k| menu.name(k)).collect();
+    let table = |rs: &[TrajectoryRecord]| {
+        let m2 = per_mode(&two, &arb, &theta2, rs, names.len());
+        let m1 = per_mode(&two, &arb, &theta2_first, rs, names.len());
+        let mp = per_mode(&plain, &arb, &theta_p, rs, names.len());
+        let (agree, err2) = m2.rates(two.actions.len());
+        let (agree1, err1) = m1.rates(two.actions.len());
+        let (_, errp) = mp.rates(plain.actions.len());
+        (0..names.len())
+            .map(|k| {
+                json!({"intent": names[k], "labels": m2.intent_labels[k], "mode_samples": m2.mode_samples[k],
+                       "agreement_two_layer": agree[k], "agreement_two_layer_before_refit": agree1[k],
+                       "action_mse_two_layer": err2[k], "action_mse_two_layer_before_refit": err1[k], "action_mse_plain": errp[k]})
+            })
+            .collect::<Vec<_>>()
+    };
+    let teacher = |rs: &[TrajectoryRecord]| rs.iter().filter(|r| r.source == RecordSource::Teacher).cloned().collect::<Vec<_>>();
+    let mut held_all = teacher(&held_live);
+    for (_, rs) in &held_scene {
+        held_all.extend(teacher(rs));
+    }
+    let held_out = json!({
+        "live_teacher": table(&teacher(&held_live)),
+        "live_alternative_mode": table(&held_live.iter().filter(|r| r.source == RecordSource::AlternativeMode).cloned().collect::<Vec<_>>()),
+        "scenes": held_scene.iter().map(|(m, rs)| json!({"scene": m.name(), "rows": table(&teacher(rs))})).collect::<Vec<_>>(),
+        "all_teacher": table(&held_all),
+    });
+
+    // 6. Competence on the held-out scene seeds, three arms on identical starts.
+    let two_driver = driver_of(&two, &theta2, "two-layer");
+    let plain_driver = driver_of(&plain, &theta_p, "plain");
+    let arms: [(&str, Option<&EpisodeDriver>); 3] = [("heuristic", None), ("two_layer", Some(&two_driver)), ("plain", Some(&plain_driver))];
+    let mut competence = Vec::new();
+    for &m in &lineage_scenes {
+        let mut row = serde_json::Map::new();
+        row.insert("scene".into(), json!(m.name()));
+        row.insert("intent".into(), json!(m.intent()));
+        for (label, d) in arms {
+            let runs: Vec<_> = each(&scene_heldout, |&s| scenes::competence(&scene_cfg, m, s, d))
+                .into_iter()
+                .filter_map(|r| r.map_err(|why| eprintln!("# competence {} {label}: {why}", m.name())).ok())
+                .collect();
+            row.insert(label.into(), json!({
+                "competence": mean(runs.iter().map(|r| r.competence)),
+                "mode_share": mean(runs.iter().map(|r| r.mode_share)),
+                "deaths": runs.iter().map(|r| r.deaths).sum::<u64>(),
+                "energy_change": mean(runs.iter().map(|r| r.energy_end - r.energy_start)),
+                "null_gap_max": runs.iter().map(|r| r.null_gap).fold(0.0, f64::max),
+                "runs": runs,
+            }));
+        }
+        competence.push(serde_json::Value::Object(row));
+    }
+    eprintln!("# competence {:.0} s", t0.elapsed().as_secs_f64());
+
+    // 7. Live closed loop on matched seeds.
+    let mut live_arms = serde_json::Map::new();
+    if closed_s > 0 {
+        let closed_seeds = seeds(&args, "closed_seeds", "21,22");
+        for (label, d) in arms {
+            let rows: Vec<serde_json::Value> = closed_seeds
+                .iter()
+                .zip(each(&closed_seeds, |&s| closed(s, f, bodies, d, closed_s)))
+                .filter_map(|(s, r)| match r {
+                    Ok(v) => Some(v),
+                    Err(why) => {
+                        eprintln!("# skipped live closed-loop seed {s}: {why}");
+                        skipped.push(json!({"what": format!("live closed loop {label}"), "seed": s, "why": why}));
+                        None
+                    }
+                })
+                .collect();
+            live_arms.insert(label.into(), json!(rows));
+        }
+        eprintln!("# live closed loop {:.0} s", t0.elapsed().as_secs_f64());
+    }
+
     let summary = json!({
         "founder": f.name(),
         "bodies": bodies, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
-        "samples": {"train_teacher": count(&train, RecordSource::Teacher), "train_alternative_mode": count(&train, RecordSource::AlternativeMode),
-                    "heldout_teacher": count(&held, RecordSource::Teacher), "heldout_alternative_mode": count(&held, RecordSource::AlternativeMode),
-                    "closed_loop_shadow": shadow_samples},
+        "scene_s": scene_cfg.duration_s, "scene_seeds": scene_seeds, "scene_heldout": scene_heldout, "refit_rounds": refit_rounds,
+        "samples": {"train_teacher": samples(&train, RecordSource::Teacher), "train_alternative_mode": samples(&train, RecordSource::AlternativeMode),
+                    "train_scene": samples(&train_scene, RecordSource::Teacher), "heldout_teacher": held_all.iter().map(|r| r.samples.len()).sum::<usize>()},
         "fit": {"updates": spec.updates, "two_layer_last": report2.last, "plain_last": report_p.last},
+        "refit": rounds,
         "held_out": held_out,
-        "closed_loop": arms,
-        "two_layer_file": path.display().to_string(),
+        "competence": competence,
+        "live_closed_loop": live_arms,
+        "skipped": skipped,
         "wall_s": t0.elapsed().as_secs_f64(),
     });
-    let text = serde_json::to_string_pretty(&summary).expect("json");
-    std::fs::write(out.join("summary.json"), &text).expect("summary");
-    println!("{text}");
+    std::fs::write(out.join("summary.json"), serde_json::to_string_pretty(&summary).expect("json")).expect("summary");
+    // The per-mode table: held-out agreement and action error, competence by arm.
+    println!("{:16} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6}", "intent", "labels", "agree2", "mse2", "mseP", "compH", "comp2", "compP");
+    let rows = summary["held_out"]["all_teacher"].as_array().cloned().unwrap_or_default();
+    for r in rows {
+        let intent = r["intent"].as_str().unwrap_or("?");
+        let comp = summary["competence"].as_array().and_then(|c| c.iter().find(|c| c["intent"] == intent)).cloned();
+        let c = |arm: &str| comp.as_ref().and_then(|c| c[arm]["competence"].as_f64()).map_or("-".into(), |x| format!("{x:.2}"));
+        let g = |k: &str| r[k].as_f64().map_or("-".into(), |x| format!("{x:.4}"));
+        println!("{:16} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6}", intent, r["labels"], g("agreement_two_layer"), g("action_mse_two_layer"), g("action_mse_plain"), c("heuristic"), c("two_layer"), c("plain"));
+    }
 }

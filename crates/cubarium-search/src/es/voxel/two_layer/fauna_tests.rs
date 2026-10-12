@@ -537,3 +537,25 @@ fn a_staged_scene_records_its_mode_and_runs_a_brain_closed_loop() {
     assert!(!closed.is_empty());
     assert!(closed.iter().flat_map(|r| &r.samples).all(|s| s.proposal.is_some()));
 }
+
+/// BRAIN-NEXT step 5: the competence check reads what each mode is for, the heuristic in its
+/// own scenes does it, a body standing still does not, and two copies of one arm are
+/// identical (the null pair's gap is zero).
+#[test]
+fn the_competence_check_reads_each_modes_purpose() {
+    use cubarium_voxel_sim::mode_scenes::{Config, ModeScene};
+    let cfg = Config { duration_s: 15.0, ..Config::default() };
+    // A brain that stands still and holds its menu's first intent.
+    for scene in [ModeScene::Groom, ModeScene::Feed, ModeScene::FollowMother] {
+        let h = super::scenes::competence(&cfg, scene, 1, None).unwrap();
+        assert_eq!(h.null_gap, 0.0, "{}: one arm's copies are identical", scene.name());
+        assert!(h.competence > 0.0, "{}: the heuristic does what its mode is for ({h:?})", scene.name());
+        assert!(h.mode_share > 0.0, "{}: and holds the mode", scene.name());
+        let f = scene.founder();
+        let shape = TwoLayerShape::plain_from_manifest(&f.manifest());
+        let still = vec![0.0; super::shape::TwoLayerLayout::new(&shape).params];
+        let d = crate::es::voxel::EpisodeDriver::gru(&still, f).unwrap();
+        let s = super::scenes::competence(&cfg, scene, 1, Some(&d)).unwrap();
+        assert!(s.competence < h.competence, "{}: a body that only stands does less ({s:?})", scene.name());
+    }
+}
