@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use cubarium_gpu::target::readback::ReadbackRing;
 use cubarium_gpu::voxel::Highlight;
-use cubarium_session::{CandidateSource, HookClock, LoopHook};
+use cubarium_session::{CandidateSource, HookClock, LoopHook, Prepared};
 use cubarium_voxel::World;
 use cubarium_voxel_fauna::Fauna;
 use cubarium_voxel_flora::Flora;
@@ -735,6 +735,9 @@ struct Shared {
     /// The newest still world asked for: an older stager still opening its renderer
     /// installs nothing over it.
     still_asked: AtomicU64,
+    /// How long a still world waits for its lighting ([`STATIC_LIGHT_WAIT`]; a test sets a
+    /// shorter one).
+    light_wait: Mutex<Duration>,
     /// The presenter, the pack thread, the still-world stagers and renderers being
     /// released: joined by [`Shared::shutdown`].
     threads: Mutex<Vec<JoinHandle<()>>>,
@@ -1160,6 +1163,7 @@ impl Hosted {
             unlit: AtomicBool::new(false),
             still_lighting: std::sync::atomic::AtomicU8::new(1),
             still_asked: AtomicU64::new(0),
+            light_wait: Mutex::new(STATIC_LIGHT_WAIT),
             threads: Mutex::new(Vec::new()),
             lane: PackLane::default(),
             packing: AtomicBool::new(false),
@@ -1201,13 +1205,18 @@ impl Hosted {
     /// stagers of the process ([`StageTurns`]); one that is not (a candidate opened large,
     /// asked for by hand) starts at once.
     pub fn show_static(&self, source: CandidateSource, index: usize, queued: bool) {
+        self.show_still(move || source.get(index), index, queued);
+    }
+
+    /// [`Hosted::show_static`] of the world `get` hands over (a test's own).
+    fn show_still(&self, get: impl FnOnce() -> Option<Arc<Prepared>> + Send + 'static, index: usize, queued: bool) {
         let asked = self.shared.still_asked.fetch_add(1, Ordering::SeqCst) + 1;
         let lighting = match self.shared.still_lighting.load(Ordering::SeqCst) {
             0 => StillLighting::Fast,
             _ => StillLighting::Refined,
         };
         self.spawn("cubarium-hosted-static", move |shared| {
-            if let Err(e) = stage_static(shared, &source, index, queued, asked, lighting) {
+            if let Err(e) = stage_static(shared, get, index, queued, asked, lighting) {
                 shared.fail(e);
             }
         });
@@ -1405,7 +1414,7 @@ impl Drop for Hosted {
 /// by a newer one installs nothing.
 fn stage_static(
     shared: &Arc<Shared>,
-    source: &CandidateSource,
+    get: impl FnOnce() -> Option<Arc<Prepared>>,
     index: usize,
     queued: bool,
     asked: u64,
@@ -1419,7 +1428,7 @@ fn stage_static(
         return Ok(());
     }
     timing(format_args!("candidate {index} has its turn"));
-    let p = source.get(index).context("the candidate is not ready")?;
+    let p = get().context("the candidate is not ready")?;
     let (world, flora, fauna) = (&p.world, &p.flora, &p.fauna);
     let (mut sink, proj) = shared.open(world.config(), Some(lighting))?;
     sink.set_clock(world.tick(), 0.0);
@@ -1440,6 +1449,7 @@ fn stage_static(
     let generation = shared.install(sink, proj, true)?;
     // The first picture is up: the next preview may open its renderer.
     drop(turn);
+    let light_wait = *shared.light_wait.lock().unwrap_or_else(|e| e.into_inner());
     let started = Instant::now();
     loop {
         if quit() {
@@ -1460,7 +1470,7 @@ fn stage_static(
             // Once nothing is pending the presenter eases the sky in and reports the last
             // frame itself.
             let pending = st.sink.light_pending();
-            if pending && started.elapsed() >= STATIC_LIGHT_WAIT {
+            if pending && started.elapsed() >= light_wait {
                 timing(format_args!("r{} gave up waiting for its lighting", st.trace));
                 // The picture drawn next is the last; a frame is owed so the view hears it.
                 st.gave_up = true;
@@ -1883,5 +1893,193 @@ mod tests {
         let (x, _) = map.animal_at(5).unwrap();
         // Pixels 6..=7 and then 0..=1 round the ring: the middle is 7.5, not 3.5.
         assert!((x - 7.5).abs() < 1e-3, "{x}");
+    }
+
+    // ---- still worlds (the fast preview tier) ----
+
+    use super::super::super::light::{hold_plane_turns, preview_queues};
+    use super::super::fast_preview_tests::sheltered;
+
+    /// A Vulkan device opens here; a test needing one says so and passes without it.
+    fn gpu_here() -> bool {
+        match cubarium_gpu::vk::Gpu::open(&[]) {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("skipped: no Vulkan device: {e:#}");
+                false
+            }
+        }
+    }
+
+    /// A hosted renderer on a small lit presentation config of its own.
+    fn still_host(name: &str) -> Hosted {
+        let dir = std::env::temp_dir().join(format!("cubarium-hosted-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("still.toml");
+        std::fs::write(
+            &config,
+            "tilt_degrees = 30.0\npx_per_voxel = 4\nlighting = \"lit\"\ntextures = false\nvine_tiles = false\n\n[light]\nsky_fade_s = 0.2\n",
+        )
+        .unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let host = Hosted::new(HostedOptions { config, root, screen: (256, 128), fps: 120.0, highlight_mix: 0.4 });
+        // The config is read once, at the start.
+        let _ = std::fs::remove_dir_all(&dir);
+        host.expect("a hosted renderer")
+    }
+
+    /// A bare terrain of its own (`mark`: no other test's terrain, so no sky plane of it
+    /// is already known), as a candidate is handed over.
+    fn candidate(width: u32, mark: u32) -> Arc<Prepared> {
+        let c = cubarium_voxel::Config { width, height: 10, depth: 6, ..Default::default() };
+        Arc::new(Prepared {
+            world: sheltered(&c, mark),
+            flora: Flora::new(cubarium_voxel_flora::FloraConfig::default()),
+            fauna: Fauna::new(cubarium_voxel_fauna::FaunaConfig::default()),
+            label: String::new(),
+            exec: cubarium_session::SimParams::default(),
+        })
+    }
+
+    /// Take frames until `done` says so; the frames taken, oldest first.
+    fn frames_until(host: &Hosted, within: Duration, mut done: impl FnMut(&[HostedFrame]) -> bool) -> Vec<HostedFrame> {
+        let deadline = Instant::now() + within;
+        let mut seen = Vec::new();
+        loop {
+            while let Some(mut f) = host.take_frame() {
+                f.rgba = Vec::new();
+                seen.push(f);
+            }
+            if let Some(e) = host.error() {
+                panic!("the renderer failed: {e}");
+            }
+            if done(&seen) {
+                return seen;
+            }
+            let brief: Vec<_> = seen.iter().map(|f| (f.generation, f.width, f.lighting_ready, f.settled)).collect();
+            assert!(Instant::now() < deadline, "not within {within:?}: frames (generation, width, lit, settled) {brief:?}");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Whether every still-world stager this renderer started has ended.
+    fn stagers_done(host: &Hosted) -> bool {
+        let threads = host.shared.threads.lock().unwrap();
+        threads.iter().filter(|t| t.thread().name() == Some("cubarium-hosted-static")).all(|t| t.is_finished())
+    }
+
+    /// The packs of the world installed: staged and refused alike.
+    fn packs(host: &Hosted) -> u64 {
+        let guard = host.shared.sink.lock().unwrap();
+        let st = guard.as_ref().expect("a world installed");
+        st.sink.ticks_staged + st.sink.packs_skipped
+    }
+
+    /// **A preview gives its turn up once its first picture is up.** With every preview's
+    /// sky plane held back, one more queued preview than there are turns still gets its
+    /// first picture: none of them waits for another's lighting.
+    #[test]
+    fn a_queued_preview_gets_its_first_picture_while_the_ones_before_still_light() {
+        let _queues = preview_queues();
+        if !gpu_here() {
+            return;
+        }
+        let held = hold_plane_turns();
+        let hosts: Vec<Hosted> = (0..STATIC_STAGERS + 1).map(|k| still_host(&format!("turns{k}"))).collect();
+        for (k, host) in hosts.iter().enumerate() {
+            let p = candidate(24, 100 + k as u32);
+            host.show_still(move || Some(p), k, true);
+        }
+        for (k, host) in hosts.iter().enumerate() {
+            let frames = frames_until(host, Duration::from_secs(60), |f| !f.is_empty());
+            assert!(
+                frames.iter().all(|f| !f.lighting_ready && !f.settled),
+                "preview {k}'s lighting cannot have landed: {:?}",
+                frames.iter().map(|f| (f.lighting_ready, f.settled)).collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(STAGE_TURNS.waiting(), 0, "no preview still waits for a turn");
+        drop(hosts);
+        drop(held);
+    }
+
+    /// **The wait for lighting is bounded.** A preview whose sky plane never comes keeps
+    /// its first picture, and after the wait (a short one here) a frame says `settled`
+    /// without its lighting, and its stager ends.
+    #[test]
+    fn a_preview_whose_lighting_never_lands_settles_after_the_wait() {
+        let _queues = preview_queues();
+        if !gpu_here() {
+            return;
+        }
+        let held = hold_plane_turns();
+        let host = still_host("cap");
+        let wait = Duration::from_millis(300);
+        *host.shared.light_wait.lock().unwrap() = wait;
+        let p = candidate(26, 200);
+        host.show_still(move || Some(p), 0, true);
+        let frames = frames_until(&host, Duration::from_secs(60), |f| !f.is_empty());
+        assert!(!frames[0].settled && !frames[0].lighting_ready, "the first picture is not the last");
+        let first = Instant::now();
+        let frames = frames_until(&host, wait + Duration::from_secs(10), |f| f.iter().any(|f| f.settled));
+        let settled = frames.iter().find(|f| f.settled).unwrap();
+        assert!(!settled.lighting_ready, "settled without its lighting");
+        assert!(first.elapsed() >= wait / 2, "settled only after the wait for lighting");
+        frames_until(&host, Duration::from_secs(10), |_| stagers_done(&host));
+        drop(host);
+        drop(held);
+    }
+
+    /// **A still world is packed once for its first picture and once more for its sky
+    /// plane**, never while it waits for the plane, and not again after.
+    #[test]
+    fn a_preview_packs_once_more_when_its_sky_plane_lands_and_not_while_waiting() {
+        let _queues = preview_queues();
+        if !gpu_here() {
+            return;
+        }
+        let held = hold_plane_turns();
+        let host = still_host("packs");
+        let p = candidate(28, 300);
+        host.show_still(move || Some(p), 0, true);
+        frames_until(&host, Duration::from_secs(60), |f| !f.is_empty());
+        assert_eq!(packs(&host), 1, "the first picture's pack");
+        std::thread::sleep(RESTAGE_EVERY * 8);
+        assert_eq!(packs(&host), 1, "no pack while the plane is still to come");
+        drop(held);
+        frames_until(&host, Duration::from_secs(30), |f| f.iter().any(|f| f.lighting_ready && f.settled));
+        assert_eq!(packs(&host), 2, "one pack took the plane in");
+        frames_until(&host, Duration::from_secs(10), |_| stagers_done(&host));
+        std::thread::sleep(RESTAGE_EVERY * 4);
+        assert_eq!(packs(&host), 2, "and none after");
+    }
+
+    /// **A newer still world is never covered by an older one finishing late.** The first
+    /// asked is held up opening until the second's picture is up; it then installs nothing,
+    /// and the second stays.
+    #[test]
+    fn an_older_still_world_finishing_late_installs_nothing_over_a_newer_one() {
+        let _queues = preview_queues();
+        if !gpu_here() {
+            return;
+        }
+        let host = still_host("order");
+        let (go, gate) = std::sync::mpsc::channel::<()>();
+        let (older, newer) = (candidate(30, 400), candidate(20, 401));
+        host.show_still(move || gate.recv().ok().map(|_| older), 0, false);
+        host.show_still(move || Some(newer), 1, false);
+        let frames = frames_until(&host, Duration::from_secs(60), |f| !f.is_empty());
+        let (generation, width) = (frames[0].generation, frames[0].width);
+        go.send(()).unwrap();
+        frames_until(&host, Duration::from_secs(60), |_| stagers_done(&host));
+        std::thread::sleep(Duration::from_millis(100));
+        let late = frames_until(&host, Duration::from_secs(1), |_| true);
+        assert!(
+            late.iter().all(|f| (f.generation, f.width) == (generation, width)),
+            "the older world's frames came after the newer's: {:?}",
+            late.iter().map(|f| (f.generation, f.width)).collect::<Vec<_>>()
+        );
+        let installed = host.shared.sink.lock().unwrap().as_ref().map(|st| st.generation);
+        assert_eq!(installed, Some(generation), "the newer world is still the one installed");
     }
 }

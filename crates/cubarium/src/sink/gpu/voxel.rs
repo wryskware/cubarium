@@ -76,6 +76,11 @@ const _: () = assert!(sleep::POSE_ENTRIES == POSE_ENTRIES && POSE_ENTRIES <= 64)
 #[doc(hidden)]
 pub mod oracle;
 
+/// The fast preview tier's tests on a headless renderer.
+#[cfg(test)]
+#[path = "fast_preview_tests.rs"]
+mod fast_preview_tests;
+
 /// The renderer hosted in an app: the Godot world view's (H1, D-0005).
 #[path = "hosted.rs"]
 pub mod hosted;

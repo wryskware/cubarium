@@ -4427,6 +4427,10 @@ impl WeatherPass {
 mod fog_occlude_tests;
 
 #[cfg(test)]
+#[path = "still_pipelines_tests.rs"]
+mod still_pipelines_tests;
+
+#[cfg(test)]
 pub(crate) mod tests {
     use super::*;
 
