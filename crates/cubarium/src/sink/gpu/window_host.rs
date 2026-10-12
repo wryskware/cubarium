@@ -69,13 +69,13 @@ impl ApplicationHandler for Events {
     }
 }
 
-struct DrawEvents<'a, F, R> {
+struct DrawEvents<'a, F> {
     events: &'a mut Events,
-    draw: Option<F>,
-    result: Option<Result<R>>,
+    draw: F,
+    error: Option<anyhow::Error>,
 }
 
-impl<F: FnOnce() -> Result<R>, R> ApplicationHandler for DrawEvents<'_, F, R> {
+impl<F: FnMut() -> Result<()>> ApplicationHandler for DrawEvents<'_, F> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.events.resumed(event_loop);
     }
@@ -84,8 +84,8 @@ impl<F: FnOnce() -> Result<R>, R> ApplicationHandler for DrawEvents<'_, F, R> {
         if matches!(event, WindowEvent::RedrawRequested)
             && self.events.window.as_ref().is_some_and(|window| window.id() == id)
         {
-            if let Some(draw) = self.draw.take() {
-                self.result = Some(draw());
+            if !self.events.quit && self.error.is_none() {
+                self.error = (self.draw)().err();
             }
         } else {
             self.events.window_event(event_loop, id, event);
@@ -155,12 +155,12 @@ impl WindowHost {
     }
 
     /// Paints inside Winit's redraw callback, as macOS requires.
-    pub fn draw<R>(&mut self, draw: impl FnOnce() -> Result<R>) -> Result<Option<R>> {
+    pub fn draw(&mut self, draw: impl FnMut() -> Result<()>) -> Result<()> {
         self.window().request_redraw();
-        let (status, result) = {
-            let mut events = DrawEvents { events: &mut self.events, draw: Some(draw), result: None };
+        let (status, error) = {
+            let mut events = DrawEvents { events: &mut self.events, draw, error: None };
             let status = self.event_loop.pump_app_events(Some(Duration::ZERO), &mut events);
-            (status, events.result)
+            (status, events.error)
         };
         if matches!(status, PumpStatus::Exit(_)) {
             self.events.quit = true;
@@ -168,6 +168,9 @@ impl WindowHost {
         if let Some(error) = self.events.error.take() {
             return Err(error);
         }
-        result.transpose()
+        match error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 }

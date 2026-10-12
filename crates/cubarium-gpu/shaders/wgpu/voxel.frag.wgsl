@@ -10636,19 +10636,22 @@ fn main_1() {
                         }
                     }
                     let _e426: bool = vineHere;
-                    let _e427: vec4<u32> = vc;
-                    let _e428: i32 = x_101;
-                    let _e429: i32 = level_7;
-                    let _e430: i32 = vz;
-                    let _e431: i32 = z_98;
-                    let _e432: i32 = dx_48;
-                    let _e433: i32 = r_30;
-                    let _e438: f32 = vineDraw(_e427, _e428, _e429, _e430, _e431, _e432, _e433, (&acc_4), (&trans_7));
-                    if (_e426 && (_e438 >= 1f)) {
-                        {
-                            let _e442: i32 = z_98;
-                            zHit = f32(_e442);
-                            break;
+                    // vineDraw changes acc/trans and must only run for actual vines.
+                    if _e426 {
+                        let _e427: vec4<u32> = vc;
+                        let _e428: i32 = x_101;
+                        let _e429: i32 = level_7;
+                        let _e430: i32 = vz;
+                        let _e431: i32 = z_98;
+                        let _e432: i32 = dx_48;
+                        let _e433: i32 = r_30;
+                        let _e438: f32 = vineDraw(_e427, _e428, _e429, _e430, _e431, _e432, _e433, (&acc_4), (&trans_7));
+                        if (_e438 >= 1f) {
+                            {
+                                let _e442: i32 = z_98;
+                                zHit = f32(_e442);
+                                break;
+                            }
                         }
                     }
                     let _e444: bool = solid_1;
@@ -10709,7 +10712,10 @@ fn main_1() {
                             let _e502: vec4<u32> = v_72;
                             let _e503: i32 = fl_4;
                             let _e504: i32 = dx_48;
-                            let _e509: bool = glyphFrontAt(_e499, _e500, _e501, _e502, _e503, _e504, (&art), (&glow_6));
+                            var _e509: bool = false;
+                            if _e498 {
+                                _e509 = glyphFrontAt(_e499, _e500, _e501, _e502, _e503, _e504, (&art), (&glow_6));
+                            }
                             if (_e498 && _e509) {
                                 {
                                     let _e511: vec4<u32> = v_72;
@@ -10831,7 +10837,10 @@ fn main_1() {
                     let _e638: vec4<u32> = v_73;
                     let _e639: i32 = cl;
                     let _e640: i32 = dx_48;
-                    let _e645: bool = glyphCapAt(_e635, _e636, _e637, _e638, _e639, _e640, (&cap_3), (&glow_7));
+                    var _e645: bool = false;
+                    if ((_e625 && !(_e628)) && (_e631 >= 0i)) {
+                        _e645 = glyphCapAt(_e635, _e636, _e637, _e638, _e639, _e640, (&cap_3), (&glow_7));
+                    }
                     if (((_e625 && !(_e628)) && (_e631 >= 0i)) && _e645) {
                         {
                             let _e647: vec4<u32> = v_73;

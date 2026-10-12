@@ -41,42 +41,52 @@ impl WgpuWindowTarget {
         world: S::Frame<'_>,
     ) -> Result<f64> {
         self.poll(src)?;
-        self.open = self.host.pump()?;
-        self.save |= self.host.take_save();
+        self.open = self.host.is_open();
         if !self.open {
-            return Ok(src.gpu_ms(&self.gpu));
-        }
-        if src.frames_in_flight() >= src.frame_capacity() {
             return Ok(src.gpu_ms(&self.gpu));
         }
         let window = self.host.window();
         let presenter = &mut self.presenter;
         let gpu = &self.gpu;
-        let submission = self.host.draw(|| {
+        let flight = &mut self.flight;
+        let mut world = Some(world);
+        let result = self.host.draw(|| {
             let size = window.inner_size();
             presenter.resize((size.width, size.height));
             let Some(frame) = presenter.acquire()? else {
-                return Ok(None);
+                return Ok(());
             };
             let mut encoder = gpu.encoder("development window world and presentation");
-            src.record_frame(gpu, &mut encoder, world, None)?;
+            // Additional redraws (including live resize) reuse the raster. Keep
+            // pumping events even while all world-frame slots are occupied.
+            let recorded = world.is_some() && src.frames_in_flight() < src.frame_capacity();
+            if recorded {
+                src.record_frame(gpu, &mut encoder, world.take().expect("available world frame"), None)?;
+            }
             if let Err(error) = presenter.record_present(&mut encoder, src.raster_view(), src.raster_size(), &frame) {
-                src.frame_discarded();
+                if recorded { src.frame_discarded(); }
                 return Err(error);
             }
-            match presenter.submit(frame, encoder) {
-                Ok(index) => Ok(Some(index)),
-                Err(error) => { src.frame_discarded(); Err(error) }
+            let index = match presenter.submit(frame, encoder) {
+                Ok(index) => index,
+                Err(error) => {
+                    if recorded { src.frame_discarded(); }
+                    return Err(error);
+                }
+            };
+            if recorded {
+                // Register immediately: a later redraw error in this same pump
+                // must not lose retirement of an already submitted world frame.
+                let ready = Arc::new(AtomicBool::new(false));
+                let completed = ready.clone();
+                gpu.queue.on_submitted_work_done(move || completed.store(true, Ordering::Release));
+                flight.push_back((index, ready));
             }
-        })?;
+            Ok(())
+        });
         self.save |= self.host.take_save();
         self.open = self.host.is_open();
-        if let Some(index) = submission.flatten() {
-            let ready = Arc::new(AtomicBool::new(false));
-            let completed = ready.clone();
-            self.gpu.queue.on_submitted_work_done(move || completed.store(true, Ordering::Release));
-            self.flight.push_back((index, ready));
-        }
+        result?;
         Ok(src.gpu_ms(&self.gpu))
     }
 

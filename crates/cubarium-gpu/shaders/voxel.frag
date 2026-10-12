@@ -2118,8 +2118,12 @@ void main() {
                         || (k == VINE_SLIVER_R && dx >= S - q);
                 }
             }
-            if (vineHere && vineDraw(vc, x, level, vz, z, dx, r, acc, trans) >= 1.0) {
-                zHit = float(z); break;
+            // Keep the mutating call inside its guard. The GLSL-to-WGSL conversion
+            // frontend eagerly lowers function calls inside logical expressions.
+            if (vineHere) {
+                if (vineDraw(vc, x, level, vz, z, dx, r, acc, trans) >= 1.0) {
+                    zHit = float(z); break;
+                }
             }
             if (solid) {
                 acc += trans * blockFront(x, level, z, v, r, dx);
@@ -2139,7 +2143,9 @@ void main() {
                 }
                 vec3 art;
                 vec3 glow;
-                if (found && glyphFrontAt(x, fy, z, v, fl, dx, art, glow)) {
+                bool frontShown = false;
+                if (found) { frontShown = glyphFrontAt(x, fy, z, v, fl, dx, art, glow); }
+                if (frontShown) {
                     plantBehind = plantHidden(v);
                     if (partOf(v) == ANIMAL_INTERIM && highlighted(x, fy, z)) { art = hiTint(art); }
                     acc += trans * art;
@@ -2173,8 +2179,11 @@ void main() {
             vec3 glow;
             // A posing cell's cap is where its settle and breath put it (WX4).
             int cl = isPosed(v) ? posedCapRow(v, level, r) : RISE - 1 - r;
-            if (isBlockPart(p) && !walkSkipsPlant(v, trans) && cl >= 0
-                && glyphCapAt(x, below, z, v, cl, dx, cap, glow)) {
+            bool capShown = false;
+            if (isBlockPart(p) && !walkSkipsPlant(v, trans) && cl >= 0) {
+                capShown = glyphCapAt(x, below, z, v, cl, dx, cap, glow);
+            }
+            if (capShown) {
                 plantBehind = plantHidden(v);
                 if (p == ANIMAL_INTERIM && highlighted(x, below, z)) { cap = hiTint(cap); }
                 acc += trans * cap;
