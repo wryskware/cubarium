@@ -31,9 +31,11 @@ pub mod readback;
 pub mod window;
 
 #[cfg(feature = "scanout")]
-pub mod dmabuf;
-#[cfg(feature = "scanout")]
 pub mod kms;
+#[cfg(feature = "scanout")]
+mod scanout_buffer;
+#[cfg(feature = "scanout")]
+mod panel_readback;
 #[cfg(feature = "scanout")]
 mod scanout;
 #[cfg(feature = "scanout")]

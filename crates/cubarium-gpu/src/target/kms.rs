@@ -6,7 +6,8 @@
 //! oversimplification**: the 5.4 downstream KMS driver on this board exposes no
 //! `IN_FORMATS` blob on its planes and rejects the one modifier the Vulkan blob
 //! advertises, so a plain `AddFB2` over a `VK_IMAGE_TILING_LINEAR` image is the only
-//! accepted route (`gpu-scanout-spike-2026-09-16.md` Q2).
+//! accepted GPU export route (`gpu-scanout-spike-2026-09-16.md` Q2). The safe wgpu
+//! backend now uses modifier-free DRM dumb buffers filled from completed readbacks.
 
 use std::fs::{File, OpenOptions};
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};

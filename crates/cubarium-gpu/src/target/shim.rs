@@ -1,8 +1,7 @@
 //! The board, through `cube-screen-shim`'s dma-buf socket (GS-2).
 //!
-//! This is the target the panel gets in production. The renderer exports the same
-//! `VK_IMAGE_TILING_LINEAR` scanout images as the direct path ([`super::dmabuf`]) and
-//! hands their fds to the daemon over `SOCK_SEQPACKET` at
+//! This is the target the panel gets in production. The renderer copies completed wgpu readbacks into linear DRM allocations and
+//! hands their exported dma-buf fds to the daemon over `SOCK_SEQPACKET` at
 //! `/run/cube-screen-shim/frames.sock`; the daemon keeps DRM master and does the page
 //! flips. Nothing here takes DRM master, so the service stays up and two workers can be
 //! on the device at once.
@@ -37,21 +36,19 @@
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use ash::vk;
 
-use super::dmabuf::{self, LinearImage};
+use super::panel_readback::PanelImage;
 use super::presenter::{
     Frame, FromPresenter, Mailbox, Next, Panel, PresentSample, PresentStats, next_frame,
     present_loop,
 };
-use crate::present::FrameSource;
-use crate::render::{PresentTransform, TargetImage};
-use crate::vk::Gpu;
+use crate::render::PresentTransform;
+use crate::wgpu_backend::{FrameSource, Gpu, PresentPass, TargetSlot};
 
 /// The daemon's socket.
 pub const SOCKET: &str = "/run/cube-screen-shim/frames.sock";
@@ -94,251 +91,99 @@ const HANDOFF_RETRIES: u32 = 40;
 const HANDOFF_WAIT: Duration = Duration::from_millis(100);
 
 struct Slot {
-    /// The slot number the **daemon** assigned in its `Attached` reply. It is not the
-    /// index in this vector: `Attach` carries slot 0 and the daemon picks, and the
-    /// `released` bitmask is in the daemon's numbering.
     id: u8,
-    /// Our end of the dma-buf, **kept** rather than dropped after the attach: when the
-    /// daemon hands the panel over it forgets every slot, and re-attaching the same
-    /// memory is what puts this client back on the screen without re-exporting it.
     fd: OwnedFd,
-    image: LinearImage,
-    target: TargetImage,
-    command_buffer: vk::CommandBuffer,
-    fence: vk::Fence,
+    image: PanelImage,
+    recording: Arc<Mutex<Option<wgpu::CommandEncoder>>>,
 }
 
-/// A client of the shim's frame socket.
+/// A client of the shim's frame socket, retaining every allocation across reconnects.
 pub struct ShimScanout {
     socket: OwnedFd,
     slots: Vec<Slot>,
-    /// Bitmask of slots the daemon is not using.
     free: u8,
     transform: PresentTransform,
-    view_format: vk::Format,
     seq: u32,
     next: usize,
+    last_presented: usize,
 }
 
 impl ShimScanout {
-    /// Connect, export `SLOTS` scanout images and attach them all.
-    pub fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, quarter_turns: u32) -> Result<ShimScanout> {
-        if !gpu.has_dma_buf {
-            bail!("this device has no VK_EXT_external_memory_dma_buf; the shim cannot be fed");
-        }
-        dmabuf::linear_export_supported(gpu)?;
-        let shader_encode = !dmabuf::srgb_view_supported(gpu);
+    pub fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, quarter_turns: u32) -> Result<Self> {
         let raster = src.raster_size();
-        let transform = PresentTransform::fit(raster, PANEL, quarter_turns, shader_encode)
-            .ok_or_else(|| {
-                anyhow!(
-                    "a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
-                    raster.0,
-                    raster.1,
-                    PANEL.0,
-                    PANEL.1
-                )
-            })?;
-
-        let view_format = if shader_encode {
-            dmabuf::FORMAT
-        } else {
-            vk::Format::B8G8R8A8_SRGB
+        let transform = PresentTransform::fit(raster, PANEL, quarter_turns, false)
+            .ok_or_else(|| anyhow!("a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
+                raster.0, raster.1, PANEL.0, PANEL.1))?;
+        // Hold exactly one connected socket: the daemon refuses a second client.
+        let first = PanelImage::new(gpu, PANEL)?;
+        let first_fd = first.export()?;
+        let (socket, attached) = connect_when_free(first.pitch(), 0, first_fd.as_fd())?;
+        let mut client = Self {
+            socket, slots: Vec::with_capacity(SLOTS),
+            free: attached.released | (1 << attached.slot), transform,
+            seq: 0, next: 0, last_presented: 0,
         };
-        let pass = src.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
-        let d = &gpu.device;
-        let command_buffers = unsafe {
-            d.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(src.command_pool())
-                    .command_buffer_count(SLOTS as u32),
-            )
-        }?;
-        // **Exactly one socket, and it is the retrying one.** The daemon decides
-        // one-client-at-a-time at `accept`, not at `Attach` (`handoff/server.rs`:
-        // `if client.is_some()` on the newly accepted connection), so any second
-        // socket this process holds open -- including a placeholder created only to
-        // fill in a struct field -- *is* the attached client and makes the real
-        // connection refuse itself. That cost half an hour of blaming a neighbour.
-        let mut first = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
-        let first_fd = first
-            .fd
-            .take()
-            .expect("a freshly exported image has its fd");
-        let (socket, attached) = connect_when_free(&first, first_fd.as_fd())?;
-        let mut client = ShimScanout {
-            socket,
-            slots: Vec::with_capacity(SLOTS),
-            free: attached.released | (1 << attached.slot),
-            transform,
-            view_format,
-            seq: 0,
-            next: 0,
-        };
-        let mut pending = vec![(attached.slot, first, first_fd)];
+        client.slots.push(Slot {
+            id: attached.slot, fd: first_fd, image: first,
+            recording: Arc::new(Mutex::new(None)),
+        });
         for _ in 1..SLOTS {
-            let mut image = dmabuf::export_linear(gpu, PANEL.0, PANEL.1, shader_encode)?;
-            let fd = image
-                .fd
-                .take()
-                .expect("a freshly exported image has its fd");
-            let id = client.attach(&image, fd.as_fd())?;
+            let image = PanelImage::new(gpu, PANEL)?;
+            let fd = image.export()?;
+            let id = client.attach(image.pitch(), fd.as_fd())?;
             client.free |= 1 << id;
-            pending.push((id, image, fd));
+            client.slots.push(Slot { id, fd, image, recording: Arc::new(Mutex::new(None)) });
         }
-        for (i, (id, image, fd)) in pending.into_iter().enumerate() {
-            let target = TargetImage {
-                image: image.image,
-                view: image.view,
-                framebuffer: crate::render::framebuffer(d, pass, image.view, PANEL.0, PANEL.1)?,
-            };
-            client.slots.push(Slot {
-                id,
-                fd,
-                image,
-                target,
-                command_buffer: command_buffers[i],
-                fence: unsafe { d.create_fence(&vk::FenceCreateInfo::default(), None) }?,
-            });
-        }
-        println!(
-            "shim socket: {SLOTS} slots attached at {}x{} XR24 pitch {}, sRGB encode by {}",
-            PANEL.0,
-            PANEL.1,
-            client.slots[0].image.pitch,
-            if shader_encode {
-                "the present shader"
-            } else {
-                "the _SRGB attachment"
-            }
-        );
+        println!("shim socket: {SLOTS} slots attached at {}x{} XR24 pitch {}, wgpu readback into DRM buffers",
+            PANEL.0, PANEL.1, client.slots[0].image.pitch());
         Ok(client)
     }
 
-    pub fn transform(&self) -> PresentTransform {
-        self.transform
-    }
+    pub fn transform(&self) -> PresentTransform { self.transform }
 
-    /// Render one frame into a free slot and present it.
-    ///
-    /// Returns `(GPU ms, submit..fence ms, pacing ms)`. The third is what this frame
-    /// spent waiting for the daemon to give a slot back — the panel's own pacing, which
-    /// with three slots shows up only once the renderer is a frame ahead of it.
-    pub fn draw<S: FrameSource>(
-        &mut self,
-        gpu: &Gpu,
-        src: &mut S,
-        frame: S::Frame<'_>,
-    ) -> Result<(f64, f64, f64)> {
+    pub fn draw<S: FrameSource>(&mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>)
+        -> Result<(f64, f64, f64)>
+    {
         let waited = Instant::now();
         let index = self.take_free_slot()?;
-        let d = &gpu.device;
         let start = Instant::now();
-        {
-            let slot = &self.slots[index];
-            unsafe {
-                d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
-            }?;
-            src.record_frame(
-                gpu,
-                slot.command_buffer,
-                frame,
-                Some((
-                    &slot.target,
-                    PANEL,
-                    self.view_format,
-                    vk::ImageLayout::GENERAL,
-                    self.transform,
-                )),
-            )?;
-            let one = [slot.command_buffer];
-            unsafe { d.reset_fences(&[slot.fence]) }?;
-            gpu.submit(
-                &[vk::SubmitInfo::default().command_buffers(&one)],
-                slot.fence,
-            )?;
-            unsafe { d.wait_for_fences(&[slot.fence], true, u64::MAX) }?;
-        }
+        let ms = self.slots[index].image.draw(gpu, src, frame, self.transform)?;
         let submitted = Instant::now();
-        src.frame_retired();
-        self.present(self.slots[index].id)?;
-        Ok((
-            src.gpu_ms(gpu),
-            (submitted - start).as_secs_f64() * 1e3,
-            (start - waited).as_secs_f64() * 1e3,
-        ))
+        self.present_slot(index)?;
+        Ok((ms, (submitted - start).as_secs_f64() * 1e3,
+            (start - waited).as_secs_f64() * 1e3))
     }
 
-    /// The last presented slot's contents, read back through the GPU as RGBA8: proof
-    /// that what the daemon is scanning out is the frame that was drawn.
-    pub fn read_presented<S: FrameSource>(
-        &self,
-        gpu: &Gpu,
-        src: &S,
-    ) -> Result<(u32, u32, Vec<u8>)> {
-        let index = (self.next + SLOTS - 1) % SLOTS;
-        let rgba = dmabuf::read_back(
-            gpu,
-            src.command_pool(),
-            &self.slots[index].image,
-            PANEL.0,
-            PANEL.1,
-            vk::ImageLayout::GENERAL,
-        )?;
-        Ok((PANEL.0, PANEL.1, rgba))
+    pub fn read_presented<S: FrameSource>(&self, _gpu: &Gpu, _src: &S)
+        -> Result<(u32, u32, Vec<u8>)>
+    {
+        Ok((PANEL.0, PANEL.1, self.slots[self.last_presented].image.rgba().to_vec()))
     }
 
-    /// Every slot's command buffer and attachment, for a recorder that is not this
-    /// thread. They are fixed when the slot is attached — a re-attach changes the
-    /// daemon's slot *id*, never the image or the buffer — so the recorder can keep them
-    /// while the client itself lives on the presenter thread.
     pub fn record_slots(&self) -> Vec<SlotRecord> {
-        self.slots
-            .iter()
-            .map(|s| SlotRecord {
-                command_buffer: s.command_buffer,
-                image: s.target,
-            })
-            .collect()
+        self.slots.iter().map(|s| SlotRecord {
+            view: s.image.view().clone(), recording: s.recording.clone(),
+        }).collect()
     }
 
-    /// The attachment format every slot's view has, which the recorder needs to ask for
-    /// the right present pass.
-    pub fn view_format(&self) -> vk::Format {
-        self.view_format
-    }
+    pub fn view_format(&self) -> wgpu::TextureFormat { wgpu::TextureFormat::Rgba8UnormSrgb }
 
-    /// Submit slot `i`'s recording.
     pub fn submit_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
-        let slot = &self.slots[i];
-        let one = [slot.command_buffer];
-        unsafe { gpu.device.reset_fences(&[slot.fence]) }?;
-        gpu.submit(
-            &[vk::SubmitInfo::default().command_buffers(&one)],
-            slot.fence,
-        )
+        let slot = &mut self.slots[i];
+        let encoder = slot.recording.lock().expect("slot recording mutex poisoned").take()
+            .ok_or_else(|| anyhow!("slot {i} has no recording"))?;
+        slot.image.submit(gpu, encoder)
     }
 
-    /// Wait for slot `i`'s fence.
-    ///
-    /// **The wait stays.** The wire has no fence field, so a `Present` is a promise that
-    /// the image is finished; the only thing that moved is which thread pays for it. It
-    /// is separate from the submit so that a report can say which of the two the panel's
-    /// rate is spent in — a driver that renders on the submitting thread and a GPU that
-    /// is simply slow look the same from the outside.
+    /// The wire has no fence field: a Present promises a completed CPU-writable buffer.
     pub fn wait_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
-        let fence = [self.slots[i].fence];
-        unsafe { gpu.device.wait_for_fences(&fence, true, u64::MAX) }?;
-        Ok(())
+        self.slots[i].image.wait(gpu)
     }
 
-    /// Show slot `i`.
-    ///
-    /// Presenting faster than the panel refreshes is safe and is not waste: the daemon's
-    /// `Present` is latest-wins, and the frame it overtakes is freed at the next flip
-    /// along with the one leaving the screen (`handoff/slots.rs`).
     pub fn present_slot(&mut self, i: usize) -> Result<()> {
-        self.present(self.slots[i].id)
+        self.present(self.slots[i].id)?;
+        self.last_presented = i;
+        Ok(())
     }
 
     /// The slots the daemon has released and this client has not handed on yet.
@@ -397,8 +242,8 @@ impl ShimScanout {
     ///
     /// `slot` is **reserved on the way in** — the daemon picks and says so in its
     /// `Attached` reply — so the request carries 0 and the answer is authoritative.
-    fn attach(&mut self, image: &LinearImage, fd: BorrowedFd<'_>) -> Result<u8> {
-        let reply = attach_on(&self.socket, image.pitch, image.offset, fd)?
+    fn attach(&mut self, pitch: u32, fd: BorrowedFd<'_>) -> Result<u8> {
+        let reply = attach_on(&self.socket, pitch, 0, fd)?
             .ok_or_else(|| anyhow!("the daemon closed the connection during the attach"))?;
         self.free |= reply.released;
         reply.expect(REPLY_ATTACHED)?;
@@ -418,7 +263,7 @@ impl ShimScanout {
         let images: Vec<(u32, u32, BorrowedFd<'_>)> = self
             .slots
             .iter()
-            .map(|s| (s.image.pitch, s.image.offset, s.fd.as_fd()))
+            .map(|s| (s.image.pitch(), 0, s.fd.as_fd()))
             .collect();
         let (socket, ids, free) = {
             let dead = std::mem::replace(&mut self.socket, placeholder_socket()?);
@@ -472,44 +317,24 @@ impl ShimScanout {
         }
     }
 
-    pub fn destroy(&mut self, gpu: &Gpu) {
-        let d = &gpu.device;
-        unsafe {
-            let _ = d.device_wait_idle();
-        }
-        for i in 0..self.slots.len() {
-            let request = request(TAG_DETACH, self.slots[i].id, 0, 0, 0, 0, 0, 0);
-            // On the way out a closed socket is simply the end of the conversation:
-            // the reply is read if there is one, and nothing is re-attached.
+    pub fn destroy(&mut self, _gpu: &Gpu) {
+        for slot in &self.slots {
+            let request = request(TAG_DETACH, slot.id, 0, 0, 0, 0, 0, 0);
             if send(&self.socket, &request, None).is_ok()
                 && let Ok(Some(reply)) = recv(&self.socket)
             {
                 let _ = reply.expect(REPLY_DETACHED);
             }
         }
-        unsafe {
-            for slot in &self.slots {
-                d.destroy_fence(slot.fence, None);
-                d.destroy_framebuffer(slot.target.framebuffer, None);
-                d.destroy_image_view(slot.image.view, None);
-                d.destroy_image(slot.image.image, None);
-                d.free_memory(slot.image.memory, None);
-            }
-        }
         self.slots.clear();
     }
 }
 
-/// What a recorder needs to draw into one slot: the command buffer it records into and
-/// the attachment the present pass draws onto.
-///
-/// Both are fixed when the slot is attached and neither is owned here — the client on the
-/// presenter thread owns them and destroys them — so this is a handle a second thread may
-/// hold, not a second owner.
-#[derive(Clone, Copy, Debug)]
+/// A retained target view and an owned recording handed to the presenter thread.
+#[derive(Clone, Debug)]
 pub struct SlotRecord {
-    pub command_buffer: vk::CommandBuffer,
-    pub image: TargetImage,
+    pub view: wgpu::TextureView,
+    recording: Arc<Mutex<Option<wgpu::CommandEncoder>>>,
 }
 
 /// The shim client as the presenter thread uses it.
@@ -550,7 +375,7 @@ pub struct ShimPresenter {
     /// The client, once the thread has given it back, so that `destroy` can free it.
     client: Option<ShimScanout>,
     slots: Vec<SlotRecord>,
-    view_format: vk::Format,
+    view_format: wgpu::TextureFormat,
     transform: PresentTransform,
     /// Slots the presenter has lent and this side has not used yet, newest first.
     free: std::collections::VecDeque<usize>,
@@ -672,6 +497,7 @@ impl ShimPresenter {
             // one recorded, which is the only one the renderer's ring can give back.
             Next::Replace { .. } => {
                 if let Some(frame) = self.mail.reclaim() {
+                    self.slots[frame.slot].recording.lock().expect("slot recording mutex poisoned").take();
                     src.frame_discarded();
                     self.free.push_front(frame.slot);
                 }
@@ -684,23 +510,18 @@ impl ShimPresenter {
             self.skipped += 1;
             return Ok(src.gpu_ms(gpu));
         };
-        let slot = self.slots[index];
-        unsafe {
-            gpu.device
-                .reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
-        }?;
-        src.record_frame(
-            gpu,
-            slot.command_buffer,
-            frame,
-            Some((
-                &slot.image,
-                PANEL,
-                self.view_format,
-                vk::ImageLayout::GENERAL,
-                self.transform,
-            )),
-        )?;
+        let slot = &self.slots[index];
+        let mut encoder = gpu.encoder("shim recorded frame");
+        if let Err(error) = src.record_frame(gpu, &mut encoder, frame, Some(TargetSlot {
+            view: &slot.view,
+            size: PANEL,
+            format: self.view_format,
+            transform: PresentPass::panel_transform(self.transform, PANEL),
+        })) {
+            self.free.push_front(index);
+            return Err(error);
+        }
+        *slot.recording.lock().expect("slot recording mutex poisoned") = Some(encoder);
         // What the frame did is the presenter's to report: a frame that redrew the world
         // and one that only put an already-drawn raster on a new slot cost very different
         // amounts, and which of the two the panel's rate is made of is the whole question.
@@ -740,8 +561,31 @@ impl ShimPresenter {
         }
     }
 
-    /// Stop the thread, take the client back and free everything.
-    pub fn destroy(&mut self, gpu: &Gpu) {
+    /// Complete posted frames and return their renderer resources in FIFO order.
+    pub fn finish<S: FrameSource>(&mut self, _gpu: &Gpu, src: &mut S) -> Result<()> {
+        self.stop_thread();
+        let mut failure = None;
+        loop {
+            match self.back.try_recv() {
+                Ok(FromPresenter::Retired) => src.frame_retired(),
+                Ok(FromPresenter::Free(slot)) => self.free.push_back(slot),
+                Ok(FromPresenter::Failed(why)) => failure = Some(why),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        // Only a presenter failure can leave a posted frame unsubmitted.
+        if let Some(frame) = self.mail.reclaim() {
+            self.slots[frame.slot].recording.lock().expect("slot recording mutex poisoned").take();
+            src.frame_discarded();
+        }
+        if let Some(why) = failure {
+            self.stopped = Some(why.clone());
+            bail!("the presenting thread stopped: {why}");
+        }
+        Ok(())
+    }
+
+    fn stop_thread(&mut self) {
         self.mail.quit();
         if let Some(thread) = self.thread.take() {
             match thread.join() {
@@ -749,6 +593,11 @@ impl ShimPresenter {
                 Err(_) => eprintln!("shim socket: the presenting thread panicked"),
             }
         }
+    }
+
+    /// Stop the thread, take the client back and free everything.
+    pub fn destroy(&mut self, gpu: &Gpu) {
+        self.stop_thread();
         if let Some(mut shim) = self.client.take() {
             shim.destroy(gpu);
         }
@@ -844,11 +693,11 @@ fn connect_to(path: &str) -> Result<OwnedFd> {
 ///
 /// The caller must hold **no other** connection to the daemon while this runs: it
 /// refuses a second `accept` outright, whether or not that connection ever speaks.
-fn connect_when_free(image: &LinearImage, fd: BorrowedFd<'_>) -> Result<(OwnedFd, Reply)> {
+fn connect_when_free(pitch: u32, offset: u32, fd: BorrowedFd<'_>) -> Result<(OwnedFd, Reply)> {
     let mut last = String::new();
     for attempt in 0..BUSY_RETRIES {
         let socket = connect()?;
-        match attach_on(&socket, image.pitch, image.offset, fd) {
+        match attach_on(&socket, pitch, offset, fd) {
             Ok(Some(reply)) if !reply.is_busy() => {
                 reply.expect(REPLY_ATTACHED)?;
                 return Ok((socket, reply));

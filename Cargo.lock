@@ -719,6 +719,7 @@ dependencies = [
  "ash",
  "bytemuck",
  "drm",
+ "naga",
  "png",
  "pollster",
  "rustix",
@@ -1763,6 +1764,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "petgraph",
+ "pp-rs",
  "rustc-hash 1.1.0",
  "spirv",
  "thiserror",
@@ -2101,6 +2103,15 @@ dependencies = [
  "embedded-io 0.6.1",
  "heapless 0.7.17",
  "serde",
+]
+
+[[package]]
+name = "pp-rs"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bb458bb7f6e250e6eb79d5026badc10a3ebb8f9a15d1fff0f13d17c71f4d6dee"
+dependencies = [
+ "unicode-xid",
 ]
 
 [[package]]

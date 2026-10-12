@@ -2,6 +2,72 @@
 //! encoder drops its copies, without a queue write escaping a discarded frame.
 #![forbid(unsafe_code)]
 
+pub mod bloom;
+pub mod flat;
+pub mod headless;
+pub mod geometry;
+pub mod shader;
+pub mod sunvis;
+pub mod timing;
+pub mod window;
+pub mod voxel;
+
+/// Renderer-neutral target for the shared last pass. The target owns submission
+/// and completion; a renderer records into its encoder without queue writes.
+pub struct TargetSlot<'a> {
+    pub view: &'a wgpu::TextureView,
+    pub size: (u32, u32),
+    pub format: wgpu::TextureFormat,
+    pub transform: [f32; 8],
+}
+
+/// Safe replacement for the Vulkan frame boundary, available in parallel while
+/// the existing renderers are ported. Recorded frames retire in submission order.
+pub trait FrameSource {
+    type Frame<'a>;
+    fn raster_size(&self) -> (u32, u32);
+    fn raster_texture(&self) -> &wgpu::Texture;
+    fn raster_view(&self) -> &wgpu::TextureView;
+    /// On error, this source rolls back only the failed attempt. The caller drops
+    /// the encoder; explicit frame_discarded applies only to successful records.
+    fn record_frame(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: Self::Frame<'_>,
+        target: Option<TargetSlot<'_>>,
+    ) -> Result<()>;
+    fn frame_retired(&mut self) {}
+    fn frame_discarded(&mut self) {}
+    fn frames_in_flight(&self) -> usize {
+        0
+    }
+    fn frame_capacity(&self) -> usize {
+        usize::MAX
+    }
+    fn content_version(&self) -> Option<u64> {
+        None
+    }
+    fn redrew_last(&self) -> bool {
+        true
+    }
+    fn gpu_ms(&self, _gpu: &Gpu) -> f64 {
+        0.0
+    }
+    fn read_raster(&self, gpu: &Gpu) -> Result<Vec<u8>> {
+        let mut readback = ReadbackRing::new(gpu, self.raster_size(), 1)?;
+        let mut bytes = Vec::new();
+        readback.submit(
+            gpu,
+            gpu.encoder("raster readback"),
+            self.raster_texture(),
+            0,
+        )?;
+        readback.drain(gpu, |_, pixels| bytes.extend_from_slice(pixels))?;
+        Ok(bytes)
+    }
+}
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -17,25 +83,59 @@ pub struct Gpu {
     pub name: String,
 }
 
+static PREFERRED_DEVICE: Mutex<Option<String>> = Mutex::new(None);
+
+/// Keep rendering on the host's adapter when possible. `CUBARIUM_GPU` takes priority.
+pub fn prefer_device(name: &str) {
+    *PREFERRED_DEVICE.lock().unwrap_or_else(|e| e.into_inner()) = Some(name.to_owned());
+}
+
+fn preferred_device() -> Option<String> {
+    std::env::var("CUBARIUM_GPU")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            PREFERRED_DEVICE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        })
+}
+
 impl Gpu {
     pub fn open() -> Result<Self> {
         pollster::block_on(Self::open_async())
     }
 
     async fn open_async() -> Result<Self> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
-            })
-            .await
-            .context("request wgpu adapter")?;
+        let descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+        let backends = descriptor.backends;
+        let instance = wgpu::Instance::new(descriptor);
+        let preferred = if let Some(name) = preferred_device() {
+            let name = name.to_lowercase();
+            instance
+                .enumerate_adapters(backends)
+                .await
+                .into_iter()
+                .find(|adapter| adapter.get_info().name.to_lowercase().contains(&name))
+        } else {
+            None
+        };
+        let adapter = match preferred {
+            Some(adapter) => adapter,
+            None => instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::HighPerformance,
+                    ..Default::default()
+                })
+                .await
+                .context("request wgpu adapter")?,
+        };
         let name = adapter.get_info().name;
         let required_features = adapter.features()
             & (wgpu::Features::IMMEDIATES
                 | wgpu::Features::TIMESTAMP_QUERY
+                | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -155,9 +255,9 @@ pub struct PresentPass {
 impl PresentPass {
     pub fn panel_transform(
         transform: crate::render::PresentTransform,
-        size: (u32, u32),
+        target_size: (u32, u32),
     ) -> [f32; 8] {
-        transform.push(size)
+        transform.push(target_size)
     }
 
     pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
@@ -329,6 +429,55 @@ impl ReadbackRing {
     }
     pub fn can_submit(&self) -> bool {
         self.flight.len() < self.slots.len()
+    }
+
+    pub fn can_submit_source<S: FrameSource>(&self, source: &S) -> bool {
+        self.can_submit() && source.frames_in_flight() < source.frame_capacity()
+    }
+
+    pub fn submit_source<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        source: &mut S,
+        frame: S::Frame<'_>,
+        tag: u64,
+    ) -> Result<bool> {
+        if !self.can_submit_source(source) {
+            return Ok(false);
+        }
+        let mut encoder = gpu.encoder("world and readback");
+        source.record_frame(gpu, &mut encoder, frame, None)?;
+        match self.submit(gpu, encoder, source.raster_texture(), tag) {
+            Ok(true) => Ok(true),
+            result => {
+                source.frame_discarded();
+                result
+            }
+        }
+    }
+
+    pub fn poll_source<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        source: &mut S,
+        mut done: impl FnMut(u64, &[u8]),
+    ) -> Result<usize> {
+        self.poll(gpu, |tag, bytes| {
+            source.frame_retired();
+            done(tag, bytes);
+        })
+    }
+
+    pub fn drain_source<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        source: &mut S,
+        mut done: impl FnMut(u64, &[u8]),
+    ) -> Result<usize> {
+        self.drain(gpu, |tag, bytes| {
+            source.frame_retired();
+            done(tag, bytes);
+        })
     }
 
     /// Submit the world/present recording and its readback copy in one ordered batch.

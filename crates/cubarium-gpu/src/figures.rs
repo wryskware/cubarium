@@ -434,13 +434,13 @@ impl ShelfPacker {
 
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-struct TileGpu {
+pub(crate) struct TileGpu {
     pos: [f32; 4],
     ax: [f32; 4],
     ay: [f32; 4],
     az: [f32; 4],
-    rect: [i32; 4],
-    orig: [i32; 4],
+    pub(crate) rect: [i32; 4],
+    pub(crate) orig: [i32; 4],
     depth: [f32; 4],
     face_size: [i32; 4],
     /// FEED-RIG: the first of its bones in the slot's bone buffer (-1: none), -, -, -.
@@ -449,7 +449,7 @@ struct TileGpu {
 
 #[derive(Clone, Copy, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-struct FigGpu {
+pub(crate) struct FigGpu {
     anchor: [f32; 4],
     tiles: [i32; 4],
     k: [f32; 4],
@@ -458,16 +458,16 @@ struct FigGpu {
 /// One frame's tiles and composites, packed: what [`FigurePass::prepare`] writes.
 #[derive(Clone, Debug, Default)]
 pub struct Packed {
-    tiles: Vec<TileGpu>,
+    pub(crate) tiles: Vec<TileGpu>,
     /// Each tile's cell count, beside it.
-    counts: Vec<u32>,
+    pub(crate) counts: Vec<u32>,
     /// Whether each tile casts a shadow: its figure's shown tile, at least half faded in.
-    casts: Vec<bool>,
-    figs: Vec<FigGpu>,
-    palette: Vec<[f32; 8]>,
+    pub(crate) casts: Vec<bool>,
+    pub(crate) figs: Vec<FigGpu>,
+    pub(crate) palette: Vec<[f32; 8]>,
     /// The rigged tiles' bone transforms, rows of `[m0, m1, m2, t]`.
-    bones: Vec<[[f32; 4]; 3]>,
-    used_h: u32,
+    pub(crate) bones: Vec<[[f32; 4]; 3]>,
+    pub(crate) used_h: u32,
     /// The viewport and clip-space scale, possibly smaller than the physical planes.
     pub logical_atlas: (u32, u32),
     /// Tiles the atlas had no room for this frame (their figures are not drawn).

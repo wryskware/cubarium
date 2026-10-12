@@ -196,7 +196,7 @@ pub const EMIT_PLANTS: u32 = 1 << 21;
 
 /// The table capacity and payload flags used by both the shader and the walk variant.
 /// An empty table selects the whole-cell walk even if the supplied cells carry sizes.
-fn emit_view(cap: u32, cells: &[EmitCell]) -> u32 {
+pub(crate) fn emit_view(cap: u32, cells: &[EmitCell]) -> u32 {
     if cap == 0 {
         return 0;
     }
@@ -1021,7 +1021,7 @@ const AT_GLOW: usize = 6;
 const AT_END: usize = 7;
 
 impl VoxelParams {
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         if self.s == 0 || self.rise == 0 || self.rise > self.s {
             bail!(
                 "px_per_voxel {} and rise {} are not a projection",
@@ -1111,7 +1111,7 @@ impl VoxelParams {
     }
 
     /// The canopy image's extent: two RGBA8 texels per column, `(x, 2z)` and `(x, 2z+1)`.
-    fn canopy_extent(&self) -> (u32, u32) {
+    pub(crate) fn canopy_extent(&self) -> (u32, u32) {
         if self.lit {
             (self.width, self.depth * (CANOPY_STEPS as u32 / 2))
         } else {
@@ -1121,7 +1121,7 @@ impl VoxelParams {
 
     /// The uniform block, in the layout `voxel.frag` declares, for an atlas holding the
     /// slots in `tex_mask`.
-    fn uniforms(
+    pub(crate) fn uniforms(
         &self,
         tex_mask: u32,
         vine_on: bool,
@@ -1314,107 +1314,107 @@ impl FrameClock {
 
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
-struct VoxelUniforms {
-    geom: [i32; 4],
-    extent: [i32; 4],
-    knobs: [f32; 4],
-    sky: [f32; 4],
-    sky_horizon: [f32; 4],
-    bedrock: [f32; 4],
-    rock: [f32; 4],
-    soil: [f32; 4],
-    water_deep: [f32; 4],
-    water_surface: [f32; 4],
-    light: [f32; 4],
-    haze_colour: [f32; 4],
-    shade_a: [f32; 4],
-    shade_b: [f32; 4],
-    roof: [f32; 4],
-    water: [f32; 4],
-    plant_a: [f32; 4],
-    plant_b: [f32; 4],
+pub(crate) struct VoxelUniforms {
+    pub(crate) geom: [i32; 4],
+    pub(crate) extent: [i32; 4],
+    pub(crate) knobs: [f32; 4],
+    pub(crate) sky: [f32; 4],
+    pub(crate) sky_horizon: [f32; 4],
+    pub(crate) bedrock: [f32; 4],
+    pub(crate) rock: [f32; 4],
+    pub(crate) soil: [f32; 4],
+    pub(crate) water_deep: [f32; 4],
+    pub(crate) water_surface: [f32; 4],
+    pub(crate) light: [f32; 4],
+    pub(crate) haze_colour: [f32; 4],
+    pub(crate) shade_a: [f32; 4],
+    pub(crate) shade_b: [f32; 4],
+    pub(crate) roof: [f32; 4],
+    pub(crate) water: [f32; 4],
+    pub(crate) plant_a: [f32; 4],
+    pub(crate) plant_b: [f32; 4],
     /// The face textures present (`VoxelTextures::mask`), whether the vine tiles are, and
     /// the drape cords ([`crate::cord::DrapeCords::uniform`]).
-    tex: [i32; 4],
+    pub(crate) tex: [i32; 4],
     /// The lit tier: ambient gain, ambient floor, ladder rungs, AO strength.
-    light_k: [f32; 4],
+    pub(crate) light_k: [f32; 4],
     /// The lit tier's ambient colour.
-    ambient: [f32; 4],
+    pub(crate) ambient: [f32; 4],
     /// The lit tier's sun: the unit direction toward it, and the sunlit tint.
-    sun: [f32; 4],
+    pub(crate) sun: [f32; 4],
     /// The lit tier's water: absorption, reflection gain, ripple tilt, reflection cells.
-    water_l: [f32; 4],
+    pub(crate) water_l: [f32; 4],
     /// Sim time in ticks, the water's animation step, the flow overlay flag, padding.
-    clock: [f32; 4],
+    pub(crate) clock: [f32; 4],
     /// The lit tier's water details: foam, glint, rain rings, highlight.
-    water_m: [f32; 4],
+    pub(crate) water_m: [f32; 4],
     /// The light shafts: density, glow weight, falloff, the volume's fade.
-    vol: [f32; 4],
+    pub(crate) vol: [f32; 4],
     /// The weather and the time of day (`crate::weather::Look`): ambient level, sun
     /// strength, stars, twilight band.
-    day_k: [f32; 4],
+    pub(crate) day_k: [f32; 4],
     /// The unlit water's level, then padding.
-    day_l: [f32; 4],
+    pub(crate) day_l: [f32; 4],
     /// The colour a sunlit texel leans toward; which side the sun is on.
-    sun_lean: [f32; 4],
+    pub(crate) sun_lean: [f32; 4],
     /// Cloud cover, drift (voxels), storm, twinkle clock (seconds).
-    cloud_k: [f32; 4],
-    cloud_body: [f32; 4],
+    pub(crate) cloud_k: [f32; 4],
+    pub(crate) cloud_body: [f32; 4],
     /// The clouds' lit edge colour, and its strength.
-    cloud_lit: [f32; 4],
+    pub(crate) cloud_lit: [f32; 4],
     /// The twilight band's colours, top to bottom.
-    band_a: [f32; 4],
-    band_b: [f32; 4],
-    band_c: [f32; 4],
+    pub(crate) band_a: [f32; 4],
+    pub(crate) band_b: [f32; 4],
+    pub(crate) band_c: [f32; 4],
     /// The flat tier's whole-picture tint.
-    tint: [f32; 4],
+    pub(crate) tint: [f32; 4],
     /// The lit sky's day gradient (zenith, middle, horizon) and how much of it shows; the
     /// stars' bloom share rides in `day_b.w`.
-    day_a: [f32; 4],
-    day_b: [f32; 4],
-    day_c: [f32; 4],
+    pub(crate) day_a: [f32; 4],
+    pub(crate) day_b: [f32; 4],
+    pub(crate) day_c: [f32; 4],
     /// The clouds by day: body and shadowed underside.
-    cloud_day: [f32; 4],
-    cloud_shade: [f32; 4],
+    pub(crate) cloud_day: [f32; 4],
+    pub(crate) cloud_shade: [f32; 4],
     /// The rain (checkpoint 2): drizzle, shower, downpour, and the rings' density; the
     /// streaks' colour.
-    rain_k: [f32; 4],
-    rain_c: [f32; 4],
+    pub(crate) rain_k: [f32; 4],
+    pub(crate) rain_c: [f32; 4],
     /// The fog: density at its floor, the floor (voxels), the full band, the falloff; its
     /// light and its glow weight.
-    fog_k: [f32; 4],
-    fog_c: [f32; 4],
+    pub(crate) fog_k: [f32; 4],
+    pub(crate) fog_c: [f32; 4],
     /// Lightning: the fill flash's light and level; the bolt's column (x centre, top y, z)
     /// and brightness; its seed in two 16-bit halves.
-    flash_c: [f32; 4],
-    strike_k: [f32; 4],
-    strike_l: [f32; 4],
+    pub(crate) flash_c: [f32; 4],
+    pub(crate) strike_k: [f32; 4],
+    pub(crate) strike_l: [f32; 4],
     /// The pose table of the pack this frame draws, evaluated on its clock ([`pose_rows`]).
-    poses: [[f32; 4]; POSE_ENTRIES],
+    pub(crate) poses: [[f32; 4]; POSE_ENTRIES],
     /// Each style slot's emission gain this frame: its curve's
     /// ([`VoxelStaging::emit_curves`], [`VoxelRenderer::set_emit_gains`]), four slots a
     /// row; `1` draws the style's emissive colour as it is.
-    emit_k: [[f32; 4]; MAX_STYLES / 4],
+    pub(crate) emit_k: [[f32; 4]; MAX_STYLES / 4],
     /// The view ([`VoxelRenderer::set_view_x`]): raster columns turned round the ring, the
     /// highlight's cell count (0 none, -1 its box alone), padding.
-    view: [i32; 4],
+    pub(crate) view: [i32; 4],
     /// The highlighted animal's box: first x, lowest y, nearest z; x span, highest y,
     /// farthest z ([`VoxelRenderer::set_highlight`]).
-    hi_min: [i32; 4],
-    hi_max: [i32; 4],
+    pub(crate) hi_min: [i32; 4],
+    pub(crate) hi_max: [i32; 4],
     /// How far its cells lean toward white.
-    hi_k: [f32; 4],
+    pub(crate) hi_k: [f32; 4],
     /// Its cells, [`Highlight::key`], four a row.
-    hi_cells: [[u32; 4]; HIGHLIGHT_CELLS / 4],
+    pub(crate) hi_cells: [[u32; 4]; HIGHLIGHT_CELLS / 4],
     /// The figures' sun map ([`crate::figures::sun_map`]): `figSun`, `figMap`.
-    fig_sun: [f32; 4],
-    fig_map: [f32; 4],
+    pub(crate) fig_sun: [f32; 4],
+    pub(crate) fig_map: [f32; 4],
     /// How the fog moves ([`crate::weather::FogMotion::uniform`]): `fogM`.
-    fog_m: [f32; 4],
+    pub(crate) fog_m: [f32; 4],
     /// How much of each rain mode's haze hangs in the air (`rainH`,
     /// [`crate::weather::Look::rain_haze`]).
-    rain_h: [f32; 4],
-    camera: [i32; 4],
+    pub(crate) rain_h: [f32; 4],
+    pub(crate) camera: [i32; 4],
 }
 
 /// The most cells a highlight names one by one; a larger body is highlighted by its box.
@@ -1439,7 +1439,7 @@ impl Highlight {
     /// The uniform block's view of it, for a world `width` voxels round: the box (`x` from
     /// its first column round the ring, so a body across the seam has a small box), the
     /// cell count (-1 when there are too many to list), and the list.
-    fn block(&self, width: u32) -> ([i32; 4], [i32; 4], i32, [[u32; 4]; HIGHLIGHT_CELLS / 4]) {
+    pub(crate) fn block(&self, width: u32) -> ([i32; 4], [i32; 4], i32, [[u32; 4]; HIGHLIGHT_CELLS / 4]) {
         let mut cells = [[0u32; 4]; HIGHLIGHT_CELLS / 4];
         if self.cells.is_empty() || width == 0 {
             return ([0; 4], [0; 4], 0, cells);
@@ -1664,7 +1664,7 @@ pub struct Carried {
     pub bricks: Vec<u32>,
 }
 
-fn image_upload_bytes(p: &VoxelParams, carried: &Carried, slow: [bool; SLOW_PLANES]) -> usize {
+pub(crate) fn image_upload_bytes(p: &VoxelParams, carried: &Carried, slow: [bool; SLOW_PLANES]) -> usize {
     let n = p.voxel_count();
     let voxels = if carried.full { n } else { carried.bricks.len() * BRICK_TEXELS } * 4;
     let sizes = [n, p.glyph_bytes(), p.sky_bytes(), p.glow_bytes(),
@@ -4344,7 +4344,7 @@ impl Backdrop {
 
 /// Whether the lit tier's weather pass has anything to draw: rain, the bolt, or fog the
 /// walk's own in-scatter does not already carry (volumetric on, the fog is in the march).
-fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -> bool {
+pub(crate) fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -> bool {
     look.rain.iter().any(|&r| r > 0.0)
         || look.rain_haze.iter().any(|&h| h > 0.0)
         || look.bolt > 0.0

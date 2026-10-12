@@ -13,31 +13,25 @@
 use std::path::Path;
 use std::time::Instant;
 
-use anyhow::{Result, anyhow, bail};
-use ash::vk;
+use anyhow::{Result, anyhow};
 use drm::buffer::DrmFourcc;
 
-use super::dmabuf::{self, LinearImage};
 use super::kms::Output;
-use crate::present::FrameSource;
-use crate::render::{PresentTransform, TargetImage, framebuffer};
-use crate::vk::Gpu;
+use super::panel_readback::PanelImage;
+use crate::render::PresentTransform;
+use crate::wgpu_backend::{FrameSource, Gpu};
 
 const RING: usize = 2;
 
 struct Frame {
-    image: LinearImage,
-    target: TargetImage,
+    image: PanelImage,
     fb: drm::control::framebuffer::Handle,
-    command_buffer: vk::CommandBuffer,
-    fence: vk::Fence,
 }
 
 pub struct Scanout {
     output: Output,
     frames: Vec<Frame>,
     transform: PresentTransform,
-    view_format: vk::Format,
     index: usize,
 }
 
@@ -48,169 +42,52 @@ impl Scanout {
         src: &mut S,
         connector: &str,
         quarter_turns: u32,
-    ) -> Result<Scanout> {
-        if !gpu.has_dma_buf {
-            bail!("this device has no VK_EXT_external_memory_dma_buf; scanout is impossible");
-        }
-        dmabuf::linear_export_supported(gpu)?;
-        let shader_encode = !dmabuf::srgb_view_supported(gpu);
+    ) -> Result<Self> {
         let mut output = Output::open(Path::new("/dev/dri/card0"), connector)?;
         let (w, h) = (output.width, output.height);
         let raster = src.raster_size();
-        let transform = PresentTransform::fit(raster, (w, h), quarter_turns, shader_encode)
-            .ok_or_else(|| {
-                anyhow!(
-                    "a {}x{} raster does not fit {w}x{h} at {quarter_turns} quarter turn(s)",
-                    raster.0,
-                    raster.1
-                )
-            })?;
-        let view_format = if shader_encode {
-            dmabuf::FORMAT
-        } else {
-            vk::Format::B8G8R8A8_SRGB
-        };
-        let pass = src.present_pass(gpu, view_format, vk::ImageLayout::GENERAL)?;
-
-        let d = &gpu.device;
-        let command_buffers = unsafe {
-            d.allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(src.command_pool())
-                    .command_buffer_count(RING as u32),
-            )
-        }?;
+        let transform = PresentTransform::fit(raster, (w, h), quarter_turns, false)
+            .ok_or_else(|| anyhow!("a {}x{} raster does not fit {w}x{h} at {quarter_turns} quarter turn(s)",
+                raster.0, raster.1))?;
         let mut frames = Vec::with_capacity(RING);
-        for i in 0..RING {
-            let mut image = dmabuf::export_linear(gpu, w, h, shader_encode)?;
-            let fd = image
-                .fd
-                .take()
-                .expect("a freshly exported image has its fd");
-            let fb =
-                output.import_dmabuf(fd, w, h, DrmFourcc::Xrgb8888, image.pitch, image.offset)?;
-            frames.push(Frame {
-                target: TargetImage {
-                    image: image.image,
-                    view: image.view,
-                    framebuffer: framebuffer(d, pass, image.view, w, h)?,
-                },
-                image,
-                fb,
-                command_buffer: command_buffers[i],
-                fence: unsafe { d.create_fence(&vk::FenceCreateInfo::default(), None) }?,
-            });
+        for _ in 0..RING {
+            let image = PanelImage::new(gpu, (w, h))?;
+            let fb = output.import_dmabuf(image.export()?, w, h, DrmFourcc::Xrgb8888, image.pitch(), 0)?;
+            frames.push(Frame { image, fb });
         }
         output.set_crtc(frames[0].fb)?;
-        println!(
-            "direct scanout: {RING} linear dma-bufs, AddFB2 accepted at pitch {}, sRGB encode by {}",
-            frames[0].image.pitch,
-            if shader_encode {
-                "the present shader"
-            } else {
-                "the _SRGB attachment"
-            }
-        );
-        Ok(Scanout {
-            output,
-            frames,
-            transform,
-            view_format,
-            index: 0,
-        })
+        println!("direct scanout: {RING} DRM buffers, AddFB2 accepted at pitch {}, wgpu readback",
+            frames[0].image.pitch());
+        Ok(Self { output, frames, transform, index: 0 })
     }
 
-    pub fn width(&self) -> u32 {
-        self.output.width
-    }
+    pub fn width(&self) -> u32 { self.output.width }
+    pub fn height(&self) -> u32 { self.output.height }
+    pub fn refresh_hz(&self) -> f64 { self.output.refresh_hz() }
+    pub fn transform(&self) -> PresentTransform { self.transform }
 
-    pub fn height(&self) -> u32 {
-        self.output.height
-    }
-
-    pub fn refresh_hz(&self) -> f64 {
-        self.output.refresh_hz()
-    }
-
-    pub fn transform(&self) -> PresentTransform {
-        self.transform
-    }
-
-    /// Render into the next image of the ring and flip it.
-    ///
-    /// Returns `(GPU ms, submit..fence ms, flip queue..complete ms)`.
+    /// Render into the next released image and wait for its flip to finish.
     pub fn draw<S: FrameSource>(
-        &mut self,
-        gpu: &Gpu,
-        src: &mut S,
-        frame: S::Frame<'_>,
+        &mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>,
     ) -> Result<(f64, f64, f64)> {
-        let d = &gpu.device;
         let i = self.index;
         self.index = (self.index + 1) % RING;
-        let slot = &self.frames[i];
+        let slot = &mut self.frames[i];
         let start = Instant::now();
-        unsafe {
-            d.reset_command_buffer(slot.command_buffer, vk::CommandBufferResetFlags::empty())
-        }?;
-        src.record_frame(
-            gpu,
-            slot.command_buffer,
-            frame,
-            Some((
-                &slot.target,
-                (self.output.width, self.output.height),
-                self.view_format,
-                vk::ImageLayout::GENERAL,
-                self.transform,
-            )),
-        )?;
-        let one = [slot.command_buffer];
-        unsafe {
-            d.reset_fences(&[slot.fence])?;
-            d.queue_submit(
-                gpu.queue,
-                &[vk::SubmitInfo::default().command_buffers(&one)],
-                slot.fence,
-            )?;
-            d.wait_for_fences(&[slot.fence], true, u64::MAX)?;
-        }
+        let ms = slot.image.draw(gpu, src, frame, self.transform)?;
         let submitted = Instant::now();
         self.output.flip(slot.fb)?;
         let flipped = Instant::now();
-        Ok((
-            src.gpu_ms(gpu),
-            (submitted - start).as_secs_f64() * 1e3,
-            (flipped - submitted).as_secs_f64() * 1e3,
-        ))
+        Ok((ms, (submitted - start).as_secs_f64() * 1e3,
+            (flipped - submitted).as_secs_f64() * 1e3))
     }
 
-    /// The last scanned-out image, read back through the GPU as RGBA8.
-    pub fn read_scanout<S: FrameSource>(&self, gpu: &Gpu, src: &S) -> Result<(u32, u32, Vec<u8>)> {
+    pub fn read_scanout<S: FrameSource>(&self, _gpu: &Gpu, _src: &S) -> Result<(u32, u32, Vec<u8>)> {
         let i = (self.index + RING - 1) % RING;
-        let rgba = dmabuf::read_back(
-            gpu,
-            src.command_pool(),
-            &self.frames[i].image,
-            self.output.width,
-            self.output.height,
-            vk::ImageLayout::GENERAL,
-        )?;
-        Ok((self.output.width, self.output.height, rgba))
+        Ok((self.output.width, self.output.height, self.frames[i].image.rgba().to_vec()))
     }
 
-    pub fn destroy(&mut self, gpu: &Gpu) {
-        let d = &gpu.device;
-        unsafe {
-            let _ = d.device_wait_idle();
-            for frame in &self.frames {
-                d.destroy_fence(frame.fence, None);
-                d.destroy_framebuffer(frame.target.framebuffer, None);
-                d.destroy_image_view(frame.image.view, None);
-                d.destroy_image(frame.image.image, None);
-                d.free_memory(frame.image.memory, None);
-            }
-        }
+    pub fn destroy(&mut self, _gpu: &Gpu) {
         self.frames.clear();
     }
 }

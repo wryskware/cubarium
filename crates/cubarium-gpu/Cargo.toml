@@ -16,7 +16,8 @@ ash = "0.38"
 bytemuck = { version = "1", features = ["derive"] }
 png = { workspace = true }
 serde_json = "1"
-wgpu = { version = "=30.0.1", features = ["spirv"] }
+wgpu = { version = "=30.0.1", features = ["spirv", "naga-ir"] }
+naga = { version = "=30.0.1", features = ["glsl-in", "msl-out", "hlsl-out", "wgsl-out"] }
 pollster = "0.4"
 
 [target.'cfg(target_os = "linux")'.dependencies]
