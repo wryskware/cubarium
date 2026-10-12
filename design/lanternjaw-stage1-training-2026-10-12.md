@@ -13,10 +13,14 @@ change (YOUNG-ROAM adds `explore`), so they wait.
 
 ## What trains
 
-- **Starting centre:** the two-layer lanternjaw cloned by BRAIN-FIX (job
-  `1012-122230-brain-fix-clone-lanternj-e4ac`, `run/run/lanternjaw-two-layer.json`). It has
-  the full labels (step 2: ambush, rest and feed come from the patrol's own state) and the
-  closed-loop pass on the learner's own hold (step 3).
+- **Starting centre (BRAIN-FIX-2):** the two-layer lanternjaw re-cloned on hungry teacher
+  streams (job `1012-132335-bf2-lj-clone-then-smoke-5960`, `run/clone/lanternjaw-two-layer.json`;
+  `two_layer_clone fullness=0.3`, the same fullness as the top-up below). BRAIN-FIX's clone
+  (job `…-e4ac`) recorded no patrol or ambush: its teacher worlds placed lanternjaws at a
+  placed body's default stores, which is sated (traced: the default body matches a
+  fullness-1.0 body sample for sample), so they digested through the whole recording.
+  BRAIN-FIX-2 also labels a sated lanternjaw standing at a carcass `rest`, not `feed` (the
+  latch is off and it takes nothing).
 - **Stage 1:** the kin stage defaults to `top`, so the variant builder perturbs only the top
   (intent head and pointer). The bottom stays frozen at its copy.
 - **Comparison:** `per_body` in the live windows, as today. The lanternjaw is solitary, so
@@ -38,7 +42,8 @@ Each check runs `two_layer::check` on the current centre. It also runs once on t
 centre (generation 0).
 
 - **Energy against the heuristic on matched seeds.** Six live seeds (21, 31, 32, 41, 42, 51;
-  any seed the founding refuses is skipped and noted). Each seed is founded twice, with the
+  a seed the founding refuses is redrawn deterministically from it, noted in the run log, so
+  both arms still found the same world; BRAIN-FIX-2). Each seed is founded twice, with the
   same top-up: once with the lanternjaws on their heuristic, once on the centre. Each arm runs
   600 s. The check records the lanternjaws' energy per starting body (bodies and stores),
   deaths and bodies. It also records the share of body-seconds with the eating latch on, which
@@ -52,7 +57,9 @@ centre (generation 0).
 
 ## The runs
 
-- **Smoke** (quick lane, job `1012-124416-brain-fix-lj-stage1-smok-200d`): 2 worlds, 2 pairs,
+- **Smoke** (BRAIN-FIX's job `1012-124416-brain-fix-lj-stage1-smok-200d` panicked on a
+  refused training-world terrain; BRAIN-FIX-2 redraws it and reruns the smoke chained after
+  the new clone, job `1012-132335-bf2-lj-clone-then-smoke-5960`, `run/smoke/`): 2 worlds, 2 pairs,
   1-minute windows, 2 generations, with a check (2 seeds × 60 s, scene seed 101) on the start
   and after each generation. It should show that the run trains (one update per generation),
   writes back (`centres/final-lanternjaw.json`) and runs the checks.
@@ -66,6 +73,10 @@ centre (generation 0).
   is near 0, inside the seed-to-seed spread. Competence should be close to the rules' on feed
   (both near 1). On give_way it will be at or below the rules' (the first clone scored 0.06
   against 0.63).
+- **Revision (BRAIN-FIX-2):** the starting clone now has patrol and ambush in its teacher
+  data, so generation 0's paired gap should still sit near 0, but the windows' hunger
+  (top-up 0.3, which the trace shows turns the eating latch on and the patrol to ambush and
+  patrol) should give most early windows signal, not few. The rest of the prediction stands.
 - **Early generations** carry little signal. A sated lanternjaw stands still and digests, so
   every arm's window is identical. The first clone's live arms matched to 1e-9 in 300 s,
   because their bodies were full. The top-up's hunger and the persistent worlds' own hunger
