@@ -152,8 +152,112 @@ pub fn try_found_world_from(
     Ok((sim, info))
 }
 
+/// How many base seeds a training or check world tries before its founding is a clean
+/// `Err` (BRAIN-FIX-2 step 1). Each base already runs the founding's own redraws (up to
+/// its habitat cap of terrains), so four bases are up to four times that many terrains.
+/// A run-structure cap, not an ecological number.
+pub const FOUNDING_BASE_TRIES: usize = 4;
+
+/// The `k`-th base seed for a world asked for at `base`: `base` itself first, then
+/// splitmix64 redraws hashed from `base` and `k`, so the same `base` always draws the same
+/// sequence and two worlds' redraws don't land on each other.
+pub fn redrawn_base(base: u64, k: usize) -> u64 {
+    if k == 0 {
+        return base;
+    }
+    let mut z = base ^ (k as u64).wrapping_mul(0xD1B5_4A32_D192_ED03).rotate_left(17);
+    z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// **Found with redraws** (BRAIN-FIX-2 step 1): `try_found(seed)` on [`redrawn_base`]`(base,
+/// k)` for `k = 0, 1, …` until one is accepted or [`FOUNDING_BASE_TRIES`] are refused, which
+/// is a clean `Err` naming every refusal. Each refusal is passed to `note` (the run log) with
+/// the next base. A first base that is accepted is exactly the plain founding.
+pub fn found_redrawing<T>(
+    base: u64,
+    mut try_found: impl FnMut(u64) -> Result<T, String>,
+    mut note: impl FnMut(&str),
+) -> Result<T, String> {
+    let mut refusals = Vec::new();
+    for k in 0..FOUNDING_BASE_TRIES {
+        let seed = redrawn_base(base, k);
+        match try_found(seed) {
+            Ok(t) => return Ok(t),
+            Err(why) => {
+                if k + 1 < FOUNDING_BASE_TRIES {
+                    note(&format!("base seed {seed} (from {base}, try {k}) refused: {why}; redrawing from {}",
+                        redrawn_base(base, k + 1)));
+                }
+                refusals.push(format!("{seed}: {why}"));
+            }
+        }
+    }
+    Err(format!("world base {base}: every one of {FOUNDING_BASE_TRIES} base seeds was refused ({})", refusals.join("; ")))
+}
+
+/// [`try_found_world`] through [`found_redrawing`]: a training world from `base` that
+/// survives a refused terrain.
+pub fn found_world_redrawing(
+    cfg: &Config,
+    base: u64,
+    founder_counts: [usize; Founder::COUNT],
+    ecology: &EcologyParams,
+    note: impl FnMut(&str),
+) -> Result<(Sim, FoundInfo), String> {
+    found_redrawing(base, |seed| try_found_world(cfg, seed, founder_counts, ecology), note)
+}
+
 #[cfg(test)]
 mod tests {
+    /// BRAIN-FIX-2 step 1: an accepted first base is founded once, on `base` itself, with no
+    /// note (so it founds exactly as before).
+    #[test]
+    fn an_accepted_first_base_founds_once_on_itself() {
+        let (mut asked, mut notes) = (Vec::new(), Vec::new());
+        let got = super::found_redrawing(77, |s| { asked.push(s); Ok::<u64, String>(s) }, |n| notes.push(n.to_string()));
+        assert_eq!(got, Ok(77));
+        assert_eq!(asked, vec![77]);
+        assert!(notes.is_empty(), "{notes:?}");
+    }
+
+    /// A refused base redraws deterministically, with a note per refusal, and keeps the first
+    /// accepted redraw.
+    #[test]
+    fn a_refused_base_redraws_deterministically_with_a_note() {
+        let run = || {
+            let (mut asked, mut notes) = (Vec::new(), Vec::new());
+            let got = super::found_redrawing(21, |s| {
+                asked.push(s);
+                if asked.len() < 3 { Err(format!("no route {s}")) } else { Ok(s) }
+            }, |n| notes.push(n.to_string()));
+            (got, asked, notes)
+        };
+        let (got, asked, notes) = run();
+        assert_eq!(asked.len(), 3);
+        assert_eq!(asked[0], 21);
+        assert_eq!(asked, (0..3).map(|k| super::redrawn_base(21, k)).collect::<Vec<_>>());
+        assert_eq!(got, Ok(asked[2]));
+        assert_eq!(notes.len(), 2);
+        assert!(notes[0].contains("no route 21") && notes[0].contains(&asked[1].to_string()), "{notes:?}");
+        assert_eq!(run().1, asked, "the same base draws the same sequence");
+        // Two bases' redraws are distinct.
+        assert_ne!(super::redrawn_base(21, 1), super::redrawn_base(22, 1));
+        assert_ne!(super::redrawn_base(21, 1), super::redrawn_base(21, 2));
+    }
+
+    /// Past the cap the founding is a clean `Err` naming every refusal, not a panic.
+    #[test]
+    fn every_base_refused_is_a_clean_err() {
+        let mut tries = 0;
+        let got = super::found_redrawing::<()>(5, |s| { tries += 1; Err(format!("refused {s}")) }, |_| {});
+        assert_eq!(tries, super::FOUNDING_BASE_TRIES);
+        let why = got.expect_err("every base refused");
+        assert_eq!(why.matches(": refused ").count(), super::FOUNDING_BASE_TRIES, "{why}");
+    }
+
     /// BRAIN-NEXT step 4: a terrain the founding refuses comes back as `Err` with its reason
     /// (the clone tool skips it with a note) instead of a panic.
     #[test]
