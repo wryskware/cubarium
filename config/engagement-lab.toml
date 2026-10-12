@@ -1,0 +1,38 @@
+# ENGAGE source commit b5239cd2175e76cd58619fe36328a350444b7a52; binary sha256 a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b
+kind = "batch"
+name = "engage-baseline"
+out = "/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/baseline"
+hosts = ["desktop"]
+parallel = 2
+mem_gb = 4
+bin = "/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/scripts/studies/engagement-task.py"
+args = [
+  "--config",
+  "/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/config/engagement.toml",
+  "--required",
+  "/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/config/engagement-required.toml",
+  "--seeds",
+  "1-50",
+  "--hours",
+  "0.08333333333333333",
+  "--threads",
+  "1",
+  "--arm",
+  "family-2=arm=family-2 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "family-3=arm=family-3 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "family-4=arm=family-4 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "adults-2=arm=adults-2 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "adults-3=arm=adults-3 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "adults-4=arm=adults-4 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "calf-2=arm=calf-2 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "calf-3=arm=calf-3 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium",
+  "--arm",
+  "calf-4=arm=calf-4 probe=/home/wrysk/wryskware/cubarium/.claude/worktrees/engage/target/release/examples/engagement_probe probe_sha256=a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b film_seed=1 film_out=/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/family-3-seed1.mp4 render_tree=/home/wrysk/wryskware/cubarium"
+]

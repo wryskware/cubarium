@@ -4527,3 +4527,25 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.parasite_switch_radius_m` | 3.0 | m | [0, inf) | 1–8 | N | placeholder | LJ-HOSTSWITCH: how far an outgrown rider senses a host that bears it and walks to it |
 | `fauna.parasite_switch_give_up_s` | 600.0 | s | [0, inf) | 60–3600 log | N | placeholder | LJ-HOSTSWITCH: how long an outgrown rider looks for a new host before going free |
 | `fauna.lineage_body_ceiling` | 2500 | bodies | [0, inf) |  | N | decision | COMPUTE GUARD, not ecology: living bodies a lineage may hold before breeding is refused and logged (0 off) |
+
+**`engagement.*`** (isolated harness; `config/engagement.toml`)
+
+| path | value | unit | range | what |
+| --- | --- | --- | --- | --- |
+| `engagement.duration_s` | 300.0 | s | (0, 300] | Episode limit |
+| `engagement.episodes` | 50 | count | [1, inf) | Episodes per arm |
+| `engagement.width` | 128 | voxel | [1, inf) | Periodic arena width |
+| `engagement.height` | 48 | voxel | [1, inf) | Arena height |
+| `engagement.depth` | 96 | voxel | [1, inf) | Arena depth |
+| `engagement.voxel_m` | 0.25 | m | (0, inf) | Voxel pitch |
+| `engagement.soil_layers` | 2 | voxel | [1, inf) | Soil thickness |
+| `engagement.distance_m.*` | 4.0, 6.0 | m | (0, inf) | Family to pack centre distance |
+| `engagement.spacing_m` | 1.5 | m | (0, inf) | Body separation |
+| `engagement.depth_jitter_m` | 1.0 | m | [0, inf) | Centre depth jitter |
+| `engagement.adult_body.*` | 0.9, 1.0 | fraction | (0, 1] | Adult structure |
+| `engagement.calf_body.*` | 0.16, 0.22 | fraction | (0, 1] | Calf structure |
+| `engagement.family_fullness.*` | 0.85, 0.95 | fraction | [0, 1] | Family reserve and stomach |
+| `engagement.pack_fullness.*` | 0.1, 0.2 | fraction | [0, 1] | Pack reserve and stomach |
+| `engagement.adult_age_s.*` | 600.0, 900.0 | s | [0, inf) | Adult arrival age |
+| `engagement.calf_age_s.*` | 0.0, 30.0 | s | [0, inf) | Calf arrival age |
+| `engagement.arms.*.pack_size` | 2, 3, 4, 2, 3, 4, 2, 3, 4 | count | [2, 4] | Hounds per pack |
