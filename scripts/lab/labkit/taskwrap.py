@@ -53,6 +53,50 @@ def verify(pid, cpus, log):
     log.flush()
 
 
+def tree_mem_gb(root):
+    """Private resident memory (RssAnon + RssShmem) of the child's session and descendants, in GB.
+    Shared libraries and file cache are left out: this is what the task takes from the host."""
+    parents, members = {}, set()
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except OSError:
+            continue
+        fields = stat[stat.rindex(")") + 2:].split()
+        pid = int(entry.name)
+        parents[pid] = int(fields[1])
+        if int(fields[3]) == root:
+            members.add(pid)
+    children = {}
+    for pid, parent in parents.items():
+        children.setdefault(parent, []).append(pid)
+    stack = [root]
+    while stack:
+        pid = stack.pop()
+        members.add(pid)
+        stack.extend(children.get(pid, ()))
+    kb = 0
+    for pid in members:
+        try:
+            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+                if line.startswith(("RssAnon:", "RssShmem:")):
+                    kb += int(line.split()[1])
+        except OSError:
+            pass
+    return kb / 1024**2
+
+
+def sample_peak(root, peak, every=2.0):
+    while True:
+        try:
+            peak[0] = max(peak[0], tree_mem_gb(root))
+        except Exception:  # noqa: BLE001 - sampling must never take the task down
+            pass
+        time.sleep(every)
+
+
 def main():
     spec = json.loads(Path(sys.argv[1]).read_text())
     lab = Path(spec["lab_dir"])
@@ -109,14 +153,17 @@ def main():
             signal.signal(signum, forward)
         if cpus:
             threading.Thread(target=verify, args=(child.pid, cpus, log), daemon=True).start()
+        peak = [0.0]
+        threading.Thread(target=sample_peak, args=(child.pid, peak), daemon=True).start()
         while True:
             try:
                 rc = child.wait()
                 break
             except InterruptedError:
                 continue
-    atomic(rc_path, json.dumps(dict(rc=rc, ended=time.time(), cancelled=bool(cancelled))))
-    log.write(f"ended rc={rc}\n")
+    atomic(rc_path, json.dumps(dict(rc=rc, ended=time.time(), cancelled=bool(cancelled),
+                                    mem_peak_gb=round(peak[0], 2))))
+    log.write(f"ended rc={rc} mem_peak_gb={peak[0]:.2f}\n")
     log.close()
     return 0 if rc == 0 else min(abs(rc), 255) or 1
 

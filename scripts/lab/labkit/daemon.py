@@ -529,8 +529,10 @@ class Daemon:
                           finished=rc.get("ended", self.clock()), reason=reason)
         if host and host.kind != "local":
             self.cleanup_task(row)
+        # Measured peak beside the ask, so kind defaults (`[build] mem_gb`) can follow real use.
         self.events.emit("task-done" if state == "done" else "task-failed", job=job.id, task=row["name"],
-                         host=row["host"], rc=code, reason=reason)
+                         host=row["host"], rc=code, reason=reason, kind=job.kind,
+                         mem_gb=task.mem_gb, mem_peak_gb=rc.get("mem_peak_gb"))
         self.after_task(job.id, row["name"])
 
     def task_lost(self, row, reason, *, replacement=None):

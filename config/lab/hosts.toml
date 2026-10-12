@@ -36,7 +36,7 @@ max_cpu_fraction = 0.9
 reserve_cpus = 4      # Wrysk's app / desktop
 build_overcommit_threads = 8 # shared extra threads for build / cargo-test only
 quick_overcommit_threads = 8 # separate extra threads for quick tasks only (Wrysk 2026-10-11)
-reserve_mem_gb = 12   # live MemAvailable must keep this free after a placement
+reserve_mem_gb = 2    # live MemAvailable must keep this free after a placement (Wrysk 2026-10-12: 12 → 2)
 idle = true           # SCHED_IDLE + nice 19 for every task (= chrt -i 0 nice -n 19)
 external_load = true  # subtract load labd does not own (loadavg - labd's threads)
 launcher = "systemd"  # each task: systemd-run --user --collect transient unit
