@@ -648,6 +648,10 @@ impl VoxelRenderer {
             p.lit,
             spec,
         )?;
+        // Stamped plants use the walk's depth directly; model plants replace
+        // this input below. Establish it even when there is no model-plant pass.
+        let walk_depth = figures.walk_depth.view.clone();
+        figures.set_occluder(gpu, &walk_depth);
         let plants = match p.plants {
             Some(motion) => {
                 let plants = Plants::new(

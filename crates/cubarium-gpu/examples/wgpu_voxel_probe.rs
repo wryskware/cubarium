@@ -1,7 +1,11 @@
 //! Headless validation of the complete safe voxel pass chain.
 use anyhow::{Result, ensure};
 use cubarium_gpu::{
-    voxel::{SLOW_PLANES, VoxelParams, VoxelTexel, VoxelTextures, write_upload},
+    figures::{CLASS_NONE, FigureFrame, FigureInstance, FigureTile, FigureVoxel, PaletteEntry},
+    plants::{PlantRec, SETTLED, pack_cell},
+    voxel::{
+        PART_CROWN, SLOW_PLANES, VoxelParams, VoxelStyle, VoxelTexel, VoxelTextures, write_upload,
+    },
     wgpu_backend::{FrameSource, Gpu, headless::Headless, voxel::VoxelRenderer},
 };
 fn main() -> Result<()> {
@@ -20,11 +24,44 @@ fn main() -> Result<()> {
         p.bloom = if lit { 0.2 } else { 0.0 };
         p.plants = plants.then(Default::default);
         let mut r = VoxelRenderer::new(&gpu, p, &VoxelTextures::empty(p.s, p.rise))?;
+        ensure!(
+            r.put_figure_models(0, &[FigureVoxel::new([0; 3], 0, CLASS_NONE, false, 63, 0)]),
+            "model rejected"
+        );
+        r.set_figures(FigureFrame {
+            figures: vec![FigureInstance {
+                id: 1,
+                a: FigureTile {
+                    first: 0,
+                    count: 1,
+                    pos: [4.0, 2.0, 1.0],
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    centre: [0.0; 3],
+                    radius: 1.0,
+                    pose: [0.0; 4],
+                    palette: 0,
+                    bones: None,
+                },
+                b: None,
+                weight_b: 0.0,
+                alpha: 1.0,
+                highlight: 0.0,
+            }],
+            palette: vec![PaletteEntry {
+                base: [0.8, 0.1, 0.05],
+                emit: Some([0.1, 0.02, 0.0]),
+            }],
+            ..Default::default()
+        });
         let mut master = vec![VoxelTexel::default(); p.voxel_count()];
         for z in 0..p.depth {
             for x in 0..p.width {
                 master[(z * p.height * p.width + x) as usize] = VoxelTexel([3, 0, 0, 0]);
             }
+        }
+        if plants {
+            master[((2 * p.height + 1) * p.width + 2) as usize] =
+                VoxelTexel::pack(0, PART_CROWN, 0.0, true, 0.0, 1);
         }
         ensure!(
             r.stage([1; SLOW_PLANES], |s| {
@@ -36,6 +73,12 @@ fn main() -> Result<()> {
                 s.sky.fill(255);
                 s.canopy.fill(0);
                 s.glow.fill(0);
+                s.styles[1] =
+                    VoxelStyle::new([0.1, 0.05, 0.02], [0.05, 0.5, 0.1], [0.1, 0.2, 0.05]);
+                if let Some(list) = s.plants {
+                    list.plants = vec![PlantRec::default()];
+                    list.cells = vec![pack_cell([2, 1, 2], 0, 0.0, false, SETTLED, 0)];
+                }
             }),
             "stage refused"
         );
