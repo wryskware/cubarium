@@ -27,7 +27,11 @@ fn heads() -> MenuHeads {
 }
 
 fn loftstrider_net(seed: u64) -> Arc<TwoLayerNet> {
-    let shape = TwoLayerShape::menu_from_manifest(&Founder::Loftstrider.manifest(), heads());
+    loftstrider_net_with(seed, heads())
+}
+
+fn loftstrider_net_with(seed: u64, heads: MenuHeads) -> Arc<TwoLayerNet> {
+    let shape = TwoLayerShape::menu_from_manifest(&Founder::Loftstrider.manifest(), heads);
     Arc::new(TwoLayerNet::new(shape.clone(), initial_center(&shape, seed)).unwrap())
 }
 
@@ -239,6 +243,10 @@ fn spy(brain: TwoLayerBrain, twin: Option<TwoLayerBrain>, cold: Option<TwoLayerB
 /// sample and then answer exactly as an uninterrupted copy of each brain does on the same
 /// inputs; a cold-started copy does not. (The loaded world itself need not be bit-identical
 /// to the original; the brain's continuation is what is checked.)
+///
+/// The brains have no rest head: an asleep body's controller is not consulted, so a random
+/// brain whose rest head asks to rest would sleep through both halves and leave nothing to
+/// compare (its first sample's ask is granted, and it is not sampled again).
 #[test]
 fn a_fauna_save_mid_hold_continues_the_brains_identically() {
     let w = plain_world(3);
@@ -264,7 +272,7 @@ fn a_fauna_save_mid_hold_continues_the_brains_identically() {
             brains.push(f.view().animals.last().unwrap().id);
         }
     }
-    let net = loftstrider_net(11);
+    let net = loftstrider_net_with(11, MenuHeads { rest: false, ..heads() });
     let arb = cubarium_voxel_fauna::BrainArbitration::default();
     let period = Founder::Loftstrider.manifest().controller_period_s;
     let mut snapshots = Vec::new();
