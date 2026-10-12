@@ -105,4 +105,3 @@ fn an_unforced_world_is_unchanged_by_the_hook() {
         }
     }
 }
-

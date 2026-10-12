@@ -285,6 +285,7 @@ pub struct Episode {
     abandoned: bool,
     outcome: Option<Outcome>,
     family_flee_ticks: u64,
+    family_defend_ticks: u64,
     calf_chases: u64,
     adult_chases: u64,
     ends: BTreeMap<String, u64>,
@@ -513,6 +514,7 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         abandoned: false,
         outcome: None,
         family_flee_ticks: 0,
+        family_defend_ticks: 0,
         calf_chases: 0,
         adult_chases: 0,
         ends: BTreeMap::new(),
@@ -550,6 +552,14 @@ pub struct RowOut {
     pub captures: Option<u64>,
     pub kills: usize,
     pub family_flee_ticks: u64,
+    /// LS-DEFEND: family body-ticks steered by the defence layer, kicks landed by the
+    /// family, and kick-backs drawn by landed bites.
+    #[serde(default)]
+    pub family_defend_ticks: u64,
+    #[serde(default)]
+    pub kicks: u64,
+    #[serde(default)]
+    pub kick_backs: u64,
     /// VH-TACTICS readouts (the fauna ledger; zero on the old tactic): tests begun, tests
     /// that ended in a commitment, hunts given up (a test broken off or a chase given up),
     /// strikes on a substituted young body, lunges that met a body before their prey.
@@ -584,6 +594,10 @@ impl Episode {
         self.tick += 1;
         let fauna = self.sim.fauna();
         let family: Vec<_> = self.adults.iter().copied().chain(self.calf).collect();
+        self.family_defend_ticks += family
+            .iter()
+            .filter(|&&id| matches!(fauna.steer_of(id), Some(cubarium_voxel_fauna::Steer::Defend)))
+            .count() as u64;
         self.family_flee_ticks += family
             .iter()
             .filter(|&&id| matches!(fauna.steer_of(id), Some(cubarium_voxel_fauna::Steer::Flee)))
@@ -730,6 +744,9 @@ impl Episode {
             captures: None,
             kills: self.kills.len(),
             family_flee_ticks: self.family_flee_ticks,
+            family_defend_ticks: self.family_defend_ticks,
+            kicks: self.sim.fauna().view().ledger.kicks_landed_by_founder[Founder::Loftstrider.index()],
+            kick_backs: self.sim.fauna().view().ledger.kick_backs,
             hound_tests: self.sim.fauna().view().ledger.hound_tests,
             test_commits: self.sim.fauna().view().ledger.hound_test_commits,
             give_ups: self.sim.fauna().view().ledger.hound_give_ups,
