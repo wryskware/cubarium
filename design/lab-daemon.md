@@ -159,8 +159,9 @@ expression parsing, hooks, cancellation, and reporting stay in the core.
 | `outputs` | directory, default `<job>/<name>`; `stdout`/`stderr` default `{out}/stdout.log`, `{out}/stderr.log` |
 | `done_marker` | relative to `outputs`; exit 0 without it counts as failure |
 | `deps`, `priority` | ordering within and across jobs |
+| `quick` | quick lane (see Placement); `quick = true` on a job spec applies to all its tasks |
 | `liveness` | `{stall_min, paths: [globs]}` (output growth) or `{stall_min, minute_file}` (census minute); a stalled task is stopped and reported |
-| `timeout_h` | systemd `RuntimeMaxSec` |
+| `timeout_h` | systemd `RuntimeMaxSec`; quick tasks are capped at `[lab] quick_timeout_min` and labd also stops them itself |
 | `est_h` | wall estimate for ETAs and the EC2 estimate |
 | `retries`, `resume_argv` | after host loss (spot reclaim, a dead unit), requeue up to `retries` times with `resume_argv` |
 | `produces` | `{key: path relative to outputs}`; on success the core copies the file into the artifact cache |
@@ -265,6 +266,20 @@ cannot fit on any host even when idle aborts its job at plan time. Otherwise it 
 Among eligible hosts that fit, prefer the most free threads: usable threads minus all
 running labd tasks and external load. `hosts = ["desktop"]` or `["eidolon"]` pins run/test
 tasks; without a pin every enabled non-EC2 host is eligible. EC2 remains opt-in and approved.
+
+Lanes. Normal tasks need every charged thread inside usable. Two lanes may go above it,
+each into its own pool, so neither takes the other's threads:
+- **build**: build and cargo-test tasks, up to the host's `build_overcommit_threads`.
+- **quick** (Wrysk, 2026-10-11): tasks with `quick = true` (or `lab quick -- CMD...`), up to
+  `quick_overcommit_threads`. Quick is a setting, not a priority. A quick task ignores
+  reservations held by waiting large tasks and holds none itself. It tries local hosts first
+  and goes elsewhere only when no local host fits even with the pool. Its timeout is capped at
+  `[lab] quick_timeout_min` (default 15); past it labd stops the task and fails it with
+  "exceeded the quick limit", so a slow job shows it was never quick.
+Memory, L3 groups and idle priority are the same for every lane. Tasks that run in a
+literal local directory (a `cwd` without placeholders and no `remote_argv`, as command jobs
+default to on local hosts) also try local hosts first; every other task keeps the
+most-free-threads order.
 
 - Desktop: SCHED_IDLE plus nice 19 for every task (the effect of `chrt -i 0 nice -n 19`),
   group 1 preferred over the V-cache group 0, and 4 CPUs plus 12 GB reserved for Wrysk.

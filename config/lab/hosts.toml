@@ -1,14 +1,15 @@
 # labd host inventory (design/lab-daemon.md). Read at daemon start; restart labd to apply.
 #
 # Capacity per host: usable threads = min(floor(cpus * max_cpu_fraction), cpus - reserve_cpus);
-# each L3 group gets its share. Builds may share the configured thread overcommit;
-# memory limits always apply across all jobs.
+# each L3 group gets its share. Builds may share the configured build thread overcommit and
+# quick tasks their own, separate quick overcommit; memory limits always apply across all jobs.
 
 [lab]
 tick_s = 2            # daemon loop period
 progress_s = 60       # kind progress cadence and liveness checks
 probe_s = 300         # remote host probes (reachability, load, L3 groups, linger)
 remote_poll_s = 30    # remote task polls
+quick_timeout_min = 15 # quick tasks (quick = true, `lab quick`) are killed past this; a larger timeout_h is capped
 # kind_paths = ["~/lab-kinds"]   # extra kind plugin dirs (also $LAB_KIND_PATH)
 
 [build]
@@ -34,6 +35,7 @@ max_mem_gb = 64       # Wrysk's ceiling for offline work (WORKING_POLICY.md); al
 max_cpu_fraction = 0.9
 reserve_cpus = 4      # Wrysk's app / desktop
 build_overcommit_threads = 8 # shared extra threads for build / cargo-test only
+quick_overcommit_threads = 8 # separate extra threads for quick tasks only (Wrysk 2026-10-11)
 reserve_mem_gb = 12   # live MemAvailable must keep this free after a placement
 idle = true           # SCHED_IDLE + nice 19 for every task (= chrt -i 0 nice -n 19)
 external_load = true  # subtract load labd does not own (loadavg - labd's threads)

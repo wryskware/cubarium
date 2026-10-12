@@ -23,7 +23,8 @@ import time
 import traceback
 
 from .core import Abort, Context, Job, Spawn, SpecError, Task, TaskView, load_kinds
-from .hosts import Host, Inventory, Usage, allowed, could_ever_fit, fits, mem_available_gb
+from .hosts import (Host, Inventory, Usage, allowed, could_ever_fit, fits, mem_available_gb, prefers_local,
+                    quick_timeout_h)
 from .launch import LAUNCHERS, LocalTransport, SshTransport, systemd_user_works, write_file
 from .store import TERMINAL, Events, Store, atomic_write, new_id
 from .ec2 import Ec2Pool, estimate
@@ -31,6 +32,14 @@ from . import providers
 from .stops import evaluate, run_hook, validate_rules
 
 ACTIVE = ("submitted", "inputs", "preflight", "running", "aborting")
+QUICK_LIMIT = "exceeded the quick limit"
+QUICK_SLACK_S = 5    # an end this close to the cap counts as the cap (systemd RuntimeMaxSec vs our tick)
+
+
+def quick_limit_reason(task, elapsed_s):
+    return (f"{QUICK_LIMIT}: ran {elapsed_s / 60:.1f} min against a {task.timeout_h * 60:g} min cap "
+            f"([lab] quick_timeout_min or the task's timeout_h); this was not a quick task, "
+            f"resubmit it without quick")
 TOOLS = ("taskwrap.py", "snaprun.py", "census_resume.py")
 
 
@@ -510,6 +519,10 @@ class Daemon:
                     self.register_artifact(key, view.out / relative, job.id)
                 except OSError as error:
                     state, reason = "failed", f"artifact {key}: {error}"
+        elapsed = rc.get("ended", self.clock()) - (row["started"] or self.clock())
+        if task.quick and state != "done" and task.timeout_h \
+                and elapsed >= task.timeout_h * 3600 - QUICK_SLACK_S:
+            state, reason = "failed", quick_limit_reason(task, elapsed)  # systemd's RuntimeMaxSec got there first
         if reason is None and state != "done":
             reason = f"exit {code}"
         self.store.update("tasks", dict(job=row["job"], name=row["name"]), state=state, rc=code,
@@ -659,6 +672,21 @@ class Daemon:
                 if not self.check_stops(job):
                     self.handle(job, self.call(job, "progress", None))
 
+    def quick_timeouts(self):
+        """Quick tasks end at their capped timeout on every launcher (setsid has no RuntimeMaxSec)."""
+        now = self.clock()
+        for row in self.store.q("SELECT * FROM tasks WHERE state='running'"):
+            task = Task.from_dict(json.loads(row["spec"]))
+            if not task.quick or not task.timeout_h or row["started"] is None:
+                continue
+            elapsed = now - row["started"]
+            if elapsed < task.timeout_h * 3600:
+                continue
+            reason = quick_limit_reason(task, elapsed)
+            self.stop_task(row, "failed", reason)
+            self.events.emit("task-failed", job=row["job"], task=row["name"], host=row["host"], reason=reason)
+            self.after_task(row["job"], row["name"])
+
     def check_liveness(self, job, view):
         row = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
         spec = view.task.liveness
@@ -737,13 +765,18 @@ class Daemon:
         usage = self.usage()
         live_mem = mem_available_gb()
         rows = self.store.q(
-            "SELECT t.*, j.priority AS jp, j.kind AS jk FROM tasks t JOIN jobs j ON t.job=j.id "
+            "SELECT t.*, j.priority AS jp, j.kind AS jk, j.spec AS js FROM tasks t JOIN jobs j ON t.job=j.id "
             "WHERE t.state='pending' AND j.state='running' ORDER BY j.submitted, t.seq, j.id")
         # Stable sorting preserves FIFO when job + task priorities are equal.
         rows = [(row, Task.from_dict(json.loads(row["spec"]))) for row in rows]
         # Tasks planned before kinds marked themselves (build lane) take their job's kind.
+        quick_min = self.inv.get("quick_timeout_min", 15)
         for row, task in rows:
             task.meta.setdefault("kind", row["jk"])
+            # quick = true on the job spec applies to all its tasks; quick tasks get the time cap.
+            task.quick = bool(task.quick or json.loads(row["js"] or "{}").get("quick"))
+            if task.quick:
+                task.timeout_h = quick_timeout_h(task, quick_min)
         rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
         states = {}
         reservations = {}
@@ -757,13 +790,17 @@ class Daemon:
                     "SELECT name, state FROM tasks WHERE job=?", row["job"])}
             if any(states[row["job"]].get(d) != "done" for d in task.deps):
                 continue
-            candidates = sorted(self.hosts(), key=lambda h: h.usable - usage[h.name].threads -
-                                (h.external_threads if h.external_load else 0), reverse=True)
+            # Most free threads first; quick tasks and tasks with local inputs try local hosts first.
+            local_first = prefers_local(task)
+            candidates = sorted(self.hosts(), key=lambda h: (
+                local_first and h.kind != "local",
+                -(h.usable - usage[h.name].threads - (h.external_threads if h.external_load else 0))))
             for host in candidates:
                 group = fits(task, host, usage[host.name], live_mem if host.kind == "local" else None)
                 if group is None:
                     continue
-                if host.name in reservations:
+                # A quick task never waits behind a reservation (its own pool is above usable).
+                if host.name in reservations and not task.quick:
                     if any(priority >= reserved_priority or deadline is None or task.est_h is None
                            or task.est_h <= 0 or now + task.est_h * 3600 > deadline
                            for reserved_priority, deadline in reservations[host.name]):
@@ -774,7 +811,11 @@ class Daemon:
             else:
                 eligible = [h for h in candidates if h.up and could_ever_fit(task, h)
                             and (not task.l3 or h.groups)]
-                if eligible:
+                if eligible and task.quick:
+                    # Quick tasks hold no reservation: their pool turns over within the time cap.
+                    self.store.update("tasks", key, reason=f"waiting for {task.threads} threads on "
+                                      f"{eligible[0].name} (quick pool)")
+                elif eligible:
                     host = eligible[0]
                     reservations.setdefault(host.name, []).append(
                         (priority, self.reservation_start(task, host, live_mem, now)))
@@ -957,8 +998,10 @@ class Daemon:
             for view in job.tasks.values():
                 host = self.host(view.host)
                 stopped = self.store.one("SELECT * FROM tasks WHERE job=? AND name=?", job.id, view.name)
+                killed = view.state in ("cancelled", "stalled") or (
+                    view.state == "failed" and (view.reason or "").startswith(QUICK_LIMIT))
                 if not host or host.kind == "local" or not host.up or not stopped["unit"] \
-                        or view.state not in ("cancelled", "stalled") or view.rc is not None:
+                        or not killed or view.rc is not None:
                     continue
                 try:
                     rc, alive = self.launchers[host.name].poll([(stopped["unit"], self.lab_dir(stopped))])[stopped["unit"]]
@@ -1037,6 +1080,7 @@ class Daemon:
         self.collect_preflights()
         self.probe_hosts()
         self.poll_tasks()
+        self.quick_timeouts()
         self.collect_stop_hooks()
         self.cadence()
         self.schedule()

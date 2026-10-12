@@ -155,6 +155,11 @@ and build job goes through `scripts/lab/lab submit SPEC`.
   instead of launching. They don't start `systemd-run`, `setsid`, `run-study.py` batches or
   `ab.py` runs themselves.
 - **The parent:** it keeps one `lab wait --any-new` waiter for all jobs.
+- **Quick jobs (Wrysk, 2026-10-11):** a short check (minutes) goes through
+  `lab quick [--name N] [--threads T] [--mem-gb G] [--out DIR] -- CMD...`, or `quick = true`
+  on a spec or task. It runs in its own overcommit pool, never waits behind a big task's
+  reservation, prefers the desktop, and is killed at `[lab] quick_timeout_min` (15) with a
+  reason saying it was not quick. Don't mark long work quick.
 - **EC2:** each launch still needs Wrysk's go, given as
   `lab approve ec2 ID --max-hours H --max-usd D`, and labd tears the host down when the
   queue drains.

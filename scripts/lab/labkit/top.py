@@ -8,7 +8,7 @@ from pathlib import Path
 import shutil
 import time
 
-from .hosts import Host, Inventory
+from .hosts import Host, Inventory, lane
 from .store import Store, TERMINAL
 from .stops import rule_labels
 
@@ -198,6 +198,8 @@ class Dashboard:
             probe = self.store.kv_get(f'host:{name}', {})
             running = [json.loads(t['spec']) for t in tasks if t['state'] == 'running' and t['host'] == name]
             used = sum(t.get('threads', 1) for t in running)
+            build, quick = (sum(t.get('threads', 1) for t in running if lane(t) == which)
+                            for which in ('build', 'quick'))
             mem = sum(t.get('mem_gb', 1) for t in running)
             load = os.getloadavg()[0] if host.kind == 'local' else probe.get('load')
             up = host.kind == 'local' or probe.get('up') or (name == 'ec2' and ec2.get('state') == 'up')
@@ -210,7 +212,7 @@ class Dashboard:
                 metric = f'CPU {meter}'
             else:
                 metric = f"load {load_label}/{host.cpus} cpus"
-            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {host.thread_label(used)} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
+            lines.append(f"{name} {'up' if up else 'down'} {metric} thr {host.thread_label(used, build, quick)} mem {mem:g}/{host.max_mem_gb:g} load {load_label}")
         return lines
 
     def frame(self, width=80, now=None):
