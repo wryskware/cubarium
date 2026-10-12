@@ -62,3 +62,25 @@ It is evidence, not a decision.
 - **The rules' own competence is low in some scenes** (groom 0.16, rest 0.16, feed 0.13). The
   scenes or their competence tests may be stricter than the heuristic's real behaviour;
   check them before reading the clones against them.
+
+## BRAIN-FIX rerun (seedporter; job `1012-122230-brain-fix-clone-seedport-52cc`)
+
+The run used the same arguments as the first. Three things changed:
+- the groom scene's host holds still at a meal, and its troopmates face it;
+- feed competence is the share of hungry seconds spent biting;
+- the closed-loop pass conditions the top on the learner's own hold.
+
+The lanternjaw rerun is job `1012-122230-brain-fix-clone-lanternj-e4ac`.
+
+`switch` is the agreement on labels that differ from the hold the top read.
+
+| intent | agreement | switch, after / before refit | competence rules / two-layer / plain | two-layer mode share |
+|---|---|---|---|---|
+| roost | 0.92 | 0.11 / 0.00 | 0.94 / **0.69** (was 0.19) / 0.50 | 0.56 (was 0.00) |
+| groom | 0.96 | 0.33 / 0.80 | **1.00** (was 0.16) / 0.85 / 0.88 | 0.06 |
+| follow mother | 1.00 | 1.00 / 1.00 | 0.97 / 0.90 / 0.92 | 0.96 |
+| flee to trees | 0.97 | 0.79 / 0.89 | 0.69 / 0.62 / 0.62 | 0.76 |
+| rest | 0.86 | 0.14 / 0.21 | 0.16 / 0.00 / 0.00 | 0.38 |
+
+Seedporter rest is unchanged: a glider sleeps only perched, so no arm can rest on open ground.
+Neither clone beats the rules in any mode yet.
