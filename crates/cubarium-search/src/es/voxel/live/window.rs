@@ -60,10 +60,37 @@ pub struct BodyScore {
     pub newborn: bool,
 }
 
+/// One body's metered result for one window, whether a variant drove it or not (§11.7:
+/// heuristic relatives are metered too). [`WindowResult::scores`] keeps only the bodies
+/// with a variant, as before; this keeps every body that could have lived in the window.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct MeteredBody {
+    pub body_id: u64,
+    pub founder: Founder,
+    /// Its variant, `None` for a body its lineage's driver (a heuristic, a centre) ran.
+    pub candidate: Option<usize>,
+    pub newborn: bool,
+    /// The score of the kind the window ranks by (body or stomach-aware), curiosity
+    /// included; a death is scored with `E_end = 0` as for every scored body.
+    pub score: NetEnergy,
+}
+
+impl MeteredBody {
+    /// Its own base score, the energy part only: `(E_end − E_start + E_given)/body_ref`,
+    /// without the curiosity term. What a relative contributes to its kin (§10.3).
+    pub fn base(&self) -> f64 {
+        self.score.delta_normalized + self.score.given_normalized
+    }
+}
+
 /// What one window of one world produced.
 pub struct WindowResult {
     pub world: usize,
     pub scores: Vec<BodyScore>,
+    /// Every body metered in the window, variant or not ([`MeteredBody`]).
+    pub metered: Vec<MeteredBody>,
+    /// The window's reward roster: fixed at its start, newborns joined at birth.
+    pub roster: crate::es::voxel::kin::Roster,
     pub lineages: [LineageStats; Founder::COUNT],
     pub readout: Vec<(String, Pool, f64)>,
     pub ticks: u64,
@@ -328,6 +355,7 @@ pub struct Window {
     curiosity: Curiosity,
     geometry: Vec<Geometry>,
     memory: Memory,
+    roster: crate::es::voxel::kin::Roster,
 }
 
 impl Window {
@@ -393,6 +421,15 @@ impl Window {
                 .map(|f| Geometry::of(sim.fauna().config().founder(*f), curiosity.of(*f)))
                 .collect(),
             memory: Memory::default(),
+            roster: crate::es::voxel::kin::Roster::fixed(
+                &sim.fauna()
+                    .view()
+                    .animals
+                    .iter()
+                    .filter(|a| a.founder.is_some())
+                    .map(crate::es::voxel::kin::KinRecord::of)
+                    .collect::<Vec<_>>(),
+            ),
         };
         let bodies: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)> = sim
             .fauna()
@@ -561,6 +598,8 @@ impl Window {
             if let Some(a) = sim.fauna().view().animals.iter().find(|a| a.id == id) {
                 self.memory
                     .observe(id, &self.geometry[fi], x.rem_euclid(self.ring_m), a.pose.z);
+                // A newborn joins its mother's roster at birth (§11.7).
+                self.roster.join(crate::es::voxel::kin::KinRecord::of(a));
             }
             self.index.insert(id, self.tracked.len());
             self.tracked.push(Tracked {
@@ -620,6 +659,7 @@ impl Window {
     /// Close the window: every scored body's result, the lineage counts and the readout.
     pub fn finish(mut self, sim: &Sim, world_id: usize) -> WindowResult {
         let mut scores = Vec::new();
+        let mut metered = Vec::new();
         let mut anomalies = 0u64;
         let events = super::accounting::Recruitment::of(sim.fauna()).since(&self.recruitment_start);
         let deaths_end = sim.fauna().view().ledger.deaths_by_founder_cause;
@@ -667,11 +707,8 @@ impl Window {
                 s.novelty_sum += novelty;
                 s.curiosity_sum += weight * novelty;
             }
-            let (Some(c), true) = (b.candidate, b.possible > 0) else {
+            if b.possible == 0 {
                 continue;
-            };
-            if b.meter.intake < -1e-9 {
-                anomalies += 1;
             }
             let body_score = b
                 .energy
@@ -684,6 +721,19 @@ impl Window {
             let stomach_score = b.energy.stomach_score(b.meter.intake.max(0.0), b.meter.motor.max(0.0),
                 b.founder.manifest().body_reference).with_curiosity(novelty, weight);
             let score = if self.stomach_aware_reward { stomach_score } else { body_score };
+            metered.push(MeteredBody {
+                body_id: b.id,
+                founder: b.founder,
+                candidate: b.candidate,
+                newborn: b.newborn,
+                score,
+            });
+            let Some(c) = b.candidate else {
+                continue;
+            };
+            if b.meter.intake < -1e-9 {
+                anomalies += 1;
+            }
             s.scored += 1;
             s.mean_score += score.score;
             scores.push(BodyScore {
@@ -714,6 +764,8 @@ impl Window {
         WindowResult {
             world: world_id,
             scores,
+            metered,
+            roster: self.roster,
             lineages: self.stats,
             readout,
             ticks: self.elapsed,
