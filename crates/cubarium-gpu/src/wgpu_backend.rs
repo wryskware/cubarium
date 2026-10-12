@@ -171,11 +171,26 @@ impl Gpu {
                 | wgpu::Features::TIMESTAMP_QUERY
                 | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+        // Portable defaults cover our 4096x2048 figure atlas, <=4 MiB storage
+        // records, <=4 KiB uniforms, six storage buffers and four attachments.
+        // Figure composites add four images to the world's seventeen; plants
+        // use the largest immediate block (64 bytes). Preserve adapter texture
+        // resolution for wide worlds/displays; those caps reserve no images.
+        let required_limits = wgpu::Limits {
+            max_sampled_textures_per_shader_stage: 21,
+            max_immediate_size: if required_features.contains(wgpu::Features::IMMEDIATES) {
+                64
+            } else {
+                0
+            },
+            ..wgpu::Limits::default().using_resolution(adapter.limits())
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Cubarium"),
                 required_features,
-                required_limits: adapter.limits(),
+                required_limits,
+                memory_hints: wgpu::MemoryHints::MemoryUsage,
                 ..Default::default()
             })
             .await

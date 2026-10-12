@@ -1,0 +1,25 @@
+{
+  "kind": "command",
+  "name": "wgpu-device-lifecycle",
+  "argv": [
+    "{bin}",
+    "32"
+  ],
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "ed757f2e431bc9e527a3923d28c9581e31975b0d",
+    "name": "wgpu_device_probe",
+    "package": "cubarium-gpu",
+    "example": "wgpu_device_probe",
+    "pinned": true
+  },
+  "threads": 1,
+  "priority": 1,
+  "est_h": 0.01,
+  "mem_gb": 2,
+  "timeout_h": 0.1,
+  "local_only": true,
+  "env": {
+    "CUBARIUM_GPU": "5080"
+  }
+}
