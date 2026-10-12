@@ -779,6 +779,10 @@ impl Shared {
                 OffscreenOptions { pipelines: Pipelines::Still, sky: SkyBake::Never, sky_fade_s: 0.0 }
             }
         };
+        // Opened while the background warm-up compiles: wait for the phase this renderer
+        // needs rather than compile a second copy beside it (`super::warm`).
+        let key = super::warm::key_of(&self.options.config, &self.options.root);
+        super::warm::wait(&key, options.pipelines, || self.quit.load(Ordering::SeqCst));
         let sink = VoxelGpuSink::offscreen_with(&cfg, proj, models, options)?;
         timing(format_args!("opened: models {:.0} ms, sink {:.0} ms", model_time.as_secs_f64() * 1e3, (started.elapsed() - model_time).as_secs_f64() * 1e3));
         Ok((sink, proj))
@@ -1253,6 +1257,14 @@ impl Hosted {
             Ok(t) => threads.push(t),
             Err(e) => self.shared.fail(e.into()),
         }
+    }
+
+    /// Compile this config's shader pipelines in the background now (`super::warm`): the
+    /// still terrain's first, then the rest. Once per process; returns at once. A renderer
+    /// opened before they are done waits for the ones it needs instead of compiling them too.
+    pub fn warm_pipelines(&self) -> bool {
+        let key = super::warm::key_of(&self.shared.options.config, &self.shared.options.root);
+        super::warm::start(key, &self.shared.cfg, self.shared.options.screen)
     }
 
     /// The newest frame not yet taken.

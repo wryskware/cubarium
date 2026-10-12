@@ -37,6 +37,15 @@ pub struct Gpu {
     /// The `extra_instance_extensions` the loader had, and which were therefore enabled:
     /// how the desktop window learns whether it can make a surface at all.
     extra_instance: Vec<String>,
+    /// This device's pipeline cache ([`crate::pipeline_cache`]): every pipeline the crate
+    /// builds on the device goes through it, seeded with what the process (and, with a
+    /// directory set, earlier runs) compiled for this physical device.
+    pub pipeline_cache: vk::PipelineCache,
+    /// The seed's length: [`crate::pipeline_cache::save`] has nothing to merge until the
+    /// cache outgrows it.
+    pub pipeline_seed_len: usize,
+    /// The physical device and driver build the cache is for.
+    pub cache_key: crate::pipeline_cache::CacheKey,
     /// **The queue is externally synchronised.** One device, one queue, and since the
     /// presenter runs on its own thread there are two threads that submit to it: the
     /// presenter for every frame, and whoever reads the raster back for the viewer or a
@@ -180,7 +189,12 @@ impl Gpu {
         }
         .context("vkCreateDevice")?;
         let queue = unsafe { device.get_device_queue(queue_family, 0) };
+        let cache_key = crate::pipeline_cache::CacheKey::of(&props);
+        let (pipeline_cache, pipeline_seed_len) = crate::pipeline_cache::create(&device, cache_key)?;
         Ok(Gpu {
+            pipeline_cache,
+            pipeline_seed_len,
+            cache_key,
             memory: unsafe { instance.get_physical_device_memory_properties(pdev) },
             timestamp_period: props.limits.timestamp_period,
             entry,
