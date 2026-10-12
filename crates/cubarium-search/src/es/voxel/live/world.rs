@@ -171,3 +171,57 @@ mod tests {
         assert!(why.contains("rejected"), "{why}");
     }
 }
+
+/// **A training top-up** (BRAIN-FIX step 4, `--top-up LINEAGE=N[:FULLNESS]`): after the
+/// founding, `founder` is brought up to `bodies` grown bodies on its heuristic, placed on the
+/// faces other bodies stand on, for a lineage the training worlds found none of (the
+/// lanternjaw founds as an egg bank, which the training worlds leave out). `fullness` is
+/// their reserve and stomach as a fraction of capacity (`None`: a placed body's default).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TopUp {
+    pub founder: Founder,
+    pub bodies: usize,
+    pub fullness: Option<f64>,
+}
+
+impl TopUp {
+    /// `lineage=N` or `lineage=N:fullness`.
+    pub fn parse(s: &str) -> Result<TopUp, String> {
+        let (name, rest) = s.split_once('=').ok_or_else(|| format!("top-up {s:?}: want LINEAGE=N[:FULLNESS]"))?;
+        let founder = crate::es::voxel::parse_founder(name.trim())?;
+        let (n, full) = match rest.split_once(':') {
+            Some((n, f)) => (n, Some(f.trim().parse::<f64>().map_err(|e| format!("top-up {s:?}: {e}"))?)),
+            None => (rest, None),
+        };
+        let bodies = n.trim().parse().map_err(|e| format!("top-up {s:?}: {e}"))?;
+        if full.is_some_and(|f| !(0.0..=1.0).contains(&f)) {
+            return Err(format!("top-up {s:?}: fullness is a fraction"));
+        }
+        Ok(TopUp { founder, bodies, fullness: full })
+    }
+}
+
+/// Bring `t.founder` up to `t.bodies` grown bodies under its heuristic (the faces other
+/// bodies stand on, in id order); how many were placed.
+pub fn top_up(sim: &mut Sim, t: TopUp) -> usize {
+    use cubarium_voxel_fauna::{BodySpec, BodyStage, Placed, Spot};
+    let have = sim.fauna().view().animals.iter().filter(|a| a.founder == Some(t.founder)).count();
+    if have >= t.bodies {
+        return 0;
+    }
+    let (w, flora) = (sim.world().clone(), sim.flora().clone());
+    let sites: Vec<_> = sim.fauna().view().animals.iter().map(|a| a.site).collect();
+    let teachers = sim.fauna().config().teachers;
+    let mut placed = 0;
+    for (k, site) in sites.iter().enumerate() {
+        if have + placed >= t.bodies {
+            break;
+        }
+        let spec = BodySpec { stage: BodyStage::Adult, heading_rad: k as f64 * 1.3, fullness: t.fullness, ..BodySpec::default() };
+        if let Ok(Placed::Body { id, .. }) = sim.fauna_mut().place_body(&w, &flora, t.founder, Spot::Face(*site), spec) {
+            sim.fauna_mut().set_controller(id, cubarium_voxel_fauna::heuristic(t.founder, teachers));
+            placed += 1;
+        }
+    }
+    placed
+}

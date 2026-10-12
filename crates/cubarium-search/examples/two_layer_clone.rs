@@ -42,7 +42,7 @@ use cubarium_search::es::voxel::two_layer::record::{closed_loop_records, per_mod
 use cubarium_search::es::voxel::two_layer::scenes;
 use cubarium_search::es::voxel::two_layer::{MenuHeads, TwoLayerNet, TwoLayerPolicyFile, TwoLayerShape};
 use cubarium_search::es::voxel::EpisodeDriver;
-use cubarium_voxel_fauna::{BodySpec, BodyStage, DryScope, Founder, Placed, Spot};
+use cubarium_voxel_fauna::{DryScope, Founder};
 use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
 use serde_json::json;
 
@@ -65,23 +65,7 @@ const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
     let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
-    let have = lineage_ids(&sim, f).len();
-    if have < bodies {
-        let (w, flora) = (sim.world().clone(), sim.flora().clone());
-        let sites: Vec<_> = sim.fauna().view().animals.iter().map(|a| a.site).collect();
-        let teachers = sim.fauna().config().teachers;
-        let mut placed = 0;
-        for (k, site) in sites.iter().enumerate() {
-            if have + placed >= bodies {
-                break;
-            }
-            let spec = BodySpec { stage: BodyStage::Adult, heading_rad: k as f64 * 1.3, ..BodySpec::default() };
-            if let Ok(Placed::Body { id, .. }) = sim.fauna_mut().place_body(&w, &flora, f, Spot::Face(*site), spec) {
-                sim.fauna_mut().set_controller(id, cubarium_voxel_fauna::heuristic(f, teachers));
-                placed += 1;
-            }
-        }
-    }
+    world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: None });
     Ok(sim)
 }
 

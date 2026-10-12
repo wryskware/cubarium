@@ -44,6 +44,8 @@ fn spec(name: &str, centres: Vec<(Founder, PathBuf)>) -> LiveSpec {
         curiosity: Default::default(),
         stomach_aware_reward: false,
         kin: Default::default(),
+        check: None,
+        top_up: Vec::new(),
     }
 }
 
@@ -194,5 +196,71 @@ fn a_centre_for_another_lineage_is_refused() {
     let err = Lineage::load(&spec, Founder::Lanternjaw, &path).err().expect("refused");
     assert!(err.contains("seedporter"), "{err}");
     std::fs::remove_dir_all(&spec.out).unwrap();
+    let _ = std::fs::remove_file(&path);
+}
+
+
+/// BRAIN-FIX step 4: a lanternjaw stage-1 generation's write-back loads and drives. One
+/// window on the staged feed scene's world with the lineage on its variants, the update,
+/// the write-back; the written centre then loads as a brain driver and decides for a
+/// lanternjaw in a fresh scene (its records are the brain's, not the rules').
+#[test]
+fn a_lanternjaw_stage_one_write_back_loads_and_drives() {
+    use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
+    let f = Founder::Lanternjaw;
+    let path = two_layer_centre(f, "lj-stage1");
+    let spec = spec("lj-stage1", vec![(f, path.clone())]);
+    let mut l = Lineage::load(&spec, f, &path).unwrap();
+    let tables = tables_for(&spec, std::slice::from_ref(&l), 0).unwrap();
+    let cfg = mode_scenes::Config { duration_s: 10.0, ..mode_scenes::Config::default() };
+    let mut sim = mode_scenes::found(&cfg, ModeScene::Feed, 1).unwrap().sim;
+    let r = window(&mut sim, &tables, &spec);
+    assert!(!r.scores.is_empty(), "the lanternjaw ran a variant");
+    update(&spec, &mut l, std::slice::from_ref(&r), 0);
+    save_centres(&spec, std::slice::from_ref(&l), 1, "final").unwrap();
+    let back = final_centre(&spec.out, f);
+    let driver = crate::es::voxel::store::load_brain_driver(&back, f).expect("the write-back loads");
+    let mut e = mode_scenes::found(&cfg, ModeScene::Feed, 2).unwrap();
+    crate::es::voxel::live::install_centres(e.sim.fauna_mut(), &[(f, driver)]);
+    // The dry teacher labels brain-driven bodies only: its labels mark a brain at the wheel.
+    e.sim.fauna_mut().dry_teach(f, Some(cubarium_voxel_fauna::DryScope::Brains));
+    e.sim.fauna_mut().start_tap();
+    let id = e.focal[0];
+    let mut sampled = 0;
+    for _ in 0..100 {
+        e.step();
+        let a = *e.sim.fauna().view().animal(id).expect("alive");
+        sampled += usize::from(a.intent.sample_tick == e.sim.fauna().tick());
+    }
+    assert!(sampled > 0, "the brain decided");
+    let tap = e.sim.fauna_mut().take_tap().unwrap();
+    assert!(tap.teacher_labels(id).is_some_and(|l| !l.is_empty()), "a brain drives it");
+    std::fs::remove_dir_all(&spec.out).unwrap();
+    let _ = std::fs::remove_file(&path);
+}
+
+/// BRAIN-FIX step 4: the check runs a brain beside its heuristic on matched starts and
+/// reads energy, holds and per-mode competence; on one start both arms see the same world.
+#[test]
+fn the_brain_check_reads_both_arms_on_matched_starts() {
+    use crate::es::voxel::two_layer::check::{CheckSpec, check};
+    use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
+    let f = Founder::Lanternjaw;
+    let path = two_layer_centre(f, "lj-check");
+    let s = spec("lj-check", vec![(f, path.clone())]);
+    let driver = Lineage::load(&s, f, &path).unwrap().driver(&s).unwrap();
+    let c = CheckSpec { every: 1, seeds: vec![1, 2], seconds: 5, scene_seeds: vec![1], threads: 2 };
+    let found = |seed: u64| -> Result<Sim, String> { Ok(mode_scenes::found(&mode_scenes::Config::default(), ModeScene::Feed, seed)?.sim) };
+    let r = check(f, &driver, 3, &c, &found);
+    assert_eq!((r.heuristic.len(), r.brain.len()), (2, 2), "{:?}", r.skipped);
+    for (h, b) in r.heuristic.iter().zip(&r.brain) {
+        assert_eq!(h.seed, b.seed);
+        assert_eq!((h.energy_start, h.bodies_start), (b.energy_start, b.bodies_start), "one start per seed");
+    }
+    assert!(r.holds_brain.decision_samples > 0 && r.holds_heuristic.decision_samples > 0);
+    let names: Vec<_> = r.scenes.iter().map(|x| x.intent).collect();
+    assert_eq!(names, ["feed", "give_way"]);
+    assert!(r.gain_per_body_brain_minus_heuristic.is_finite());
+    let _ = std::fs::remove_dir_all(&s.out);
     let _ = std::fs::remove_file(&path);
 }

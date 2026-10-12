@@ -88,6 +88,15 @@ pub struct LiveSpec {
     pub stomach_aware_reward: bool,
     /// Each lineage's kin knobs (`--kin`; KIN-TRAIN). The default is today's training.
     pub kin: crate::es::voxel::kin::KinConfig,
+    /// **The brain checks** (BRAIN-FIX step 4, `--check-every`): every two-layer lineage's
+    /// centre beside its heuristic on matched starts, on the starting centre and every
+    /// `every` generations, one JSON line each in `checks.jsonl`. Readouts only: `None`
+    /// (the default) and every plain lineage train exactly as before.
+    pub check: Option<crate::es::voxel::two_layer::check::CheckSpec>,
+    /// **Training top-ups** (BRAIN-FIX step 4, `--top-up`): lineages brought up to a count
+    /// of grown bodies after every founding (the lanternjaw, which the training worlds found
+    /// none of). Empty (the default): every world founds exactly as before.
+    pub top_up: Vec<world::TopUp>,
 }
 
 /// One lineage's side of a generation.
@@ -440,6 +449,9 @@ fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveW
         ecology.fauna().founder_counts_without_egg_bank(),
         &ecology,
     );
+    for t in &spec.top_up {
+        world::top_up(&mut sim, *t);
+    }
     prepare(&mut sim, spec, lineages);
     LiveWorld {
         id: slot,
@@ -705,6 +717,18 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         .map_err(|e| format!("cannot write the generation log: {e}"))?;
     save_centres(spec, &lineages, first_generation, "latest")?;
     save_checkpoint(spec, &lineages, &worlds, first_generation, next_fresh_seed)?;
+    let mut checks = match &spec.check {
+        Some(_) => Some(
+            std::fs::OpenOptions::new().create(true).append(true).open(spec.out.join("checks.jsonl"))
+                .map_err(|e| format!("cannot write the check log: {e}"))?,
+        ),
+        None => None,
+    };
+    if let Some(log) = checks.as_mut() {
+        if spec.resume.is_none() {
+            run_checks(spec, &lineages, first_generation, log)?;
+        }
+    }
     let mut last_gen_wall = 0.0;
     let mut next_generation = first_generation;
 
@@ -810,6 +834,11 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
             save_centres(spec, &lineages, next_generation, "latest")?;
             save_checkpoint(spec, &lineages, &worlds, next_generation, next_fresh_seed)?;
         }
+        if let (Some(c), Some(log)) = (&spec.check, checks.as_mut()) {
+            if c.every > 0 && next_generation % c.every == 0 {
+                run_checks(spec, &lineages, next_generation, log)?;
+            }
+        }
         last_gen_wall = started.elapsed().as_secs_f64();
         // STOP/wall pauses always commit the entire current boundary, even between saves.
         if (next_generation < spec.generations || run.dir.join("STOP").exists()) && run.boundary(next_generation, last_gen_wall) {
@@ -820,6 +849,29 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
     save_centres(spec, &lineages, next_generation, "final")?;
     save_checkpoint(spec, &lineages, &worlds, next_generation, next_fresh_seed)?;
     Ok(records)
+}
+
+/// Run the brain checks of every two-layer lineage at `generation` and log them
+/// ([`LiveSpec::check`]). The check's worlds are founded as the training worlds are, on
+/// the check's own seeds, and never touch a training world.
+fn run_checks(spec: &LiveSpec, lineages: &[Lineage], generation: u32, log: &mut std::fs::File) -> Result<(), String> {
+    let Some(c) = &spec.check else { return Ok(()) };
+    let cfg = spec.world.clone().unwrap_or_else(world::training_config);
+    let found = |seed: u64| -> Result<Sim, String> {
+        let (mut sim, _) = world::try_found_world(&cfg, seed, spec.ecology.fauna().founder_counts_without_egg_bank(), &spec.ecology)?;
+        for t in &spec.top_up {
+            world::top_up(&mut sim, *t);
+        }
+        sim.world_mut().set_water_every(spec.water_every);
+        Ok(sim)
+    };
+    for l in lineages.iter().filter(|l| matches!(l.template, BrainFile::TwoLayer(_))) {
+        let report = crate::es::voxel::two_layer::check::check(l.founder, &l.driver(spec)?, generation, c, &found);
+        println!("{}", crate::es::voxel::two_layer::check::summary_line(&report));
+        writeln!(log, "{}", serde_json::to_string(&report).map_err(|e| e.to_string())?).map_err(|e| format!("check log: {e}"))?;
+        log.flush().map_err(|e| format!("check log flush: {e}"))?;
+    }
+    Ok(())
 }
 
 /// One compact line per generation for the console.
@@ -887,7 +939,7 @@ mod recovery_tests {
             window_ticks: 100, generations: 2, wall_seconds: 60.0, first_generation_seconds: 60.0,
             sigma: 0.05, learning_rate: 0.01, train_seed: 3, world_seed: 7, water_every: 1,
             population_cap: 100, save_every: 1, out, resume: None, ecology: EcologyParams::defaults(),
-            world: Some(cfg), curiosity: Default::default(), stomach_aware_reward: false, kin: Default::default() };
+            world: Some(cfg), curiosity: Default::default(), stomach_aware_reward: false, kin: Default::default(), check: None, top_up: Vec::new() };
         let mut sim = Sim::ambient(world, flora, fauna, cubarium_voxel_sim::SimConfig { threads: 1, overlap: false, water_every: 1 });
         prepare(&mut sim, &spec, &lineages);
         for _ in 0..10 { sim.step(); }
