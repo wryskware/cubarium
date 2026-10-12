@@ -27,6 +27,8 @@ rustix = { version = "1", features = ["event", "fs", "net"], optional = true }
 default = ["scanout"]
 # Linux panel transport uses safe DRM buffers populated by GPU readback.
 scanout = ["dep:drm", "dep:rustix"]
+# wgpu's internal resource and memory counters (diagnostics only).
+counters = ["wgpu/counters"]
 
 [[example]]
 name = "synthetic"

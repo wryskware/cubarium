@@ -2102,4 +2102,150 @@ mod tests {
         let installed = host.shared.sink.lock().unwrap().as_ref().map(|st| st.generation);
         assert_eq!(installed, Some(generation), "the newer world is still the one installed");
     }
+
+    // ---- GPU memory over preview rounds (a measurement, run by hand) ----
+
+    /// This process's GPU memory in MiB, as `nvidia-smi -q -d PIDS` lists it (graphics
+    /// contexts included); None without nvidia-smi.
+    fn own_gpu_mib() -> Option<u64> {
+        let out = std::process::Command::new("nvidia-smi").args(["-q", "-d", "PIDS"]).output().ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let pid = std::process::id().to_string();
+        let mut mine = false;
+        let mut total = 0;
+        let mut seen = false;
+        for line in text.lines() {
+            let Some((k, v)) = line.split_once(':') else { continue };
+            let (k, v) = (k.trim(), v.trim());
+            if k == "Process ID" {
+                mine = v == pid;
+            } else if mine && k == "Used GPU Memory" {
+                total += v.trim_end_matches("MiB").trim().parse::<u64>().unwrap_or(0);
+                seen = true;
+                mine = false;
+            }
+        }
+        seen.then_some(total)
+    }
+
+    fn report(label: &str) {
+        let gpu = super::super::warm::shared_gpu().expect("the shared device");
+        let c = gpu.device.get_internal_counters().hal;
+        let s = gpu.pipeline_cache_stats();
+        eprintln!(
+            "PROBE {label:<10} gpu_mib={:?} buf_mem={} tex_mem={} allocs={} buffers={} textures={} views={} bind_groups={} bgl={} pipelines={} layouts={} shaders={} samplers={} encoders={} | cache pipelines={} shader_modules={} layouts={} hits={}",
+            own_gpu_mib(),
+            c.buffer_memory.read(),
+            c.texture_memory.read(),
+            c.memory_allocations.read(),
+            c.buffers.read(),
+            c.textures.read(),
+            c.texture_views.read(),
+            c.bind_groups.read(),
+            c.bind_group_layouts.read(),
+            c.render_pipelines.read(),
+            c.pipeline_layouts.read(),
+            c.shader_modules.read(),
+            c.samplers.read(),
+            c.command_encoders.read(),
+            s.pipelines,
+            s.shader_modules,
+            s.layouts,
+            s.hits,
+        );
+    }
+
+    /// A still renderer drawing for `screen`.
+    fn sized_host(name: &str, screen: (u32, u32)) -> Hosted {
+        let dir = std::env::temp_dir().join(format!("cubarium-hosted-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = dir.join("still.toml");
+        std::fs::write(
+            &config,
+            "tilt_degrees = 30.0\npx_per_voxel = \"auto\"\nlighting = \"lit\"\ntextures = false\nvine_tiles = false\n\n[light]\nsky_fade_s = 0.2\n",
+        )
+        .unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let host = Hosted::new(HostedOptions { config, root, screen, fps: 120.0, highlight_mix: 0.4 });
+        let _ = std::fs::remove_dir_all(&dir);
+        host.expect("a hosted renderer")
+    }
+
+    fn world(width: u32, height: u32, mark: u32) -> Prepared {
+        let c = cubarium_voxel::Config { width, height, depth: 6, ..Default::default() };
+        Prepared {
+            world: sheltered(&c, mark),
+            flora: Flora::new(cubarium_voxel_flora::FloraConfig::default()),
+            fauna: Fauna::new(cubarium_voxel_fauna::FaunaConfig::default()),
+            label: String::new(),
+            exec: cubarium_session::SimParams::default(),
+        }
+    }
+
+    /// **Measurement, not a check.** Rounds of four preview cards (worlds and screens of
+    /// varied sizes), each staged to its settled picture, released and dropped as the
+    /// picker does; then the live world opened and closed twice. Prints a `PROBE` line per
+    /// round: this process's GPU memory, wgpu's internal counters (non-zero only with the
+    /// `gpu-counters` feature) and the resident pipeline cache. Run:
+    /// `cargo test -p cubarium --features gpu-counters --lib preview_rounds_gpu_memory -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn preview_rounds_gpu_memory() {
+        let _queues = preview_queues();
+        if !gpu_here() {
+            return;
+        }
+        report("start");
+        let widths = [24u32, 40, 64, 32, 96, 48, 128, 28, 80, 56];
+        let screens = [(256u32, 128u32), (320, 180), (200, 112), (384, 216), (288, 160)];
+        for (round, &w) in widths.iter().enumerate() {
+            let hosts: Vec<Hosted> = (0..4)
+                .map(|k| {
+                    let host = sized_host(&format!("r{round}c{k}"), screens[(round + k) % screens.len()]);
+                    *host.shared.light_wait.lock().unwrap() = Duration::from_secs(10);
+                    host
+                })
+                .collect();
+            for (k, host) in hosts.iter().enumerate() {
+                let p = Arc::new(world(w + 8 * k as u32, 10 + (round as u32 % 3) * 4, 1000 + 10 * round as u32 + k as u32));
+                host.show_still(move || Some(p), k, true);
+            }
+            for host in &hosts {
+                frames_until(host, Duration::from_secs(60), |f| f.iter().any(|f| f.settled));
+                host.release();
+            }
+            drop(hosts);
+            report(&format!("preview{}", round + 1));
+        }
+        for round in 0..2 {
+            let session = cubarium_session::Session::new(cubarium_session::SessionOptions {
+                exec: cubarium_session::SimParams { threads: 2, ..cubarium_session::SimParams::default() },
+                ..cubarium_session::SessionOptions::default()
+            });
+            session.install(world(64 + 32 * round, 14, 2000 + round));
+            let host = sized_host(&format!("live{round}"), (480, 270));
+            session.set_hook(Some(host.hook()));
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let mut frames = 0;
+            while Instant::now() < deadline && frames < 30 {
+                while host.take_frame().is_some() {
+                    frames += 1;
+                }
+                if let Some(e) = host.error() {
+                    panic!("the live renderer failed: {e}");
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            report(&format!("live{}+", round + 1));
+            session.set_hook(None);
+            session.close();
+            drop(host);
+            drop(session);
+            report(&format!("live{}-", round + 1));
+            eprintln!("PROBE live{} frames={frames}", round + 1);
+        }
+        let gpu = super::super::warm::shared_gpu().unwrap();
+        gpu.device.poll(wgpu::PollType::Poll).unwrap();
+        report("polled");
+    }
 }

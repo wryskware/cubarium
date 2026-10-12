@@ -22,6 +22,9 @@ test = true
 # `examples/pack_profile.rs`'s per-phase pack times. Off, the phase marks compile to
 # nothing (`sink/gpu/pack_timer.rs`).
 pack-profile = []
+# wgpu's internal resource and memory counters, for the GPU memory probe in
+# `sink/gpu/hosted.rs` (diagnostics only).
+gpu-counters = ["cubarium-gpu/counters"]
 
 [dependencies]
 # Byte views of `Pod` data with no `unsafe` (the pack's terrain compare).
