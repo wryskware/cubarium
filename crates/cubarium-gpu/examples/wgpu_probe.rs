@@ -314,7 +314,7 @@ fn present_smoke(gpu: &Gpu) -> Result<()> {
     );
     let source_view = source.create_view(&Default::default());
     let mut output = Headless::new(gpu, size, 2)?;
-    let present = PresentPass::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let present = PresentPass::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb)?;
     let pixels: Vec<u8> = (0..size.1)
         .flat_map(|y| {
             (0..size.0)

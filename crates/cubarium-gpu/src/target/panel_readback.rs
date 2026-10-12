@@ -15,23 +15,17 @@ pub struct PanelImage {
     target: Headless,
     scanout: ScanoutBuffer,
     size: (u32, u32),
-    latest: Vec<u8>,
 }
 
 impl PanelImage {
     pub fn new(gpu: &Gpu, size: (u32, u32)) -> Result<Self> {
         let target = Headless::new(gpu, size, 1)?;
         let mut scanout = ScanoutBuffer::new(Path::new("/dev/dri/card0"), size.0, size.1)?;
-        let mut latest = vec![0; size.0 as usize * size.1 as usize * 4];
-        for pixel in latest.chunks_exact_mut(4) {
-            pixel[3] = 255;
-        }
-        scanout.write_rgba(&latest)?;
+        scanout.clear();
         Ok(Self {
             target,
             scanout,
             size,
-            latest,
         })
     }
 
@@ -43,8 +37,8 @@ impl PanelImage {
         self.scanout.pitch()
     }
 
-    pub fn rgba(&self) -> &[u8] {
-        &self.latest
+    pub fn rgba(&self) -> Vec<u8> {
+        self.scanout.read_rgba()
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
@@ -68,14 +62,14 @@ impl PanelImage {
 
     /// Finish readback and the CPU copy before promising a finished buffer to DRM.
     pub fn wait(&mut self, gpu: &Gpu) -> Result<()> {
-        let mut completed = None;
-        self.target
-            .readback
-            .drain(gpu, |_, rgba| completed = Some(rgba.to_vec()))?;
-        let rgba = completed.ok_or_else(|| anyhow::anyhow!("panel frame was not submitted"))?;
-        self.scanout.write_rgba(&rgba)?;
-        self.latest = rgba;
-        Ok(())
+        let mut completed = false;
+        let mut copied = Ok(());
+        self.target.readback.drain_rows(gpu, |_, rows| {
+            completed = true;
+            copied = self.scanout.write_rows(rows.data, rows.stride);
+        })?;
+        ensure!(completed, "panel frame was not submitted");
+        copied
     }
 
     pub fn draw<S: FrameSource>(
@@ -101,8 +95,9 @@ impl PanelImage {
             source.frame_discarded();
             return Err(error);
         }
-        self.wait(gpu)?;
+        let result = self.wait(gpu);
         source.frame_retired();
+        result?;
         Ok(source.gpu_ms(gpu))
     }
 }

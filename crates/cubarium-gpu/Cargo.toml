@@ -18,6 +18,7 @@ serde_json = "1"
 wgpu = { version = "=30.0.1", features = ["spirv", "naga-ir"] }
 naga = { version = "=30.0.1", features = ["glsl-in", "msl-out", "hlsl-out", "wgsl-out"] }
 pollster = "0.4"
+sha2 = "0.10"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 drm = { version = "0.15", optional = true }
@@ -29,6 +30,7 @@ default = ["scanout"]
 scanout = ["dep:drm", "dep:rustix"]
 # wgpu's internal resource and memory counters (diagnostics only).
 counters = ["wgpu/counters"]
+gpu-counters = ["counters"]
 
 [[example]]
 name = "synthetic"

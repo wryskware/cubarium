@@ -40,7 +40,7 @@ fn root() -> std::path::PathBuf {
 /// at all, which is not a failure of the renderer.
 fn render(layout: RingLayout) -> Option<Vec<u8>> {
     let atlas = Atlas::load(&root().join("../../assets/atelier")).expect("load assets/atelier");
-    let gpu = match Gpu::open() {
+    let gpu = match Gpu::open_with_cache_dir(None) {
         Ok(gpu) => gpu,
         Err(e) => {
             eprintln!("no GPU device here ({e}); the golden image was not checked");
@@ -159,7 +159,7 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
     // The raster is kept entirely above the horizon and its fields are all zero, so the
     // background is the flat night floor and every other colour is the sprite's.
     let atlas = Atlas::load(&root().join("../../assets/atelier")).expect("load assets/atelier");
-    let gpu = match Gpu::open() {
+    let gpu = match Gpu::open_with_cache_dir(None) {
         Ok(gpu) => gpu,
         Err(e) => {
             eprintln!("no GPU device here ({e}); the pixel grid was not checked");

@@ -66,6 +66,18 @@ mod window_host;
 mod window_target;
 pub use target::{GpuTarget, GpuTargetKind};
 
+/// Unit tests never save caches to the application's user directory.
+fn open_device() -> anyhow::Result<cubarium_gpu::Gpu> {
+    #[cfg(test)]
+    {
+        cubarium_gpu::Gpu::open_with_cache_dir(None)
+    }
+    #[cfg(not(test))]
+    {
+        cubarium_gpu::Gpu::open()
+    }
+}
+
 #[path = "gpu/light.rs"]
 mod light;
 mod palette;

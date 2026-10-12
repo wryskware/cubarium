@@ -1,0 +1,11 @@
+# Performance restoration verification
+
+`run.py` takes a repository, exact branch commit, the worktree's existing target cache, frozen parity fixture and baseline benchmark world. `launch.sh` is the single six-hour timeout. Submit it as one local labd command task with eight threads, one L3 group and `CUBARIUM_GPU=5090`. It runs GPU tests serially through the existing nextest GPU group, workspace tests, the port-to-branch capture matrix and strict comparator, then the trimmed ash-to-branch benchmarks. Failures are recorded while later cases continue; it never waits for another job.
+
+The five `gpu-parity-*.json` files are portable copies of the port's specs. The runner substitutes `{tree}`, `{runner_tree}`, `{fixture}`, `{out}`, `{arm}`, `{commit}` and `{bin}`. The port arm is `ce035f3a`. Both present suites use the port's captured raster as input.
+
+Results: `gpu-tests.log`, `workspace-tests.log`, `comparator.log`, `comparison.json`, `results.txt` and `stages.json`. Final local markers are `DONE` / `FAIL`; the desktop benchmark additionally writes `desktop/DONE` / `desktop/FAIL` and `desktop/summary.md`. Source snapshots are temporary and are removed after the chain; Git commits record source history. The frame diagnostic patch is applied only to benchmark snapshots, with its SHA-256 recorded in `benchmark-source.json`.
+
+The remote baseline is checked exactly once after local validation and benchmark builds. Without `~/bench-wgpu/DONE` or `FAIL`, the remote arm is left untouched and `voidrunner-FAIL` explains why it was not launched. Once that gate passes, the remote chain runs detached with its own single six-hour timeout in the supplied task directory, with `DONE` / `FAIL`, `out/summary.md` and `chain.log`. It reuses the baseline's world and one remote build cache. The window scenario uses the snapshot's private Xvfb wrapper; process sampling follows the actual binary through that wrapper. Each simulation run uses `run-study.py` on its execution host.
+
+Default matrices retain baseline headless60, headless240, churn60, cold and warm scenarios; the remote adds window60. Main, cold and warm cases run two repeats of 45 seconds; the existing 20-second proof per arm remains. The parent should compare the remote window results with care because the private display differs from a visible compositor. No desktop window is launched.

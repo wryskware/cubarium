@@ -146,7 +146,7 @@ impl Bloom {
             .into_iter()
             .map(|(mode, source, target, src)| {
                 let view = source.map_or(&emission.view, |i| &targets[i].view);
-                let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                let bind = gpu.bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("bloom pass"),
                     layout: &layout,
                     entries: &[
@@ -222,11 +222,11 @@ impl Bloom {
                 cache: None,
             })
         };
-        let cell = pipeline(wgpu::TextureFormat::Rgba16Float, None);
+        let cell = pipeline(wgpu::TextureFormat::Rgba16Float, None)?;
         let add = pipeline(
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-        );
+        )?;
         Ok(Self {
             emission: emission.view,
             _emission: emission._texture,

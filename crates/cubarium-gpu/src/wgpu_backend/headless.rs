@@ -44,7 +44,7 @@ impl Headless {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         );
         let view = texture.create_view(&Default::default());
-        let present = PresentPass::new(gpu, texture.format());
+        let present = PresentPass::new(gpu, texture.format())?;
         let transform = crate::present::WindowFit::fit(source.raster_size(), size, false).push();
         Ok(Self {
             output: Some(Output {
@@ -67,20 +67,26 @@ impl Headless {
         let mut encoder = gpu.encoder("headless frame");
         source.record_frame(gpu, &mut encoder, frame, None)?;
         if let Some(output) = &self.output {
-            output.present.record(
+            let shown = output.present.record(
                 gpu,
                 &mut encoder,
                 source.raster_view(),
                 &output.view,
                 output.transform,
             );
+            if !shown {
+                drop(encoder);
+                source.frame_discarded();
+                anyhow::bail!("headless present recording failed");
+            }
         }
         let submission = gpu.queue.submit([encoder.finish()]);
-        gpu.device.poll(wgpu::PollType::Wait {
+        let result = gpu.device.poll(wgpu::PollType::Wait {
             submission_index: Some(submission),
             timeout: Some(Duration::from_secs(30)),
-        })?;
+        });
         source.frame_retired();
+        result?;
         Ok(source.gpu_ms(gpu))
     }
 
@@ -109,6 +115,6 @@ pub fn read_texture(gpu: &Gpu, texture: &wgpu::Texture) -> Result<Vec<u8>> {
     let mut ring = ReadbackRing::new(gpu, (texture.width(), texture.height()), 1)?;
     ring.submit(gpu, gpu.encoder("headless readback"), texture, 0)?;
     let mut bytes = Vec::new();
-    ring.drain(gpu, |_, pixels| bytes.extend_from_slice(pixels))?;
+    ring.drain_rows(gpu, |_, pixels| pixels.copy_into(&mut bytes))?;
     Ok(bytes)
 }

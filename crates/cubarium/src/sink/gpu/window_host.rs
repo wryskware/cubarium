@@ -147,7 +147,7 @@ impl WindowHost {
         if let Some(error) = self.events.error.take() {
             return Err(error);
         }
-        Ok(!self.events.quit)
+        Ok(self.is_open())
     }
 
     pub fn take_save(&mut self) -> bool {
