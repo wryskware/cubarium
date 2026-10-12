@@ -437,3 +437,12 @@ size (`[plants] light_by_size`, default on).
   probably the weighted path's register pressure, not its lookups.
 - **Next ideas:** keep the specialization and gate inside it, slim the weighted path's
   registers, or select the weighted pipeline only when changing cells are on screen.
+
+## 24. Seedporter mothers carry their young (Wrysk, 2026-10-12: "we might add carrying later for seedporters. but would require a model yeah so backlog.")
+
+Real primate infants ride on the mother, so they are always in reach of milk. SP-NURSE
+(fd1a5c90) passes milk only within 0.5 m. Its 8-seed check (`1011-204110-nurse-groom`) found
+the young a median 9–24 m from their mothers, in contact 1–2 % of dependent time.
+- SP-FOLLOW (2026-10-12) makes the young walk and climb to her instead.
+- Carrying needs a carry pose on the seedporter rig (a model and art: Wrysk's call) and a
+  rider-style attachment like the lanternjaw larva's.
