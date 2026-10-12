@@ -91,11 +91,11 @@ fn main() {
                 for seed in 0..seeds {
                     let (sim, _) = world::found_world(
                         &world::training_config(),
-                        7 + seed * 1000,
+                        3001 + seed * 1000,
                         ecology.fauna().founder_counts_without_egg_bank(),
                         &ecology,
                     );
-                    let scene = SavedScene { start: SimStart::capture(&sim, &[]), ticks, centres: Vec::new(), threads: th, water_every: 1 };
+                    let scene = SavedScene { start: SimStart::capture(&sim, &[]), ticks, centres: Vec::new(), threads: th, water_every: cubarium_voxel_sim::EXPERIMENT_WATER_EVERY };
                     let lineages: Vec<Founder> = Founder::ALL.into_iter().filter(|f| sim.fauna().view().animals.iter().any(|a| a.founder == Some(*f))).collect();
                     run(&format!("live-threads{th}"), &scene, &lineages, 2, &mut rows);
                 }
