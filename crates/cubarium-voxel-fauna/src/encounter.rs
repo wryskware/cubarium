@@ -438,6 +438,10 @@ pub struct DropWay {
     pub at: u8,
 }
 
+/// SP-STUCK-2: the jumps after the first a trapped body's way down may take
+/// ([`RouteGraph::drop_way`]): one, a jump in two. A cost bound, not a knob.
+pub const DROP_HOPS: u32 = 1;
+
 /// SP-STUCK: the points of its landing column a jump down may come down on, as offsets from
 /// the column's centre to its sides (×½ voxel, less a hair): the centre, then each side, then
 /// each corner. On a terraced slope every face is a voxel deep with a riser behind it, and a
@@ -935,6 +939,13 @@ impl RouteGraph {
     /// `own_cols`, else [`RouteGraph::way_on`] out to `max_cols`): never onto an island, nor
     /// back into its own pocket. Of those, the shallowest drop, then the nearest pocket face.
     /// Never a climb, and never a route: the graph's own edges stay within the step.
+    ///
+    /// **SP-STUCK-2, a jump in two**: when no landing reaches the graph, a landing in a lower
+    /// pocket from which a jump of its own does ([`DROP_HOPS`]) is taken: the shallowest
+    /// first jump, then the nearest pocket face. A seedporter on a shelf a voxel deep in a
+    /// cliff of such shelves (s5, 2026-10-11) had its next shelf five layers down, itself
+    /// cornered with the floor ten layers under it, both within its reach; no single jump
+    /// reached its graph, so it never jumped, and starved there for hours.
     #[allow(clippy::too_many_arguments)]
     pub fn drop_way(
         &self,
@@ -948,6 +959,25 @@ impl RouteGraph {
         wade_m: f64,
         own_cols: u32,
         max_cols: u32,
+    ) -> Option<DropWay> {
+        self.drop_way_hops(view, site, xz, r, headroom, step, reach, wade_m, own_cols, max_cols, DROP_HOPS)
+    }
+
+    /// [`RouteGraph::drop_way`], with `hops` further jumps allowed after this one.
+    #[allow(clippy::too_many_arguments)]
+    fn drop_way_hops(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        xz: (f64, f64),
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        reach: u32,
+        wade_m: f64,
+        own_cols: u32,
+        max_cols: u32,
+        hops: u32,
     ) -> Option<DropWay> {
         if reach <= step.down {
             return None;
@@ -1088,14 +1118,31 @@ impl RouteGraph {
             }
         }
         jumps.sort_by_key(|&(layers, order, _, _, _, at)| (layers, order, at));
-        jumps.into_iter().find_map(|(_, order, from, land, edge, at)| {
-            if seen.contains_key(&land) {
-                return None;
-            }
+        jumps.retain(|j| !seen.contains_key(&j.3));
+        let way = |&(_, order, from, land, edge, at): &(u32, usize, Site, Site, Site, u8)| DropWay { from, land, edge, first: pocket[order].1, at };
+        let direct = jumps.iter().find(|&&(_, _, _, land, _, at)| {
             let p = drop_landing(land, at, v, self.width);
-            let reached = on(land, p) || self.way_on(view, land, p, r, headroom, step, wade_m, own_cols, max_cols).is_some();
-            reached.then(|| DropWay { from, land, edge, first: pocket[order].1, at })
-        })
+            on(land, p) || self.way_on(view, land, p, r, headroom, step, wade_m, own_cols, max_cols).is_some()
+        });
+        if let Some(j) = direct {
+            return Some(way(j));
+        }
+        if hops == 0 {
+            return None;
+        }
+        // A jump in two: into a lower pocket with a jump on of its own. Each landing face is
+        // asked once, from its first landing point.
+        let mut asked: FxHashMap<Site, ()> = FxHashMap::default();
+        jumps
+            .iter()
+            .find(|&&(_, _, _, land, _, at)| {
+                if asked.insert(land, ()).is_some() {
+                    return false;
+                }
+                let p = drop_landing(land, at, v, self.width);
+                self.drop_way_hops(view, land, p, r, headroom, step, reach, wade_m, own_cols, max_cols, hops - 1).is_some()
+            })
+            .map(way)
     }
 
     /// **WADE-OUT, the way out through the water**: for a body held on `site` — out of its

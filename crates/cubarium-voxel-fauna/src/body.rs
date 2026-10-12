@@ -3942,6 +3942,13 @@ impl ContactReading {
 /// exactly. A body that stands still while embedded in the riser it just stepped off is
 /// the one case the receptor does not describe (see `advance_candidate`); it reads clear
 /// there, which is what a body that can step away from it should read.
+///
+/// **SP-STUCK-2**: a probe reads solid only when its column is solid at the body's own
+/// layer as well as at the step up. Under a roof the step up is the roof, and a capgnawer on
+/// a ledge under an overhang, its roof two layers over its feet, read a wall ahead, left and
+/// right wherever it stood, turned on the spot for hours, and never walked to the ledge's
+/// edge to climb down. A roof is not a wall; one too low to pass under refuses the motor
+/// instead. `climb = 0` still reproduces the old reading exactly.
 pub(crate) fn contact_readings(
     view: &VoxelView<'_>,
     pose: &crate::Pose,
@@ -3958,10 +3965,11 @@ pub(crate) fn contact_readings(
     }
     // A probe above the world is open sky, not a wall; one past the strip's `z` edge is
     // a wall at any height (D4).
-    let layer = body.contact_layer(standing_y, c.voxel_m) + climb;
+    let own = body.contact_layer(standing_y, c.voxel_m);
+    let layer = own + climb;
     let r = body.footprint_radius();
     let wx = cx.rem_euclid(i64::from(c.width));
-    let arc = |centre: f64| boundary_arc(view, pose, r, layer, centre);
+    let arc = |centre: f64| boundary_arc(view, pose, r, own, layer, centre);
     ContactReading {
         front: arc(pose.heading_rad),
         left: arc(pose.heading_rad - std::f64::consts::FRAC_PI_2),
@@ -3977,8 +3985,9 @@ pub(crate) fn contact_readings(
 /// standing on. A body smaller than a voxel that touches a solid covers at least one
 /// probe. A probe past the strip's `z` edge is solid (D4) — the sweep's clamp holds the
 /// disc exactly at the edge, so a body pressed there reads it the way it reads a wall; a
-/// probe above the world is open.
-fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, centre: f64) -> f64 {
+/// probe above the world is open. A probe is solid when its column is solid at `layer`
+/// and at the body's own layer `own` (SP-STUCK-2: a roof over the body is not a wall).
+fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, own: u32, layer: u32, centre: f64) -> f64 {
     let c = view.config;
     let probe = r * (1.0 + 1e-6);
     for da in [
@@ -3997,7 +4006,7 @@ fn boundary_arc(view: &VoxelView<'_>, pose: &crate::Pose, r: f64, layer: u32, ce
             continue;
         }
         let wx = ((px / c.voxel_m).floor() as i64).rem_euclid(i64::from(c.width));
-        if view.material_at(wx, layer, z as u32).is_solid() {
+        if view.material_at(wx, layer, z as u32).is_solid() && view.material_at(wx, own, z as u32).is_solid() {
             return 1.0;
         }
     }
@@ -4911,7 +4920,13 @@ fn observation_v2(
     obs[cm.offset] = reading.front;
     obs[cm.offset + 1] = reading.left;
     obs[cm.offset + 2] = reading.right;
-    obs[cm.offset + 3] = reading.underside;
+    // SP-STUCK-2: on a face nothing is under the body until its climb ends. Down a cliff its
+    // receptors read from the layer its feet have reached, rounded, over the column it hangs
+    // in: the last half voxel above the foot read the foot's face as ground under it. Its
+    // forager then took the face for a floor and a wall ahead, and turned, which on a face
+    // backs it up; up again, it read the face, climbed on, and so on — capgnawer juveniles
+    // hung half a voxel above a cliff's foot for hours.
+    obs[cm.offset + 3] = if a.mobility.climb.is_some() { 0.0 } else { reading.underside };
     obs[cm.offset + 4] = valid;
     obs[wm.offset] = reading.wet;
     obs[wm.offset + 1] = valid;
