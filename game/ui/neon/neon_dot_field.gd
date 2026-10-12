@@ -24,6 +24,13 @@ extends Control
 ##   sits in is pressed (held or toggled on) or disabled; dot_min_gap where unset. They let
 ##   one label (the main button's keycap) be a solid plate at rest and dotted pressed or
 ##   disabled (Wrysk's picks, 2026-10-11).
+## - dot_gap_fill: percent of a dot's light (0-100) that the rest of its pitch x pitch cell
+##   (the gap pixels around it) carries, in the same colour, where dot_min_gap leaves a gap.
+##   It fills plate cells only (the drawn zones), never the letters' cells, so a dotted
+##   negative plate reads as full-strength dots over a fainter plate with dark letters cut
+##   out (Wrysk's in-between pick, 2026-10-11). 0: gaps stay empty.
+## - dot_gap_fill_pressed, dot_gap_fill_disabled: dot_gap_fill while the label's button is
+##   pressed or disabled, as dot_min_gap_pressed / _disabled; dot_gap_fill where unset.
 ## - dot_fill_spacing: 1 also fills the letter-spacing columns (spacing_glyph) with RECT
 ##   dots; 0 leaves them empty, as the font does.
 ##
@@ -35,6 +42,7 @@ enum Layer { TEXT, SHADOW }
 const LIGHT_DEFAULT := 100
 const MIN_GAP_DEFAULT := 0
 const FILL_SPACING_DEFAULT := 0
+const GAP_FILL_DEFAULT := 0
 
 @export var color := Color(0.97, 0.94, 1.0, 0.5):
 	set(v):
@@ -194,6 +202,12 @@ static func draw_glyph_zones(ci: CanvasItem, font: Font, font_size: int, glyphs:
 		var col := Color(c, c.a * d.alpha)
 		var half := Vector2(n, n) / 2.0
 		var rect_size := Vector2(n, n)
+		# the gap pixels of each dot's cell, at dot_gap_fill of the dot's light (only where
+		# dot_min_gap keeps the dot smaller than its cell)
+		var gap_rects: Array[Rect2] = []
+		var gap_col := Color(c, c.a * d.alpha * knobs.gap_fill / 100.0)
+		if knobs.min_gap > 0 and n < pi and gap_col.a > 0.0:
+			gap_rects = _gap_rects(pi, n)
 		for g in glyphs:
 			if g.index < 0:
 				continue
@@ -210,7 +224,26 @@ static func draw_glyph_zones(ci: CanvasItem, font: Font, font_size: int, glyphs:
 					# a centre on a pixel corner takes the n × n pixels around it (n even), or
 					# sits half a pixel right and below (n odd): whole canvas pixels either way
 					var at: Vector2 = o + off + Vector2(g.pen.x + k * p, y) - half + Vector2(0.501, 0.501)
-					ci.draw_rect(Rect2(at.floor() - o, rect_size), col)
+					var dot_at := at.floor() - o
+					ci.draw_rect(Rect2(dot_at, rect_size), col)
+					for r2 in gap_rects:
+						ci.draw_rect(Rect2(dot_at + r2.position, r2.size), gap_col)
+
+
+## The rest of a `pitch` x `pitch` cell around an `n` x `n` dot, as rects relative to the
+## dot's top-left: the cell lies (pitch - n) / 2 px out from the dot on each side, rounded
+## the way the dot's own centre rounds (an odd remainder puts the extra pixel left/above).
+static func _gap_rects(pitch: int, n: int) -> Array[Rect2]:
+	var lead := int(ceilf((pitch - n) / 2.0))
+	var trail := pitch - n - lead
+	var res: Array[Rect2] = []
+	if lead > 0:
+		res.append(Rect2(-lead, -lead, pitch, lead))  # above, full width
+		res.append(Rect2(-lead, 0, lead, n))  # left
+	if trail > 0:
+		res.append(Rect2(-lead, n, pitch, trail))  # below, full width
+		res.append(Rect2(n, 0, trail, n))  # right
+	return res
 
 
 ## Where the font really draws a glyph whose pen position is `pen` (in `ci`'s px): on the
@@ -252,7 +285,8 @@ static func _button_state(c: Control) -> StringName:
 
 
 static func _knobs(c: Control, own_type: bool, state := &"") -> Dictionary:
-	var k := {"light": LIGHT_DEFAULT, "min_gap": MIN_GAP_DEFAULT, "fill_spacing": FILL_SPACING_DEFAULT != 0}
+	var k := {"light": LIGHT_DEFAULT, "min_gap": MIN_GAP_DEFAULT, "fill_spacing": FILL_SPACING_DEFAULT != 0,
+		"gap_fill": GAP_FILL_DEFAULT}
 	if c == null:
 		return k
 	var t: StringName = &"" if own_type else &"Label"
@@ -263,6 +297,11 @@ static func _knobs(c: Control, own_type: bool, state := &"") -> Dictionary:
 		gap = StringName("dot_min_gap_" + state)
 	if c.has_theme_constant(gap, t):
 		k.min_gap = c.get_theme_constant(gap, t)
+	var fill := &"dot_gap_fill"
+	if state != &"" and c.has_theme_constant(StringName("dot_gap_fill_" + state), t):
+		fill = StringName("dot_gap_fill_" + state)
+	if c.has_theme_constant(fill, t):
+		k.gap_fill = clampi(c.get_theme_constant(fill, t), 0, 100)
 	if c.has_theme_constant("dot_fill_spacing", t):
 		k.fill_spacing = c.get_theme_constant("dot_fill_spacing", t) != 0
 	return k

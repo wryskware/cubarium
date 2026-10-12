@@ -18,11 +18,16 @@ extends RefCounted
 ##   not the second button's plate, the negative or the pressed plate) at dot_light 270 %:
 ##   about the light trial B's flat 0.51 field puts on plain chrome labels, keeping the
 ##   BACK:RECT ratio. (B's 0.51 matches today's light on the second button's plate.)
+## - gapNN (gap25, gap40, ...): new, with the dotted negative plates' gaps filled at NN %
+##   of the dot's light (dot_gap_fill NN on NEGATIVE_PLATES; the gap-fill ladder).
+## - solid: new, with the negative plates solid (dot_min_gap 0 on NEGATIVE_PLATES).
 
 const TITLE_FONT := "res://ui/neon/fonts/title.tres"
 const B_ALPHA := {"title": 0.86, "chrome": 0.51}
 const BRIGHT_CHROME := 270
 const THEME := "res://ui/neon/neon_theme.tres"
+## The dotted negative plates of Wrysk's picks (2026-10-11) and the pressed main label.
+const NEGATIVE_PLATES := [&"TabLabelSelected", &"ButtonLabelMain", &"ButtonLabelMainPressed"]
 
 
 ## The changed theme, held so the resource cache keeps it (and its fonts) for the run.
@@ -45,6 +50,14 @@ static func apply(theme: Theme, variant: String) -> void:
 		"fill":
 			theme.set_constant("dot_fill_spacing", "Label", 1)
 			return
+		"solid":
+			for t in NEGATIVE_PLATES:
+				theme.set_constant("dot_min_gap", t, 0)
+			return
+	if variant.begins_with("gap") and variant.substr(3).is_valid_int():
+		for t in NEGATIVE_PLATES:
+			theme.set_constant("dot_gap_fill", t, variant.substr(3).to_int())
+		return
 	var done := {}
 	for type in theme.get_font_type_list():
 		if not theme.has_font("font", type):

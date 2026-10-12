@@ -466,6 +466,7 @@ Kicker/styles/normal = SubResource("StyleBoxEmpty_oqeuo")
 Label/colors/font_color = Color(0.8627451, 0.81960785, 0.96862745, 1)
 Label/colors/font_shadow_color = Color(0, 0, 0, 0)
 Label/constants/dot_fill_spacing = 1
+Label/constants/dot_gap_fill = 0
 Label/constants/dot_light = 100
 Label/constants/dot_min_gap = 0
 Label/constants/dot_min_gap_disabled = 1
