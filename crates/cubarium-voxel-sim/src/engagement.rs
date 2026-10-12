@@ -285,6 +285,8 @@ pub struct Episode {
     abandoned: bool,
     outcome: Option<Outcome>,
     family_flee_ticks: u64,
+    calf_chases: u64,
+    adult_chases: u64,
 }
 
 /// Found a start with stable IDs for all seven roster slots, even in smaller arms.
@@ -510,6 +512,8 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         abandoned: false,
         outcome: None,
         family_flee_ticks: 0,
+        calf_chases: 0,
+        adult_chases: 0,
     })
 }
 
@@ -544,6 +548,24 @@ pub struct RowOut {
     pub captures: Option<u64>,
     pub kills: usize,
     pub family_flee_ticks: u64,
+    /// VH-TACTICS readouts (the fauna ledger; zero on the old tactic): tests begun, tests
+    /// that ended in a commitment, hunts given up (a test broken off or a chase given up),
+    /// strikes on a substituted young body, lunges that met a body before their prey.
+    #[serde(default)]
+    pub hound_tests: u64,
+    #[serde(default)]
+    pub test_commits: u64,
+    #[serde(default)]
+    pub give_ups: u64,
+    #[serde(default)]
+    pub substitutions: u64,
+    #[serde(default)]
+    pub lunges_blocked: u64,
+    /// Chases started on the calf and on an adult (ChaseStart events).
+    #[serde(default)]
+    pub calf_chases: u64,
+    #[serde(default)]
+    pub adult_chases: u64,
 }
 impl Episode {
     /// Step once and read state/events. Does not infer giving up or death from positions.
@@ -596,6 +618,11 @@ impl Episode {
                     if pack == self.pack && family.contains(&target) =>
                 {
                     self.chases += 1;
+                    if self.calf == Some(target) {
+                        self.calf_chases += 1;
+                    } else {
+                        self.adult_chases += 1;
+                    }
                     self.abandoned = false;
                 }
                 PackEvent::ChaseEnd {
@@ -630,17 +657,37 @@ impl Episode {
             .hounds
             .iter()
             .all(|&id| fauna.view().animal(id).is_none())
-            || (self.abandoned
-                && self.hounds.iter().all(|&id| {
-                    fauna.view().animal(id).is_none()
-                        || fauna.view().animal(id).is_some_and(|a| a.homing_ticks > 0)
-                }))
+            || (self.abandoned && self.hounds.iter().all(|&id| self.withdrawn(id)))
         {
             self.outcome = Some(Outcome::PackGaveUp);
         } else if self.tick >= self.limit {
             self.outcome = Some(Outcome::Timeout);
         }
         true
+    }
+    /// **A hound withdrawn from the family** (the give-up read): gone; or homeward
+    /// (`homing_ticks`); or, under VH-TACTICS, hunting no family member and in the rest after
+    /// a give-up (its memory's `gave_up_tick` within `rest_s`), at home or walked off.
+    fn withdrawn(&self, id: u64) -> bool {
+        let fauna = self.sim.fauna();
+        let view = fauna.view();
+        let Some(a) = view.animal(id) else { return true };
+        if a.homing_ticks > 0 {
+            return true;
+        }
+        let family: Vec<u64> = self.adults.iter().copied().chain(self.calf).collect();
+        let rest_s = view
+            .config
+            .founder(Founder::Chorister)
+            .pack
+            .map_or(0.0, |p| p.tactics.rest_s);
+        fauna.hound(id).is_some_and(|m| {
+            m.gave_up_tick > 0
+                && !m.target.is_some_and(|t| family.contains(&t))
+                && (view.tick.saturating_sub(m.gave_up_tick) as f64
+                    / f64::from(cubarium_voxel_fauna::TICK_HZ))
+                    < rest_s
+        })
     }
     pub fn done(&self) -> bool {
         self.outcome.is_some()
@@ -675,6 +722,13 @@ impl Episode {
             captures: None,
             kills: self.kills.len(),
             family_flee_ticks: self.family_flee_ticks,
+            hound_tests: self.sim.fauna().view().ledger.hound_tests,
+            test_commits: self.sim.fauna().view().ledger.hound_test_commits,
+            give_ups: self.sim.fauna().view().ledger.hound_give_ups,
+            substitutions: self.sim.fauna().view().ledger.hound_substitutions,
+            lunges_blocked: self.sim.fauna().view().ledger.lunges_blocked,
+            calf_chases: self.calf_chases,
+            adult_chases: self.adult_chases,
         }
     }
 }
@@ -767,6 +821,29 @@ mod tests {
             assert_eq!(body.age_ticks, other.age_ticks);
             assert_eq!(body.stomach, other.stomach);
         }
+    }
+    /// **The give-up read** (VH-TACTICS): a pack whose hounds give a hunt up on the first
+    /// sample (`give_up_value` above any value, `commit_value` below) ends the episode as
+    /// gave-up once every hound is withdrawn, with the give-ups on the row.
+    #[test]
+    fn a_pack_that_gives_up_ends_the_episode_as_gave_up() {
+        let mut cfg = fixture();
+        cfg.duration_s = 30.0;
+        cfg.distance_m = [2.0, 2.5];
+        let mut arm = cfg
+            .arms
+            .iter()
+            .find(|a| a.composition == Composition::Calf)
+            .cloned()
+            .expect("a lone-calf arm");
+        arm.sets = vec![
+            "fauna.founders.chorister.pack.tactics.give_up_value=1e9".into(),
+            "fauna.founders.chorister.pack.tactics.commit_value=-1e9".into(),
+        ];
+        let row = run(&cfg, 73, &arm).unwrap();
+        assert!(row.give_ups >= 1, "{row:?}");
+        assert_eq!(row.outcome, Outcome::PackGaveUp, "{row:?}");
+        assert_eq!(row.kills, 0);
     }
     #[test]
     fn harness_registry_covers_numeric_settings_and_refuses_invalid_input() {

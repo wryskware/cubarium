@@ -27,15 +27,22 @@ across compositions and pack sizes. A lone calf retains its absent mother's ID.
 the family and pack. Arms never participate in the random start.
 
 Rows use kill identity events plus recorded carcass consumption for a kill
-outcome. Giving up requires a recorded abandoned chase and homeward state for
-all survivors; all hounds gone also ends the encounter. Other episodes timeout.
+outcome. Giving up requires a recorded abandoned chase (or a test broken off)
+and every survivor withdrawn: homeward, or (VH-TACTICS) holding no family
+target and inside the rest after its own give-up (`Fauna::hound`'s
+`gave_up_tick` within `pack.tactics.rest_s`); all hounds gone also ends the
+encounter. Other episodes timeout.
 Wounds are sums/worst of each body's peak wound stock, with a recorded wound
 kill represented by stock 1. Hound deaths include every mortality cause in the
 fixed pack roster ledger, excluding setup removals. Encounters are distinct
 sensed hound/family pairs;
 tests are recorded BrokeOff chase endings, chases are ChaseStart events on the
 family, kills are exact family victim IDs. Captures are null: today's bites
-have no holding stage. These definitions are explicit and should be retained
+have no holding stage. VH-TACTICS adds the fauna ledger's `hound_tests` (tests
+begun), `test_commits`, `give_ups` (tests broken off and chases given up),
+`substitutions` and `lunges_blocked`, and ChaseStart counts split into
+`calf_chases` and `adult_chases`; `tests` keeps its BrokeOff definition (on the
+new tactic a value give-up also logs BrokeOff). These definitions are explicit and should be retained
 when comparing later arms; they are not position-based proxies.
 
 Run a short check through `lab quick`, for example:

@@ -4899,6 +4899,12 @@ impl Fauna {
         self.tap.as_ref()
     }
 
+    /// VH-TACTICS' readout (the engagement harness, census): Veilhound `id`'s tactical memory
+    /// ([`Hound`]), `None` before it has one. Bookkeeping: no rule reads another hound's.
+    pub fn hound(&self, id: u64) -> Option<&Hound> {
+        self.hounds.get(&id)
+    }
+
     /// EDGE's readout: which layer set the founder `id`'s held actions on its last
     /// controller sample, `None` before its first.
     pub fn steer_of(&self, id: u64) -> Option<Steer> {
