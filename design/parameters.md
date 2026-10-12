@@ -1013,7 +1013,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.seed_attrition_per_s` | 0.0001388888888888889 | /s | [0, inf) |  | C | derived | a banked seed's death rate |
 | `flora.glowcap.seed_max_age_s` | 7200.0 | s | [0, inf) | yes | B | placeholder | dormancy: a bin older than this falls to litter |
 | `flora.glowcap.seed_cohorts_max` | 4 | bins | [1, inf) |  | N | numerics | the bank's age resolution |
-| `flora.glowcap.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
+| `flora.glowcap.n_tissue` | 0.04 | mineral per org-unit | [0, inf) | 0.005–0.05 log | B | placeholder | stoichiometry of built tissue |
 | `flora.glowcap.reserve_share` | 0.2 | fraction | [0, inf) | 0–0.6 | C | placeholder | share of a tick's surplus to the reserve first |
 | `flora.glowcap.reflush_below` | 0.25 | fraction of P_cap | [0, inf) | 0–1 | C | placeholder | reserve funds foliage only below this |
 | `flora.glowcap.seedling_below` | 2.0 | multiple of alive_min | [0, inf) | 1–5 | C | placeholder | a seedling's reflush answers to its seed's leaf, not alpha, below this wood |
@@ -1542,7 +1542,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_wet_min_depth_m` | 0.01 | m | [0, inf) |  | - | placeholder | glassfilm: shallowest standing water a site is wet-eligible under (a residue is dry) |
 | `flora.film_gone_fraction` | 0.02 | fraction of capacity | [0, 1] |  | - | placeholder | glassfilm: dry film below this share of capacity dies whole to litter |
 | `flora.film_seed_per_m2` | 0.2 | org-units per m2 | [0, inf) |  | - | placeholder | glassfilm: founding film per square metre |
-| `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
+| `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
 **`fauna.*`** (4392 rows)
@@ -1589,7 +1589,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.frondgrazer.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.littershredder.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.littershredder.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.littershredder.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.littershredder.core.body_max` | 0.375 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.littershredder.core.growth_max_per_s` | 0.000102 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.littershredder.core.body_min` | 0.09375 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
@@ -2515,7 +2515,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000009722222222222223 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.lanternjaw.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.lanternjaw.core.body_max` | 1.05 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.lanternjaw.core.growth_max_per_s` | 0.00030000000000000003 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.lanternjaw.core.body_min` | 0.0525 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
@@ -2978,7 +2978,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.capgnawer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.capgnawer.core.body_max` | 0.6384 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.capgnawer.core.growth_max_per_s` | 0.00017364479999999998 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.capgnawer.core.body_min` | 0.1596 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
@@ -3904,7 +3904,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.ripple-snail.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.ripple-snail.core.body_max` | 0.1455552 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.ripple-snail.core.growth_max_per_s` | 0.0000395910144 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.ripple-snail.core.body_min` | 0.0363888 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
@@ -5293,7 +5293,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.chorister.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.chorister.core.body_max` | 2.7439999999999998 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.chorister.core.growth_max_per_s` | 0.00019599999999999997 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.chorister.core.body_min` | 0.26655999999999996 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
