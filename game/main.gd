@@ -88,6 +88,7 @@ var _hovered := -1
 
 func _ready() -> void:
 	_read_args()
+	WindowFit.fit_window(get_window())
 	_actions()
 	get_tree().auto_accept_quit = false
 	if not quit_hook.is_valid():

@@ -21,6 +21,9 @@ extends RefCounted
 ## - gapNN (gap25, gap40, ...): new, with the dotted negative plates' gaps filled at NN %
 ##   of the dot's light (dot_gap_fill NN on NEGATIVE_PLATES; the gap-fill ladder).
 ## - solid: new, with the negative plates solid (dot_min_gap 0 on NEGATIVE_PLATES).
+## - title-dotted: new, with roles whose pitch on screen is 4 px or more kept dotted when
+##   the UI is scaled (Label dot_scaled_keep_pitch 4: the 91 px title, 4.67 px at 0.667);
+##   everything else draws solid there as by default (ui-scale, 2026-10-11).
 
 const TITLE_FONT := "res://ui/neon/fonts/title.tres"
 const B_ALPHA := {"title": 0.86, "chrome": 0.51}
@@ -49,6 +52,9 @@ static func apply(theme: Theme, variant: String) -> void:
 			return
 		"fill":
 			theme.set_constant("dot_fill_spacing", "Label", 1)
+			return
+		"title-dotted":
+			theme.set_constant("dot_scaled_keep_pitch", "Label", 4)
 			return
 		"solid":
 			for t in NEGATIVE_PLATES:

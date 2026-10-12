@@ -277,8 +277,9 @@ func _draw() -> void:
 		var baseline := roundf(top_pad + track_height + names_gap + stop_font.get_ascent(stop_font_size))
 		var x := 0.0
 		for i in names.size():
-			draw_string(stop_font, Vector2(roundf(x), baseline), names[i], HORIZONTAL_ALIGNMENT_LEFT, -1,
-					stop_font_size, stop_on_color if i == index else stop_color)
+			if not NeonDotField.draws_letters(self, stop_font, stop_font_size):
+				draw_string(stop_font, Vector2(roundf(x), baseline), names[i], HORIZONTAL_ALIGNMENT_LEFT, -1,
+						stop_font_size, stop_on_color if i == index else stop_color)
 			NeonDotField.draw_string_field(self, stop_font, Vector2(roundf(x), baseline), names[i],
 					HORIZONTAL_ALIGNMENT_LEFT, -1, stop_font_size, stop_on_color if i == index else stop_color)
 			x += widths[i] + between

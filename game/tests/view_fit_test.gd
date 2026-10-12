@@ -39,6 +39,14 @@ func bounds(node: Control) -> Rect2:
 	return node.get_global_transform() * Rect2(Vector2.ZERO, node.size)
 
 
+## The first shown label in `node` whose font has a drawn Gridlite field.
+func gridlite_label(node: Node) -> Label:
+	for l in node.find_children("*", "Label", true, false):
+		if l.is_visible_in_tree() and not Gridlite.field_spec(l.get_theme_font("font")).is_empty():
+			return l
+	return null
+
+
 func run() -> void:
 	var canvas := Control.new()
 	canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -59,6 +67,14 @@ func run() -> void:
 		check(bounds(page.get_node("Scrim")).size.is_equal_approx(screen), "scrim covers %s" % screen)
 		check(window.encloses(bounds(inspector)), "inspector fits %s" % screen)
 		check(window.encloses(bounds(notices)), "notices fit %s" % screen)
+		# Gridlite text draws solid below scale 1 (its own glyphs hidden, the cells filled
+		# flat) and dotted at 1 (NeonDotField, "Scaled UI").
+		var chrome := gridlite_label(page)
+		var knobs := NeonDotField._knobs(chrome, true)
+		var size: int = chrome.get_theme_font_size("font_size")
+		var solid := NeonDotField.solid_at(chrome, size, knobs)
+		check(solid == (scale < 1.0), "Gridlite text solid only below scale 1 (%s, scale %.3f)" % [screen, scale])
+		check((chrome.self_modulate.a == 0.0) == (scale < 1.0), "label's own dotted glyphs hidden only while solid at %s" % screen)
 	canvas.queue_free()
 	await process_frame
 

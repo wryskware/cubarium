@@ -14,7 +14,7 @@ Recorded as D-0006, a living direction: when Wrysk changes something, update thi
 
 The direction is **pixel Neon diorama**. In his words: "something around pixel neon diorama lands best for me". He ruled out hybrid pixel/smooth.
 
-The UI is a 1920×1080 layout drawn at native pixels, with no stretch. On a 1440p screen it sits centred.
+The UI is a 1920×1080 layout drawn at native pixels, with no stretch. On a 1440p screen it sits centred. The window opens at 1920×1080, clamped to a smaller screen's usable area (his 2560×720 display: 1920×720). A window smaller than 1920×1080 shrinks the whole UI, and there Gridlite text draws solid: each dot zone and the letters fill their cells flat at the dotted version's light per area (Wrysk, 2026-10-11: "when we scale, we default back to solid").
 
 ## Type
 
