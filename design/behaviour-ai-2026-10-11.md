@@ -41,6 +41,7 @@ Evidence:
 | 7 | Does a calf treat its own mother differently (the record exists: `Animal::mother`, SP-NURSE) | **bond both ways** (Wrysk, 2026-10-12: "lets do A"), plus his addition: "young loftstriders and non-infant seedporters should have some level of curiosity to stray from their parent and explore though, increasing the older they get" (§3.5) |
 | 8 | How often the pack should win | **a rare feast** (Wrysk, 2026-10-12: "(a) makes sense"): about one loftstrider a world-year, mostly strayed calves; an adult once in several years (lone, lame or old); a standoff every 1–2 h that usually ends with the pack giving up; a hound killed by kicks about once in a few years. A target the knobs are turned to bracket, not a gate (§6) |
 | 9 | Look of the new poses (kick, guard stance, calf tucked in, hound crouch) | when there is something to show |
+| 10 | How training compares animals, so the family benefit survives scoring (Astra review #1–3) | asked (§11.7) |
 
 ## 1. What happens today
 
@@ -65,8 +66,9 @@ open ground, 10–31 m from the den):
   ever comes to it.
 - There is no kick, no counter-strike, armour 0 and agility 0. The `Counter` seam exists but
   only the lanternjaw uses it.
-- The loftstrider reads alarms only while asleep. It has one kin slot, no parent id, and
-  nothing ties a calf to its mother.
+- The loftstrider reads alarms only while asleep. It has one kin slot, and nothing in its
+  behaviour ties a calf to its mother. (At the survey, no parent id existed; `Animal::mother`
+  has since landed with SP-NURSE, §3.5.)
 
 **The pack is crude and partly telepathic:**
 - `pack::known` reads every awake packmate's prey tracks within 10 m straight from their
@@ -128,7 +130,7 @@ member can then see its group.
 |---|---|
 | Loftstrider | **Alarm snort.** An adult or juvenile that sees a pressing threat. |
 |  | **Distress bleat.** A calf chased, struck or alone with a threat. |
-| Veilhound | **Hunt cue.** On committing to or rushing a target; `subject` = the target. A packmate adopts it only if it senses the subject or the caller. It stands for "I can see which one it's after"; field studies report no hunting signals, only positioning (*eth §3.2*). |
+| Veilhound | **Hunt cue.** On committing to or rushing a target. The record keeps the target for diagnostics, but a hearer gets only the caller's bearing; it adopts the quarry only when it has its own track on it and sees the caller heading at it (§11.2). Field studies report no hunting signals, only positioning (*eth §3.2*). |
 |  | **Regroup howl.** After a hunt or at the den. |
 | Frondgrazer | Today's bolt alarm moves onto the substrate unchanged (§5). |
 
@@ -149,12 +151,14 @@ percept and the calls it has heard. It takes the best one, with hysteresis:
 Rules:
 - Every weight is a knob.
 - Every term is a plausible response to what the animal senses: heuristics are teachers.
-- The chosen option is recorded as the body's `Steer` label.
+- The chosen intent and its subject are recorded apart from the executed steering source
+  (`Steer`), which a physical override can replace (§11.3).
 
 For the brains (topic 3, Wrysk 2026-10-12), **this menu is the top layer's vocabulary**:
 - the top layer runs at the intent rate (4 Hz) with the same hold and switch margin, and picks
   a named intent (plus a couple of spare, unnamed ones the rules never use);
-- the bottom layer runs every tick, reads the senses plus the held intent, and steers. It is
+- the bottom layer runs at every controller sample, reads the senses plus the held intent,
+  and steers. It is
   learned, not scripted, so how an intent is carried out can improve past the rules;
 - cloning: the top copies which intent the rules held (cross-entropy); the bottom copies the
   rules' actions under that intent;
@@ -269,12 +273,18 @@ The kick is an aimed action of an adult in **guard**:
 - The hound dodges at its agility × awareness, as prey dodges a strike today.
 - **Damage** uses the counter formula: `damage × size_self/size_hound`.
 
-The existing reactive `Counter` also goes on the loftstrider. A hound that bites inside the
-reach gets kicked back. Today's contact-before-dodge order (`step.rs:3838`) is fixed so a
-dodged strike draws no counter.
+**One kick, one budget** (Astra review #6). The aimed kick and a reactive kick-back are the
+same physical kick: one state machine with one windup, front arc and recovery, whichever
+asked for it. A bite that lands while the kick is ready and the biter is in the arc draws a
+kick-back that spends the recovery; a bite during recovery or from behind draws none. So an
+adult can't answer four hounds on four sides at once. Today's `Counter` (`step.rs:3867`,
+`counter_answer` `step.rs:3964`, no facing, no recovery) is not reused for the loftstrider;
+the lanternjaw keeps its own. A dodged bite draws no kick-back.
 
-Placeholder geometry: kick reach about 1.3 m against the hound's 0.84 m bite. A hound must
-step inside the kick zone to bite.
+Geometry is stated in the bites' own convention (jaw offset, sweep, both footprints;
+`step.rs:3528-3571`): kick origin, front arc, height band, tracking during windup and terrain
+obstruction (§11.4). Placeholder: reach about 1.3 m against the hound's 0.84 m bite, measured
+the same way, so a hound must step inside the kick zone to bite.
 
 **Deterrence then comes from cooldowns and facing, not from a count rule.**
 - One adult can hold one or two hounds off. Four overwhelm it: it can face and kick only one
@@ -302,8 +312,10 @@ Wild giraffe at night (*eth §2.1*):
 Elephants sleep about 2 h a day.
 
 Wrysk's call (topic 5, 2026-10-12): the physiology below plus the "sleeps lighter" rule,
-generalised from a lone animal to any animal that sees no relative awake. A guard rota is out
-(it needs the shared group mind topic 1 ruled out).
+generalised from a lone animal to any animal that sees no relative awake. No explicit guard
+rota: Wrysk picked the local rule, and a rota would need more machinery than it buys. The
+guard is probabilistic, not guaranteed: the readout is the fraction of rest time the whole
+family is in deep sleep at once (Astra review #7).
 - **Rest is mostly light.**
   - A resting loftstrider lies down and senses at reduced range (`rest_sense`).
   - Deep sleep comes in short bouts (`deep_bout_s`, about 1–2 min) separated by light rest.
@@ -328,7 +340,10 @@ The parent id now exists: `Animal::mother` (SP-NURSE, main fd1a5c90) is set at b
 live-bearer's young, and seedporter young already trail their mother (`nurse::mother_pull`).
 Topic 7 asks whether the loftstrider uses it in behaviour. Two choices:
 - **Bond.**
-  - The calf trails its mother and goes to her first (`mother_pull`, reused).
+  - The calf trails its mother and goes to her first, when she is reachable without crossing
+    a hunter; otherwise the nearest safe adult (Astra review #10). `nurse::mother_pull` only
+    serves nursing seedporters, so a sensed mother-follow primitive is extracted from it for
+    any age and lineage (§11.6).
   - The mother's *go to calf* weighs her own calf above others. Other adults still defend
     any family calf: elephant allomothers do, and bison bulls do.
 - **No bond.** Calves go to the nearest adult, and every adult weighs every calf the same.
@@ -499,8 +514,10 @@ no pinned numbers:
   - A kick lands only after the windup, on a hound in reach and arc, then cools down.
   - A dodged strike draws no counter.
 - **Veilhound.**
-  - N hounds around a standing target settle outside kick reach, spread apart. The test
-    checks the minimum gap against the config's `da`, not angles.
+  - N hounds around a standing target settle outside kick reach and don't overlap; the test
+    checks the two forces (approach to `dc`, repulsion from packmates within `da` of the
+    target) and bounded approach, not a gap equal to `da` (Astra review #10: in Escobedo's
+    model `da` is the distance from the prey at which repulsion switches on).
   - A cut-off point lies between the target and its nearest defender.
   - With config weights, an isolated calf outscores a guarded one and a lame adult outscores
     a sound one.
@@ -519,14 +536,19 @@ no pinned numbers:
 - **Cost:** minutes of compute.
 - **Video.** One chosen episode rendered headless to MP4 (x264 yuv444p crf 12, today | new).
 
-**The wide check.** 8 seeds × 6 h through labd. The 6 h length is set by the event count:
-the 2026-10-11 probe saw 11 loftstrider deaths in that size, and a drop to about 2 needs
-that many events to read. Its readouts:
+**The wide check.** 8 seeds × 6 h through labd, staged: an early liveness and mechanism
+checkpoint, then the rest only for a stated event question. At the topic-8 target (one
+loftstrider per 10 h) 48 world-hours expect about 5 kills, so the check can catch a large
+failure and give a rough kill rate against today's 11; it can't settle the rarer targets
+(adult and hound deaths). Fewer kills after a family dies out is not success: exposure (hours
+with both family and pack alive) is reported beside every rate (Astra review #12). Its
+readouts:
 - loftstrider deaths by posture and age;
 - engagements and their outcomes;
 - hound wounds;
-- the pack's diet share;
-- family size over time.
+- the pack's diet share by kills and by energy eaten (a few large carcasses can dominate);
+- family size, births, dispersals and calf availability over time;
+- encounters, tests, chases, captures and kills counted apart.
 
 **Prey switching (Wrysk's worry on topic 6, a watch item for every brain training check).** The
 Veilhound's list holds the frondgrazer, the lanternjaw, a grounded seedporter and a resting
@@ -545,40 +567,44 @@ Each one ships something visible and testable. Order:
 
 | # | Package | Ships | Lane |
 |---|---|---|---|
-| 1 | **ENGAGE.** Engagement harness: scenario, outcome readout, MP4 | today's behaviour on video, the baseline numbers | Codex high (harness on existing study patterns) |
-| 2 | **CALLS-REST.** The call substrate (loftstrider snort and bleat; frondgrazer bolt ported with its observation input unchanged); rest physiology with "sleeps lighter"; a rushing hound wakes sleepers; rest sites read hunter scent; kin 4 with the "mine" mark | a family that wakes, snorts and bunches when a pack comes | Opus high (new substrate) |
-| 3 | **LS-DEFEND.** Loftstrider intent layer and skills; kick and counter (dodge before counter); `group_min` flight retired; the bond (calf to its mother, her weight on her own) | calves run to their mothers, adults stand over them and kick | Opus high |
-| 4 | **VH-TACTICS.** Veilhound intent layer and skills; risk-aware target choice; privileged reads removed; strikes go to the target | test, cut off, encircle, harry, give up | Opus high |
-| 5 | **YOUNG-ROAM.** Straying with age for loftstrider calves and post-weaning seedporters: the loosening leash, excursions, the bleat on losing sight | calves that wander off and get called back | Opus medium |
-| 6 | **TWO-LAYER.** The brain of §10.1: the top head, intent and subject feedback, kick and call actions, cloning with teacher forcing; intent labels for the seedporter and lanternjaw first, then the loftstrider and Veilhound from packages 3–4 | brains that copy their rules mode by mode | Opus high (new architecture) |
-| 7 | **KIN-TRAIN.** Kin-weighted reward (§10.3), staged training (top first), staged-encounter episodes in the trainer, the frozen-brain noise check | training that can value a calf, and the noise read | Codex xhigh (specified by §10) |
-| 8 | **BALANCE.** Engagement sweeps over §6's top knobs; the wide check; defaults chosen; report to Wrysk | his topic-8 target bracketed or a stated gap | Opus medium |
+| 1 | **ENGAGE.** Engagement harness: scenario, outcome readout, MP4; matched starts (§11.7) | today's behaviour on video, the baseline numbers | Codex high (harness on existing study patterns) |
+| 2 | **CONTRACTS.** The shared interfaces of §11 in code before lineage work splits: slot and subject encoding, call records and hearing (awake and asleep), intent/subject/override records, the kick state machine and rest request in the action interface, save semantics. No behaviour change yet beyond what the records need | one interface packages 3–7 build on | Opus high (new architecture) |
+| 3 | **CALLS-REST.** The call substrate on that contract (loftstrider snort and bleat; frondgrazer bolt ported with its observation input unchanged and its alarm behaviour checked); rest physiology with "sleeps lighter"; a rushing hound and calls wake sleepers; rest sites read hunter scent; kin 4 with the "mine" mark | a family that wakes on a rush or a call | Opus high (new substrate) |
+| 4 | **LS-DEFEND.** Loftstrider intent layer and skills; the one-budget kick; `group_min` flight retired; the bond (mother-follow primitive, her weight on her own); defender sector spread | calves run to their mothers, adults bunch, face out and kick | Opus high |
+| 5 | **VH-TACTICS.** Veilhound intent layer and skills; tactical memory (§11.5); risk-aware target choice; privileged reads and feast travel removed (§11.2); strike identity; pry and attack accounting ported off the pack target | test, cut off, encircle, harry, give up | Opus high |
+| 6 | **YOUNG-ROAM.** Straying with age for loftstrider calves and post-weaning seedporters: the loosening leash, excursions, the distress bleat on losing sight (the seedporter's included) and the mother's response | calves that wander off and get called back | Opus medium |
+| 7 | **TWO-LAYER.** The brain of §10.1 with §11.3's timing; cloning with teacher forcing, alternative-mode examples and a closed-loop correction pass; per-mode competence checks; labels for the seedporter and lanternjaw first, then the loftstrider and Veilhound from 4–5, *explore* from 6 | brains that copy their rules mode by mode | Opus high (new architecture) |
+| 8 | **KIN-TRAIN.** The reward roster and estimator (§11.7), stage 1 perturbing only the top, staged-encounter episodes in the trainer, the noise and signal checks | training that can value a calf, and the signal read | Opus high (the estimator is new) |
+| 9 | **BALANCE.** Engagement sweeps over §6's top knobs; the staged wide check; defaults chosen; report to Wrysk | his topic-8 target bracketed or a stated gap | Opus medium |
 
 Order:
 - 1 first: it records today's baseline.
-- 2 next: everything after it uses calls, rest and kin slots.
-- 3, 4 and 6 can run in parallel after 2. They touch different lineages and files. 6 starts
-  with the seedporter and lanternjaw labels, whose rules exist today, and adds the loftstrider
-  and Veilhound labels when 3 and 4 land.
-- 5 after 3: it uses the calf's bleat and the mother's response.
-- 7 after 6. 8 after 3–5, and again once trained brains exist.
-- The frondgrazer's plain training (ecology-training thread) is blocked by none of these. Its
-  menu trial (topic 4) waits for 6 and 7.
-
-**Poses** (topic 9) are drawn with existing clips until Wrysk picks the looks: kick,
-guard stance, calf tucked in, hound crouch and rear.
+- 2 next. The lineage packages share the controller write path, actions, observation encoding,
+  labels and saves (`step.rs:1783-1789`, `2171-2194`), so their common contract lands once,
+  before they split (Astra review #13).
+- 3 after 2. Then 4, 5 and 7 in parallel: 7 builds against the contract with provisional
+  menus, and clones the seedporter and lanternjaw first.
+- 6 after 4 (it uses the calf's bleat and the mother's response).
+- 8 after 7. 9 after 4–6, and again once trained brains exist.
+- The frondgrazer's plain training (ecology-training thread) is blocked by none of these, as
+  long as plain-lineage manifests stay unchanged. Its menu trial (topic 4) waits for 7 and 8;
+  it tests the menu machinery, not pack credit.
 
 **Cost per tick.**
 - The intent layer reads the body's own record (≤ 32 tracks) at 4 Hz, which is negligible.
 - Calls are a few per minute. Hearing them is O(calls × candidates) inside the sense pass.
 - Removing `pack::known` and the true-position scans removes O(N) loops.
-- Expected well under 0.1 ms per tick [hyp]; measured in package 2.
+- Expected well under 0.1 ms per tick for the rules [hyp]. The full mixed-world cost (four kin
+  slots, call queries, both brain layers) is measured after packages 3 and 7, not bounded by
+  package 3 alone.
 
 **Saving.**
 - `Animal::mother` exists (schema 79). A kick cooldown or any intent state that must survive a
   save bumps the fauna schema.
-- Calls and intent hold timers are session state, not saved. A load mid-engagement just
-  re-decides.
+- Calls are session state: an old call vanishing on load is harmless. A kick's recovery, a
+  brain's held intent, subject, hold age and recurrent state are saved (schema bump, now 80),
+  because matched training starts and mid-engagement saves must continue, not cold-start
+  (§11.3).
 
 ## 9. Rules this design keeps
 
@@ -602,7 +628,8 @@ implementation"). Topics 2–4 settled them; this section is the spec they add u
 
 - **Bottom layer.** Today's per-lineage GRU (P3, merged 71b5d8ef). Its input is the v3
   observation plus:
-  - the held intent, one-hot over the lineage's menu (named intents and two spare ones);
+  - the held intent, one-hot over the lineage's menu (named intents, plus two spare ones kept
+    masked until the self-invented-intent study);
   - a mark on the subject's slot, when the intent has a subject;
   - time in the current intent, squashed.
 
@@ -613,8 +640,8 @@ implementation"). Topics 2–4 settled them; this section is the spec they add u
   - logits over the menu;
   - a pointer over the kin and threat slots for the subject.
 
-  `hold_s` and `switch_margin` apply to its logits as they do to the heuristic's scores. They
-  are per-lineage knobs, not trained weights.
+  `hold_s` and `switch_margin` apply to its probabilities at a fixed temperature, not raw
+  logits (§11.3). They are per-lineage knobs, not trained weights.
 - **A plain brain** is a one-item menu: the top head is absent and the intent input constant.
   Frondgrazer and littershredder training on today's brain is this case, unchanged.
 - **Mixed worlds work.** Brain and heuristic animals coordinate only through sight and calls
@@ -626,7 +653,8 @@ implementation"). Topics 2–4 settled them; this section is the spec they add u
 - **The top** copies which intent the rules held, and its subject, by cross-entropy.
   Imitation already fits an option head (`imitate.rs:822`).
 - **The bottom** copies the rules' actions under the rules' own intent and subject (teacher
-  forcing), so each mode is learnt cleanly.
+  forcing), so each mode is learnt cleanly. Timing, alternative-mode examples and the
+  closed-loop correction pass are in §11.3.
 - **Label sources:**
   - loftstrider and Veilhound: their new intent layers (§3.1, §4.2);
   - seedporter: its existing modes and the `Steer` readout (forage, stay with troop, roost,
@@ -637,16 +665,19 @@ implementation"). Topics 2–4 settled them; this section is the spec they add u
 
 ### 10.3 Reward (topic 2)
 
-Each body keeps its own antithetic variant. Its window score is its own
-`(E_end − E_start + E_given)/body_ref`, as today, plus `r ×` each living relative's score over
-the same window:
+Each body keeps its own antithetic variant. Its score is its own
+`(E_end − E_start + E_given)/body_ref`, as today, plus `r ×` each relative's own score over
+the same span. Who counts and how the scores are compared are fixed in §11.7: today's
+within-world z-scoring cancels the shared family term exactly (Astra review #1), so the
+comparison changes (topic 10).
 - **Who counts as a relative.** Relatives come from `Animal::mother` (its calf, its mother,
   siblings sharing a mother) and from the pack record for packmates. The reward reads
   bookkeeping the animal never senses. That is allowed: only its behaviour must come from its
   senses.
 - **The share.** `r` is a knob per relation (calf, mother, sibling, packmate), 0.5 to start.
-- **The leak.** A relative on another variant leaks its luck into the score. The noise check
-  reads how much.
+- **The leak.** A relative on another variant leaks its luck into the score, and a neighbour
+  on the opposite sign of the same perturbation is an interacting opponent, not noise (Astra
+  review #3). §11.7's matched copies remove both.
 
 **Noise check first.** A run per lineage with the brains frozen (no perturbation), as in the
 2026-10-08 pilot, shows how much of a window score is luck. A lineage whose training signal
@@ -654,21 +685,181 @@ stays at that noise level switches to one shared variant per family or pack (top
 
 ### 10.4 Training
 
-- **Stage 1: the top only.** The bottom stays frozen at its copy, so choices improve without
-  wrecking movement. With few weights the signal comes quickly, and this is the first read on
-  whether brains beat their rules.
+- **Stage 1: the top only.** The bottom stays frozen at its copy (the variant builder
+  perturbs only the top's weights), so choices improve without wrecking movement. A quick
+  signal is a hypothesis, not a promise: loftstrider and Veilhound encounters are rare in
+  live windows (eight 10-minute windows hold about one engagement), so the staged encounters
+  are the primary early evidence for them (Astra review #3).
 - **Stage 2: both layers.**
 - **Staged encounters.** Live 10-minute windows hold too few hunts, so the loftstrider and
   Veilhound brains also train on the engagement harness's episodes (family against pack,
   random placements, at most 5 minutes each, package 1). The scores are the same energy terms
   over the episode.
-- **Readouts every check,** brains beside their heuristic:
-  - fitness;
+- **Readouts every check,** brains beside their heuristic on matched starts:
+  - own energy return and kin-weighted return, raw (the "beats its heuristic" bar);
   - the topic-8 numbers;
-  - the Veilhound's diet share and each prey's numbers (§7, prey switching).
+  - the Veilhound's diet share by kills and by energy, and each prey's numbers (§7, prey
+    switching);
+  - hold durations, switch rates and why holds ended.
 - **The frondgrazer trial** (topic 4): plain against a graze / bunch / hunker / shelter / rest
   menu. If the menu wins, the other prey get menus.
 - **Later studies:**
   - self-invented intents, only once named intents beat the heuristic baseline (topic 3);
   - *look* as an action (§2.2);
   - player commands setting the top layer's intent (§2.2).
+
+## 11. Contracts (from the Astra review, 2026-10-12)
+
+Astra's review (`design/7_Research/astra-behaviour-ai-review-2026-10-11.md`) found the
+direction sound and none of Wrysk's calls broken, but the interfaces underspecified. This
+section fixes them; package 2 builds it before the lineage packages split. Review finding
+numbers are in brackets.
+
+### 11.1 Slots and subjects [#4]
+
+- **Slots.** Bounded lists of kin, threats and, for hunters, prey. A recognised mother or calf
+  keeps a reserved kin slot while sensed. Each slot carries what the teacher reads: lineage
+  and size; bearing, distance and elevation; heading or a velocity estimate from the track;
+  posture with resting and asleep apart; stance (guard, rush); lame; modality and freshness;
+  relation (mother, calf, kin, other).
+- **Subjects** are typed: none, a body (sensed or remembered), or a place (sensed or
+  remembered: a rest spot, an excursion goal, a guard or cut-off point). The selected body is
+  held by its id internally and its current slot re-marked at each sample, so slot order
+  changing doesn't change the subject. Raw ids never enter the network.
+- **Expiry and masks.** A subject unseen for `subject_lost_s` becomes none. Invalid
+  intent–subject pairs are masked, and the subject head is conditioned on the chosen intent.
+- **Checks:** slot permutation, two targets crossing, a subject dying or vanishing, two
+  calves bleating at once.
+
+### 11.2 Calls and shared records [#7, #9]
+
+- **What a hearer gets:** kind, bearing, proximity, age, and the caller's relation if it
+  recognises the voice (mother and calf, a per-lineage knob). Never an exact subject id.
+- **Hunt cue.** It draws attention to the caller. A hound adopts the caller's quarry only
+  when it has its own track on that animal and can see the caller heading at it.
+- **Bounded records.** Each hearer keeps a few call records with deduplication and a
+  refractory time. Calls are collected by their own range, not through the nearest-animal
+  candidate cap (`perception.rs:601-628`).
+- **Asleep hearing.** Deep sleepers hear calls and a rush's footfalls above a loudness
+  threshold, with the same occlusion as waking hearing. The current wake path
+  (`rhythm.rs:371-408`) has no terrain ray; this one does.
+- **Shared records stay accounting.** The pack's feast and kill records remain for the census.
+  A hound goes to a carcass it senses, remembers or hears a regroup howl from, not to
+  `pack.feast` (`pack.rs:1880-1894`). The remaining global reads (membership, hunger, target
+  progress, shunning, roles) are audited and either localised or confined to bookkeeping.
+- **Focal-invariance check:** moving bodies a hound can't sense, with its percept and call
+  history fixed, doesn't change its decision. This replaces "the pack never targets prey no
+  member senses".
+
+### 11.3 Intent timing, holding and cloning [#5, #11, #13]
+
+- **Records.** Chosen intent, subject, executed actions and override reason are recorded
+  apart. `Steer` stays the executed steering source, which a physical override can replace.
+- **Order at a decision sample.** The GRU updates once with the observation and the
+  previously held intent. The top reads that state and proposes. Arbitration settles the
+  held intent and subject, which condition the bottom from the next sample. Cloning uses
+  exactly this order, so the label never leaks in through the input.
+- **What the top imitates:** the teacher's proposal before its hold (its best-scoring
+  intent). The brain then runs the same hold and margin, so hysteresis isn't applied twice.
+- **Hold semantics.** The margin is on probabilities at a fixed temperature, a knob per
+  lineage, so a change in logit scale can't change switching on its own. A hold ends early
+  when its subject dies or is lost, when its intent becomes masked, or on a physical
+  emergency (DROP, wade-out, a hit). The top then chooses again.
+- **Cloning data.**
+  - Besides the teacher's own choices, staged scenes invoke teacher skills in other modes
+    and at transitions, so the bottom learns how each mode moves where the teacher wouldn't
+    have chosen it.
+  - Then a short closed-loop pass: the learner picks intents, and the teacher labels the
+    states it actually reaches.
+  - The strategic loss trains the shared representation during cloning.
+- **Competence before freezing.** Rescue, guard, retreat and intercept are each checked
+  closed-loop on staged scenes. Average action error over mostly grazing samples doesn't
+  count.
+- **Saves.** Held intent, subject, hold age and recurrent state are saved for brains, so a
+  load or a matched training start continues rather than cold-starts.
+
+### 11.4 Actions and the body [#6, #7, #8]
+
+- **The kick** is one state machine with one budget for aimed kicks and kick-backs (§3.3).
+  Its geometry is in the bites' convention. It tracks its target during windup within the
+  turn rate; whether the body may step during windup is a knob.
+- **Rest is an action.**
+  - A brain or heuristic requests rest through the shared action interface. The body checks
+    eligibility and runs light and deep sleep.
+  - A body past its sleep-need ceiling still falls asleep (today's rhythm as the backstop).
+  - The same path serves brains and heuristics.
+- **"Sleeps lighter" reads sight.** It uses recent visual evidence that a relative is up, not
+  a refreshed track timestamp or an unseen animal's true state. A minimum light-rest interval
+  separates deep bouts.
+- **Strikes keep their target.** The chosen target's id passes into strike creation and holds
+  through windup and contact. Taking a juvenile that comes into reach instead is an explicit
+  substitution of a sensed animal; a brain does it by changing its subject.
+- **Bodies block.** A lunge contacts the first body along its path. An adult standing between
+  hound and calf takes or blocks the lunge; there is no invulnerability rule.
+- **`window_body` splits.** Whether a bite can take an animal of that size stays a physical
+  mechanism on true state (`step.rs:3679-3688`). The hound's sensed estimate of the pack at
+  hand goes only into its risk and target choice.
+- **Checks:** two prey in one capsule, a calf behind an adult, opposite sides of a ledge,
+  ring-seam geometry, a rear approach, two simultaneous bites, a bite during recovery, a
+  target moving during windup.
+
+### 11.5 Tactical memory [#10]
+
+The Escobedo rules justify an encirclement skill, not the whole repertoire (they start from
+an already isolated prey). The heuristics add local memory:
+- target commitment with expiry, and a per-hound approach-side preference as a stable
+  tie-break, so four hounds don't all pick *cut off* and then all drop it;
+- occupied-sector avoidance from packmates and adults it sees; adults spread to face hounds
+  no other adult faces;
+- cut-off, guard and calf points checked as reachable and safe; lead prediction bounded by
+  terrain and replanned when blocked;
+- a packmate's role read from its recent movement relative to the target. An adult's kick
+  recovery is assumed only from a kick the hound saw, with its time; otherwise unknown;
+- scenarios with asymmetry, occlusion and confinement, not only open-ground circles; feasible
+  and failed interceptions tested apart.
+
+### 11.6 Couplings the packages must carry [#13]
+
+- Frondgrazer prying (`vigil.rs:1486-1489`) and attack accounting read physical events or
+  local attack state, not the pack target.
+- Dispersal eligibility stops depending on `herding.young_only` (`step.rs:1408-1412`), so
+  all-age loftstrider herding doesn't switch dispersal off.
+- A sensed mother-follow primitive comes out of `nurse::mother_pull` for any lineage and age;
+  nursing keeps using it.
+- Plain-lineage manifests stay unchanged, so frondgrazer and littershredder training stays
+  compatible.
+- Founders of one family are recorded as sisters, and of one pack as littermates (a shared
+  founding mother id), so kin reward and recognition hold from the first generation, as in
+  real elephant families. Sibling relations need a shared real mother id; founders with none
+  are not siblings by accident.
+
+### 11.7 Reward roster and comparison [#1, #2, #3] (topic 10 asked)
+
+- **Roster.**
+  - Fixed at the start of the window or episode from true relations; a newborn joins its
+    mother's roster at birth.
+  - Relatives' energy meters persist after death, so a killed calf's loss counts against its
+    mother.
+  - Each relative contributes its own base score, not its kin-augmented one.
+  - One relation per pair, the closest (mother/calf, then sibling, then packmate).
+  - Heuristic relatives are metered too (today `window.rs:670-672` drops bodies without a
+    candidate).
+- **The cancellation.** Today scores are z-scored within each world and lineage
+  (`trainer.rs:136-161`). With one pack per world and equal shares, a hound's score is
+  `(1 − r)·own + r·pack total`. The shared total is the same for every member, so
+  normalising removes it, and the score becomes exactly own energy again. Antithetic twins
+  are placed as ring neighbours (`window.rs:228-245`), so a mother and her calf often carry
+  opposite signs of one perturbation.
+- **Comparison (proposed, topic 10):** matched copies. A scene is run twice from the same
+  start; one animal carries `+ε` in one copy and `−ε` in the other, and everything else is
+  identical. The difference in its kin-weighted score is then caused by its own variant,
+  relatives included. Focal animal and sign rotate. It is cheap on the staged encounters
+  (small scenes, at most 5 min). Live windows keep today's per-body comparison for everyday
+  skills, where kin terms add little.
+- **Checks.** An algebraic check that a perturbation improving only a relative's energy
+  survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
+  are never scored as zero returns.
+- **Signal check, beside the frozen-brain noise check:** repeated matched differences in a
+  consistent direction, how often decisions change, held-out energy improvement, and
+  candidate coverage.
+
