@@ -7,7 +7,9 @@
 //! - [`compare`]: the comparison switch's scorers, family placement, the pair update.
 //! - [`matched`]: the matched-copies runner over any scene, and the null pair.
 //! - [`stage`]: stage 1 (the top only) and stage 2 perturbations.
+//! - [`checks`]: the frozen-brain noise, signal and held-out checks a run switches on.
 
+pub mod checks;
 pub mod compare;
 pub mod config;
 pub mod matched;

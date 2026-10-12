@@ -524,3 +524,64 @@ fn plain_lineages_are_unchanged_by_the_stage() {
     let layout = crate::es::voxel::two_layer::TwoLayerLayout::new(&shape);
     assert_eq!(super::stage::Perturber::two_layer(&layout, BrainStage::Top), super::stage::Perturber::plain());
 }
+
+// ---- step 6: readouts and checks ----
+
+use super::checks::{MatchedChecks, NoiseReadout, SignalReadout};
+
+fn mp(pair: usize, plus: f64, minus: f64, changed: f64) -> matched::MatchedPair {
+    let k = |c: f64| super::KinParts { own: c, relatives: 0.0, combined: c, relatives_counted: 0 };
+    matched::MatchedPair {
+        plan: MatchedPlan { focal: 1, pair, plus_first: true },
+        plus: Some(k(plus)),
+        minus: Some(k(minus)),
+        decisions_changed: changed,
+        ticks: [1, 1],
+    }
+}
+
+#[test]
+fn the_signal_check_reads_consistency_coverage_and_changes() {
+    // Pair 0 repeated three times, always + ahead; pair 1 twice, disagreeing; pair 2 never.
+    let mut rs = vec![mp(0, 1.0, 0.0, 0.2), mp(0, 0.5, 0.1, 0.4), mp(0, 0.3, 0.2, 0.0), mp(1, 0.0, 0.2, 0.1), mp(1, 0.4, 0.1, 0.3)];
+    rs.push(matched::MatchedPair { minus: None, ..mp(2, 1.0, 0.0, 0.0) });
+    let noise = NoiseReadout { pairs: 4, rms_gap: 0.1, max_gap: 0.2, identical: 0 };
+    let s = SignalReadout::of(&rs, 3, Some(&noise));
+    assert_eq!(s.complete, 5, "a result missing a sign is not counted");
+    assert!((s.coverage - 2.0 / 3.0).abs() < 1e-12);
+    assert_eq!(s.repeated, 5);
+    // Pair 0: 3 of 3 agree; pair 1: mean +0.05, 1 of 2 agrees.
+    assert!((s.consistent_share - 4.0 / 5.0).abs() < 1e-12);
+    assert!((s.signal_to_noise - s.mean_abs_difference / 0.1).abs() < 1e-12);
+    assert!(s.decisions_changed > 0.0);
+    let zero = NoiseReadout { rms_gap: 0.0, ..noise };
+    assert!(SignalReadout::of(&rs, 3, Some(&zero)).signal_to_noise.is_infinite());
+}
+
+#[test]
+fn a_matched_generation_runs_the_switched_on_checks() {
+    let scenes = [engage(0.5), EngageScene { seed: 74, ..engage(0.5) }];
+    let t = table(Founder::Chorister, 2);
+    let checks = MatchedChecks { rounds_per_scene: 2.0, null_pairs_per_scene: 1.0, held_out_scenes: 0.0, copy_threads: 2.0 };
+    let g = super::checks::matched_generation(&scenes, Founder::Chorister, &t, &KinConfig::default(), &checks).unwrap();
+    assert_eq!(g.pairs.len(), 4);
+    assert_eq!(g.null_pairs.len(), 2);
+    assert!(g.noise.is_some());
+    let pairs = matched::pair_scores(&g.pairs, 2);
+    assert_eq!(pairs.pairs.len() + pairs.missing, 2);
+    // The noise check off: no null pairs run.
+    let off = MatchedChecks { null_pairs_per_scene: 0.0, ..checks };
+    assert!(super::checks::matched_generation(&scenes[..1], Founder::Chorister, &t, &KinConfig::default(), &off).unwrap().noise.is_none());
+    assert!(super::checks::registry().check(&MatchedChecks::default()).is_ok());
+    assert!(super::checks::registry().check(&MatchedChecks { copy_threads: 3.0, ..checks }).is_err());
+}
+
+#[test]
+fn held_out_compares_the_new_centre_with_the_old() {
+    let f = Founder::Chorister;
+    let m = f.manifest();
+    let old = crate::es::tensor::initial_center_runtime(m.inputs(), m.outputs(), m.hidden, 5);
+    let h = super::checks::held_out(&[engage(0.5)], f, &old, &old, &KinConfig::default(), 2).unwrap();
+    assert!(h.comparisons > 0);
+    assert!(h.mean_gain.is_finite() && h.wins <= h.comparisons);
+}
