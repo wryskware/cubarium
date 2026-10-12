@@ -5,7 +5,6 @@
 //! set by the case); no tuned default, ratio, verdict or hash is asserted. Nothing steps past a
 //! few hundred ticks.
 
-#![allow(dead_code, unused_imports)] // WIP
 
 #[path = "predation_fixture.rs"]
 #[allow(dead_code)]
@@ -148,6 +147,12 @@ fn set_percept(f: &mut Fauna, me: u64, tracks: &[Track]) {
     p.n = tracks.len() as u8;
     p.tick = f.tick;
     f.percepts.insert(me, p);
+}
+
+/// Hound `me` sees exactly `bodies` now (`(id, class)`), as they stand.
+fn sees(f: &mut Fauna, me: u64, bodies: &[(u64, u8)]) {
+    let tracks: Vec<Track> = bodies.iter().map(|&(id, c)| seen(f, me, id, c)).collect();
+    set_percept(f, me, &tracks);
 }
 
 /// One sample of hound `me`'s tactic, over a still held action.
@@ -544,4 +549,370 @@ fn a_hunt_cue_is_adopted_only_with_the_hearers_own_track_and_the_caller_seen_hea
     let far = crate::calls::CallRecord { x: caller_at.0 - 3.0 * t.cue_caller_m - 1.0, ..cue };
     let f = hearer(&[caller(at_q, SIGHT), quarry, bystander]);
     assert_eq!(adopt_from_cue(&f, 900, &far, &t, lost, RING), None);
+}
+
+// ------------------------------------------------------------------ scenes: the tactic itself
+
+/// A pack of two on the arena, hound `h` at `(10, MID_Z)` facing east, its packmate far east;
+/// a lone calf at `(16, MID_Z)`. Returns the world, plants, fauna, `[h, mate]` and the calf.
+fn lone_calf_scene() -> (World, Flora, Fauna, [u64; 2], u64) {
+    let w = arena(7);
+    let flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    let hs = pack(&mut f, &w, 2);
+    place(&mut f, hs[0], 10.0, MID_Z, EAST);
+    place(&mut f, hs[1], 28.0, MID_Z, WEST);
+    let calf = strider(&mut f, &w, true, 16.0, MID_Z, EAST);
+    (w, flora, f, [hs[0], hs[1]], calf)
+}
+
+/// Everything the tactic decided for hound `h` this sample: its action, memory, teacher label
+/// and the calls it made.
+fn decision(f: &Fauna, act: Actions, h: u64) -> String {
+    format!("{act:?} {:?} {:?} {:?}", f.hounds.get(&h), f.hound_teach.get(&h), f.calls.iter().filter(|c| c.caller == h).collect::<Vec<_>>())
+}
+
+/// **Focal invariance** (§11.2, replacing "the pack never targets prey no member senses"):
+/// with the hound's record and call history fixed, moving the bodies it does not sense — a
+/// grown loftstrider and a calf beside it, its packmate — and pointing the pack's record at
+/// one of them changes nothing it decides, sample after sample.
+#[test]
+fn moving_bodies_a_hound_does_not_sense_does_not_change_its_decision() {
+    let (w, flora, mut f, [h, mate], calf) = lone_calf_scene();
+    let near_adult = strider(&mut f, &w, false, 11.0, MID_Z + 2.5, WEST);
+    let near_calf = strider(&mut f, &w, true, 9.0, MID_Z, EAST);
+    let tracks = [seen(&f, h, calf, class::PREY)];
+    let mut b = f.clone();
+    place(&mut b, near_adult, 20.0, MID_Z - 4.0, EAST);
+    place(&mut b, near_calf, 12.5, MID_Z + 1.0, WEST);
+    place(&mut b, mate, 11.0, MID_Z - 1.0, EAST);
+    let own = animal(&b, h).pack.unwrap().pack;
+    if let Some(p) = b.pack_mut(own) {
+        p.target = Some(near_calf);
+        p.feast = Some(Site { x: 44, y: SURFACE_Y, z: D / 2 + 4 });
+    }
+    let period = cubarium_voxel::ticks_at_least_one(f.config.manifest(CH).controller_period_s);
+    let mut decided = Vec::new();
+    for sample in 0..8 {
+        for x in [&mut f, &mut b] {
+            set_percept(x, h, &tracks.map(|t| Track { tick: x.tick, ..t }));
+            x.percepts.entry(mate).or_default();
+        }
+        let (aa, ab) = (decide(&mut f, &w, &flora, h), decide(&mut b, &w, &flora, h));
+        assert_eq!(decision(&f, aa, h), decision(&b, ab, h), "sample {sample}: the same decision");
+        decided.push(f.hounds.get(&h).and_then(|m| m.target));
+        f.tick += period;
+        b.tick += period;
+    }
+    assert!(decided.iter().all(|t| *t == Some(calf)), "it hunts the calf it senses: {decided:?}");
+}
+
+/// **A hound gives up when its wound passes the configured threshold** (§7), in the tactic:
+/// committed to a calf, its wound set at `give_up_wound`, its next sample breaks off: the hunt
+/// is dropped and the calf shunned, the give-up is counted, it howls the regroup howl and
+/// turns from the calf; one hair under the threshold it hunts on.
+#[test]
+fn a_committed_hound_gives_up_when_its_wound_reaches_the_threshold() {
+    for (under, label) in [(true, "under"), (false, "at")] {
+        let (w, flora, mut f, [h, _], calf) = lone_calf_scene();
+        let t = tac(&f);
+        sees(&mut f, h, &[(calf, class::PREY)]);
+        decide(&mut f, &w, &flora, h);
+        let m = f.hounds[&h];
+        assert!(m.target == Some(calf) && m.committed, "{label}: committed to the lone calf: {m:?}");
+        animal_mut(&mut f, h).wound = if under { t.give_up_wound - 1e-6 } else { t.give_up_wound };
+        f.tick += 1;
+        f.last_call.clear();
+        sees(&mut f, h, &[(calf, class::PREY)]);
+        let act = decide(&mut f, &w, &flora, h);
+        let m = f.hounds[&h];
+        if under {
+            assert_eq!(m.target, Some(calf), "under the threshold it hunts on");
+            assert_eq!(f.ledger.hound_give_ups, 0);
+            continue;
+        }
+        assert_eq!(m.target, None, "the hunt is dropped");
+        assert!(m.gave_up_tick == f.tick && m.shuns(calf, f.tick), "the calf shunned: {m:?}");
+        assert_eq!(f.ledger.hound_give_ups, 1);
+        assert!(f.calls.iter().any(|c| c.caller == h && usize::from(c.kind) == REGROUP_HOWL), "the regroup howl");
+        assert_eq!(f.hound_teach[&h].held, "give_up");
+        // It holds no bite as it goes.
+        assert_eq!(act.feed, 0.0, "{act:?}");
+        // The shunned calf is not taken again in the shun.
+        f.tick += 1;
+        sees(&mut f, h, &[(calf, class::PREY)]);
+        decide(&mut f, &w, &flora, h);
+        assert_eq!(f.hounds[&h].target, None, "not taken again in the shun");
+    }
+}
+
+/// A family on the arena: two grown loftstriders and a calf between them, standing; hound `h`
+/// of a pack of two at `(8, MID_Z)` sees all three.
+fn family_scene() -> (World, Flora, Fauna, u64, [u64; 3]) {
+    let w = arena(9);
+    let flora = Flora::new(FloraConfig::default());
+    let mut f = Fauna::new(config());
+    let hs = pack(&mut f, &w, 2);
+    place(&mut f, hs[0], 8.0, MID_Z, EAST);
+    place(&mut f, hs[1], 28.0, MID_Z, WEST);
+    let a1 = strider(&mut f, &w, false, 16.0, MID_Z - 1.5, EAST);
+    let calf = strider(&mut f, &w, true, 16.5, MID_Z, EAST);
+    let a2 = strider(&mut f, &w, false, 16.0, MID_Z + 1.5, EAST);
+    (w, flora, f, hs[0], [a1, calf, a2])
+}
+
+/// **The test** (§4.2, §4.3: the choice is made there): a group is tested, not chased; at the
+/// rush's end the hound commits to the group's best when it is worth `commit_value`, and else
+/// breaks off — the whole group shunned, the give-up counted, the regroup howl.
+#[test]
+fn a_test_ends_in_a_commitment_or_a_break_off_by_the_commit_value() {
+    for (commit_value, commits) in [(f64::MIN, true), (f64::MAX, false)] {
+        let (w, flora, mut f, h, fam) = family_scene();
+        if let Some(p) = f.config.founders[CH.index()].pack.as_mut() {
+            p.tactics.commit_value = commit_value;
+            p.tactics.test_floor = f64::MIN;
+        }
+        let t = tac(&f);
+        let all: Vec<(u64, u8)> = fam.iter().map(|&id| (id, class::PREY)).collect();
+        sees(&mut f, h, &all);
+        decide(&mut f, &w, &flora, h);
+        let m = f.hounds[&h];
+        assert_eq!(f.ledger.hound_tests, 1, "a group is tested");
+        assert!(!m.committed && m.test == TestPhase::Approach && fam.contains(&m.target.unwrap()));
+        assert_eq!(f.hound_teach[&h].held, "test");
+        assert_eq!(f.ledger.pack_chases, 0, "a test is not a chase");
+        // At the rush's end.
+        let rush = cubarium_voxel::ticks_at_least_one(t.test_rush_s);
+        f.tick += rush + 1;
+        f.hounds.get_mut(&h).unwrap().test = TestPhase::Rush;
+        f.hounds.get_mut(&h).unwrap().phase_tick = f.tick - rush - 1;
+        sees(&mut f, h, &all);
+        decide(&mut f, &w, &flora, h);
+        let m = f.hounds[&h];
+        if commits {
+            assert!(m.committed && fam.contains(&m.target.unwrap()), "committed: {m:?}");
+            assert_eq!(f.ledger.hound_test_commits, 1);
+            assert_eq!(f.ledger.pack_chases, 1, "a chase starts");
+        } else {
+            assert_eq!(m.target, None, "broken off");
+            assert!(fam.iter().all(|&id| m.shuns(id, f.tick)), "the group shunned");
+            assert_eq!(f.ledger.hound_give_ups, 1);
+            assert!(f.calls.iter().any(|c| c.caller == h && usize::from(c.kind) == REGROUP_HOWL));
+            // Not tested again within the shun.
+            f.tick += 1;
+            sees(&mut f, h, &all);
+            decide(&mut f, &w, &flora, h);
+            assert_eq!((f.hounds[&h].target, f.ledger.hound_tests), (None, 1));
+        }
+    }
+}
+
+/// The hound `h` (facing east at `x0`) and points along its lunge: the jaw where the lunge
+/// begins and the reach it sweeps.
+fn jaw_line(f: &Fauna, h: u64) -> (f64, f64) {
+    let hunter = f.config.founder(CH).active_hunter().unwrap();
+    let len = length(f, h);
+    (animal(f, h).pose.x + hunter.jaw_forward_length_fraction * len, hunter.strike_reach_length_fraction * len)
+}
+
+/// **Strikes go to the target** (§4.2, §11.4): of two bodies in the capsule the hound strikes
+/// its target, not the nearer; a grown bystander alone in the capsule is not struck; a young
+/// body is struck in its place only as an explicit substitution (counted).
+#[test]
+fn a_strike_takes_the_target_not_the_nearer_bystander() {
+    let (w, _, mut f, [h, mate], calf) = lone_calf_scene();
+    let hunter = f.config.founder(CH).active_hunter().unwrap();
+    let (jaw, reach) = jaw_line(&f, h);
+    let hx = animal(&f, h).pose.x;
+    place(&mut f, mate, hx - 1.0, MID_Z, EAST);
+    // The calf at the capsule's far end, a grown loftstrider nearer the jaw beside the line.
+    place(&mut f, calf, jaw + 0.9 * reach, MID_Z, EAST);
+    let adult = strider(&mut f, &w, false, jaw + 0.2 * reach, MID_Z + 0.4, EAST);
+    let i = index(&f, h);
+    let geometry = f.config.founder(CH).body_at(animal(&f, h).body);
+    let view = w.view();
+    let mut m = Hound { target: Some(calf), committed: true, ..Hound::default() };
+    f.hounds.insert(h, m);
+    sees(&mut f, h, &[(calf, class::PREY), (adult, class::PREY)]);
+    assert_eq!(crate::step::prey_in_capsule(&f, i, &view, &geometry, &hunter), Some(calf), "the target, not the nearer adult");
+    // Committed to nothing: the grown bystander is not struck.
+    m.target = None;
+    f.hounds.insert(h, m);
+    sees(&mut f, h, &[(adult, class::PREY)]);
+    place(&mut f, calf, 30.0, MID_Z + 5.0, EAST);
+    assert_eq!(crate::step::prey_in_capsule(&f, i, &view, &geometry, &hunter), None, "no bite on a bystander adult");
+    // A young body it senses with a high enough one-hound p_kill may be substituted.
+    place(&mut f, calf, jaw + 0.9 * reach, MID_Z, EAST);
+    sees(&mut f, h, &[(calf, class::PREY), (adult, class::PREY)]);
+    let p = assess_of(&f, i, calf).unwrap().assess.p_one;
+    let sub = crate::step::prey_in_capsule(&f, i, &view, &geometry, &hunter);
+    assert_eq!(sub, (p >= tac(&f).substitute_p_kill).then_some(calf), "a substitution only past substitute_p_kill");
+}
+
+/// **Bodies block** (§11.4): a lunge at a calf with a grown loftstrider standing between hound
+/// and calf meets the adult first, which takes it or blocks it — the calf is unhurt; with
+/// nobody between, the same lunge wounds the calf.
+#[test]
+fn an_adult_between_hound_and_calf_takes_or_blocks_the_lunge() {
+    for between in [false, true] {
+        let (w, mut flora, mut f, [h, mate], calf) = lone_calf_scene();
+        let (jaw, reach) = jaw_line(&f, h);
+        let hx = animal(&f, h).pose.x;
+    place(&mut f, mate, hx - 1.0, MID_Z, EAST);
+        place(&mut f, calf, jaw + reach + 0.1, MID_Z, EAST);
+        strider(&mut f, &w, false, if between { jaw + 0.5 * reach } else { 30.0 }, if between { MID_Z } else { 2.0 }, EAST);
+        f.hounds.insert(h, Hound { target: Some(calf), committed: true, ..Hound::default() });
+        let (x, z) = (animal(&f, h).pose.x, animal(&f, h).pose.z);
+        animal_mut(&mut f, h).strike = Some(crate::Strike { phase: StrikePhase::Windup, ticks_left: 1, prey: calf, from_x: x, from_z: z, lure: false });
+        let lunge = crate::Hunter::ticks(f.config.founder(CH).active_hunter().unwrap().lunge_s);
+        let mut through_windup = true;
+        for _ in 0..lunge + 2 {
+            f.step_with(&w, &mut flora, 1);
+            if let Some(s) = animal(&f, h).strike {
+                through_windup &= s.prey == calf;
+            }
+            if animal(&f, h).strike.is_some_and(|s| s.phase == StrikePhase::Recovery) {
+                break;
+            }
+        }
+        assert!(through_windup, "the strike keeps its target");
+        let calf_wound = f.view().animal(calf).map_or(1.0, |a| a.wound);
+        if between {
+            assert_eq!(calf_wound, 0.0, "the adult between takes or blocks the lunge");
+            assert_eq!(f.ledger.lunges_blocked, 1);
+        } else {
+            assert!(calf_wound > 0.0, "nobody between: the calf is struck");
+            assert_eq!(f.ledger.lunges_blocked, 0);
+        }
+    }
+}
+
+// ------------------------------------------------------------------ confined and occluded scenes
+
+/// The committed hound `h`'s options on `target` in world `w` (its record as `sees` set it).
+fn options_of(f: &mut Fauna, w: &World, h: u64, target: u64) -> Options {
+    let i = index(f, h);
+    let phys = *f.config.founder(CH);
+    let (pk, hunter) = (phys.pack.unwrap(), phys.active_hunter().unwrap());
+    let geometry = phys.body_at(animal(f, h).body);
+    let mem = f.hounds.get(&h).copied().unwrap_or_default();
+    let p = assess_of(f, i, target).expect("a target it senses");
+    options(f, i, &w.view(), &pk.tactics, &pk, &hunter, &geometry, &mem, &p)
+}
+
+fn inside(p: (f64, f64), (x0, x1): (i64, i64), (z0, z1): (u32, u32)) -> bool {
+    let (x, z) = ((p.0 / VOXEL_M).floor() as i64, (p.1 / VOXEL_M).floor() as i64);
+    (x0..=x1).contains(&x) && (i64::from(z0)..=i64::from(z1)).contains(&z)
+}
+
+/// **A cut-off point is reachable** (§11.5), in an asymmetric, confined scene: a calf with its
+/// grown kin off to one side. On open ground the hound's cut-off point lies between them; with
+/// a closed pen of rock over the stretch between them, the point the hound takes is never in
+/// the pen (passed over for a reachable one, or none).
+#[test]
+fn a_cut_off_point_is_reachable_and_not_in_a_closed_pen() {
+    let pen = ((66i64, 90i64), (D / 2 - 6, D / 2 + 10));
+    for penned in [false, true] {
+        let mut w = arena(13);
+        if penned {
+            let ((x0, x1), (z0, z1)) = pen;
+            wall(&mut w, (x0, x1), (z0, z0), 5);
+            wall(&mut w, (x0, x1), (z1, z1), 5);
+            wall(&mut w, (x0, x0), (z0, z1), 5);
+            wall(&mut w, (x1, x1), (z0, z1), 5);
+        }
+        let mut f = Fauna::new(config());
+        let hs = pack(&mut f, &w, 2);
+        let h = hs[0];
+        place(&mut f, h, 8.0, MID_Z - 4.0, EAST);
+        place(&mut f, hs[1], 28.0, 2.0, WEST);
+        let calf = strider(&mut f, &w, true, 16.0, MID_Z, EAST);
+        let adult = strider(&mut f, &w, false, 23.5, MID_Z + 1.5, WEST);
+        f.hounds.insert(h, Hound { target: Some(calf), committed: true, ..Hound::default() });
+        sees(&mut f, h, &[(calf, class::PREY), (adult, class::PREY)]);
+        let o = options_of(&mut f, &w, h, calf);
+        let calf_at = (16.0, MID_Z);
+        let adult_at = (23.5, MID_Z + 1.5);
+        if !penned {
+            let c = o.cut.expect("a cut-off point on open ground");
+            assert!((dist(calf_at, c) + dist(c, adult_at) - dist(calf_at, adult_at)).abs() < 1e-6, "between them");
+            assert!(o.scores[ix("cut_off")].is_finite());
+        } else if let Some(c) = o.cut {
+            assert!(!inside(c, pen.0, pen.1), "never in the pen: {c:?}");
+        } else {
+            assert!(o.scores[ix("cut_off")] == f64::NEG_INFINITY, "no point, no option");
+        }
+    }
+}
+
+/// **Interceptions in terrain** (§11.5, feasible and failed apart): a calf running across the
+/// hound's front is intercepted on open ground; with a rock wall across its line the point
+/// the hound aims at is never beyond the wall (the lead is replanned short of it, or none).
+#[test]
+fn an_interception_is_bounded_by_terrain() {
+    let wall_z = D / 2 + 4;
+    for walled in [false, true] {
+        let mut w = arena(17);
+        if walled {
+            wall(&mut w, (0, i64::from(W) - 1), (wall_z, wall_z + 1), 5);
+        }
+        let mut f = Fauna::new(config());
+        let hs = pack(&mut f, &w, 2);
+        let h = hs[0];
+        place(&mut f, h, 10.0, MID_Z, EAST);
+        place(&mut f, hs[1], 28.0, 2.0, WEST);
+        let calf = strider(&mut f, &w, true, 14.0, MID_Z - 0.5, 0.0);
+        // Its last two sightings: running +z (north) at a walk's pace.
+        let v = f.config.manifest(LS).cruise_m_per_s;
+        f.hounds.insert(h, Hound { target: Some(calf), committed: true, vel: [0.0, v], last_tick: f.tick, ..Hound::default() });
+        let mut t = seen(&f, h, calf, class::PREY);
+        t.moving = true;
+        set_percept(&mut f, h, &[t]);
+        let o = options_of(&mut f, &w, h, calf);
+        if !walled {
+            let p = o.intercept.expect("a feasible interception on open ground");
+            assert!(p.1 > MID_Z - 0.5, "ahead of the calf");
+            assert!(o.scores[ix("intercept")].is_finite());
+        } else if let Some(p) = o.intercept {
+            assert!(p.1 < f64::from(wall_z) * VOXEL_M, "never beyond the wall: {p:?}");
+        }
+    }
+}
+
+/// **Occlusion** (§11.5): a hound that hunts by sight alone takes a lone calf in the open; with
+/// a rock wall between them it does not (it reads only what it senses).
+#[test]
+fn a_calf_behind_rock_is_not_taken_by_a_hound_that_cannot_sense_it() {
+    for walled in [false, true] {
+        let mut w = arena(19);
+        if walled {
+            wall(&mut w, (52, 54), (0, D - 1), 8);
+        }
+        let mut flora = Flora::new(FloraConfig::default());
+        let mut c = config();
+        c.founders[CH.index()].senses = crate::SenseTable {
+            live: true,
+            sight_m: 12.0,
+            sight_night_m: 12.0,
+            sight_still_fraction: 1.0,
+            sight_half_angle_deg: 180.0,
+            hearing_m: 0.0,
+            hearing_min: 1e-12,
+            ..crate::SenseTable::default()
+        };
+        c.perception.remote_hz = f64::from(crate::TICK_HZ);
+        let mut f = Fauna::new(c);
+        let hs = pack(&mut f, &w, 2);
+        place(&mut f, hs[0], 10.0, MID_Z, EAST);
+        place(&mut f, hs[1], 9.0, MID_Z + 1.0, EAST);
+        let calf = strider(&mut f, &w, true, 17.0, MID_Z, EAST);
+        let period = cubarium_voxel::ticks_at_least_one(f.config.manifest(CH).controller_period_s) as u32;
+        let mut took = false;
+        for _ in 0..3 * period {
+            f.step_with(&w, &mut flora, 1);
+            took |= hs.iter().any(|h| f.hounds.get(h).is_some_and(|m| m.target == Some(calf)));
+        }
+        let sensed = hs.iter().any(|&h| f.percept(h).is_some_and(|p| p.track(calf).is_some()));
+        assert_eq!(took, !walled, "walled {walled}: taken only when sensed (sensed now: {sensed})");
+    }
 }
