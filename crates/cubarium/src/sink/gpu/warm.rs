@@ -71,13 +71,28 @@ pub(crate) fn shared_gpu() -> Result<Arc<Gpu>> {
     if let Some(gpu) = stored.as_ref() {
         return Ok(gpu.clone());
     }
-    let gpu = Arc::new(Gpu::open().context("opening the shared GPU device")?);
+    let gpu = Arc::new(crate::sink::gpu::open_device().context("opening the shared GPU device")?);
     *stored = Some(gpu.clone());
     Ok(gpu)
 }
 
+/// Completion is published even if a worker unwinds during pipeline creation.
+struct WarmCompletion<'a>(&'a Warm);
+impl Drop for WarmCompletion<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.still = Phase::Done;
+        state.all = Phase::Done;
+        self.0.moved.notify_all();
+    }
+}
+
 /// The warm-up's thread, for [`stop`].
 static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+#[cfg(test)]
+thread_local! {
+    static FAIL_WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 /// [`stop`] was called: no further phase starts.
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
@@ -116,7 +131,14 @@ pub fn start(key: String, cfg: &VoxelConfig, screen: (u32, u32)) -> bool {
         *s = State { key: Some(key.clone()), still: Phase::Running, all: Phase::Running, started: Some(Instant::now()) };
     }
     let cfg = cfg.clone();
+    #[cfg(test)]
+    let fail_worker = FAIL_WORKER.with(|flag| flag.replace(false));
     let spawned = std::thread::Builder::new().name("cubarium-pipeline-warm".into()).spawn(move || {
+        let _completion = WarmCompletion(&WARM);
+        #[cfg(test)]
+        if fail_worker {
+            panic!("injected warm-up failure");
+        }
         let t0 = Instant::now();
         let mut lap = Instant::now();
         let finish = |kind: Pipelines| {
@@ -172,8 +194,11 @@ fn lower_priority() {
 /// Block until the warm-up for `key` has compiled what a renderer building `want` needs, or
 /// `give_up` says so. Returns at once when no warm-up runs for `key`. How long it waited.
 pub fn wait(key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration {
+    wait_in(&WARM, key, want, give_up)
+}
+fn wait_in(warm: &Warm, key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration {
     let started = Instant::now();
-    let mut s = WARM.state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = warm.state.lock().unwrap_or_else(|e| e.into_inner());
     if s.key.as_deref() != Some(key) {
         return Duration::ZERO;
     }
@@ -187,7 +212,7 @@ pub fn wait(key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration 
     let since = s.started.map_or(Duration::ZERO, |t| t.elapsed());
     timing(format_args!("waiting for the warm-up's {want:?} pipelines ({:.0} ms into it)", since.as_secs_f64() * 1e3));
     while pending(&s) && !give_up() {
-        s = WARM.moved.wait_timeout(s, WAIT_SLICE).unwrap_or_else(|e| e.into_inner()).0;
+        s = warm.moved.wait_timeout(s, WAIT_SLICE).unwrap_or_else(|e| e.into_inner()).0;
     }
     let waited = started.elapsed();
     timing(format_args!("waited {:.0} ms for the warm-up's {want:?} pipelines", waited.as_secs_f64() * 1e3));
@@ -220,5 +245,24 @@ fn compile(cfg: &VoxelConfig, screen: (u32, u32), kinds: &[Pipelines], mut done:
         let made = VoxelRenderer::with_pipelines(&gpu, params, &textures, kind).map(|mut r| r.destroy(&gpu));
         done(kind, made);
     }
+    cubarium_gpu::pipeline_cache::save(&gpu)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+    #[test]
+    fn failed_warmup_releases_the_first_live_world_waiter() {
+        FAIL_WORKER.with(|flag| flag.set(true));
+        assert!(start("injected".into(), &VoxelConfig::default(), (64, 64)));
+        let thread = THREAD.lock().unwrap().take().unwrap();
+        assert!(thread.join().is_err(), "the worker failed inside start");
+        assert_eq!(WARM.state.lock().unwrap().still, Phase::Done);
+        assert_eq!(WARM.state.lock().unwrap().all, Phase::Done);
+        wait("injected", Pipelines::All, || panic!("a completed failed warm-up must never wait"));
+        *WARM.state.lock().unwrap() = State {
+            key: None, still: Phase::Done, all: Phase::Done, started: None,
+        };
+    }
 }

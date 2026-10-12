@@ -1,5 +1,6 @@
 //! Safe voxel passes with the existing CPU packing and frame-state algorithms.
 #![forbid(unsafe_code)]
+use super::upload::{self, UploadRing};
 use super::{
     FrameSource, Gpu, PresentPass, TargetSlot,
     bloom::Bloom,
@@ -10,7 +11,6 @@ use super::{
 use crate::voxel::*;
 use anyhow::{Result, bail, ensure};
 use std::collections::HashMap;
-use wgpu::util::DeviceExt;
 struct Plane {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -48,6 +48,7 @@ pub struct VoxelRenderer {
     bloom: Option<Bloom>,
     figures: Figures,
     plants: Option<Plants>,
+    plant_recorded: Vec<bool>,
     world_layout: wgpu::BindGroupLayout,
     pipelines: Pipelines,
     sky_lift: f32,
@@ -57,6 +58,7 @@ pub struct VoxelRenderer {
     nearest: wgpu::Sampler,
     linear: wgpu::Sampler,
     present: HashMap<wgpu::TextureFormat, PresentPass>,
+    present_frames: std::collections::VecDeque<Option<wgpu::TextureFormat>>,
     staging: Vec<Staging>,
     ring: StagingRing,
     slow: SlowPlanes,
@@ -92,6 +94,13 @@ pub struct VoxelRenderer {
     projection_height: u32,
     highlight: Option<Highlight>,
     last_done: Option<usize>,
+    uploads: UploadRing,
+    uniforms: wgpu::Buffer,
+    uniform_stride: u64,
+    emit_buffers: Vec<wgpu::Buffer>,
+    emit_version: u64,
+    emit_written: Vec<u64>,
+    world_groups: Vec<[wgpu::BindGroup; 6]>,
     figure_frame: crate::figures::FigureFrame,
     figures_dropped: u64,
 }
@@ -259,6 +268,7 @@ impl VoxelRenderer {
         if cells != self.emit_cells.as_slice() {
             self.emit_cells.clear();
             self.emit_cells.extend_from_slice(cells);
+            self.emit_version += 1;
             if self.params.lit {
                 self.raster_current = false;
                 self.version += 1;
@@ -363,7 +373,17 @@ impl VoxelRenderer {
 
     pub fn retire_frame(&mut self) {
         self.timing.retire();
+        self.present_frames.pop_front();
         if let Some(frame) = self.ring.retire() {
+            self.uploads.retire();
+            self.figures.retired(frame.slot);
+            if self.plant_recorded[frame.slot] {
+                if let Some(pl) = &mut self.plants {
+                    pl.frame_retired();
+                }
+                self.plant_recorded[frame.slot] = false;
+                self.frame_uploads[frame.slot] = (0, 0);
+            }
             self.last_done = Some(frame.slot);
             self.sunvis.retired(frame.slot);
         }
@@ -374,12 +394,26 @@ impl VoxelRenderer {
     /// never reach the GPU, because recording cleared the dirty flag.
     pub fn discard_frame(&mut self) {
         self.timing.discard();
-        self.raster_current = false;
-        if let Some(pl) = &mut self.plants {
-            pl.frame_discarded();
+        if let Some(Some(format)) = self.present_frames.pop_back() {
+            if let Some(p) = self.present.get(&format) {
+                p.discarded();
+            }
         }
+        self.raster_current = false;
         let frame = self.ring.discard();
         if let Some(f) = frame {
+            if self.plant_recorded[f.slot] {
+                if let Some(pl) = &mut self.plants {
+                    pl.frame_discarded();
+                }
+                self.plant_recorded[f.slot] = false;
+            }
+            self.uploads.discard_slot(f.slot);
+            self.figures.discarded(f.slot);
+            self.emit_written[f.slot] = u64::MAX;
+            if let Some(p) = &mut self.plants {
+                p.discarded(f.slot);
+            }
             self.sunvis.discarded(f.slot);
             let (bytes, batches) = std::mem::take(&mut self.frame_uploads[f.slot]);
             self.upload_totals.0 -= bytes;
@@ -486,9 +520,22 @@ impl VoxelRenderer {
         textures: &VoxelTextures,
         pipelines: Pipelines,
     ) -> Result<Self> {
+        gpu.validated("voxel renderer construction", || {
+            Self::build_with_pipelines(gpu, params, textures, pipelines)
+        })
+    }
+
+    fn build_with_pipelines(
+        gpu: &Gpu,
+        params: VoxelParams,
+        textures: &VoxelTextures,
+        pipelines: Pipelines,
+    ) -> Result<Self> {
+        gpu.check_alive()?;
         params.validate()?;
         ensure!(
-            gpu.device.limits().max_sampled_textures_per_shader_stage >= 21,
+            gpu.device.limits().max_sampled_textures_per_shader_stage
+                >= super::WORLD_SAMPLED_TEXTURES,
             "voxel rendering requires 21 sampled textures per shader stage; adapter {} supports {}",
             gpu.name,
             gpu.device.limits().max_sampled_textures_per_shader_stage
@@ -496,6 +543,10 @@ impl VoxelRenderer {
         ensure!(
             (textures.s, textures.rise) == (params.s, params.rise),
             "face texture projection differs"
+        );
+        ensure!(
+            gpu.device.limits().max_immediate_size >= 64,
+            "voxel rendering requires 64 immediate bytes"
         );
         let p = &params;
         let raster_size = (p.raster_w, p.raster_h);
@@ -831,7 +882,56 @@ impl VoxelRenderer {
                 glow: vec![0; p.glow_bytes()],
             })
             .collect();
-        Ok(Self {
+        let uniform_stride =
+            (std::mem::size_of::<VoxelUniforms>() as u64).div_ceil(u64::from(
+                gpu.device.limits().min_uniform_buffer_offset_alignment,
+            )) * u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment);
+        let uniforms = upload::buffer(
+            gpu,
+            "world uniform ring",
+            uniform_stride * STAGING_RING as u64,
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let emit_buffers = (0..STAGING_RING)
+            .map(|_| {
+                upload::buffer(
+                    gpu,
+                    "world emitter table",
+                    (EMIT_TABLE * 16) as u64,
+                    wgpu::BufferUsages::STORAGE,
+                )
+            })
+            .collect();
+        let (bw, bh, bd) = brick_dims(p.width, p.height, p.depth);
+        let brick_capacity = u64::from(bw * bh * bd).div_ceil(4) * u64::from(BRICK * BRICK * 256);
+        let full_capacity = upload::texture_bytes(extent(volume), 4);
+        let upload_capacity = full_capacity.max(brick_capacity)
+            + world
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !matches!(i, 0 | 4 | 5))
+                .map(|(_, t)| {
+                    upload::texture_bytes(
+                        t.texture.size(),
+                        t.texture.format().block_copy_size(None).unwrap(),
+                    )
+                })
+                .sum::<u64>()
+            + upload::texture_bytes(extent(volume), 2)
+            + super::geometry::upload_capacity()
+            + (EMIT_TABLE * 16) as u64
+            + uniform_stride
+            + 4096;
+        let uploads = UploadRing::new(gpu, upload_capacity, STAGING_RING);
+        let mut renderer = Self {
+            uploads,
+            uniforms,
+            uniform_stride,
+            emit_buffers,
+            emit_version: 0,
+            emit_written: vec![u64::MAX; STAGING_RING],
+            world_groups: vec![],
+
             closed: false,
             timing: Default::default(),
             params,
@@ -846,6 +946,7 @@ impl VoxelRenderer {
             bloom,
             figures,
             plants,
+            plant_recorded: vec![false; STAGING_RING],
             world_layout,
             pipelines,
             sky_lift: 0.0,
@@ -855,6 +956,7 @@ impl VoxelRenderer {
             nearest,
             linear,
             present: HashMap::new(),
+            present_frames: Default::default(),
             staging,
             ring: StagingRing::new(STAGING_RING),
             slow: SlowPlanes::new(STAGING_RING),
@@ -892,7 +994,111 @@ impl VoxelRenderer {
             last_done: None,
             figure_frame: Default::default(),
             figures_dropped: 0,
-        })
+        };
+        renderer.world_groups = (0..STAGING_RING)
+            .map(|slot| renderer.make_world_groups(gpu, slot))
+            .collect();
+        gpu.check_alive()?;
+        Ok(renderer)
+    }
+    fn make_world_groups(&self, gpu: &Gpu, slot: usize) -> [wgpu::BindGroup; 6] {
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &self.uniforms,
+                offset: self.uniform_stride * slot as u64,
+                size: wgpu::BufferSize::new(std::mem::size_of::<VoxelUniforms>() as u64),
+            }),
+        }];
+        for (i, plane) in self.world.iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: i as u32 + 1,
+                resource: wgpu::BindingResource::TextureView(&plane.view),
+            });
+        }
+        let plant_z = self
+            .plants
+            .as_ref()
+            .map_or(&self.figures.walk_depth.view, |p| &p.occluder.view);
+        let plant_surface = self
+            .plants
+            .as_ref()
+            .and_then(|p| p.weather_surface.as_ref())
+            .map_or(&self.backdrop.view, |p| &p.view);
+        let figure_surface = self
+            .figures
+            .weather_surface
+            .as_ref()
+            .map_or(&self.backdrop.view, |p| &p.view);
+        for (binding, view) in [
+            (10, &self.sunvis.view),
+            (11, &self.backdrop.view),
+            (
+                12,
+                self.bloom
+                    .as_ref()
+                    .map_or(&self.backdrop.view, |b| &b.emission),
+            ),
+            (13, &self.figures.sun.view),
+            (15, plant_z),
+            (16, &self.figures.comp_depth.view),
+            (17, plant_surface),
+            (18, figure_surface),
+        ] {
+            entries.push(wgpu::BindGroupEntry {
+                binding,
+                resource: wgpu::BindingResource::TextureView(view),
+            });
+        }
+        entries.extend([
+            wgpu::BindGroupEntry {
+                binding: 14,
+                resource: self.emit_buffers[slot].as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 32,
+                resource: wgpu::BindingResource::Sampler(&self.nearest),
+            },
+            wgpu::BindGroupEntry {
+                binding: 33,
+                resource: wgpu::BindingResource::Sampler(&self.linear),
+            },
+        ]);
+        let world_group = |excluded: &[u32]| {
+            let entries: Vec<_> = entries
+                .iter()
+                .map(|entry| wgpu::BindGroupEntry {
+                    binding: entry.binding,
+                    resource: if excluded.contains(&entry.binding) {
+                        wgpu::BindingResource::TextureView(if matches!(entry.binding, 13 | 16) {
+                            &self.dummy_depth.view
+                        } else {
+                            &self.dummy_colour.view
+                        })
+                    } else {
+                        entry.resource.clone()
+                    },
+                })
+                .collect();
+            gpu.bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("pass world inputs"),
+                layout: &self.world_layout,
+                entries: &entries,
+            })
+        };
+        [
+            world_group(&[]),
+            world_group(&[11, 17, 18]),
+            world_group(&[13]),
+            world_group(&[12, 15]),
+            world_group(&[12, 15, 17]),
+            world_group(&[12, 16, 18]),
+        ]
+    }
+
+    #[cfg(test)]
+    pub(super) fn plant_tips(&self) -> &[f32] {
+        self.plants.as_ref().unwrap().drawn_tips()
     }
     pub fn params(&self) -> VoxelParams {
         self.params
@@ -1001,7 +1207,7 @@ fn fullscreen(
             })
         })
         .collect();
-    Ok(gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(shader.name()),
         layout: Some(layout),
         vertex: wgpu::VertexState {
@@ -1024,7 +1230,7 @@ fn fullscreen(
         multisample: Default::default(),
         multiview_mask: None,
         cache: None,
-    }))
+    })
 }
 
 impl VoxelRenderer {
@@ -1047,7 +1253,12 @@ impl VoxelRenderer {
         encoder: &mut wgpu::CommandEncoder,
         target: Option<TargetSlot<'_>>,
     ) -> Result<()> {
+        gpu.check_alive()?;
         ensure!(!self.closed, "voxel renderer is destroyed");
+        ensure!(
+            self.ring.in_flight() < STAGING_RING,
+            "renderer is at frame capacity"
+        );
         ensure!(self.staged, "VoxelRenderer::record before first stage");
         let timing = self.timing.begin(gpu, 12);
         if let Some(t) = &timing {
@@ -1058,6 +1269,10 @@ impl VoxelRenderer {
         // until it retires. A frame that uploads nothing still takes a place in the
         // ring's order, so retirements and frames stay one to one.
         let frame = self.ring.record();
+        self.plant_recorded[frame.slot] = false;
+        self.frame_uploads[frame.slot] = (0, 0);
+        self.present_frames.push_back(None);
+        let mut writer = self.uploads.begin(gpu, frame.slot)?;
         let upload = self.dirty && frame.staging.is_some();
         self.dirty = false;
         // Which of the roof and the atlas this upload carries: only the ones the images
@@ -1112,8 +1327,10 @@ impl VoxelRenderer {
         block.fog_k[1] = self.fog_floor;
         block.clock[3] = self.sky_lift;
         // The emitter table into this frame's own region (GLOW-EASE).
-        let cap = emit_table(&self.emit_cells, &mut self.emit_scratch);
-        if cap > 0 {}
+        if self.emit_written[frame.slot] != self.emit_version {
+            emit_table(&self.emit_cells, &mut self.emit_scratch);
+        }
+        let cap = self.emit_scratch.len() as u32;
         block.view[2] = 0;
         block.view[3] = emit_view(cap, &self.emit_cells) as i32;
         // The figures go into this slot's buffer now: the sun map is drawn before the walk.
@@ -1121,13 +1338,16 @@ impl VoxelRenderer {
         let sun_map = if redraw {
             self.figures_dropped += self.figures.prepare(
                 gpu,
+                encoder,
+                &mut writer,
+                frame.slot,
                 &self.figure_frame,
                 p.s,
                 p.rise,
                 p.base,
                 self.view_x,
                 p.width * p.s,
-            ) as u64;
+            )? as u64;
             (p.lit && self.figures.has_tiles())
                 .then(|| crate::figures::sun_map(p.width, p.height, p.depth, self.look.sun))
                 .flatten()
@@ -1160,13 +1380,14 @@ impl VoxelRenderer {
 
         if let Some(pl) = &mut self.plants {
             pl.frame_recorded(redraw);
+            self.plant_recorded[frame.slot] = true;
         }
         if upload && redraw {
             let i = frame.staging.unwrap();
             let b = &self.staging[i];
             let carried = &self.carried[i];
             if carried.full {
-                gpu.upload_texture(
+                writer.texture(
                     encoder,
                     &self.world[0].texture,
                     wgpu::Origin3d::ZERO,
@@ -1183,21 +1404,16 @@ impl VoxelRenderer {
                         (brick / (bw * bh)) * BRICK,
                     );
                     let size = ((w - x).min(BRICK), (h - y).min(BRICK), (dd - z).min(BRICK));
-                    let mut texels = Vec::with_capacity((size.0 * size.1 * size.2) as usize);
                     let slot = &b.voxels[k * BRICK_TEXELS..(k + 1) * BRICK_TEXELS];
-                    for dz in 0..size.2 {
-                        for dy in 0..size.1 {
-                            let start = ((dz * BRICK + dy) * BRICK) as usize;
-                            texels.extend_from_slice(&slot[start..start + size.0 as usize]);
-                        }
-                    }
-                    gpu.upload_texture(
+                    writer.texture_rows(
                         encoder,
                         &self.world[0].texture,
                         wgpu::Origin3d { x, y, z },
                         extent(size),
                         4,
-                        bytemuck::cast_slice(&texels),
+                        bytemuck::cast_slice(slot),
+                        BRICK * 4,
+                        BRICK,
                     )?;
                 }
             }
@@ -1240,7 +1456,7 @@ impl VoxelRenderer {
             ];
             for (on, i, size, bytes, data) in planes {
                 if on {
-                    gpu.upload_texture(
+                    writer.texture(
                         encoder,
                         &self.world[i].texture,
                         wgpu::Origin3d::ZERO,
@@ -1252,121 +1468,39 @@ impl VoxelRenderer {
             }
         }
         if redraw {
-            self.sunvis.record_upload(gpu, encoder, frame.slot)?;
+            self.sunvis
+                .record_upload(&mut writer, encoder, frame.slot)?;
             if let Some(p) = &mut self.plants {
-                p.prepare(gpu);
+                p.prepare(encoder, &mut writer, frame.slot)?;
             }
         }
         if let Some(t) = &timing {
             t.stamp(encoder, 1);
         }
-        let uniform = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("voxel frame uniforms"),
-                contents: bytemuck::bytes_of(&block),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let empty = [[0u32; 4]];
-        let emit = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("voxel frame emitter cells"),
-                contents: bytemuck::cast_slice(if self.emit_scratch.is_empty() {
-                    &empty
-                } else {
-                    &self.emit_scratch
-                }),
-                usage: wgpu::BufferUsages::STORAGE,
-            });
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform.as_entire_binding(),
-        }];
-        for (i, plane) in self.world.iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: i as u32 + 1,
-                resource: wgpu::BindingResource::TextureView(&plane.view),
-            });
+        writer.bytes(
+            encoder,
+            &self.uniforms,
+            self.uniform_stride * frame.slot as u64,
+            bytemuck::bytes_of(&block),
+        )?;
+        if self.emit_written[frame.slot] != self.emit_version {
+            writer.bytes(
+                encoder,
+                &self.emit_buffers[frame.slot],
+                0,
+                bytemuck::cast_slice(&self.emit_scratch),
+            )?;
+            self.emit_written[frame.slot] = self.emit_version;
         }
-        let plant_z = self
-            .plants
-            .as_ref()
-            .map_or(&self.figures.walk_depth.view, |p| &p.occluder.view);
-        let plant_surface = self
-            .plants
-            .as_ref()
-            .and_then(|p| p.weather_surface.as_ref())
-            .map_or(&self.backdrop.view, |p| &p.view);
-        let figure_surface = self
-            .figures
-            .weather_surface
-            .as_ref()
-            .map_or(&self.backdrop.view, |p| &p.view);
-        for (binding, view) in [
-            (10, &self.sunvis.view),
-            (11, &self.backdrop.view),
-            (
-                12,
-                self.bloom
-                    .as_ref()
-                    .map_or(&self.backdrop.view, |b| &b.emission),
-            ),
-            (13, &self.figures.sun.view),
-            (15, plant_z),
-            (16, &self.figures.comp_depth.view),
-            (17, plant_surface),
-            (18, figure_surface),
-        ] {
-            entries.push(wgpu::BindGroupEntry {
-                binding,
-                resource: wgpu::BindingResource::TextureView(view),
-            });
-        }
-        entries.extend([
-            wgpu::BindGroupEntry {
-                binding: 14,
-                resource: emit.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 32,
-                resource: wgpu::BindingResource::Sampler(&self.nearest),
-            },
-            wgpu::BindGroupEntry {
-                binding: 33,
-                resource: wgpu::BindingResource::Sampler(&self.linear),
-            },
-        ]);
-        let world_group = |excluded: &[u32]| {
-            let entries: Vec<_> = entries
-                .iter()
-                .map(|entry| wgpu::BindGroupEntry {
-                    binding: entry.binding,
-                    resource: if excluded.contains(&entry.binding) {
-                        wgpu::BindingResource::TextureView(if matches!(entry.binding, 13 | 16) {
-                            &self.dummy_depth.view
-                        } else {
-                            &self.dummy_colour.view
-                        })
-                    } else {
-                        entry.resource.clone()
-                    },
-                })
-                .collect();
-            gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("pass world inputs"),
-                layout: &self.world_layout,
-                entries: &entries,
-            })
-        };
-        let world = world_group(&[]);
-        let sky_world = world_group(&[11, 17, 18]);
-        let sun_world = world_group(&[13]);
-        // Weather reads the walk end from emission alpha (12), not linear
-        // model depth. Both attached planes and the plant fallback need dummies.
-        let walk_world = world_group(&[12, 15]);
-        let plant_world = world_group(&[12, 15, 17]);
-        let figure_world = world_group(&[12, 16, 18]);
+        writer.finish(encoder);
+        let [
+            world,
+            sky_world,
+            sun_world,
+            walk_world,
+            plant_world,
+            figure_world,
+        ] = &self.world_groups[frame.slot];
         if redraw {
             if let Some(pipeline) = &self.sky_pipeline {
                 draw_fullscreen(
@@ -1468,16 +1602,21 @@ impl VoxelRenderer {
             t.stamp(encoder, 2);
         }
         if let Some(target) = target {
-            self.present
-                .entry(target.format)
-                .or_insert_with(|| PresentPass::new(gpu, target.format))
-                .record(
-                    gpu,
-                    encoder,
-                    &self.raster.view,
-                    target.view,
-                    target.transform,
-                );
+            let present = match self.present.entry(target.format) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(PresentPass::new(gpu, target.format)?)
+                }
+            };
+            let shown = present.record(
+                gpu,
+                encoder,
+                &self.raster.view,
+                target.view,
+                target.transform,
+            );
+            ensure!(shown, "present recording failed");
+            *self.present_frames.back_mut().unwrap() = Some(target.format);
         }
         if let Some(t) = timing {
             t.stamp(encoder, 3);
@@ -1568,9 +1707,6 @@ impl FrameSource for VoxelRenderer {
     }
     fn frame_retired(&mut self) {
         self.retire_frame();
-        if let Some(pl) = &mut self.plants {
-            pl.frame_retired();
-        }
     }
     fn frame_discarded(&mut self) {
         self.discard_frame();

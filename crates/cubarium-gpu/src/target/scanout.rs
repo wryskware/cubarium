@@ -124,7 +124,7 @@ impl Scanout {
         Ok((
             self.output.width,
             self.output.height,
-            self.frames[i].image.rgba().to_vec(),
+            self.frames[i].image.rgba(),
         ))
     }
 

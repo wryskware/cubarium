@@ -84,12 +84,12 @@ impl SunVisVolume {
     }
     pub fn record_upload(
         &mut self,
-        gpu: &Gpu,
+        upload: &mut super::upload::Upload<'_>,
         encoder: &mut wgpu::CommandEncoder,
         slot: usize,
     ) -> Result<()> {
         if self.upload == Upload::Owed {
-            gpu.upload_texture(
+            upload.texture(
                 encoder,
                 &self.texture,
                 wgpu::Origin3d::ZERO,

@@ -9,7 +9,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
 use drm::buffer::{Buffer, DrmFourcc};
-use drm::control::{Device as ControlDevice, dumbbuffer::DumbBuffer};
+use drm::control::{
+    Device as ControlDevice,
+    dumbbuffer::{DumbBuffer, DumbMapping},
+};
 
 struct Card(File);
 
@@ -24,6 +27,7 @@ impl ControlDevice for Card {}
 /// A linear XR24 allocation, exported once and written only while its slot is free.
 pub struct ScanoutBuffer {
     card: Card,
+    mapping: Option<DumbMapping<'static>>,
     buffer: DumbBuffer,
 }
 
@@ -44,7 +48,21 @@ impl ScanoutBuffer {
         let buffer = card
             .create_dumb_buffer((width, height), DrmFourcc::Xrgb8888, 32)
             .context("allocate linear DRM scanout buffer")?;
-        Ok(Self { card, buffer })
+        // drm ties the mapping to the mutable handle, not to the card. Leak only
+        // this tiny Copy handle; the mapping, allocation and card still drop normally.
+        let handle = Box::leak(Box::new(buffer));
+        let mapping = match card.map_dumb_buffer(handle) {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                let _ = card.destroy_dumb_buffer(buffer);
+                return Err(error).context("map DRM scanout allocation once");
+            }
+        };
+        Ok(Self {
+            card,
+            mapping: Some(mapping),
+            buffer,
+        })
     }
 
     pub fn pitch(&self) -> u32 {
@@ -58,27 +76,53 @@ impl ScanoutBuffer {
             .context("export DRM scanout allocation as dma-buf")
     }
 
-    /// Copies tightly packed sRGB RGBA bytes into the buffer's padded BGRA rows.
-    pub fn write_rgba(&mut self, rgba: &[u8]) -> Result<()> {
+    pub fn clear(&mut self) {
+        let pitch = self.buffer.pitch() as usize;
+        let (width, height) = self.buffer.size();
+        let mapped = self.mapping.as_mut().unwrap();
+        mapped.fill(0);
+        for row in mapped.chunks_mut(pitch).take(height as usize) {
+            for pixel in row[..width as usize * 4].chunks_exact_mut(4) {
+                pixel[3] = 255;
+            }
+        }
+    }
+    pub fn write_rows(&mut self, rgba: &[u8], source_pitch: usize) -> Result<()> {
         let (width, height) = self.buffer.size();
         let row_bytes = width as usize * 4;
-        ensure!(
-            rgba.len() == row_bytes * height as usize,
-            "wrong scanout readback size"
-        );
         let pitch = self.buffer.pitch() as usize;
-        ensure!(
-            pitch >= row_bytes,
-            "DRM pitch is smaller than a scanout row"
-        );
-        let mut mapped = self
-            .card
-            .map_dumb_buffer(&mut self.buffer)
-            .context("map DRM scanout allocation")?;
-        copy_rows(rgba, &mut mapped, row_bytes, pitch, height as usize)
+        copy_rows_strided(
+            rgba,
+            source_pitch,
+            self.mapping.as_mut().unwrap(),
+            row_bytes,
+            pitch,
+            height as usize,
+        )
+    }
+
+    /// Diagnostic captures alone copy pixels back out of scanout memory.
+    pub fn read_rgba(&self) -> Vec<u8> {
+        let (width, height) = self.buffer.size();
+        let row_bytes = width as usize * 4;
+        let mut rgba = vec![0; row_bytes * height as usize];
+        let mapped = self.mapping.as_ref().unwrap();
+        for (source, target) in mapped
+            .chunks(self.buffer.pitch() as usize)
+            .zip(rgba.chunks_exact_mut(row_bytes))
+        {
+            for (pixel, out) in source[..row_bytes]
+                .chunks_exact(4)
+                .zip(target.chunks_exact_mut(4))
+            {
+                out.copy_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+            }
+        }
+        rgba
     }
 }
 
+#[cfg(test)]
 fn copy_rows(
     rgba: &[u8],
     mapped: &mut [u8],
@@ -86,19 +130,29 @@ fn copy_rows(
     pitch: usize,
     rows: usize,
 ) -> Result<()> {
+    copy_rows_strided(rgba, row_bytes, mapped, row_bytes, pitch, rows)
+}
+fn copy_rows_strided(
+    rgba: &[u8],
+    source_pitch: usize,
+    mapped: &mut [u8],
+    row_bytes: usize,
+    pitch: usize,
+    rows: usize,
+) -> Result<()> {
     ensure!(
-        row_bytes > 0 && row_bytes % 4 == 0 && pitch >= row_bytes,
+        row_bytes > 0 && row_bytes % 4 == 0 && pitch >= row_bytes && source_pitch >= row_bytes,
         "invalid scanout stride"
     );
     ensure!(
-        rgba.len() == row_bytes * rows && mapped.len() >= pitch * rows,
+        rgba.len() >= source_pitch * rows && mapped.len() >= pitch * rows,
         "scanout allocation does not cover the frame"
     );
     for (source, destination) in rgba
-        .chunks_exact(row_bytes)
+        .chunks_exact(source_pitch)
         .zip(mapped.chunks_mut(pitch).take(rows))
     {
-        for (pixel, target) in source
+        for (pixel, target) in source[..row_bytes]
             .chunks_exact(4)
             .zip(destination[..row_bytes].chunks_exact_mut(4))
         {
@@ -110,6 +164,7 @@ fn copy_rows(
 
 impl Drop for ScanoutBuffer {
     fn drop(&mut self) {
+        drop(self.mapping.take());
         let _ = self.card.destroy_dumb_buffer(self.buffer);
     }
 }

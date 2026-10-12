@@ -65,15 +65,26 @@ def capture(args):
         commands.append(base + ["--weather", "fixed:0.95,0,clear,0", str(out / "models-plants-glow.png")])
         commands.append(base + ["--textures", "assets/voxel-textures", str(out / "plants-textures.png")])
     records = []
+    failed = []
     for command in commands:
         print(json.dumps(command), flush=True)
-        subprocess.run(command, cwd=root, check=True, timeout=300)
+        try:
+            result = subprocess.run(command, cwd=root, check=not args.keep_going,
+                                    timeout=None if args.keep_going else 300)
+            if result.returncode:
+                failed.append(dict(command=command, returncode=result.returncode))
+        except subprocess.SubprocessError as error:
+            if not args.keep_going:
+                raise
+            failed.append(dict(command=command, error=str(error)))
         records.append(command)
         size = sum(p.stat().st_size for d in (out, fixture) for p in d.rglob("*") if p.is_file())
-        if size > 100 * 1024**2:
+        if size > 100 * 1024**2 and not args.keep_going:
             raise RuntimeError(f"parity artifacts exceeded 100 MiB: {size} bytes")
     images = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(out.rglob("*.png"))}
-    (out / f"{args.suite}-commands.json").write_text(json.dumps(dict(commands=records, images=images), indent=2) + "\n")
+    (out / f"{args.suite}-commands.json").write_text(json.dumps(dict(commands=records, images=images, failures=failed), indent=2) + "\n")
+
+    return int(bool(failed))
 
 
 def smoke(args):
@@ -175,6 +186,7 @@ def main():
     for key in ("binary", "tree", "fixture", "out"):
         cap.add_argument("--" + key, required=True)
     cap.add_argument("--suite", choices=("synthetic", "world", "specimens", "figures", "present"), required=True)
+    cap.add_argument("--keep-going", action="store_true", help="finish every capture case even after a failure")
     cap.add_argument("--source", help="raster PNG input for the present suite")
     comp = sub.add_parser("compare")
     comp.add_argument("baseline")

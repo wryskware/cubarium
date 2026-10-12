@@ -1,27 +1,45 @@
 //! Portable safe GPU rendering of the ring and voxel worlds.
 //! Maintained WGSL runs through wgpu on Vulkan, Metal and Direct3D.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
+#[forbid(unsafe_code)]
 pub mod adapter;
+#[forbid(unsafe_code)]
 pub mod atlas;
+#[forbid(unsafe_code)]
 pub mod bloom;
+#[forbid(unsafe_code)]
 pub mod cord;
 #[cfg(test)]
+#[forbid(unsafe_code)]
 mod cord_tests;
+#[forbid(unsafe_code)]
 pub mod figures;
 #[cfg(test)]
+#[forbid(unsafe_code)]
 mod figures_order_tests;
+#[forbid(unsafe_code)]
 pub mod palette;
-pub mod plants;
 pub mod pipeline_cache;
+#[forbid(unsafe_code)]
+pub mod plants;
+#[forbid(unsafe_code)]
 pub mod present;
+#[forbid(unsafe_code)]
 pub mod render;
+#[forbid(unsafe_code)]
 pub mod scene;
+#[forbid(unsafe_code)]
 pub mod sunvis;
+#[forbid(unsafe_code)]
 pub mod synthetic;
+#[forbid(unsafe_code)]
 pub mod target;
+#[forbid(unsafe_code)]
 pub mod voxel;
+#[forbid(unsafe_code)]
 pub mod weather;
+#[forbid(unsafe_code)]
 pub mod wgpu_backend;
 
 pub use adapter::{MAX_POSES, PoseRef, ScratchFrame, Stamp, StampMask, StampTone};

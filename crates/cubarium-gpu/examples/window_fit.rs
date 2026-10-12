@@ -83,7 +83,7 @@ fn main() -> Result<()> {
         wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
     );
     let target_view = target.create_view(&Default::default());
-    let pass = PresentPass::new(&gpu, FORMAT);
+    let pass = PresentPass::new(&gpu, FORMAT)?;
     let fit = WindowFit::fit((rw, rh), (ww, wh), false);
     let mut upload = gpu.encoder("window-fit upload");
     gpu.upload_texture(

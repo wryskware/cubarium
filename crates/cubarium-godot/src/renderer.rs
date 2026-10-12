@@ -46,6 +46,10 @@ impl WorldRenderer {
             fps,
             highlight_mix: HIGHLIGHT_MIX,
         };
+        let user = godot::classes::Os::singleton().get_user_data_dir().to_string();
+        if !user.is_empty() {
+            cubarium_gpu::pipeline_cache::use_dir(Some(PathBuf::from(user).join("pipeline-cache")));
+        }
         // Hosted renderers share the warm-up's device and resident pipelines.
         match Hosted::new(options) {
             Ok(h) => {
