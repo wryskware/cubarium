@@ -34,7 +34,10 @@
 //!   lineage's `kin_tracks` (the seedporter weighs one: the nearest of its kind, usually its
 //!   twin, so its mother was almost never in its record), and it **remembers** where it last
 //!   sensed her for `mother_memory_s` ([`crate::Fauna::mother_seen`], session state), heading
-//!   there when she is out of its senses, until it gets there.
+//!   there when she is out of its senses, until it gets there. **In contact it feels her**
+//!   (SP-FOLLOW-2): a newborn beside a still, silent mother on a vine, out of its field or
+//!   past a terrace step, took the spot where it last sensed her for one she had left, forgot
+//!   her within seconds of its birth, and never found her again.
 //!
 //! **Never scored.** Nursing is no fitness or reward term; the ledger's `nursed_*` lines are
 //! readouts only.
@@ -310,8 +313,10 @@ pub(crate) enum MotherGoal {
 /// off, its mother dead, out of its senses longer than `mother_memory_s`, or sated within
 /// `leash_m` of her (and sated in contact). It reads its own percept record and keeps the
 /// memory of her ([`crate::Fauna::mother_seen`]); reaching where it last sensed her without
-/// sensing her ends that memory.
-pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, ring: f64) -> Option<MotherGoal> {
+/// sensing her ends that memory. In contact it feels her (SP-FOLLOW-2, [`felt`]), so a
+/// mother it touches is never taken for one who has left.
+pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<MotherGoal> {
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
     let id = fauna.animals.get(i)?.id;
     let t = match table_of(fauna, i) {
         Some(t) if dependent(fauna, i) && t.leash_m > 0.0 => t,
@@ -331,6 +336,9 @@ pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, ring: f64) -> Option<Moth
     let seen = fauna
         .percept(id)
         .and_then(|p| p.tracks().iter().find(|tr| tr.class == class::KIN && tr.id == mother && now.saturating_sub(tr.tick) <= fresh).copied());
+    // SP-FOLLOW-2: in contact it feels her, whatever its eyes and ears give (a still, silent
+    // mother behind it on a vine or past a terrace step is in none of its senses).
+    let seen = seen.or_else(|| felt(fauna, i, mother, ring, t.nurse_radius_m, view));
     if let Some(tr) = seen {
         fauna.mother_seen.insert(id, tr);
     }
@@ -356,4 +364,41 @@ pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, ring: f64) -> Option<Moth
         return None;
     }
     Some(MotherGoal::Go { x: m.x, z: m.z, y_m: m.y_m, lift_m: m.lift_m, site: m.site })
+}
+
+/// **Touch** (SP-FOLLOW-2): the track of its mother, by id, that the body at `i` feels in
+/// contact with her (within `radius_m`, 3D, as nursing takes it), else `None`. Her centre,
+/// base height, support face and lift, as a sensing records them.
+fn felt(fauna: &Fauna, i: usize, mother: u64, ring: f64, radius_m: f64, view: &VoxelView<'_>) -> Option<crate::Track> {
+    let g = fauna.animals.binary_search_by_key(&mother, |b| b.id).ok()?;
+    if !(distance_3d(fauna, i, g, ring) <= radius_m) {
+        return None;
+    }
+    let (a, o) = (&fauna.animals[i], &fauna.animals[g]);
+    let v = view.config.voxel_m;
+    let base = crate::perception::base_m(o, v);
+    let grounded = o.mobility.mode == crate::MobilityMode::Ground && o.attached.is_none();
+    let lift_m = if grounded {
+        0.0
+    } else {
+        crate::flight::support_below(view, o.pose.x, o.pose.z, base).map_or(0.0, |s| (base - crate::surface_m(s.y, v)).max(0.0))
+    };
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, o.pose.x, o.pose.z, ring);
+    Some(crate::Track {
+        known: true,
+        id: o.id,
+        lineage: o.founder.map_or(u8::MAX, |f| f.index() as u8),
+        class: class::KIN,
+        x: o.pose.x,
+        z: o.pose.z,
+        y_m: base,
+        site: (o.site.x, o.site.y, o.site.z),
+        lift_m,
+        grounded: grounded && o.mobility.climb.is_none(),
+        climbing: o.mobility.climb.is_some(),
+        d_m: dx.hypot(dz).hypot(base - a.pose.y_m),
+        tick: fauna.tick,
+        heading: o.pose.heading_rad,
+        ..crate::Track::default()
+    })
 }

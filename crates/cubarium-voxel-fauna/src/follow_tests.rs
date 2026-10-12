@@ -393,3 +393,78 @@ fn a_weaned_young_an_orphan_and_other_lineages_behave_as_with_the_follow_off() {
     assert_eq!(on.animals, off.animals, "no body differs");
     assert_eq!(on.ledger, off.ledger, "no book differs");
 }
+
+/// SP-FOLLOW-2: a hungry young standing on a carcass, 4 m west of its held mother, its lineage
+/// catching (so its carrion meal is on): `(the layer's carrion eaten by its lineage, whether it
+/// reached nursing contact, the milk it received)` after `ticks`.
+fn carcass_scene(edit: fn(&mut Nursing), ticks: u32) -> (f64, bool, f64) {
+    let w = world(false);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config(edit);
+    c.founders[SP.index()].catch_bellwings = true;
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let m = mother(&mut f, &w, 7.5, LANE_Z);
+    let y = young(&mut f, &w, 3.5, LANE_Z, EAST, Some(m), 0.1);
+    let site = Site { x: (3.5 / VOXEL_M).floor() as u32, y: 2, z: (LANE_Z / VOXEL_M).floor() as u32 };
+    assert!(flora.deposit(site, cubarium_voxel_flora::Deposit { kind: cubarium_voxel_flora::DepositKind::Carrion, organic: 1.0, mineral: 0.05, energy: 2.0 }));
+    assert!(flora.lay_carcass(site, cubarium_voxel_flora::Carcass { lineage: Founder::Blind.index() as u8, heading_rad: 0.0, organic: 1.0 }));
+    let before = received(&f);
+    let mut contact = false;
+    for _ in 0..ticks {
+        f.step_with(&w, &mut flora, 1);
+        contact |= apart(&f, &w, y, m) <= RADIUS;
+    }
+    (f.ledger.eaten_carrion_by_founder[SP.index()], contact, received(&f) - before)
+}
+
+#[test]
+fn a_hungry_dependent_young_goes_to_its_mother_over_a_carcass_at_its_mouth() {
+    // The catch's meal came after the follow and overrode it, the readout still saying Nurse.
+    let (eaten, _, _) = carcass_scene(|n| {
+        leash_off(n);
+        n.follow_m = 0.0;
+    }, 300);
+    assert!(eaten > 0.0, "fixture: unfollowed, the young eats the carcass at its mouth");
+    let (_, contact, milk) = carcass_scene(|_| {}, 600);
+    assert!(contact, "it leaves the carcass and reaches nursing contact");
+    assert!(milk > 0.0, "and its mother's reserve flows to it");
+}
+
+/// SP-FOLLOW-2: a hungry young in contact with its held mother, 0.3 m behind her, its senses
+/// dark (she is still and silent, out of its field or behind a terrace step), stepped
+/// `ticks`: `(the farthest it got from her, metres, the milk it received, whether the follow
+/// steered it)`.
+fn blind_contact_scene(edit: fn(&mut Nursing), ticks: u32) -> (f64, f64, bool) {
+    let w = world(false);
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut c = config(edit);
+    c.founders[SP.index()].senses = SenseTable { live: true, ..SenseTable::default() };
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let m = mother(&mut f, &w, 6.0, LANE_Z);
+    let y = young(&mut f, &w, 5.7, LANE_Z, WEST, Some(m), 0.1);
+    let before = received(&f);
+    let (mut far, mut steered) = (0.0f64, false);
+    for _ in 0..ticks {
+        f.step_with(&w, &mut flora, 1);
+        far = far.max(apart(&f, &w, y, m));
+        steered |= f.steer_of(y) == Some(Steer::Nurse);
+    }
+    (far, received(&f) - before, steered)
+}
+
+#[test]
+fn a_dependent_young_in_contact_feels_its_unseen_mother_and_stays_to_nurse() {
+    // Newborns were born in contact with a mother still on a vine, did not see her, took the
+    // spot where they last sensed her for one she had left, forgot her, and never found her.
+    let (far, _, _) = blind_contact_scene(|n| {
+        leash_off(n);
+        n.follow_m = 0.0;
+    }, 1200);
+    assert!(far > LEASH, "fixture: on its own heuristic the young walks past its leash ({far:.2} m)");
+    let (far, milk, steered) = blind_contact_scene(|_| {}, 1200);
+    assert!(steered, "it keeps to her by touch");
+    assert!(milk > 0.0, "and is nursed");
+    assert!(far <= LEASH, "and, fed, keeps within its leash of where it last felt her ({far:.2} m)");
+}
