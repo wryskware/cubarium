@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         let output = gpu.texture("panel probe output", extent(target), wgpu::TextureDimension::D2,
             format, wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC);
         let view = output.create_view(&Default::default());
-        let pass = PresentPass::new(&gpu, format);
+        let pass = PresentPass::new(&gpu, format)?;
         let mut readback = ReadbackRing::new(&gpu, target, 2)?;
         for rotation in 0..4 {
             let transform = PresentTransform::fit(raster, target, rotation, encode).unwrap();

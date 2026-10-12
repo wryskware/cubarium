@@ -222,11 +222,11 @@ impl Bloom {
                 cache: None,
             })
         };
-        let cell = pipeline(wgpu::TextureFormat::Rgba16Float, None);
+        let cell = pipeline(wgpu::TextureFormat::Rgba16Float, None)?;
         let add = pipeline(
             wgpu::TextureFormat::Rgba8UnormSrgb,
             Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-        );
+        )?;
         Ok(Self {
             emission: emission.view,
             _emission: emission._texture,

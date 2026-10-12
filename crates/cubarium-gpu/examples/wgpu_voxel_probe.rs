@@ -125,7 +125,7 @@ fn cache_probe(gpu: &Gpu) -> Result<()> {
     use cubarium_gpu::voxel::Pipelines;
     // Eight simultaneous requests must publish exactly one compiled descriptor.
     let before = gpu.pipeline_cache_stats();
-    std::thread::scope(|scope| {
+    std::thread::scope(|scope| -> Result<()> {
         let jobs: Vec<_> = (0..8)
             .map(|_| {
                 scope.spawn(|| {
@@ -137,9 +137,10 @@ fn cache_probe(gpu: &Gpu) -> Result<()> {
             })
             .collect();
         for job in jobs {
-            drop(job.join().expect("concurrent presenter builder panicked"));
+            drop(job.join().expect("concurrent presenter builder panicked")?);
         }
-    });
+        Ok(())
+    })?;
     let concurrent = gpu.pipeline_cache_stats();
     ensure!(
         concurrent.misses == before.misses + 1 && concurrent.hits >= before.hits + 7,
@@ -148,7 +149,7 @@ fn cache_probe(gpu: &Gpu) -> Result<()> {
     {
         let other = Gpu::open()?;
         let _ =
-            cubarium_gpu::wgpu_backend::PresentPass::new(&other, wgpu::TextureFormat::Rgba8Unorm);
+            cubarium_gpu::wgpu_backend::PresentPass::new(&other, wgpu::TextureFormat::Rgba8Unorm)?;
         ensure!(
             other.pipeline_cache_stats().misses == 1 && gpu.pipeline_cache_stats() == concurrent,
             "a new device must compile its own pipeline"
@@ -181,9 +182,9 @@ fn cache_probe(gpu: &Gpu) -> Result<()> {
     );
     repeated.destroy(gpu);
     // Target-format separation must not return a pipeline built for another format.
-    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8Unorm);
+    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8Unorm)?;
     let before = gpu.pipeline_cache_stats();
-    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb)?;
     let after = gpu.pipeline_cache_stats();
     ensure!(
         after.misses == before.misses + 1,

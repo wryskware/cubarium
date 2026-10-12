@@ -44,7 +44,7 @@ impl Headless {
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         );
         let view = texture.create_view(&Default::default());
-        let present = PresentPass::new(gpu, texture.format());
+        let present = PresentPass::new(gpu, texture.format())?;
         let transform = crate::present::WindowFit::fit(source.raster_size(), size, false).push();
         Ok(Self {
             output: Some(Output {

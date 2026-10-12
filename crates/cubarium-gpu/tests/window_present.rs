@@ -57,13 +57,19 @@ fn present(gpu: &Gpu, window: (u32, u32), fit: WindowFit) -> Vec<u8> {
         &pixels,
     )
     .unwrap();
-    PresentPass::new(gpu, FORMAT).record(gpu, &mut encoder, &raster_view, &view, fit.push());
+    PresentPass::new(gpu, FORMAT).unwrap().record(
+        gpu,
+        &mut encoder,
+        &raster_view,
+        &view,
+        fit.push(),
+    );
     gpu.queue.submit([encoder.finish()]);
     read_texture(gpu, &target).unwrap()
 }
 
 fn open() -> Option<Gpu> {
-    match Gpu::open() {
+    match Gpu::open_with_cache_dir(None) {
         Ok(gpu) => Some(gpu),
         Err(e) => {
             eprintln!("no GPU device here ({e}); the window's present pass was not checked");

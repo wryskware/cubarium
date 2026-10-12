@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 use super::*;
-#[cfg(feature = "counters")]
 use crate::voxel::{self, VoxelStyle, VoxelTexel, VoxelTextures};
 use crate::{atlas::Atlas, scene::RingLayout, synthetic::SyntheticWorld};
 
@@ -318,4 +317,86 @@ fn a_readback_map_failure_retires_the_source_slot_and_the_ring_is_reusable() {
     .unwrap();
     assert_eq!(delivered, 1);
     assert_eq!(renderer.frames_in_flight(), 0);
+}
+
+#[test]
+fn unlit_model_plant_redraw_between_ticks_preserves_tips() {
+    let gpu = gpu();
+    let p = voxel::VoxelParams {
+        lit: false,
+        plants: Some(crate::plants::PlantMotion {
+            breeze: crate::plants::Breeze {
+                period_s: 4.,
+                rise_s: 2.,
+                hold_s: 1.,
+                fall_s: 1.,
+                sweeps: 0,
+                flutter: 0.,
+                peak_vary: 0.,
+                ..Default::default()
+            },
+            ..Default::default()
+        }),
+        ..voxel::tests::params()
+    };
+    let mut renderer =
+        voxel::VoxelRenderer::new(&gpu, p, &VoxelTextures::empty(p.s, p.rise)).unwrap();
+    assert!(renderer.stage([1; voxel::SLOW_PLANES], |st| {
+        let list = st.plants.unwrap();
+        list.cells = vec![crate::plants::pack_cell(
+            [8, 2, 2],
+            1,
+            1.,
+            false,
+            crate::plants::SETTLED,
+            0,
+        )];
+        list.plants = vec![
+            Default::default(),
+            crate::plants::PlantRec {
+                x: 8.,
+                amp: 0.5,
+                lag: 0.,
+            },
+        ];
+    }));
+    renderer.set_clock(voxel::FrameClock::at(20, 0., 60., 20., true));
+    let mut output = headless::Headless::with_size(&gpu, &renderer, (128, 64)).unwrap();
+    output.draw(&gpu, &mut renderer, ()).unwrap();
+    let tick_tips = renderer.plant_tips().to_vec();
+    assert!(
+        tick_tips.iter().any(|&tip| tip != 0.),
+        "the tick drew swaying model plants"
+    );
+    let tick_image = renderer.read_raster(&gpu).unwrap();
+    renderer.set_clock(voxel::FrameClock::at(20, 0.5, 60., 20., true));
+    renderer.set_params(p).unwrap();
+    output.draw(&gpu, &mut renderer, ()).unwrap();
+    assert_eq!(
+        renderer.plant_tips(),
+        tick_tips,
+        "redraw keeps the tick's tips"
+    );
+    assert_eq!(renderer.read_raster(&gpu).unwrap(), tick_image);
+    assert!(gpu.take_errors().is_empty());
+}
+
+#[test]
+fn invalid_renderer_construction_returns_error_and_shared_device_stays_usable() {
+    let gpu = gpu();
+    let p = voxel::VoxelParams {
+        raster_w: gpu.device.limits().max_texture_dimension_2d + 1,
+        ..voxel::tests::params()
+    };
+    assert!(voxel::VoxelRenderer::new(&gpu, p, &VoxelTextures::empty(p.s, p.rise)).is_err());
+    let p = voxel::tests::params();
+    let mut renderer =
+        voxel::VoxelRenderer::new(&gpu, p, &VoxelTextures::empty(p.s, p.rise)).unwrap();
+    assert!(renderer.stage([1; voxel::SLOW_PLANES], |st| st.owed.mark_full()));
+    let mut output = headless::Headless::with_size(&gpu, &renderer, (128, 64)).unwrap();
+    output.draw(&gpu, &mut renderer, ()).unwrap();
+    assert!(
+        gpu.take_errors().is_empty(),
+        "scoped construction errors never escape to the device handler"
+    );
 }

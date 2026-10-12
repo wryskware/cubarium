@@ -520,6 +520,17 @@ impl VoxelRenderer {
         textures: &VoxelTextures,
         pipelines: Pipelines,
     ) -> Result<Self> {
+        gpu.validated("voxel renderer construction", || {
+            Self::build_with_pipelines(gpu, params, textures, pipelines)
+        })
+    }
+
+    fn build_with_pipelines(
+        gpu: &Gpu,
+        params: VoxelParams,
+        textures: &VoxelTextures,
+        pipelines: Pipelines,
+    ) -> Result<Self> {
         gpu.check_alive()?;
         params.validate()?;
         ensure!(
@@ -1085,6 +1096,10 @@ impl VoxelRenderer {
         ]
     }
 
+    #[cfg(test)]
+    pub(super) fn plant_tips(&self) -> &[f32] {
+        self.plants.as_ref().unwrap().drawn_tips()
+    }
     pub fn params(&self) -> VoxelParams {
         self.params
     }
@@ -1192,7 +1207,7 @@ fn fullscreen(
             })
         })
         .collect();
-    Ok(gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(shader.name()),
         layout: Some(layout),
         vertex: wgpu::VertexState {
@@ -1215,7 +1230,7 @@ fn fullscreen(
         multisample: Default::default(),
         multiview_mask: None,
         cache: None,
-    }))
+    })
 }
 
 impl VoxelRenderer {
@@ -1587,17 +1602,19 @@ impl VoxelRenderer {
             t.stamp(encoder, 2);
         }
         if let Some(target) = target {
-            let shown = self
-                .present
-                .entry(target.format)
-                .or_insert_with(|| PresentPass::new(gpu, target.format))
-                .record(
-                    gpu,
-                    encoder,
-                    &self.raster.view,
-                    target.view,
-                    target.transform,
-                );
+            let present = match self.present.entry(target.format) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(PresentPass::new(gpu, target.format)?)
+                }
+            };
+            let shown = present.record(
+                gpu,
+                encoder,
+                &self.raster.view,
+                target.view,
+                target.transform,
+            );
             ensure!(shown, "present recording failed");
             *self.present_frames.back_mut().unwrap() = Some(target.format);
         }

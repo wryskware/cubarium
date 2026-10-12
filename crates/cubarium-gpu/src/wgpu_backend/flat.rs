@@ -57,6 +57,11 @@ pub struct Renderer {
 
 impl Renderer {
     pub fn new(gpu: &Gpu, atlas: &Atlas, layout: RingLayout) -> Result<Self> {
+        gpu.validated("flat renderer construction", || {
+            Self::build(gpu, atlas, layout)
+        })
+    }
+    fn build(gpu: &Gpu, atlas: &Atlas, layout: RingLayout) -> Result<Self> {
         ensure!(layout.is_valid(), "invalid scene layout {layout:?}");
         let texture = |name, size, format, usage| {
             gpu.texture(name, size, wgpu::TextureDimension::D2, format, usage)
@@ -152,7 +157,7 @@ impl Renderer {
             Shader::Background,
             false,
             &[],
-        );
+        )?;
         let water = pipeline(
             gpu,
             &pipeline_layout,
@@ -160,7 +165,7 @@ impl Renderer {
             Shader::Water,
             true,
             &[],
-        );
+        )?;
         let attributes = [
             attribute(0, wgpu::VertexFormat::Float32x2, 0),
             attribute(1, wgpu::VertexFormat::Float32x2, 8),
@@ -186,7 +191,7 @@ impl Renderer {
             Shader::SpriteFragment,
             true,
             &buffers,
-        );
+        )?;
         let uniform_size = std::mem::size_of::<SceneUniforms>() as u64;
         let alignment = u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment);
         let uniform_stride = uniform_size.div_ceil(alignment) * alignment;
@@ -490,17 +495,19 @@ impl Renderer {
             t.stamp(encoder, 2);
         }
         if let Some(target) = target {
-            let shown = self
-                .present
-                .entry(target.format)
-                .or_insert_with(|| PresentPass::new(gpu, target.format))
-                .record(
-                    gpu,
-                    encoder,
-                    &self.raster_view,
-                    target.view,
-                    target.transform,
-                );
+            let present = match self.present.entry(target.format) {
+                std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(PresentPass::new(gpu, target.format)?)
+                }
+            };
+            let shown = present.record(
+                gpu,
+                encoder,
+                &self.raster_view,
+                target.view,
+                target.transform,
+            );
             ensure!(shown, "present recording failed");
             *self.present_frames.back_mut().unwrap() = Some(target.format);
         }
@@ -636,7 +643,7 @@ fn pipeline(
     fragment: Shader,
     blend: bool,
     buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
-) -> wgpu::RenderPipeline {
+) -> Result<wgpu::RenderPipeline> {
     let module = |shader: Shader| {
         gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(shader.name()),

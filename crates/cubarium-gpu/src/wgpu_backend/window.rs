@@ -76,7 +76,7 @@ impl WindowPresenter {
     ) -> Result<Self> {
         let owner: Arc<dyn wgpu::DisplayAndWindowHandle> = owner;
         let config = configuration(&gpu, &surface, physical_size)?;
-        let present = PresentPass::new(&gpu, config.format);
+        let present = PresentPass::new(&gpu, config.format)?;
         Ok(Self {
             gpu,
             owner,
@@ -150,7 +150,7 @@ impl WindowPresenter {
                         .context("recreate lost window surface")?;
                     let config = configuration(&self.gpu, &self.surface, self.size)?;
                     if config.format != self.config.format {
-                        self.present = PresentPass::new(&self.gpu, config.format);
+                        self.present = PresentPass::new(&self.gpu, config.format)?;
                     }
                     self.config = config;
                     self.configure_needed = true;

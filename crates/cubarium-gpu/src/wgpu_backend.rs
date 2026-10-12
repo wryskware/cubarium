@@ -129,7 +129,20 @@ fn preferred_device() -> Option<String> {
 
 impl Gpu {
     pub fn open() -> Result<Self> {
-        pollster::block_on(Self::open_async())
+        #[cfg(test)]
+        let directory = None;
+        #[cfg(not(test))]
+        let directory = {
+            crate::pipeline_cache::init_default_dir();
+            crate::pipeline_cache::dir()
+        };
+        Self::open_with_cache_dir(directory)
+    }
+
+    /// Open with an explicit per-device cache directory, independent of the
+    /// application default. Passing None disables disk writes.
+    pub fn open_with_cache_dir(directory: Option<std::path::PathBuf>) -> Result<Self> {
+        pollster::block_on(Self::open_async(directory))
     }
 
     /// Create the window's instance and surface before selecting its adapter.
@@ -152,20 +165,33 @@ impl Gpu {
         let surface = instance
             .create_surface(window)
             .context("create owned window surface")?;
-        let gpu = pollster::block_on(Self::open_instance(instance, backends, Some(&surface)))?;
+        #[cfg(test)]
+        let directory = None;
+        #[cfg(not(test))]
+        let directory = {
+            crate::pipeline_cache::init_default_dir();
+            crate::pipeline_cache::dir()
+        };
+        let gpu = pollster::block_on(Self::open_instance(
+            instance,
+            backends,
+            Some(&surface),
+            directory,
+        ))?;
         Ok((gpu, surface))
     }
 
-    async fn open_async() -> Result<Self> {
+    async fn open_async(directory: Option<std::path::PathBuf>) -> Result<Self> {
         let descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         let backends = descriptor.backends;
-        Self::open_instance(wgpu::Instance::new(descriptor), backends, None).await
+        Self::open_instance(wgpu::Instance::new(descriptor), backends, None, directory).await
     }
 
     async fn open_instance(
         instance: wgpu::Instance,
         backends: wgpu::Backends,
         surface: Option<&wgpu::Surface<'_>>,
+        cache_directory: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let preferred = if let Some(name) = preferred_device() {
             let name = name.to_lowercase();
@@ -242,8 +268,8 @@ impl Gpu {
             eprintln!("cubarium GPU: {message}");
             *reported.lock().unwrap_or_else(|e| e.into_inner()) = Some(message);
         });
-        crate::pipeline_cache::init_default_dir();
-        let disk_cache = crate::pipeline_cache::Disk::open(&device, &adapter.get_info());
+        let disk_cache =
+            crate::pipeline_cache::Disk::open(&device, &adapter.get_info(), cache_directory);
         Ok(Self {
             disk_cache,
             errors,
@@ -288,15 +314,19 @@ impl Gpu {
     pub(crate) fn cached_render_pipeline(
         &self,
         d: &wgpu::RenderPipelineDescriptor<'_>,
-    ) -> wgpu::RenderPipeline {
+    ) -> Result<wgpu::RenderPipeline> {
         let mut descriptor = d.clone();
         descriptor.cache = self.disk_cache.as_ref().map(|c| &c.cache);
-        if let Some(cache) = &self.disk_cache {
-            cache
-                .uses
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        }
-        self.resident.pipeline(&self.device, &descriptor)
+        self.resident
+            .pipeline(&self.device, &descriptor, self.disk_cache.as_ref())
+    }
+
+    pub(crate) fn validated<T>(
+        &self,
+        label: &str,
+        create: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        crate::pipeline_cache::validated(&self.device, label, create)
     }
 
     /// Validation errors are logged at their origin and can be collected without
@@ -454,7 +484,10 @@ impl PresentPass {
         transform.push(target_size)
     }
 
-    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
+    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Result<Self> {
+        gpu.validated("present construction", || Self::build(gpu, format))
+    }
+    fn build(gpu: &Gpu, format: wgpu::TextureFormat) -> Result<Self> {
         let shader = gpu.cached_shader_module(wgpu::include_wgsl!("../shaders/present.wgsl"));
         let layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("present resources"),
@@ -510,12 +543,12 @@ impl PresentPass {
             }),
             multiview_mask: None,
             cache: None,
-        });
-        Self {
+        })?;
+        Ok(Self {
             pipeline,
             layout,
             resources: Mutex::new(Vec::new()),
-        }
+        })
     }
 
     pub fn record(

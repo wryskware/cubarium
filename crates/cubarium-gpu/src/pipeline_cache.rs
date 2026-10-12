@@ -141,7 +141,7 @@ pub(crate) struct Resident {
     shaders: Entries<String, wgpu::ShaderModule>,
     groups: Entries<Vec<wgpu::BindGroupLayoutEntry>, wgpu::BindGroupLayout>,
     layouts: Entries<LayoutKey, wgpu::PipelineLayout>,
-    pipelines: Entries<RenderKey, wgpu::RenderPipeline>,
+    pipelines: Mutex<HashMap<RenderKey, Arc<Mutex<Option<wgpu::RenderPipeline>>>>>,
     hits: AtomicUsize,
     misses: AtomicUsize,
 }
@@ -186,21 +186,31 @@ impl Resident {
         &self,
         device: &wgpu::Device,
         d: &wgpu::RenderPipelineDescriptor<'_>,
-    ) -> wgpu::RenderPipeline {
-        let slot = entry(&self.pipelines, RenderKey::new(d));
-        let mut built = false;
-        let pipeline = slot
-            .get_or_init(|| {
-                built = true;
-                compile_turn(|| device.create_render_pipeline(d))
-            })
+        disk: Option<&Disk>,
+    ) -> Result<wgpu::RenderPipeline> {
+        let slot = self
+            .pipelines
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(RenderKey::new(d))
+            .or_default()
             .clone();
-        if built {
-            self.misses.fetch_add(1, Ordering::Relaxed);
-        } else {
+        let mut slot = slot.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(pipeline) = &*slot {
             self.hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(pipeline.clone());
         }
-        pipeline
+        let pipeline = validated(device, d.label.unwrap_or("render pipeline"), || {
+            Ok(compile_turn(|| device.create_render_pipeline(d)))
+        })?;
+        // Count the descriptor actually submitted to creation, including its
+        // exact cache handle. Resident hits do not submit any descriptor.
+        if let Some(disk) = disk.filter(|disk| d.cache == Some(&disk.cache)) {
+            disk.uses.fetch_add(1, Ordering::Relaxed);
+        }
+        self.misses.fetch_add(1, Ordering::Relaxed);
+        *slot = Some(pipeline.clone());
+        Ok(pipeline)
     }
     pub fn stats(&self) -> Stats {
         Stats {
@@ -239,6 +249,22 @@ fn compile_turn<R>(create: impl FnOnce() -> R) -> R {
     result
 }
 
+/// Construction scopes are thread-local in wgpu, including warm workers.
+/// Pop even when the constructor returns an ordinary application error.
+pub(crate) fn validated<T>(
+    device: &wgpu::Device,
+    label: &str,
+    create: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let result = create();
+    if let Some(error) = pollster::block_on(scope.pop()) {
+        anyhow::bail!("GPU validation during {label}: {error}");
+    }
+    result
+}
+
+#[cfg(not(test))]
 pub(crate) fn init_default_dir() {
     if CONFIGURED.load(Ordering::Acquire) {
         return;
@@ -297,12 +323,19 @@ pub(crate) struct Disk {
     pub uses: AtomicUsize,
 }
 impl Disk {
-    pub fn open(device: &wgpu::Device, info: &wgpu::AdapterInfo) -> Option<Self> {
+    pub fn open(
+        device: &wgpu::Device,
+        info: &wgpu::AdapterInfo,
+        directory: Option<PathBuf>,
+    ) -> Option<Self> {
         if !device.features().contains(wgpu::Features::PIPELINE_CACHE) {
             return None;
         }
         let key = wgpu::util::pipeline_cache_key(info)?;
-        let path = dir().map(|d| d.join(&key));
+        if let Some(directory) = &directory {
+            remove_stale_temps(directory, std::time::SystemTime::now());
+        }
+        let path = directory.map(|d| d.join(&key));
         let bytes = path.as_ref().and_then(|p| std::fs::read(p).ok());
         let data = bytes.as_deref().and_then(|b| payload(&key, b));
         let descriptor = wgpu::PipelineCacheDescriptor {
@@ -327,6 +360,13 @@ impl Disk {
             return Ok(Saved::default());
         };
         let previous = self.seed_bytes.load(Ordering::Relaxed);
+        if data.len() <= previous {
+            return Ok(Saved {
+                grew: false,
+                bytes: data.len(),
+                written: false,
+            });
+        }
         let written = if let Some(path) = &self.path {
             atomic_write(path, &envelope(&self.key, &data))?;
             true
@@ -352,6 +392,30 @@ fn import_cache(
     // wgpu validates its driver/version header; fallback rejects obsolete data.
     // Wrysk approved this one call on 2026-10-12.
     unsafe { device.create_pipeline_cache(descriptor) }
+}
+
+fn remove_stale_temps(directory: &std::path::Path, now: std::time::SystemTime) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|extension| extension != "tmp") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        if metadata.is_file()
+            && metadata
+                .modified()
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age > std::time::Duration::from_secs(24 * 60 * 60))
+        {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 fn atomic_write(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
@@ -395,10 +459,8 @@ fn atomic_write_before_rename(
 mod tests {
     use super::*;
     use crate::{Gpu, PresentPass};
-    use std::path::Path;
     struct CacheDir {
         path: PathBuf,
-        previous: Option<PathBuf>,
     }
     impl CacheDir {
         fn new() -> Self {
@@ -409,14 +471,11 @@ mod tests {
                 SERIAL.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir_all(&path).unwrap();
-            let previous = dir();
-            set_dir(Some(path.clone()));
-            Self { path, previous }
+            Self { path }
         }
     }
     impl Drop for CacheDir {
         fn drop(&mut self) {
-            set_dir(self.previous.clone());
             let _ = std::fs::remove_dir_all(&self.path);
         }
     }
@@ -444,7 +503,7 @@ mod tests {
         let mut encoder = gpu.encoder("cache test");
         gpu.upload_texture(&mut encoder, &source, wgpu::Origin3d::ZERO, size, 4, &bytes)
             .unwrap();
-        let present = PresentPass::new(gpu, target.format());
+        let present = PresentPass::new(gpu, target.format()).unwrap();
         present.record(
             gpu,
             &mut encoder,
@@ -461,7 +520,7 @@ mod tests {
     #[test]
     fn saved_cache_reloads_and_is_used_and_corrupt_or_foreign_files_render_identically() {
         let directory = CacheDir::new();
-        let gpu = Gpu::open().unwrap();
+        let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
         let expected = render(&gpu);
         let saved = save(&gpu).unwrap();
         assert!(
@@ -472,16 +531,24 @@ mod tests {
         let path = directory.path.join(&key);
         drop(gpu);
         let valid = std::fs::read(&path).unwrap();
-        let gpu = Gpu::open().unwrap();
+        let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
         assert!(
             gpu.disk_cache_stats().unwrap().0,
             "the saved payload was loaded"
         );
         assert_eq!(render(&gpu), expected);
-        assert!(
-            gpu.disk_cache_stats().unwrap().1 > 0,
-            "pipelines used the reloaded native cache"
+        assert_eq!(
+            gpu.disk_cache_stats().unwrap().1,
+            gpu.pipeline_cache_stats().misses,
+            "every created pipeline received the reloaded cache in its descriptor"
         );
+        assert!(gpu.disk_cache_stats().unwrap().1 > 0);
+        let unchanged = save(&gpu).unwrap();
+        assert!(
+            !unchanged.grew && !unchanged.written,
+            "unchanged caches are not rewritten"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), valid);
         drop(gpu);
         let foreign = envelope(
             "wgpu_pipeline_cache_vulkan_other_adapter",
@@ -496,13 +563,29 @@ mod tests {
                 seed as u8
             })
             .collect();
+        // Keep our envelope valid while corrupting wgpu's native header. This
+        // reaches create_pipeline_cache(data=Some(..), fallback=true), rather
+        // than stopping at the app's key or SHA checks.
+        let mut damaged_payload = payload(&key, &valid).unwrap().to_vec();
+        damaged_payload[0] ^= 0xff;
+        let damaged = envelope(&key, &damaged_payload);
+        assert!(payload(&key, &damaged).is_some());
+        std::fs::write(&path, &damaged).unwrap();
+        let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
+        assert!(
+            gpu.disk_cache_stats().unwrap().0,
+            "valid envelope reached wgpu import"
+        );
+        assert_eq!(render(&gpu), expected, "wgpu native payload fallback image");
+        assert!(gpu.disk_cache_stats().unwrap().1 > 0);
+        drop(gpu);
         for (name, bytes) in [
             ("truncated", valid[..valid.len() / 2].to_vec()),
             ("random", random),
             ("foreign", foreign),
         ] {
             std::fs::write(&path, bytes).unwrap();
-            let gpu = Gpu::open().unwrap();
+            let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
             assert!(
                 !gpu.disk_cache_stats().unwrap().0,
                 "{name} file fell back before driver import"
@@ -512,21 +595,81 @@ mod tests {
         }
     }
     #[test]
+    fn construction_validation_errors_are_returned_and_never_cached() {
+        let gpu = Gpu::open_with_cache_dir(None).unwrap();
+        let before = gpu.pipeline_cache_stats();
+        for _ in 0..2 {
+            let result = PresentPass::new(&gpu, wgpu::TextureFormat::Depth32Float);
+            assert!(
+                result.is_err(),
+                "invalid color format must fail construction"
+            );
+            assert_eq!(gpu.pipeline_cache_stats().misses, before.misses);
+            assert!(
+                gpu.resident
+                    .pipelines
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .all(|slot| slot.lock().unwrap().is_none())
+            );
+        }
+        assert!(
+            gpu.take_errors().is_empty(),
+            "scopes capture construction errors"
+        );
+        render(&gpu);
+        assert_eq!(gpu.pipeline_cache_stats().misses, before.misses + 1);
+    }
+
+    #[test]
     fn an_interrupted_atomic_write_preserves_the_real_file() {
         let directory = CacheDir::new();
-        let path = directory.path.join("cache");
-        atomic_write(&path, b"complete previous cache").unwrap();
+        let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
+        let expected = render(&gpu);
+        assert!(save(&gpu).unwrap().written);
+        let key = wgpu::util::pipeline_cache_key(&gpu.adapter.get_info()).unwrap();
+        let path = directory.path.join(&key);
+        drop(gpu);
+        let previous = std::fs::read(&path).unwrap();
         let interrupted = atomic_write_before_rename(&path, b"replacement cache", || {
             anyhow::bail!("injected interruption before rename")
         });
         assert!(interrupted.is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"complete previous cache");
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
         assert_eq!(std::fs::read_dir(&directory.path).unwrap().count(), 1);
-        // A process killed before cleanup may leave only its separate temp name.
+        // A process killed before cleanup leaves a separate partial temp file.
+        // Reopen through the production loader to prove it selects the complete
+        // file and supplies a usable cache, despite that interrupted write.
         std::fs::write(path.with_extension("interrupted.tmp"), b"partial").unwrap();
-        assert_eq!(
-            std::fs::read(Path::new(&path)).unwrap(),
-            b"complete previous cache"
-        );
+        let gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
+        assert!(gpu.disk_cache_stats().unwrap().0);
+        assert_eq!(render(&gpu), expected);
+        assert_eq!(std::fs::read(&path).unwrap(), previous);
+    }
+
+    #[test]
+    fn opening_a_cache_removes_only_day_old_temp_files() {
+        let directory = CacheDir::new();
+        let old = directory.path.join("old.tmp");
+        let recent = directory.path.join("recent.tmp");
+        let complete = directory.path.join("complete");
+        for path in [&old, &recent, &complete] {
+            std::fs::write(path, b"cache bytes").unwrap();
+        }
+        let previous_day =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(48 * 60 * 60);
+        for path in [&old, &complete] {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(previous_day))
+                .unwrap();
+        }
+        let _gpu = Gpu::open_with_cache_dir(Some(directory.path.clone())).unwrap();
+        assert!(!old.exists());
+        assert_eq!(std::fs::read(recent).unwrap(), b"cache bytes");
+        assert_eq!(std::fs::read(complete).unwrap(), b"cache bytes");
     }
 }

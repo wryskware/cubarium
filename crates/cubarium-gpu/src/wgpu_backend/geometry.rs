@@ -193,7 +193,7 @@ fn pipeline(
     let (vc_owned, fc_owned) = (constants(vertex)?, constants(fragment)?);
     let vc: Vec<_> = vc_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     let fc: Vec<_> = fc_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    Ok(gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(fragment.name()),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
@@ -232,7 +232,7 @@ fn pipeline(
         }),
         multiview_mask: None,
         cache: None,
-    }))
+    })
 }
 fn attachment(
     view: &wgpu::TextureView,
@@ -919,17 +919,22 @@ impl Plants {
     pub fn discarded(&mut self, slot: usize) {
         self.cell_written[slot] = u64::MAX;
     }
-    /// Move snapshots between recordings instead of cloning plant tips. Skipped
-    /// frames need only an ordering marker; retired snapshots become scratch.
+    /// Move rollback snapshots between recordings. Keep the current tips in scratch
+    /// for redraws between unlit ticks; clone_from reuses its existing allocation.
     pub fn frame_recorded(&mut self, redraw: bool) {
         let previous = if redraw {
             let previous = std::mem::replace(&mut self.drawn_tips, std::mem::take(&mut self.tips));
             self.tips = self.spare_tips.pop().unwrap_or_default();
+            self.tips.clone_from(&self.drawn_tips);
             Some(previous)
         } else {
             None
         };
         self.recorded_tips.push_back(previous);
+    }
+    #[cfg(test)]
+    pub(super) fn drawn_tips(&self) -> &[f32] {
+        &self.drawn_tips
     }
     pub fn frame_retired(&mut self) {
         if let Some(Some(previous)) = self.recorded_tips.pop_front() {
