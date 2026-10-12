@@ -3,3 +3,13 @@
 # and should be cut or marked `#[ignore = "study: run by name"]`.
 [profile.default]
 slow-timeout = { period = "2s" }
+
+# GPU renderer tests run one at a time. A fresh build has no driver shader cache, and
+# several renderers compiling cold at once beside the rest of the suite can take more
+# than a minute to show a first picture; one at a time, only the first pays the compile.
+[test-groups]
+gpu = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(cubarium-gpu) | test(/sink::gpu::/)'
+test-group = 'gpu'
