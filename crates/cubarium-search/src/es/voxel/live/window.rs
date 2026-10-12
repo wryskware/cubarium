@@ -58,12 +58,42 @@ pub struct BodyScore {
     pub score: NetEnergy,
     /// Whether the body was born inside the window.
     pub newborn: bool,
+    /// Its kin-weighted score and parts (§11.7): `combined` is what the comparison ranks;
+    /// with every share 0 it is `score.score` exactly.
+    pub kin: crate::es::voxel::kin::KinParts,
+}
+
+/// One body's metered result for one window, whether a variant drove it or not (§11.7:
+/// heuristic relatives are metered too). [`WindowResult::scores`] keeps only the bodies
+/// with a variant, as before; this keeps every body that could have lived in the window.
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct MeteredBody {
+    pub body_id: u64,
+    pub founder: Founder,
+    /// Its variant, `None` for a body its lineage's driver (a heuristic, a centre) ran.
+    pub candidate: Option<usize>,
+    pub newborn: bool,
+    /// The score of the kind the window ranks by (body or stomach-aware), curiosity
+    /// included; a death is scored with `E_end = 0` as for every scored body.
+    pub score: NetEnergy,
+}
+
+impl MeteredBody {
+    /// Its own base score, the energy part only: `(E_end − E_start + E_given)/body_ref`,
+    /// without the curiosity term. What a relative contributes to its kin (§10.3).
+    pub fn base(&self) -> f64 {
+        self.score.delta_normalized + self.score.given_normalized
+    }
 }
 
 /// What one window of one world produced.
 pub struct WindowResult {
     pub world: usize,
     pub scores: Vec<BodyScore>,
+    /// Every body metered in the window, variant or not ([`MeteredBody`]).
+    pub metered: Vec<MeteredBody>,
+    /// The window's reward roster: fixed at its start, newborns joined at birth.
+    pub roster: crate::es::voxel::kin::Roster,
     pub lineages: [LineageStats; Founder::COUNT],
     pub readout: Vec<(String, Pool, f64)>,
     pub ticks: u64,
@@ -296,11 +326,17 @@ struct Tracked {
     earned: f64,
 }
 
+/// The ledger reading [`Window::after_step`] needs from before the tick.
+#[derive(Clone, Copy, Debug)]
+pub struct StepMark([f64; Founder::COUNT]);
+
 /// One window in progress on one world: [`Window::begin`], [`Window::step`] once per
 /// tick, [`Window::finish`]. [`run_window`] is the three in a row.
 pub struct Window {
     /// Training-side experiment; false retains the current tissue/stores reward.
     pub stomach_aware_reward: bool,
+    /// Each lineage's kin knobs ([`Window::begin_kin`]); the default is today's training.
+    kin: crate::es::voxel::kin::KinConfig,
     tables: Vec<Option<VariantTable>>,
     ticks: u64,
     elapsed: u64,
@@ -328,6 +364,7 @@ pub struct Window {
     curiosity: Curiosity,
     geometry: Vec<Geometry>,
     memory: Memory,
+    roster: crate::es::voxel::kin::Roster,
 }
 
 impl Window {
@@ -353,7 +390,22 @@ impl Window {
         first_pair: &[usize],
         ticks: u64,
         curiosity: &Curiosity,
+        memory: Memory,
+    ) -> Window {
+        Window::begin_kin(sim, tables, first_pair, ticks, curiosity, memory, &Default::default())
+    }
+
+    /// [`Window::begin_with`] under each lineage's kin knobs: a lineage on the `family`
+    /// comparison places one variant per family ([`crate::es::voxel::kin::place_families`]),
+    /// and every scored body carries its kin-weighted score.
+    pub fn begin_kin(
+        sim: &mut Sim,
+        tables: &[Option<VariantTable>],
+        first_pair: &[usize],
+        ticks: u64,
+        curiosity: &Curiosity,
         mut memory: Memory,
+        kin: &crate::es::voxel::kin::KinConfig,
     ) -> Window {
         assert_eq!(tables.len(), Founder::COUNT);
         let voxel_m = sim.world().config().voxel_m;
@@ -364,6 +416,7 @@ impl Window {
             .collect();
         let mut w = Window {
             stomach_aware_reward: false,
+            kin: kin.clone(),
             tables: tables.to_vec(),
             ticks,
             elapsed: 0,
@@ -393,6 +446,15 @@ impl Window {
                 .map(|f| Geometry::of(sim.fauna().config().founder(*f), curiosity.of(*f)))
                 .collect(),
             memory: Memory::default(),
+            roster: crate::es::voxel::kin::Roster::fixed(
+                &sim.fauna()
+                    .view()
+                    .animals
+                    .iter()
+                    .filter(|a| a.founder.is_some())
+                    .map(crate::es::voxel::kin::KinRecord::of)
+                    .collect::<Vec<_>>(),
+            ),
         };
         let bodies: Vec<(u64, Founder, f64, BodyMeter, EnergyMeter)> = sim
             .fauna()
@@ -429,9 +491,15 @@ impl Window {
                 .map(|b| Placed { id: b.0, x_m: b.2 })
                 .collect();
             let placed: FxHashMap<u64, usize> = match &w.tables[fi] {
-                Some(_) if !mine.is_empty() => place_twins(&mine, pairs[fi], first_pair[fi])
+                Some(_) if !mine.is_empty() => {
+                    if w.kin.of(f).comparison == crate::es::voxel::kin::Comparison::Family {
+                        crate::es::voxel::kin::place_families(&mine, &w.roster, pairs[fi], first_pair[fi])
+                    } else {
+                        place_twins(&mine, pairs[fi], first_pair[fi])
+                    }
                     .into_iter()
-                    .collect(),
+                    .collect()
+                }
                 _ => FxHashMap::default(),
             };
             for b in bodies.iter().filter(|b| b.1 == f) {
@@ -472,9 +540,22 @@ impl Window {
     /// Step `sim` one tick and follow every body; a newcomer gets its variant the tick it
     /// appears.
     pub fn step(&mut self, sim: &mut Sim) {
-        let assimilated_before = sim.fauna().view().ledger.assimilated_by_founder;
-        let mut seen = [0.0f64; Founder::COUNT];
+        let mark = self.before_step(sim);
         sim.step();
+        self.after_step(sim, mark);
+    }
+
+    /// What [`Window::after_step`] needs from before a tick, for a host that steps the sim
+    /// itself (a staged encounter's own step that reads its events): `before_step`, the
+    /// host's one tick, then `after_step`.
+    pub fn before_step(&self, sim: &Sim) -> StepMark {
+        StepMark(sim.fauna().view().ledger.assimilated_by_founder)
+    }
+
+    /// Follow every body after one tick the host ran ([`Window::before_step`]).
+    pub fn after_step(&mut self, sim: &mut Sim, mark: StepMark) {
+        let assimilated_before = mark.0;
+        let mut seen = [0.0f64; Founder::COUNT];
         self.elapsed += 1;
         self.memory.advance();
         let stamp = self.elapsed;
@@ -548,8 +629,17 @@ impl Window {
         for (id, f, x, meter, energy) in self.newcomers.drain(..) {
             let fi = f.index();
 
+            let family = self.kin.of(f).comparison == crate::es::voxel::kin::Comparison::Family;
+            // On the `family` comparison a newborn carries its mother's variant (its family's).
+            let mothers = family
+                .then(|| sim.fauna().view().animals.iter().find(|a| a.id == id).and_then(|a| a.mother))
+                .flatten()
+                .and_then(|m| self.index.get(&m))
+                .and_then(|&k| self.tracked[k].candidate);
             let candidate = self.tables[fi].as_ref().map(|table| {
-                let c = newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi]);
+                let c = mothers.unwrap_or_else(|| {
+                    newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi])
+                });
                 sim.fauna_mut().set_controller(id, table.controller(c));
                 c
             });
@@ -561,6 +651,8 @@ impl Window {
             if let Some(a) = sim.fauna().view().animals.iter().find(|a| a.id == id) {
                 self.memory
                     .observe(id, &self.geometry[fi], x.rem_euclid(self.ring_m), a.pose.z);
+                // A newborn joins its mother's roster at birth (§11.7).
+                self.roster.join(crate::es::voxel::kin::KinRecord::of(a));
             }
             self.index.insert(id, self.tracked.len());
             self.tracked.push(Tracked {
@@ -620,6 +712,7 @@ impl Window {
     /// Close the window: every scored body's result, the lineage counts and the readout.
     pub fn finish(mut self, sim: &Sim, world_id: usize) -> WindowResult {
         let mut scores = Vec::new();
+        let mut metered = Vec::new();
         let mut anomalies = 0u64;
         let events = super::accounting::Recruitment::of(sim.fauna()).since(&self.recruitment_start);
         let deaths_end = sim.fauna().view().ledger.deaths_by_founder_cause;
@@ -667,11 +760,8 @@ impl Window {
                 s.novelty_sum += novelty;
                 s.curiosity_sum += weight * novelty;
             }
-            let (Some(c), true) = (b.candidate, b.possible > 0) else {
+            if b.possible == 0 {
                 continue;
-            };
-            if b.meter.intake < -1e-9 {
-                anomalies += 1;
             }
             let body_score = b
                 .energy
@@ -684,6 +774,19 @@ impl Window {
             let stomach_score = b.energy.stomach_score(b.meter.intake.max(0.0), b.meter.motor.max(0.0),
                 b.founder.manifest().body_reference).with_curiosity(novelty, weight);
             let score = if self.stomach_aware_reward { stomach_score } else { body_score };
+            metered.push(MeteredBody {
+                body_id: b.id,
+                founder: b.founder,
+                candidate: b.candidate,
+                newborn: b.newborn,
+                score,
+            });
+            let Some(c) = b.candidate else {
+                continue;
+            };
+            if b.meter.intake < -1e-9 {
+                anomalies += 1;
+            }
             s.scored += 1;
             s.mean_score += score.score;
             scores.push(BodyScore {
@@ -695,7 +798,17 @@ impl Window {
                 candidate: c,
                 score,
                 newborn: b.newborn,
+                kin: crate::es::voxel::kin::KinParts {
+                    own: score.score,
+                    relatives: 0.0,
+                    combined: score.score,
+                    relatives_counted: 0,
+                },
             });
+        }
+        let kin = crate::es::voxel::kin::kin_scores(&metered, &self.roster, &self.kin);
+        for b in scores.iter_mut() {
+            b.kin = kin[&b.body_id];
         }
         for s in self.stats.iter_mut() {
             if s.scored > 0 {
@@ -714,6 +827,8 @@ impl Window {
         WindowResult {
             world: world_id,
             scores,
+            metered,
+            roster: self.roster,
             lineages: self.stats,
             readout,
             ticks: self.elapsed,

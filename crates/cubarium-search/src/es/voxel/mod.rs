@@ -73,6 +73,7 @@ pub mod driver;
 #[cfg(test)]
 mod herding_tests;
 pub mod imitate;
+pub mod kin;
 pub mod landscape;
 pub mod live;
 pub mod pin;

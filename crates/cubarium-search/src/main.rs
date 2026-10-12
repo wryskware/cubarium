@@ -1089,6 +1089,11 @@ enum Command {
         /// `weight × novelty` in the brains' window score. Without it every weight is 0.
         #[arg(long)]
         curiosity: Option<PathBuf>,
+        /// Per-lineage kin knobs (KIN-TRAIN, `config/training/kin-2026-10-12.toml`): the
+        /// shares of relatives' scores, the comparison (`per_body`, `family`) and the brain
+        /// stage. Without it every lineage trains as before (shares 0, `per_body`).
+        #[arg(long)]
+        kin: Option<PathBuf>,
         /// Experimental energy potential includes digestible stomach; both deltas are logged.
         #[arg(long)]
         stomach_aware_reward: bool,
@@ -2267,6 +2272,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             world,
             ecology,
             curiosity,
+            kin,
             stomach_aware_reward,
         } => {
             // A scenario map (`base = "<file>"`) is resolved through its chain, so its
@@ -2310,6 +2316,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 out,
                 resume,
                 curiosity: es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
+                kin: es::voxel::kin::KinConfig::from_flag(kin.as_deref())?,
             };
             es::voxel::live::trainer::train(&spec)?;
             Ok(())

@@ -84,6 +84,8 @@ pub struct LiveSpec {
     pub curiosity: super::curiosity::Curiosity,
     /// Experimental training reward, false keeps tissue/reserve/escrow accounting.
     pub stomach_aware_reward: bool,
+    /// Each lineage's kin knobs (`--kin`; KIN-TRAIN). The default is today's training.
+    pub kin: crate::es::voxel::kin::KinConfig,
 }
 
 /// One lineage's side of a generation.
@@ -99,6 +101,15 @@ pub struct LineageUpdate {
     pub update_rms: f64,
     /// Pooled (within-world z) score per candidate, in candidate order.
     pub candidate_scores: Vec<f64>,
+    /// The comparison it was scored under (`per_body`, `family`).
+    pub comparison: crate::es::voxel::kin::Comparison,
+    /// Pairs left out of the update for a missing sign (`family`; `per_body` keeps today's
+    /// zero for an unplaced candidate and reports 0 here).
+    pub pairs_missing: usize,
+    /// Mean raw own, relatives' and combined score over its scored bodies (§11.7).
+    pub mean_own: f64,
+    pub mean_relatives: f64,
+    pub mean_combined: f64,
 }
 
 /// One world replaced after a generation.
@@ -280,6 +291,8 @@ struct TrainingCheckpoint {
     sigma: f64,
     curiosity: super::curiosity::Curiosity,
     stomach_aware_reward: bool,
+    #[serde(default)]
+    kin: crate::es::voxel::kin::KinConfig,
     lineages: Vec<(Founder, Vec<f64>, Adam, VoxelPolicyFile)>,
     worlds: Vec<WorldState>,
 }
@@ -305,7 +318,7 @@ fn save_checkpoint(spec: &LiveSpec, lineages: &[Lineage], worlds: &[LiveWorld], 
     let state = TrainingCheckpoint {
         next_generation, next_fresh_seed, train_seed: spec.train_seed, pairs: spec.pairs,
         window_ticks: spec.window_ticks, sigma: spec.sigma, curiosity: spec.curiosity.clone(),
-        stomach_aware_reward: spec.stomach_aware_reward,
+        stomach_aware_reward: spec.stomach_aware_reward, kin: spec.kin.clone(),
         lineages: lineages.iter().map(|l| (l.founder, l.theta.clone(), l.adam.clone(), l.template.clone())).collect(),
         worlds: worlds.iter().map(|w| WorldState { id: w.id, windows: w.windows, info: w.info.clone(), familiarity: w.memory.state() }).collect(),
     };
@@ -328,9 +341,10 @@ fn load_checkpoint(spec: &LiveSpec, dir: &Path, lineages: &mut Vec<Lineage>) -> 
     let state: TrainingCheckpoint = serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     if state.train_seed != spec.train_seed || state.pairs != spec.pairs || state.window_ticks != spec.window_ticks
         || state.sigma != spec.sigma || state.stomach_aware_reward != spec.stomach_aware_reward
+        || state.kin != spec.kin
         || serde_json::to_string(&state.curiosity).map_err(|e| e.to_string())? != serde_json::to_string(&spec.curiosity).map_err(|e| e.to_string())?
         || state.worlds.len() != spec.worlds {
-        return Err("checkpoint training settings differ (seed, pairs, window, sigma, reward, curiosity or worlds)".into());
+        return Err("checkpoint training settings differ (seed, pairs, window, sigma, reward, kin, curiosity or worlds)".into());
     }
     let policy: Vec<_> = lineages.iter().map(|l| l.founder).collect();
     if state.lineages.iter().map(|l| l.0).collect::<Vec<_>>() != policy { return Err("checkpoint trained lineages differ".into()); }
@@ -369,7 +383,7 @@ fn staged_window(world: &mut LiveWorld, tables: &[Option<VariantTable>], first: 
     let started = Instant::now();
     let mut check = full.then(|| cubarium_voxel_sim::staged::Window::open(&world.sim));
     let memory = std::mem::take(&mut world.memory);
-    let mut w = window::Window::begin_with(&mut world.sim, tables, first, spec.window_ticks, &spec.curiosity, memory);
+    let mut w = window::Window::begin_kin(&mut world.sim, tables, first, spec.window_ticks, &spec.curiosity, memory, &spec.kin);
     w.stomach_aware_reward = spec.stomach_aware_reward;
     while !w.done() {
         if let Err(why) = run.check() {
@@ -399,6 +413,16 @@ pub fn train(spec: &LiveSpec) -> Result<Vec<GenerationRecord>, String> {
 fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Result<Vec<GenerationRecord>, String> {
     let run_started = Instant::now();
     if spec.worlds == 0 || spec.pairs == 0 || spec.window_ticks == 0 { return Err("worlds, pairs and window length must be positive".into()); }
+    for (f, _) in &spec.centres {
+        if spec.kin.of(*f).comparison == crate::es::voxel::kin::Comparison::Matched {
+            return Err(format!(
+                "{}: the `matched` comparison runs through the matched-copies runner \
+                 (es::voxel::kin::matched), not the live loop; matched live windows are a priced \
+                 trial (design/behaviour-ai-2026-10-11.md §11.7)",
+                f.name()
+            ));
+        }
+    }
     cubarium_voxel::world::set_thread_override(1);
     println!("# pools: workers={} world-threads=1 tail-cores=1", spec.threads.max(1).min(spec.worlds));
     std::fs::create_dir_all(&spec.out)
@@ -493,36 +517,39 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         // 3. One update per lineage, from the scores normalised within each world.
         let mut updates = Vec::new();
         for l in lineages.iter_mut() {
-            let per_world: Vec<Vec<(usize, f64)>> = results
+            let comparison = spec.kin.of(l.founder).comparison;
+            let per_world: Vec<Vec<BodyScore>> = results
                 .iter()
-                .map(|r| {
-                    r.scores
-                        .iter()
-                        .filter(|b| b.founder == l.founder)
-                        .map(|b| (b.candidate, b.score.score))
-                        .collect()
-                })
+                .map(|r| r.scores.iter().filter(|b| b.founder == l.founder).copied().collect())
                 .collect();
-            let (scores, n) = pooled_scores(&per_world, candidates);
-            let mine: Vec<&BodyScore> = results
-                .iter()
-                .flat_map(|r| r.scores.iter())
-                .filter(|b| b.founder == l.founder)
-                .collect();
-            // σ = 0 is the placement-noise control: every variant is the centre, so
-            // there is no direction to estimate and the centre is left alone.
-            let (gradient_norm, update_rms) = if mine.len() >= 2 && spec.sigma > 0.0 {
-                ascend(
-                    &mut l.theta,
-                    &mut l.adam,
-                    &scores,
-                    spec.sigma,
-                    spec.train_seed,
-                    generation,
-                )
-            } else {
-                (0.0, 0.0)
+            let mine: Vec<&BodyScore> = per_world.iter().flatten().collect();
+            let (scores, n, pairs_missing, (gradient_norm, update_rms)) = match comparison {
+                crate::es::voxel::kin::Comparison::Family => {
+                    let fam: Vec<_> = per_world.iter().zip(&results).map(|(b, r)| (b.as_slice(), &r.roster)).collect();
+                    let by_candidate = crate::es::voxel::kin::compare::family(&fam, candidates);
+                    let pairs = crate::es::voxel::kin::PairScores::from_candidates(&by_candidate);
+                    let mut n = vec![0usize; candidates];
+                    for b in &mine { n[b.candidate] += 1; }
+                    let (train_seed, generation) = (spec.train_seed, u64::from(generation));
+                    let step = crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &pairs, spec.sigma,
+                        |p, out| perturbation(train_seed, generation, p as u64, out));
+                    (by_candidate.iter().map(|s| s.unwrap_or(f64::NAN)).collect::<Vec<_>>(), n, pairs.missing, step)
+                }
+                // `matched` is refused at the start of the run.
+                _ => {
+                    let refs: Vec<&[BodyScore]> = per_world.iter().map(Vec::as_slice).collect();
+                    let (scores, n) = crate::es::voxel::kin::compare::per_body(&refs, candidates);
+                    // σ = 0 is the placement-noise control: every variant is the centre, so
+                    // there is no direction to estimate and the centre is left alone.
+                    let step = if mine.len() >= 2 && spec.sigma > 0.0 {
+                        ascend(&mut l.theta, &mut l.adam, &scores, spec.sigma, spec.train_seed, generation)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    (scores, n, 0, step)
+                }
             };
+            let mean = |f: fn(&BodyScore) -> f64| mine.iter().map(|b| f(b)).sum::<f64>() / mine.len().max(1) as f64;
             updates.push(LineageUpdate {
                 lineage: l.founder.name().into(),
                 bodies: mine.len(),
@@ -533,6 +560,11 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
                 gradient_norm,
                 update_rms,
                 candidate_scores: scores.clone(),
+                comparison,
+                pairs_missing,
+                mean_own: mean(|b| b.kin.own),
+                mean_relatives: mean(|b| b.kin.relatives),
+                mean_combined: mean(|b| b.kin.combined),
             });
         }
 
@@ -682,7 +714,7 @@ mod recovery_tests {
             window_ticks: 100, generations: 2, wall_seconds: 60.0, first_generation_seconds: 60.0,
             sigma: 0.05, learning_rate: 0.01, train_seed: 3, world_seed: 7, water_every: 1,
             population_cap: 100, save_every: 1, out, resume: None, ecology: EcologyParams::defaults(),
-            world: Some(cfg), curiosity: Default::default(), stomach_aware_reward: false };
+            world: Some(cfg), curiosity: Default::default(), stomach_aware_reward: false, kin: Default::default() };
         let mut sim = Sim::ambient(world, flora, fauna, cubarium_voxel_sim::SimConfig { threads: 1, overlap: false, water_every: 1 });
         prepare(&mut sim, &spec, &lineages);
         for _ in 0..10 { sim.step(); }

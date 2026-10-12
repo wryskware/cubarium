@@ -871,6 +871,11 @@ an already isolated prey). The heuristics add local memory:
   - `per_body`, z-scored as today (the default for live windows).
   Matched copies are built over any saved start state, so matched copies of a whole live
   window are the same machinery on a bigger scene: a cost choice, not new code.
+- **Determinism, measured 2026-10-12 (KIN-TRAIN, `kin::matched::null_pair`).** Two copies
+  from one start with identical brains were bit-identical in 32 of 32 staged-encounter pairs
+  (300 s, on the single-thread schedule the harness already uses) and in 8 of 8 small live
+  windows on one thread. The null-pair noise is exactly zero, so any matched difference is
+  the perturbation's effect. A run can keep checking it every generation (`NoiseReadout`).
 - **When to revisit**, read at KIN-TRAIN's first signal check and reported to Wrysk:
   - matched differences for a lineage stay at the frozen-brain noise level: that lineage
     switches to `family` (topic 2's fallback, already his call);
