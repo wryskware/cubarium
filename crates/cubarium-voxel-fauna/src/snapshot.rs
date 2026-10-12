@@ -175,13 +175,19 @@ use crate::{Fauna, FaunaConfig};
 //     (`Nursing`) is config, not a bump.
 // 80: SP-GROOM — saved continuous contacts, grooming counters, and a departure cause.
 //     The per-founder grooming table is named config, not itself a schema bump.
-pub const SCHEMA: u32 = 80;
+// 81: CONTRACTS (behaviour-AI §11) — `Animal::{intent, kick}` (the intent record: proposal,
+//     held intent, subject, hold start, executed actions, override; the kick's phase),
+//     `Fauna::heard` (call records), `Track::lame`, and the envelope's brains' memories
+//     (`Controller::memory`). The intent, kick and call tables are named config.
+pub const SCHEMA: u32 = 81;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
     schema: u32,
     config: Vec<u8>,
     fauna: &'a Fauna,
+    /// CONTRACTS: each brain's memory that has one (§11.3), restored before its next sample.
+    brains: Vec<(u64, crate::BrainMemory)>,
 }
 
 #[derive(Deserialize)]
@@ -189,6 +195,7 @@ struct EnvelopeIn {
     _schema: u32,
     config: Vec<u8>,
     fauna: Fauna,
+    brains: Vec<(u64, crate::BrainMemory)>,
 }
 
 /// Knobs renamed since saves began carrying named configs, `(old, new)`
@@ -201,6 +208,7 @@ pub fn encode(fauna: &Fauna) -> Vec<u8> {
         schema: SCHEMA,
         config: cubarium_voxel::savedoc::to_doc(&fauna.config),
         fauna,
+        brains: fauna.controllers.memories(),
     })
     .expect("a Fauna always serializes")
 }
@@ -222,6 +230,7 @@ pub fn decode(bytes: &[u8]) -> anyhow::Result<Fauna> {
             cubarium_voxel::savedoc::note_ignored("voxel fauna", &ignored);
             let mut fauna = env.fauna;
             fauna.config = config;
+            fauna.brain_memory = env.brains.into_iter().collect();
             fauna
         }
         found => bail!(
@@ -720,7 +729,7 @@ mod tests {
     }
 
     fn with_doc(fauna: &Fauna, doc: Vec<u8>) -> Vec<u8> {
-        postcard::to_stdvec(&EnvelopeOut { schema: SCHEMA, config: doc, fauna }).unwrap()
+        postcard::to_stdvec(&EnvelopeOut { schema: SCHEMA, config: doc, fauna, brains: Vec::new() }).unwrap()
     }
 
     /// The config document as a CBOR tree, edited by `f`.

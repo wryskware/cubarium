@@ -662,3 +662,57 @@ fn a_mothers_voice_is_recognised_where_the_lineage_knows_voices_and_never_names_
     call_and_hear(&w, &mut f, mother, 0);
     assert_eq!(calls::heard(&f, ids[0])[0].relation, 0);
 }
+
+// ---- Step 6: saves ----
+
+#[test]
+fn a_save_mid_hold_restores_the_intent_its_subject_and_hold_the_brain_memory_and_the_kick_phase() {
+    let k = Kick { windup_s: 1.0, ..Kick::LOFTSTRIDER };
+    let (w, mut flora, mut f, ls, vh) = kick_world(1.0, k);
+    let mut proposal = [0.0; intent::MAX_MENU];
+    let watch = menu_of(Founder::Loftstrider).index("watch").unwrap();
+    proposal[watch] = 1.0;
+    let row = f.config.manifest(Founder::Loftstrider).kin_slots;
+    let memory = BrainMemory { tag: 7, bytes: vec![1, 2, 3, 4] };
+    let mut brain = probe(Decision { intent: watch, subject: Some(row), proposal, ..Decision::default() });
+    brain.memory = Some(memory.clone());
+    f.controllers.set(ls, Box::new(brain));
+    for _ in 0..4 {
+        let now = f.tick;
+        set_tracks(&mut f, ls, &[track(vh, class::THREAT, 5.0, 1.0, now)]);
+        f.step(&w, &mut flora);
+    }
+    let i = index_of(&f, ls);
+    kick::request(&mut f, i, vh, Source::Aimed).unwrap();
+    f.step(&w, &mut flora);
+    let before = animal(&f, ls);
+    assert_eq!(before.kick.phase, Phase::Windup);
+    assert_eq!(usize::from(before.intent.held), watch);
+    assert_eq!(before.intent.subject.body(), Some(vh));
+    let bytes = f.save();
+    let mut g = Fauna::load(&bytes).expect("loads");
+    let after = animal(&g, ls);
+    assert_eq!(after.intent, before.intent, "held intent, subject, hold start and the rest");
+    assert_eq!(after.intent.hold_age_s(g.tick), before.intent.hold_age_s(f.tick));
+    assert_eq!(after.kick, before.kick);
+    // The brain's memory goes back to a fresh controller before its next sample.
+    let fresh = probe(Decision::default());
+    let handle = Arc::new(Mutex::new(None::<BrainMemory>));
+    struct Spy(Probe, Arc<Mutex<Option<BrainMemory>>>);
+    impl Controller for Spy {
+        fn drive(&mut self, o: &[f64]) -> Response {
+            self.0.drive(o)
+        }
+        fn reset(&mut self) {}
+        fn restore(&mut self, m: &BrainMemory) -> bool {
+            *self.1.lock().unwrap() = Some(m.clone());
+            true
+        }
+    }
+    g.controllers.set(ls, Box::new(Spy(fresh, handle.clone())));
+    let mut flora2 = Flora::new(FloraConfig::default());
+    for _ in 0..f.config.manifest(Founder::Loftstrider).cadence_ticks() + 1 {
+        g.step(&w, &mut flora2);
+    }
+    assert_eq!(handle.lock().unwrap().clone(), Some(memory));
+}
