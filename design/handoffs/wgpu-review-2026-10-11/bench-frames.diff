@@ -1,0 +1,113 @@
+diff --git a/crates/cubarium/src/sink/gpu/voxel.rs b/crates/cubarium/src/sink/gpu/voxel.rs
+index 7f964c22..801cbda0 100644
+--- a/crates/cubarium/src/sink/gpu/voxel.rs
++++ b/crates/cubarium/src/sink/gpu/voxel.rs
+@@ -1170,6 +1170,7 @@ impl VoxelGpuSink<GpuTarget> {
+         if let Some(sv) = &mut self.sunvis {
+             sv.frame(self.clock_s, self.renderer.params().sun, &mut self.renderer);
+         }
++        let bench_before = bench_frames::armed().then_some((self.gpu_stages, self.walk_plant_ms));
+         let started = Instant::now();
+         let ms = self.target.draw(&self.gpu, &mut self.renderer, ())?;
+         self.frames += 1;
+@@ -1197,6 +1198,20 @@ impl VoxelGpuSink<GpuTarget> {
+             self.walk_plant_ms.2 += 1;
+         }
+         self.present_ms += (Instant::now() - started).as_secs_f64() * 1e3;
++        if let Some((stages, wp)) = bench_before {
++            bench_frames::record(
++                (Instant::now() - started).as_secs_f64() * 1e3,
++                ms,
++                self.renderer.redrew_last(),
++                [
++                    self.gpu_stages[0] - stages[0],
++                    self.gpu_stages[1] - stages[1],
++                    self.gpu_stages[2] - stages[2],
++                    self.walk_plant_ms.0 - wp.0,
++                    self.walk_plant_ms.1 - wp.1,
++                ],
++            );
++        }
+         if let Some(dir) = &self.capture {
+             let at = Instant::now();
+             let p = self.renderer.params();
+@@ -1221,6 +1236,7 @@ impl VoxelGpuSink<GpuTarget> {
+ 
+     /// Report what the frames cost and stop.
+     pub fn finish(&mut self) -> Result<()> {
++        bench_frames::dump();
+         let n = self.frames.max(1) as f64;
+         let t = self.ticks_staged.max(1) as f64;
+         let p = self.renderer.params();
+@@ -4676,3 +4692,71 @@ mod tests {
+         assert!(seen.iter().all(|&s| s), "five windows of a five-tick sweep cover the grid");
+     }
+ }
++
++/// Benchmark instrumentation (throwaway `bench/ash` and `bench/wgpu` branches only; never
++/// merged). With `CUBARIUM_BENCH_FRAMES=<path>` set, every rendered frame's CPU wall time
++/// around `target.draw` and its GPU times are kept in memory and written as CSV at
++/// `finish`. Unset, it costs one cached environment lookup per frame.
++mod bench_frames {
++    use std::io::Write;
++    use std::sync::{Mutex, OnceLock};
++    use std::time::{SystemTime, UNIX_EPOCH};
++
++    struct Log {
++        path: std::path::PathBuf,
++        rows: Vec<(f64, f64, f64, bool, [f64; 5])>,
++    }
++
++    static LOG: OnceLock<Option<Mutex<Log>>> = OnceLock::new();
++
++    fn log() -> Option<&'static Mutex<Log>> {
++        LOG.get_or_init(|| {
++            std::env::var_os("CUBARIUM_BENCH_FRAMES").map(|p| {
++                Mutex::new(Log { path: p.into(), rows: Vec::with_capacity(1 << 16) })
++            })
++        })
++        .as_ref()
++    }
++
++    pub fn armed() -> bool {
++        log().is_some()
++    }
++
++    /// One frame: CPU wall ms of the draw call, total GPU ms, whether the world pass
++    /// redrew, and the GPU splits (upload, slab walk, present, walk, plants) it added.
++    pub fn record(wall_ms: f64, gpu_ms: f64, redrew: bool, split: [f64; 5]) {
++        let Some(log) = log() else { return };
++        let end = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
++        let mut log = log.lock().unwrap_or_else(|e| e.into_inner());
++        log.rows.push((end, wall_ms, gpu_ms, redrew, split));
++    }
++
++    /// Write every frame recorded so far, once.
++    pub fn dump() {
++        let Some(log) = log() else { return };
++        let mut log = log.lock().unwrap_or_else(|e| e.into_inner());
++        let rows = std::mem::take(&mut log.rows);
++        let write = || -> std::io::Result<()> {
++            let mut f = std::io::BufWriter::new(std::fs::File::create(&log.path)?);
++            writeln!(f, "end_unix_s,draw_wall_ms,gpu_ms,redrew,upload_ms,slab_walk_ms,present_ms,walk_ms,plant_ms")?;
++            for (end, wall, gpu, redrew, s) in &rows {
++                writeln!(
++                    f,
++                    "{end:.6},{wall:.4},{gpu:.4},{},{:.4},{:.4},{:.4},{:.4},{:.4}",
++                    u8::from(*redrew),
++                    s[0],
++                    s[1],
++                    s[2],
++                    s[3],
++                    s[4]
++                )?;
++            }
++            f.flush()
++        };
++        if let Err(e) = write() {
++            eprintln!("cubarium voxel: bench frame log {}: {e}", log.path.display());
++        } else {
++            eprintln!("cubarium voxel: bench frame log: {} frames to {}", rows.len(), log.path.display());
++        }
++    }
++}
