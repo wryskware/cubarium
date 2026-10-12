@@ -395,6 +395,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
             )
         };
         packer.animals.set_hunker_s(cfg.hunker_s);
+        packer.animals.set_idle_actions(cfg.figures.idle.clone());
         packer.animals.set_meal_flash(cfg.meal_flash);
         packer.animals.set_condition_fade_s(cfg.light.colour_fade_s);
         let models_on = cfg.figures.animals == AnimalDraw::Models;

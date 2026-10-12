@@ -5068,7 +5068,11 @@ const DOMAIN_LITTER: u64 = 0x11_77E2;
 fn litter_size(fauna: &Fauna, i: usize, sc: &SpeciesConfig, rule: &crate::Reproduction, seed: u64) -> Litter {
     let a = &fauna.animals[i];
     let Some(t) = a.founder.and_then(|f| fauna.config.founder(f).pack) else {
-        return Litter::One;
+        return if rule.young_per_birth > 1 {
+            Litter::Of(rule.young_per_birth)
+        } else {
+            Litter::One
+        };
     };
     let Some(m) = a.pack.filter(|m| !m.pup) else {
         return Litter::Not;

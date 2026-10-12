@@ -621,3 +621,48 @@ fn the_model_loses_part_of_a_litter_under_partial_provisioning() {
     let (starved, places, _) = pup_night(false, half);
     assert!(starved == 0.0 || (starved - 4.0).abs() < 1e-9, "shared, one fate for the litter: {starved} {places:?}");
 }
+
+#[test]
+fn nonpack_live_births_count_young_and_pay_each_package() {
+    for young in [1, 2, 3] {
+        let f = Founder::Seedporter;
+        let mut p = clock_off();
+        let sc = &mut p.fauna.founders[f.index()].core;
+        sc.reserve_cap = 10.0;
+        sc.reproduction.surplus_hold_s = 1.0;
+        sc.reproduction.surplus_share = 1.0;
+        sc.reproduction.gestation_s = 3.0;
+        sc.reproduction.young_per_birth = young;
+        let sc = *sc;
+        let mut m = FaunaModel::new(&p, Fits::unfitted(), 1.0);
+        only(&mut m, &[f]);
+        m.add(f, Cohort::new(4.0, sc.body_max, sc.reserve_of(sc.body_max)));
+        let reserve = m.pops[f.index()][0].b.reserve;
+        let mut ret = crate::exchange::Returns::default();
+        m.reproduce(1.0, false, &mut ret);
+        // Retuning while pregnant must not change the held young count.
+        m.config.founders[f.index()]
+            .core
+            .reproduction
+            .young_per_birth = young + 1;
+        for _ in 1..3 {
+            m.reproduce(1.0, false, &mut ret);
+        }
+        assert!(close(
+            m.ledger[f.index()].born,
+            4.0 * f64::from(young),
+            1e-12
+        ));
+        assert!(close(
+            reserve - m.pops[f.index()][0].b.reserve,
+            sc.birth_cost * f64::from(young),
+            1e-12
+        ));
+        let parcel: f64 = m.pops[f.index()]
+            .iter()
+            .filter(|c| c.native)
+            .map(|c| c.n * (c.b.body + c.b.reserve))
+            .sum();
+        assert!(close(parcel, 4.0 * sc.birth_cost * f64::from(young), 1e-12));
+    }
+}

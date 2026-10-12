@@ -122,6 +122,17 @@ const REFILL_GAP: f64 = 0.1;
 /// The ecological day the daily needs and lifespans below are written in, seconds
 /// ([`crate::LifeConfig::ecological_day_s`]'s default): a unit for stating defaults.
 const DAY_S: f64 = 7200.0;
+/// The reference dry-season year (five ecological days), seconds: a unit for
+/// stating config defaults, rather than a separate runtime calendar.
+///
+/// **Seedporter calendar and twins** (SP-TWINS, Wrysk 2026-10-11):
+/// "sure calendar. have them do twins. veilhounds already have litters, so it makes sense."
+/// Common marmosets (Callithrix jacchus) carry for about 145 days, usually bear twins,
+/// and have about two litters a year. Gestation is rounded to 0.4 of the reference
+/// year; a 0.04-year postpartum refractory plus the surplus hold gives about two
+/// litters a year at most. These numbers are adjustable; ecology training will
+/// settle them. The serde reproduction knobs carry the timings and young count.
+const YEAR_S: f64 = 5.0 * DAY_S;
 
 /// **Daily need `f`**: the share of its adult body a lineage burns per world day awake
 /// and at rest (`design/metabolism-meals-2026-10-02.md` §1; `maintenance_per_s = f /
@@ -544,6 +555,14 @@ pub struct FounderPhysiology {
     pub founding: Founding,
     /// Where a founding body is placed ([`FoundingSite`]); unread for [`Founding::Clutches`].
     pub founding_site: FoundingSite,
+    /// AtFood founding puts this lineage's bodies in one component of its walk graph.
+    /// Real world: a giraffe herd or family shares a range.
+    #[serde(default)]
+    pub founding_together: bool,
+    /// Minimum walkable faces in an AtFood founding region; 0 admits any size.
+    /// Real world: a home range must be big enough to live in.
+    #[serde(default)]
+    pub founding_min_region_faces: u32,
     /// **How many** a fresh world founds: bodies, or for [`Founding::Clutches`] clutches.
     /// The code default of a new lineage is 0, so training worlds are unchanged until a
     /// preset turns it on (`[fauna.founders.<lineage>] founding_count = N`). Shredder 8,
@@ -2109,6 +2128,8 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::LitterBed,
                 founding_count: 8,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2202,6 +2223,8 @@ impl FounderPhysiology {
                 founding: Founding::Bodies,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 8,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2340,6 +2363,8 @@ impl FounderPhysiology {
                 founding: Founding::Clutches,
                 founding_site: FoundingSite::AtFood,
                 founding_count: 3,
+                founding_together: false,
+                founding_min_region_faces: 0,
                 founding_per_world: false,
                 aquatic: false,
                 water_margin_m: 0.0,
@@ -2480,6 +2505,10 @@ impl FounderPhysiology {
                     founding_site: FoundingSite::AtFood,
                     founding_count: 0,
                     founding_per_world: true,
+                    // LS-TOGETHER, Wrysk 2026-10-11: "those loftstriders can never meet
+                    // each other to breed". Found one family on a shared home range.
+                    founding_together: true,
+                    founding_min_region_faces: 500,
                     motor_respiration_per_s: DAILY_LOFTSTRIDER / DAY_S,
                     // Foliage: k 0.05, τ 120 s (one or two long browses a day).
                     gut: Gut::of(0.05, 120.0),
@@ -2593,6 +2622,9 @@ impl FounderPhysiology {
                 let shredder = FounderPhysiology::placeholder(Founder::Blind);
                 let mut core = grazer.core;
                 core.scale_mass(SEEDPORTER_VOLUME_RATIO);
+                core.reproduction.gestation_s = 0.4 * YEAR_S;
+                core.reproduction.birth_interval_s = 0.04 * YEAR_S;
+                core.reproduction.young_per_birth = 2;
                 core.maintenance_per_s = DAILY_SEEDPORTER / DAY_S;
                 core.lifespan_median_s = LIFE_GRAZER_DAYS * DAY_S;
                 FounderPhysiology {
@@ -2661,9 +2693,11 @@ impl FounderPhysiology {
                     taste_reference: Some(0.02),
                     glider: Some(Glider::SEEDPORTER),
                     gut_seeds: Some(GutSeeds::SEEDPORTER),
-                    // Vine fruit at the mouth is 1e-4..1e-3 ou, not foliage's 0.005:
-                    // K is about a third of a ripe patch. Carrion keeps the inherited K.
-                    fruit_bite_half_stock: Some(0.0005),
+                    // FRUIT-FAST (Wrysk 2026-10-11: "monkeys can pick off berries and eat
+                    // tons"): picking runs near gut speed until a face is nearly stripped.
+                    // An average fruiting vine face holds ~8e-5 ou, so K is ~1/8 of it (was
+                    // 5e-4: bites at 0.14 of the gut rate). Carrion keeps the inherited K.
+                    fruit_bite_half_stock: Some(0.00001),
                     // A fruit patch worth ~2 upkeep rates is still food: the full gut
                     // rate is ~45 upkeep rates, so leave below 5%, not the grazer's 50%.
                     give_up_fraction: Some(0.05),

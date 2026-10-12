@@ -159,8 +159,9 @@ expression parsing, hooks, cancellation, and reporting stay in the core.
 | `outputs` | directory, default `<job>/<name>`; `stdout`/`stderr` default `{out}/stdout.log`, `{out}/stderr.log` |
 | `done_marker` | relative to `outputs`; exit 0 without it counts as failure |
 | `deps`, `priority` | ordering within and across jobs |
+| `quick` | quick lane (see Placement); `quick = true` on a job spec applies to all its tasks |
 | `liveness` | `{stall_min, paths: [globs]}` (output growth) or `{stall_min, minute_file}` (census minute); a stalled task is stopped and reported |
-| `timeout_h` | systemd `RuntimeMaxSec` |
+| `timeout_h` | systemd `RuntimeMaxSec`; quick tasks are capped at `[lab] quick_timeout_min` and labd also stops them itself |
 | `est_h` | wall estimate for ETAs and the EC2 estimate |
 | `retries`, `resume_argv` | after host loss (spot reclaim, a dead unit), requeue up to `retries` times with `resume_argv` |
 | `produces` | `{key: path relative to outputs}`; on success the core copies the file into the artifact cache |
@@ -231,6 +232,13 @@ end to end with no core edit.
   that arm's config bundle, and only its own load checkpoint. `ab.early_read` is the
   identical-results tripwire. Continuations load only their own checkpoints, after
   `ab.unchanged`. `ab.py` stays a working CLI.
+  A run that is lost after its retry, fails, or stalls does not abort the job (2026-10-11:
+  one eidolon reboot had killed eight healthy desktop runs). The stage waits for its other
+  runs. A lost early run drops that seed from every arm's continuation (logged in
+  `early.log`); a lost continuation leaves the rest running. The job finishes `done`, and
+  the first line of its summary, which is its reason in `lab status`/`lab wait`, names the
+  missing runs; the summary then lists each one (arm, seed, stage, state, reason). A stage
+  with no seed whose every arm finished aborts: there is nothing to compare.
 - **batch**: `scripts/studies/batch.py` as one L3 task, charged `parallel × threads`,
   on desktop or eidolon by default, or the configured EC2 architecture when `hosts`
   names `ec2`. EC2 batches use `binary = {tree, commit}` for the native cached build;
@@ -258,6 +266,20 @@ cannot fit on any host even when idle aborts its job at plan time. Otherwise it 
 Among eligible hosts that fit, prefer the most free threads: usable threads minus all
 running labd tasks and external load. `hosts = ["desktop"]` or `["eidolon"]` pins run/test
 tasks; without a pin every enabled non-EC2 host is eligible. EC2 remains opt-in and approved.
+
+Lanes. Normal tasks need every charged thread inside usable. Two lanes may go above it,
+each into its own pool, so neither takes the other's threads:
+- **build**: build and cargo-test tasks, up to the host's `build_overcommit_threads`.
+- **quick** (Wrysk, 2026-10-11): tasks with `quick = true` (or `lab quick -- CMD...`), up to
+  `quick_overcommit_threads`. Quick is a setting, not a priority. A quick task ignores
+  reservations held by waiting large tasks and holds none itself. It tries local hosts first
+  and goes elsewhere only when no local host fits even with the pool. Its timeout is capped at
+  `[lab] quick_timeout_min` (default 15); past it labd stops the task and fails it with
+  "exceeded the quick limit", so a slow job shows it was never quick.
+Memory, L3 groups and idle priority are the same for every lane. Tasks that run in a
+literal local directory (a `cwd` without placeholders and no `remote_argv`, as command jobs
+default to on local hosts) also try local hosts first; every other task keeps the
+most-free-threads order.
 
 - Desktop: SCHED_IDLE plus nice 19 for every task (the effect of `chrt -i 0 nice -n 19`),
   group 1 preferred over the V-cache group 0, and 4 CPUs plus 12 GB reserved for Wrysk.
@@ -298,6 +320,10 @@ On start the daemon:
 - probes hosts;
 - polls every running task: `rc.json` means ended, a live unit or process means still
   running, and neither means `lost` (requeued if retries remain).
+
+A host reboot today: its tasks are lost, then retried once from their latest fetched
+checkpoint (`ab` and `batch` set `retries = 1` with a resume form). A task lost again is
+final. For `ab` that run is dropped and the job keeps the rest; other kinds abort on it.
 
 `lab status` reads sqlite directly, so it works with the daemon down.
 
@@ -360,10 +386,21 @@ sleep loop costs nothing.
 
 `labkit/ec2.py`, driving `scripts/aws-graviton.sh up|status|down`.
 
+The `hosts.toml` EC2 types are candidate sizes, smallest first. labd compares total
+cost and ETA for candidates that can host every eligible task and required build,
+using a longest-first greedy schedule within usable threads and memory. It picks the
+shortest ETA within `cost_tolerance`
+(default 10%) of the cheapest cost, then the fewest CPUs. Approval requests include
+the comparisons and the chosen type's fallback; `--type` overrides the choice and
+uses that type's own fallback. The actual launched type sets capacity and cost.
+Each option and the chosen approval report `fill_profile`, `fill_mean` and `idle_usd`,
+including setup and serial builds. `lab status` prints fill segments and idle cost;
+unknown task durations leave fill unknown. These add information, no approval gate.
+
 1. **idle → approval-needed.** This happens when pending tasks may run on EC2 and either
    only EC2 fits (a job names `ec2`, or the arch is aarch64), or the local queue estimate
    exceeds `suggest_after_h` and the EC2 estimate is shorter. The estimate is
-   `max(longest simulation task, simulation thread-hours / capacity)` plus the estimated
+   the greedy simulation makespan plus the estimated
    time of all uncached native builds, then `setup_h`. Required builds count once per
    binary key, even before their provider tasks are planned; cached binaries add no build
    time. Distinct builds are estimated serially, conservatively. A simulation job's
@@ -372,7 +409,7 @@ sleep loop costs nothing.
    × the assumed spot price in `hosts.toml`. One request opens with
    `lab approve ec2 <id> --max-hours H --max-usd D`, and labd never calls `up` without
    it. The request is withdrawn if the eligible tasks go away.
-2. **Approve → launching.** labd runs `up -n 1 -t TYPE --hours ceil(H)`, so the host's own
+2. **Approve → launching.** labd runs `up -n 1 -t TYPE,FALLBACK --hours ceil(H)`, so the host's own
    shutdown timer backs up the limit. One approval buys one launch.
 3. **launching → up.** Once `status` shows the instance running with an IP and the host
    is bootstrapped, the instance becomes the schedulable host `ec2` over ssh (key
@@ -387,6 +424,17 @@ sleep loop costs nothing.
      artifact cache and job directory through the same transport as eidolon.
    - When the queue drains (nothing eligible pending, nothing running there), it runs
      `down`.
+   - With no eligible pending work, charged use ≤ `tail_fraction` (0.25) of usable
+     threads for `tail_hold_min` (10 wall minutes) moves checkpointed tails home only
+     when placement has room now. Remaining wall time from stage progress and `est_h`,
+     less checkpoint replay, must exceed `tail_min_remaining_h` (0.5). The same commit's
+     x86_64 binary is reused or built by the normal provider before stopping the task.
+     The loss/fetch/requeue path then launches it immediately on the selected local host;
+     A/B and batch children resume their own newest checkpoints and stitch census stdout
+     by minute. Each
+     `tail-moved` reports the checkpoint, estimated task hours and marginal instance
+     dollars saved (zero when drain progress is unknown); `lab status` summarizes moves.
+     The existing queue drain downs EC2.
    - On spot loss (`status` no longer lists the instance), it emits `host-down`, requeues
      the lost tasks with `resume_argv` from fetched checkpoints, and opens a new request.
      A replacement needs its own go.

@@ -200,7 +200,7 @@ fn not_hunkered_the_resting_pose_is_unchanged() {
     let mut with_grid = Animals::empty(24, 8, 12);
     let mut without_grid = Animals::empty(24, 8, 12);
     let mut posed = 0;
-    for tick in 100..(100 + (2.5 * idle::MOVE_EVERY_S / DT) as u64) {
+    for tick in 100..(100 + (2.5 * idle::IdleConfig::default().frondgrazer.apart_s[1] / DT) as u64) {
         a.state = if (400..440).contains(&tick) {
             State::Asleep
         } else {

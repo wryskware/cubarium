@@ -111,9 +111,9 @@ class AB(Kind):
         # Config expansion/diff executes locally, even when the simulations are ARM.
         return list(dict.fromkeys([*self.keys(job, ctx, ctx.arch).values(), *self.keys(job, ctx).values()]))
 
-    def stage_tasks(self, job, ctx, stage, hours, binaries, starts=None):
+    def stage_tasks(self, job, ctx, stage, hours, binaries, starts=None, seeds=None):
         spec, tasks = job.spec, []
-        for seed in spec["seed_list"]:
+        for seed in spec["seed_list"] if seeds is None else seeds:
             for name in spec["arms"]:
                 root = job.out / stage / name / f"s{seed}"
                 arm = spec["arms"][name]
@@ -129,6 +129,8 @@ class AB(Kind):
                 if binaries[name] == arm.get("bin"):
                     files[arm["bin"]] = "{job}/inputs/" + name + "/binary"
                 argv = abtool.census_argv(binaries[name], hours, source, root, spec["threads"], spec["segment_min"])
+                start_minute = float((Path(checkpoint) / "minute").read_text()) if starts else 0
+                resume = ["{python}", "{lab}/census_resume.py", binaries[name], "{out}", str(spec["threads"]), *argv[1:]]
                 tasks.append(Task(name=f"{stage}-{name}-s{seed}", argv=argv, threads=spec["threads"],
                                   mem_gb=spec["mem_gb"], l3=True, arch=job.state.get("arch", ctx.arch),
                                   hosts=spec.get("hosts"), files=files,
@@ -136,7 +138,9 @@ class AB(Kind):
                                   stdout=str(root / "census.csv"), stderr=str(root / "err.log"),
                                   inputs=[binaries[name][7:-1]] if binaries[name].startswith("{input:") else [],
                                   liveness=dict(minute_file="run/status", stall_min=spec["stall_min"]),
-                                  est_h=spec.get("est_h"), meta=dict(stage=stage, arm=name, seed=seed)))
+                                  retries=1, resume_argv=resume, est_h=spec.get("est_h"),
+                                  meta=dict(stage=stage, arm=name, seed=seed, start_minute=start_minute,
+                                            total_minutes=hours * 60)))
         return tasks
 
     def binaries(self, job, ctx, placeholders=True):
@@ -193,21 +197,47 @@ class AB(Kind):
         job.state["preflight_log"] = log.getvalue()[-2000:]
         return None
 
+    @staticmethod
+    def complete_seeds(job, views):
+        """Seeds whose every arm finished this stage; a lost or failed run leaves its seed unpaired."""
+        arms = list(job.spec["arms"])
+        done = {(v.task.meta.get("arm"), str(v.task.meta.get("seed"))) for v in views if v.state == "done"}
+        seeds = {str(v.task.meta.get("seed")) for v in views}
+        return [s for s in job.spec["seed_list"] if str(s) in seeds and all((a, str(s)) in done for a in arms)]
+
+    @staticmethod
+    def missing(views):
+        return [v for v in views if v.state != "done"]
+
     def progress(self, job, task, ctx):
+        # A lost or failed run no longer aborts the job: the stage waits for its other runs, then
+        # carries on with the seeds whose every arm finished (Wrysk 2026-10-11: one host reboot
+        # killed eight healthy runs). Only a stage with no complete seed aborts.
         if task is None:
             return None
         stage = task.task.meta.get("stage")
-        if task.state != "done":
-            return Abort(f"{stage}: {task.name} {task.state} ({task.reason})")
-        if any(v.state != "done" for v in job.tasks.values() if v.task.meta.get("stage") == stage):
+        views = [v for v in job.tasks.values() if v.task.meta.get("stage") == stage]
+        if any(v.state in ("pending", "running") for v in views):
             return None
+        missing = self.missing(views)
+        seeds = self.complete_seeds(job, views)
+        lost = ", ".join(f"{v.name} {v.state} ({v.reason})" for v in missing)
+        if not seeds:
+            return Abort(f"{stage}: no seed has every arm done, nothing to compare; missing: {lost}")
         if stage != "early":
             return None
+        if missing:
+            dropped = [s for s in job.spec["seed_list"] if s not in seeds]  # seeds are seed_list members
+            job.state["dropped_seeds"] = {str(s): [f"{v.name} {v.state} ({v.reason})" for v in missing
+                                                   if str(v.task.meta.get("seed")) == str(s)] for s in dropped}
+            with open(job.out / "early.log", "a") as log:
+                for seed, why in job.state["dropped_seeds"].items():
+                    log.write(f"dropped seed {seed} from every arm's continuation: {'; '.join(why)}\n")
         spec = job.spec
         arms = job.state["arms"]
         with logged(job.out / "early.log"):
             try:
-                different = abtool.early_read(job.out, job.out / "early", list(arms), spec["seed_list"],
+                different = abtool.early_read(job.out, job.out / "early", list(arms), seeds,
                                               spec["expect_metric"], spec["early_minute"])
             except (OSError, ValueError) as error:
                 return Abort(f"early read: {error}")
@@ -217,8 +247,8 @@ class AB(Kind):
         if rest <= 0:
             return None
         starts = {}
-        for view in job.tasks.values():
-            if view.task.meta.get("stage") != "early":
+        for view in views:
+            if str(view.task.meta.get("seed")) not in {str(s) for s in seeds}:
                 continue
             checkpoint = view.out / "run/ckpt" / f"m{spec['early_minute']:06d}"
             if not (checkpoint / "minute").is_file():
@@ -230,7 +260,7 @@ class AB(Kind):
         except ValueError as error:
             return Abort(str(error))
         binaries = self.binaries(job, ctx)
-        return Spawn(self.stage_tasks(job, ctx, "continuation", rest, binaries, starts))
+        return Spawn(self.stage_tasks(job, ctx, "continuation", rest, binaries, starts, seeds))
 
     def census_runs(self, job, ctx):
         from ..stops import CensusRun
@@ -248,5 +278,17 @@ class AB(Kind):
                 stages.setdefault(stage, {}).setdefault(view.state, 0)
                 stages[stage][view.state] += 1
             head = "stages: " + "; ".join(f"{s} " + ", ".join(f"{n} {k}" for k, n in c.items()) for s, c in stages.items())
+            missing = self.missing(job.tasks.values())
+            if missing:
+                # Missing runs lead the first line: it becomes the job's reason in lab status/wait.
+                head = (f"{len(missing)} missing run{'s' if len(missing) != 1 else ''}: "
+                        + ", ".join(f"{v.task.name} {v.state}" for v in missing) + "; " + head)
+                for view in missing:
+                    meta = view.task.meta
+                    head += (f"\nmissing: arm={meta.get('arm', '?')} seed={meta.get('seed', '?')} "
+                             f"stage={meta.get('stage', '?')} state={view.state} "
+                             f"reason={getattr(view, 'reason', None) or '-'}")
+                for seed, why in job.state.get("dropped_seeds", {}).items():
+                    head += f"\ndropped seed {seed} from continuations: {'; '.join(why)}"
         diffs = ", ".join(f"{n}: {k} changed keys" for n, k in job.state.get("diff_keys", {}).items())
         return f"{head}\npreflight diff: {diffs or '-'}\n{job.state.get('preflight_log', '')}"
