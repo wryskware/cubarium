@@ -496,6 +496,7 @@ fn fixture_sample(rng: &mut Rng, shape: &TwoLayerShape, intent: usize, proposal:
             intent,
             subject: subject(intent as u64 % 3),
         },
+        learner_held: None,
         actions: (0..shape.actions.len()).map(|_| rng.unit()).collect(),
         kick: Some(rng.unit() < 0.5),
         call: Some(if rng.unit() < 0.5 { None } else { Some(1) }),
@@ -801,6 +802,7 @@ fn mode_teacher(seed: u64, samples: usize, neutral: usize) -> TrajectoryRecord {
             early_end: None,
             proposal: Some(choice),
             held: choice,
+            learner_held: None,
             actions,
             kick: None,
             call: None,
@@ -1002,6 +1004,7 @@ fn the_cloned_pointer_picks_the_teachers_subject() {
                     early_end: None,
                     proposal: Some(choice),
                     held: choice,
+                    learner_held: None,
                     actions: vec![if intent == 1 { feats[best][1] * 0.8 } else { 0.0 }],
                     kick: None,
                     call: None,
@@ -1143,4 +1146,127 @@ fn report_a_decision_samples_cost() {
         layout.range(Layer::Bottom).len(),
         layout.range(Layer::Top).len()
     );
+}
+
+// ---------------------------------------------------------------------------------------
+// BRAIN-FIX step 3: the closed-loop pass conditions the top on the learner's own hold.
+// ---------------------------------------------------------------------------------------
+
+/// **Which hold each reader sees in a closed-loop record**: the GRU's update and the top
+/// read the learner's own hold (what the brain held at runtime); the same-sample readout
+/// reads the teacher's (teacher forcing of the actions). A record whose learner hold is the
+/// teacher's conditions exactly as a teacher's stream does.
+#[test]
+fn a_closed_loop_record_feeds_the_learners_hold_to_the_top_and_the_teachers_to_the_readout() {
+    let shape = full_shape();
+    let cfg = test_arbitration(0.5, 0.1);
+    let theta = initial_center(&shape, 4);
+    let mut rng = Rng(9);
+    // The teacher holds intent 1 throughout; the learner never left intent 0.
+    let teacher: Vec<_> = (0..6).map(|_| fixture_sample(&mut rng, &shape, 1, 1)).collect();
+    let learner = RecordedChoice { intent: 0, subject: None };
+    let closed: Vec<_> = teacher.iter().cloned().map(|s| RecordedSample { learner_held: Some(learner), ..s }).collect();
+    let rec = |samples: Vec<RecordedSample>| TrajectoryRecord { source: RecordSource::ClosedLoop, ..record_from(samples) };
+    let (u, c) = (
+        clone::top_inputs(&shape, &cfg, &theta, &rec(closed.clone())),
+        clone::readout_conditioning(&shape, &cfg, &rec(closed)),
+    );
+    let (ut, ct) = (
+        clone::top_inputs(&shape, &cfg, &theta, &rec(teacher.clone())),
+        clone::readout_conditioning(&shape, &cfg, &rec(teacher.clone())),
+    );
+    let h = shape.hidden;
+    for t in 1..6 {
+        assert_eq!(u[t][h], 1.0, "sample {t}: the top reads the learner's hold");
+        assert_eq!(u[t][h + 1], 0.0);
+        assert_eq!(ut[t][h + 1], 1.0, "sample {t}: on the teacher's stream it reads the teacher's");
+        assert_eq!(c[t], ct[t], "sample {t}: the readout reads the teacher's hold either way");
+    }
+    // The learner's hold equal to the teacher's: exactly the teacher's conditioning.
+    let same: Vec<_> = teacher.iter().cloned().map(|s| RecordedSample { learner_held: Some(s.held), ..s }).collect();
+    assert_eq!(clone::top_inputs(&shape, &cfg, &theta, &rec(same.clone())), ut);
+    assert_eq!(clone::bottom_inputs(&shape, &cfg, &rec(same.clone())), clone::bottom_inputs(&shape, &cfg, &rec(teacher.clone())));
+    assert_eq!(clone::readout_conditioning(&shape, &cfg, &rec(same)), ct);
+}
+
+/// A night-roost teacher: `night` (input 0) comes on at a random sample and stays; the
+/// teacher leaves intent 0 for intent 1 at a random later sample (its rest bout, which the
+/// input does not show) and holds it. With `learner`, the stream is a closed-loop record
+/// of a learner that never left intent 0, the teacher labelling every sample it reached.
+fn roost_teacher(seed: u64, samples: usize, learner: bool) -> TrajectoryRecord {
+    let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+    let dusk = rng.range(20, 60) as usize;
+    let bout = dusk + rng.range(5, 60) as usize;
+    let out = (0..samples)
+        .map(|t| {
+            let intent = usize::from(t >= bout);
+            let choice = RecordedChoice { intent, subject: None };
+            RecordedSample {
+                observation: vec![f64::from(u8::from(t >= dusk)), rng.unit()],
+                intent_valid: vec![true, true],
+                candidates: Vec::new(),
+                early_end: None,
+                proposal: Some(choice),
+                held: choice,
+                learner_held: learner.then_some(RecordedChoice { intent: 0, subject: None }),
+                actions: vec![if intent == 1 { 0.2 } else { 0.8 }],
+                kick: None,
+                call: None,
+                rest: None,
+            }
+        })
+        .collect();
+    TrajectoryRecord {
+        source: if learner { RecordSource::ClosedLoop } else { RecordSource::Teacher },
+        ..record_from(out)
+    }
+}
+
+/// **The cause of the roost failure, on a synthetic teacher**: when the closed-loop pass
+/// feeds the top the teacher's hold, every label but the one at the teacher's own switch is
+/// the hold the top already reads, so the clone learns to copy its hold and never to leave
+/// it for a learner that has not. Fed the learner's own hold, the same records teach the
+/// switch. Scored on the switch labels of held-out closed-loop records (the learner still
+/// in intent 0, the teacher in 1): the agreement that copying cannot earn.
+#[test]
+fn the_learners_own_hold_teaches_the_top_to_switch_where_the_teachers_only_teaches_it_to_copy() {
+    let two = TwoLayerShape {
+        observation: 2,
+        hidden: 8,
+        actions: vec![ActionTransfer::Sigmoid],
+        legacy_options: 0,
+        menu: 2,
+        spare: 2,
+        candidates: 0,
+        row_width: 0,
+        kick: false,
+        call_kinds: 0,
+        rest: false,
+        top_hidden: 8,
+        pointer_width: 0,
+    };
+    let cfg = IntentArbitration { intent_hz: 10.0, hold_s: 0.0, switch_margin: 0.05, temperature: 1.0, intent_time_scale_s: 2.0 };
+    let spec = CloneSpec { updates: 200, learning_rate: 0.02, chunk: 40, clip: 5.0, seed: 3, workers: 4 };
+    let mut fixed: Vec<_> = (0..6).map(|s| roost_teacher(s, 160, false)).collect();
+    fixed.extend((10..16).map(|s| roost_teacher(s, 160, true)));
+    // The same closed-loop records with the learner's hold dropped: the teacher's hold fed
+    // to the top, as before the fix.
+    let copied: Vec<_> = fixed
+        .iter()
+        .cloned()
+        .map(|mut r| {
+            r.samples.iter_mut().for_each(|s| s.learner_held = None);
+            r
+        })
+        .collect();
+    let held_out: Vec<_> = (100..104).map(|s| roost_teacher(s, 160, true)).collect();
+    let switch = |records: &[TrajectoryRecord]| {
+        let (theta, _) = clone::fit(&two, &cfg, records, None, &spec).expect("fit");
+        let m = super::record::per_mode(&two, &cfg, &theta, &held_out, 2);
+        assert!(m.switch_labels[1] > 0, "the held-out records carry switch labels");
+        m.switch_rates()[1]
+    };
+    let (with_learner, with_teacher) = (switch(&fixed), switch(&copied));
+    eprintln!("switch agreement on intent 1: learner's hold {with_learner:.3}, teacher's hold {with_teacher:.3}");
+    assert!(with_learner > with_teacher, "the learner's own hold teaches the switch ({with_learner} vs {with_teacher})");
 }

@@ -100,6 +100,7 @@ fn sample(
         early_end: d.prep.early_end.map(early_end),
         proposal: (!forced).then_some(proposal),
         held,
+        learner_held: None,
         actions: label(manifest, s),
         kick: discrete(shape.kick).map(|()| d.executed.kick),
         call: discrete(shape.call_kinds > 0)
@@ -215,6 +216,7 @@ pub fn closed_loop_records(
                 early_end: d.prep.early_end.map(early_end),
                 proposal: Some(choice(usize::from(l.proposal), l.proposal_row, &rows)),
                 held: choice(usize::from(l.held), l.held_row, &rows),
+                learner_held: Some(choice(usize::from(d.held), d.held_row, &rows)),
                 actions: held_actions(&manifest, held),
                 kick: None,
                 call: None,
@@ -272,6 +274,7 @@ impl Controller for ShadowTeacher {
                 early_end: input.early_end.map(early_end),
                 proposal: None,
                 held,
+                learner_held: None,
                 actions: held_actions(&self.manifest, &Held { actions: taught.actions, body: taught.body }),
                 kick: None,
                 call: None,
@@ -296,6 +299,13 @@ pub struct PerMode {
     /// matched.
     pub intent_labels: Vec<usize>,
     pub intent_hits: Vec<usize>,
+    /// Per named intent: the top labels whose intent differs from the hold the top read
+    /// (a switch the teacher made), and how many the top matched (BRAIN-FIX step 3). A top
+    /// that only copies its hold scores high on [`PerMode::intent_hits`] and 0 here.
+    #[serde(default)]
+    pub switch_labels: Vec<usize>,
+    #[serde(default)]
+    pub switch_hits: Vec<usize>,
     /// Per held intent (the mode the bottom acts in): samples and summed squared action
     /// error per action value.
     pub mode_samples: Vec<usize>,
@@ -303,6 +313,15 @@ pub struct PerMode {
 }
 
 impl PerMode {
+    /// Agreement per intent on its switch labels, `NaN` where none.
+    pub fn switch_rates(&self) -> Vec<f64> {
+        self.switch_labels
+            .iter()
+            .zip(&self.switch_hits)
+            .map(|(n, h)| if *n > 0 { *h as f64 / *n as f64 } else { f64::NAN })
+            .collect()
+    }
+
     /// `(agreement per intent, mean squared action error per mode)`, `NaN` where empty.
     pub fn rates(&self, actions: usize) -> (Vec<f64>, Vec<f64>) {
         let agree = self
@@ -336,6 +355,8 @@ pub fn per_mode(
     let mut m = PerMode {
         intent_labels: vec![0; menu],
         intent_hits: vec![0; menu],
+        switch_labels: vec![0; menu],
+        switch_hits: vec![0; menu],
         mode_samples: vec![0; menu],
         mode_se: vec![0.0; menu],
     };
@@ -343,23 +364,25 @@ pub fn per_mode(
     for record in records {
         let xs = super::clone::bottom_inputs(shape, arbitration, record);
         let cs = super::clone::readout_conditioning(shape, arbitration, record);
+        let us = super::clone::top_conditioning(shape, arbitration, record);
         let mut hidden = vec![0.0; shape.hidden];
         let mut next = vec![0.0; shape.hidden];
         let mut y = vec![0.0; shape.bottom_outputs()];
         let mut top = super::net::TopForward::new(shape);
-        let mut before: Option<usize> = None;
-        let mut age = 0.0;
         for (t, s) in record.samples.iter().enumerate() {
             crate::es::tensor::gru_view(theta, &layout.bottom).forward(&xs[t], &mut hidden, &mut next, &mut y);
             if let (Some(to), Some(p)) = (layout.top, s.proposal) {
-                let time = super::net::squash_time(age, arbitration.intent_time_scale_s);
+                let (before, time) = us[t];
                 top_forward(shape, &to, theta, &hidden, before, time, &mut top);
                 let mut valid = vec![false; shape.intents()];
                 valid[..shape.menu].copy_from_slice(&s.intent_valid);
                 if valid.get(p.intent).copied().unwrap_or(false) && p.intent < menu {
+                    let hit = super::net::masked_argmax(&top.logits, &valid) == Some(p.intent);
                     m.intent_labels[p.intent] += 1;
-                    if super::net::masked_argmax(&top.logits, &valid) == Some(p.intent) {
-                        m.intent_hits[p.intent] += 1;
+                    m.intent_hits[p.intent] += usize::from(hit);
+                    if before != Some(p.intent) {
+                        m.switch_labels[p.intent] += 1;
+                        m.switch_hits[p.intent] += usize::from(hit);
                     }
                 }
             }
@@ -370,11 +393,6 @@ pub fn per_mode(
                 let e = tr.apply(y[a]) - s.actions[a];
                 m.mode_se[mode] += e * e;
             }
-            if before != Some(s.held.intent) {
-                age = 0.0;
-            }
-            age += record.sample_period_s;
-            before = Some(s.held.intent);
         }
     }
     m

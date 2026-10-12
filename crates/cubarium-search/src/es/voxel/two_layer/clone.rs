@@ -93,10 +93,19 @@ pub struct RecordedSample {
     /// The teacher's proposal **before its hold**, at a decision sample: the top's label.
     /// `None` where the top gets no label (between decisions, invoked modes).
     pub proposal: Option<RecordedChoice>,
-    /// The intent and subject held after this sample's arbitration (the teacher's, or the
-    /// learner's in a closed-loop pass). The bottom is conditioned on it from the **next**
-    /// sample.
+    /// The intent and subject the **teacher** held after this sample's arbitration (in a
+    /// closed-loop pass, the dry-run teacher's hold: teacher forcing). The same-sample
+    /// readout is conditioned on it, and — unless [`RecordedSample::learner_held`] is set —
+    /// the GRU and the top from the **next** sample.
     pub held: RecordedChoice,
+    /// **The learner's own hold** after this sample's arbitration, in a closed-loop pass
+    /// (BRAIN-FIX step 3). The GRU's update and the top read the hold the brain actually
+    /// had at runtime, so the top learns to leave a hold the teacher would have left. With
+    /// the teacher's hold there instead, its input carried the label's own previous value,
+    /// and the clone learnt to copy its hold and never to switch. `None` for the teacher's
+    /// own streams (the two holds are one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub learner_held: Option<RecordedChoice>,
     /// The teacher's continuous actions, adapted, in manifest order.
     pub actions: Vec<f64>,
     #[serde(default)]
@@ -187,14 +196,33 @@ pub fn top_inputs(
         .collect()
 }
 
+/// The top's conditioning at every sample of `record`: the hold before the sample (the
+/// learner's own in a closed-loop record) and its squashed time, as the GRU and the top
+/// read them.
+pub fn top_conditioning(
+    shape: &TwoLayerShape,
+    arbitration: &IntentArbitration,
+    record: &TrajectoryRecord,
+) -> Vec<(Option<usize>, f64)> {
+    conditioning(shape, arbitration, record)
+        .into_iter()
+        .map(|c| (c.held, c.time))
+        .collect()
+}
+
 fn conditioning(
     shape: &TwoLayerShape,
     arbitration: &IntentArbitration,
     record: &TrajectoryRecord,
 ) -> Vec<Conditioning> {
     let mut out = Vec::with_capacity(record.samples.len());
+    // Two holds, one per reader: the input side (GRU, top) follows the learner's own hold
+    // where the record has one; the readout follows the teacher's. On a teacher's stream
+    // they are one hold and the two clocks tick together.
     let mut before: Option<RecordedChoice> = None;
     let mut age = 0.0;
+    let mut before_out: Option<RecordedChoice> = None;
+    let mut age_out = 0.0;
     for sample in &record.samples {
         let held = before.filter(|_| shape.has_top());
         let row = held.and_then(|h| h.subject).and_then(|s| {
@@ -215,7 +243,11 @@ fn conditioning(
             &mut x,
         );
         // The hold at this sample, with its time after any switch: the readout's.
-        if before.is_none_or(|b| b.intent != sample.held.intent) {
+        if before_out.is_none_or(|b| b.intent != sample.held.intent) {
+            age_out = 0.0;
+        }
+        let after = sample.learner_held.unwrap_or(sample.held);
+        if before.is_none_or(|b| b.intent != after.intent) {
             age = 0.0;
         }
         let mut c = vec![0.0; shape.conditioning()];
@@ -231,7 +263,7 @@ fn conditioning(
                 shape,
                 Some(sample.held.intent),
                 row,
-                squash_time(age, arbitration.intent_time_scale_s),
+                squash_time(age_out, arbitration.intent_time_scale_s),
                 &mut c,
             );
         }
@@ -242,7 +274,9 @@ fn conditioning(
             c,
         });
         age += record.sample_period_s;
-        before = Some(sample.held);
+        age_out += record.sample_period_s;
+        before = Some(after);
+        before_out = Some(sample.held);
     }
     out
 }
