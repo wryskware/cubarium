@@ -74,6 +74,10 @@ pub mod defend;
 pub use defend::Defence;
 /// YOUNG-ROAM (behaviour-AI §3.5): young pace, the loosening leash and excursions.
 pub mod roam;
+/// NUTS: checking trees for food a glider cannot see (the host test, the memory).
+pub mod treecheck;
+#[cfg(test)]
+mod nuts_tests;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -3407,6 +3411,10 @@ pub struct FaunaLedger {
     pub fruit_eaten_by_source: [f64; 2],
     #[serde(default)]
     pub fruit_bites_by_source: [u64; 2],
+    /// NUTS: stand fruit eaten by the species it came off, organic, indexed by
+    /// [`cubarium_voxel_flora::Species::index`] (a share of `fruit_eaten_by_source[0]`).
+    #[serde(default)]
+    pub fruit_eaten_by_plant: [f64; cubarium_voxel_flora::Species::COUNT],
     /// Glides started by choice (off a ledge, a crown or a vine), and forced ones (a lost
     /// perch or hold).
     #[serde(default)]
@@ -4341,6 +4349,16 @@ pub struct Fauna {
     /// last regroup howl it heard. Saved: a load continues a hunt.
     #[serde(default)]
     pub(crate) hounds: FxHashMap<u64, Hound>,
+    /// NUTS: each glider's tree-check memory ([`treecheck::TreeChecks`]): the hosts it looked
+    /// into and whether they held food. Saved: trap-lining survives a load.
+    #[serde(default)]
+    pub(crate) tree_checks: FxHashMap<u64, treecheck::TreeChecks>,
+    /// NUTS: the tree checks' readout ([`treecheck::CheckTally`]). Session state.
+    #[serde(skip)]
+    pub(crate) check_tally: treecheck::CheckTally,
+    /// NUTS: the tick the dead's tree-check memories were last pruned. Session state.
+    #[serde(skip)]
+    pub(crate) check_pruned: Option<u64>,
     /// VH-TACTICS: each hound's teacher labels at its last sample ([`HoundTeach`]), read by
     /// its intent record. Session state.
     #[serde(skip)]
@@ -4515,11 +4533,14 @@ pub enum Steer {
     Explore,
     /// YOUNG-ROAM: a mother's walk to her own young's distress call ([`roam::answer`]).
     Answer,
+    /// NUTS: a hungry glider's walk to a tree that may hold food it cannot see, to climb it
+    /// and look ([`treecheck`]).
+    Check,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 24] = [
+    pub const ALL: [Steer; 25] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4544,6 +4565,7 @@ impl Steer {
         Steer::Defend,
         Steer::Explore,
         Steer::Answer,
+        Steer::Check,
     ];
 
     /// A short name for tables.
@@ -4573,6 +4595,7 @@ impl Steer {
             Steer::Defend => "defend",
             Steer::Explore => "explore",
             Steer::Answer => "answer",
+            Steer::Check => "check",
         }
     }
 }
@@ -4957,6 +4980,9 @@ impl Fauna {
             calls: Vec::new(),
             last_call: FxHashMap::default(),
             hounds: FxHashMap::default(),
+            tree_checks: FxHashMap::default(),
+            check_tally: Default::default(),
+            check_pruned: None,
             hound_teach: FxHashMap::default(),
             ls_teach: FxHashMap::default(),
             excursions: FxHashMap::default(),
@@ -5020,6 +5046,16 @@ impl Fauna {
     /// controller sample, `None` before its first.
     pub fn steer_of(&self, id: u64) -> Option<Steer> {
         self.steer.get(&id).copied()
+    }
+
+    /// NUTS: the tree checks' readout ([`treecheck::CheckTally`]).
+    pub fn check_tally(&self) -> treecheck::CheckTally {
+        self.check_tally
+    }
+
+    /// NUTS: body `id`'s tree-check memory, if it has one ([`treecheck::TreeChecks`]).
+    pub fn tree_checks_of(&self, id: u64) -> Option<&treecheck::TreeChecks> {
+        self.tree_checks.get(&id)
     }
 
     /// YOUNG-ROAM's readout for lineage `founder` ([`roam::RoamTally`]).

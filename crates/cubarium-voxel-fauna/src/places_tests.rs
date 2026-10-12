@@ -305,6 +305,9 @@ fn roost_and_fruit_use_the_reflexes_climbable_tree_queries() {
     let climb = g_climb(&cfg);
     let mut fc = FloraConfig::default();
     fc.vaulttree.crown_height_m = [2.0 * safe.max(climb), 2.0 * safe.max(climb)];
+    // NUTS: the fixture's tree shows its fruit as plain fruit (no close-sight limit), so the
+    // fruit below is seen from where the body stands.
+    fc.vaulttree.fruit_sight_m = 0.0;
     let wood = fc.vaulttree.wood_max;
     let mut flora = Flora::new(fc);
     assert!(flora.apply(
@@ -335,7 +338,10 @@ fn roost_and_fruit_use_the_reflexes_climbable_tree_queries() {
     // Flora owns stocks: use its serialized state to construct the small fixture.
     let mut doc = serde_json::to_value(&flora).unwrap();
     doc["stands"][0]["fruit"] = serde_json::json!(1.0);
+    // The config is saved beside the state, not in it: put the fixture's back.
+    let keep = flora.config().clone();
     flora = serde_json::from_value(doc).unwrap();
+    flora.set_config_rebinned(keep);
     f.config.founders[Founder::Seedporter.index()]
         .senses
         .sight_m = 8.0;

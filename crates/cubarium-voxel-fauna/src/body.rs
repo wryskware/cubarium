@@ -1226,6 +1226,24 @@ pub struct Glider {
     /// Veilhound's strike height. 1.0 (the glide's minimum start).
     #[serde(default = "roost_ledge_min_m")]
     pub roost_ledge_min_m: f64,
+    /// **NUTS: checking trees** (Wrysk 2026-10-12: "somehow seedporters should know to liek
+    /// \"check\" trees and stuff cuz they wont be able to see larvae or nuts from the ground in
+    /// a tall vaulttree"): a hungry grounded glider on its heuristic, with no food in sight,
+    /// walks to the nearest host plant that may hold food it cannot see
+    /// ([`crate::treecheck::may_hold_hidden_food`]) within this horizontal distance, metres,
+    /// climbs into its crown and looks. A heuristic world query over the plant layer (a tree
+    /// is a big, plain object), not a sense of the food. Real: tamarins and marmosets travel
+    /// tens of metres between feeding trees (Garber 1988, *Behaviour* 105). 0 turns the
+    /// check off. 16.0 (two fruit searches).
+    #[serde(default = "check_search_m")]
+    pub check_search_m: f64,
+    /// **NUTS: how long it remembers a checked tree**, seconds: whether the tree held food when
+    /// it last looked. It does not check an empty one again until that memory lapses, and
+    /// goes first to one that held food. Real: tamarins and marmosets revisit known feeding
+    /// trees along routes ("trap-lining": Garber 1989, *Am. J. Primatol.* 19). 3600 (an hour,
+    /// half a world day; a nut crop rests 2 h).
+    #[serde(default = "check_memory_s")]
+    pub check_memory_s: f64,
 }
 
 fn roost_search_m() -> f64 {
@@ -1248,6 +1266,14 @@ fn fruit_search_m() -> f64 {
     8.0
 }
 
+fn check_search_m() -> f64 {
+    Glider::SEEDPORTER.check_search_m
+}
+
+fn check_memory_s() -> f64 {
+    Glider::SEEDPORTER.check_memory_s
+}
+
 impl Glider {
     /// The seedporter's table (predation-and-flight §3.5, §3.9; Brief F3; placeholders):
     /// climbs stands from 1 m, glides from 1 m at 2.5 : 1 and 2 × its cruise for 1.2 × basal.
@@ -1262,6 +1288,8 @@ impl Glider {
         roost_budget_m: 12.0,
         roost_reserve_share: 0.5,
         roost_ledge_min_m: 1.0,
+        check_search_m: 16.0,
+        check_memory_s: 3600.0,
     };
 }
 

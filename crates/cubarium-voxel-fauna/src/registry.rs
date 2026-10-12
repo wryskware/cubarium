@@ -543,6 +543,8 @@ fn founder_rows() -> Vec<Row> {
         r("glider.roost_budget_m", "m", nonneg, "at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off)").optional(),
         r("glider.roost_reserve_share", "fraction of reserve above emergency floor", fraction, "a preferred roost's trip (walk and climb) may spend this share").optional(),
         r("glider.roost_ledge_min_m", "m", nonneg, "a roost ledge stands at least this over the foot of its vine wall").optional(),
+        r("glider.check_search_m", "m", nonneg, "NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees)").optional().search(0.0, 32.0),
+        r("glider.check_memory_s", "s", nonneg, "NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets)").optional().search(0.0, 14400.0),
         // Gut seeds (`GutSeeds`, F3): the seedporter's only, optional on the others.
         r("gut_seeds.seeds_per_fruit_organic", "org-units per org-unit of fruit", fraction, "share of a fruit meal that is the source's seeds, carried in the gut").optional(),
         r("gut_seeds.gut_transit_s", "s", nonneg, "a meal's seeds are voided at the body's face this long after it").optional(),

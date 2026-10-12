@@ -192,7 +192,10 @@ use crate::{Fauna, FaunaConfig};
 //     `defence_samples`, `kicks_landed_by_founder` and `kick_backs` (a state layout change).
 //     `FounderPhysiology::defence` (`Defence`) and the loftstrider's kick table are named
 //     config, not bumps.
-pub const SCHEMA: u32 = 84;
+// 85: NUTS — `Fauna::tree_checks` (each glider's tree-check memory, `TreeChecks`) and the
+//     ledger's `fruit_eaten_by_plant` (a state layout change). `Glider::{check_search_m,
+//     check_memory_s}` are named config, not bumps.
+pub const SCHEMA: u32 = 85;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
