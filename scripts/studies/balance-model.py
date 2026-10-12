@@ -56,14 +56,20 @@ def main():
     p.add_argument('--summary', action='append', default=[])
     p.add_argument('--type', action='append', default=[], help='TYPE=ARM')
     p.add_argument('--rate', action='append', default=[], help='TYPE=encounters per hour')
-    p.add_argument('--census')
+    p.add_argument('--census', action='append', default=[],
+                   help='a wide run root (every census.csv under it); repeat for arms')
+    p.add_argument('--hounds', type=float, default=4.0,
+                   help='hounds a standoff: census give-ups and tests are per hound')
     o = p.parse_args()
     rows = load(o.summary)
     types = dict(t.split('=', 1) for t in o.type)
     rates = {k: float(v) for k, v in (r.split('=', 1) for r in o.rate)}
-    if o.census:
-        c = census_rates(o.census)
-        print('census', ' '.join(f'{k}={v:.3f}' for k, v in c.items()))
+    for root in o.census:
+        c = census_rates(root)
+        print('census', root, ' '.join(f'{k}={v:.3f}' for k, v in c.items()))
+        print(f'  live a year: loftstriders killed {YEAR_H * c["ls_kills_per_h"]:.2f}; hounds killed by kicks '
+              f'{YEAR_H * c["hound_kick_deaths_per_h"]:.2f}; standoffs {YEAR_H * c["give_ups_per_h"] / o.hounds:.1f} '
+              f'(give-ups / {o.hounds:g} hounds; 0 on a census without the BALANCE columns)')
     adults = calves = deaths = standoffs = 0.0
     print('type\tarm\tE/h\tP(adult)\tP(calf)\tP(gave up)\tP(hound death)\tadults/yr\tcalves/yr\thound deaths/yr')
     for k, arm in types.items():
