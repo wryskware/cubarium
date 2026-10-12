@@ -36,7 +36,9 @@ use super::window::{self, BodyScore, LiveWorld, WindowResult};
 use super::world;
 use crate::es::optimizer::{self, Adam};
 use crate::es::rng::perturbation;
+use crate::es::voxel::kin::stage::Perturber;
 use crate::es::voxel::store::VoxelPolicyFile;
+use crate::es::voxel::two_layer::{BrainFile, TwoLayerPolicyFile};
 
 /// The protocol label written into the centres this loop saves.
 pub const LIVE_PROTOCOL: &str = "live-world-1";
@@ -136,12 +138,157 @@ pub struct GenerationRecord {
     pub readout: Vec<(String, f64)>,
 }
 
-/// A lineage being trained.
+/// A lineage being trained: its centre's weights and optimizer, and the file the centre
+/// came from (BRAIN-NEXT step 1). A plain file trains exactly as before; a two-layer file
+/// ([`TwoLayerPolicyFile`]) builds its variants with the two-layer brain, perturbed at the
+/// lineage's stage (`kin.<lineage>.stage`; stage 1: only the top, [`Perturber`]), draws the
+/// update from the same restricted stream, and is written back as a two-layer file.
 struct Lineage {
     founder: Founder,
     theta: Vec<f64>,
     adam: Adam,
-    template: VoxelPolicyFile,
+    template: BrainFile,
+}
+
+impl Lineage {
+    /// A centre file as `founder`'s lineage: a plain file exactly as before (a `transfer:`
+    /// path too), a two-layer file through its own validation.
+    fn load(spec: &LiveSpec, founder: Founder, path: &Path) -> Result<Lineage, String> {
+        let template = if is_two_layer(path) {
+            let file = TwoLayerPolicyFile::load(path)?;
+            let declared = crate::es::voxel::parse_founder(&file.founder)?;
+            if declared != founder {
+                return Err(format!(
+                    "{} declares the {} lineage, not {}",
+                    path.display(),
+                    declared.name(),
+                    founder.name()
+                ));
+            }
+            BrainFile::TwoLayer(file)
+        } else {
+            let file = VoxelPolicyFile::load_or_transfer(path)?;
+            let declared = file.founder()?;
+            if declared != founder {
+                return Err(format!(
+                    "{} declares the {} lineage, not {}",
+                    path.display(),
+                    declared.name(),
+                    founder.name()
+                ));
+            }
+            BrainFile::Plain(file)
+        };
+        let theta = match &template {
+            BrainFile::Plain(f) => f.theta.clone(),
+            BrainFile::TwoLayer(f) => f.theta.clone(),
+        };
+        let mut adam = Adam::new(theta.len());
+        adam.learning_rate = spec.learning_rate;
+        let l = Lineage { founder, theta, adam, template };
+        // Validates length, finiteness and this build's digest, and the world's mass.
+        super::search::check_mass(&[(founder, l.driver(spec)?)], &spec.ecology)?;
+        Ok(l)
+    }
+
+    /// The perturbation the variants and the update draw: today's for a plain file, the
+    /// lineage's stage for a two-layer one.
+    fn perturber(&self, spec: &LiveSpec) -> Perturber {
+        match &self.template {
+            BrainFile::Plain(_) => Perturber::plain(),
+            BrainFile::TwoLayer(f) => Perturber::two_layer(&f.layout(), spec.kin.of(self.founder).stage),
+        }
+    }
+
+    /// The two-layer file at the current centre.
+    fn two_layer_at(&self, f: &TwoLayerPolicyFile) -> TwoLayerPolicyFile {
+        TwoLayerPolicyFile { theta: self.theta.clone(), ..f.clone() }
+    }
+
+    /// The holding knobs a two-layer lineage's brains run by: the training worlds' own
+    /// `fauna.founders.<lineage>.brain`.
+    fn arbitration(&self, spec: &LiveSpec) -> crate::es::voxel::two_layer::IntentArbitration {
+        spec.ecology.fauna().founder(self.founder).brain
+    }
+
+    /// The current centre as a driver (the birth factory's brain).
+    fn driver(&self, spec: &LiveSpec) -> Result<crate::es::voxel::EpisodeDriver, String> {
+        match &self.template {
+            BrainFile::Plain(_) => crate::es::voxel::EpisodeDriver::gru(&self.theta, self.founder),
+            BrainFile::TwoLayer(f) => Ok(crate::es::voxel::EpisodeDriver::two_layer(
+                self.two_layer_at(f).net()?,
+                self.arbitration(spec),
+                self.founder,
+            )),
+        }
+    }
+
+    /// This generation's `2·pairs` variants.
+    fn table(&self, spec: &LiveSpec, generation: u32) -> Result<VariantTable, String> {
+        match &self.template {
+            BrainFile::Plain(_) => VariantTable::antithetic(
+                self.founder,
+                &self.theta,
+                spec.train_seed,
+                spec.sigma,
+                generation,
+                spec.pairs,
+            ),
+            BrainFile::TwoLayer(f) => VariantTable::antithetic_two_layer(
+                &self.two_layer_at(f),
+                spec.kin.of(self.founder).stage,
+                self.arbitration(spec),
+                spec.train_seed,
+                spec.sigma,
+                generation,
+                spec.pairs,
+            ),
+        }
+    }
+}
+
+/// Whether a centre path is a two-layer file (by its schema token); anything else,
+/// including a `transfer:` path, loads as a plain file exactly as before.
+fn is_two_layer(path: &Path) -> bool {
+    if path.to_string_lossy().starts_with("transfer:") {
+        return false;
+    }
+    #[derive(Deserialize)]
+    struct Token {
+        schema: String,
+    }
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Token>(&b).ok())
+        .is_some_and(|t| t.schema == crate::es::voxel::two_layer::TWO_LAYER_POLICY_SCHEMA)
+}
+
+/// A lineage's template in the checkpoint: untagged, so a plain lineage's checkpoint is
+/// byte-for-byte today's (`shape` is required by the two-layer file, which a plain file has
+/// not, so a plain template never reads as two-layer).
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedTemplate {
+    TwoLayer(TwoLayerPolicyFile),
+    Plain(VoxelPolicyFile),
+}
+
+impl From<&BrainFile> for SavedTemplate {
+    fn from(b: &BrainFile) -> SavedTemplate {
+        match b {
+            BrainFile::Plain(f) => SavedTemplate::Plain(f.clone()),
+            BrainFile::TwoLayer(f) => SavedTemplate::TwoLayer(f.clone()),
+        }
+    }
+}
+
+impl From<SavedTemplate> for BrainFile {
+    fn from(s: SavedTemplate) -> BrainFile {
+        match s {
+            SavedTemplate::Plain(f) => BrainFile::Plain(f),
+            SavedTemplate::TwoLayer(f) => BrainFile::TwoLayer(f),
+        }
+    }
 }
 
 /// Z-score each body within its own world and lineage, then pool: a candidate's score is
@@ -182,15 +329,106 @@ pub fn ascend(
     train_seed: u64,
     generation: u32,
 ) -> (f64, f64) {
+    ascend_with(theta, adam, scores, sigma, |i, out| {
+        perturbation(train_seed, u64::from(generation), i as u64, out);
+    })
+}
+
+/// [`ascend`] over any pair-keyed perturbation stream (`eps(pair, out)`): a two-layer
+/// lineage's stage-restricted draw ([`Perturber::eps`]), so a stage-1 gradient is zero on
+/// the bottom by construction.
+pub fn ascend_with(
+    theta: &mut [f64],
+    adam: &mut Adam,
+    scores: &[f64],
+    sigma: f64,
+    eps: impl Fn(usize, &mut [f64]) + Sync,
+) -> (f64, f64) {
     let pairs = scores.len() / 2;
     let plus: Vec<f64> = (0..pairs).map(|p| scores[2 * p]).collect();
     let minus: Vec<f64> = (0..pairs).map(|p| scores[2 * p + 1]).collect();
-    let g = optimizer::gradient(&plus, &minus, theta.len(), sigma, |i, out| {
-        perturbation(train_seed, u64::from(generation), i as u64, out);
-    });
+    let g = optimizer::gradient(&plus, &minus, theta.len(), sigma, eps);
     let norm = g.iter().map(|x| x * x).sum::<f64>().sqrt();
     let rms = adam.ascend(theta, &g);
     (norm, rms)
+}
+
+/// This generation's variant tables, one per trained lineage, indexed by [`Founder::index`].
+fn tables_for(spec: &LiveSpec, lineages: &[Lineage], generation: u32) -> Result<Vec<Option<VariantTable>>, String> {
+    let mut tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
+    for l in lineages {
+        tables[l.founder.index()] = Some(l.table(spec, generation)?);
+    }
+    Ok(tables)
+}
+
+/// One lineage's update from every world's window: its comparison's scores, then the
+/// antithetic step over the same perturbation stream its variants were drawn from.
+fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation: u32) -> LineageUpdate {
+    let candidates = 2 * spec.pairs;
+    let comparison = spec.kin.of(l.founder).comparison;
+    let perturber = l.perturber(spec);
+    let two_layer = matches!(l.template, BrainFile::TwoLayer(_));
+    let per_world: Vec<Vec<BodyScore>> = results
+        .iter()
+        .map(|r| r.scores.iter().filter(|b| b.founder == l.founder).copied().collect())
+        .collect();
+    let mine: Vec<&BodyScore> = per_world.iter().flatten().collect();
+    let (scores, n, pairs_missing, (gradient_norm, update_rms)) = match comparison {
+        crate::es::voxel::kin::Comparison::Family => {
+            let fam: Vec<_> = per_world.iter().zip(results).map(|(b, r)| (b.as_slice(), &r.roster)).collect();
+            let by_candidate = crate::es::voxel::kin::compare::family(&fam, candidates);
+            let pairs = crate::es::voxel::kin::PairScores::from_candidates(&by_candidate);
+            let mut n = vec![0usize; candidates];
+            for b in &mine { n[b.candidate] += 1; }
+            let train_seed = spec.train_seed;
+            let step = if two_layer {
+                crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &pairs, spec.sigma,
+                    |p, out| perturber.eps(train_seed, generation, p, out))
+            } else {
+                let generation = u64::from(generation);
+                crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &pairs, spec.sigma,
+                    |p, out| perturbation(train_seed, generation, p as u64, out))
+            };
+            (by_candidate.iter().map(|s| s.unwrap_or(f64::NAN)).collect::<Vec<_>>(), n, pairs.missing, step)
+        }
+        // `matched` is refused at the start of the run.
+        _ => {
+            let refs: Vec<&[BodyScore]> = per_world.iter().map(Vec::as_slice).collect();
+            let (scores, n) = crate::es::voxel::kin::compare::per_body(&refs, candidates);
+            // σ = 0 is the placement-noise control: every variant is the centre, so
+            // there is no direction to estimate and the centre is left alone.
+            let step = if mine.len() >= 2 && spec.sigma > 0.0 {
+                if two_layer {
+                    let train_seed = spec.train_seed;
+                    ascend_with(&mut l.theta, &mut l.adam, &scores, spec.sigma,
+                        |p, out| perturber.eps(train_seed, generation, p, out))
+                } else {
+                    ascend(&mut l.theta, &mut l.adam, &scores, spec.sigma, spec.train_seed, generation)
+                }
+            } else {
+                (0.0, 0.0)
+            };
+            (scores, n, 0, step)
+        }
+    };
+    let mean = |f: fn(&BodyScore) -> f64| mine.iter().map(|b| f(b)).sum::<f64>() / mine.len().max(1) as f64;
+    LineageUpdate {
+        lineage: l.founder.name().into(),
+        bodies: mine.len(),
+        newborn_bodies: mine.iter().filter(|b| b.newborn).count(),
+        candidates_placed: n.iter().filter(|&&k| k > 0).count(),
+        mean_raw_score: mine.iter().map(|b| b.score.score).sum::<f64>()
+            / mine.len().max(1) as f64,
+        gradient_norm,
+        update_rms,
+        candidate_scores: scores.clone(),
+        comparison,
+        pairs_missing,
+        mean_own: mean(|b| b.kin.own),
+        mean_relatives: mean(|b| b.kin.relatives),
+        mean_combined: mean(|b| b.kin.combined),
+    }
 }
 
 fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveWorld {
@@ -220,13 +458,7 @@ fn prepare(sim: &mut Sim, spec: &LiveSpec, lineages: &[Lineage]) {
     sim.world_mut().set_water_every(spec.water_every);
     let drivers: Vec<_> = lineages
         .iter()
-        .map(|l| {
-            (
-                l.founder,
-                crate::es::voxel::EpisodeDriver::gru(&l.theta, l.founder)
-                    .expect("a validated centre"),
-            )
-        })
+        .map(|l| (l.founder, l.driver(spec).expect("a validated centre")))
         .collect();
     super::install_centres(sim.fauna_mut(), &drivers);
 }
@@ -264,19 +496,38 @@ fn save_centres(spec: &LiveSpec, lineages: &[Lineage], generation: u32, tag: &st
     let dir = spec.out.join("centres");
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for l in lineages {
-        let file = VoxelPolicyFile {
-            build: crate::evaluate::BUILD_ID.into(),
-            train_seed: spec.train_seed,
-            generation: Some(u64::from(generation)),
-            score: None,
-            arena_protocol: LIVE_PROTOCOL.into(),
-            protocol_hash: None,
-            imitation: None,
-            theta: l.theta.clone(),
-            ..l.template.clone()
-        };
         let path = dir.join(format!("{tag}-{}.json", l.founder.name()));
-        file.write(&path)?;
+        match &l.template {
+            BrainFile::Plain(template) => {
+                let file = VoxelPolicyFile {
+                    build: crate::evaluate::BUILD_ID.into(),
+                    train_seed: spec.train_seed,
+                    generation: Some(u64::from(generation)),
+                    score: None,
+                    arena_protocol: LIVE_PROTOCOL.into(),
+                    protocol_hash: None,
+                    imitation: None,
+                    theta: l.theta.clone(),
+                    ..template.clone()
+                };
+                file.write(&path)?;
+            }
+            // Written back through its own format: shape and founder from the template,
+            // this run's weights, seed and generation.
+            BrainFile::TwoLayer(template) => {
+                let file = TwoLayerPolicyFile {
+                    build: crate::evaluate::BUILD_ID.into(),
+                    train_seed: spec.train_seed,
+                    generation: Some(u64::from(generation)),
+                    score: None,
+                    origin: LIVE_PROTOCOL.into(),
+                    theta: l.theta.clone(),
+                    ..template.clone()
+                };
+                file.validate(&path.display().to_string())?;
+                file.write(&path)?;
+            }
+        }
     }
     Ok(())
 }
@@ -293,7 +544,7 @@ struct TrainingCheckpoint {
     stomach_aware_reward: bool,
     #[serde(default)]
     kin: crate::es::voxel::kin::KinConfig,
-    lineages: Vec<(Founder, Vec<f64>, Adam, VoxelPolicyFile)>,
+    lineages: Vec<(Founder, Vec<f64>, Adam, SavedTemplate)>,
     worlds: Vec<WorldState>,
 }
 
@@ -319,7 +570,7 @@ fn save_checkpoint(spec: &LiveSpec, lineages: &[Lineage], worlds: &[LiveWorld], 
         next_generation, next_fresh_seed, train_seed: spec.train_seed, pairs: spec.pairs,
         window_ticks: spec.window_ticks, sigma: spec.sigma, curiosity: spec.curiosity.clone(),
         stomach_aware_reward: spec.stomach_aware_reward, kin: spec.kin.clone(),
-        lineages: lineages.iter().map(|l| (l.founder, l.theta.clone(), l.adam.clone(), l.template.clone())).collect(),
+        lineages: lineages.iter().map(|l| (l.founder, l.theta.clone(), l.adam.clone(), SavedTemplate::from(&l.template))).collect(),
         worlds: worlds.iter().map(|w| WorldState { id: w.id, windows: w.windows, info: w.info.clone(), familiarity: w.memory.state() }).collect(),
     };
     super::staging::atomic_text(&dir.join("state.json"), &serde_json::to_string(&state).map_err(|e| e.to_string())?)?;
@@ -348,7 +599,7 @@ fn load_checkpoint(spec: &LiveSpec, dir: &Path, lineages: &mut Vec<Lineage>) -> 
     }
     let policy: Vec<_> = lineages.iter().map(|l| l.founder).collect();
     if state.lineages.iter().map(|l| l.0).collect::<Vec<_>>() != policy { return Err("checkpoint trained lineages differ".into()); }
-    *lineages = state.lineages.into_iter().map(|(founder, theta, adam, template)| Lineage { founder, theta, adam, template }).collect();
+    *lineages = state.lineages.into_iter().map(|(founder, theta, adam, template)| Lineage { founder, theta, adam, template: template.into() }).collect();
     let mut worlds = Vec::new();
     for state in state.worlds {
         let saved = cubarium_voxel_sim::saved::load(&dir.join(format!("world-{}", state.id)), &policy)?;
@@ -429,26 +680,7 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         .map_err(|e| format!("cannot create {}: {e}", spec.out.display()))?;
     let mut lineages: Vec<Lineage> = Vec::new();
     for (founder, path) in &spec.centres {
-        let file = VoxelPolicyFile::load_or_transfer(path)?;
-        let declared = file.founder()?;
-        if declared != *founder {
-            return Err(format!(
-                "{} declares the {} lineage, not {}",
-                path.display(),
-                declared.name(),
-                founder.name()
-            ));
-        }
-        // Validates length, finiteness and this build's digest, and the world's mass.
-        super::search::check_mass(&[(*founder, file.driver()?)], &spec.ecology)?;
-        let mut adam = Adam::new(file.theta.len());
-        adam.learning_rate = spec.learning_rate;
-        lineages.push(Lineage {
-            founder: *founder,
-            theta: file.theta.clone(),
-            adam,
-            template: file,
-        });
+        lineages.push(Lineage::load(spec, *founder, path)?);
     }
     if lineages.is_empty() {
         return Err("live training needs at least one centre".into());
@@ -477,24 +709,13 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
     let mut next_generation = first_generation;
 
     let mut records = Vec::new();
-    let candidates = 2 * spec.pairs;
     for generation in first_generation..spec.generations {
         if run.boundary(generation, last_gen_wall) { break; }
         run.check()?;
         run.status(generation, 0, 0.0, "drivers and ledgers OK", "RUNNING")?;
         let started = Instant::now();
         // 1. This generation's tables, and where each world's placement starts.
-        let mut tables: Vec<Option<VariantTable>> = vec![None; Founder::COUNT];
-        for l in &lineages {
-            tables[l.founder.index()] = Some(VariantTable::antithetic(
-                l.founder,
-                &l.theta,
-                spec.train_seed,
-                spec.sigma,
-                generation,
-                spec.pairs,
-            )?);
-        }
+        let tables = tables_for(spec, &lineages, generation)?;
         let mut first: Vec<Vec<usize>> = Vec::with_capacity(worlds.len());
         let mut cursor = vec![0usize; Founder::COUNT];
         for w in &worlds {
@@ -515,58 +736,10 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         run.check()?;
 
         // 3. One update per lineage, from the scores normalised within each world.
-        let mut updates = Vec::new();
-        for l in lineages.iter_mut() {
-            let comparison = spec.kin.of(l.founder).comparison;
-            let per_world: Vec<Vec<BodyScore>> = results
-                .iter()
-                .map(|r| r.scores.iter().filter(|b| b.founder == l.founder).copied().collect())
-                .collect();
-            let mine: Vec<&BodyScore> = per_world.iter().flatten().collect();
-            let (scores, n, pairs_missing, (gradient_norm, update_rms)) = match comparison {
-                crate::es::voxel::kin::Comparison::Family => {
-                    let fam: Vec<_> = per_world.iter().zip(&results).map(|(b, r)| (b.as_slice(), &r.roster)).collect();
-                    let by_candidate = crate::es::voxel::kin::compare::family(&fam, candidates);
-                    let pairs = crate::es::voxel::kin::PairScores::from_candidates(&by_candidate);
-                    let mut n = vec![0usize; candidates];
-                    for b in &mine { n[b.candidate] += 1; }
-                    let (train_seed, generation) = (spec.train_seed, u64::from(generation));
-                    let step = crate::es::voxel::kin::ascend_pairs(&mut l.theta, &mut l.adam, &pairs, spec.sigma,
-                        |p, out| perturbation(train_seed, generation, p as u64, out));
-                    (by_candidate.iter().map(|s| s.unwrap_or(f64::NAN)).collect::<Vec<_>>(), n, pairs.missing, step)
-                }
-                // `matched` is refused at the start of the run.
-                _ => {
-                    let refs: Vec<&[BodyScore]> = per_world.iter().map(Vec::as_slice).collect();
-                    let (scores, n) = crate::es::voxel::kin::compare::per_body(&refs, candidates);
-                    // σ = 0 is the placement-noise control: every variant is the centre, so
-                    // there is no direction to estimate and the centre is left alone.
-                    let step = if mine.len() >= 2 && spec.sigma > 0.0 {
-                        ascend(&mut l.theta, &mut l.adam, &scores, spec.sigma, spec.train_seed, generation)
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    (scores, n, 0, step)
-                }
-            };
-            let mean = |f: fn(&BodyScore) -> f64| mine.iter().map(|b| f(b)).sum::<f64>() / mine.len().max(1) as f64;
-            updates.push(LineageUpdate {
-                lineage: l.founder.name().into(),
-                bodies: mine.len(),
-                newborn_bodies: mine.iter().filter(|b| b.newborn).count(),
-                candidates_placed: n.iter().filter(|&&k| k > 0).count(),
-                mean_raw_score: mine.iter().map(|b| b.score.score).sum::<f64>()
-                    / mine.len().max(1) as f64,
-                gradient_norm,
-                update_rms,
-                candidate_scores: scores.clone(),
-                comparison,
-                pairs_missing,
-                mean_own: mean(|b| b.kin.own),
-                mean_relatives: mean(|b| b.kin.relatives),
-                mean_combined: mean(|b| b.kin.combined),
-            });
-        }
+        let updates: Vec<LineageUpdate> = lineages
+            .iter_mut()
+            .map(|l| update(spec, l, &results, generation))
+            .collect();
 
         // 4. The readout, pooled.
         let per_world: Vec<_> = results.iter().map(|r| r.readout.clone()).collect();
@@ -702,7 +875,7 @@ mod recovery_tests {
         std::fs::create_dir_all(&out).unwrap();
         let path = crate::es::voxel::store::test_centre_path(Founder::Blind, name);
         let template = VoxelPolicyFile::load_or_transfer(&path).unwrap();
-        let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template }];
+        let mut lineages = vec![Lineage { founder: Founder::Blind, theta: template.theta.clone(), adam: Adam::new(template.theta.len()), template: BrainFile::Plain(template) }];
         let cfg = cubarium_voxel::Config { width: 64, height: 24, depth: 6, ..Default::default() };
         let mut world = cubarium_voxel_sim::scene::authored(cfg.clone());
         let mut flora = cubarium_voxel_flora::Flora::new(Default::default());
@@ -787,3 +960,7 @@ mod recovery_tests {
         std::fs::remove_dir_all(&spec.out).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "trainer_brain_tests.rs"]
+mod brain_tests;

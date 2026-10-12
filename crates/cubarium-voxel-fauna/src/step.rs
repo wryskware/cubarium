@@ -298,7 +298,13 @@ pub(crate) fn read(
         // The controller stage: sample due founders and hold their actions, before
         // anything moves or eats this tick, from the same pre-action state every
         // controller of the tick reads.
-        controllers(fauna, &view, flora, senses, &start.sky, threads);
+        // BRAIN-NEXT: the dry-run teachers read the layer as it stands before the stage,
+        // after it, on a copy (`crate::dry`); the stage itself runs as without them.
+        let before = crate::dry::before(fauna);
+        controllers(fauna, &view, flora, senses, &start.sky, threads, None);
+        if let Some(copy) = before {
+            crate::dry::after(fauna, copy, &view, flora, &start.sky, threads);
+        }
     });
 }
 
@@ -1575,6 +1581,8 @@ struct Sensed {
     /// menu lineage's brain, or while the tap records a menu body).
     decision: Option<crate::Decision>,
     prep: Option<crate::subjects::DecisionPrep>,
+    /// BRAIN-NEXT: the observation a dry-run teacher reads beside this body ([`crate::dry`]).
+    dry_obs: Option<Vec<f64>>,
 }
 
 /// The fewest due bodies one observation job takes.
@@ -1596,13 +1604,14 @@ const JOBS_PER_WORKER: usize = 4;
 /// observation and its controller's answer — reads only and runs on the compute pool
 /// with `threads`; the write side — the senses' writes, the reflexes, the held actions —
 /// runs after it, serially, in body order.
-fn controllers(
+pub(crate) fn controllers(
     fauna: &mut Fauna,
     view: &VoxelView<'_>,
     flora: &Flora,
     mut senses: Option<&mut crate::Senses>,
     sky: &Sky,
     threads: usize,
+    only: Option<&[u64]>,
 ) {
     #[cfg(feature = "profile")]
     let mut timer = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaWindows);
@@ -1627,6 +1636,8 @@ fn controllers(
             a.state != State::Asleep
                 && a.attached.is_none()
                 && a.age_ticks % founder.manifest().cadence_ticks() == 0
+                // BRAIN-NEXT: a dry-run copy samples only its dry bodies.
+                && only.is_none_or(|o| o.contains(&a.id))
         })
         .map(|(i, _)| i)
         .collect();
@@ -1766,18 +1777,22 @@ fn controllers(
             } else {
                 predation_occupancy
             };
-            let (obs, writes) = body::observation_read(
-                fauna,
-                i,
-                view,
-                fv,
-                &manifest,
-                senses,
-                occupancy,
-                full_observation[i] || wants_tail[i],
-                blooms.as_ref(),
-                wants_tail[i].then_some(clock),
-            );
+            // BRAIN-NEXT: a dry teacher reads the observation its body's brain read.
+            let (obs, writes) = match fauna.dry.given(fauna.animals[i].id) {
+                Some(o) => (o.to_vec(), crate::senses::SenseWrites::default()),
+                None => body::observation_read(
+                    fauna,
+                    i,
+                    view,
+                    fv,
+                    &manifest,
+                    senses,
+                    occupancy,
+                    full_observation[i] || wants_tail[i],
+                    blooms.as_ref(),
+                    wants_tail[i].then_some(clock),
+                ),
+            };
             // Reject rather than train through: an observation with a non-finite channel
             // holds rest instead of reaching the controller at all.
             // A taste-only controller encoded in full for the tap sees what it sees untapped:
@@ -1799,9 +1814,13 @@ fn controllers(
             let menu_body = !manifest.menu.plain();
             let mut decision = None;
             let mut prep = None;
+            let mut dry_obs = None;
             let (resolved, seek, body_controlled, driven) = match slot.as_deref_mut() {
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
                     let brain = c.layer() == crate::Layer::Brain;
+                    if fauna.dry.wants(founder, c.layer()) {
+                        dry_obs = Some(obs.clone());
+                    }
                     if menu_body && (brain || tap) {
                         #[cfg(feature = "profile")]
                         let _intent = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaIntent);
@@ -1833,7 +1852,7 @@ fn controllers(
                 _ => (crate::controller::Resolved::default(), crate::Seek::Unknown, false, false),
             };
             let tapped = tap.then_some(obs);
-            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body, decision, prep }
+            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body, decision, prep, dry_obs }
         };
         // Several jobs per worker: one body's observation can cost many another's (a
         // flyer's fan), and the pool evens that out as workers come free.
@@ -1859,6 +1878,16 @@ fn controllers(
     if let Some(s) = senses.as_deref_mut() {
         for got in &sensed {
             got.writes.apply(s, view);
+        }
+    }
+    {
+        let dry: Vec<(u64, Vec<f64>)> = due
+            .iter()
+            .zip(&sensed)
+            .filter_map(|(&i, s)| s.dry_obs.clone().map(|o| (fauna.animals[i].id, o)))
+            .collect();
+        if !dry.is_empty() {
+            fauna.dry.capture(dry);
         }
     }
 

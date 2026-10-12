@@ -14,7 +14,9 @@
 //! - [`brain`]: one body's brain ([`TwoLayerBrain`]) and its saved state ([`BrainState`]);
 //! - [`file`]: the versioned two-layer policy file and the plain-file bridge;
 //! - [`clone`]: trajectory records and the teacher-forced fit of both layers;
-//! - [`adapter`]: the brain behind the fauna's menu seam (`Controller::decide`, saves).
+//! - [`adapter`]: the brain behind the fauna's menu seam (`Controller::decide`, saves);
+//! - [`scenes`]: the staged mode scenes as recordings, closed-loop runs and competence
+//!   checks (BRAIN-NEXT).
 
 pub mod adapter;
 pub mod arbitration;
@@ -23,6 +25,7 @@ pub mod clone;
 pub mod file;
 pub mod net;
 pub mod record;
+pub mod scenes;
 pub mod shape;
 
 #[cfg(test)]

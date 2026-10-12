@@ -4982,3 +4982,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `engagement.adult_age_s.*` | 600.0, 900.0 | s | [0, inf) | Adult arrival age |
 | `engagement.calf_age_s.*` | 0.0, 30.0 | s | [0, inf) | Calf arrival age |
 | `engagement.arms.*.pack_size` | 2, 3, 4, 2, 3, 4, 2, 3, 4 | count | [2, 4] | Hounds per pack |
+
+**`mode_scenes.*`** (BRAIN-NEXT staged mode scenes; cloning and competence checks)
+
+| path | value | unit | range | what |
+| --- | --- | --- | --- | --- |
+| `mode_scenes.duration_s` | 60.0 | s | (0, 300] | BRAIN-NEXT mode scenes: simulated seconds per staged scene |
+| `mode_scenes.width` | 96 | voxel | [1, inf) | BRAIN-NEXT mode scenes: periodic arena width |
+| `mode_scenes.height` | 40 | voxel | [1, inf) | BRAIN-NEXT mode scenes: arena height |
+| `mode_scenes.depth` | 24 | voxel | [1, inf) | BRAIN-NEXT mode scenes: arena depth |
+| `mode_scenes.voxel_m` | 0.25 | m | (0, inf) | BRAIN-NEXT mode scenes: voxel pitch |
+| `mode_scenes.soil_layers` | 2 | voxel | [1, inf) | BRAIN-NEXT mode scenes: soil thickness |
+| `mode_scenes.night_hour` | 0.0 | h | [0, 24] | BRAIN-NEXT mode scenes: the clock's hour at a night scene's start (roost, seedporter rest, feed, give way) |
+| `mode_scenes.day_hour` | 12.0 | h | [0, 24] | BRAIN-NEXT mode scenes: the clock's hour at a day scene's start (groom, follow mother, flee to trees) |
+| `mode_scenes.troop` | 4 | count | [2, inf) | BRAIN-NEXT mode scenes: seedporters in a troop scene |
+| `mode_scenes.spacing_m` | 0.75 | m | (0, inf) | BRAIN-NEXT mode scenes: distance between adjacent starting bodies |
+| `mode_scenes.jitter_m` | 0.2 | m | [0, inf) | BRAIN-NEXT mode scenes: each body's seeded placement jitter, each side |
+| `mode_scenes.stand_distance_m` | 2.5 | m | (0, inf) | BRAIN-NEXT mode scenes: troop to its crown (roost, flight to the trees) |
+| `mode_scenes.crown_margin_m` | 0.5 | m | [0, inf) | BRAIN-NEXT mode scenes: the crown's height over the lineage's least climbable safe crown |
+| `mode_scenes.threat_distance_m` | 6.0 | m | (0, inf) | BRAIN-NEXT mode scenes: troop to the Veilhound pair (flight to the trees) |
+| `mode_scenes.hounds` | 2 | count | [1, 4] | BRAIN-NEXT mode scenes: hounds in the threat |
+| `mode_scenes.hound_fullness` | 0.2 | fraction | [0, 1] | BRAIN-NEXT mode scenes: the hounds' reserve and stomach (flee to the trees, give way) |
+| `mode_scenes.mother_distance_m` | 3.0 | m | (0, inf) | BRAIN-NEXT mode scenes: mother to her young (follow mother) |
+| `mode_scenes.young_age_s` | 60.0 | s | [0, inf) | BRAIN-NEXT mode scenes: the young's age at the start (follow mother) |
+| `mode_scenes.young_fullness` | 0.2 | fraction | [0, 1] | BRAIN-NEXT mode scenes: the young's reserve and stomach (follow mother) |
+| `mode_scenes.hunter_fullness` | 0.2 | fraction | [0, 1] | BRAIN-NEXT mode scenes: the lanternjaw's reserve and stomach at its carcass (feed, give way) |
+| `mode_scenes.carcass_organic` | 0.5 | kg | (0, inf) | BRAIN-NEXT mode scenes: the carcass's organic matter (feed, give way) |
+| `mode_scenes.big_distance_m` | 1.0 | m | [0, inf) | BRAIN-NEXT mode scenes: carcass to the Veilhound standing by it (give way) |

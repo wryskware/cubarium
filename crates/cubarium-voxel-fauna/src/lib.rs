@@ -64,6 +64,11 @@ pub mod kick;
 pub mod calls;
 /// CALLS-REST (behaviour-AI §3.4): rest physiology, light rest and deep bouts.
 pub mod sleep;
+/// BRAIN-NEXT: the dry-run teacher beside a brain-driven body.
+mod dry;
+pub use dry::{DryScope, TeacherLabel};
+#[cfg(test)]
+mod dry_tests;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -4270,6 +4275,10 @@ pub struct Fauna {
     /// scene ([`Fauna::force_own`]). Session state, empty in every ordinary world.
     #[serde(skip)]
     pub(crate) forced_own: rustc_hash::FxHashSet<u64>,
+    /// BRAIN-NEXT: the dry-run teachers beside brain-driven bodies ([`Fauna::dry_teach`]).
+    /// Session state, off in every ordinary world; not saved and not copied.
+    #[serde(skip)]
+    pub(crate) dry: dry::DryTeachers,
     /// CONTRACTS: the calls emitted since the last hearing ([`calls`]). Session state.
     #[serde(skip)]
     pub(crate) calls: Vec<calls::CallEvent>,
@@ -4541,6 +4550,8 @@ pub struct ActionTap {
     streams: std::collections::BTreeMap<u64, (Founder, Vec<TapSample>)>,
     /// CONTRACTS: the menu bodies' decision samples, by id.
     decisions: std::collections::BTreeMap<u64, (Founder, Vec<TapDecision>)>,
+    /// BRAIN-NEXT: the dry-run teachers' labels, by id ([`Fauna::dry_teach`]).
+    teachers: std::collections::BTreeMap<u64, (Founder, Vec<TeacherLabel>)>,
 }
 
 impl ActionTap {
@@ -4551,6 +4562,16 @@ impl ActionTap {
 
     pub(crate) fn push_decision(&mut self, id: u64, founder: Founder, sample: TapDecision) {
         self.decisions.entry(id).or_insert_with(|| (founder, Vec::new())).1.push(sample);
+    }
+
+    /// Body `id`'s dry-run teacher labels so far, one per decision sample it ran beside
+    /// ([`Fauna::dry_teach`]).
+    pub fn teacher_labels(&self, id: u64) -> Option<&[TeacherLabel]> {
+        self.teachers.get(&id).map(|(_, s)| s.as_slice())
+    }
+
+    pub(crate) fn push_teacher(&mut self, id: u64, founder: Founder, label: TeacherLabel) {
+        self.teachers.entry(id).or_insert_with(|| (founder, Vec::new())).1.push(label);
     }
 
     /// Body `id`'s stream so far.
@@ -4565,7 +4586,7 @@ impl ActionTap {
 
     /// A recording from per-body streams (tools and tests that read a saved one).
     pub fn from_streams(streams: impl IntoIterator<Item = (u64, Founder, Vec<TapSample>)>) -> ActionTap {
-        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect(), decisions: Default::default() }
+        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect(), decisions: Default::default(), teachers: Default::default() }
     }
 
     /// Finalize only this tick's sample, after the motor's stamina gate runs.
@@ -4852,6 +4873,7 @@ impl Fauna {
             brain_memory: FxHashMap::default(),
             rest_asks: FxHashMap::default(),
             forced_own: Default::default(),
+            dry: Default::default(),
             calls: Vec::new(),
             last_call: FxHashMap::default(),
             heard: FxHashMap::default(),
@@ -5035,6 +5057,24 @@ impl Fauna {
     /// nursing walks, patrol, the carcass yield, herding, grooming, the walks to food).
     /// DROP, WADE-OUT and the shallows still win: a brain's body keeps them too. Off for
     /// every body unless a scene asks; not saved.
+    /// **BRAIN-NEXT's dry-run teacher** (behaviour-AI §11.3, the closed-loop pass): while
+    /// `scope` is set, the heuristic of `founder` runs dry beside its brain-driven bodies
+    /// ([`DryScope::Brains`]; [`DryScope::Every`] beside every driven body), on a copy of the
+    /// layer, and its proposal, hold and actions go to the tap
+    /// ([`ActionTap::teacher_labels`]). The world runs exactly as without it. `None` turns
+    /// it off and drops the lineage's teachers. Not saved.
+    pub fn dry_teach(&mut self, founder: Founder, scope: Option<DryScope>) {
+        self.dry.set(founder, scope);
+    }
+
+    /// **A staged scene's tree** (BRAIN-NEXT mode scenes): the least crown height a glider
+    /// lineage both climbs and is safe in from the ground hunter — what its roost and its
+    /// flight to the trees read. `None` for a lineage that does not glide.
+    pub fn refuge_crown_m(&self, founder: Founder) -> Option<f64> {
+        let g = self.config.founder(founder).glider?;
+        Some(g.climb_min_stand_m.max(step::refuge_height_m(&self.config)))
+    }
+
     pub fn force_own(&mut self, animal_id: u64, on: bool) {
         if on {
             self.forced_own.insert(animal_id);
