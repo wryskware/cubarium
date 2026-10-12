@@ -277,16 +277,23 @@ pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
     }
     // SP-FOLLOW: with the leash on, the young is left to itself within it ([`mother_goal`]).
     let comfort = if t.leash_m > 0.0 { t.leash_m.max(t.follow_m) } else { t.follow_m };
-    let mother = crate::mother_body(&a)?;
-    let p = fauna.percept(a.id)?;
-    let fresh = 2 * fauna.config.perception.stagger_ticks();
-    let track = p
-        .tracks()
-        .iter()
-        .find(|tr| tr.class == class::KIN && tr.id == mother && fauna.tick.saturating_sub(tr.tick) <= fresh)?;
+    let track = mother_track(fauna, i)?;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, track.x, track.z, ring);
     let d = dx.hypot(dz);
     Some((d > comfort).then(|| Pull { dx, dz, kin: 1, nearest_m: d, weight: t.follow_pull.clamp(0.0, 1.0) }))
+}
+
+/// **The sensed mother** (LS-DEFEND, behaviour-AI §11.6: the mother-follow primitive, any
+/// lineage and any age): a fresh kin track of body `i`'s recorded living mother in its own
+/// record, else `None` (no mother recorded, or not in its senses). The follow of a dependent
+/// young ([`mother_pull`]) and a loftstrider calf's run to its mother ([`crate::defend`])
+/// both read it.
+pub fn mother_track(fauna: &Fauna, i: usize) -> Option<crate::Track> {
+    let a = fauna.animals.get(i)?;
+    let mother = crate::mother_body(a)?;
+    let p = fauna.percept(a.id)?;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    p.tracks().iter().find(|tr| tr.class == class::KIN && tr.id == mother && fauna.tick.saturating_sub(tr.tick) <= fresh).copied()
 }
 
 /// Whether the body at `i` weighs body `o` as its mother on a remote sensing over its

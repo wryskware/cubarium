@@ -643,3 +643,67 @@ fn landed_kicks_kill_a_grown_hound_after_as_many_as_its_damage_needs() {
     assert!(!f.animals.iter().any(|a| a.id == vh), "dead at the {n}th landed kick");
     assert_eq!(f.ledger.kicks_landed_by_founder[LS.index()], n as u64);
 }
+
+// ------------------------------------------------------------------ step 4: the bond
+
+#[test]
+fn a_bonded_calf_runs_to_its_mother_over_a_nearer_adult_unless_her_way_crosses_a_hound() {
+    let (w, mut f) = world(15);
+    let dd = d(&f);
+    let calf = strider(&mut f, &w, true, 10.0, MID_Z, EAST);
+    let near = strider(&mut f, &w, false, 13.0, MID_Z, WEST);
+    let mother = strider(&mut f, &w, false, 10.0, MID_Z + 6.0, WEST);
+    animal_mut(&mut f, calf).mother = Some(mother);
+    let vh = hound(&mut f, &w, 5.0, MID_Z - 3.0, EAST);
+    let all = [(near, class::KIN, false), (mother, class::KIN, false), (vh, class::THREAT, true)];
+    sees(&mut f, calf, &all);
+    decide(&mut f, &w, calf).expect("defends");
+    assert_eq!(f.ls_teach[&calf].subject.body(), Some(mother), "its mother, though another adult is nearer");
+    // A hound on the way to her: the nearest adult with a safe way.
+    fresh_hold(&mut f, calf);
+    place(&mut f, vh, 10.0, MID_Z + 3.0, EAST);
+    assert!(0.0 < dd.cross_m);
+    sees(&mut f, calf, &all);
+    decide(&mut f, &w, calf).expect("defends");
+    assert_eq!(f.ls_teach[&calf].subject.body(), Some(near), "her way crosses the hound");
+}
+
+#[test]
+fn a_mother_goes_to_her_own_calf_before_a_nearer_threatened_one_and_others_still_defend_any_calf() {
+    let (w, mut f) = world(16);
+    let mother = strider(&mut f, &w, false, 20.0, MID_Z, WEST);
+    let mine = strider(&mut f, &w, true, 12.0, MID_Z + 4.0, EAST);
+    let other = strider(&mut f, &w, true, 12.0, MID_Z - 4.0, EAST);
+    animal_mut(&mut f, mine).mother = Some(mother);
+    // Its hound is farther from her own calf than the other's is from the other calf.
+    let h1 = hound(&mut f, &w, 8.0, MID_Z + 4.0, EAST);
+    let h2 = hound(&mut f, &w, 10.0, MID_Z - 4.0, EAST);
+    let all = [(mine, class::KIN, false), (other, class::KIN, false), (h1, class::THREAT, true), (h2, class::THREAT, true)];
+    sees(&mut f, mother, &all);
+    decide(&mut f, &w, mother).expect("defends");
+    assert_eq!(held(&f, mother), Some("go_to_calf"));
+    assert_eq!(f.ls_teach[&mother].subject.body(), Some(mine), "her own calf first");
+    // An adult that is no calf's mother goes to the calf in most danger.
+    let aunt = strider(&mut f, &w, false, 20.0, MID_Z - 1.0, WEST);
+    sees(&mut f, aunt, &all);
+    decide(&mut f, &w, aunt).expect("defends");
+    assert_eq!(held(&f, aunt), Some("go_to_calf"));
+    assert_eq!(f.ls_teach[&aunt].subject.body(), Some(other), "the calf nearest its hound");
+}
+
+#[test]
+fn the_sensed_mother_is_found_for_any_lineage_and_age() {
+    let (w, mut f) = world(17);
+    for founder in [LS, Founder::Browser] {
+        let mother = introduce(&mut f, &w, founder, StartingStores::FULL);
+        let grown = introduce(&mut f, &w, founder, StartingStores::FULL);
+        place(&mut f, mother, 5.0, MID_Z, EAST);
+        place(&mut f, grown, 8.0, MID_Z, WEST);
+        animal_mut(&mut f, grown).mother = Some(mother);
+        let i = index(&f, grown);
+        assert!(crate::nurse::mother_track(&f, i).is_none(), "not in its senses");
+        sees(&mut f, grown, &[(mother, class::KIN, false)]);
+        assert_eq!(crate::nurse::mother_track(&f, i).map(|t| t.id), Some(mother), "{}", founder.name());
+        assert!(!crate::nurse::dependent(&f, i), "a grown body, no nursing: the follow primitive still finds her");
+    }
+}

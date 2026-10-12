@@ -230,6 +230,10 @@ pub(crate) struct Scene {
     pub(crate) calves: Vec<Track>,
     /// The call it heeds, if any (kind 0 an alarm, 1 a distress call).
     pub(crate) call: Option<crate::calls::CallRecord>,
+    /// Its mother, when it senses her ([`crate::nurse::mother_track`]), and the calves it
+    /// senses that it knows as its own (recognition, §3.5).
+    pub(crate) mother: Option<u64>,
+    pub(crate) own: Vec<u64>,
 }
 
 /// **The scene** of body `i` (module note): read from its own record and calls only.
@@ -251,7 +255,13 @@ pub(crate) fn scene(fauna: &Fauna, i: usize, view: &VoxelView<'_>) -> Option<Sce
     let (calves, adults): (Vec<Track>, Vec<Track>) = kin.into_iter().partition(|t| looks_young(&fauna.config, t));
     let (call, _) = crate::calls::heeded(fauna, i, p.vigil.heard_from);
     let body = phys.body_at(a.body);
-    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call })
+    let mother = crate::nurse::mother_track(fauna, i).map(|t| t.id);
+    let own = calves
+        .iter()
+        .filter(|c| fauna.animals.binary_search_by_key(&c.id, |o| o.id).ok().is_some_and(|j| crate::mother_body(&fauna.animals[j]) == Some(a.id)))
+        .map(|c| c.id)
+        .collect();
+    Some(Scene { me: a, young: crate::intent::young(fauna, &a, f), radius: body.footprint_radius(), length: body.length_m, threats, adults, calves, call, mother, own })
 }
 
 /// Whether lineage `f`'s body `a` knows a grown kin (a fresh kin track that looks grown):
@@ -312,8 +322,14 @@ fn go_to_adults(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, rin
     if !threatened {
         return None;
     }
+    // The bond (§3.5, topic 7): its mother first, when it senses her; the nearest after.
+    let mother = s.mother;
     let mut order: Vec<&Track> = s.adults.iter().collect();
-    order.sort_by(|p, q| gap(me.pose.x, me.pose.z, p.x, p.z, ring).2.total_cmp(&gap(me.pose.x, me.pose.z, q.x, q.z, ring).2).then(p.id.cmp(&q.id)));
+    order.sort_by(|p, q| {
+        (Some(q.id) == mother).cmp(&(Some(p.id) == mother))
+            .then(gap(me.pose.x, me.pose.z, p.x, p.z, ring).2.total_cmp(&gap(me.pose.x, me.pose.z, q.x, q.z, ring).2))
+            .then(p.id.cmp(&q.id))
+    });
     // Each adult's far point; the first reachable and safe one (§11.5), else the first.
     let point = |k: &Track| {
         let h = nearest_pressing(s, k.x, k.z, ring).map(|(t, _)| (t.x, t.z));
@@ -338,30 +354,37 @@ struct CalfTarget {
     z: f64,
     calf: Option<Track>,
     threat: Option<Threat>,
+    /// Its own calf (topic 7: a mother guards hers hardest).
+    mine: bool,
 }
 
 fn calf_target(d: &Defence, s: &Scene, ring: f64) -> Option<CalfTarget> {
     let me = &s.me;
-    let mut best: Option<(CalfTarget, f64)> = None;
+    // Its own calf first, then the one nearest its threat.
+    let mut best: Option<(CalfTarget, (bool, f64))> = None;
     for c in &s.calves {
         let Some((h, dch)) = nearest_pressing(s, c.x, c.z, ring) else { continue };
         if dch > d.threat_m {
             continue;
         }
         let adult_d = s.adults.iter().map(|k| gap(k.x, k.z, h.x, h.z, ring).2).fold(gap(me.pose.x, me.pose.z, h.x, h.z, ring).2, f64::min);
-        if dch < adult_d && best.as_ref().is_none_or(|(_, b)| dch < *b) {
-            best = Some((CalfTarget { x: c.x, z: c.z, calf: Some(*c), threat: Some(h) }, dch));
+        let mine = s.own.contains(&c.id);
+        let key = (!mine, dch);
+        if dch < adult_d && best.as_ref().is_none_or(|(_, b)| key.0 < b.0 || (key.0 == b.0 && key.1 < b.1)) {
+            best = Some((CalfTarget { x: c.x, z: c.z, calf: Some(*c), threat: Some(h), mine }, key));
         }
     }
     if let Some((t, _)) = best {
         return Some(t);
     }
-    // A distress call heeded: where it came from, the calf there if it senses it.
+    // A distress call heeded: where it came from, the calf there if it senses it; its own
+    // when it knows the voice (a recognised call is heeded first, `calls::heeded`).
     let r = s.call.filter(|r| r.kind == 1)?;
     let calf = s.calves.iter().filter(|c| gap(c.x, c.z, r.x, r.z, ring).2 <= d.cross_m.max(d.arrive_m)).min_by(|p, q| gap(p.x, p.z, r.x, r.z, ring).2.total_cmp(&gap(q.x, q.z, r.x, r.z, ring).2)).copied();
     let (x, z) = calf.map_or((r.x, r.z), |c| (c.x, c.z));
     let threat = nearest_pressing(s, x, z, ring).filter(|(_, dd)| *dd <= d.threat_m).map(|(t, _)| t);
-    Some(CalfTarget { x, z, calf, threat })
+    let mine = r.relation == 2 || calf.is_some_and(|c| s.own.contains(&c.id));
+    Some(CalfTarget { x, z, calf, threat, mine })
 }
 
 /// **The guard point** between a calf at `(cx, cz)` (footprint `rc`) and a threat at
@@ -387,7 +410,8 @@ fn go_to_calf(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> 
         return None;
     }
     let subject = t.calf.map_or(Subject::Place { kind: PlaceKind::GuardPoint, x: gx, z: gz, y_m: me.pose.y_m, seen_tick: fauna.tick }, |c| track_subject(&c));
-    Some(Plan { name: "go_to_calf", score: d.w_go_to_calf, subject, act: walk(me, gx, gz, 1.0, ring) })
+    let score = d.w_go_to_calf * if t.mine { d.mother_weight } else { 1.0 };
+    Some(Plan { name: "go_to_calf", score, subject, act: walk(me, gx, gz, 1.0, ring) })
 }
 
 /// **Guard** (adult, §3.1): a pressing threat within `guard_m` of it, or of the calf it
@@ -397,12 +421,13 @@ fn guard(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, ring: f64)
         return None;
     }
     let me = &s.me;
+    // The calf it stands by: its own first (topic 7), then the nearest, within `guard_m`.
     let calf = s
         .calves
         .iter()
         .map(|c| (c, gap(me.pose.x, me.pose.z, c.x, c.z, ring).2))
         .filter(|(_, dd)| *dd <= d.guard_m)
-        .min_by(|p, q| p.1.total_cmp(&q.1).then(p.0.id.cmp(&q.0.id)))
+        .min_by(|p, q| (!s.own.contains(&p.0.id)).cmp(&!s.own.contains(&q.0.id)).then(p.1.total_cmp(&q.1)).then(p.0.id.cmp(&q.0.id)))
         .map(|(c, _)| *c);
     let near = |t: &Threat| t.pressing && (t.d <= d.guard_m || calf.is_some_and(|c| gap(c.x, c.z, t.x, t.z, ring).2 <= d.guard_m));
     let (rx, rz) = calf.map_or((me.pose.x, me.pose.z), |c| (c.x, c.z));
