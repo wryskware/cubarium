@@ -112,7 +112,14 @@ fn ticks(s: f64) -> u64 {
 /// `comfort_m`: where the kin it knows are, when the nearest is farther than `comfort_m`.
 /// `None` within it, or knowing no kin (none in sense and none remembered). `ring` is the
 /// world's x circumference, metres. Reads its own record only.
+///
+/// SP-NURSE: a dependent young that senses its mother is pulled toward her instead, on its
+/// lineage's nursing table's `follow_m` and `follow_pull` and not `comfort_m`
+/// ([`crate::nurse::mother_pull`]).
 pub fn group_pull(fauna: &Fauna, i: usize, ring: f64, comfort_m: f64) -> Option<Pull> {
+    if let Some(follow) = crate::nurse::mother_pull(fauna, i, ring) {
+        return follow;
+    }
     let a = fauna.animals.get(i)?;
     let h = fauna.config.founder(a.founder?).herding;
     let p = fauna.percept(a.id)?;
@@ -184,10 +191,12 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, actions: Actions, seek: Seek, r
     let founder = a.founder?;
     let phys = fauna.config.founder(founder);
     let h = phys.herding;
-    if !(h.comfort_m > 0.0) || !(h.pull > 0.0) {
+    // SP-NURSE: a dependent young follows its mother whatever its lineage's herd table.
+    let follows = crate::nurse::dependent(fauna, i);
+    if !follows && (!(h.comfort_m > 0.0) || !(h.pull > 0.0)) {
         return None;
     }
-    if h.young_only && a.body >= phys.core.birth_body {
+    if !follows && h.young_only && a.body >= phys.core.birth_body {
         return None;
     }
     let cropping = actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward;

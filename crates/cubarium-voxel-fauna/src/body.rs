@@ -639,6 +639,11 @@ pub struct FounderPhysiology {
     /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
     #[serde(default)]
     pub herding: crate::Herding,
+    /// **Its nursing** (SP-NURSE, [`crate::Nursing`]): a live-bearing mother passes reserve to
+    /// her dependent young near her, and they follow her. Off for every lineage but the
+    /// seedporter.
+    #[serde(default)]
+    pub nursing: crate::Nursing,
     /// Picking attached larvae off another body of the same lineage; missing table is off.
     #[serde(default)]
     pub grooming: crate::Grooming,
@@ -2019,6 +2024,7 @@ impl FounderPhysiology {
         p.sprint = crate::gait::sprint_of(founder);
         p.hunker = crate::vigil::hunker_of(founder);
         p.herding = crate::herding::herding_of(founder);
+        p.nursing = crate::nurse::nursing_of(founder);
         p.grooming = crate::groom::grooming_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
@@ -2148,6 +2154,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
@@ -2244,6 +2251,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
@@ -2385,6 +2393,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),

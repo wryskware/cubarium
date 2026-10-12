@@ -242,6 +242,8 @@ pub(crate) fn begin(fauna: &mut Fauna, world: &World, flora: &mut Flora) -> Tick
             .map(|a| a.id)
             .collect();
         crate::pack::upkeep(fauna, &view);
+        // SP-NURSE: mothers nurse their dependent young.
+        crate::nurse::nurse(fauna, &view);
         let independent: Vec<u64> = pups
             .into_iter()
             .filter(|id| {
@@ -4989,7 +4991,7 @@ fn gestate(
     if let (Some(r), Some(f)) = (&mut fauna.census_readout, a.founder) {
         r.organic_given[f.index()] += e.organic;
     }
-    let (site, species, pose, founder, pack) = (a.site, a.species, a.pose, a.founder, a.pack);
+    let (site, species, pose, founder, pack, mother) = (a.site, a.species, a.pose, a.founder, a.pack, a.id);
     // A litter's parcel is split evenly; the last young takes what division left, so the
     // parcels sum to the escrow exactly.
     let young = e.young.max(1);
@@ -5020,6 +5022,8 @@ fn gestate(
             share,
             sc.lifespan_median_s,
         );
+        // SP-NURSE: the young knows its mother ([`crate::nurse`]).
+        n.mother = Some(mother);
         // Born into the parent's pack, a pup.
         if let Some(m) = pack {
             n.pack = Some(crate::PackMember {
@@ -5080,6 +5084,7 @@ pub(crate) fn whelp(fauna: &mut Fauna, view: &VoxelView<'_>, pack: u64, young: u
         let share = Taken { organic: paid.organic * f, mineral: paid.mineral * f, energy: paid.energy * f };
         let mut n = newborn(fauna, (species, founder), (den, pose), sc.body_min, share, sc.lifespan_median_s);
         n.pack = Some(crate::PackMember { pack, pup: true, calling_ticks: 0 });
+        n.mother = Some(breeder);
         ids.push(n.id);
         let fd = n.founder;
         fauna.insert(n);
@@ -5261,6 +5266,7 @@ fn newborn(
         emergency: false,
         bout: None,
         hunt: crate::HuntMemory::default(),
+        mother: None,
         bite: crate::LastBite::default(),
     }
 }

@@ -38,6 +38,7 @@ pub mod atlas;
 pub mod bloom;
 pub mod cord;
 pub mod palette;
+pub mod pipeline_cache;
 pub mod present;
 pub mod render;
 pub mod scene;
