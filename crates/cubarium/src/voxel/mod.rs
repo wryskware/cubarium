@@ -1185,8 +1185,15 @@ pub fn run_voxel(args: &Voxel, stop: &AtomicBool) -> Result<()> {
         // stretched up. Everything else keeps the largest strip that fits.
         let window = target == Some(GpuTargetKind::Window);
         let (out, what) = if panel {
-            let (w, h) = cubarium_gpu::target::SHIM_PANEL;
-            ((h, w), "fits the panel")
+            #[cfg(target_os = "linux")]
+            {
+                let (w, h) = cubarium_gpu::target::SHIM_PANEL;
+                ((h, w), "fits the panel")
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                bail!("GPU hardware-panel output is supported only on Linux");
+            }
         } else if window {
             match largest_desktop_screen() {
                 Some(size) => (size, "covers the largest screen"),
