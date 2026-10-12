@@ -3121,7 +3121,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.loftstrider.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
-| `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.loftstrider.senses.kin_tracks` | 4 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.loftstrider.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
 | `fauna.founders.loftstrider.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -4517,7 +4517,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.chorister.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
-| `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.chorister.senses.kin_tracks` | 4 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.chorister.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
 | `fauna.founders.chorister.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |

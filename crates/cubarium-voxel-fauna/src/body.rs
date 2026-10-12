@@ -6765,8 +6765,11 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // 360° from the eye ring: moving bodies at 12 m by day, 6 at night, static at 8 and
         // 4; large-body movement heard at 8 m, louder to 10; ~2 m of ground disturbance;
         // animal odour at 2–3 m.
+        // CALLS-REST (behaviour-AI §2.1): it weighs four of its family (kin 1 -> 4), so a
+        // family member can see its group.
         Founder::Loftstrider => SenseTable {
             live: true,
+            kin_tracks: 4,
             sight_m: 12.0,
             sight_night_m: 6.0,
             sight_still_fraction: 8.0 / 12.0,
@@ -6837,8 +6840,11 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // far as a moving one; 9 m at night (Astra's 8–10; it stays a day hunter, D4); hearing
         // 10 m, the territory radius, of a frondgrazer moving at 0.05 m/s (the branch's
         // threshold for its main prey: 0.05 × 0.75 / 10); ~1 m of footfall; smell ~6 m.
+        // CALLS-REST (behaviour-AI §2.1): it weighs four of its pack (kin 1 -> 4), so a pack
+        // member can see its group.
         Founder::Chorister => SenseTable {
             live: true,
+            kin_tracks: 4,
             sight_m: 16.0,
             sight_night_m: 9.0,
             sight_still_fraction: 1.0,

@@ -708,3 +708,51 @@ fn a_resting_loftstrider_picks_a_site_without_hound_scent() {
     assert!(!crate::sleep::bed_ask(&mut f, i, &w.view()), "search spent");
     assert!(crate::sleep::bed_reflex(&f, i, &w.view()).is_none());
 }
+
+// ------------------------------------------------------------------ step 6: kin and the mark
+
+/// A family member weighs up to its lineage's `kin_tracks` of its own kind each sensing, nearest
+/// first, for the loftstrider and the Veilhound alike (read from the config).
+#[test]
+fn a_family_or_pack_member_sees_up_to_its_kin_tracks_of_its_group() {
+    let w = world(61);
+    for lineage in [LS, VH] {
+        let mut c = config();
+        c.founders[lineage.index()].senses = crate::FaunaConfig::default().founder(lineage).senses;
+        let cap = c.founder(lineage).senses.kin_tracks as usize;
+        let mut f = Fauna::new(c);
+        f.set_births_enabled(false);
+        let me = body(&mut f, &w, lineage, 2.0, EAST, 0.0);
+        for k in 0..cap + 2 {
+            body(&mut f, &w, lineage, 2.5 + 0.5 * k as f64, EAST, 0.0);
+        }
+        sense(&mut f, &w);
+        let kin = f.percept(me).unwrap().tracks().iter().filter(|t| t.class == perception::class::KIN).count();
+        assert_eq!(kin, cap, "{}", lineage.name());
+    }
+}
+
+/// **The "mine" mark**: a mother and her calf each see the other marked in their kin rows (the
+/// relation channel: mother for the calf, own calf for the mother); another relative is plain
+/// kin.
+#[test]
+fn a_mother_and_her_calf_carry_the_mine_mark_on_each_other() {
+    use crate::intent::Subject;
+    use crate::subjects::candidates;
+    let w = world(62);
+    let mut f = Fauna::new(config());
+    f.set_births_enabled(false);
+    let mother = body(&mut f, &w, LS, 2.0, EAST, 0.0);
+    let young = calf(&mut f, &w, 3.0, WEST);
+    let other = body(&mut f, &w, LS, 2.5, EAST, 0.0);
+    animal_mut(&mut f, young).mother = Some(mother);
+    sense(&mut f, &w);
+    let row = |f: &Fauna, me: u64, of: u64| {
+        let i = f.animals.iter().position(|a| a.id == me).unwrap();
+        candidates(f, i, LS, Subject::None).rows.iter().find(|r| r.subject.body() == Some(of)).map(|r| r.row).expect("a kin row")
+    };
+    let (calf_sees_mother, mother_sees_calf, mother_sees_other) = (row(&f, young, mother), row(&f, mother, young), row(&f, mother, other));
+    assert_eq!((calf_sees_mother[20], calf_sees_mother[21]), (1.0, 0.0), "her mother");
+    assert_eq!((mother_sees_calf[20], mother_sees_calf[21]), (0.0, 1.0), "her own calf");
+    assert_eq!((mother_sees_other[20], mother_sees_other[21], mother_sees_other[22]), (0.0, 0.0, 1.0), "plain kin");
+}
