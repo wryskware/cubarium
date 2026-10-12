@@ -147,8 +147,9 @@ fn the_layout_names_top_and_bottom_and_restricts_to_either() {
     let mask = layout.mask(Layer::Bottom);
     assert_eq!(mask.iter().filter(|m| **m).count(), bottom.len());
 
-    // Perturbing only the top leaves a fresh brain's actions at its first sample alone
-    // (the first sample's bottom has no hold to read), and changes its choice somewhere.
+    // Perturbing only the top changes the brain's choice, and leaves a fresh brain's
+    // actions at its first sample alone: the GRU has no hold to read yet, and the
+    // same-sample readout starts at zero.
     let theta = initial_center(&shape, 3);
     let mut moved = theta.clone();
     for i in top {
@@ -502,18 +503,25 @@ fn fixture_sample(rng: &mut Rng, shape: &TwoLayerShape, intent: usize, proposal:
     }
 }
 
-/// With the teacher's hold fed as conditioning, the top's label at sample t (its
-/// proposal, and the hold that follows from it) never reaches the bottom's input at t:
-/// changing them leaves input t alone and moves input t + 1.
+/// **The order** (§11.3, amended 2026-10-12), with the teacher's hold fed as conditioning:
+/// the top's label at sample t (its proposal, and the hold that follows from it) never
+/// reaches the **top's** input at t, nor the GRU's update at t. It reaches the bottom's
+/// action readout at t (the same-sample readout) and the GRU's update from t + 1.
 #[test]
-fn the_label_at_t_never_reaches_the_input_at_t() {
+fn the_label_at_t_never_reaches_the_tops_input_at_t() {
     let shape = full_shape();
     let cfg = test_arbitration(0.5, 0.1);
+    let theta = initial_center(&shape, 4);
     let mut rng = Rng(5);
     let samples: Vec<_> = (0..8)
         .map(|t| fixture_sample(&mut rng, &shape, t % 2, (t + 1) % 3))
         .collect();
-    let base = clone::bottom_inputs(&shape, &cfg, &record_from(samples.clone()));
+    let rec = record_from(samples.clone());
+    let (base_x, base_u, base_c) = (
+        clone::bottom_inputs(&shape, &cfg, &rec),
+        clone::top_inputs(&shape, &cfg, &theta, &rec),
+        clone::readout_conditioning(&shape, &cfg, &rec),
+    );
     for t in 0..7 {
         let mut changed = samples.clone();
         let other = (samples[t].held.intent + 1) % shape.menu;
@@ -525,16 +533,78 @@ fn the_label_at_t_never_reaches_the_input_at_t() {
             intent: other,
             subject: None,
         };
-        let x = clone::bottom_inputs(&shape, &cfg, &record_from(changed));
-        assert_eq!(x[t], base[t], "sample {t}'s label reached its own input");
-        assert_ne!(x[t + 1], base[t + 1], "the hold conditions the next sample");
-        for s in 0..t {
-            assert_eq!(x[s], base[s]);
+        let rec = record_from(changed);
+        let (x, u, c) = (
+            clone::bottom_inputs(&shape, &cfg, &rec),
+            clone::top_inputs(&shape, &cfg, &theta, &rec),
+            clone::readout_conditioning(&shape, &cfg, &rec),
+        );
+        for s in 0..=t {
+            assert_eq!(u[s], base_u[s], "sample {t}'s label reached the top's input at {s}");
+            assert_eq!(x[s], base_x[s], "sample {t}'s label reached the GRU's update at {s}");
         }
+        assert_ne!(c[t], base_c[t], "the settled hold conditions the same sample's readout");
+        assert_ne!(x[t + 1], base_x[t + 1], "the hold conditions the next sample's update");
+        assert_ne!(u[t + 1], base_u[t + 1], "and so the next sample's top");
     }
-    // The first sample reads no hold at all.
+    // The first sample's update and top read no hold at all.
     let block = shape.observation..shape.observation + shape.intent_block();
-    assert!(base[0][block].iter().all(|v| *v == 0.0));
+    assert!(base_x[0][block].iter().all(|v| *v == 0.0));
+    let h = shape.hidden;
+    assert!(base_u[0][h..h + shape.intents()].iter().all(|v| *v == 0.0));
+}
+
+/// **The same-sample readout at runtime**: at the sample the hold switches, the actions
+/// already read the newly settled intent (a readout weight on that intent moves them at
+/// once), while the hidden state the next decision reads is the same as without that
+/// weight: the readout never feeds back into the recurrent update.
+#[test]
+fn a_switch_moves_the_actions_in_the_same_sample_and_not_the_state() {
+    let shape = TwoLayerShape {
+        candidates: 0,
+        row_width: 0,
+        pointer_width: 0,
+        ..full_shape()
+    };
+    let layout = TwoLayerLayout::new(&shape);
+    let theta = initial_center(&shape, 21);
+    // A readout weight on intent 1 for action 0 only.
+    let mut lifted = theta.clone();
+    let cw = shape.conditioning();
+    lifted[layout.readout.start + 1] = 3.0;
+    let (a, b) = (
+        Arc::new(TwoLayerNet::new(shape.clone(), theta).unwrap()),
+        Arc::new(TwoLayerNet::new(shape.clone(), lifted).unwrap()),
+    );
+    let cfg = test_arbitration(0.0, 0.0);
+    let (mut ba, mut bb) = (a.brain(cfg, 0.1), b.brain(cfg, 0.1));
+    let mut rng = Rng(77);
+    let mut saw_intent_one = false;
+    for _ in 0..30 {
+        // Mask everything but one intent per sample, so the hold changes as the mask does.
+        let pick = (rng.next() % 3) as usize;
+        let mask: Vec<bool> = (0..shape.menu).map(|k| k == pick).collect();
+        let obs: Vec<f64> = (0..shape.observation).map(|_| rng.unit()).collect();
+        let s = DecisionSample {
+            observation: &obs,
+            intent_valid: &mask,
+            candidates: &[],
+            early_end: None,
+        };
+        let (x, y) = (ba.step(&s).clone(), bb.step(&s).clone());
+        assert_eq!(x.intent, pick, "a lone valid intent is held at once");
+        assert_eq!(y.intent, pick);
+        assert_eq!(ba.state().hidden, bb.state().hidden, "the readout never reaches the state");
+        let d = y.action_logits[0] - x.action_logits[0];
+        if pick == 1 {
+            saw_intent_one = true;
+            assert!((d - 3.0).abs() < 1e-12, "intent 1 settled at this sample moves action 0 now");
+        } else {
+            assert_eq!(d, 0.0);
+        }
+        assert_eq!(x.action_logits[1], y.action_logits[1]);
+    }
+    assert!(saw_intent_one && cw > 0);
 }
 
 /// Serialise a brain mid-hold, restore it into a fresh one, and the next outputs are
@@ -697,7 +767,7 @@ const WINDOW: usize = 10;
 /// actions. So the right intent depends on the input (the cue), the actions depend on the
 /// intent, and which mode is in force is memory, not something in the present
 /// observation.
-fn mode_teacher(seed: u64, samples: usize) -> TrajectoryRecord {
+fn mode_teacher(seed: u64, samples: usize, neutral: usize) -> TrajectoryRecord {
     let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
     let mut mode = 0;
     let mut next_cue = 0;
@@ -713,7 +783,7 @@ fn mode_teacher(seed: u64, samples: usize) -> TrajectoryRecord {
             next_cue = t + rng.range(40, 90) as usize;
         }
         let jitter = 0.3 * (u - 0.5);
-        let actions = if t - last_cue < NEUTRAL {
+        let actions = if t - last_cue < neutral {
             vec![0.5, jitter]
         } else if mode == 0 {
             vec![0.8, -0.5 + jitter]
@@ -740,16 +810,24 @@ fn mode_teacher(seed: u64, samples: usize) -> TrajectoryRecord {
     record_from(out)
 }
 
-/// Cloned from the synthetic teacher, the two-layer net holds the teacher's mode and
-/// copies each mode's actions on held-out streams far better than an intent-blind clone
-/// (today's plain GRU) fitted the same way on the same streams: the held intent and its
-/// time carry the mode past the BPTT window, where action error alone cannot teach the
-/// blind clone to remember the cue. The comparison is asserted, not an accuracy.
-#[test]
-fn a_two_layer_clone_beats_an_intent_blind_clone_on_held_out_streams() {
+/// What one synthetic cloning comparison measured on held-out streams.
+struct ModeComparison {
+    fit_intent_agreement: f64,
+    mode_two: f64,
+    mode_blind: f64,
+    mse_two: f64,
+    mse_blind: f64,
+}
+
+/// Clone the two-layer net and an intent-blind net (today's plain GRU) the same way on the
+/// same synthetic streams (`neutral` samples after each cue where both modes act alike),
+/// then run both closed loop on held-out streams. Mode is scored where the teacher's
+/// actions show it (past the neutral stretch); the blind clone's mode is read off its
+/// forward action, which the two modes set apart (0.8 against 0.2).
+fn compare_mode_clones(neutral: usize) -> ModeComparison {
     let period = 0.1;
-    let train: Vec<_> = (0..12).map(|s| mode_teacher(s, 400)).collect();
-    let held_out: Vec<_> = (100..104).map(|s| mode_teacher(s, 400)).collect();
+    let train: Vec<_> = (0..12).map(|s| mode_teacher(s, 400, neutral)).collect();
+    let held_out: Vec<_> = (100..104).map(|s| mode_teacher(s, 400, neutral)).collect();
     let actions = vec![ActionTransfer::Sigmoid, ActionTransfer::Tanh];
     let two = TwoLayerShape {
         observation: 3,
@@ -783,13 +861,10 @@ fn a_two_layer_clone_beats_an_intent_blind_clone_on_held_out_streams() {
         workers: 4,
     };
     let (theta2, report2) = clone::fit(&two, &cfg, &train, None, &spec).expect("fit");
-    let (theta_b, report_b) = clone::fit(&blind, &cfg, &train, None, &spec).expect("fit");
+    let (theta_b, _) = clone::fit(&blind, &cfg, &train, None, &spec).expect("fit");
     let net2 = Arc::new(TwoLayerNet::new(two, theta2).unwrap());
     let net_b = Arc::new(TwoLayerNet::new(blind, theta_b).unwrap());
 
-    // Closed loop on the held-out streams. Mode is scored where the teacher's actions show
-    // it (past the neutral stretch); the blind clone's mode is read off its forward
-    // action, which the two modes set apart (0.8 against 0.2).
     let (mut n, mut two_hits, mut blind_hits, mut se2, mut seb) = (0, 0, 0, 0.0, 0.0);
     for record in &held_out {
         let mut b2 = net2.brain(cfg, period);
@@ -814,7 +889,7 @@ fn a_two_layer_clone_beats_an_intent_blind_clone_on_held_out_streams() {
                 se2 += (tr.apply(a2.action_logits[k]) - s.actions[k]).powi(2);
                 seb += (tr.apply(lb[k]) - s.actions[k]).powi(2);
             }
-            if t - last_cue >= NEUTRAL {
+            if t - last_cue >= neutral {
                 n += 1;
                 two_hits += usize::from(a2.intent == s.held.intent);
                 let blind_mode = usize::from(ActionTransfer::Sigmoid.apply(lb[0]) < 0.5);
@@ -823,21 +898,56 @@ fn a_two_layer_clone_beats_an_intent_blind_clone_on_held_out_streams() {
         }
     }
     let samples = (held_out.len() * 400 * 2) as f64;
-    let (mse2, mseb) = (se2 / samples, seb / samples);
-    let (mode2, mode_b) = (two_hits as f64 / n as f64, blind_hits as f64 / n as f64);
+    let c = ModeComparison {
+        fit_intent_agreement: report2.last.intent_agreement,
+        mode_two: two_hits as f64 / n as f64,
+        mode_blind: blind_hits as f64 / n as f64,
+        mse_two: se2 / samples,
+        mse_blind: seb / samples,
+    };
     eprintln!(
-        "two-layer: teacher-forced intent agreement {:.3}, held-out mode {mode2:.3}, action \
-         mse {mse2:.4}; intent-blind: held-out mode {mode_b:.3}, action mse {mseb:.4}; \
-         teacher-forced fit mse two {:.4} blind {:.4}",
-        report2.last.intent_agreement, report2.last.action_mse, report_b.last.action_mse
+        "neutral {neutral}: two-layer teacher-forced intent agreement {:.3}, held-out mode \
+         {:.3}, action mse {:.6}; intent-blind held-out mode {:.3}, action mse {:.6}",
+        c.fit_intent_agreement, c.mode_two, c.mse_two, c.mode_blind, c.mse_blind
+    );
+    c
+}
+
+/// Cloned from the synthetic teacher, the two-layer net holds the teacher's mode and
+/// copies each mode's actions on held-out streams far better than an intent-blind clone
+/// (today's plain GRU) fitted the same way on the same streams: the held intent and its
+/// time carry the mode past the BPTT window, where action error alone cannot teach the
+/// blind clone to remember the cue. The comparison is asserted, not an accuracy.
+#[test]
+fn a_two_layer_clone_beats_an_intent_blind_clone_on_held_out_streams() {
+    let c = compare_mode_clones(NEUTRAL);
+    assert!(
+        c.mode_two > c.mode_blind,
+        "the two-layer clone holds the teacher's mode better ({} vs {})",
+        c.mode_two,
+        c.mode_blind
     );
     assert!(
-        mode2 > mode_b,
-        "the two-layer clone holds the teacher's mode better ({mode2} vs {mode_b})"
+        c.mse_two * 2.0 < c.mse_blind,
+        "the two-layer clone copies each mode's actions far better ({} vs {})",
+        c.mse_two,
+        c.mse_blind
     );
+}
+
+/// **Modes that act at once** (no neutral stretch): the variant the plain GRU won while the
+/// whole bottom was conditioned only from the next sample (§11.3's amendment: mode 0.993,
+/// action error 0.0023 against 0.0146). With the same-sample readout a mode change acts
+/// in the sample it is settled, so the two-layer clone copies the actions at least as well
+/// as the blind one. Printed beside the comparison above; the comparison is asserted.
+#[test]
+fn with_modes_acting_at_once_the_two_layer_clone_is_not_one_sample_late() {
+    let c = compare_mode_clones(0);
     assert!(
-        mse2 * 2.0 < mseb,
-        "the two-layer clone copies each mode's actions far better ({mse2} vs {mseb})"
+        c.mse_two <= c.mse_blind,
+        "the same-sample readout copies at-once modes no worse ({} vs {})",
+        c.mse_two,
+        c.mse_blind
     );
 }
 

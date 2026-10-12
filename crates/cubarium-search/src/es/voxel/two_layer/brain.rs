@@ -5,17 +5,20 @@
 //! 1. The brain finds its held subject among this sample's candidates by its opaque key
 //!    (the key never enters a network) and notes any early end: the fauna's flag, the
 //!    subject gone or invalid for the held intent, the held intent masked.
-//! 2. **The bottom updates once** on the observation plus the intent held *before* this
-//!    sample's decision, that hold's subject row and the squashed time in the intent. Its
-//!    outputs are this sample's actions.
+//! 2. **The GRU updates once** on the observation plus the intent held *before* this
+//!    sample's decision, that hold's subject row and the squashed time in the intent.
 //! 3. **At a decision** (the top's rate is a credit of `period × intent_hz` per sample; an
 //!    early end decides at once) the top reads that GRU state, the held intent and the
 //!    time held, and proposes an intent and, conditioned on it, a subject.
 //! 4. **Arbitration** ([`super::arbitration::settle`]) settles the held intent and subject.
-//!    They condition the bottom from the next sample.
+//! 5. **The same-sample readout** (§11.3, amended 2026-10-12): this sample's actions read
+//!    the new hidden state *and* the intent and subject just settled
+//!    ([`super::net::readout`]), so a mode change acts at once. The recurrent update reads
+//!    the settled hold from the next sample (step 2), so the top never reads its own
+//!    choice through the state it chooses from.
 //!
-//! A plain brain has no top: steps 1, 3 and 4 do nothing and step 2 is today's GRU step,
-//! with today's input, on today's weights.
+//! A plain brain has no top: steps 1, 3, 4 and 5 do nothing and step 2 is today's GRU
+//! step, with today's input, on today's weights.
 
 use std::sync::Arc;
 
@@ -27,8 +30,8 @@ use super::arbitration::{
     EarlyEnd, HoldChange, HoldView, IntentArbitration, ProposalView, Settle, settle,
 };
 use super::net::{
-    SubjectKind, TopForward, bottom_input, masked_argmax, masked_softmax, none_score,
-    pointer_query, pointer_row, pointer_score, squash_time, top_forward,
+    SubjectKind, TopForward, bottom_input, conditioning, masked_argmax, masked_softmax,
+    none_score, pointer_query, pointer_row, pointer_score, readout, squash_time, top_forward,
 };
 use super::shape::{TYPE_TAGS, TwoLayerLayout, TwoLayerShape};
 use crate::es::tensor;
@@ -92,6 +95,7 @@ impl TwoLayerNet {
             sample_period_s,
             state: BrainState::fresh(s),
             x: vec![0.0; s.bottom_inputs()],
+            c: vec![0.0; s.conditioning()],
             next: vec![0.0; s.hidden],
             y: vec![0.0; s.bottom_outputs()],
             valid: vec![false; s.intents()],
@@ -246,6 +250,7 @@ pub struct TwoLayerBrain {
     sample_period_s: f64,
     state: BrainState,
     x: Vec<f64>,
+    c: Vec<f64>,
     next: Vec<f64>,
     y: Vec<f64>,
     valid: Vec<bool>,
@@ -366,7 +371,7 @@ impl TwoLayerBrain {
             }
         }
 
-        // 2. The bottom, conditioned on the hold from before this sample.
+        // 2. The GRU, conditioned on the hold from before this sample.
         let held_intent = self.state.held.map(|h| h.intent);
         let time = squash_time(
             self.state.intent_age_s,
@@ -386,17 +391,6 @@ impl TwoLayerBrain {
             &mut self.next,
             &mut self.y,
         );
-        let heads = s.heads();
-        self.answer
-            .action_logits
-            .copy_from_slice(&self.y[heads.passthrough.clone()]);
-        self.answer.kick = heads.kick.map(|k| self.y[k] > 0.0);
-        self.answer.call = heads.call.clone().map(|r| {
-            let calls = &self.y[r];
-            let best = (1..calls.len()).fold(0, |b, k| if calls[k] > calls[b] { k } else { b });
-            (best > 0).then(|| best - 1)
-        });
-        self.answer.rest = heads.rest.map(|k| self.y[k] > 0.0);
 
         // 3–4. The top and arbitration, at a decision.
         let scheduled = self.state.decision_credit >= 1.0 - 1e-9;
@@ -419,6 +413,35 @@ impl TwoLayerBrain {
                 .iter()
                 .position(|c| c.key == r.key && c.kind == r.kind)
         });
+
+        // 5. The same-sample readout on the settled hold.
+        if has_top {
+            let time = squash_time(
+                self.state.intent_age_s,
+                self.arbitration.intent_time_scale_s,
+            );
+            conditioning(
+                s,
+                self.state.held.map(|h| h.intent),
+                self.answer
+                    .subject
+                    .map(|k| (sample.candidates[k].features, sample.candidates[k].kind)),
+                time,
+                &mut self.c,
+            );
+            readout(&net.layout, theta, &self.c, &mut self.y);
+        }
+        let heads = s.heads();
+        self.answer
+            .action_logits
+            .copy_from_slice(&self.y[heads.passthrough.clone()]);
+        self.answer.kick = heads.kick.map(|k| self.y[k] > 0.0);
+        self.answer.call = heads.call.clone().map(|r| {
+            let calls = &self.y[r];
+            let best = (1..calls.len()).fold(0, |b, k| if calls[k] > calls[b] { k } else { b });
+            (best > 0).then(|| best - 1)
+        });
+        self.answer.rest = heads.rest.map(|k| self.y[k] > 0.0);
 
         // Time passes.
         let dt = self.sample_period_s;
