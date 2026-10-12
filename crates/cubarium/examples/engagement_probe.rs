@@ -17,9 +17,11 @@ fn film(
     path: &std::path::Path,
     seconds: f64,
     fps: f64,
+    pixels: u32,
 ) -> Result<()> {
     let mut cfg = cubarium::voxel::load_config(std::path::Path::new("config/desktop/voxel.toml"))?;
     cfg.sim.world = episode.sim.world().config().clone();
+    cfg.px_per_voxel = pixels;
     let projection = Projection::new(
         cfg.tilt_degrees,
         cfg.px_per_voxel,
@@ -141,8 +143,17 @@ fn main() -> Result<()> {
         ensure!(arms.len() == 1, "video needs one arm");
         let fps: f64 = get("fps=").unwrap_or("30").parse()?;
         ensure!(fps.is_finite() && fps > 0.0, "positive fps required");
+        // Presentation pitch, pixels per voxel; auto has no screen in headless capture.
+        let pixels: u32 = get("pixels=").unwrap_or("8").parse()?;
+        ensure!(pixels > 0, "positive pixels per voxel required");
         let episode = engagement::found(&cfg, seed, arms[0]).map_err(anyhow::Error::msg)?;
-        return film(episode, std::path::Path::new(path), cfg.duration_s, fps);
+        return film(
+            episode,
+            std::path::Path::new(path),
+            cfg.duration_s,
+            fps,
+            pixels,
+        );
     }
     for offset in 0..cfg.episodes {
         for arm in &arms {

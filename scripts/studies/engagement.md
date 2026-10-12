@@ -66,6 +66,8 @@ The generated spec writes to main's
 `summary.tsv`, `video.log`, `VIDEO_DONE` or `VIDEO_FAILED`. A missing/failed
 child is visible in `STATE.tsv`; no partial table pretends to be complete.
 Video uses the normal headless voxel sink and existing art/models, one panel,
-30 fps at real simulated time, x264/yuv444p/CRF 12. It streams RGBA directly to
+30 fps at real simulated time, x264/yuv444p/CRF 12.
+`pixels=8` fixes the headless pixel pitch instead of screen-dependent auto;
+this scales the normal renderer without changing its art or the scene. It streams RGBA directly to
 ffmpeg, without a PNG frame archive, under main's
 `art/gen/runs/engage-2026-10-12/family-3-seedN.mp4`.
