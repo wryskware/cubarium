@@ -64,6 +64,9 @@ pub mod kick;
 pub mod calls;
 /// CALLS-REST (behaviour-AI §3.4): rest physiology, light rest and deep bouts.
 pub mod sleep;
+/// LS-DEFEND (behaviour-AI §3): the loftstrider's family defence.
+pub mod defend;
+pub use defend::Defence;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -3461,6 +3464,15 @@ pub struct FaunaLedger {
     pub hound_substitutions: u64,
     #[serde(default)]
     pub lunges_blocked: u64,
+    /// **LS-DEFEND** readouts: controller samples that held a defence intent (by the
+    /// loftstrider menu's index, [`intent::LOFTSTRIDER`]), kicks landed on a body by the
+    /// kicker's lineage, and kick-backs a landed bite drew.
+    #[serde(default)]
+    pub defence_samples: [u64; intent::MAX_MENU],
+    #[serde(default)]
+    pub kicks_landed_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub kick_backs: u64,
     /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
     /// steps off from a prey inside the outline and pivots to face one; and chases broken off
     /// as out of reach (no face beside the target puts it in the jaw band).
@@ -4302,6 +4314,10 @@ pub struct Fauna {
     /// its intent record. Session state.
     #[serde(skip)]
     pub(crate) hound_teach: FxHashMap<u64, HoundTeach>,
+    /// LS-DEFEND: each loftstrider's teacher labels at its last sample under its defence layer
+    /// ([`defend::steer`]), read by its intent record. Session state.
+    #[serde(skip)]
+    pub(crate) ls_teach: FxHashMap<u64, intent::Teach>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4455,11 +4471,13 @@ pub enum Steer {
     Nurse,
     /// CALLS-REST: the walk down the hunter scent to a bed ([`sleep::bed_reflex`]).
     Bed,
+    /// LS-DEFEND: a defence intent's skill ([`defend::steer`]).
+    Defend,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 21] = [
+    pub const ALL: [Steer; 22] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4481,6 +4499,7 @@ impl Steer {
         Steer::Groom,
         Steer::Nurse,
         Steer::Bed,
+        Steer::Defend,
     ];
 
     /// A short name for tables.
@@ -4507,6 +4526,7 @@ impl Steer {
             Steer::Groom => "groom",
             Steer::Nurse => "nurse",
             Steer::Bed => "bed",
+            Steer::Defend => "defend",
         }
     }
 }
@@ -4879,6 +4899,7 @@ impl Fauna {
             last_call: FxHashMap::default(),
             hounds: FxHashMap::default(),
             hound_teach: FxHashMap::default(),
+            ls_teach: FxHashMap::default(),
             heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),

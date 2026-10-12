@@ -218,6 +218,9 @@ fn an_adult_stands_its_ground_below_its_group() {
     c.founders[f.index()].senses =
         SenseTable { live: true, sight_m: 5.0, sight_night_m: 5.0, sight_still_fraction: 1.0, sight_half_angle_deg: 180.0, ..SenseTable::default() };
     c.founders[f.index()].vigilance = Vigilance { group_min: 2, ..flight_only(3.0, 4.0, 1.0) };
+    // The old rule, kept for a lineage without a defence layer (LS-DEFEND retires it for the
+    // loftstrider: `defend_tests`).
+    c.founders[f.index()].defence.enabled = false;
     for n in [1usize, 2] {
         let mut fauna = Fauna::new(c.clone());
         fauna.set_births_enabled(false);

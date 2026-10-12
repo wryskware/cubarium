@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4113 rows)
+**`fauna.*`** (4257 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1731,7 +1731,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.littershredder.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.littershredder.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.littershredder.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -1783,6 +1783,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.littershredder.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.littershredder.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.littershredder.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.littershredder.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.littershredder.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.littershredder.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.littershredder.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.littershredder.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.littershredder.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.littershredder.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.littershredder.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.littershredder.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.littershredder.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.littershredder.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.littershredder.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.littershredder.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.littershredder.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.littershredder.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2163,7 +2179,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.frondgrazer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -2215,6 +2231,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.frondgrazer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.frondgrazer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.frondgrazer.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.frondgrazer.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.frondgrazer.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.frondgrazer.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.frondgrazer.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.frondgrazer.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.frondgrazer.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.frondgrazer.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.frondgrazer.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.frondgrazer.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.frondgrazer.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.frondgrazer.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.frondgrazer.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.frondgrazer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.frondgrazer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.frondgrazer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2595,7 +2627,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.lanternjaw.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.lanternjaw.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.lanternjaw.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -2647,6 +2679,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.lanternjaw.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.lanternjaw.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.lanternjaw.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.lanternjaw.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.lanternjaw.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.lanternjaw.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.lanternjaw.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.lanternjaw.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.lanternjaw.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.lanternjaw.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.lanternjaw.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.lanternjaw.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.lanternjaw.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.lanternjaw.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.lanternjaw.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.lanternjaw.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.lanternjaw.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.lanternjaw.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3027,7 +3075,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.capgnawer.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.capgnawer.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.capgnawer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3079,6 +3127,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.capgnawer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.capgnawer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.capgnawer.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.capgnawer.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.capgnawer.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.capgnawer.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.capgnawer.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.capgnawer.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.capgnawer.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.capgnawer.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.capgnawer.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.capgnawer.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.capgnawer.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.capgnawer.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.capgnawer.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.capgnawer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.capgnawer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.capgnawer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3459,7 +3523,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.loftstrider.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.loftstrider.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.loftstrider.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3511,6 +3575,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.loftstrider.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.loftstrider.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.loftstrider.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.loftstrider.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.loftstrider.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.loftstrider.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.loftstrider.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.loftstrider.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.loftstrider.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.loftstrider.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.loftstrider.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.loftstrider.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.loftstrider.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.loftstrider.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.loftstrider.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.loftstrider.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.loftstrider.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3891,7 +3971,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.ripple-snail.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.ripple-snail.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.ripple-snail.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3943,6 +4023,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.ripple-snail.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.ripple-snail.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.ripple-snail.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.ripple-snail.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.ripple-snail.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.ripple-snail.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.ripple-snail.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.ripple-snail.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.ripple-snail.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.ripple-snail.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.ripple-snail.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.ripple-snail.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.ripple-snail.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.ripple-snail.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.ripple-snail.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.ripple-snail.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.ripple-snail.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.ripple-snail.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4323,7 +4419,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.bellwing.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.bellwing.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.bellwing.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -4375,6 +4471,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.bellwing.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.bellwing.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.bellwing.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.bellwing.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.bellwing.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.bellwing.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.bellwing.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.bellwing.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.bellwing.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.bellwing.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.bellwing.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.bellwing.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.bellwing.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.bellwing.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.bellwing.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.bellwing.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.bellwing.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.bellwing.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4755,7 +4867,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.seedporter.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.seedporter.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.seedporter.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -4807,6 +4919,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.seedporter.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.seedporter.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.seedporter.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.seedporter.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.seedporter.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.seedporter.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.seedporter.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.seedporter.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.seedporter.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.seedporter.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.seedporter.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.seedporter.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.seedporter.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.seedporter.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.seedporter.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.seedporter.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.seedporter.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.seedporter.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -5187,7 +5315,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.chorister.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.chorister.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.chorister.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -5239,6 +5367,22 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.chorister.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.chorister.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.chorister.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.chorister.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.chorister.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.chorister.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.chorister.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.chorister.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.chorister.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.chorister.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.chorister.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.chorister.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.chorister.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.chorister.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.chorister.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.chorister.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.chorister.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.chorister.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |

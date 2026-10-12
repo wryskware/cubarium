@@ -511,8 +511,9 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 /// - seedporter: flight → `flee_to_trees`, roost, groom, its mother → `follow_mother`, the
 ///   herd pull → `stay_with_troop`, its own steering and the walks to food → `forage`, a
 ///   rest bout → `rest`;
-/// - loftstrider: flight standing (no forward) → `watch`, flight walking → `move_off`, the
-///   herd pull → `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
+/// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else flight
+///   standing (no forward) → `watch`, flight walking → `move_off`, the herd pull →
+///   `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
 /// - Veilhound: the pack tactic's own reading ([`crate::Fauna::pack_hint`]: rest, den,
 ///   feed, stalk, drive — the flankers too —, else search); its own steering → `search`;
 /// - lanternjaw: the patrol → `patrol`, the carcass yield → `give_way`, at a carcass →
@@ -547,6 +548,9 @@ pub(crate) fn teacher_label(
             _ => Teach::default(),
         },
         Founder::Loftstrider => match src {
+            // LS-DEFEND: the defence layer's own proposal, hold and call; under the hold of a
+            // calm intent, its proposal only.
+            _ if fauna.ls_teach.contains_key(&a.id) => fauna.ls_teach[&a.id],
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),

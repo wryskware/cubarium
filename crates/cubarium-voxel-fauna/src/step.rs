@@ -1999,6 +1999,7 @@ fn controllers(
             }
         }
         let mut fled = false;
+        fauna.ls_teach.remove(&id);
         if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
@@ -2006,6 +2007,17 @@ fn controllers(
                 lift = 0.0;
                 fled = true;
                 src = crate::Steer::Flee;
+            }
+            // LS-DEFEND: the loftstrider's defence layer over its ground response, while it
+            // holds a defence intent (watch, move off, go to adults or calf, guard).
+            if crate::defend::on(&fauna.config, founder) {
+                if let Some(go) = crate::defend::steer(fauna, i, view) {
+                    actions = go;
+                    lure = 0.0;
+                    lift = 0.0;
+                    fled = true;
+                    src = crate::Steer::Defend;
+                }
             }
         }
         // CALLS-REST step 5: about to rest, a body smelling hunters walks down their scent to
@@ -2249,6 +2261,7 @@ fn controllers(
             src = crate::Steer::Heuristic;
             fled = false;
             herded = false;
+            fauna.ls_teach.remove(&id);
         }
         // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
         // lineage's `drop.after_s` jumps down; last, as it is the only way out.
