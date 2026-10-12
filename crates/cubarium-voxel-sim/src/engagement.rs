@@ -657,7 +657,17 @@ impl Episode {
             time_s: self.tick as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ),
             hound_wounds: self.hounds.iter().map(wound).sum(),
             hound_worst_wound: self.hounds.iter().map(wound).fold(0.0, f64::max),
-            hound_deaths: self.hound_deaths.len(),
+            hound_deaths: cubarium_voxel_fauna::Departure::ALL
+                .iter()
+                .filter(|cause| cause.is_death())
+                .map(|&cause| {
+                    self.sim
+                        .fauna()
+                        .view()
+                        .ledger
+                        .departed_founder(Founder::Chorister, cause) as usize
+                })
+                .sum(),
             calf_wounds: self.calf.as_ref().map(wound).unwrap_or(0.0),
             adult_wounds: self.adults.iter().map(wound).sum(),
             encounters: self.encounters.len(),
@@ -711,7 +721,17 @@ mod tests {
         {
             assert!(episode.sim.fauna().has_controller(id));
         }
+        let id = episode.adults[0];
+        let body = episode.sim.fauna().view().animal(id).unwrap();
+        let remaining = body.lifespan_ticks.saturating_sub(body.age_ticks);
+        let age = body.age_ticks + 1;
+        assert!(episode.sim.fauna_mut().stage_identity(id, age, None));
+        let body = episode.sim.fauna().view().animal(id).unwrap();
+        if body.lifespan_ticks != 0 {
+            assert_eq!(body.lifespan_ticks - body.age_ticks, remaining);
+        }
         while episode.step() {}
+        assert!(!episode.sim.fauna_mut().stage_identity(id, age, None));
         let text = serde_json::to_string(&episode.row()).unwrap();
         let row: RowOut = serde_json::from_str(&text).unwrap();
         assert_eq!(row.seed, 73);
@@ -726,15 +746,27 @@ mod tests {
         let b = found(&cfg, 73, &cfg.arms[4]).unwrap();
         assert_eq!(a.sim.world().tick(), 0);
         assert_eq!(b.sim.world().tick(), 0);
-        for body in b.sim.fauna().view().animals {
-            let other = a.sim.fauna().view().animal(body.id).unwrap_or_else(|| {
-                // Arm b may contain extra hounds; check the intersection only.
-                body
-            });
+        let common: Vec<_> = b
+            .sim
+            .fauna()
+            .view()
+            .animals
+            .iter()
+            .filter_map(|body| {
+                a.sim
+                    .fauna()
+                    .view()
+                    .animal(body.id)
+                    .map(|other| (body, other))
+            })
+            .collect();
+        assert!(!common.is_empty());
+        for (body, other) in common {
             assert_eq!(body.pose, other.pose);
             assert_eq!(body.energy, other.energy);
             assert_eq!(body.reserve, other.reserve);
             assert_eq!(body.age_ticks, other.age_ticks);
+            assert_eq!(body.stomach, other.stomach);
         }
     }
     #[test]

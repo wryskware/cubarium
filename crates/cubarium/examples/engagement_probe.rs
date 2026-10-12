@@ -3,7 +3,7 @@
 use anyhow::{Context, Result, ensure};
 use cubarium::sink::gpu::GpuTargetKind;
 use cubarium::sink::gpu::voxel::{VoxelGpuSink, VoxelGpuSinkOptions};
-use cubarium::voxel::Projection;
+use cubarium::voxel::project::Projection;
 use cubarium_voxel_sim::engagement::{self, Config};
 use std::{
     io::Write,
