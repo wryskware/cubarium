@@ -1,5 +1,6 @@
-//! Headless migration probe: validate every existing shader, then exercise the
-//! safe present/readback path on an asymmetric, non-aligned texture.
+//! Headless shader probe: validate every WGSL shader (Naga, MSL and HLSL output, a real
+//! pipeline on this adapter) across the override cases, then exercise the safe
+//! present/readback path on an asymmetric, non-aligned texture.
 #![forbid(unsafe_code)]
 
 use anyhow::{Context, Result, ensure};
@@ -13,25 +14,6 @@ fn main() -> Result<()> {
         gpu.name,
         gpu.adapter.get_info().backend
     );
-    if std::env::args().any(|a| a == "--spirv") {
-        return spirv_probe(&gpu);
-    }
-    let args: Vec<_> = std::env::args().collect();
-    let write_dir = args
-        .windows(2)
-        .find(|a| a[0] == "--write-wgsl")
-        .map(|a| std::path::PathBuf::from(&a[1]));
-    if let Some(directory) = &write_dir {
-        std::fs::create_dir_all(directory)?;
-        for shader in shader::ALL {
-            match shader.wgsl() {
-                Ok(source) => {
-                    std::fs::write(directory.join(format!("{}.wgsl", shader.name())), source)?
-                }
-                Err(error) => println!("FAIL WGSL conversion {:?}: {error:#}", shader),
-            }
-        }
-    }
     let mut failed = 0;
     let mut cases: Vec<_> = shader::ALL
         .into_iter()
@@ -71,42 +53,7 @@ fn main() -> Result<()> {
     present_smoke(&gpu)?;
     ensure!(
         failed == 0,
-        "{failed} WGSL cases require repair before the full renderer port"
-    );
-    Ok(())
-}
-
-fn spirv_probe(gpu: &Gpu) -> Result<()> {
-    let shaders = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("shaders");
-    let mut paths = std::fs::read_dir(shaders)?
-        .map(|entry| entry.map(|e| e.path()))
-        .collect::<std::io::Result<Vec<_>>>()?;
-    paths.retain(|p| p.extension().is_some_and(|e| e == "spv"));
-    paths.sort();
-    let mut failed = 0;
-    for path in &paths {
-        let bytes = std::fs::read(path)?;
-        let name = path
-            .file_name()
-            .context("shader filename")?
-            .to_string_lossy();
-        let result = probe_shader(gpu, &name, &bytes);
-        match result {
-            Ok(()) => println!("PASS shader {name}"),
-            Err(error) => {
-                failed += 1;
-                println!("FAIL shader {name}: {error:#}");
-            }
-        }
-    }
-    println!(
-        "shader modules: {} passed, {failed} failed",
-        paths.len() - failed
-    );
-    present_smoke(gpu)?;
-    ensure!(
-        failed == 0,
-        "{failed} shader modules require translation before the full renderer port"
+        "{failed} WGSL cases failed"
     );
     Ok(())
 }
@@ -341,28 +288,6 @@ fn vertex_format(ty: &naga::TypeInner) -> Result<wgpu::VertexFormat> {
         (naga::ScalarKind::Uint, 4) => wgpu::VertexFormat::Uint32x4,
         _ => anyhow::bail!("unsupported probe vertex scalar {kind:?} size {size}"),
     })
-}
-
-fn probe_shader(gpu: &Gpu, name: &str, bytes: &[u8]) -> Result<()> {
-    let module = wgpu::naga::front::spv::parse_u8_slice(bytes, &Default::default())
-        .context("Naga SPIR-V parsing")?;
-    wgpu::naga::valid::Validator::new(
-        wgpu::naga::valid::ValidationFlags::all(),
-        wgpu::naga::valid::Capabilities::all(),
-    )
-    .validate(&module)
-    .context("Naga validation")?;
-    let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let _shader = gpu
-        .device
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(name),
-            source: wgpu::util::make_spirv(bytes),
-        });
-    if let Some(error) = pollster::block_on(scope.pop()) {
-        anyhow::bail!("wgpu validation: {error}");
-    }
-    Ok(())
 }
 
 fn present_smoke(gpu: &Gpu) -> Result<()> {
