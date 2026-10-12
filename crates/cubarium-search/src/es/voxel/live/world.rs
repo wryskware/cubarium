@@ -151,3 +151,23 @@ pub fn try_found_world_from(
     };
     Ok((sim, info))
 }
+
+#[cfg(test)]
+mod tests {
+    /// BRAIN-NEXT step 4: a terrain the founding refuses comes back as `Err` with its reason
+    /// (the clone tool skips it with a note) instead of a panic.
+    #[test]
+    fn a_refused_terrain_is_an_err_not_a_panic() {
+        let eco = super::EcologyParams::defaults();
+        // Seed 1's terrain is refused before its pre-roll (no closed walking route); asked
+        // for, it is kept and returned with that reason.
+        let got = super::try_found_world_from(
+            &super::training_config(),
+            super::found::Seeds::Asked(1),
+            eco.fauna().founder_counts(),
+            &eco,
+        );
+        let why = got.err().expect("the refused terrain is an Err");
+        assert!(why.contains("rejected"), "{why}");
+    }
+}
