@@ -4324,9 +4324,15 @@ pub struct Fauna {
     #[serde(skip)]
     pub(crate) brain_memory: FxHashMap<u64, BrainMemory>,
     /// CONTRACTS: a brain's rest request at its last sample ([`RestAsk`]), which the
-    /// circadian stage grants when the body may rest. Session state.
-    #[serde(skip)]
+    /// circadian stage grants when the body may rest. BRAIN-REST: saved, so a body asleep on
+    /// its own ask stays asleep across a save.
+    #[serde(default)]
     pub(crate) rest_asks: FxHashMap<u64, RestAsk>,
+    /// BRAIN-REST: the tick each body's granted brain rest bout ends
+    /// ([`sleep::RestTable::brain_bout_s`]), set when the circadian stage first grants it.
+    /// Saved with the ask.
+    #[serde(default)]
+    pub(crate) brain_bouts: FxHashMap<u64, u64>,
     /// TWO-LAYER: bodies held to their controller's **own** answer for a staged cloning
     /// scene ([`Fauna::force_own`]). Session state, empty in every ordinary world.
     #[serde(skip)]
@@ -4975,6 +4981,7 @@ impl Fauna {
             pack_hint: FxHashMap::default(),
             brain_memory: FxHashMap::default(),
             rest_asks: FxHashMap::default(),
+            brain_bouts: FxHashMap::default(),
             forced_own: Default::default(),
             dry: Default::default(),
             calls: Vec::new(),

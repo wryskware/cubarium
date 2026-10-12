@@ -141,7 +141,9 @@ fn up_a_stand(a: &cubarium_voxel_fauna::Animal) -> bool {
 ///   (`grooming.groom_radius_m`) or the larva is gone;
 /// - follow mother: the share of seconds the young is within its lineage's nursing leash
 ///   (`nursing.leash_m`, 3D) of its mother;
-/// - seedporter rest: the share of body-seconds resting or asleep;
+/// - seedporter rest: over the body-seconds holding the rest intent, the share holding still
+///   (held forward at most `teachers.forage_stay_forward`) and not asleep: the daytime pause
+///   (a seedporter sleeps only perched, which is `roost`);
 /// - feed: the share of the seconds the lanternjaw wants food (its eating latch on) that it
 ///   takes a bite ([`cubarium_voxel_fauna::State::Cropping`]). Not the share of the carcass
 ///   eaten: the bite rate caps a 60 s scene at about an eighth of it and the full event stops
@@ -170,6 +172,7 @@ pub fn competence(config: &mode_scenes::Config, scene: ModeScene, seed: u64, dri
     let yield_m = e.sim.fauna().config().predation.carcass_yield_radius_m;
     let groom_m = e.sim.fauna().config().founder(f).grooming.groom_radius_m;
     let keep_m = e.sim.fauna().config().predation.still_threat_near_m;
+    let stay = e.sim.fauna().config().teachers.forage_stay_forward;
     let (mut held, mut samples) = (0usize, 0usize);
     let (mut good, mut seconds) = (0usize, 0usize);
     let mut reached = std::collections::BTreeSet::new();
@@ -207,9 +210,13 @@ pub fn competence(config: &mode_scenes::Config, scene: ModeScene, seed: u64, dri
                 good += usize::from(gone || host.is_some_and(|h| focal.iter().any(|a| dist(a, h) <= groom_m)));
             }
             ModeScene::SeedporterRest => {
-                for a in &focal {
+                // BRAIN-REST: a seedporter sleeps only perched (that is `roost`); its `rest`
+                // is the daytime pause of the stop-and-go gait. Over the seconds a body holds
+                // the rest intent, the share it holds still and is not asleep.
+                for a in focal.iter().filter(|a| usize::from(a.intent.held) == k) {
                     seconds += 1;
-                    good += usize::from(matches!(a.state, cubarium_voxel_fauna::State::Resting | cubarium_voxel_fauna::State::Asleep));
+                    let still = a.founder_state.held.forward <= stay;
+                    good += usize::from(still && a.state != cubarium_voxel_fauna::State::Asleep);
                 }
             }
             ModeScene::Feed => {

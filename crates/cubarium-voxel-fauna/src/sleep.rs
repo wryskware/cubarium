@@ -64,6 +64,13 @@ pub struct RestTable {
     pub bed_scent: f64,
     /// ...for at most this long from the rest's onset, then rests where it is, seconds.
     pub bed_search_s: f64,
+    /// **A brain's rest bout** (BRAIN-REST): when the circadian stage grants sleep on a
+    /// brain's own rest ask ([`crate::RestAsk::Rest`]), the body sleeps this long, then the
+    /// ask clears and the brain is sampled again on its next cadence tick (asking again
+    /// sleeps another bout). A wake or an emergency ends it sooner; it does not end inside a
+    /// deep bout. The rhythm's own sleep and a heuristic body's are untouched. Seconds (0: no
+    /// limit, the ask holds until a wake, as before).
+    pub brain_bout_s: f64,
 }
 
 impl Default for RestTable {
@@ -82,6 +89,7 @@ impl Default for RestTable {
             rush_over_cruise: 0.0,
             bed_scent: 0.0,
             bed_search_s: 0.0,
+            brain_bout_s: 1.0,
         }
     }
 }
@@ -97,7 +105,18 @@ impl Default for RestTable {
 ///   up to 30 s;
 /// - **the Veilhound** (topic 5's "also for the Veilhounds at the den"): the same light rest
 ///   and sleeps-lighter rule, which it mostly takes at its den; rushes and scent are prey's.
+///
+/// **A brain's rest bout** (`brain_bout_s`, BRAIN-REST), from what each lineage already does:
+/// - the light resters (loftstrider, Veilhound): one light-rest interval and the longest deep
+///   bout after it (`light_min_s + deep_max_s`, 3 min), so a brain's rest can hold one deep
+///   bout;
+/// - the paced walkers and climbers (shredder, capgnawer, frondgrazer, seedporter): their
+///   heuristic's longest stop-and-go pause ([`crate::rhythm::cadence_of`]'s `pause_max_s`:
+///   2.5, 2.5, 3 and 2 s);
+/// - the unpaced (bellwing, lanternjaw, ripple-snail): the two-layer top's intent hold
+///   ([`crate::BrainArbitration`]'s `hold_s`, 1 s; the default).
 pub fn rest_of(founder: Founder) -> RestTable {
+    let pause = |f: Founder| RestTable { brain_bout_s: crate::rhythm::cadence_of(f).pause_max_s, ..RestTable::default() };
     let d = RestTable::default();
     let light = RestTable {
         light: true,
@@ -109,12 +128,14 @@ pub fn rest_of(founder: Founder) -> RestTable {
         deep_alone_scale: 0.2,
         kin_awake_s: 60.0,
         need_s: 1200.0,
+        brain_bout_s: 180.0,
         ..d
     };
     match founder {
         Founder::Loftstrider => RestTable { rush_over_cruise: 1.2, bed_scent: 1.0, bed_search_s: 30.0, ..light },
         Founder::Chorister => light,
-        _ => d,
+        Founder::Blind | Founder::Capgnawer | Founder::Browser | Founder::Seedporter => pause(founder),
+        Founder::Bellwing | Founder::Lanternjaw | Founder::RippleSnail => d,
     }
 }
 

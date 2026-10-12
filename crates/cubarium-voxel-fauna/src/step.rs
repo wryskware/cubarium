@@ -891,6 +891,12 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         .collect();
     nurseries.sort_unstable();
     nurseries.dedup();
+    // BRAIN-REST: the saved asks and bouts of bodies gone from the world.
+    if tick % 64 == 0 && !(fauna.rest_asks.is_empty() && fauna.brain_bouts.is_empty()) {
+        let alive: rustc_hash::FxHashSet<u64> = fauna.animals.iter().map(|a| a.id).collect();
+        fauna.rest_asks.retain(|id, _| alive.contains(id));
+        fauna.brain_bouts.retain(|id, _| alive.contains(id));
+    }
     for i in 0..fauna.animals.len() {
         let Some(founder) = fauna.animals[i].founder else {
             continue;
@@ -996,11 +1002,42 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
             None => fauna.rest_asks.get(&fauna.animals[i].id).copied().unwrap_or_default(),
         };
         fauna.animals[i].intent.executed.rest = ask;
+        // BRAIN-REST: a granted brain rest lasts one bout (`rest.brain_bout_s` from its first
+        // granted tick), then the ask clears and the body is awake for its brain's next
+        // sample; not inside a deep bout. Any other outcome (the rhythm's sleep, a wake, an
+        // emergency, no ask) ends the bout record.
+        let id = fauna.animals[i].id;
         let rest = match (rest, ask) {
-            (Some(_), crate::RestAsk::Stay) => None,
-            (Some(r), _) => Some(r),
-            (None, crate::RestAsk::Rest) if free && !emergency => Some(Rest::Sleep),
+            (Some(_), crate::RestAsk::Stay) => {
+                fauna.brain_bouts.remove(&id);
+                None
+            }
+            (Some(r), _) => {
+                fauna.brain_bouts.remove(&id);
+                Some(r)
+            }
+            (None, crate::RestAsk::Rest) if free && !emergency => {
+                let bout = phys.rest.brain_bout_s;
+                if bout.is_finite() && bout > 0.0 {
+                    let until = *fauna
+                        .brain_bouts
+                        .entry(id)
+                        .or_insert_with(|| tick + cubarium_voxel::ticks_at_least_one(bout));
+                    if tick >= until && !crate::sleep::deep_asleep(&fauna.animals[i]) {
+                        fauna.brain_bouts.remove(&id);
+                        fauna.rest_asks.remove(&id);
+                        fauna.animals[i].intent.executed.rest = crate::RestAsk::Default;
+                        fauna.animals[i].homing_ticks = 0;
+                        None
+                    } else {
+                        Some(Rest::Sleep)
+                    }
+                } else {
+                    Some(Rest::Sleep)
+                }
+            }
             (None, _) => {
+                fauna.brain_bouts.remove(&id);
                 fauna.animals[i].homing_ticks = 0;
                 None
             }
@@ -7133,6 +7170,9 @@ mod ground_response_tests;
 #[cfg(test)]
 #[path = "calls_rest_tests.rs"]
 mod calls_rest_tests;
+#[cfg(test)]
+#[path = "brain_rest_tests.rs"]
+mod brain_rest_tests;
 #[cfg(test)]
 #[path = "edge_tests.rs"]
 mod edge_tests;

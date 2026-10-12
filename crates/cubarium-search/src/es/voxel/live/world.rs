@@ -278,7 +278,8 @@ mod tests {
 
 /// **A training top-up** (BRAIN-FIX step 4, `--top-up LINEAGE=N[:FULLNESS]`): after the
 /// founding, `founder` is brought up to `bodies` grown bodies on its heuristic, placed on the
-/// faces other bodies stand on, for a lineage the training worlds found none of (the
+/// faces other bodies stand on (then, when those run out, the columns' top faces on a
+/// coarse grid), for a lineage the training worlds found none of (the
 /// lanternjaw founds as an egg bank, which the training worlds leave out). `fullness` is
 /// their reserve and stomach as a fraction of capacity (`None`: a placed body's default).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -327,5 +328,31 @@ pub fn top_up(sim: &mut Sim, t: TopUp) -> usize {
             placed += 1;
         }
     }
+    // BRAIN-REST step 4: a large body (the loftstrider) fits few of the faces small bodies
+    // stand on; when those run out, the columns' top faces on a coarse grid, in order.
+    let (width, depth) = (w.config().width, w.config().depth);
+    let stride = TOP_UP_STRIDE.max(1) as usize;
+    let mut k = sites.len();
+    'grid: for z in (0..depth).step_by(stride) {
+        for x in (0..width).step_by(stride) {
+            if have + placed >= t.bodies {
+                break 'grid;
+            }
+            let Some(y) = w.view().surface_y(i64::from(x), z) else { continue };
+            let site = cubarium_voxel_flora::Site { x, y, z };
+            if sites.contains(&site) {
+                continue;
+            }
+            let spec = BodySpec { stage: BodyStage::Adult, heading_rad: k as f64 * 1.3, fullness: t.fullness, ..BodySpec::default() };
+            k += 1;
+            if let Ok(Placed::Body { id, .. }) = sim.fauna_mut().place_body(&w, &flora, t.founder, Spot::Face(site), spec) {
+                sim.fauna_mut().set_controller(id, cubarium_voxel_fauna::heuristic(t.founder, teachers));
+                placed += 1;
+            }
+        }
+    }
     placed
 }
+
+/// The grid step of [`top_up`]'s fallback faces, voxels.
+const TOP_UP_STRIDE: u32 = 4;
