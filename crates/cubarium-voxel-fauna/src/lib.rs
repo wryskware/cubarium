@@ -4421,11 +4421,13 @@ pub enum Steer {
     /// SP-FOLLOW: a dependent young going to its mother, or holding still in contact with her
     /// to nurse ([`nurse::mother_goal`]).
     Nurse,
+    /// CALLS-REST: the walk down the hunter scent to a bed ([`sleep::bed_reflex`]).
+    Bed,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 20] = [
+    pub const ALL: [Steer; 21] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4446,6 +4448,7 @@ impl Steer {
         Steer::Host,
         Steer::Groom,
         Steer::Nurse,
+        Steer::Bed,
     ];
 
     /// A short name for tables.
@@ -4471,6 +4474,7 @@ impl Steer {
             Steer::Host => "host",
             Steer::Groom => "groom",
             Steer::Nurse => "nurse",
+            Steer::Bed => "bed",
         }
     }
 }

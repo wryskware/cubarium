@@ -978,6 +978,10 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         // requests to stay up (the walk home, the better roost), unchanged; a brain's request
         // to rest is granted when the body is free and not in an emergency. The rhythm stays
         // the backstop.
+        if rest.is_none() {
+            // CALLS-REST step 5: a bed search lasts one rest onset.
+            fauna.animals[i].doze.bed_until = 0;
+        }
         let ask = match rest {
             Some(_) => heuristic_rest_ask(fauna, i, view, fv, downpour),
             None => fauna.rest_asks.get(&fauna.animals[i].id).copied().unwrap_or_default(),
@@ -1069,6 +1073,11 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
 fn heuristic_rest_ask(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, downpour: bool) -> crate::RestAsk {
     let founder = fauna.animals[i].founder.expect("a founder");
     let phys = *fauna.config.founder(founder);
+    // CALLS-REST step 5: a heuristic body looks for a bed with no hunter scent first.
+    let heuristic = fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic;
+    if heuristic && crate::sleep::bed_ask(fauna, i, view) {
+        return crate::RestAsk::Stay;
+    }
     if crate::pack::must_walk_home(fauna, i, view)
         || (phys.glider.is_some()
             && !downpour
@@ -1995,6 +2004,16 @@ fn controllers(
                 lift = 0.0;
                 fled = true;
                 src = crate::Steer::Flee;
+            }
+        }
+        // CALLS-REST step 5: about to rest, a body smelling hunters walks down their scent to
+        // a bed (`sleep::bed_reflex`). Flight wins.
+        if driven && prey && !fled {
+            if let Some(go) = crate::sleep::bed_reflex(fauna, i, view) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Bed;
             }
         }
         // A glider's roost reflex (F3): at its rest hour or in a downpour, its own

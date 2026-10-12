@@ -233,3 +233,62 @@ pub(crate) fn step(fauna: &mut Fauna, i: usize, f: Founder, was_asleep: bool, se
     d.deep_until = now + ticks(s).max(1);
     true
 }
+
+// ---- step 5: rest sites read hunter scent ----
+
+/// The hunter scent body `a` smells where it stands, over its smell floor
+/// (`senses.smell_min`), and the field's gradient there (per metre, toward more scent);
+/// `None` when it does not smell.
+fn hunter_smell(fauna: &Fauna, view: &cubarium_voxel::VoxelView<'_>, a: &Animal) -> Option<(f64, f64, f64)> {
+    let f = a.founder?;
+    let t = fauna.config.founder(f).senses;
+    if !t.live || !(t.smell_min > 0.0) {
+        return None;
+    }
+    let r = fauna.scent.read(view, a)[crate::scent::ScentChannel::Hunter.index()];
+    Some((r.level / t.smell_min, r.gx, r.gz))
+}
+
+/// **A bed with no hunter scent** (module note; CALLS-REST step 5, §3.4): body `i`, a heuristic
+/// body its rhythm would put to rest, keeps looking — asks to stay up — while its search lasts
+/// (`rest.bed_search_s` from the rest's onset) and the hunter scent where it stands is at least
+/// `rest.bed_scent` × its smell floor. Reads only its own smell. `false`: it rests here.
+pub(crate) fn bed_ask(fauna: &mut Fauna, i: usize, view: &cubarium_voxel::VoxelView<'_>) -> bool {
+    let a = fauna.animals[i];
+    let Some(f) = a.founder else { return false };
+    let t = fauna.config.founder(f).rest;
+    if !(t.bed_scent > 0.0) || !(t.bed_search_s > 0.0) || a.state == State::Asleep {
+        return false;
+    }
+    let now = fauna.tick;
+    if a.doze.bed_until == 0 {
+        fauna.animals[i].doze.bed_until = now + ticks(t.bed_search_s).max(1);
+    }
+    now < fauna.animals[i].doze.bed_until && hunter_smell(fauna, view, &a).is_some_and(|(s, _, _)| s >= t.bed_scent)
+}
+
+/// **The walk to a bed** (step 5): a body searching for one ([`bed_ask`]: its search under way
+/// and hunter scent where it stands) walks down the hunter-scent gradient, not feeding; on a
+/// flat reading it walks on as it faces.
+pub(crate) fn bed_reflex(fauna: &Fauna, i: usize, view: &cubarium_voxel::VoxelView<'_>) -> Option<crate::Actions> {
+    let a = &fauna.animals[i];
+    let f = a.founder?;
+    let t = fauna.config.founder(f).rest;
+    if !(t.bed_scent > 0.0) || a.state == State::Asleep || !(fauna.tick < a.doze.bed_until) {
+        return None;
+    }
+    let (s, gx, gz) = hunter_smell(fauna, view, a)?;
+    if s < t.bed_scent {
+        return None;
+    }
+    let turn = if gx.hypot(gz) > 0.0 {
+        let want = (-gx).atan2(-gz);
+        let d = (want - a.pose.heading_rad).rem_euclid(std::f64::consts::TAU);
+        let diff = if d > std::f64::consts::PI { d - std::f64::consts::TAU } else { d };
+        (diff / std::f64::consts::FRAC_PI_4).clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
+    let forward = if turn.abs() >= 1.0 { 0.0 } else { 1.0 };
+    Some(crate::Actions { forward, turn, feed: 0.0 })
+}

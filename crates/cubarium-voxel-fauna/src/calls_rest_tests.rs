@@ -655,3 +655,56 @@ fn a_light_rester_wakes_to_a_stalking_hound_it_sees_and_a_deep_sleeper_does_not(
         assert_eq!(wakes(&f, &w, me), light.then_some(crate::rhythm::Wake::Sight), "light {light}");
     }
 }
+
+// ------------------------------------------------------------------ step 5: rest sites
+
+/// **A resting loftstrider picks a site without hound scent over an otherwise equal one that
+/// has it**: on a field a hound laid at one end (the hound then gone), a body about to rest on
+/// the scented spot keeps looking (asks to stay up) and walks down the scent, not feeding; the
+/// same body on the far, unscented spot of the same plain lies down there. Once its search time
+/// is spent it rests wherever it is.
+#[test]
+fn a_resting_loftstrider_picks_a_site_without_hound_scent() {
+    let w = world(51);
+    let flora = Flora::new(FloraConfig::default());
+    let mut c = config();
+    c.scent.half_life_s = 1e12;
+    let t = rest_table(&mut c);
+    t.bed_scent = 1.0;
+    t.bed_search_s = 5.0;
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let hound = body(&mut f, &w, VH, 1.0, EAST, 0.0);
+    for _ in 0..40 {
+        let mut field = std::mem::take(&mut f.scent);
+        field.update(&w.view(), &flora.view(), &f.animals, &f.config);
+        f.scent = field;
+    }
+    f.animals.retain(|a| a.id != hound);
+    let floor = f.config.founder(LS).senses.smell_min;
+    let me = body(&mut f, &w, LS, 2.0, WEST, 0.0);
+    let i = f.animals.iter().position(|a| a.id == me).unwrap();
+    let smell = |f: &Fauna, x: f64| {
+        let mut a = animal(f, me);
+        a.pose.x = x;
+        a.site.x = (x / VOXEL_M) as u32;
+        f.scent.read(&w.view(), &a)[crate::scent::ScentChannel::Hunter.index()]
+    };
+    let (near, far) = (smell(&f, 2.0), smell(&f, 7.0));
+    assert!(near.level >= floor && far.level < floor, "the fixture: scent {} at the near spot, {} at the far, floor {floor}", near.level, far.level);
+    assert!(crate::sleep::bed_ask(&mut f, i, &w.view()), "on the scented spot it keeps looking");
+    let go = crate::sleep::bed_reflex(&f, i, &w.view()).expect("it walks to a bed");
+    assert_eq!(go.feed, 0.0);
+    // Down the gradient: the scent's gradient points back at the source (west), so it turns
+    // east from facing west.
+    assert!(near.gx < 0.0 && go.turn != 0.0, "turns away from the source: {go:?}");
+    // The same body on the unscented spot lies down there.
+    place(&mut f, me, 7.0, LANE_Z, WEST);
+    animal_mut(&mut f, me).doze.bed_until = 0;
+    assert!(!crate::sleep::bed_ask(&mut f, i, &w.view()), "no scent: it rests here");
+    // Back on the scent with its search spent: it rests anyway.
+    place(&mut f, me, 2.0, LANE_Z, WEST);
+    f.tick += cubarium_voxel::ticks_at_least_one(5.0) + 1;
+    assert!(!crate::sleep::bed_ask(&mut f, i, &w.view()), "search spent");
+    assert!(crate::sleep::bed_reflex(&f, i, &w.view()).is_none());
+}
