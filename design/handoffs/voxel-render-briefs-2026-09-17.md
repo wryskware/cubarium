@@ -17,7 +17,7 @@ order: a **local window**, then the **Tachyon panel**, then the **LED cube**.
   world raster at `R8G8B8A8_SRGB`, a `present` pass (nearest ×k upscale plus
   quarter turn) into a window swapchain or a linear dma-buf for KMS. `Gpu::open`,
   `Renderer::record`, `PresentTransform::fit`, `read_raster`, the fullscreen
-  vertex shader and the SPIR-V build (`shaders/compile.sh`) are all reusable.
+  vertex shader and the shaders (hand-written WGSL in `shaders/` since 2026-10-12) are all reusable.
 - `crates/cubarium/src/sink/gpu/**`: `GpuSink` with `GpuTargetKind::{Shim,
   Window, Headless}`, `--gpu-capture DIR` PNGs, `--gpu-web-rate` viewer. The
   Window target reads the raster back into the desktop window each frame; Shim
@@ -124,8 +124,8 @@ world width is fresh-world config), measured fps on the Adreno 643.
 ## Rules
 
 Fast iteration; explicit-path commits; no cargo fmt; no long tests, no pinned
-hashes, no golden PNGs (captures are disposable evidence); GLSL and its SPIR-V
-checked in together via `shaders/compile.sh`; never enable
+hashes, no golden PNGs (captures are disposable evidence); shaders are the
+hand-written WGSL in `shaders/` (no compile step since 2026-10-12); never enable
 `drm_format_modifier` or touch the board's `DP-1` sysfs; do not touch
 `crates/cubarium-voxel-flora/**`, `design/handoffs/README.md`, the cube, or the
 running toy on port 7402; never HashMap iteration. Return the evidence: what was

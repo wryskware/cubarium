@@ -11,8 +11,8 @@ Rules: `design/handoffs/worker-rules-2026-10-07.md`. In brief:
 - No tool call over 5 minutes (`timeout 270`). A longer capture batch runs as one detached
   chain with a DONE marker, and you hand back.
 - Seed your own `target/` by reflink. Never put worktrees or targets under `/tmp`.
-- Commit with explicit paths. Recompile shaders with `crates/cubarium-gpu/shaders/compile.sh`
-  and commit the .spv.
+- Commit with explicit paths. Edit the WGSL in `crates/cubarium-gpu/shaders/` 
+  (the only shader source since WGSL-SOURCE, 2026-10-12; no compile step).
 - MP4s (x264 yuv444p crf 12) go to the main checkout's
   `art/gen/runs/cell-shrink-2026-10-10/`.
 - `unsafe` only for the `ash` FFI calls in `cubarium-gpu`.

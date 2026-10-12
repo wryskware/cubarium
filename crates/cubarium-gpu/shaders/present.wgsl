@@ -1,4 +1,5 @@
-// The existing present.frag algorithm, with transform data in a uniform buffer.
+// The window's present pass: the raster scaled into the window by area average, with the
+// transform data in a uniform buffer (`WindowFit`).
 struct Present { col0: vec4<f32>, offset: vec4<f32> }
 @group(0) @binding(0) var raster: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> p: Present;

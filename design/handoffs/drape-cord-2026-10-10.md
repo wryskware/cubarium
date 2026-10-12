@@ -11,8 +11,8 @@ Rules: `design/handoffs/worker-rules-2026-10-07.md` (no windows, 5-minute calls,
 return). No `unsafe` except the approved `ash` FFI calls inside `cubarium-gpu`, one call per
 block. Worktrees and targets never go under `/tmp` (a RAM disk). Put every picture and video
 you hand back under the **main checkout's** `art/gen/runs/drape-cord-2026-10-10/` (absolute
-path), not inside the worktree. Recompile shaders with `crates/cubarium-gpu/shaders/compile.sh`
-and commit the .spv.
+path), not inside the worktree. Edit the WGSL in `crates/cubarium-gpu/shaders/` 
+(the only shader source since WGSL-SOURCE, 2026-10-12; no compile step).
 
 **Another worker (GLOW-EASE, branch `glow-ease`) is editing `voxel.frag` and the emission
 path at the same time.** Keep your shader changes in new functions with small call-site
@@ -62,7 +62,7 @@ experimental face textures (`[voxel] textures`, off by default) give drapes a cu
 - **Mechanism: your call.** Authored cord tiles (a sheet like the latticevine's, rendered
   in `blender -b`) or a cord drawn procedurally in the shader. Pixel-constant width favours
   procedural; say which you chose and why.
-- **Shadows.** Say what drape cells do in the sun march today (`world.glsl` `sunReaches`).
+- **Shadows.** Say what drape cells do in the sun march today (`world.glsl`, now `world.wgsl`, `sunReaches`).
   A 1–2 px cord should not cast a whole cell's shadow; choose none or a thin one and say
   why.
 
@@ -97,7 +97,7 @@ merge, no deploy.
 
 ## Round 2 (2026-10-10): a long wave, wider than a column
 
-Round 1 merged (0173107e): the cord drawn in the shader (`shaders/drape_cord.glsl`, CPU
+Round 1 merged (0173107e): the cord drawn in the shader (`shaders/drape_cord.glsl`, now `drape_cord.wgsl`; CPU
 mirror `crates/cubarium-gpu/src/cord.rs`), each join a hash of its face, no shadow. Wrysk
 picked 2 px, eased, wander 0.5 (now the defaults, 34c0d824), and said: "the wave period
 could be much longer. could also have amplitude that crosses more than one voxel column.
