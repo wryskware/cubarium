@@ -172,8 +172,10 @@ impl State {
                     .with_inner_size(size),
             )?,
         );
-        let (gpu, surface) =
-            Gpu::open_for_window(event_loop.owned_display_handle(), window.clone())?;
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+            event_loop.owned_display_handle(),
+        ));
+        let (gpu, surface) = Gpu::open_for_window(descriptor, window.clone())?;
         let gpu = Arc::new(gpu);
         println!("device: {}", gpu.name);
         let renderer = Renderer::new(&gpu, atlas, layout)?;

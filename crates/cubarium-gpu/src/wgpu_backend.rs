@@ -107,18 +107,20 @@ impl Gpu {
     }
 
     /// Create the window's instance and surface before selecting its adapter.
+    /// Pass a descriptor created with `new_with_display_handle_from_env`.
     /// The owned display is essential for GLES presentation. The surface retains
     /// the window owner, so neither handle borrows the platform event loop.
-    pub fn open_for_window<D, W>(
-        display: D,
+    pub fn open_for_window<W>(
+        descriptor: wgpu::InstanceDescriptor,
         window: Arc<W>,
     ) -> Result<(Self, wgpu::Surface<'static>)>
     where
-        D: wgpu::WgpuHasDisplayHandle,
         W: wgpu::DisplayAndWindowHandle + 'static,
     {
-        let descriptor =
-            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display));
+        ensure!(
+            descriptor.display.is_some(),
+            "window GPU requires an owned display"
+        );
         let backends = descriptor.backends;
         let instance = wgpu::Instance::new(descriptor);
         let surface = instance

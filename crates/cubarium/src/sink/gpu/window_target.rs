@@ -27,7 +27,8 @@ impl WgpuWindowTarget {
         let (rw, rh) = (raster_size.0.max(1), raster_size.1.max(1));
         let zoom = ((1600 / rw).min(900 / rh)).max(1);
         let host = WindowHost::open(title, (rw * zoom, rh * zoom))?;
-        let (gpu, surface) = Gpu::open_for_window(host.display(), host.window())?;
+        let descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(host.display()));
+        let (gpu, surface) = Gpu::open_for_window(descriptor, host.window())?;
         let gpu = Arc::new(gpu);
         let presenter = WindowPresenter::from_surface(gpu.clone(), host.window(), surface, host.size())?;
         let target = Self { presenter, host, gpu: gpu.clone(), open: true, save: false, flight: VecDeque::new() };
