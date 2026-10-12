@@ -196,7 +196,7 @@ pub struct Vigilance {
     /// **FEAR-2** (module note): a flight, or a refuge watch, whose hunter it has not known
     /// within `flee_stop_m` for this long ends where it is, seconds; 0 never (S2's hold).
     pub lost_calm_s: f64,
-    /// **Woken by an alarm** (RHYTHMS-CADENCE, [`crate::rhythm::alarm_wakes`]): asleep it hears
+    /// **Woken by an alarm** (RHYTHMS-CADENCE, [`crate::rhythm::wakes`]): asleep it hears
     /// a running body (fleeing or bolting) at this share of its awake sensitivity (its hearing
     /// floor over this) and wakes; 0 sleeps through. Fraction.
     pub sleep_hearing: f64,
@@ -571,6 +571,10 @@ pub struct Vigil {
     /// **FEAR-2**: at its last sample it held its perch under a hunter (the refuge watch: in
     /// refuge, not in flight).
     pub refuge: bool,
+    /// **CALLS-REST**: its wound at its last herd sample (a rise since is a strike it took),
+    /// and the tick its current heeding of a call began (0: none; [`crate::calls::reaction`]).
+    pub wound_seen: f64,
+    pub heard_from: u64,
 }
 
 impl Vigilance {
@@ -629,6 +633,8 @@ struct Threat {
     calm: bool,
     /// From it, 3D (its base to the track's base), metres.
     d3: f64,
+    /// Seen (sight among the senses that hold it).
+    seen: bool,
     /// Gait inferred from a fresh moving track's lineage and visible length, m/s.
     gait: f64,
 }
@@ -642,7 +648,7 @@ fn calm_of(config: &FaunaConfig, vg: &Vigilance, a: &Animal, t: &Track, ring: f6
         return false;
     }
     match t.posture {
-        posture::ASLEEP => true,
+        posture::ASLEEP | posture::DOZE => true,
         posture::REST => {
             let (dx, dz) = crate::pose::wrapped_delta(t.x, t.z, a.pose.x, a.pose.z, ring);
             // FEAR-2: awake in contact (within the predation table's `still_threat_near_m`),
@@ -680,6 +686,7 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, v
                 pressing: !calm && (seen_pressing || t.modes & (HEARING | TREMOR) != 0),
                 calm,
                 d3: (d * d + dy * dy).sqrt(),
+                seen: t.modes & SIGHT != 0,
                 gait: if t.moving {
                     Founder::ALL.get(usize::from(t.lineage)).map_or(0.0, |&f| config.founder(f).cruise_body_lengths_per_s * t.size_m)
                 } else { 0.0 },
@@ -688,6 +695,18 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, v
         .collect();
     out.sort_by(|p, q| p.d.total_cmp(&q.d).then(p.id.cmp(&q.id)));
     out
+}
+
+/// **A pressing threat sensed since `since`** (CALLS-REST: a light rester's wake): body `a`'s
+/// record holds a threat it senses pressing (seen moving or near, heard, felt; not one it
+/// watches), fresh and from a sensing at or after `since`.
+pub(crate) fn pressing_since(fauna: &Fauna, a: &Animal, since: u64, view: &VoxelView<'_>) -> bool {
+    let Some(p) = fauna.percepts.get(&a.id) else { return false };
+    if p.tick < since {
+        return false;
+    }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    threats(&fauna.config, a, p, fauna.tick, ring, view.config.voxel_m).iter().any(|t| t.pressing)
 }
 
 /// **A readout** (FEAR-2's probe; no rule reads it): the threats the body `a` knows from its
@@ -1040,6 +1059,18 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
     let adult = a.body >= phys.core.birth_body;
     let need = if adult { vg.group_min.max(1) as usize } else { 1 };
     let k = founder.index();
+    // CALLS-REST: its calls, from what its record holds (§2.1).
+    {
+        let ts = crate::calls::ThreatSense {
+            pressing_m: th.iter().find(|t| t.pressing).map(|t| t.d),
+            seen_m: th.iter().find(|t| t.pressing && t.seen).map(|t| t.d),
+        };
+        let struck = a.wound > v.wound_seen + 1e-12;
+        v.wound_seen = a.wound;
+        if let Some(kind) = crate::calls::heuristic_calls(fauna, i, ts, struck, ring) {
+            fauna.ledger.vigil.calls[k][kind] += 1;
+        }
+    }
     let kin = if hk.enabled { kin_of(&fauna.config, &a, &p, now, ring) } else { None };
     let herd = hk.enabled && hk.herd_enabled;
     if herd && !v.hunkered {
@@ -1146,14 +1177,10 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         }
     }
     // The herd alarm: a kin heard running.
+    // CALLS-REST step 2: the alarm is a sensed call ([`crate::calls::sensed_alarm`]): its record
+    // is written at the sensing from the same rule this read off the tracks.
     if !v.fleeing && now >= v.alarm_ready && vg.alarm_emission_factor > 0.0 && now >= v.bolt_until {
-        let pc = fauna.config.perception;
-        let walk = |size: f64| (phys.cruise_body_lengths_per_s * size).max(0.0).powf(pc.hearing_speed_exp) * size.max(0.0).powf(pc.hearing_size_exp);
-        let bolting = p.tracks().iter().filter(|t| t.class == class::KIN && t.modes & HEARING != 0 && t.tick + 2 * pc.stagger_ticks() >= now).find(|t| {
-            let heard = t.loud * t.d_m.max(pc.hearing_near_m);
-            heard >= vg.alarm_emission_factor * walk(t.size_m)
-        });
-        if let Some(t) = bolting {
+        if let Some(t) = crate::calls::sensed_alarm(fauna, &a, now) {
             v.bolt_until = now + ticks(vg.alarm_bolt_s).max(1);
             // HUNKER: toward the kin it knows, not along the runner's heading.
             v.bolt_heading = match kin {
@@ -1164,6 +1191,8 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
             fauna.ledger.vigil.alarm_bolts[k] += 1;
         }
     }
+    let (reaction, heard_from) = crate::calls::reaction(fauna, i, v.heard_from, ring);
+    v.heard_from = heard_from;
     let mut out = None;
     if v.fleeing {
         let cornered = cornered(&fauna.config, &a, &v, now);
@@ -1172,6 +1201,18 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
         // A bunching body already beside its kin stands, head up, facing them.
         let beside = hk.enabled && !herd && kin.is_some_and(|(_, nearest)| nearest <= hk.ring_m);
         out = Some(head(&a, v.bolt_heading, if beside { 0.0 } else { 1.0 }, 0.0));
+    } else if let Some(r) = reaction {
+        // CALLS-REST: a heeded call (an alarm gathers it to its kin, head up; a distress call
+        // draws it to the caller).
+        fauna.ledger.vigil.call_reactions[k] += 1;
+        out = Some(match r {
+            crate::calls::Reaction::Walk { dx, dz } => head(&a, dx.atan2(dz), 1.0, 0.0),
+            crate::calls::Reaction::Face { heading } => {
+                let mut act = head(&a, heading, 0.0, 0.0);
+                act.forward = 0.0;
+                act
+            }
+        });
     } else if vg.orient_s > 0.0 {
         // A threat it has not faced: face it. Below its group it stands its ground, facing
         // the nearest pressing one.
@@ -1557,6 +1598,10 @@ pub struct VigilLedger {
     pub scans: [u64; Founder::COUNT],
     pub flees: [u64; Founder::COUNT],
     pub alarm_bolts: [u64; Founder::COUNT],
+    /// CALLS-REST: calls its heuristic emitted, per kind ([`crate::calls::kinds_of`] order),
+    /// and herd samples spent reacting to a heeded call.
+    pub calls: [[u64; crate::calls::MAX_CALL_KINDS]; Founder::COUNT],
+    pub call_reactions: [u64; Founder::COUNT],
     pub orients: [u64; Founder::COUNT],
     pub freezes: [u64; Founder::COUNT],
     pub refuges: [u64; Founder::COUNT],

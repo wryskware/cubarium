@@ -159,6 +159,9 @@ pub mod posture {
     pub const REST: u8 = 1;
     /// Asleep.
     pub const ASLEEP: u8 = 2;
+    /// **CALLS-REST**: lying in light rest, head up ([`crate::sleep`]). Every rule but the
+    /// sleeps-lighter rule reads it as [`ASLEEP`], as it read every sleeper before.
+    pub const DOZE: u8 = 3;
 }
 
 /// **FEAR**: `o`'s posture ([`posture`]): asleep; still (awake, no strike under way, not
@@ -169,7 +172,9 @@ pub mod posture {
 /// a hunter at a carcass) is active: FEAR's probe found prey fleeing a feeding Veilhound in at
 /// most 1 % of the seedporter's flight ticks (0–8 % of the loftstrider's), too little to rule on.
 pub fn posture_of(config: &FaunaConfig, o: &Animal) -> u8 {
-    if o.state == crate::State::Asleep {
+    if crate::sleep::light_rest(o) {
+        posture::DOZE
+    } else if o.state == crate::State::Asleep {
         posture::ASLEEP
     } else if o.state != crate::State::Cropping && o.strike.is_none() && !crate::moved_recently(&config.predation, o) {
         posture::REST
@@ -582,7 +587,11 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
     let b = &fauna.animals[i];
     let Some(f) = b.founder else { return Vec::new() };
     // RHYTHMS-CADENCE: a body that has stood still senses farther (`SenseTable::still_gain`).
-    let table = fauna.config.founder(f).senses.sensing(b.still_ticks);
+    let mut table = fauna.config.founder(f).senses.sensing(b.still_ticks);
+    // CALLS-REST: in light rest it senses at its `rest.rest_sense` share.
+    if crate::sleep::light_rest(b) {
+        table = table.resting(fauna.config.founder(f).rest.rest_sense);
+    }
     let reach = table.reach_m(day);
     if !(reach > 0.0) {
         return Vec::new();
@@ -726,7 +735,7 @@ pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool
         .enumerate()
         .filter(|(_, a)| {
             a.founder.is_some_and(|f| fauna.config.founder(f).senses.live)
-                && a.state != crate::State::Asleep
+                && (a.state != crate::State::Asleep || crate::sleep::light_rest(a))
                 && a.attached.is_none()
                 && a.id % stagger == tick % stagger
         })
@@ -763,6 +772,8 @@ pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool
     for (i, tracks, cost) in results {
         let (id, founder) = (fauna.animals[i].id, fauna.animals[i].founder.expect("a live lineage"));
         fold(fauna, id, founder, &tracks, None);
+        // CALLS-REST step 2: the sensed calls (the frondgrazer's bolt alarm) are heard here.
+        crate::calls::sense_alarms(fauna, id, founder);
         let l = &mut fauna.ledger;
         l.percept_sensings += 1;
         l.percept_pairs += cost.pairs;

@@ -223,7 +223,7 @@ fn body_row(fauna: &Fauna, a: &Animal, frame: &Frame, t: &Track, range_m: f64, l
     r[8] = rel_heading.cos();
     r[9] = f64::from(t.moving);
     r[10] = f64::from(t.posture == posture::REST);
-    r[11] = f64::from(t.posture == posture::ASLEEP);
+    r[11] = f64::from(t.posture == posture::ASLEEP || t.posture == posture::DOZE);
     r[14] = f64::from(t.lame);
     r[15] = level(t.size_m, own_length);
     r[16] = if lost_s > 0.0 { (1.0 - age_s / lost_s).clamp(0.0, 1.0) } else { 0.0 };

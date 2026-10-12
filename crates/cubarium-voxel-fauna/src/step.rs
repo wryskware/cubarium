@@ -868,8 +868,8 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
     // may hear (none to read while nobody sleeps).
     let hours = crate::rhythm::hours_per_tick(&view.config.day);
     let seed = view.config.seed;
-    let running = if fauna.animals.iter().any(|a| a.state == State::Asleep) {
-        crate::rhythm::running_bodies(fauna)
+    let loud = if fauna.animals.iter().any(|a| a.state == State::Asleep) {
+        crate::rhythm::loud_bodies(fauna)
     } else {
         Vec::new()
     };
@@ -919,13 +919,19 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
                 a.rest_ticks = 0;
             }
         }
-        // A sleeper that hears a run (the alarm wave) wakes and stays up for `alert_s`.
-        if fauna.animals[i].state == State::Asleep
-            && !running.is_empty()
-            && crate::rhythm::alarm_wakes(fauna, i, &running)
-        {
-            fauna.animals[i].alert_ticks = fauna.animals[i].alert_ticks.max(alert_ticks);
-            fauna.ledger.alarm_wakes_by_founder[founder.index()] += 1;
+        // CALLS-REST: the one wake rule (`rhythm::wakes`): a footfall it hears (a run, or a
+        // rush where its lineage hears one), a heeded call, or in light rest a pressing threat.
+        // It stays up for `alert_s`.
+        if fauna.animals[i].state == State::Asleep {
+            if let Some(why) = crate::rhythm::wakes(fauna, view, i, &loud) {
+                fauna.animals[i].alert_ticks = fauna.animals[i].alert_ticks.max(alert_ticks);
+                let k = founder.index();
+                match why {
+                    crate::rhythm::Wake::Footfall => fauna.ledger.alarm_wakes_by_founder[k] += 1,
+                    crate::rhythm::Wake::Call => fauna.ledger.call_wakes_by_founder[k] += 1,
+                    crate::rhythm::Wake::Sight => fauna.ledger.sight_wakes_by_founder[k] += 1,
+                }
+            }
         }
         let a = &fauna.animals[i];
         let hungry = hunger(a, &phys.core);
@@ -972,6 +978,10 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         // requests to stay up (the walk home, the better roost), unchanged; a brain's request
         // to rest is granted when the body is free and not in an emergency. The rhythm stays
         // the backstop.
+        if rest.is_none() {
+            // CALLS-REST step 5: a bed search lasts one rest onset.
+            fauna.animals[i].doze.bed_until = 0;
+        }
         let ask = match rest {
             Some(_) => heuristic_rest_ask(fauna, i, view, fv, downpour),
             None => fauna.rest_asks.get(&fauna.animals[i].id).copied().unwrap_or_default(),
@@ -1040,6 +1050,20 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         if let Some(b) = a.bout.as_mut() {
             b.kind = b.kind.max(kind);
         }
+        // CALLS-REST: the body's light-or-deep choice inside its rest ([`crate::sleep`]).
+        let began = crate::sleep::step(fauna, i, founder, was_asleep, seed);
+        let a = &fauna.animals[i];
+        let k = founder.index();
+        if a.state == State::Asleep {
+            if a.doze.light {
+                fauna.ledger.light_rest_ticks_by_founder[k] += 1;
+            } else {
+                fauna.ledger.deep_sleep_ticks_by_founder[k] += 1;
+            }
+        }
+        if began {
+            fauna.ledger.deep_bouts_by_founder[k] += 1;
+        }
     }
 }
 
@@ -1049,6 +1073,11 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
 fn heuristic_rest_ask(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, downpour: bool) -> crate::RestAsk {
     let founder = fauna.animals[i].founder.expect("a founder");
     let phys = *fauna.config.founder(founder);
+    // CALLS-REST step 5: a heuristic body looks for a bed with no hunter scent first.
+    let heuristic = fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic;
+    if heuristic && crate::sleep::bed_ask(fauna, i, view) {
+        return crate::RestAsk::Stay;
+    }
     if crate::pack::must_walk_home(fauna, i, view)
         || (phys.glider.is_some()
             && !downpour
@@ -1774,6 +1803,8 @@ fn controllers(
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
                     let brain = c.layer() == crate::Layer::Brain;
                     if menu_body && (brain || tap) {
+                        #[cfg(feature = "profile")]
+                        let _intent = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaIntent);
                         prep = Some(crate::subjects::decision_prep(fauna, i, founder));
                     }
                     let response = match prep.as_ref() {
@@ -1975,6 +2006,16 @@ fn controllers(
                 lift = 0.0;
                 fled = true;
                 src = crate::Steer::Flee;
+            }
+        }
+        // CALLS-REST step 5: about to rest, a body smelling hunters walks down their scent to
+        // a bed (`sleep::bed_reflex`). Flight wins.
+        if driven && prey && !fled {
+            if let Some(go) = crate::sleep::bed_reflex(fauna, i, view) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Bed;
             }
         }
         // A glider's roost reflex (F3): at its rest hour or in a downpour, its own
@@ -2297,6 +2338,8 @@ fn controllers(
                     crate::intent::record_brain(fauna, i, src, &d, prep, executed);
                 }
                 _ => {
+                    #[cfg(feature = "profile")]
+                    let _intent = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaIntent);
                     let teach = if heuristic {
                         crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
                     } else {
@@ -5416,6 +5459,7 @@ fn newborn(
         pack: None,
         homing_ticks: 0,
         rest_ticks: 0,
+        doze: crate::sleep::Doze::default(),
         yielding: false,
         hunkered: false,
         // A newborn starts with an empty stomach and its eating latch off (repair 2
@@ -6939,6 +6983,9 @@ mod lure_dusk_tests;
 #[cfg(test)]
 #[path = "ground_response_tests.rs"]
 mod ground_response_tests;
+#[cfg(test)]
+#[path = "calls_rest_tests.rs"]
+mod calls_rest_tests;
 #[cfg(test)]
 #[path = "edge_tests.rs"]
 mod edge_tests;

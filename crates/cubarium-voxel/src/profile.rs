@@ -102,10 +102,13 @@ pub enum Phase {
     FaunaLight,
     /// The flyer nectar plume read inside the serial reflexes.
     FaunaNectar,
+    /// CALLS-REST: the menu lineages' intent records and decision inputs (their subject
+    /// candidates), inside the observations (a brain's) and the reflexes (a heuristic's).
+    FaunaIntent,
 }
 
 impl Phase {
-    pub const ALL: [Phase; 55] = [
+    pub const ALL: [Phase; 56] = [
         Phase::WorldStep,
         Phase::Begin,
         Phase::Rain,
@@ -161,6 +164,7 @@ impl Phase {
         Phase::FaunaRemote,
         Phase::FaunaLight,
         Phase::FaunaNectar,
+        Phase::FaunaIntent,
     ];
     pub const COUNT: usize = Phase::ALL.len();
 
@@ -238,6 +242,7 @@ impl Phase {
             Phase::FaunaRemote => "      remote perception (part of windows)",
             Phase::FaunaLight => "      light and loom (part of reflexes)",
             Phase::FaunaNectar => "      nectar plume (part of reflexes)",
+            Phase::FaunaIntent => "      intent records and subject candidates (part of observe and reflexes)",
         }
     }
 }

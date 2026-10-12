@@ -665,6 +665,10 @@ pub struct FounderPhysiology {
     /// range for a lineage without call kinds.
     #[serde(default)]
     pub calls: crate::calls::CallTable,
+    /// **Its rest physiology** (CALLS-REST, [`crate::sleep::RestTable`]): off (the whole rest
+    /// deep) but for the loftstrider and the Veilhound.
+    #[serde(default)]
+    pub rest: crate::sleep::RestTable,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2046,6 +2050,7 @@ impl FounderPhysiology {
         p.grooming = crate::groom::grooming_of(founder);
         p.intent = crate::intent::intent_of(founder);
         p.calls = crate::calls::calls_of(founder);
+        p.rest = crate::sleep::rest_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2180,6 +2185,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2281,6 +2287,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2427,6 +2434,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -6647,6 +6655,18 @@ impl SenseTable {
         self.sight_range_m(day).max(self.hearing_m).max(self.tremor_m)
     }
 
+    /// This table in light rest (CALLS-REST, [`crate::sleep`]): its ranges at `share`.
+    pub fn resting(&self, share: f64) -> SenseTable {
+        let s = if share.is_finite() { share.max(0.0) } else { 1.0 };
+        SenseTable {
+            sight_m: self.sight_m * s,
+            sight_night_m: self.sight_night_m * s,
+            hearing_m: self.hearing_m * s,
+            tremor_m: self.tremor_m * s,
+            ..*self
+        }
+    }
+
     /// This table as a body that has been still for `still_ticks` senses
     /// ([`SenseTable::still_gain`]): itself while it moves or the gain is at most 1.
     pub fn sensing(&self, still_ticks: u64) -> SenseTable {
@@ -6753,8 +6773,11 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // 360° from the eye ring: moving bodies at 12 m by day, 6 at night, static at 8 and
         // 4; large-body movement heard at 8 m, louder to 10; ~2 m of ground disturbance;
         // animal odour at 2–3 m.
+        // CALLS-REST (behaviour-AI §2.1): it weighs four of its family (kin 1 -> 4), so a
+        // family member can see its group.
         Founder::Loftstrider => SenseTable {
             live: true,
+            kin_tracks: 4,
             sight_m: 12.0,
             sight_night_m: 6.0,
             sight_still_fraction: 8.0 / 12.0,
@@ -6825,8 +6848,11 @@ pub fn senses_of(founder: Founder) -> SenseTable {
         // far as a moving one; 9 m at night (Astra's 8–10; it stays a day hunter, D4); hearing
         // 10 m, the territory radius, of a frondgrazer moving at 0.05 m/s (the branch's
         // threshold for its main prey: 0.05 × 0.75 / 10); ~1 m of footfall; smell ~6 m.
+        // CALLS-REST (behaviour-AI §2.1): it weighs four of its pack (kin 1 -> 4), so a pack
+        // member can see its group.
         Founder::Chorister => SenseTable {
             live: true,
+            kin_tracks: 4,
             sight_m: 16.0,
             sight_night_m: 9.0,
             sight_still_fraction: 1.0,

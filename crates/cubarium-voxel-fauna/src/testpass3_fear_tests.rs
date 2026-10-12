@@ -160,6 +160,7 @@ fn calm_margin_boundary_uses_height_and_walks_without_food() {
         z: a.pose.z,
         id: 91,
         calm: true,
+        seen: true,
         pressing: false,
     };
     let act = calm_walk(&f, &w.view(), &a, &vg(&f), &[t], ring(&w)).expect("on the 3D margin");
@@ -199,6 +200,7 @@ fn refused_calm_walk_stops_at_replan_boundary() {
         z: a.pose.z,
         id: 91,
         calm: true,
+        seen: true,
         pressing: false,
     };
     let limit = cubarium_voxel::ticks_at_least_one(f.config.teachers.press_replan_s);
@@ -265,6 +267,7 @@ fn a_reappearing_hunter_restarts_the_lost_clock() {
         z: v.from_z,
         id: 91,
         calm: false,
+        seen: true,
         pressing: true,
     };
     let now = 10 + ticks(vg(&f).lost_calm_s);

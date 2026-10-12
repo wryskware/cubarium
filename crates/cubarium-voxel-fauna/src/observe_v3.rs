@@ -32,7 +32,7 @@ use cubarium_voxel::VoxelView;
 use cubarium_voxel_flora::{FloraView, Site};
 
 use crate::manifest::{HEIGHT_REFERENCE_M, Manifest, SCENT_REFERENCE, TREMOR_REFERENCE};
-use crate::perception::{HEARING, Percept, Track, class, posture};
+use crate::perception::{Percept, Track, class, posture};
 use crate::scent::{ScentChannel, ScentReading};
 use crate::{Animal, Fauna, MobilityMode};
 
@@ -125,7 +125,7 @@ pub fn slot(t: &Track, frame: &Frame, range_m: f64, fresh_s: f64) -> [f64; 7] {
         c,
         proximity(d, range_m),
         f64::from(t.moving),
-        f64::from(t.posture == posture::REST || t.posture == posture::ASLEEP),
+        f64::from(t.posture == posture::REST || t.posture == posture::ASLEEP || t.posture == posture::DOZE),
         clamp01(1.0 - age_s / fresh_s),
     ]
 }
@@ -253,25 +253,14 @@ pub(crate) fn encode(
 /// **The herd alarm** as the vigil hears it: a kin track heard in the latest sensings whose
 /// loudness at its distance is at least the lineage's `alarm_emission_factor` times a
 /// walking kin's. 0 for a lineage that hears no alarm.
-fn kin_alarm(fauna: &Fauna, a: &Animal, p: &Percept) -> f64 {
+pub(crate) fn kin_alarm(fauna: &Fauna, a: &Animal, _p: &Percept) -> f64 {
     let Some(founder) = a.founder else { return 0.0 };
-    let phys = fauna.config.founder(founder);
-    let vg = phys.vigilance;
-    if !(vg.alarm_emission_factor > 0.0) {
+    if !(fauna.config.founder(founder).vigilance.alarm_emission_factor > 0.0) {
         return 0.0;
     }
-    let pc = fauna.config.perception;
-    let now = fauna.tick;
-    let walk = |size: f64| {
-        (phys.cruise_body_lengths_per_s * size).max(0.0).powf(pc.hearing_speed_exp) * size.max(0.0).powf(pc.hearing_size_exp)
-    };
-    let heard = p.tracks().iter().any(|t| {
-        t.class == class::KIN
-            && t.modes & HEARING != 0
-            && t.tick + 2 * pc.stagger_ticks() >= now
-            && t.loud * t.d_m.max(pc.hearing_near_m) >= vg.alarm_emission_factor * walk(t.size_m)
-    });
-    f64::from(heard)
+    // CALLS-REST step 2: the bolt alarm's record, written at the sensing from the rule this
+    // read off the tracks (byte-identical).
+    f64::from(crate::calls::sensed_alarm(fauna, a, fauna.tick).is_some())
 }
 
 /// The nearest carcass face within `range_m` (`valid, sin, cos, proximity`).
