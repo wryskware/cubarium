@@ -39,6 +39,10 @@ mod testpass3_drop_tests;
 #[path = "sp_stuck_tests.rs"]
 mod sp_stuck_tests;
 
+#[cfg(test)]
+#[path = "sp_stuck2_tests.rs"]
+mod sp_stuck2_tests;
+
 /// **A lineage's jump down** when trapped (DROP). A reach at or under its step is no jump.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
