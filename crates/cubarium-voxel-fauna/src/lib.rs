@@ -64,6 +64,8 @@ pub mod kick;
 pub mod calls;
 #[cfg(test)]
 mod intent_tests;
+#[cfg(test)]
+mod force_tests;
 pub use nurse::Nursing;
 #[cfg(test)]
 mod nurse_tests;
@@ -4245,6 +4247,10 @@ pub struct Fauna {
     /// circadian stage grants when the body may rest. Session state.
     #[serde(skip)]
     pub(crate) rest_asks: FxHashMap<u64, RestAsk>,
+    /// TWO-LAYER: bodies held to their controller's **own** answer for a staged cloning
+    /// scene ([`Fauna::force_own`]). Session state, empty in every ordinary world.
+    #[serde(skip)]
+    pub(crate) forced_own: rustc_hash::FxHashSet<u64>,
     /// CONTRACTS: the calls emitted since the last hearing ([`calls`]). Session state.
     #[serde(skip)]
     pub(crate) calls: Vec<calls::CallEvent>,
@@ -4822,6 +4828,7 @@ impl Fauna {
             pack_hint: FxHashMap::default(),
             brain_memory: FxHashMap::default(),
             rest_asks: FxHashMap::default(),
+            forced_own: Default::default(),
             calls: Vec::new(),
             last_call: FxHashMap::default(),
             heard: FxHashMap::default(),
@@ -4998,6 +5005,21 @@ impl Fauna {
     /// tick's controller stage drives. Accepted only for a body that exists; `true`
     /// when installed. A fresh episode clears a controller's own memory through
     /// [`Controller::reset`] — reinstalling is not what resets hidden state.
+    /// **TWO-LAYER's mode-forcing hook** for staged cloning scenes (behaviour-AI §11.3,
+    /// "alternative-mode examples"): while `on`, body `animal_id` holds its controller's
+    /// own answer (its heuristic's base mode: the seedporter's forage, the lanternjaw's
+    /// ambush, the loftstrider's graze) over every heuristic-layer override (flight, roost,
+    /// nursing walks, patrol, the carcass yield, herding, grooming, the walks to food).
+    /// DROP, WADE-OUT and the shallows still win: a brain's body keeps them too. Off for
+    /// every body unless a scene asks; not saved.
+    pub fn force_own(&mut self, animal_id: u64, on: bool) {
+        if on {
+            self.forced_own.insert(animal_id);
+        } else {
+            self.forced_own.remove(&animal_id);
+        }
+    }
+
     pub fn set_controller(&mut self, animal_id: u64, controller: Box<dyn Controller>) -> bool {
         if self.view().animal(animal_id).is_none() {
             return false;
