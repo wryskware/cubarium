@@ -1,0 +1,54 @@
+# BALANCE sweep from config/engagement-young-roam.toml; knobs ['roam:fauna.founders.loftstrider.young.roam_m:5,20', 'exm:fauna.founders.loftstrider.young.excursion_m:10,40', 'exs:fauna.founders.loftstrider.young.excursion_s:60,240']; sets []
+duration_s = 300.0
+episodes = 40
+width = 480
+height = 48
+depth = 400
+voxel_m = 0.25
+soil_layers = 2
+distance_m = [40.0, 44.0]
+spacing_m = 0.5
+depth_jitter_m = 1.0
+adult_body = [0.9, 1.0]
+calf_body = [0.3, 0.35]
+family_fullness = [0.85, 0.95]
+pack_fullness = [0.1, 0.2]
+adult_age_s = [20000.0, 20000.0]
+calf_age_s = [7500.0, 7500.0]
+usual_prey = false
+
+[[arms]]
+name = "strays-3--roam5"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.roam_m=5"]
+
+[[arms]]
+name = "strays-3--roam20"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.roam_m=20"]
+
+[[arms]]
+name = "strays-3--exm10"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.excursion_m=10"]
+
+[[arms]]
+name = "strays-3--exm40"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.excursion_m=40"]
+
+[[arms]]
+name = "strays-3--exs60"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.excursion_s=60"]
+
+[[arms]]
+name = "strays-3--exs240"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.young.excursion_s=240"]
