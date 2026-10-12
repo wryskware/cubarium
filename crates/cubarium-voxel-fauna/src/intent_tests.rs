@@ -716,3 +716,39 @@ fn a_save_mid_hold_restores_the_intent_its_subject_and_hold_the_brain_memory_and
     }
     assert_eq!(handle.lock().unwrap().clone(), Some(memory));
 }
+
+// ---- Step 7: founder kinship (§11.6) ----
+
+#[test]
+fn a_packs_founders_are_littermates_of_a_founding_mother_no_living_body_is() {
+    let (_, _, f, ids) = mixed_world(quiet_config());
+    let hounds: Vec<crate::Animal> = f.animals.iter().filter(|a| a.founder == Some(Founder::Chorister)).copied().collect();
+    assert_eq!(hounds.len(), 2);
+    let m = hounds[0].mother.expect("a founding mother id");
+    assert!(crate::is_founding_mother(m));
+    assert!(f.animals.iter().all(|a| a.id != m), "it names no living body");
+    assert!(crate::siblings(&hounds[0], &hounds[1]));
+    assert!(hounds.iter().all(|h| crate::mother_body(h).is_none()));
+    // Bodies founded alone have no mother and are nobody's siblings.
+    let lone: Vec<crate::Animal> = ids.iter().filter_map(|&id| f.view().animal(id).copied()).filter(|a| a.founder == Some(Founder::Seedporter)).collect();
+    assert!(lone.iter().all(|a| a.mother.is_none()));
+    assert!(!crate::siblings(&lone[0], &lone[1]));
+}
+
+#[test]
+fn a_founding_mother_is_read_as_no_mother_by_nursing_and_siblings_need_a_shared_id() {
+    let w = clock_off(4);
+    let mut c = quiet_config();
+    c.founders[Founder::Seedporter.index()].nursing.weaning_age_s = 1.0e6;
+    let mut f = Fauna::new(c);
+    let a = introduce(&mut f, &w, Founder::Seedporter, StartingStores::FULL);
+    let b = introduce(&mut f, &w, Founder::Seedporter, StartingStores::FULL);
+    let calf = introduce(&mut f, &w, Founder::Seedporter, StartingStores::FULL);
+    f.record_founding_family(&[a, b], a);
+    animal_mut(&mut f, calf).mother = Some(a);
+    let (ia, ic) = (index_of(&f, a), index_of(&f, calf));
+    assert!(!crate::nurse::dependent(&f, ia), "a founder is nobody's dependent young");
+    assert!(crate::nurse::dependent(&f, ic), "a young with a real mother is");
+    assert!(crate::siblings(&animal(&f, a), &animal(&f, b)));
+    assert!(!crate::siblings(&animal(&f, a), &animal(&f, calf)));
+}

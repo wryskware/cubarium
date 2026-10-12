@@ -615,7 +615,7 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
     let sight_scale = if fauna.percepts.get(&b.id).is_some_and(|p| p.vigil.head_down(now)) { table.feeding_sight_fraction } else { 1.0 };
     // SP-FOLLOW: a dependent young weighs its mother over its kin cap
     // ([`crate::nurse::weighs_as_mother`]); `None` when it has none to weigh, or once weighed.
-    let mut mother = b.mother.filter(|&m| crate::nurse::weighs_as_mother(fauna, i, m) && cand.iter().any(|c| c.1 == m));
+    let mut mother = crate::mother_body(b).filter(|&m| crate::nurse::weighs_as_mother(fauna, i, m) && cand.iter().any(|c| c.1 == m));
     for &(_, oid, k, c) in &cand {
         if c == class::KIN && mother == Some(oid) {
             mother = None;

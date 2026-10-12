@@ -180,6 +180,10 @@ pub use snapshot::SCHEMA;
 /// [`Animal::mother`] for a body (nursing, the mother pull, the census) treats it as no mother.
 pub const FOUNDING_MOTHER_BIT: u64 = 1 << 63;
 
+/// A pack's founding group: this bit over its pack id (a family's group is its first
+/// founder's id, which never reaches it).
+pub const FOUNDING_PACK_TAG: u64 = 1 << 40;
+
 /// The founding mother id of founding group `group` ([`FOUNDING_MOTHER_BIT`]).
 pub const fn founding_mother(group: u64) -> u64 {
     FOUNDING_MOTHER_BIT | group
@@ -5372,6 +5376,8 @@ impl Fauna {
                 });
             }
         }
+        // CONTRACTS (§11.6): one pack's founders are littermates of a founding mother.
+        self.record_founding_family(&members, FOUNDING_PACK_TAG | id);
         self.next_pack += 1;
         self.packs.push(PackRecord {
             id,
@@ -5395,6 +5401,21 @@ impl Fauna {
             season: Season::default(),
         });
         Some(id)
+    }
+
+    /// **Record founders as one family** (CONTRACTS, behaviour-AI §11.6): `ids` share the
+    /// founding mother id of `group` ([`founding_mother`]), so they are sisters (a family) or
+    /// littermates (a pack) from the first generation; nothing reads it as a living mother.
+    /// A body that already has a recorded mother keeps it.
+    pub fn record_founding_family(&mut self, ids: &[u64], group: u64) {
+        let m = founding_mother(group & !FOUNDING_MOTHER_BIT);
+        for &id in ids {
+            if let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) {
+                if self.animals[i].mother.is_none() {
+                    self.animals[i].mother = Some(m);
+                }
+            }
+        }
     }
 
     pub fn view(&self) -> FaunaView<'_> {
