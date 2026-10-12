@@ -195,7 +195,10 @@ use crate::{Fauna, FaunaConfig};
 // 85: BRAIN-REST — `Fauna::rest_asks` (a brain's rest ask, now saved) and
 //     `Fauna::brain_bouts` (the end tick of a granted brain rest bout). `rest.brain_bout_s`
 //     is named config, not a bump.
-pub const SCHEMA: u32 = 85;
+// 86: NUTS — `Fauna::tree_checks` (each glider's tree-check memory, `TreeChecks`) and the
+//     ledger's `fruit_eaten_by_plant` (a state layout change). `Glider::{check_search_m,
+//     check_memory_s}` are named config, not bumps.
+pub const SCHEMA: u32 = 86;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

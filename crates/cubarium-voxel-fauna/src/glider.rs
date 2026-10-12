@@ -418,6 +418,9 @@ pub(super) fn glider_act(
     {
         a.site = site;
     }
+    // NUTS: in a host's crown it sees what the host holds, hungry or not, every tick it is
+    // there (a perch may last a tick before it glides off).
+    crate::treecheck::note(fauna, i, view, &flora.view());
 }
 
 /// On the ground: the walker's act, then a stem, a vine or an edge.
@@ -1200,6 +1203,19 @@ fn glider_feed(
     };
     super::forage::note_bite(fauna, i, phys, Food::Fruit, manifest.controller_period_s, effort, stock, key);
     let bite = gut_bite(&fauna.animals[i], phys, Food::Fruit, manifest.controller_period_s, effort, stock);
+    // NUTS: a stand's fruit is bitten at its species' handling (a nut, opened, is slower to
+    // eat than pulp); and its seeds ride in the gut only when the species' do.
+    let (handling, seeds_ride) = match source {
+        Bloom::Stand(site) => {
+            let fv = flora.view();
+            fv.stand_at(site).map_or((1.0, true), |s| {
+                let sc = fv.config.species(s.species);
+                (sc.fruit_handling.clamp(0.0, 1.0), sc.fruit_seeds_in_gut)
+            })
+        }
+        Bloom::Vine(_) => (1.0, true),
+    };
+    let bite = handling * bite;
     if !(bite > 0.0) {
         return false;
     }
@@ -1240,10 +1256,11 @@ fn glider_feed(
     if let Some(SeedPlant::Stand(sp)) = plant {
         fauna.ledger.bites_by_plant[sp.index()] += 1;
         fauna.ledger.eaten_by_plant[sp.index()] += taken.organic;
+        fauna.ledger.fruit_eaten_by_plant[sp.index()] += taken.organic;
     }
     // The seeds ride in the gut: their share of all three currencies.
     let rest = match (phys.gut_seeds, plant) {
-        (Some(gut), Some(plant)) if gut.seeds_per_fruit_organic > 0.0 => {
+        (Some(gut), Some(plant)) if gut.seeds_per_fruit_organic > 0.0 && seeds_ride => {
             let f = gut.seeds_per_fruit_organic.clamp(0.0, 1.0);
             let seeds = Taken {
                 organic: f * taken.organic,
@@ -1800,7 +1817,7 @@ fn travel_forward(a: &Animal) -> (f64, f64) {
 /// unchanged).
 ///
 /// **S2**: a glider whose table is live finds fruit by sight instead ([`fruit_by_sight`]).
-pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
+pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<(Actions, crate::Steer)> {
     let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
@@ -1835,14 +1852,29 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
         if a.mobility.mode == MobilityMode::Climb {
             fauna.animals[i].mobility.falling = true;
         }
-        return Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 });
+        return Some((Actions { forward: 1.0, turn: 0.0, feed: 0.0 }, crate::Steer::Fruit));
     }
     if a.mobility.mode != MobilityMode::Ground { return None; }
-    if phys.senses.live {
-        return fruit_by_sight(fauna, i, view, fv, day);
+    let fruit = if phys.senses.live {
+        fruit_by_sight(fauna, i, view, fv, day)
+    } else {
+        // NUTS: hidden fruit counts only within its sight of the body's eye.
+        let v = view.config.voxel_m;
+        let ring = f64::from(view.config.width) * v;
+        let eye = crate::body_of(&fauna.config, &a)
+            .map_or((a.pose.x, a.pose.y_m, a.pose.z), |g| crate::senses::cone_origin(view, &a.pose, a.sense_layer(v), &g));
+        let seen = |s: &cubarium_voxel_flora::Stand| {
+            let (dx, dz) = crate::pose::wrapped_delta(eye.0, eye.2, (f64::from(s.site.x) + 0.5) * v, (f64::from(s.site.z) + 0.5) * v, ring);
+            let my = crate::surface_m(s.site.y, v) + 0.5 * fv.config.species(s.species).crown_height_m_at(s.wood);
+            fruit_in_sight(fv, s, dx.hypot(dz).hypot(my - eye.1))
+        };
+        let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| s.fruit > 0.0 && climbable(fv, s, &glider) && seen(s));
+        walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
+    };
+    if let Some(go) = fruit {
+        return Some((go, crate::Steer::Fruit));
     }
-    let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| s.fruit > 0.0 && climbable(fv, s, &glider));
-    walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
+    check_tree(fauna, i, view, fv).map(|go| (go, crate::Steer::Check))
 }
 
 // Face food keys use a separate namespace from stand IDs and vine ledge walks.
@@ -1921,6 +1953,10 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
             if d3 > range || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
                 continue;
             }
+            // NUTS: fruit hidden among a crown's leaves is seen only from close by.
+            if !fruit_in_sight(fv, stand, d3) {
+                continue;
+            }
             seen.push((d3, stand.id, stand.site, (sx, my, sz)));
         }
     }
@@ -1945,6 +1981,38 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
     // EDGE: of those it sees, the nearest it can walk to on its route graph.
     let clear: Vec<(f64, u64, Site, (f64, f64, f64))> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
     Some(clear)
+}
+
+/// NUTS: whether a stand's hanging fruit is seen at `d3` metres from the eye to its crown's
+/// middle: within its species' `fruit_sight_m` (0: no limit, today's sight).
+fn fruit_in_sight(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, d3: f64) -> bool {
+    let lim = fv.config.species(stand.species).fruit_sight_m;
+    !(lim > 0.0) || d3 <= lim
+}
+
+/// **NUTS: the check** ([`crate::treecheck`]): a hungry grounded glider that sees no food
+/// walks to the nearest host that may hold food it cannot see, within `check_search_m`, that
+/// it can climb and can walk to — the one it is already walking to first, then a host it
+/// remembers holding food, one it remembers empty not at all — and walking into the stem
+/// climbs it to the crown, where it looks.
+/// `None` with the check off or no host to check.
+fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let glider = fauna.config.founder(a.founder?).glider?;
+    let search = glider.check_search_m;
+    if !(search > 0.0) {
+        return None;
+    }
+    let (now, memory) = (fauna.tick, cubarium_voxel::ticks_at_least_one(glider.check_memory_s.max(0.0)));
+    let near = {
+        let f: &Fauna = fauna;
+        stands_within(view, fv, &a, search, |s| climbable(fv, s, &glider) && crate::treecheck::may_hold_hidden_food(f, fv, s))
+    };
+    let aim = crate::treecheck::aim_of(fauna, a.id);
+    let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
+    let (go, k) = walk_to_stand(fauna, i, view, fv, &cands, search, 1.0, crate::Steer::Check)?;
+    crate::treecheck::aim(fauna, a.id, cands[k].1);
+    Some(go)
 }
 
 fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {

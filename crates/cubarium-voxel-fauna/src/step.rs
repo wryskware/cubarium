@@ -112,6 +112,8 @@ pub(crate) mod places;
 #[cfg(test)]
 pub(crate) use glider::{better_roost, safe_crown, Roost};
 pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, off_graph_exit};
+#[cfg(test)]
+pub(crate) use glider::fruit_candidates as glider_fruit_candidates;
 #[path = "jump.rs"]
 pub(crate) mod jump;
 #[path = "forage.rs"]
@@ -1961,7 +1963,7 @@ pub(crate) fn controllers(
             // the same target/shun clock covers this path as well as a refused walk.
             let fruit_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && a.mobility.mode == crate::MobilityMode::Ground
-                && fauna.steer.get(&id) == Some(&crate::Steer::Fruit)
+                && matches!(fauna.steer.get(&id), Some(crate::Steer::Fruit | crate::Steer::Check))
                 && fb.delivered_forward <= 1e-12 && fb.delivered_turn.abs() <= 1e-12;
             let vine_stalled = heuristic && fauna.config.founder(founder).glider.is_some()
                 && matches!(a.mobility.mode, crate::MobilityMode::Climb | crate::MobilityMode::Perched)
@@ -2018,9 +2020,9 @@ pub(crate) fn controllers(
         // stand in reach. Flight from a threat and the roost come after it and win.
         if driven && prey && fauna.config.founder(founder).glider.is_some() {
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
-            if let Some(go) = glider::fruit_reflex(fauna, i, view, &fv, day) {
+            if let Some((go, kind)) = glider::fruit_reflex(fauna, i, view, &fv, day) {
                 actions = go;
-                src = crate::Steer::Fruit;
+                src = kind;
             }
         }
         // FORAGE-LEAVE: a heuristic body holding still to feed on a patch that cannot end a

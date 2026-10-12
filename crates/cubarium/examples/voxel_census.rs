@@ -1971,6 +1971,15 @@ fn print_header() {
     // stands and vines (cumulative, organic).
     header.push_str(",lantern_in_flower,flower_visits_stand,flower_visits_vine,crops_set_floor,crops_set_visited");
     header.push_str(",fruit_set_floor,fruit_set_visited,fruit_overhead,fruit_eaten_seedporter,fruit_eaten_seedporter_stand,fruit_eaten_seedporter_vine");
+    // NUTS (2026-10-12): vaulttree nuts hanging now and fallen uneaten (cumulative), the
+    // seedporters' vaulttree fruit eaten (cumulative, organic), and the tree checks (session):
+    // check walks set out on, crown visits, checks made, checks that found food, and the
+    // bodies that made one.
+    header.push_str(",nut_standing,nut_fell,fruit_eaten_seedporter_vaulttree");
+    header.push_str(",tree_check_walks,tree_check_switches,tree_visits,tree_checks,tree_checks_found,tree_checkers");
+    // ... the seedporters' climbs (cumulative) and the oldest check walk under way now, seconds
+    // (a body steered by the check whose aimed host it has not reached).
+    header.push_str(",sp_climbs,tree_check_oldest_s");
     // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
     // standing (above every layer's grazing floor), then plant deaths by cause for the
     // turf, the pad and the two woody species, cumulative.
@@ -2260,6 +2269,23 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         // The seedporter is the only fruit eater; its glide-and-perch bites book here.
         row.push(format!("{:.6}", a.ledger.fruit_eaten_by_source.iter().sum::<f64>()));
         row.extend(a.ledger.fruit_eaten_by_source.iter().map(|q| format!("{q:.6}")));
+        row.push(format!("{:.6}", of(Plant::Vaulttree).map(|s| s.fruit).sum::<f64>()));
+        row.push(format!("{:.6}", l.fruit_fell[Plant::Vaulttree.index()]));
+        row.push(format!("{:.6}", a.ledger.fruit_eaten_by_plant[Plant::Vaulttree.index()]));
+        let t = sim.fauna().check_tally();
+        for n in [t.walks, t.switches, t.visits, t.checks, t.found, t.checkers] {
+            row.push(n.to_string());
+        }
+        row.push(a.ledger.climbs.to_string());
+        let fa = sim.fauna();
+        let oldest = a
+            .animals
+            .iter()
+            .filter(|b| fa.steer_of(b.id) == Some(cubarium_voxel_fauna::Steer::Check))
+            .filter_map(|b| fa.tree_checks_of(b.id).filter(|m| m.aim.is_some()).map(|m| fa.tick().saturating_sub(m.aim_since)))
+            .max()
+            .unwrap_or(0);
+        row.push(format!("{:.1}", oldest as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ)));
     }
     let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
     row.push(format!("{edible:.6}"));

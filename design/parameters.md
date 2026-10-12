@@ -389,7 +389,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `world.landform.terrarium.river_bed_slope` | (absent) | voxels per column | [0, inf) | 0.05–0.5 | - | placeholder | how much the stream's bed falls per column |
 | `world.landform.terrarium.river_drop_every` | (absent) | columns | [1, inf) | 2–10 | - | placeholder | columns between the stream's extra one-voxel falls |
 
-**`flora.*`** (1151 rows)
+**`flora.*`** (1178 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -469,6 +469,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.bloomcrown.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.bloomcrown.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.bloomcrown.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.bloomcrown.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.bloomcrown.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.bloomcrown.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.bloomcrown.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.bloomcrown.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.bloomcrown.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -587,6 +590,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.umbrellafrond.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.umbrellafrond.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.umbrellafrond.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.umbrellafrond.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.umbrellafrond.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.umbrellafrond.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.umbrellafrond.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.umbrellafrond.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.umbrellafrond.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -705,6 +711,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.springturf.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.springturf.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.springturf.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.springturf.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.springturf.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.springturf.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.springturf.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.springturf.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.springturf.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -823,6 +832,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.stonecushion.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.stonecushion.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.stonecushion.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.stonecushion.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.stonecushion.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.stonecushion.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.stonecushion.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.stonecushion.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.stonecushion.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -941,6 +953,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.velvetpad.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.velvetpad.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.velvetpad.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.velvetpad.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.velvetpad.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.velvetpad.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.velvetpad.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.velvetpad.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.velvetpad.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -1059,6 +1074,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.glowcap.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.glowcap.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.glowcap.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.glowcap.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.glowcap.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.glowcap.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.glowcap.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.glowcap.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.glowcap.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -1168,15 +1186,18 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.vaulttree.nectar_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into nectar per second, in daylight |
 | `flora.vaulttree.nectar_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most nectar an adult stand holds |
 | `flora.vaulttree.nectar_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of nectar carries (pollen lumped in) |
-| `flora.vaulttree.fruit_per_s` | 0.0 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
-| `flora.vaulttree.fruit_cap` | 0.0 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
-| `flora.vaulttree.fruit_drop_s` | 0.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
-| `flora.vaulttree.fruit_rest_s` | 0.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
+| `flora.vaulttree.fruit_per_s` | 0.00001 | org-units/s per stand | [0, inf) |  | N | decision | reserve an adult stand moves into hanging fruit per second, in daylight |
+| `flora.vaulttree.fruit_cap` | 0.02 | org-units per stand | [0, inf) |  | N | decision | the most fruit an adult stand holds |
+| `flora.vaulttree.fruit_drop_s` | 14400.0 | s | [0, inf) |  | N | decision | ripe fruit left uneaten this long falls to the litter at the stand's site |
+| `flora.vaulttree.fruit_rest_s` | 7200.0 | s | [0, inf) | 0–3600 | - | placeholder | mean rest (exponential, per stand) after a crop falls uneaten or is eaten out before the stand flowers again; 0 none |
 | `flora.vaulttree.flower_s` | 0.0 | s | [0, inf) | 0–3600 | - | decision | FLOWER-FRUIT: a crop's flowers stand open this long (nectar, near-IR, visits counted) before the fruit sets; 0 no flowering stage, every crop sets in full |
-| `flora.vaulttree.fruit_cost` | 1.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
+| `flora.vaulttree.fruit_cost` | 2.0 | reserve per unit of fruit | [1, inf) | 1–4 | - | decision | FLOWER-FRUIT: reserve a unit of edible fruit costs; the overhead beyond the fruit is respired |
 | `flora.vaulttree.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.vaulttree.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
-| `flora.vaulttree.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.vaulttree.fruit_mineral_fraction` | 0.025 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.vaulttree.fruit_handling` | 0.33 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.vaulttree.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.vaulttree.fruit_sight_m` | 2.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.vaulttree.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.vaulttree.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.vaulttree.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -1295,6 +1316,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.lanternberry.pollination_floor` | 0.1 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.lanternberry.pollination_visits` | 3.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.lanternberry.fruit_mineral_fraction` | 0.01 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.lanternberry.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.lanternberry.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.lanternberry.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.lanternberry.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.lanternberry.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.lanternberry.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -1413,6 +1437,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.siphonreed.pollination_floor` | 1.0 | fraction of a full crop | [0, 1] | 0–0.5 | - | decision | FLOWER-FRUIT: the share of a full crop a flowering no pollinator visited sets |
 | `flora.siphonreed.pollination_visits` | 1.0 | visits | [0, inf) | 0–10 | - | decision | FLOWER-FRUIT: pollinator visits to a flowering that set a full crop (the floor rising linearly to it); 0 any visit |
 | `flora.siphonreed.fruit_mineral_fraction` | 0.0 | fraction of organic | [0, 1] |  | N | decision | mineral a unit of fruit carries (small, not zero) |
+| `flora.siphonreed.fruit_handling` | 1.0 | fraction of a plain fruit's bite | (0, 1] | 0.1–1 | N | decision | NUTS: scales a frugivore's bite of this fruit (vaulttree nuts 0.33: ~3x a fruit's feeding time, as a squirrel opening a kernel against pulp) |
+| `flora.siphonreed.fruit_seeds_in_gut` | (absent) | switch (true / false) | (-inf, inf) |  | N | decision | NUTS: an eaten fruit's seeds ride in the gut and are voided alive (false: a nut, the seed itself, destroyed) |
+| `flora.siphonreed.fruit_sight_m` | 0.0 | m (0 = no limit) | [0, inf) | 0–6 | N | decision | NUTS: an eater sees this fruit only within this of the crown's middle (vaulttree nuts 2 m: found by close search in the canopy) |
 | `flora.siphonreed.night_bloom_scale` | 0.3 | fraction of the day rate | [0, 1] | 0–1 | N | decision | nectar and fruit made at night out of the night budget |
 | `flora.siphonreed.night_floor` | 0.2 | fraction of reserve cap | [0, 1] | 0–0.8 | N | decision | the reserve a stand keeps for dawn; the night budget spends only above it |
 | `flora.siphonreed.night_min_s` | 600.0 | s | [1, inf) | 60–3600 log | N | numerics | the night budget is spread over at least this long, so it stays bounded near dawn |
@@ -1545,7 +1572,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.04 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4392 rows)
+**`fauna.*`** (4410 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1910,6 +1937,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.littershredder.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.littershredder.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.littershredder.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.littershredder.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.littershredder.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.littershredder.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.littershredder.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2373,6 +2402,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.frondgrazer.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.frondgrazer.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.frondgrazer.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.frondgrazer.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.frondgrazer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.frondgrazer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.frondgrazer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -2836,6 +2867,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.lanternjaw.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.lanternjaw.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.lanternjaw.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.lanternjaw.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.lanternjaw.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.lanternjaw.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.lanternjaw.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3299,6 +3332,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.capgnawer.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.capgnawer.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.capgnawer.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.capgnawer.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.capgnawer.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.capgnawer.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.capgnawer.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -3762,6 +3797,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.loftstrider.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.loftstrider.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.loftstrider.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.loftstrider.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.loftstrider.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.loftstrider.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.loftstrider.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -4225,6 +4262,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.ripple-snail.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.ripple-snail.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.ripple-snail.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.ripple-snail.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.ripple-snail.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.ripple-snail.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.ripple-snail.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -4688,6 +4727,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.bellwing.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.bellwing.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.bellwing.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.bellwing.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.bellwing.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.bellwing.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.bellwing.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -5151,6 +5192,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.glider.roost_budget_m` | 12.0 | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.seedporter.glider.roost_reserve_share` | 0.5 | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.seedporter.glider.roost_ledge_min_m` | 1.0 | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.seedporter.glider.check_search_m` | 16.0 | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.seedporter.glider.check_memory_s` | 3600.0 | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.seedporter.gut_seeds.seeds_per_fruit_organic` | 0.1 | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.seedporter.gut_seeds.gut_transit_s` | 900.0 | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.seedporter.pack.pack_radius_m` | (absent) | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
@@ -5614,6 +5657,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.glider.roost_budget_m` | (absent) | m | [0, inf) |  | - | placeholder | at its rest hour a glider on its heuristic roosts in a vaulttree crown, else on a vine-climbed ledge top, within this (0: off) |
 | `fauna.founders.chorister.glider.roost_reserve_share` | (absent) | fraction of reserve above emergency floor | [0, 1] |  | - | placeholder | a preferred roost's trip (walk and climb) may spend this share |
 | `fauna.founders.chorister.glider.roost_ledge_min_m` | (absent) | m | [0, inf) |  | - | placeholder | a roost ledge stands at least this over the foot of its vine wall |
+| `fauna.founders.chorister.glider.check_search_m` | (absent) | m | [0, inf) | 0–32 | - | placeholder | NUTS: a hungry grounded glider with no food in sight walks to the nearest host that may hold hidden food within this, climbs and looks (0: off; tamarins travel tens of m between feeding trees) |
+| `fauna.founders.chorister.glider.check_memory_s` | (absent) | s | [0, inf) | 0–14400 | - | placeholder | NUTS: how long it remembers whether a checked tree held food; no recheck of an empty one until then (trap-lining tamarins and marmosets) |
 | `fauna.founders.chorister.gut_seeds.seeds_per_fruit_organic` | (absent) | org-units per org-unit of fruit | [0, 1] |  | - | placeholder | share of a fruit meal that is the source's seeds, carried in the gut |
 | `fauna.founders.chorister.gut_seeds.gut_transit_s` | (absent) | s | [0, inf) |  | - | placeholder | a meal's seeds are voided at the body's face this long after it |
 | `fauna.founders.chorister.pack.pack_radius_m` | 6.0 | m | [0, inf) |  | - | decision | the size window sums the bodies of packmates within this |
