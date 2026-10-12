@@ -568,6 +568,9 @@ fn founder_rows() -> Vec<Row> {
         r("pack.shun_s", "s", nonneg, "PACK-TUNE: a target dropped alive is not taken again for this").optional(),
         // VH-TACTICS (`crate::Tactics`, behaviour-AI §4): the Veilhound's own-senses tactics.
         r("pack.tactics.meat_exp", "exponent", nonneg, "VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed)").optional(),
+        r("pack.tactics.meat_by_mass", "switch", fraction, "VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths)").optional(),
+        r("pack.tactics.usable_meals", "switch", fraction, "VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass)").optional(),
+        r("pack.tactics.carcass_keep_s", "s", nonneg, "VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition)").optional(),
         r("pack.tactics.chase_cost_per_m", "meals/m", nonneg, "VH-TACTICS: value spent per metre between hound and prey").optional(),
         r("pack.tactics.p_one", "chance", fraction, "VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p))").optional(),
         r("pack.tactics.size_exp", "exponent", nonneg, "VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down").optional(),

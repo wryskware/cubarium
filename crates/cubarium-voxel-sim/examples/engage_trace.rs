@@ -77,6 +77,12 @@ fn main() -> Result<(), String> {
                     m.vel[0],
                     m.vel[1],
                 );
+                for (pid, v) in fauna.hound_values(id) {
+                    println!(
+                        "{t:7.1}   values {id}->{pid}: value {:.3} meat {:.2} (raw {:.2}, usable {:.2}) p_one {:.3} p_kill {:.3} chase {:.2} kicks {:.2} risk {:.3} young {} guards {} facing {} hounds {} group {}",
+                        v.value, v.meat, v.meat_raw, v.usable, v.p_one, v.p_kill, v.chase_cost, v.expected_kicks, v.risk, v.young, v.guards, v.facing, v.hounds, v.in_group
+                    );
+                }
             }
         }
         if !go {

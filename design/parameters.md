@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4131 rows)
+**`fauna.*`** (4158 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1934,6 +1934,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.littershredder.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.littershredder.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.littershredder.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.littershredder.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.littershredder.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.littershredder.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.littershredder.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -2368,6 +2371,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.frondgrazer.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.frondgrazer.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.frondgrazer.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.frondgrazer.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.frondgrazer.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.frondgrazer.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.frondgrazer.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -2802,6 +2808,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.lanternjaw.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.lanternjaw.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.lanternjaw.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.lanternjaw.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.lanternjaw.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.lanternjaw.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.lanternjaw.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -3236,6 +3245,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.capgnawer.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.capgnawer.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.capgnawer.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.capgnawer.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.capgnawer.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.capgnawer.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.capgnawer.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -3670,6 +3682,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.loftstrider.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.loftstrider.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.loftstrider.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.loftstrider.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.loftstrider.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.loftstrider.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.loftstrider.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -4104,6 +4119,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.ripple-snail.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.ripple-snail.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.ripple-snail.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.ripple-snail.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.ripple-snail.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.ripple-snail.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.ripple-snail.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -4538,6 +4556,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.bellwing.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.bellwing.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.bellwing.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.bellwing.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.bellwing.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.bellwing.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.bellwing.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -4972,6 +4993,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.seedporter.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.seedporter.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.seedporter.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.seedporter.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.seedporter.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.seedporter.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.seedporter.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
@@ -5406,6 +5430,9 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
 | `fauna.founders.chorister.pack.tactics.meat_exp` | 3.0 | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.chorister.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.chorister.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.chorister.pack.tactics.carcass_keep_s` | 3600.0 | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
 | `fauna.founders.chorister.pack.tactics.chase_cost_per_m` | 0.02 | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
 | `fauna.founders.chorister.pack.tactics.p_one` | 0.25 | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
 | `fauna.founders.chorister.pack.tactics.size_exp` | 2.0 | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
