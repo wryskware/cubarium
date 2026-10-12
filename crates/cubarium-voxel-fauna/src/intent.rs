@@ -510,8 +510,15 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 ///   herd pull → `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
 /// - Veilhound: the pack tactic's own reading ([`crate::Fauna::pack_hint`]: rest, den,
 ///   feed, stalk, drive — the flankers too —, else search); its own steering → `search`;
-/// - lanternjaw: the patrol → `patrol`, the carcass yield → `give_way`, at a carcass →
-///   `feed`, its own (ambush) heuristic → `ambush`, a rest bout → `rest`.
+/// - lanternjaw (BRAIN-FIX step 2), from the patrol's own state ([`crate::hunt::steer`],
+///   whose answer sets [`crate::HuntMemory::mode`] and reads the eating latch): fed, its
+///   eating latch off, it holds still to digest → `rest`; going to or eating at a carcass
+///   ([`crate::HuntMode::Meal`]) → `feed`; waiting still on a patch with the lure lit, or
+///   turned and stalking to a prey it engages from there ([`crate::HuntMode::Wait`]) →
+///   `ambush`; choosing or walking to a patch → `patrol`. The carcass yield → `give_way`.
+///   Under its own (ambush) heuristic, the patrol off: at a carcass → `feed`, a rest bout →
+///   `rest`, else `ambush`. It has no other threat response — the prey flee rule excludes
+///   it and the yield starts only at a carcass — so nothing maps to `flee`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn teacher_label(
     fauna: &crate::Fauna,
@@ -573,6 +580,9 @@ pub(crate) fn teacher_label(
             _ => Teach::default(),
         },
         Founder::Lanternjaw => match src {
+            S::Patrol if !a.eating => t("rest", Subject::None),
+            S::Patrol if a.hunt.mode == crate::HuntMode::Meal => t("feed", Subject::None),
+            S::Patrol if a.hunt.mode == crate::HuntMode::Wait => t("ambush", Subject::None),
             S::Patrol => t("patrol", Subject::None),
             S::Yield => t("give_way", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic if at_carcass => t("feed", Subject::None),
