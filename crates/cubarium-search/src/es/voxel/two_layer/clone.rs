@@ -345,7 +345,8 @@ fn prepare(
                 shape.actions.len()
             ));
         }
-        if s.candidates.len() > k {
+        // A shape without subjects reads no rows: the same records clone a plain brain.
+        if k > 0 && s.candidates.len() > k {
             return Err(format!("sample {t}: {} candidates, K is {k}", s.candidates.len()));
         }
         counts.samples += 1;
