@@ -5141,10 +5141,10 @@ impl Fauna {
         }
         let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) else { return false };
         let a = &mut self.animals[i];
-        a.age_ticks = age_ticks;
         if a.lifespan_ticks != 0 {
-            a.lifespan_ticks = a.lifespan_ticks.saturating_add(age_ticks);
+            a.lifespan_ticks = a.lifespan_ticks.saturating_sub(a.age_ticks).saturating_add(age_ticks);
         }
+        a.age_ticks = age_ticks;
         a.mother = mother;
         true
     }
