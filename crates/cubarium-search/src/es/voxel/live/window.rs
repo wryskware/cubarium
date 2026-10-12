@@ -58,6 +58,9 @@ pub struct BodyScore {
     pub score: NetEnergy,
     /// Whether the body was born inside the window.
     pub newborn: bool,
+    /// Its kin-weighted score and parts (§11.7): `combined` is what the comparison ranks;
+    /// with every share 0 it is `score.score` exactly.
+    pub kin: crate::es::voxel::kin::KinParts,
 }
 
 /// One body's metered result for one window, whether a variant drove it or not (§11.7:
@@ -328,6 +331,8 @@ struct Tracked {
 pub struct Window {
     /// Training-side experiment; false retains the current tissue/stores reward.
     pub stomach_aware_reward: bool,
+    /// Each lineage's kin knobs ([`Window::begin_kin`]); the default is today's training.
+    kin: crate::es::voxel::kin::KinConfig,
     tables: Vec<Option<VariantTable>>,
     ticks: u64,
     elapsed: u64,
@@ -381,7 +386,22 @@ impl Window {
         first_pair: &[usize],
         ticks: u64,
         curiosity: &Curiosity,
+        memory: Memory,
+    ) -> Window {
+        Window::begin_kin(sim, tables, first_pair, ticks, curiosity, memory, &Default::default())
+    }
+
+    /// [`Window::begin_with`] under each lineage's kin knobs: a lineage on the `family`
+    /// comparison places one variant per family ([`crate::es::voxel::kin::place_families`]),
+    /// and every scored body carries its kin-weighted score.
+    pub fn begin_kin(
+        sim: &mut Sim,
+        tables: &[Option<VariantTable>],
+        first_pair: &[usize],
+        ticks: u64,
+        curiosity: &Curiosity,
         mut memory: Memory,
+        kin: &crate::es::voxel::kin::KinConfig,
     ) -> Window {
         assert_eq!(tables.len(), Founder::COUNT);
         let voxel_m = sim.world().config().voxel_m;
@@ -392,6 +412,7 @@ impl Window {
             .collect();
         let mut w = Window {
             stomach_aware_reward: false,
+            kin: kin.clone(),
             tables: tables.to_vec(),
             ticks,
             elapsed: 0,
@@ -466,9 +487,15 @@ impl Window {
                 .map(|b| Placed { id: b.0, x_m: b.2 })
                 .collect();
             let placed: FxHashMap<u64, usize> = match &w.tables[fi] {
-                Some(_) if !mine.is_empty() => place_twins(&mine, pairs[fi], first_pair[fi])
+                Some(_) if !mine.is_empty() => {
+                    if w.kin.of(f).comparison == crate::es::voxel::kin::Comparison::Family {
+                        crate::es::voxel::kin::place_families(&mine, &w.roster, pairs[fi], first_pair[fi])
+                    } else {
+                        place_twins(&mine, pairs[fi], first_pair[fi])
+                    }
                     .into_iter()
-                    .collect(),
+                    .collect()
+                }
                 _ => FxHashMap::default(),
             };
             for b in bodies.iter().filter(|b| b.1 == f) {
@@ -585,8 +612,17 @@ impl Window {
         for (id, f, x, meter, energy) in self.newcomers.drain(..) {
             let fi = f.index();
 
+            let family = self.kin.of(f).comparison == crate::es::voxel::kin::Comparison::Family;
+            // On the `family` comparison a newborn carries its mother's variant (its family's).
+            let mothers = family
+                .then(|| sim.fauna().view().animals.iter().find(|a| a.id == id).and_then(|a| a.mother))
+                .flatten()
+                .and_then(|m| self.index.get(&m))
+                .and_then(|&k| self.tracked[k].candidate);
             let candidate = self.tables[fi].as_ref().map(|table| {
-                let c = newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi]);
+                let c = mothers.unwrap_or_else(|| {
+                    newborn_candidate(x, self.ring_m, &self.assigned[fi], &self.counts[fi])
+                });
                 sim.fauna_mut().set_controller(id, table.controller(c));
                 c
             });
@@ -745,7 +781,17 @@ impl Window {
                 candidate: c,
                 score,
                 newborn: b.newborn,
+                kin: crate::es::voxel::kin::KinParts {
+                    own: score.score,
+                    relatives: 0.0,
+                    combined: score.score,
+                    relatives_counted: 0,
+                },
             });
+        }
+        let kin = crate::es::voxel::kin::kin_scores(&metered, &self.roster, &self.kin);
+        for b in scores.iter_mut() {
+            b.kin = kin[&b.body_id];
         }
         for s in self.stats.iter_mut() {
             if s.scored > 0 {

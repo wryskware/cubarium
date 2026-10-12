@@ -1,0 +1,26 @@
+# KIN-TRAIN's starting kin knobs (design/behaviour-ai-2026-10-11.md §10.3, §11.7).
+# `--kin` on voxel-live-train; the matched-copies runner reads the shares the same way.
+# A lineage left out trains as before: every share 0, the `per_body` comparison.
+#
+# comparison: per_body (live windows' default), family (one shared variant per family or
+# pack, compared across worlds), matched (staged encounters; the matched-copies runner).
+# stage: top (stage 1: perturb only a two-layer brain's top) or both (stage 2).
+# Table names are the lineages' code identifiers.
+
+[loftstrider]
+comparison = "per_body"
+stage = "top"
+[loftstrider.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
+
+[chorister]
+comparison = "per_body"
+stage = "top"
+[chorister.shares]
+calf = 0.5
+mother = 0.5
+sibling = 0.5
+packmate = 0.5
