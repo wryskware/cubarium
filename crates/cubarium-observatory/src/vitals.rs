@@ -121,6 +121,9 @@ pub struct AnimalVitals {
     pub minute: f64,
     pub lineage: String,
     pub n: usize,
+    /// Cumulative larvae removed by this lineage as groomer and as rider, respectively.
+    pub groomed: u64,
+    pub groomed_riders: u64,
     /// Rider, pup, juvenile, adult (query's LifeStage order).
     pub n_by_stage: [usize; 4],
     pub native_n: usize,
@@ -654,6 +657,8 @@ impl Recorder {
                 minute,
                 lineage,
                 n: 0,
+                groomed: 0,
+                groomed_riders: 0,
                 n_by_stage: [0; 4],
                 native_n: 0,
                 fullness: Vec::new(),
@@ -798,6 +803,8 @@ impl Recorder {
             }
             if let Some(f) = founder {
                 let i = f.index();
+                r.groomed = fauna.view().ledger.groomed_by_groomer[i];
+                r.groomed_riders = fauna.view().ledger.groomed_by_rider[i];
                 let l = fauna.view().ledger;
                 r.intake_organic = l.swallowed_by_founder[i] - self.ledger[i][0];
                 r.upkeep_organic = l.upkeep_by_founder[i] - self.ledger[i][1];
@@ -987,7 +994,7 @@ fn csv(out: &mut impl Write, cells: impl IntoIterator<Item = String>) -> io::Res
     writeln!(out)
 }
 
-pub const VITALS_HEADER: &str = "minute,lineage,n,n_rider,n_pup,n_juvenile,n_adult,native_n,fullness_mean,fullness_p10,fullness_p50,fullness_p90,stomach_fill_mean,stomach_fill_p50,wound_mean,wounded_n,size_mean,energy_per_body_mean,emergency_n,eating_n,asleep_n,gestating_or_clutch_n,breeding_eligible_n,body_s,awake_body_s,moving_share,feeding_share,resting_share,fleeing_share,hunting_share,climbing_share,gliding_share,flying_share,energy_body_hours,survivor_stock_change_per_body_hour,path_m_per_body,displacement_m_per_body,stuck_n,stuck_observed_n,intake_organic,upkeep_organic,motor_organic,delivered_bl_per_s,cohort_energy_change,segment,fullness_p10_rider,fullness_p50_rider,n_fullness_rider,starving_n_rider,fullness_p10_pup,fullness_p50_pup,n_fullness_pup,starving_n_pup,fullness_p10_juvenile,fullness_p50_juvenile,n_fullness_juvenile,starving_n_juvenile,fullness_p10_adult,fullness_p50_adult,n_fullness_adult,starving_n_adult";
+pub const VITALS_HEADER: &str = "minute,lineage,n,n_rider,n_pup,n_juvenile,n_adult,native_n,fullness_mean,fullness_p10,fullness_p50,fullness_p90,stomach_fill_mean,stomach_fill_p50,wound_mean,wounded_n,size_mean,energy_per_body_mean,emergency_n,eating_n,asleep_n,gestating_or_clutch_n,breeding_eligible_n,body_s,awake_body_s,moving_share,feeding_share,resting_share,fleeing_share,hunting_share,climbing_share,gliding_share,flying_share,energy_body_hours,survivor_stock_change_per_body_hour,path_m_per_body,displacement_m_per_body,stuck_n,stuck_observed_n,intake_organic,upkeep_organic,motor_organic,delivered_bl_per_s,cohort_energy_change,segment,fullness_p10_rider,fullness_p50_rider,n_fullness_rider,starving_n_rider,fullness_p10_pup,fullness_p50_pup,n_fullness_pup,starving_n_pup,fullness_p10_juvenile,fullness_p50_juvenile,n_fullness_juvenile,starving_n_juvenile,fullness_p10_adult,fullness_p50_adult,n_fullness_adult,starving_n_adult,groomed,groomed_riders";
 pub const PLANTS_HEADER: &str = "minute,species,stands,vigour_mean,vigour_p10,vigour_p50,cured_n,drought_n,aeration_n,stressed_n,segment";
 /// Every [`VITALS_HEADER`] column in order, with its meaning and unit (for readers that show
 /// the rows: the Godot dev metrics panel's tooltips).
@@ -1053,6 +1060,8 @@ pub const VITALS_COLUMNS: &[(&str, &str)] = &[
     ("fullness_p50_adult", "Median fullness over the living adults at the minute (blank with none)."),
     ("n_fullness_adult", "Living adults whose fullness was read at the minute (blank with none)."),
     ("starving_n_adult", "Living adults below the starving fullness (Options::starving_fullness, census default 0.05) at the minute (blank with none)."),
+    ("groomed", "Cumulative larvae picked off and eaten by this lineage as groomer."),
+    ("groomed_riders", "Cumulative riders of this lineage that died with cause groomed."),
 ];
 /// Every [`PLANTS_HEADER`] column in order, with its meaning and unit.
 pub const PLANTS_COLUMNS: &[(&str, &str)] = &[
@@ -1149,6 +1158,7 @@ impl AnimalVitals {
                 val((!values.is_empty()).then_some(r.starving_by_stage[stage] as f64)),
             ]);
         }
+        c.extend([r.groomed.to_string(), r.groomed_riders.to_string()]);
         c
     }
 }

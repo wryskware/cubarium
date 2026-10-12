@@ -48,6 +48,8 @@ pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 pub mod herding;
 pub use herding::{HerdTally, Herding};
+mod groom;
+pub use groom::Grooming;
 pub mod nurse;
 pub use nurse::Nursing;
 #[cfg(test)]
@@ -2689,11 +2691,14 @@ pub enum Departure {
     Desiccation,
     /// DROP: its wound reached 1 on a jump down ([`crate::DropRule`]). A corpse.
     Fell,
+    /// An attached lanternjaw larva picked off and eaten by a troop-mate of its host.
+    Groomed,
 }
 
 impl Departure {
-    pub const ALL: [Departure; 6 + Founder::COUNT] = {
-        let mut all = [Departure::Starved; 6 + Founder::COUNT];
+    pub const ALL: [Departure; 7 + Founder::COUNT] = {
+        let mut all = [Departure::Starved; 7 + Founder::COUNT];
+        all[6 + Founder::COUNT] = Departure::Groomed;
         all[4 + Founder::COUNT] = Departure::Desiccation;
         all[5 + Founder::COUNT] = Departure::Fell;
         all[1] = Departure::Drowned;
@@ -2718,6 +2723,7 @@ impl Departure {
             Departure::Killed { by } => 4 + by.index(),
             Departure::Desiccation => 4 + Founder::COUNT,
             Departure::Fell => 5 + Founder::COUNT,
+            Departure::Groomed => 6 + Founder::COUNT,
         }
     }
 
@@ -2734,6 +2740,7 @@ impl Departure {
             Departure::Removed => "removed",
             Departure::Desiccation => "desiccated",
             Departure::Fell => "fell",
+            Departure::Groomed => "groomed",
             Departure::Killed { by } => {
                 static NAMES: std::sync::OnceLock<[&'static str; Founder::COUNT]> =
                     std::sync::OnceLock::new();
@@ -3275,6 +3282,11 @@ pub struct FaunaLedger {
     pub riders_attached: u64,
     pub rider_dropoffs: u64,
     pub riders_freed: u64,
+    /// Larvae removed by grooming, cumulative by groomer and rider lineage respectively.
+    #[serde(default)]
+    pub groomed_by_groomer: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub groomed_by_rider: [u64; Founder::COUNT],
     /// **Flight** (F1): nectar sips by source, `[bloomcrown stand, latticevine face]`.
     #[serde(default)]
     pub sips_by_bloom: [u64; 2],
@@ -4005,6 +4017,9 @@ pub struct Fauna {
     /// A `Vec` with a binary search, never a `HashMap`: this layer iterates nothing
     /// unordered.
     animals: Vec<Animal>,
+    /// Continuous grooming contacts keyed by groomer id; an interruption resets progress.
+    #[serde(default)]
+    groom_contacts: std::collections::BTreeMap<u64, groom::Contact>,
     /// The clutches standing in the world, in the order they were laid — which is
     /// parent id order within a tick and tick order between ticks, so every pass over
     /// them is the same order however the world runs.
@@ -4296,11 +4311,13 @@ pub enum Steer {
     Wade,
     /// LJ-HOSTSWITCH: an outgrown rider's walk to a new host.
     Host,
+    /// SP-GROOM: approaching an infested troop-mate or holding grooming contact.
+    Groom,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 18] = [
+    pub const ALL: [Steer; 19] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4319,6 +4336,7 @@ impl Steer {
         Steer::Nest,
         Steer::Wade,
         Steer::Host,
+        Steer::Groom,
     ];
 
     /// A short name for tables.
@@ -4342,6 +4360,7 @@ impl Steer {
             Steer::Nest => "nest",
             Steer::Wade => "wade",
             Steer::Host => "host",
+            Steer::Groom => "groom",
         }
     }
 }
@@ -4641,6 +4660,7 @@ impl Fauna {
             world_geometry: None,
             tick: 0,
             animals: Vec::new(),
+            groom_contacts: std::collections::BTreeMap::new(),
             clutches: Vec::new(),
             ledger: FaunaLedger::default(),
             born_by_founder: [0; Founder::COUNT],

@@ -70,6 +70,10 @@ use crate::manifest::Founder;
 use crate::predation::{Hit, Rest, Strike, StrikePhase};
 use crate::{Animal, Departure, Fauna, Food, IntervalFeedback, SpeciesConfig, State};
 
+#[cfg(test)]
+#[path = "groom_tests.rs"]
+mod groom_tests;
+
 /// What a respiration is for, as [`FaunaLedger`](crate::FaunaLedger) books it. The four
 /// split counters sum to `respired_out` to the bit — every booking adds the same addend
 /// to the total and to one split at the same point — so a driver can read the episode's
@@ -367,6 +371,7 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
     });
+    crate::groom::step(fauna, &view, flora);
     cubarium_voxel::voxel_phase!(FaunaBirths, { reproduce(fauna, &view, flora, dusk) });
     cubarium_voxel::voxel_phase!(FaunaDeaths, {
         desiccation(fauna, &view, &sky);
@@ -2144,6 +2149,17 @@ fn controllers(
         if searched.is_some_and(|go| (go.forward, go.turn) != (actions.forward, actions.turn)) {
             rove::overridden(fauna, id);
         }
+        // SP-GROOM: an available body approaches infested kin through its normal routes.
+        // Flight, a strike, and emergency feeding retain priority; escape routes also win.
+        if driven && !fled && !matches!(src, crate::Steer::Drop | crate::Steer::Wade) {
+            let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
+            if let Some(go) = crate::groom::steer(fauna, i, view, &fv, day) {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Groom;
+            }
+        }
         // RHYTHMS-CADENCE: stop and go. A walker or climber searching or foraging on its own
         // steering moves in bouts with pauses to look and listen; flight and every directed
         // reflex above keep their pace. After the search leg's check, so a pause does not end
@@ -2824,6 +2840,19 @@ fn act(
             let a = &mut fauna.animals[i];
             a.speed_m_s = 0.0;
             a.still_ticks = a.still_ticks.saturating_add(1);
+            continue;
+        }
+        // Contact owns this body's act even between controller samples. The post-act
+        // grooming pass checks again after every host has moved and all strikes landed.
+        if crate::groom::holding(fauna, i, view) {
+            let a = &mut fauna.animals[i];
+            a.state = State::Resting;
+            a.speed_m_s = 0.0;
+            a.still_ticks = a.still_ticks.saturating_add(1);
+            if let Some(f) = a.founder {
+                fauna.ledger.founder_ticks_by_founder[f.index()] += 1;
+                crate::gait::rest(fauna, i, f);
+            }
             continue;
         }
         let before = fauna.animals[i].pose;
@@ -4012,6 +4041,11 @@ fn wound(fauna: &mut Fauna, flora: &mut Flora, prey: u64, damage: f64, by: Found
 /// the whole body goes to carrion on its face and the death is booked; a kill also lays
 /// the carcass record.
 fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: Option<&VoxelView<'_>>) {
+    kill_into(fauna, flora, j, cause, view, None);
+}
+
+/// The same kill path; an immediate eater takes fresh corpse matter before it pools.
+fn kill_into(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: Option<&VoxelView<'_>>, eater: Option<u64>) {
     let rule = body::effective_config(&fauna.config, &fauna.animals[j]).reproduction;
     fail_gestation(fauna, j, &rule);
     if fauna.animals[j].pack.is_some_and(|m| m.pup) {
@@ -4042,7 +4076,6 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
     fauna.wading.remove(&a.id);
     fauna.flushes.remove(&a.id);
     fauna.free_riders(&a, view);
-    let organic = a.organic() + a.gut.organic + a.gut_seeds.total().organic + a.stomach.organic();
     if let (Departure::Killed { by }, Some(f)) = (cause, a.founder) {
         fauna.ledger.funnel[by.index()][f.index()][crate::perception::KILLED] += 1;
         if let Some(r) = &mut fauna.census_readout {
@@ -4055,8 +4088,8 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
             fauna.ledger.vigil.kills_adult[f.index()] += 1;
         }
     }
-    let laid = bury_corpse(fauna, flora, &a, cause);
-    if laid && matches!(cause, Departure::Killed { .. }) {
+    let (laid, organic) = bury_corpse_into(fauna, flora, &a, cause, eater);
+    if laid && matches!(cause, Departure::Killed { .. } | Departure::Groomed) {
         if let Some(f) = a.founder {
             flora.lay_carcass(
                 a.site,
@@ -4073,24 +4106,34 @@ fn kill(fauna: &mut Fauna, flora: &mut Flora, j: usize, cause: Departure, view: 
 /// The whole animal to carrion on its face, and the death booked. Whether the plant
 /// layer took the corpse.
 fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departure) -> bool {
+    bury_corpse_into(fauna, flora, a, cause, None).0
+}
+
+fn bury_corpse_into(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departure, eater: Option<u64>) -> (bool, f64) {
     // The whole animal, whatever is left of it: a corpse with no organic matter left is
     // still a corpse with mineral in it, and keeping an inert remainder on a dead animal
     // is how a ledger stops closing.
     // The stomach's raw food goes with it, as raw matter: no carcass yield of its own.
     let fed = a.stomach.total();
+    let mut corpse = corpse_contents(a);
+    if let Some(i) = eater.and_then(|id| fauna.animals.binary_search_by_key(&id, |a| a.id).ok()) {
+        let f = fauna.animals[i].founder.expect("a corpse eater");
+        let room = (fauna.config.founder(f).gut.capacity(fauna.animals[i].body) - fauna.animals[i].stomach.organic()).max(0.0);
+        let taken = take_from_pool(&mut corpse, room);
+        if taken.organic > 0.0 {
+            // Internal body-to-stomach transfer, not an intake across the flora boundary.
+            fauna.ledger.bites += 1;
+            fauna.ledger.bites_by_food[Food::Carrion.index()] += 1;
+            fauna.animals[i].bite = crate::LastBite(Some(Site { y: a.site.y + 1, ..a.site }));
+            let taken = ingest_bite(fauna, i, flora, Food::Carrion, taken);
+            fauna.ledger.eaten_carrion_by_founder[f.index()] += taken.organic;
+        }
+    }
     let laid = fauna.book_deposit(
         flora,
         a.site,
         DepositKind::Carrion,
-        Taken {
-            organic: a.organic() + a.gut.organic + a.gut_seeds.total().organic + fed.organic,
-            mineral: a.mineral + a.gut.mineral + a.gut_seeds.total().mineral + fed.mineral,
-            energy: a.energy
-                + a.fuel_energy
-                + a.gut.energy
-                + a.gut_seeds.total().energy
-                + fed.energy,
-        },
+        corpse,
     );
     let l = &mut fauna.ledger;
     l.stomach_out.organic += fed.organic;
@@ -4098,7 +4141,7 @@ fn bury_corpse(fauna: &mut Fauna, flora: &mut Flora, a: &Animal, cause: Departur
     l.stomach_out.energy += fed.energy;
     fauna.ledger.deaths += 1;
     fauna.book_departure(a, cause);
-    laid
+    (laid, corpse.organic)
 }
 
 /// What a blocked climber did with the face in front of it.
@@ -4437,6 +4480,65 @@ fn back_off_face(
     a.state = State::Walking;
 }
 
+/// The shared raw-food ingestion path for normal bites and groomed prey.
+fn ingest_bite(fauna: &mut Fauna, i: usize, flora: &mut Flora, food: Food, taken: Taken) -> Taken {
+    let founder = fauna.animals[i].founder.expect("a feeding founder");
+    fauna.ledger.eaten_by_founder_food[founder.index()][food.index()] += taken.organic;
+    // The sloppy feeder (roster R1): `bite_spill_fraction` of what the plant layer gave
+    // falls at once to the litter at its standing face, pro rata in all three currencies,
+    // booked `deposited_*`; only the rest reaches the gut.
+    let spill_fraction = fauna.config.founder(founder).bite_spill_fraction.clamp(0.0, 1.0);
+    let taken = if spill_fraction > 0.0 {
+        let spilt = Taken {
+            organic: taken.organic * spill_fraction,
+            mineral: taken.mineral * spill_fraction,
+            energy: taken.energy * spill_fraction,
+        };
+        let face = fauna.animals[i].site;
+        fauna.book_deposit(flora, face, DepositKind::Litter, spilt);
+        Taken {
+            organic: taken.organic - spilt.organic,
+            mineral: taken.mineral - spilt.mineral,
+            energy: taken.energy - spilt.energy,
+        }
+    } else {
+        taken
+    };
+    fauna.ledger.bites_by_founder[founder.index()] += 1;
+    fauna.ledger.bites_by_founder_food[founder.index()][food.index()] += 1;
+    swallow(fauna, i, food, taken);
+    taken
+}
+
+/// The whole corpse, before any food capacity or yield is applied.
+fn corpse_contents(a: &Animal) -> Taken {
+    let seeds = a.gut_seeds.total();
+    let fed = a.stomach.total();
+    Taken {
+        organic: a.organic() + a.gut.organic + seeds.organic + fed.organic,
+        mineral: a.mineral + a.gut.mineral + seeds.mineral + fed.mineral,
+        energy: a.energy + a.fuel_energy + a.gut.energy + seeds.energy + fed.energy,
+    }
+}
+
+/// SP-GROOM: reuse the catch's kill-to-carcass and raw-food ingestion paths.
+pub(crate) fn groom_prey(fauna: &mut Fauna, flora: &mut Flora, groomer: u64, rider: u64, view: &VoxelView<'_>) {
+    let Ok(j) = fauna.animals.binary_search_by_key(&rider, |a| a.id) else { return; };
+    let prey = fauna.animals[j];
+    let Some(pf) = prey.founder else { return; };
+    let Some(gf) = fauna.view().animal(groomer).and_then(|a| a.founder) else { return; };
+    // A grooming removal is neither a grown drop-off nor a freed rider.
+    fauna.animals[j].attached = None;
+    kill_into(fauna, flora, j, Departure::Groomed, Some(view), Some(groomer));
+    fauna.ledger.groomed_by_groomer[gf.index()] += 1;
+    fauna.ledger.groomed_by_rider[pf.index()] += 1;
+}
+
+/// Use the same terrain route and directed walking machinery as a fruit approach.
+pub(crate) fn groom_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, host: (f64,u64,Site), seek: f64) -> Option<Actions> {
+    glider::walk_target(fauna, i, view, fv, &[host], seek, 0.0).map(|(go,_)| go)
+}
+
 /// The founder's supported local bite: the blind founder takes **detritus** — litter or
 /// carrion off the ground under its mouth region, or cap tissue off a fungal stand in
 /// its band — and the browser crops a vascular stand whose crown cells it touches. One
@@ -4558,28 +4660,8 @@ fn founder_feed(
     };
     fauna.animals[i].bite = crate::LastBite(bitten);
     fauna.ledger.eaten_mycelium_by_founder[founder.index()] += mycelium;
-    fauna.ledger.eaten_by_founder_food[founder.index()][food.index()] += taken.organic;
     let taken = fauna.book_eaten(taken, food);
-    // The sloppy feeder (roster R1): `bite_spill_fraction` of what the plant layer gave
-    // falls at once to the litter at its standing face, pro rata in all three currencies,
-    // booked `deposited_*`; only the rest reaches the gut.
-    let spill_fraction = fauna.config.founder(founder).bite_spill_fraction.clamp(0.0, 1.0);
-    let taken = if spill_fraction > 0.0 {
-        let spilt = Taken {
-            organic: taken.organic * spill_fraction,
-            mineral: taken.mineral * spill_fraction,
-            energy: taken.energy * spill_fraction,
-        };
-        let face = fauna.animals[i].site;
-        fauna.book_deposit(flora, face, DepositKind::Litter, spilt);
-        Taken {
-            organic: taken.organic - spilt.organic,
-            mineral: taken.mineral - spilt.mineral,
-            energy: taken.energy - spilt.energy,
-        }
-    } else {
-        taken
-    };
+    let taken = ingest_bite(fauna, i, flora, food, taken);
     if let Some(plant) = plant {
         fauna.ledger.bites_by_plant[plant.index()] += 1;
         fauna.ledger.eaten_by_plant[plant.index()] += taken.organic;
@@ -4597,9 +4679,6 @@ fn founder_feed(
             }
         }
     }
-    fauna.ledger.bites_by_founder[founder.index()] += 1;
-    fauna.ledger.bites_by_founder_food[founder.index()][food.index()] += 1;
-    swallow(fauna, i, food, taken);
     true
 }
 

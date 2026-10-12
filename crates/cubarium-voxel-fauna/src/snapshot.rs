@@ -173,7 +173,9 @@ use crate::{Fauna, FaunaConfig};
 // 79: SP-NURSE — `Animal::mother` and the ledger's `nursed_given_by_founder` and
 //     `nursed_received_by_founder` (a state layout change). `FounderPhysiology::nursing`
 //     (`Nursing`) is config, not a bump.
-pub const SCHEMA: u32 = 79;
+// 80: SP-GROOM — saved continuous contacts, grooming counters, and a departure cause.
+//     The per-founder grooming table is named config, not itself a schema bump.
+pub const SCHEMA: u32 = 80;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

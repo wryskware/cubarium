@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2870 rows)
+**`fauna.*`** (2960 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1754,6 +1754,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.littershredder.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.littershredder.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.littershredder.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.littershredder.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.littershredder.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.littershredder.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.littershredder.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.littershredder.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.littershredder.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.littershredder.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.littershredder.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.littershredder.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2048,6 +2058,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.frondgrazer.herding.herd_max` | 4 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.frondgrazer.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.frondgrazer.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.frondgrazer.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.frondgrazer.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.frondgrazer.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.frondgrazer.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.frondgrazer.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.frondgrazer.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.frondgrazer.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.frondgrazer.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.frondgrazer.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2342,6 +2362,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.lanternjaw.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.lanternjaw.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.lanternjaw.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.lanternjaw.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.lanternjaw.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.lanternjaw.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.lanternjaw.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.lanternjaw.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.lanternjaw.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.lanternjaw.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.lanternjaw.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.lanternjaw.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2636,6 +2666,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.capgnawer.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.capgnawer.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.capgnawer.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.capgnawer.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.capgnawer.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.capgnawer.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.capgnawer.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.capgnawer.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.capgnawer.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.capgnawer.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.capgnawer.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.capgnawer.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2930,6 +2970,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.loftstrider.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.loftstrider.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.loftstrider.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.loftstrider.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.loftstrider.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.loftstrider.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.loftstrider.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.loftstrider.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.loftstrider.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.loftstrider.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.loftstrider.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.loftstrider.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3224,6 +3274,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.ripple-snail.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.ripple-snail.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.ripple-snail.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.ripple-snail.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.ripple-snail.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.ripple-snail.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.ripple-snail.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.ripple-snail.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.ripple-snail.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.ripple-snail.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.ripple-snail.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.ripple-snail.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3518,6 +3578,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.bellwing.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.bellwing.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.bellwing.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.bellwing.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.bellwing.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.bellwing.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.bellwing.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.bellwing.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.bellwing.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.bellwing.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.bellwing.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.bellwing.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3812,6 +3882,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.herding.pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.seedporter.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.seedporter.herding.memory_s` | 60.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.seedporter.nursing.weaning_age_s` | 7200.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.seedporter.nursing.nurse_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.seedporter.nursing.nurse_rate_per_s` | 0.0002 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.seedporter.nursing.nurse_reserve_floor` | 0.25 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.seedporter.nursing.nurse_efficiency` | 0.8 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.seedporter.nursing.follow_m` | 0.4 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.seedporter.nursing.follow_pull` | 0.8 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.seedporter.grooming.groom_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.seedporter.grooming.groom_s` | 10.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.seedporter.grooming.groom_seek_m` | 4.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4106,6 +4186,16 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.herding.pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point) |
 | `fauna.founders.chorister.herding.herd_max` | 0 | kin | [0, inf) |  | - | placeholder | HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades) |
 | `fauna.founders.chorister.herding.memory_s` | 0.0 | s | [0, inf) |  | - | placeholder | HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense) |
+| `fauna.founders.chorister.nursing.weaning_age_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year |
+| `fauna.founders.chorister.nursing.nurse_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length |
+| `fauna.founders.chorister.nursing.nurse_rate_per_s` | 0.0 | 1/s | [0, inf) |  | - | placeholder | SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins |
+| `fauna.founders.chorister.nursing.nurse_reserve_floor` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk |
+| `fauna.founders.chorister.nursing.nurse_efficiency` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient |
+| `fauna.founders.chorister.nursing.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius |
+| `fauna.founders.chorister.nursing.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging |
+| `fauna.founders.chorister.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
+| `fauna.founders.chorister.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
+| `fauna.founders.chorister.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |

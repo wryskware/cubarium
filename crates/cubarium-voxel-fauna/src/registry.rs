@@ -370,6 +370,9 @@ fn founder_rows() -> Vec<Row> {
         r("nursing.nurse_efficiency", "fraction", fraction, "SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient"),
         r("nursing.follow_m", "m", nonneg, "SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius"),
         r("nursing.follow_pull", "fraction", fraction, "SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging"),
+        r("grooming.groom_radius_m", "m", nonneg, "SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length"),
+        r("grooming.groom_s", "s", nonneg, "SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds"),
+        r("grooming.groom_seek_m", "m", nonneg, "SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
