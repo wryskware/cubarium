@@ -1,4 +1,4 @@
-# ENGAGE source commit ba4ef3474e4cf688a8e0f4ae92ab096598fce6c7; binary sha256 a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b
+# ENGAGE source commit b5239cd2175e76cd58619fe36328a350444b7a52; binary sha256 a1c453622cdf382f25c8c0d336bac1a82e05cd0af536ad6df3a5c7a0a20a659b
 kind = "batch"
 name = "engage-baseline"
 out = "/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/baseline"
