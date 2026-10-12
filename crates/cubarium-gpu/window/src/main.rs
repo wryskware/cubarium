@@ -34,10 +34,12 @@ fn main() -> Result<()> {
     let mut zoom = 3u32;
     let mut seed = 1u64;
     let mut frames = None;
+    let mut surface_probe = false;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| anyhow!("{flag} wants a value"));
         match flag.as_str() {
+            "--surface-probe" => surface_probe = true,
             "--art" => art = value()?.into(),
             "--ring" => {
                 let v = value()?;
@@ -65,6 +67,7 @@ fn main() -> Result<()> {
         zoom,
         seed,
         frames,
+        surface_probe,
         error: None,
         state: None,
         start: std::time::Instant::now(),
@@ -82,6 +85,7 @@ struct App {
     zoom: u32,
     seed: u64,
     frames: Option<u64>,
+    surface_probe: bool,
     error: Option<anyhow::Error>,
     state: Option<State>,
     start: std::time::Instant,
@@ -98,6 +102,13 @@ struct State {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.surface_probe {
+            if let Err(error) = probe_surface(event_loop) {
+                self.error = Some(error);
+            }
+            event_loop.exit();
+            return;
+        }
         if self.state.is_some() {
             return;
         }
@@ -253,4 +264,50 @@ impl Drop for State {
     fn drop(&mut self) {
         self.renderer.destroy(&self.gpu);
     }
+}
+
+/// Explicit diagnostic: no renderer/device allocation and no live-display access.
+fn probe_surface(event_loop: &ActiveEventLoop) -> Result<()> {
+    hidden::window_allowed()?;
+    let window = Arc::new(
+        event_loop.create_window(
+            Window::default_attributes()
+                .with_title("cubarium surface probe")
+                .with_inner_size(winit::dpi::PhysicalSize::new(16u32, 16u32)),
+        )?,
+    );
+    for with_display in [false, true] {
+        let descriptor = if with_display {
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
+                event_loop.owned_display_handle(),
+            ))
+        } else {
+            wgpu::InstanceDescriptor::new_without_display_handle_from_env()
+        };
+        let backends = descriptor.backends;
+        let instance = wgpu::Instance::new(descriptor);
+        let surface = instance.create_surface(window.clone())?;
+        println!("surface probe owned_display={with_display} backends={backends:?}");
+        for adapter in pollster::block_on(instance.enumerate_adapters(backends)) {
+            let info = adapter.get_info();
+            let caps = surface.get_capabilities(&adapter);
+            println!(
+                "adapter name={} backend={:?} type={:?} supported={} formats={:?} modes={:?}",
+                info.name,
+                info.backend,
+                info.device_type,
+                adapter.is_surface_supported(&surface),
+                caps.formats,
+                caps.present_modes
+            );
+        }
+        match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            compatible_surface: Some(&surface),
+            ..Default::default()
+        })) {
+            Ok(adapter) => println!("compatible request adapter={:?}", adapter.get_info()),
+            Err(error) => println!("compatible request failed: {error}"),
+        }
+    }
+    Ok(())
 }

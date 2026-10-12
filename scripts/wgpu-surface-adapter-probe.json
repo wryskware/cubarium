@@ -1,0 +1,41 @@
+{
+  "kind": "command",
+  "name": "wgpu-hidden-surface-adapter-probe",
+  "argv": [
+    "python3",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/scripts/lab/labkit/snaprun.py",
+    "--repo",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "--commit",
+    "ed757f2e431bc9e527a3923d28c9581e31975b0d",
+    "--trees",
+    "/home/wrysk/.cache/labd/trees",
+    "--target-dir",
+    "/home/wrysk/.cache/labd/target",
+    "--profile",
+    "debug",
+    "--out",
+    "{out}",
+    "--",
+    "scripts/hidden.sh",
+    "env",
+    "CUBARIUM_GPU=llvmpipe",
+    "cargo",
+    "run",
+    "--manifest-path",
+    "crates/cubarium-gpu/window/Cargo.toml",
+    "--",
+    "--surface-probe",
+    "--art",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/assets/atelier"
+  ],
+  "local_only": true,
+  "threads": 2,
+  "mem_gb": 8,
+  "priority": 1,
+  "timeout_h": 0.1,
+  "est_h": 0.01,
+  "env": {
+    "CARGO_BUILD_JOBS": "2"
+  }
+}
