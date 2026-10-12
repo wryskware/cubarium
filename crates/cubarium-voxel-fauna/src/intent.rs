@@ -133,6 +133,8 @@ pub const SEEDPORTER: Menu = Menu {
         o("follow_mother", Required(Kin), Young),
         o("flee_to_trees", Optional(Threat), All),
         o("rest", Optional(Place(PlaceKind::RestSpot)), All),
+        // YOUNG-ROAM (§3.5): a weaned young's excursion.
+        o("explore", Optional(Place(PlaceKind::ExcursionGoal)), Young),
     ],
     spare: SPARE_INTENTS,
 };
@@ -148,6 +150,8 @@ pub const LOFTSTRIDER: Menu = Menu {
         o("guard", Required(Threat), Adult),
         o("move_off", Optional(Threat), All),
         o("rest", Optional(Place(PlaceKind::RestSpot)), All),
+        // YOUNG-ROAM (§3.5): a calf's excursion.
+        o("explore", Optional(Place(PlaceKind::ExcursionGoal)), Young),
     ],
     spare: SPARE_INTENTS,
 };
@@ -542,6 +546,7 @@ pub(crate) fn teacher_label(
             S::Roost => t("roost", Subject::None),
             S::Groom => t("groom", Subject::None),
             S::Nurse => t("follow_mother", a.mother.map_or(Subject::None, |m| body_subject(fauna, a.id, m))),
+            S::Explore => t("explore", fauna.excursions.get(&a.id).map_or(Subject::None, crate::roam::subject)),
             S::Heuristic | S::Search | S::Leave | S::Fruit | S::Light if herded => {
                 t("stay_with_troop", nearest(fauna, a.id, class::KIN))
             }
@@ -553,6 +558,9 @@ pub(crate) fn teacher_label(
             // LS-DEFEND: the defence layer's own proposal, hold and call; under the hold of a
             // calm intent, its proposal only.
             _ if fauna.ls_teach.contains_key(&a.id) => fauna.ls_teach[&a.id],
+            S::Explore => t("explore", fauna.excursions.get(&a.id).map_or(Subject::None, crate::roam::subject)),
+            // YOUNG-ROAM: a mother walking to her own calf's bleat.
+            S::Answer => t("go_to_calf", Subject::None),
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),

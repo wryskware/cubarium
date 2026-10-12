@@ -4338,6 +4338,13 @@ pub struct Fauna {
     /// ([`defend::steer`]), read by its intent record. Session state.
     #[serde(skip)]
     pub(crate) ls_teach: FxHashMap<u64, intent::Teach>,
+    /// YOUNG-ROAM: each young's excursion under way ([`roam::excursion`]). Session state, not
+    /// saved: a load sends it back under its leash.
+    #[serde(skip)]
+    pub(crate) excursions: FxHashMap<u64, roam::Excursion>,
+    /// YOUNG-ROAM's readout per lineage ([`roam::RoamTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) roam_tally: [roam::RoamTally; Founder::COUNT],
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4493,11 +4500,15 @@ pub enum Steer {
     Bed,
     /// LS-DEFEND: a defence intent's skill ([`defend::steer`]).
     Defend,
+    /// YOUNG-ROAM: a young's excursion ([`roam::excursion`]).
+    Explore,
+    /// YOUNG-ROAM: a mother's walk to her own young's distress call ([`roam::answer`]).
+    Answer,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 22] = [
+    pub const ALL: [Steer; 24] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4520,6 +4531,8 @@ impl Steer {
         Steer::Nurse,
         Steer::Bed,
         Steer::Defend,
+        Steer::Explore,
+        Steer::Answer,
     ];
 
     /// A short name for tables.
@@ -4547,6 +4560,8 @@ impl Steer {
             Steer::Nurse => "nurse",
             Steer::Bed => "bed",
             Steer::Defend => "defend",
+            Steer::Explore => "explore",
+            Steer::Answer => "answer",
         }
     }
 }
@@ -4920,6 +4935,8 @@ impl Fauna {
             hounds: FxHashMap::default(),
             hound_teach: FxHashMap::default(),
             ls_teach: FxHashMap::default(),
+            excursions: FxHashMap::default(),
+            roam_tally: [roam::RoamTally::default(); Founder::COUNT],
             heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
@@ -4979,6 +4996,16 @@ impl Fauna {
     /// controller sample, `None` before its first.
     pub fn steer_of(&self, id: u64) -> Option<Steer> {
         self.steer.get(&id).copied()
+    }
+
+    /// YOUNG-ROAM's readout for lineage `founder` ([`roam::RoamTally`]).
+    pub fn roam_tally(&self, founder: Founder) -> roam::RoamTally {
+        self.roam_tally[founder.index()]
+    }
+
+    /// Body `id`'s excursion under way, if any ([`roam::excursion`]).
+    pub fn excursion_of(&self, id: u64) -> Option<roam::Excursion> {
+        self.excursions.get(&id).copied()
     }
 
     /// EDGE's readout: the ticks founder `id` has pressed without a break, the target its

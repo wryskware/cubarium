@@ -29,14 +29,15 @@ use crate::{Animal, Fauna, Founder};
 pub const MAX_CALL_KINDS: usize = 2;
 
 /// A lineage's call kinds (§2.1): the loftstrider's alarm snort and distress bleat, the
-/// Veilhound's hunt cue and regroup howl, the seedporter's alarm (later, primate-style), and
+/// Veilhound's hunt cue and regroup howl, the seedporter's alarm (later, primate-style) and
+/// its young's distress call (YOUNG-ROAM), and
 /// (CALLS-REST step 2) the frondgrazer's bolt alarm, a sensed kind ([`CallTable::sensed`]).
 pub fn kinds_of(founder: Founder) -> &'static [&'static str] {
     match founder {
         Founder::Browser => &["bolt_alarm"],
         Founder::Loftstrider => &["alarm_snort", "distress_bleat"],
         Founder::Chorister => &["hunt_cue", "regroup_howl"],
-        Founder::Seedporter => &["alarm"],
+        Founder::Seedporter => &["alarm", "distress"],
         _ => &[],
     }
 }
@@ -183,7 +184,20 @@ pub fn calls_of(founder: Founder) -> CallTable {
         Founder::Browser => CallTable { sensed: [true, false], heed: [Heed::Everyone, Heed::Nobody], ..d },
         // A hunt cue is quiet; a howl carries far.
         Founder::Chorister => CallTable { range_m: 60.0, loudness: [0.3, 1.0], ..d },
-        Founder::Seedporter => CallTable { range_m: 30.0, loudness: [1.0, 0.0], recognise_voice: true, ..d },
+        // YOUNG-ROAM: a young's distress call at an excursion's end (an infant marmoset's
+        // separation call); adults heed it for 15 s, its mother at once, and walk to it until
+        // in contact (0.5 m, its nursing radius); records keep 20 s as the loftstrider's.
+        Founder::Seedporter => CallTable {
+            range_m: 30.0,
+            loudness: [1.0, 0.7],
+            recognise_voice: true,
+            keep_s: 20.0,
+            heed: [Heed::Nobody, Heed::Adults],
+            heed_s: [0.0, 15.0],
+            stranger_delay_s: [0.0, 3.0],
+            arrive_m: 0.5,
+            ..d
+        },
         _ => d,
     }
 }

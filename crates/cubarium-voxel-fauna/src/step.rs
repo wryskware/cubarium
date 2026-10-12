@@ -1984,6 +1984,28 @@ fn controllers(
                 }
             }
         }
+        // YOUNG-ROAM (`crate::roam`): a leashed young's excursion, over its own steering and the
+        // herd pull; else a mother's walk to her own young's distress call. Flight, the defence
+        // layer and every reflex below still win.
+        if driven && prey {
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let m = fauna.animals[i].mobility;
+            let calm = matches!(src, crate::Steer::Heuristic | crate::Steer::Search | crate::Steer::Leave)
+                && m.mode == crate::MobilityMode::Ground
+                && m.climb.is_none();
+            let period_s = manifest.cadence_ticks().max(1) as f64 * DT;
+            if let Some(go) = crate::roam::excursion(fauna, i, calm, period_s, view.config.seed, ring) {
+                actions = go;
+                src = crate::Steer::Explore;
+                herded = false;
+            } else if calm {
+                if let Some((go, _)) = crate::roam::answer(fauna, i, ring) {
+                    actions = go;
+                    src = crate::Steer::Answer;
+                    herded = false;
+                }
+            }
+        }
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
         // instead of fleeing: a threat it sees or feels stops and closes it.
         let retracts = fauna.config.founder(founder).amphibious.is_some_and(|am| am.retract_hold_s > 0.0);

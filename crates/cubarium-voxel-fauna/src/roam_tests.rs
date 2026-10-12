@@ -254,3 +254,195 @@ fn a_seedporter_infant_before_weaning_keeps_its_nursing_follow_and_never_strays(
     let mother = animal(&f, young).mother.expect("a mother");
     assert!(crate::nurse::weighs_as_mother(&f, i, mother));
 }
+
+// ------------------------------------------------------------------ step 3: excursions
+
+/// Body `me` has heard a call of `kind` from `(x, z)` now, `relation` its recognition of the
+/// voice (0 a stranger, 1 its mother, 2 its own young).
+fn hears(f: &mut Fauna, me: u64, kind: u8, (x, z): (f64, f64), relation: u8) {
+    let r = crate::calls::CallRecord { kind, x, z, y_m: 0.0, loudness: 1.0, proximity: 1.0, tick: f.tick, relation, asleep: false, heading: 0.0 };
+    f.heard.insert(me, crate::calls::Heard { records: vec![r] });
+}
+
+/// A calf of `founder` midway through its roam, its mother 2 m off and seen, on an excursion
+/// to a place `goal_m` east of it set out `ago_s` before now.
+fn out_on_excursion(founder: Founder, goal_m: f64, ago_s: f64) -> (World, Fauna, u64, u64) {
+    let (w, mut f) = world(4);
+    f.tick = 1_000_000;
+    let (start, end) = {
+        let p = f.config.founder(founder);
+        let start = if p.nursing.on() { p.nursing.weaning_age_s } else { 0.0 };
+        (start, p.young.independence_s)
+    };
+    let (mother, calf) = family(&mut f, &w, founder, 10.0, 2.0, 0.3, 0.5 * (start + end));
+    let a = animal(&f, calf);
+    let since = f.tick - (ago_s / cubarium_voxel::DT).round() as u64;
+    let e = Excursion { goal: Goal::Place, track: 0, x: a.pose.x + goal_m, z: a.pose.z, y_m: a.pose.y_m, since };
+    f.excursions.insert(calf, e);
+    (w, f, mother, calf)
+}
+
+fn bleated(f: &Fauna, id: u64) -> bool {
+    f.calls.iter().any(|e| e.caller == id && e.kind == 1)
+}
+
+fn run_excursion(f: &mut Fauna, id: u64) -> Option<crate::Actions> {
+    let i = index(f, id);
+    excursion(f, i, true, 0.5, 7, RING)
+}
+
+#[test]
+fn an_excursion_ends_on_alarm_on_its_mothers_call_and_on_losing_sight_and_the_young_bleats() {
+    for founder in [LS, SP] {
+        let name = founder.name();
+        // Under way, nothing amiss: it walks on toward its goal, east.
+        let (_w, mut f, mother, calf) = out_on_excursion(founder, 8.0, 1.0);
+        let go = run_excursion(&mut f, calf).expect("still out");
+        assert!(go.forward > 0.0 && go.turn.abs() < 1.0, "{name}: heading east to its goal");
+        assert!(!bleated(&f, calf));
+        // Alarmed: a threat in its record.
+        let (w, mut f, mother2, calf2) = out_on_excursion(founder, 8.0, 1.0);
+        let vh = introduce(&mut f, &w, Founder::Chorister, StartingStores::FULL);
+        place(&mut f, vh, 20.0, MID_Z, WEST);
+        sees(&mut f, calf2, &[(mother2, class::KIN, false), (vh, class::THREAT, true)]);
+        assert!(run_excursion(&mut f, calf2).is_none());
+        assert!(f.excursions.get(&calf2).is_none(), "{name}: ended");
+        assert_eq!(f.roam_tally(founder).ended[End::Alarmed.index()], 1);
+        assert!(bleated(&f, calf2), "{name}: it bleats when alarmed");
+        // An alarm call heard since it set out, no threat in sight: alarmed too.
+        let (_w, mut f, _, calf3) = out_on_excursion(founder, 8.0, 1.0);
+        hears(&mut f, calf3, 0, (30.0, MID_Z), 0);
+        assert!(run_excursion(&mut f, calf3).is_none());
+        assert_eq!(f.roam_tally(founder).ended[End::Alarmed.index()], 1, "{name}");
+        assert!(bleated(&f, calf3));
+        // Its mother's voice.
+        let (_w, mut f, _, calf4) = out_on_excursion(founder, 8.0, 1.0);
+        let at = (animal(&f, mother).pose.x, MID_Z);
+        hears(&mut f, calf4, 0, at, 1);
+        assert!(run_excursion(&mut f, calf4).is_none());
+        assert_eq!(f.roam_tally(founder).ended[End::MotherCalled.index()], 1, "{name}");
+        assert!(bleated(&f, calf4));
+        // Out of sight of its family: no kin in its record.
+        let (_w, mut f, _, calf5) = out_on_excursion(founder, 8.0, 1.0);
+        sees(&mut f, calf5, &[]);
+        assert!(run_excursion(&mut f, calf5).is_none());
+        assert_eq!(f.roam_tally(founder).ended[End::LostSight.index()], 1, "{name}");
+        assert!(bleated(&f, calf5));
+        // At its goal, and after its time: quietly.
+        let y = f.config.founder(founder).young;
+        let (_w, mut f, _, calf6) = out_on_excursion(founder, 0.5 * y.arrive_m, 1.0);
+        assert!(run_excursion(&mut f, calf6).is_none());
+        assert_eq!(f.roam_tally(founder).ended[End::Arrived.index()], 1, "{name}");
+        assert!(!bleated(&f, calf6));
+        let (_w, mut f, _, calf7) = out_on_excursion(founder, 8.0, y.excursion_s + 1.0);
+        assert!(run_excursion(&mut f, calf7).is_none());
+        assert_eq!(f.roam_tally(founder).ended[End::TimedOut.index()], 1, "{name}");
+        assert!(!bleated(&f, calf7));
+    }
+}
+
+#[test]
+fn a_calm_young_sets_off_at_its_chance_and_never_as_an_infant_or_under_threat() {
+    for founder in [LS, SP] {
+        let name = founder.name();
+        let (w, mut f) = world(5);
+        let (start, end) = {
+            let p = f.config.founder(founder);
+            (if p.nursing.on() { p.nursing.weaning_age_s } else { 0.0 }, p.young.independence_s)
+        };
+        let (mother, calf) = family(&mut f, &w, founder, 10.0, 2.0, 0.3, 0.5 * (start + end));
+        // A certain chance: it sets off, toward a goal, recorded.
+        f.config.founders[founder.index()].young.excursion_per_h = [1e9, 1e9];
+        let go = run_excursion(&mut f, calf).expect("it sets off");
+        let e = f.excursion_of(calf).expect("under way");
+        assert!(go.forward > 0.0 || go.turn != 0.0);
+        assert_eq!(f.roam_tally(founder).started.iter().sum::<u64>(), 1, "{name}");
+        // A place goal lies `excursion_m` off, away from its mother (east of her here).
+        if e.goal == Goal::Place {
+            let a = animal(&f, calf);
+            let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, e.x, e.z, RING);
+            assert!((dx.hypot(dz) - f.config.founder(founder).young.excursion_m).abs() < 1e-6);
+            assert!(dx > 0.0, "{name}: away from its mother");
+        }
+        // No chance: it never sets off.
+        f.excursions.clear();
+        f.config.founders[founder.index()].young.excursion_per_h = [0.0, 0.0];
+        for _ in 0..50 {
+            f.tick += 1;
+            assert!(run_excursion(&mut f, calf).is_none());
+        }
+        // Under threat it never sets off, whatever the chance.
+        f.config.founders[founder.index()].young.excursion_per_h = [1e9, 1e9];
+        let vh = introduce(&mut f, &w, Founder::Chorister, StartingStores::FULL);
+        place(&mut f, vh, 25.0, MID_Z, WEST);
+        sees(&mut f, calf, &[(mother, class::KIN, false), (vh, class::THREAT, false)]);
+        assert!(run_excursion(&mut f, calf).is_none(), "{name}");
+        // Alone (no kin in sense) it never sets off.
+        sees(&mut f, calf, &[]);
+        assert!(run_excursion(&mut f, calf).is_none(), "{name}");
+        // Grown past independence it never sets off.
+        sees(&mut f, calf, &[(mother, class::KIN, false)]);
+        set_age(&mut f, calf, end);
+        assert!(run_excursion(&mut f, calf).is_none(), "{name}");
+    }
+    // A seedporter infant before weaning never sets off, whatever the chance.
+    let (w, mut f) = world(6);
+    let n = f.config.founder(SP).nursing;
+    f.config.founders[SP.index()].young.excursion_per_h = [1e9, 1e9];
+    let (_, infant) = family(&mut f, &w, SP, 10.0, 0.3, 0.3, 0.5 * n.weaning_age_s);
+    for _ in 0..50 {
+        f.tick += 1;
+        assert!(run_excursion(&mut f, infant).is_none(), "an infant never strays");
+    }
+}
+
+#[test]
+fn a_mother_hearing_her_own_youngs_bleat_goes_to_it() {
+    for founder in [LS, SP] {
+        let name = founder.name();
+        let (w, mut f) = world(8);
+        let (mother, calf) = family(&mut f, &w, founder, 10.0, 6.0, 0.3, 1.0);
+        let at = (animal(&f, calf).pose.x, MID_Z);
+        let i = index(&f, mother);
+        // Her own young's voice: she walks toward it (east).
+        hears(&mut f, mother, 1, at, 2);
+        let (go, _) = answer(&mut f, i, RING).unwrap_or_else(|| panic!("{name}: she answers"));
+        let a = animal(&f, mother);
+        let want = (at.0 - a.pose.x).atan2(0.0);
+        assert!(crate::vigil::head(&a, want, 1.0, 0.0) == go, "{name}: toward the call");
+        // A stranger's bleat: not this answer (the defence layer's, under threat).
+        hears(&mut f, mother, 1, at, 0);
+        assert!(answer(&mut f, i, RING).is_none(), "{name}");
+        // Already there: she stops answering.
+        let arrive = f.config.founder(founder).calls.arrive_m;
+        hears(&mut f, mother, 1, (a.pose.x + 0.5 * arrive, MID_Z), 2);
+        assert!(answer(&mut f, i, RING).is_none(), "{name}");
+        // A call older than the kind's heed time: forgotten.
+        let heed = f.config.founder(founder).calls.heed_s[1];
+        hears(&mut f, mother, 1, at, 2);
+        f.tick += (heed / cubarium_voxel::DT).ceil() as u64 + 1;
+        assert!(answer(&mut f, i, RING).is_none(), "{name}");
+    }
+}
+
+// ------------------------------------------------------------------ step 4: the intent record
+
+#[test]
+fn an_excursion_is_recorded_as_the_young_menus_explore_with_its_goal() {
+    for founder in [LS, SP] {
+        let menu = crate::intent::menu_of(founder);
+        let k = menu.index("explore").expect("the menu has explore");
+        assert_eq!(menu.option(k).map(|o| o.who), Some(crate::intent::Who::Young));
+        let (_w, mut f, _, calf) = out_on_excursion(founder, 8.0, 1.0);
+        let i = index(&f, calf);
+        let e = f.excursion_of(calf).expect("under way");
+        let teach = crate::intent::teacher_label(&f, i, founder, crate::Steer::Explore, crate::Actions { forward: 1.0, turn: 0.0, feed: 0.0 }, false, false);
+        assert_eq!(teach.name, Some("explore"), "{}", founder.name());
+        assert_eq!(teach.subject, subject(&e));
+        assert!(matches!(teach.subject, crate::intent::Subject::Place { kind: crate::intent::PlaceKind::ExcursionGoal, .. }));
+        // An adult's mask never holds it.
+        let mask = crate::intent::intent_mask(menu, false, |_| true);
+        assert!(!mask[k]);
+        let _ = &mut f;
+    }
+}

@@ -31,6 +31,7 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders.*.calls.trigger_m".into(), names: vec!["first", "second"] },
                 Alias { pattern: "fauna.founders.*.calls.heed_s".into(), names: vec!["first", "second"] },
                 Alias { pattern: "fauna.founders.*.calls.stranger_delay_s".into(), names: vec!["first", "second"] },
+                Alias { pattern: "fauna.founders.*.young.excursion_per_h".into(), names: vec!["start", "independence"] },
             ],
             Vec::new(),
         )
@@ -423,6 +424,10 @@ fn founder_rows() -> Vec<Row> {
         r("young.follow_m", "m", nonneg, "YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off"),
         r("young.roam_m", "m", nonneg, "YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get)"),
         r("young.follow_pull", "fraction", fraction, "YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean)"),
+        r("young.excursion_per_h.*", "1/h", nonneg, "YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8)"),
+        r("young.excursion_m", "m", nonneg, "YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother"),
+        r("young.arrive_m", "m", nonneg, "YOUNG-ROAM: within this of its goal the excursion ends (quietly)"),
+        r("young.excursion_s", "s", nonneg, "YOUNG-ROAM: an excursion ends (quietly) after this long"),
         // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
         r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
         r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),
