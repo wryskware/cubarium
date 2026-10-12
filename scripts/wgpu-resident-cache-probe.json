@@ -7,7 +7,7 @@
   ],
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "7a4b53c0f6b503f44eeb37385818512ae24f27c7",
+    "commit": "5116f722f522942ebb92dc369b1400cf8a3f7a91",
     "name": "wgpu_voxel_probe",
     "package": "cubarium-gpu",
     "example": "wgpu_voxel_probe",

@@ -14,6 +14,11 @@ not add ecological or visual design decisions. Backlog item 11 supplies history.
 Worktree: `.claude/worktrees/wgpu-renderer`, branch `codex/wgpu-renderer`.
 Source baseline: `48dd6600`. The additive capture harness and pan control are
 committed at `f6d55be5`; its rendering algorithms are the ash baseline.
+The final rebase includes `main` at `69316ce7` and its merged `pipeline-warm`
+work. The matching ash capture tree is `b1867d30` (tag
+`wgpu-ash-main-2026-10-11`): that main revision plus the same additive pan
+control. Main changed the animal save format, so its final comparison freezes
+a fresh matching world rather than migrating the old schema-78 fixture.
 
 The picture follows D-0005 and
 `design/art-direction/Cubarium_Art_Direction_v0.1.md`. Preserve the cutaway
@@ -47,6 +52,13 @@ the working policy. Hardware ray queries are absent from this baseline.
    backend choice (backlog item 11 / D-0005).
 6. Remove direct ash dependencies and Vulkan-only resource code. Check native
    platform conditionals, shader portability and both default/no-scanout builds.
+7. Preserve main's Still/All preview policies, parallel walk builds, NVIDIA
+   first-compile guard, queued lighting/fade and cancellable async warming.
+   Hosted previews, live worlds and their warm worker share an `Arc<Gpu>`.
+   Shader modules, layouts and pipelines are interned on that device; concurrent
+   requests for one descriptor compile once. Safe wgpu cannot construct its
+   native disk cache without unsafe, so this cache lives until the device drops.
+   Desktop windows retain display-compatible adapter selection.
 
 ## Verification
 
@@ -59,8 +71,10 @@ water at day/dusk/night; rain/fog; two water clocks; a frozen pan; and specimens
 with plants, models and glow. Additional existing fixtures cover fractional
 animal motion and WindowFit upscale, letterbox, downscale and portrait output.
 The comparator reports changed pixels, maximum and mean channel error, and
-writes differences. Investigate every mismatch; do not silently widen a
-tolerance or replace baseline images to make a check pass.
+writes differences. Review the pictures and numerical errors. Wrysk accepted
+the tiny 1–2/255 rounding differences on 2026-10-11; do not chase every last
+pixel, silently widen a tolerance or replace a baseline to make a check pass.
+The strict comparator deliberately still returns 1 when any pixel differs.
 
 Exercise asynchronous readback ordering, backpressure, retirement, slot reuse
 and dropped recording behavior with a tiny asymmetric texture. Run tests for
@@ -68,6 +82,23 @@ each changed crate and one integrator workspace pass. Inspect screenshots in
 addition to numerical differences. Verify Metal/HLSL shader translation where
 available; a Linux capture does not establish a macOS or Windows runtime pass.
 
-Keep the requested screenshot pairs and concise comparison result under
-`runs/wgpu-parity/`. Source history is commits, not frozen binaries or build
+Keep the final requested screenshot pairs and concise comparison result under
+`runs/wgpu-parity-main/`. Source history is commits, not frozen binaries or build
 copies. Update backlog/status after the full migration and verification pass.
+
+Final verification is in progress. The pre-rebase wgpu revision `b14697ff`
+passed all 139 GPU tests, Linux workspace checks, Windows main/Godot cross-checks,
+36 shader cases with MSL/HLSL output, and a three-frame real surface test on a
+private Xvfb display. Its 45 screenshot pairs contained 4,836 changed pixels
+out of 13,417,632 (0.036%), with maximum channel error 2/255. Final checks also
+exercise concurrent cache reuse, device isolation and Still-to-All warming.
+
+After the final rebase, all 140 GPU tests pass (65 s, no skips); the Linux
+workspace and no-scanout checks pass. The actual device cache probe confirms
+one creation for eight concurrent requests, separate caches on separate
+devices, six new variants for Still-to-All, no new variants for repeated All,
+and distinct presentation pipelines for distinct output formats. The GPU
+source tree is identical at `61017541`, `dc439d11` and `5116f722`; the latter
+commits fix a test import and expose read-only diagnostic counters.
+
+Physical panel output and native Windows/macOS runtime remain untested here.

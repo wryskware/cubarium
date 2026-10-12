@@ -1,7 +1,7 @@
 {
   "kind": "cargo-test",
   "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-  "commit": "ROOT_FILL_PINNED_COMMIT",
+  "commit": "5116f722f522942ebb92dc369b1400cf8a3f7a91",
   "profile": "debug",
   "threads": 4,
   "mem_gb": 8,

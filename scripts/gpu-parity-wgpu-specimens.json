@@ -24,7 +24,7 @@
   "local_only": true,
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "ROOT_FILL_PINNED_COMMIT",
+    "commit": "5116f722f522942ebb92dc369b1400cf8a3f7a91",
     "name": "wgpu-main-voxel_specimens",
     "package": "cubarium",
     "example": "voxel_specimens",

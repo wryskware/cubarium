@@ -2,7 +2,7 @@
   "kind": "cargo-test",
   "name": "wgpu-state-lock-tests",
   "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-  "commit": "cbe0a8151224a27f8765b9ad1a66d82ede27d835",
+  "commit": "5116f722f522942ebb92dc369b1400cf8a3f7a91",
   "command": [
     "cargo",
     "test",

@@ -4,6 +4,11 @@ A persistent artificial ecosystem for a 64×64 LED cube and, first, a local
 desktop display. One shared 3D voxel world with terrain, free water and a small
 plant and animal community whose changes have physical causes.
 
+The GPU renderer uses wgpu and maintained WGSL shaders. The migration on
+`codex/wgpu-renderer` includes desktop presentation, Godot readback and async
+pipeline warming. See the [renderer handoff](design/handoffs/wgpu-renderer-2026-10-11.md)
+for verification and platform limits.
+
 ## Current direction (voxel, 2026-09-20)
 
 The project is being rebuilt around a shallow **voxel ringworld**, developed and
