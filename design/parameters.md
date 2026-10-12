@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4302 rows)
+**`fauna.*`** (4383 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1799,6 +1799,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.littershredder.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.littershredder.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.littershredder.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.littershredder.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.littershredder.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.littershredder.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.littershredder.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.littershredder.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.littershredder.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.littershredder.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.littershredder.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2252,6 +2261,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.frondgrazer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.frondgrazer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.frondgrazer.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.frondgrazer.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.frondgrazer.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.frondgrazer.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.frondgrazer.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.frondgrazer.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.frondgrazer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.frondgrazer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.frondgrazer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2705,6 +2723,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.lanternjaw.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.lanternjaw.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.lanternjaw.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.lanternjaw.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.lanternjaw.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.lanternjaw.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.lanternjaw.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.lanternjaw.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.lanternjaw.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.lanternjaw.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.lanternjaw.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3158,6 +3185,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.capgnawer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.capgnawer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.capgnawer.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.capgnawer.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.capgnawer.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.capgnawer.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.capgnawer.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.capgnawer.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.capgnawer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.capgnawer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.capgnawer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3611,6 +3647,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.loftstrider.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.loftstrider.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.loftstrider.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.loftstrider.young.independence_s` | 15000.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.loftstrider.young.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.loftstrider.young.roam_m` | 10.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.loftstrider.young.follow_pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.loftstrider.young.excursion_per_h.*` | 1.0, 4.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.loftstrider.young.excursion_m` | 20.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.loftstrider.young.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.loftstrider.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4064,6 +4109,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.ripple-snail.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.ripple-snail.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.ripple-snail.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.ripple-snail.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.ripple-snail.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.ripple-snail.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.ripple-snail.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.ripple-snail.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.ripple-snail.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.ripple-snail.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.ripple-snail.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4517,6 +4571,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.bellwing.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.bellwing.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.bellwing.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.bellwing.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.bellwing.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.bellwing.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.bellwing.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.bellwing.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.bellwing.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.bellwing.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.bellwing.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4970,21 +5033,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.seedporter.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.seedporter.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.seedporter.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.seedporter.young.independence_s` | 18000.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.seedporter.young.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.seedporter.young.roam_m` | 8.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.seedporter.young.follow_pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.seedporter.young.excursion_per_h.*` | 2.0, 6.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.seedporter.young.excursion_m` | 12.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.seedporter.young.arrive_m` | 0.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.seedporter.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
-| `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.seedporter.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
-| `fauna.founders.seedporter.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.seedporter.calls.keep_s` | 20.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.seedporter.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.seedporter.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.seedporter.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.seedporter.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
 | `fauna.founders.seedporter.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
 | `fauna.founders.seedporter.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
-| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
-| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 15.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 3.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
 | `fauna.founders.seedporter.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
-| `fauna.founders.seedporter.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.seedporter.calls.arrive_m` | 0.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.seedporter.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
 | `fauna.founders.seedporter.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
 | `fauna.founders.seedporter.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
@@ -5423,6 +5495,15 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
 | `fauna.founders.chorister.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
 | `fauna.founders.chorister.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.chorister.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.chorister.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.chorister.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.chorister.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.chorister.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.chorister.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.chorister.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.chorister.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.chorister.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
