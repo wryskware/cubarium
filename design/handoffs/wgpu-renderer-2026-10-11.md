@@ -76,6 +76,7 @@ headless-GPU/CPU-window fallback. Physical panel output and native Windows/macOS
 runtime are untested here. MSL/HLSL emission and a Windows cross-check are not
 native runtime verification.
 
+Smoke commands create their own temporary world copies and remove them on exit.
 Only the final requested pairs and frozen inputs are retained. Superseded
 captures and smoke worlds are task-owned temporary data; source history lives
 in Git commits and lightweight tags. Backlog item 11 records the original
