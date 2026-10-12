@@ -2898,6 +2898,21 @@ impl VoxelRenderer {
                 params.raster_h,
             )?,
         };
+        // What this device compiled goes into the process's pipeline cache (and its file),
+        // so the next device, and the next run, find it compiled. Nothing is merged when
+        // every pipeline came from the seed.
+        let saving = std::time::Instant::now();
+        match crate::pipeline_cache::save(gpu) {
+            Ok(s) if timing => eprintln!(
+                "cubarium timing: pipeline cache {} bytes (grew {}, written {}) in {:.0} ms",
+                s.bytes,
+                s.grew,
+                s.written,
+                saving.elapsed().as_secs_f64() * 1e3
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!("cubarium-gpu: the pipeline cache was not saved: {e:#}"),
+        }
 
         Ok(VoxelRenderer {
             params,

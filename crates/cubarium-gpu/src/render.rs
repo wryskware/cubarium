@@ -1428,7 +1428,8 @@ fn build_pipeline(
         .layout(layout)
         .render_pass(pass)
         .subpass(0)];
-    unsafe { d.create_graphics_pipelines(vk::PipelineCache::null(), &info, None) }
+    let cache = crate::pipeline_cache::of(d);
+    unsafe { d.create_graphics_pipelines(cache, &info, None) }
         .map_err(|(_, e)| anyhow!("vkCreateGraphicsPipelines: {e}"))
         .map(|p| p[0])
         .context("build a graphics pipeline")

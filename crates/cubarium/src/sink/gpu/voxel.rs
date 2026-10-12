@@ -85,6 +85,10 @@ mod fast_preview_tests;
 #[path = "hosted.rs"]
 pub mod hosted;
 
+/// Shader pipelines compiled in the background ahead of need.
+#[path = "warm.rs"]
+pub mod warm;
+
 /// What the pack reads, copied off the live world (H3).
 #[path = "snapshot.rs"]
 pub mod snapshot;

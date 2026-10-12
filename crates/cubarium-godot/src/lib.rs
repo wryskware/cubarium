@@ -93,6 +93,7 @@ mod teardown {
         let renderers = std::mem::take(&mut *RENDERERS.lock().unwrap_or_else(|e| e.into_inner()));
         let s = sessions.iter().filter(|s| s.shutdown()).count();
         let r = renderers.iter().filter(|h| h.shutdown()).count();
+        cubarium::sink::gpu::voxel::warm::stop();
         crate::world_save::stop();
         crate::autosave::stop();
         if s + r > 0 {
