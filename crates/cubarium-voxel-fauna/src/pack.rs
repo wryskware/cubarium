@@ -406,7 +406,7 @@ pub(crate) fn must_walk_home(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) 
         Some(from) => (from, 0),
         None => {
             let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
-            let Some((_, entry, steps)) = graph.way_on_path(view, a.site,
+            let Some((_, entry, steps)) = graph.way_on_path(view, a.site, (a.pose.x, a.pose.z),
                 geometry.footprint_radius(), geometry.headroom_voxels(v), phys.step_limits(v),
                 phys.wade_depth_m(&geometry), radius, reach) else { return false };
             (entry, steps)
@@ -1445,6 +1445,7 @@ fn out_of_pit(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, act: Actions) -
     let face = graph.way_on(
         view,
         a.site,
+        (a.pose.x, a.pose.z),
         geometry.footprint_radius(),
         geometry.headroom_voxels(v),
         phys.step_limits(v),
@@ -1480,7 +1481,7 @@ pub(crate) fn way_home(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::
         let Some(t) = fauna.config.founder(founder).pack else { return (goal, false) };
         let phys = fauna.config.founder(founder);
         let reach = (t.pit_search_m / v).ceil().min(f64::from(u32::MAX)) as u32;
-        return graph.way_on_path(view, a.site, geometry.footprint_radius(),
+        return graph.way_on_path(view, a.site, (a.pose.x, a.pose.z), geometry.footprint_radius(),
             geometry.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(geometry), own_r, reach)
             .map_or((goal, false), |(step, _, _)| (centre(step, v), true));
     };

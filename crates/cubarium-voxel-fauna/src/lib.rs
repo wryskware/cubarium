@@ -140,7 +140,7 @@ pub use predation::{
 };
 pub use cubarium_voxel::{DT, TICK_HZ};
 pub use encounter::{
-    DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
+    DROP_LANDINGS, DropWay, HEADING_SAMPLES, RouteGraph, RouteMap, RouteRule, SightMap, band_crown_layers, band_layers, crown_columns, crown_layer,
     crown_slab_m, eye_above_surface_m, eye_origin_m, foliage_stands_in_layers, layer_columns,
     mouth_columns_at, mouth_columns_from_face, mouth_crown_layers_at, ray_direction_deg,
     reachable_layers_of, route_components, standable_faces, surface_m, walkable_components,

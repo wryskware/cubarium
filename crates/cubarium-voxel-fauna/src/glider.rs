@@ -484,7 +484,18 @@ fn ground_tick(
         // At most cruise: a sprint the gate refused (winded) is not a blocked walk.
         let asked = held.forward.min(1.0) * manifest.cruise_m_per_s * DT;
         if (dx * dx + dz * dz).sqrt() < 0.5 * asked {
-            if let Some(face) = vine_ahead(view, &fv, &a, s) {
+            // SP-STUCK: only a climb that leads somewhere ([`climb_leads`]): to fruit, or over
+            // a lip onto a top it is not cornered on (EDGE-2's [`off_graph_exit`] from there).
+            let leads = |fauna: &mut Fauna, f: VineFace| match climb_leads(view, &fv, &a, f, s, &phys) {
+                Some(Lead::Food) => true,
+                Some(Lead::Top(x, z, top, site)) => {
+                    let mut b = a;
+                    (b.pose.x, b.pose.z, b.pose.y_m, b.site) = (x, z, top, site);
+                    off_graph_exit(fauna, view, &fv, &b, (0.0, 0.0)) != OffGraph::Cornered
+                }
+                None => false,
+            };
+            if let Some(face) = vine_ahead(view, &fv, &a, s).filter(|&f| leads(fauna, f)) {
                 let a = &mut fauna.animals[i];
                 a.pose.heading_rad = into_face(face);
                 set_mode(
@@ -513,6 +524,54 @@ fn ground_tick(
     if due && held.feed > 0.0 && glider_feed(fauna, i, view, flora, &manifest, &phys, held.feed) {
         fauna.animals[i].state = State::Cropping;
     }
+}
+
+/// Where a vine climb leads ([`climb_leads`]).
+enum Lead {
+    /// Past fruit its mouth reaches.
+    Food,
+    /// Over the lip onto a top: [`mount`]'s `(x, z, the top's height, the top face)`.
+    Top(f64, f64, f64, Site),
+}
+
+/// **SP-STUCK: where a vine climb up `face` from where body `a` stands leads**: climbing as
+/// [`climb_tick`] does (up while the cover holds the rows it spans and its own column has
+/// room overhead), while it wants food past fruit its mouth reaches
+/// ([`flight::fruit_in_reach`]: a vine face in fruit is eaten from a cling), else over the
+/// lip where the climb stops ([`mount`], the clearance its disc needs on the top); `None`: it
+/// clings there and comes back down. A stalled step at a covered riser it could not top
+/// started a climb, a cling under a shelf its disc did not fit, and a slide back down, every
+/// few seconds for hours; one it could top put it on a shelf it could not leave (seedporters
+/// on a terraced vine slope, branch s3, 2026-10-11).
+fn climb_leads(view: &VoxelView<'_>, fv: &FloraView<'_>, a: &Animal, face: VineFace, s: Shape, phys: &crate::FounderPhysiology) -> Option<Lead> {
+    let v = view.config.voxel_m;
+    let top = f64::from(view.config.height) * v;
+    let food = |b: &Animal| {
+        a.eating && {
+            let (p, reach) = fruit_mouth(b, phys);
+            flight::fruit_in_reach(view, fv, p, reach, None).is_some()
+        }
+    };
+    let mut b = *a;
+    let mut hold = face;
+    while b.pose.y_m < top {
+        if food(&b) {
+            return Some(Lead::Food);
+        }
+        // A quarter voxel a probe: finer than the rows the hold and the room are read in.
+        let y = b.pose.y_m + 0.25 * v;
+        match vine_hold(view, fv, hold, y, s) {
+            Some(f) if room_over(view, b.pose.x, b.pose.z, y, s) => {
+                b.pose.y_m = y;
+                hold = f;
+            }
+            _ => {
+                let (x, z, top, site) = mount(view, fv, b, vine_hold(view, fv, hold, b.pose.y_m, s).unwrap_or(hold), s)?;
+                return Some(Lead::Top(x, z, top, site));
+            }
+        }
+    }
+    None
 }
 
 /// Where a glide off the edge ahead starts: the first point along the heading, up to two
@@ -1988,7 +2047,8 @@ const ROUTE_LOOKAHEAD: usize = 12;
 const GLIDE_HEADINGS: u32 = 16;
 
 /// **EDGE-2: the way off a face off the route graph**, for a grounded body standing where its
-/// lineage's route graph has no node within its own reach:
+/// lineage's route graph has no node within its own reach that its motor walks to, or only
+/// nodes on islands ([`crate::RouteGraph::node_under`]; SP-STUCK):
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum OffGraph {
     /// It is on its graph.
@@ -2014,11 +2074,13 @@ pub(crate) fn off_graph_exit(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &Flora
     let body = phys.body_at(a.body);
     let r = body.footprint_radius();
     let own = (r / v).ceil().max(0.0) as u32;
-    if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_some() {
+    let (headroom, step, wade) = (body.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(&body));
+    let xz = (a.pose.x, a.pose.z);
+    if graph.node_under(view, a.site, xz, r, headroom, step, wade, own).is_some() {
         return OffGraph::On;
     }
     let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
-    if let Some(f) = graph.way_on(view, a.site, r, body.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(&body), own, cols) {
+    if let Some(f) = graph.way_on(view, a.site, xz, r, headroom, step, wade, own, cols) {
         return OffGraph::Way(f);
     }
     if let Some(glider) = phys.glider {
@@ -2089,11 +2151,13 @@ pub(crate) fn walk_target(
         return None;
     }
     let graph = fauna.routes(view, founder, tc.route_refresh_s);
-    let r = phys.body_at(a.body).footprint_radius();
+    let body = phys.body_at(a.body);
+    let r = body.footprint_radius();
     let own = (r / v).ceil().max(0.0) as u32;
-    let from = graph.node_near(a.site, (a.pose.x, a.pose.z), own);
-    // EDGE-2: off its graph, it does not walk straight at a stem over a drop or into a wall:
-    // it takes its own way back on, else glides off its ledge, else it can reach none.
+    let from = graph.node_under(view, a.site, (a.pose.x, a.pose.z), r, body.headroom_voxels(v), phys.step_limits(v), phys.wade_depth_m(&body), own);
+    // EDGE-2: off its graph (SP-STUCK: or on an island of it, or by a node its motor does not
+    // reach), it does not walk straight at a stem over a drop or into a wall: it takes its own
+    // way back on, else glides off its ledge, else it can reach none.
     if from.is_none() {
         let &(_, id, site) = cands.iter().find(|c| !shunned.contains(&c.1))?;
         let stem = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);

@@ -3737,10 +3737,10 @@ fn drop_probe(args: &[String]) {
                         if !motor_probe(&view, c.0, c.1, (0.0, 1.0), y, 0.0, &body, wade, step).1 {
                             continue;
                         }
-                        if g.way_on(&view, site, r, room, step, wade, own, cols).is_some() {
+                        if g.way_on(&view, site, ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v), r, room, step, wade, own, cols).is_some() {
                             continue;
                         }
-                        if want_jump && g.drop_way(&view, site, r, room, step, step_voxels(p.drop.reach_m(p, &body), v), wade, own, cols).is_none() {
+                        if want_jump && g.drop_way(&view, site, ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v), r, room, step, step_voxels(p.drop.reach_m(p, &body), v), wade, own, cols).is_none() {
                             continue;
                         }
                         found = Some(site);
@@ -3754,7 +3754,7 @@ fn drop_probe(args: &[String]) {
             continue;
         };
         let reach = step_voxels(p.drop.reach_m(p, &body), v);
-        let jump = g.drop_way(&view, site, r, room, step, reach, wade, own, cols);
+        let jump = g.drop_way(&view, site, ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v), r, room, step, reach, wade, own, cols);
         println!(
             "pocket,id={},lineage={},young={},from=({},{},{}),at=({},{},y{}),reach={reach},jump={}",
             a.id,
@@ -3806,7 +3806,7 @@ fn drop_probe(args: &[String]) {
             let g = &graphs[&f.index()];
             let view = sim.world().view();
             if g.node_near(b.site, (b.pose.x, b.pose.z), own).is_some()
-                || g.way_on(&view, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, cols).is_some()
+                || g.way_on(&view, b.site, (b.pose.x, b.pose.z), r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, cols).is_some()
             {
                 out_at.insert(id, t);
             }
@@ -3952,7 +3952,7 @@ fn edge_probe(args: &[String]) {
                         "embedded"
                     } else if g.node_near(b.site, (b.pose.x, b.pose.z), own).is_some() {
                         "on_graph"
-                    } else if g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32).is_some() {
+                    } else if g.way_on(&wv, b.site, (b.pose.x, b.pose.z), r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32).is_some() {
                         "off_graph_way"
                     } else {
                         "off_graph_pocket"
@@ -3971,7 +3971,7 @@ fn edge_probe(args: &[String]) {
                         let own = (r / v).ceil() as u32;
                         let near = g.node_near(b.site, (b.pose.x, b.pose.z), own).map(|j| g.faces[j]);
                         let wv = sim.world().view();
-                        let way = g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 24);
+                        let way = g.way_on(&wv, b.site, (b.pose.x, b.pose.z), r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 24);
                         println!("  detail,site={:?},near={near:?},way={way:?},wade={:.3},here_water={:.3}", b.site, p.wade_depth_m(&body), wv.water_depth_m(i64::from(b.site.x), b.site.y, b.site.z));
                         for z in b.site.z.saturating_sub(1)..=b.site.z + 2 {
                             let mut row = String::new();
@@ -4073,7 +4073,7 @@ fn edge_probe(args: &[String]) {
                     let own = (r / v).ceil() as u32;
                     let near = g.node_near(b.site, (b.pose.x, b.pose.z), own).map(|j| g.faces[j]);
                     let wv = sim.world().view();
-                    let way = g.way_on(&wv, b.site, r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32);
+                    let way = g.way_on(&wv, b.site, (b.pose.x, b.pose.z), r, body.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&body), own, 32);
                     println!(
                         "  wdetail,{}{},site={:?},near={near:?},way={way:?},step={:?},glide_min={:?},r={r:.3},attached={:?},mode={:?}",
                         f.name(), b.id, b.site, p.step_limits(v), p.glider.map(|gl| gl.glide_min_height_m), b.attached, b.mobility.mode
@@ -4574,7 +4574,7 @@ fn pit2_probe(args: &[String]) {
                 let geom = p.body_at(a.body);
                 let own_r = (geom.footprint_radius() / v).ceil() as u32;
                 let on = g.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some();
-                let way = g.way_on(&view, a.site, geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, 4 * (t.pit_search_m / v).ceil() as u32);
+                let way = g.way_on(&view, a.site, (a.pose.x, a.pose.z), geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, 4 * (t.pit_search_m / v).ceil() as u32);
                 let rec = a.pack.and_then(|m| sim.fauna().pack(m.pack)).copied();
                 let den_d = rec.map_or(f64::NAN, |rc| { let (cx, cz) = cubarium_voxel_fauna::pack_centre(rc.den, v); let (dx, dz) = wdelta(a.pose.x, a.pose.z, cx, cz, ring); (dx * dx + dz * dz).sqrt() });
                 let breeder = rec.and_then(|rc| rc.breeder).and_then(|b| fv.animal(b)).copied();
@@ -4650,8 +4650,8 @@ fn pit2_probe(args: &[String]) {
             let own_r = (geom.footprint_radius() / v).ceil() as u32;
             let on = g.node_near(a.site, (a.pose.x, a.pose.z), own_r).is_some();
             let reach = (t.pit_search_m / v).ceil() as u32;
-            let way = if on { None } else { g.way_on(&view, a.site, geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, reach) };
-            let way_far = if on || way.is_some() { None } else { g.way_on(&view, a.site, geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, 4 * reach) };
+            let way = if on { None } else { g.way_on(&view, a.site, (a.pose.x, a.pose.z), geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, reach) };
+            let way_far = if on || way.is_some() { None } else { g.way_on(&view, a.site, (a.pose.x, a.pose.z), geom.footprint_radius(), geom.headroom_voxels(v), p.step_limits(v), p.wade_depth_m(&geom), own_r, 4 * reach) };
             let (line, gx, gz) = pit2_diag(a.id);
             let rec = a.pack.and_then(|m| sim.fauna().pack(m.pack)).copied();
             let (den_d, den_node, den_reach) = rec.map_or((f64::NAN, false, false), |rc| {

@@ -124,7 +124,7 @@ fn graph_reachable(fauna: &mut Fauna, world: &World, id: u64, site: Site) -> boo
     let wv = world.view();
     let g = fauna.routes(&wv, SP, 1e6);
     let c = centre(i64::from(site.x), site.z);
-    g.node_near(site, c, own).is_some() || g.way_on(&wv, site, r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64).is_some()
+    g.node_near(site, c, own).is_some() || g.way_on(&wv, site, c, r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64).is_some()
 }
 
 /// The fixture's claims: the young body is off its graph on the ledge, and whether its own
@@ -138,7 +138,7 @@ fn assert_off_graph(fauna: &mut Fauna, world: &World, id: u64, way: bool) {
     let wv = world.view();
     let g = fauna.routes(&wv, SP, 1e6);
     assert!(g.node_near(a.site, (a.pose.x, a.pose.z), own).is_none(), "fixture: the ledge is off the route graph");
-    let w = g.way_on(&wv, a.site, r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64);
+    let w = g.way_on(&wv, a.site, (a.pose.x, a.pose.z), r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64);
     assert_eq!(w.is_some(), way, "fixture: a walking way back on is {way}");
 }
 

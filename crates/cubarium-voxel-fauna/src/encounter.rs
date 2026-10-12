@@ -434,6 +434,36 @@ pub struct DropWay {
     pub edge: Site,
     /// The first face of its walk to `from` (`from` itself when it stands there).
     pub first: Site,
+    /// Where in `land`'s column it comes down ([`DROP_LANDINGS`], [`DropWay::landing`]).
+    pub at: u8,
+}
+
+/// SP-STUCK: the points of its landing column a jump down may come down on, as offsets from
+/// the column's centre to its sides (×½ voxel, less a hair): the centre, then each side, then
+/// each corner. On a terraced slope every face is a voxel deep with a riser behind it, and a
+/// disc wider than half a voxel centred on one stands in that riser; it lands pressed against
+/// it instead, as a body walking up to a wall stands.
+pub const DROP_LANDINGS: [(i8, i8); 9] = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
+
+/// How deep in solid a landing point may leave the disc ([`DROP_LANDINGS`]), metres: the hair
+/// it stops short of the column's side by, a float tolerance (the motor's own escape lets a
+/// body step out of a wall it is caught in, no deeper), not a knob.
+const LANDING_TOLERANCE_M: f64 = 1e-6;
+
+/// The point in `land`'s column of [`DROP_LANDINGS`]`[at]`, at `voxel_m` on a ring `width`
+/// columns round.
+pub fn drop_landing(land: Site, at: u8, voxel_m: f64, width: u32) -> (f64, f64) {
+    let (ox, oz) = DROP_LANDINGS.get(usize::from(at)).copied().unwrap_or((0, 0));
+    let s = 0.5 * voxel_m - 1e-9;
+    let x = (f64::from(land.x) + 0.5) * voxel_m + f64::from(ox) * s;
+    (x.rem_euclid(f64::from(width) * voxel_m), (f64::from(land.z) + 0.5) * voxel_m + f64::from(oz) * s)
+}
+
+impl DropWay {
+    /// The point it comes down on ([`drop_landing`]).
+    pub fn landing(&self, voxel_m: f64, width: u32) -> (f64, f64) {
+        drop_landing(self.land, self.at, voxel_m, width)
+    }
 }
 
 #[derive(Debug)]
@@ -559,6 +589,85 @@ impl RouteGraph {
         self.node_near_where(site, xz, radius, |_| true)
     }
 
+    /// The side, in columns, of the square an island fits in ([`RouteGraph::island`]) for a
+    /// body whose disc reaches `own_cols` columns from its centre: its footprint, and its own
+    /// width of walking to either side of it (`4 · own_cols + 1`, at least 5). A component
+    /// that small takes the body nowhere: a shelf a voxel deep and a few long on a terraced
+    /// slope, or a lone clear spot.
+    pub fn island_side(own_cols: u32) -> u32 {
+        4 * own_cols.max(1) + 1
+    }
+
+    /// **ISLAND** (SP-STUCK): whether node `i`'s whole walkable component fits in a square
+    /// `side` columns on a side. On a steep terraced vine slope the seedporter's graph held
+    /// hundreds of components of one to four nodes (shelves a voxel deep); a body on one
+    /// counted as on its graph ([`RouteGraph::node_near`]), so neither DROP nor a reflex walk
+    /// found it stranded, and seedporters stood on such shelves for hours, starving (branch
+    /// s3, 2026-10-11). Exact: the walk over the component stops at the first node that widens
+    /// it past `side`.
+    pub fn island(&self, i: usize, side: u32) -> bool {
+        let Some(&origin) = self.faces.get(i) else { return false };
+        let w = i64::from(self.width);
+        let side = i64::from(side);
+        let (mut x0, mut x1, mut z0, mut z1) = (0i64, 0i64, 0i64, 0i64);
+        let mut seen = rustc_hash::FxHashSet::default();
+        seen.insert(i);
+        let mut stack = vec![i];
+        while let Some(j) = stack.pop() {
+            let f = self.faces[j];
+            let dx = (i64::from(f.x) - i64::from(origin.x)).rem_euclid(w);
+            let dx = if dx > w / 2 { dx - w } else { dx };
+            let dz = i64::from(f.z) - i64::from(origin.z);
+            (x0, x1, z0, z1) = (x0.min(dx), x1.max(dx), z0.min(dz), z1.max(dz));
+            if x1 - x0 >= side || z1 - z0 >= side {
+                return false;
+            }
+            for &k in &self.adj[j] {
+                if seen.insert(k) {
+                    stack.push(k);
+                }
+            }
+        }
+        true
+    }
+
+    /// **The node a body is on** (SP-STUCK), for a body of radius `r` standing on `site` with
+    /// its centre at `xz`: `site`'s own node, else the nearest node within `radius` columns
+    /// and the step ([`RouteGraph::node_near`]) to whose centre the walker's motor walks from
+    /// `xz` ([`crate::body::motor_walk`]) — never a node on an island
+    /// ([`RouteGraph::island`], [`RouteGraph::island_side`] of `radius`). The plain
+    /// [`RouteGraph::node_near`] counted a body on a shelf as on its graph by the node on
+    /// the next shelf up, a step its motor refuses from where it stands, or by its shelf's
+    /// own component of a node or two: it was on no graph it could walk.
+    #[allow(clippy::too_many_arguments)]
+    pub fn node_under(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        xz: (f64, f64),
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        wade_m: f64,
+        radius: u32,
+    ) -> Option<usize> {
+        let side = Self::island_side(radius);
+        let ring = f64::from(self.width) * self.voxel_m;
+        self.node_near_where(site, xz, radius, |f| {
+            let Some(j) = self.face(f) else { return false };
+            if self.island(j, side) {
+                return false;
+            }
+            if f == site {
+                return true;
+            }
+            let (cx, cz) = self.centre(j);
+            let (dx, dz) = crate::pose::wrapped_delta(xz.0, xz.1, cx, cz, ring);
+            let deep = view.water_depth_m(i64::from(f.x), f.y, f.z);
+            crate::body::motor_walk(view, xz, (xz.0 + dx, xz.1 + dz), site.y, r, wade_m.max(deep), headroom, step) == Some(f.y)
+        })
+    }
+
     /// [`RouteGraph::node_near`] among the nodes whose face `keep` accepts (STRIKE: a face
     /// from which a hunter's jaw band meets the prey's body).
     pub fn node_near_where(&self, site: Site, (x, z): (f64, f64), radius: u32, keep: impl Fn(Site) -> bool) -> Option<usize> {
@@ -655,20 +764,27 @@ impl RouteGraph {
         Some(at)
     }
 
-    /// **PIT, the way out**: for a body standing on `site` off the graph, the first face of
-    /// the shortest way **its own body** can step back onto it — its own disc of radius `r`
-    /// clear over `headroom` layers at each face's centre and at the midpoint of each step
-    /// ([`crate::body::pose_clear`], the graph's own rule without the margin), each step to the
-    /// neighbouring column's support face nearest its layer within `step`
-    /// ([`VoxelView::nearest_support`], the motor's rule), into water no deeper than
-    /// `wade_m` or than the water it steps from — out to `max_cols` columns round `site`. The
-    /// way ends on a face from which the graph is reached ([`RouteGraph::node_near`] within
-    /// `own_cols`). `None` when `site` is already on the graph or no such way exists in reach.
+    /// **PIT, the way out**: for a body standing on `site` off the graph with its centre at
+    /// `xz`, the first face of the shortest way **its own body** can step back onto it — its
+    /// own disc of radius `r` clear over `headroom` layers at each face's centre and at the
+    /// midpoint of each step ([`crate::body::pose_clear`], the graph's own rule without the
+    /// margin), each step to the neighbouring column's support face nearest its layer within
+    /// `step` ([`VoxelView::nearest_support`], the motor's rule) and one the walker's motor
+    /// takes ([`crate::body::motor_walk`]; SP-STUCK: the clearance rule alone admitted a step
+    /// up onto the next shelf of a terraced slope that the motor refuses), into water no
+    /// deeper than `wade_m` or than the water it steps from — out to `max_cols` columns round
+    /// `site`. The first step is walked from `xz`, where the body stands, not from its face's
+    /// centre (a body on a shelf narrower than its disc never stands there); when that fails
+    /// but the body walks to its own face's centre and on from there, the way starts with
+    /// `site` itself (walk to the centre first). The way ends on a face from which the graph
+    /// is reached ([`RouteGraph::node_under`] within `own_cols`: never an island). `None`
+    /// when the body is already on the graph or no such way exists in reach.
     #[allow(clippy::too_many_arguments)]
     pub fn way_on(
         &self,
         view: &VoxelView<'_>,
         site: Site,
+        xz: (f64, f64),
         r: f64,
         headroom: u32,
         step: crate::StepLimits,
@@ -676,7 +792,7 @@ impl RouteGraph {
         own_cols: u32,
         max_cols: u32,
     ) -> Option<Site> {
-        self.way_on_path(view, site, r, headroom, step, wade_m, own_cols, max_cols).map(|p| p.0)
+        self.way_on_path(view, site, xz, r, headroom, step, wade_m, own_cols, max_cols).map(|p| p.0)
     }
 
     /// The same recovery walk, with its entry node and step count for a travel budget.
@@ -685,6 +801,7 @@ impl RouteGraph {
         &self,
         view: &VoxelView<'_>,
         site: Site,
+        xz: (f64, f64),
         r: f64,
         headroom: u32,
         step: crate::StepLimits,
@@ -694,12 +811,13 @@ impl RouteGraph {
     ) -> Option<(Site, usize, u32)> {
         let v = self.voxel_m;
         let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
-        let on = |f: Site| self.node_near(f, centre(f), own_cols).is_some();
-        if on(site) || max_cols == 0 {
+        let entry = |f: Site, at: (f64, f64)| self.node_under(view, f, at, r, headroom, step, wade_m, own_cols);
+        if max_cols == 0 || entry(site, xz).is_some() {
             return None;
         }
         let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, headroom, step);
         let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+        let recentre = self.recentres(view, site, xz, r, headroom, step, wade_m);
         let w = i64::from(self.width);
         let span = |a: i64, b: i64| {
             let d = (a - b).rem_euclid(w);
@@ -737,9 +855,27 @@ impl RouteGraph {
                 if !(clear(cx, cz, ny) && clear(mx, mz, f.y) && clear(mx, mz, ny)) {
                     continue;
                 }
-                let way = if f == site { n } else { first[&f].0 };
+                // The motor's own walk: from where the body stands for the first step (else
+                // via its face's centre, the way then starting there), centre to centre after.
+                let walk = |from: (f64, f64)| {
+                    let to = self.toward(from, (fx + dx as f64 * v, fz + dz as f64 * v));
+                    crate::body::motor_walk(view, from, to, f.y, r, wade_m.max(deep), headroom, step) == Some(ny)
+                };
+                let way = if f == site {
+                    if walk(xz) {
+                        n
+                    } else if recentre && walk((fx, fz)) {
+                        site
+                    } else {
+                        continue;
+                    }
+                } else if walk((fx, fz)) {
+                    first[&f].0
+                } else {
+                    continue;
+                };
                 let steps = first[&f].1 + 1;
-                if let Some(entry) = self.node_near(n, centre(n), own_cols) {
+                if let Some(entry) = entry(n, centre(n)) {
                     return Some((way, entry, steps));
                 }
                 first.insert(n, (way, steps));
@@ -749,27 +885,62 @@ impl RouteGraph {
         None
     }
 
-    /// **DROP, the jump down**: for a body standing on `site` off the graph with no walking
-    /// way back on, the lowest jump down that lands where the graph is reachable — `None` when
-    /// there is none. The pocket is the faces its own body walks to from `site` out to
-    /// `max_cols` columns, each step one the motor itself admits centre to centre
-    /// ([`crate::body::motor_walk`]: stricter than [`RouteGraph::way_on`]'s clearance rule,
-    /// which admitted steps the motor refused). A jump leaves a pocket face `f` over a
-    /// neighbouring column with no support face within its `step` of `f`'s layer, the motor
-    /// walking it to that edge, and lands on the support face nearest under `f` in that column
-    /// or one further out (to `ceil(r / voxel) + 1` columns: a wide disc cannot land against
-    /// the riser), past `step.down` and at most `reach` layers below `f`, every column passed
-    /// over open from the landing up to `f`'s headroom. The disc of radius `r` must stand clear
-    /// over `headroom` layers at the landing's centre, the landing's water be no deeper than
-    /// `wade_m`, and the graph be reached from it ([`RouteGraph::node_near`] within
-    /// `own_cols`, else [`RouteGraph::way_on`] out to `max_cols`). Of those, the shallowest
-    /// drop, then the nearest pocket face. Never a climb, and never a route: the graph's own
-    /// edges stay within the step.
+    /// Whether a body standing on `site` at `xz` may begin a walk by going to its face's
+    /// centre (SP-STUCK): its disc stands clear there and its motor walks it there.
+    #[allow(clippy::too_many_arguments)]
+    fn recentres(
+        &self,
+        view: &VoxelView<'_>,
+        site: Site,
+        xz: (f64, f64),
+        r: f64,
+        headroom: u32,
+        step: crate::StepLimits,
+        wade_m: f64,
+    ) -> bool {
+        let v = self.voxel_m;
+        let c = ((f64::from(site.x) + 0.5) * v, (f64::from(site.z) + 0.5) * v);
+        let to = self.toward(xz, c);
+        let deep = view.water_depth_m(i64::from(site.x), site.y, site.z);
+        crate::body::pose_clear(view, c.0, c.1, site.y, r, headroom, step)
+            && crate::body::motor_walk(view, xz, to, site.y, r, wade_m.max(deep), headroom, step) == Some(site.y)
+    }
+
+    /// `to` brought within half the ring of `from` (the motor's walk does not wrap).
+    fn toward(&self, from: (f64, f64), to: (f64, f64)) -> (f64, f64) {
+        let ring = f64::from(self.width) * self.voxel_m;
+        let (dx, dz) = crate::pose::wrapped_delta(from.0, from.1, to.0, to.1, ring);
+        (from.0 + dx, from.1 + dz)
+    }
+
+    /// **DROP, the jump down**: for a body standing on `site` off the graph, its centre at
+    /// `xz`, with no walking way back on, the lowest jump down that lands where the graph is
+    /// reachable — `None` when there is none. The pocket is the faces its own body walks to
+    /// from `site` out to `max_cols` columns, each step one the motor itself admits
+    /// ([`crate::body::motor_walk`]: stricter than the clearance rule alone), the first from
+    /// `xz` where it stands (SP-STUCK: walked from its face's centre, which a body on a shelf
+    /// narrower than its disc never reaches, the pocket ran up the slope to faces it could
+    /// not reach, and it jumped from none), or via its face's centre when it walks there. A
+    /// jump leaves a pocket face `f` over a neighbouring column with no support face within
+    /// its `step` of `f`'s layer, the motor walking it to that edge (from `xz` on `site`), and
+    /// lands on the support face nearest under `f` in that column or one further out (to
+    /// `ceil(r / voxel) + 1` columns: a wide disc cannot land against the riser), past
+    /// `step.down` and at most `reach` layers below `f`, its column open from the landing up
+    /// to `f`'s headroom and every column passed over open from a step over the landing up
+    /// (SP-STUCK: the next stair down a terraced slope, a voxel deep, is jumped over). The disc of radius `r` must stand clear over
+    /// `headroom` layers at the landing's centre, else pressed to a side or corner of its
+    /// column ([`DROP_LANDINGS`]; SP-STUCK: on a terraced slope each face has a riser behind
+    /// it), the landing's water be no deeper than
+    /// `wade_m`, and the graph be reached from it ([`RouteGraph::node_under`] within
+    /// `own_cols`, else [`RouteGraph::way_on`] out to `max_cols`): never onto an island, nor
+    /// back into its own pocket. Of those, the shallowest drop, then the nearest pocket face.
+    /// Never a climb, and never a route: the graph's own edges stay within the step.
     #[allow(clippy::too_many_arguments)]
     pub fn drop_way(
         &self,
         view: &VoxelView<'_>,
         site: Site,
+        xz: (f64, f64),
         r: f64,
         headroom: u32,
         step: crate::StepLimits,
@@ -783,9 +954,9 @@ impl RouteGraph {
         }
         let v = self.voxel_m;
         let centre = |f: Site| ((f64::from(f.x) + 0.5) * v, (f64::from(f.z) + 0.5) * v);
-        let on = |f: Site| self.node_near(f, centre(f), own_cols).is_some();
-        let clear = |x: f64, z: f64, y: u32| crate::body::pose_clear(view, x, z, y, r, headroom, step);
+        let on = |f: Site, p: (f64, f64)| self.node_under(view, f, p, r, headroom, step, wade_m, own_cols).is_some();
         let water = |f: Site| view.water_depth_m(i64::from(f.x), f.y, f.z);
+        let recentre = self.recentres(view, site, xz, r, headroom, step, wade_m);
         let w = i64::from(self.width);
         let span = |a: i64, b: i64| {
             let d = (a - b).rem_euclid(w);
@@ -822,22 +993,38 @@ impl RouteGraph {
                 if deep > wade_m && deep > water(f) + crate::body::LEVEL_TOLERANCE_M {
                     continue;
                 }
-                // The motor's own walk, centre to centre (it is stricter than the clearance rule).
-                let to = (fx + dx as f64 * v, fz + dz as f64 * v);
-                if crate::body::motor_walk(view, (fx, fz), to, f.y, r, wade_m.max(deep), headroom, step) != Some(ny) {
+                // The motor's own walk (it is stricter than the clearance rule): from where
+                // it stands for the first step, else via its face's centre; centre to centre
+                // after.
+                let walk = |from: (f64, f64)| {
+                    let to = self.toward(from, (fx + dx as f64 * v, fz + dz as f64 * v));
+                    crate::body::motor_walk(view, from, to, f.y, r, wade_m.max(deep), headroom, step) == Some(ny)
+                };
+                let first_step = if f == site {
+                    if walk(xz) {
+                        n
+                    } else if recentre && walk((fx, fz)) {
+                        site
+                    } else {
+                        continue;
+                    }
+                } else if walk((fx, fz)) {
+                    first
+                } else {
                     continue;
-                }
+                };
                 seen.insert(n, ());
-                pocket.push((n, if f == site { n } else { first }));
+                pocket.push((n, first_step));
             }
         }
         // The jumps off its edges: (layers, pocket order, from, landing, edge). A jump goes out
         // over the edge column (no face within the step of `f`) and lands on the support face
         // nearest under `f` in that column or one further out, up to the columns its disc spans
         // and one: a disc wider than half a voxel cannot land against the ledge's riser, so it
-        // jumps out. Every column it passes over is open from the landing up to its headroom.
+        // jumps out. The landing's column is open from the landing up to its headroom, and
+        // every column it passes over from a step over the landing up.
         let out = (r / v).ceil().max(0.0) as i64 + 1;
-        let mut jumps: Vec<(u32, usize, Site, Site, Site)> = Vec::new();
+        let mut jumps: Vec<(u32, usize, Site, Site, Site, u8)> = Vec::new();
         for (order, &(f, _)) in pocket.iter().enumerate() {
             let (fx, fz) = centre(f);
             for (dx, dz) in dirs {
@@ -850,9 +1037,23 @@ impl RouteGraph {
                     continue;
                 }
                 // The motor walks it to the edge: its centre to the column's boundary, less a
-                // hair.
-                let to = (fx + (0.5 - 1e-3) * dx as f64 * v, fz + (0.5 - 1e-3) * dz as f64 * v);
-                if crate::body::motor_walk(view, (fx, fz), to, f.y, r, wade_m.max(water(f)), headroom, step) != Some(f.y) {
+                // hair — from where it stands on `site` (along the edge's axis only), else
+                // from its face's centre.
+                let edge_walk = |from: (f64, f64)| {
+                    let to = if dx != 0 {
+                        (fx + (0.5 - 1e-3) * dx as f64 * v, from.1)
+                    } else {
+                        (from.0, fz + (0.5 - 1e-3) * dz as f64 * v)
+                    };
+                    let to = self.toward(from, to);
+                    crate::body::motor_walk(view, from, to, f.y, r, wade_m.max(water(f)), headroom, step) == Some(f.y)
+                };
+                let reached = if f == site {
+                    edge_walk(xz) || (recentre && edge_walk((fx, fz)))
+                } else {
+                    edge_walk((fx, fz))
+                };
+                if !reached {
                     continue;
                 }
                 let edge = Site { x: ex as u32, y: f.y, z: ez };
@@ -864,25 +1065,36 @@ impl RouteGraph {
                     if ly + step.down >= f.y {
                         continue;
                     }
-                    if (1..=k).any(|m| col(m).is_some_and(|(cx, cz)| view.solid_in(cx, cz, ly + 1, f.y + headroom.max(1)))) {
+                    // SP-STUCK: a column it passes over may hold a step within its step up of
+                    // the landing (the next stair of a terraced slope, which its landed disc
+                    // straddles); only a rise past that stands in its way.
+                    let open = |m: i64, lo: u32| col(m).is_some_and(|(cx, cz)| !view.solid_in(cx, cz, lo, f.y + headroom.max(1)));
+                    if !open(k, ly + 1) || (1..k).any(|m| !open(m, ly + step.up + 1)) {
                         continue;
                     }
                     let land = Site { x: nx as u32, y: ly, z: nz };
                     if water(land) > wade_m {
                         continue;
                     }
-                    let (cx, cz) = centre(land);
-                    if !clear(cx, cz, ly) {
+                    // Its disc clear at the column's centre, else pressed to a side of it.
+                    let Some(at) = (0..DROP_LANDINGS.len() as u8).find(|&at| {
+                        let (x, z) = drop_landing(land, at, v, self.width);
+                        crate::body::pose_penetration(view, x, z, ly, r, headroom, step) <= LANDING_TOLERANCE_M
+                    }) else {
                         continue;
-                    }
-                    jumps.push((f.y - ly, order, f, land, edge));
+                    };
+                    jumps.push((f.y - ly, order, f, land, edge, at));
                 }
             }
         }
-        jumps.sort_by_key(|&(layers, order, _, _, _)| (layers, order));
-        jumps.into_iter().find_map(|(_, order, from, land, edge)| {
-            let reached = on(land) || self.way_on(view, land, r, headroom, step, wade_m, own_cols, max_cols).is_some();
-            reached.then(|| DropWay { from, land, edge, first: pocket[order].1 })
+        jumps.sort_by_key(|&(layers, order, _, _, _, at)| (layers, order, at));
+        jumps.into_iter().find_map(|(_, order, from, land, edge, at)| {
+            if seen.contains_key(&land) {
+                return None;
+            }
+            let p = drop_landing(land, at, v, self.width);
+            let reached = on(land, p) || self.way_on(view, land, p, r, headroom, step, wade_m, own_cols, max_cols).is_some();
+            reached.then(|| DropWay { from, land, edge, first: pocket[order].1, at })
         })
     }
 

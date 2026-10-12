@@ -1238,13 +1238,14 @@ fn the_same_beads_over_the_same_wall_give_the_same_bite_at_two_voxel_sizes() {
 
 // ------------------------------------------------------------------ SEEDPORTER-POLLEN
 
-/// A plain 16 × 20 × 5 with the rock wall at `x = 6`, `y = 1..=12`, and one latticevine
-/// covering every west face of it at rows `y = 3..=10` across every `z` (a sheet of vine). The
-/// faces at the rows `flowering` keeps are set open in flower with a little nectar; the rest
-/// are bare. The covered faces.
+/// A plain 16 × 20 × 5 with the rock wall at `x = 6`, `y = 1..=10`, and one latticevine
+/// covering every west face of it at rows `y = 3..=10` across every `z` (a sheet of vine, up
+/// to the lip: SP-STUCK, a seedporter climbs only a wall it can top or that brings fruit to
+/// its mouth). The faces at the rows `flowering` keeps are set open in flower with a little
+/// nectar; the rest are bare. The covered faces.
 fn flower_sheet(flowering: impl Fn(Face) -> bool) -> (World, Flora, Vec<Face>) {
     let mut world = plain(16, 20, 5);
-    rock(&mut world, 6..=6, 1..=12);
+    rock(&mut world, 6..=6, 1..=10);
     let mut flora = Flora::new(FloraConfig::default());
     let first = Face::new(6, 3, 2, FaceDir::NegX);
     let id = flora

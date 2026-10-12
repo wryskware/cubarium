@@ -6437,7 +6437,7 @@ pub(crate) fn shallows_target(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>,
         let own = (r / v).ceil().max(0.0) as u32;
         if graph.node_near(a.site, (a.pose.x, a.pose.z), own).is_none() {
             let cols = if reach.is_finite() && reach > 0.0 { (reach / v).ceil() as u32 } else { 0 };
-            let way = graph.way_on(view, a.site, r, geometry.headroom_voxels(v), limits, wade, own, cols);
+            let way = graph.way_on(view, a.site, (a.pose.x, a.pose.z), r, geometry.headroom_voxels(v), limits, wade, own, cols);
             if let Some(f) = way.filter(|f| !shunned.contains(&Fauna::walk_key_face(*f)) && keep(*f)) {
                 return Some(f);
             }

@@ -294,6 +294,7 @@ fn drop_session_plans_are_recomputed_after_postcard_load() {
             checked: 2,
             site: a.site,
             cornered: true,
+            aloft: None,
         },
     );
     f.drop_plans.insert(
@@ -302,6 +303,7 @@ fn drop_session_plans_are_recomputed_after_postcard_load() {
             from: a.site,
             land: Site { y: 1, ..a.site },
             edge: a.site,
+            at: 0,
         },
     );
     let back = Fauna::load(&f.save()).unwrap();

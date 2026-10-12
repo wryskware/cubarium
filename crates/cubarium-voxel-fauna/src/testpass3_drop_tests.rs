@@ -67,6 +67,7 @@ fn arm(f: &mut Fauna) -> DropPlan {
         from: a.site,
         land: Site { x: 19, y: 3, z: 8 },
         edge: Site { x: 19, y: 5, z: 8 },
+        at: 0,
     };
     f.animals[0].pose.x = 20.0 * V + 1e-4;
     f.drop_plans.insert(a.id, plan);
@@ -77,6 +78,7 @@ fn arm(f: &mut Fauna) -> DropPlan {
             checked: 0,
             site: a.site,
             cornered: true,
+            aloft: None,
         },
     );
     plan
@@ -119,6 +121,8 @@ fn disabling_drop_reach_clears_clock_and_pending_landing() {
     assert_eq!(f.ledger.drops_by_founder[SP.index()], 0);
 }
 
+/// Leaving the ground clears the pending jump; the trapped clock outlives a brief time off
+/// its feet (SP-STUCK: a climb and a cling restarted it, so it never ran out).
 #[test]
 fn leaving_ground_clears_a_pending_drop() {
     let (w, flora, mut f) = fixture();
@@ -126,7 +130,8 @@ fn leaving_ground_clears_a_pending_drop() {
     let id = f.animals[0].id;
     f.animals[0].mobility.mode = MobilityMode::Perched;
     assert!(reflex(&mut f, 0, &w.view(), &flora.view()).is_none());
-    assert!(!f.drop_plans.contains_key(&id) && !f.trapped.contains_key(&id));
+    assert!(!f.drop_plans.contains_key(&id), "the jump is off");
+    assert!(f.trapped.contains_key(&id), "the clock keeps running a moment off its feet");
 }
 
 #[test]
@@ -289,6 +294,7 @@ fn drop_prefers_the_smallest_fall_when_two_heights_reach_the_graph() {
             || g.way_on(
                 &w.view(),
                 low,
+                ((f64::from(low.x) + 0.5) * V, (f64::from(low.z) + 0.5) * V),
                 r,
                 b.headroom_voxels(V),
                 p.step_limits(V),
@@ -303,6 +309,7 @@ fn drop_prefers_the_smallest_fall_when_two_heights_reach_the_graph() {
         .drop_way(
             &w.view(),
             a.site,
+            (a.pose.x, a.pose.z),
             r,
             b.headroom_voxels(V),
             p.step_limits(V),
@@ -320,6 +327,7 @@ fn drop_prefers_the_smallest_fall_when_two_heights_reach_the_graph() {
         .drop_way(
             &w.view(),
             a.site,
+            (a.pose.x, a.pose.z),
             r,
             b.headroom_voxels(V),
             exclude_high,
