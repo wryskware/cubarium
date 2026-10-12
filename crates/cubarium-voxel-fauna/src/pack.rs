@@ -315,24 +315,36 @@ fn provision(fauna: &mut Fauna, view: &VoxelView<'_>) {
         if !(give > 0.0) {
             continue;
         }
-        let taken = crate::step::take_from_reserve(&mut fauna.animals[g], give);
-        let lost_organic = taken.organic * (1.0 - eff);
-        let lost_mineral = taken.mineral * (1.0 - eff);
-        let lost_energy = taken.energy * (1.0 - eff);
-        {
-            let p = &mut fauna.animals[k];
-            p.reserve += taken.organic - lost_organic;
-            p.mineral += taken.mineral - lost_mineral;
-            p.energy += taken.energy - lost_energy;
-        }
-        fauna.animals[g].gut.mineral += lost_mineral;
-        crate::step::book_provision_loss(fauna, lost_organic, lost_energy);
-        fauna.ledger.provision_given_organic += taken.organic;
+        let (given, received) = pass_reserve(fauna, g, k, give, eff);
+        fauna.ledger.provision_given_organic += given;
         if let Some(f) = fauna.animals[g].founder {
-            fauna.ledger.provision_by_founder[f.index()] += taken.organic;
+            fauna.ledger.provision_by_founder[f.index()] += given;
         }
-        fauna.ledger.provision_received_organic += taken.organic - lost_organic;
+        fauna.ledger.provision_received_organic += received;
     }
+}
+
+/// **The reserve transfer** (the den's reserve fallback, shared with nursing,
+/// [`crate::nurse`]): `give` organic out of body `g`'s reserve, which must hold it, with its
+/// mineral and energy at the giver's own density; body `k` receives `eff` of it — organic
+/// matter, mineral and energy alike — into its reserve, mineral and energy, and the rest is
+/// respired: its organic matter booked respired, its energy as heat, its mineral shed to the
+/// giver's gut, as every respiration sheds it. Returns the organic given and received; the
+/// caller books its own readouts.
+pub(crate) fn pass_reserve(fauna: &mut Fauna, g: usize, k: usize, give: f64, eff: f64) -> (f64, f64) {
+    let taken = crate::step::take_from_reserve(&mut fauna.animals[g], give);
+    let lost_organic = taken.organic * (1.0 - eff);
+    let lost_mineral = taken.mineral * (1.0 - eff);
+    let lost_energy = taken.energy * (1.0 - eff);
+    {
+        let p = &mut fauna.animals[k];
+        p.reserve += taken.organic - lost_organic;
+        p.mineral += taken.mineral - lost_mineral;
+        p.energy += taken.energy - lost_energy;
+    }
+    fauna.animals[g].gut.mineral += lost_mineral;
+    crate::step::book_provision_loss(fauna, lost_organic, lost_energy);
+    (taken.organic, taken.organic - lost_organic)
 }
 
 /// Whether body `i` wants to sleep now: out of its activity phase and not in an emergency

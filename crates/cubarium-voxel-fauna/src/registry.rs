@@ -362,6 +362,14 @@ fn founder_rows() -> Vec<Row> {
         r("herding.pull", "fraction", fraction, "HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point)"),
         r("herding.herd_max", "kin", nonneg, "HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades)"),
         r("herding.memory_s", "s", nonneg, "HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense)"),
+        // SP-NURSE (`Nursing`).
+        r("nursing.weaning_age_s", "s", nonneg, "SP-NURSE: a young is nursed and follows its mother while younger than this (0: off); a marmoset weans at 2-3 months, 0.2 of the 10 h year"),
+        r("nursing.nurse_radius_m", "m", nonneg, "SP-NURSE: a young within this of its mother (3D) is nursed; contact, about one adult length"),
+        r("nursing.nurse_rate_per_s", "1/s", nonneg, "SP-NURSE: the most a mother passes, organic per unit of her body per second, split by her young's room (0: off); marmoset milk ~2 % of dry mass a real day (~96 world s) for twins"),
+        r("nursing.nurse_reserve_floor", "fraction", fraction, "SP-NURSE: she never nurses below this fraction of her reserve cap; a mother in poor condition cuts milk"),
+        r("nursing.nurse_efficiency", "fraction", fraction, "SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient"),
+        r("nursing.follow_m", "m", nonneg, "SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius"),
+        r("nursing.follow_pull", "fraction", fraction, "SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
