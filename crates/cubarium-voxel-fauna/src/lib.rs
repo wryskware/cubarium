@@ -5133,6 +5133,22 @@ impl Fauna {
         true
     }
 
+    /// Set age and ancestry on a newly staged body, before its first tick. This does
+    /// not change stores or decisions. The drawn remaining lifespan is preserved.
+    pub fn stage_identity(&mut self, id: u64, age_ticks: u64, mother: Option<u64>) -> bool {
+        if self.tick != 0 || mother == Some(id) {
+            return false;
+        }
+        let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) else { return false };
+        let a = &mut self.animals[i];
+        a.age_ticks = age_ticks;
+        if a.lifespan_ticks != 0 {
+            a.lifespan_ticks = a.lifespan_ticks.saturating_add(age_ticks);
+        }
+        a.mother = mother;
+        true
+    }
+
     pub fn tick(&self) -> u64 {
         self.tick
     }
