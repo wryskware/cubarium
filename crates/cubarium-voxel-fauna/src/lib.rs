@@ -87,7 +87,7 @@ pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
-pub use pack::tactics::{Hound, HoundTeach, Tactics, TestPhase};
+pub use pack::tactics::{Assess, Hound, HoundTeach, Tactics, TestPhase};
 mod registry;
 pub use registry::registry;
 mod senses;
@@ -4953,6 +4953,12 @@ impl Fauna {
     /// ([`Hound`]), `None` before it has one. Bookkeeping: no rule reads another hound's.
     pub fn hound(&self, id: u64) -> Option<&Hound> {
         self.hounds.get(&id)
+    }
+
+    /// VH-FIX's readout (the engagement trace): what Veilhound `id` makes of each prey it
+    /// senses now, `(prey id, assessment)` (§4.3). Bookkeeping: no rule reads it.
+    pub fn hound_values(&self, id: u64) -> Vec<(u64, Assess)> {
+        crate::pack::tactics::values(self, id)
     }
 
     /// EDGE's readout: which layer set the founder `id`'s held actions on its last

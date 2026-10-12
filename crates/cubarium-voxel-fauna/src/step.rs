@@ -2000,6 +2000,8 @@ fn controllers(
             }
         }
         let mut fled = false;
+        // LS-DEFEND: the defence layer's aimed kick, started below once its steering stands.
+        let mut defend_kick = None;
         fauna.ls_teach.remove(&id);
         if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
@@ -2012,7 +2014,8 @@ fn controllers(
             // LS-DEFEND: the loftstrider's defence layer over its ground response, while it
             // holds a defence intent (watch, move off, go to adults or calf, guard).
             if crate::defend::on(&fauna.config, founder) {
-                if let Some(go) = crate::defend::steer(fauna, i, view) {
+                if let Some((go, kick)) = crate::defend::steer(fauna, i, view) {
+                    defend_kick = kick;
                     actions = go;
                     lure = 0.0;
                     lift = 0.0;
@@ -2317,6 +2320,9 @@ fn controllers(
         if driven && !fled && (prey || pack) {
             let period = manifest.cadence_ticks().max(1);
             actions = pace(fauna, i, view.config.seed, src, actions, period);
+        }
+        if let (Some(t), crate::Steer::Defend) = (defend_kick, src) {
+            crate::defend::kick_now(fauna, i, t);
         }
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.

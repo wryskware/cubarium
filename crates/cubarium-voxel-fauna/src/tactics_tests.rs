@@ -168,7 +168,7 @@ fn tr(id: u64, l: Founder, cls: u8, size: f64, (x, z): (f64, f64), heading: f64)
 }
 
 fn hound_me(f: &Fauna, x: f64, z: f64) -> Me {
-    Me { x, z, len: f.config.founder(CH).adult_length_m, wound: 0.0, hunger: 0.5, spent: 0.0 }
+    Me { x, z, len: f.config.founder(CH).adult_length_m, wound: 0.0, hunger: 0.5, spent: 0.0, body: f.config.founder(CH).core.body_max, usable: f64::INFINITY }
 }
 
 fn norm((x, z): (f64, f64)) -> f64 {
@@ -934,4 +934,173 @@ fn a_prey_is_seen_running_only_from_the_hounds_track() {
     assert_eq!(seen_running(&f, &a, &t), Some(false), "moving at the hound");
     old_tactic(&mut f.config);
     assert_eq!(seen_running(&f, &a, &t), None);
+}
+
+// ------------------------------------------------------------------ VH-FIX: the lone calf is catchable
+
+/// **A lunge is timed to land** (VH-FIX step 1): a target in the capsule that stands is struck
+/// at once; one fleeing straight down the lunge's line faster than the lunge covers its reach
+/// (windup and lunge) is not — the lunge would end short — and one fleeing slower from near
+/// the jaw still is; a target outside the capsule is not the timing's business. Speeds are
+/// set from the config's strike numbers.
+#[test]
+fn a_lunge_is_timed_to_land_on_the_target_as_it_moves() {
+    let (_, _, f, [h, _], _) = lone_calf_scene();
+    let hunter = f.config.founder(CH).active_hunter().unwrap();
+    let geometry = f.config.founder(CH).body_at(animal(&f, h).body);
+    let (jaw, reach) = jaw_line(&f, h);
+    let lunge_pace = reach / (hunter.windup_s + hunter.lunge_s);
+    let calf_len = 0.5 * tac(&f).young_length_fraction * f.config.founder(LS).adult_length_m;
+    let at = |x: f64| Track { tick: f.tick, ..tr(9, LS, class::PREY, calf_len, (x, MID_Z), EAST) };
+    let lands = |t: &Track, v: f64| lunge_lands(&f.config, &animal(&f, h), &geometry, &hunter, t, (v, 0.0), f.tick, RING);
+    assert_eq!(lands(&at(jaw + 0.9 * reach), 0.0), Some(true), "a standing target in the capsule");
+    assert_eq!(lands(&at(jaw + 0.9 * reach), 2.0 * lunge_pace), Some(false), "fleeing faster than the lunge: held");
+    assert_eq!(lands(&at(jaw + 0.1 * reach), 0.5 * lunge_pace), Some(true), "fleeing slower, near the jaw: struck");
+    assert_eq!(lands(&at(jaw + 4.0 * reach + 4.0), 0.0), None, "out of the capsule");
+    // In the tactic's hands: the strike (feed) is held exactly when the lunge would miss.
+    let t = tac(&f);
+    let run = Actions { forward: 1.0, turn: 0.0, feed: 1.0 };
+    let mem = Hound { vel: [2.0 * lunge_pace, 0.0], ..Hound::default() };
+    let moving = Track { moving: true, ..at(jaw + 0.9 * reach) };
+    assert_eq!(timed(&f, &t, &animal(&f, h), &geometry, &hunter, &moving, &mem, RING, run).feed, 0.0, "held");
+    let off = Tactics { time_strikes: false, ..t };
+    assert_eq!(timed(&f, &off, &animal(&f, h), &geometry, &hunter, &moving, &mem, RING, run).feed, 1.0, "the switch off strikes at once");
+}
+
+/// **A lone calf in the open within a hound's reach is caught** (VH-FIX step 1, "Checks"): a
+/// calf running straight away at its cruise, a hungry hound a few metres behind it on open
+/// ground, every knob from the config except the commitment and value floors (set so the case
+/// does not hang on the value placeholders); within a few hundred ticks the calf is struck.
+#[test]
+fn a_lone_calf_in_the_open_within_a_hounds_reach_is_caught() {
+    let (w, mut flora, mut f, [h, mate], calf) = lone_calf_scene();
+    if let Some(p) = f.config.founders[CH.index()].pack.as_mut() {
+        p.tactics.commit_value = f64::MIN;
+        p.tactics.test_floor = f64::MIN;
+        p.tactics.give_up_value = f64::MIN;
+    }
+    // Its packmate is fed and rests at the den: one hound on the calf.
+    animal_mut(&mut f, mate).eating = false;
+    place(&mut f, mate, 1.0, MID_Z, EAST);
+    let (jaw, reach) = jaw_line(&f, h);
+    let hx = animal(&f, h).pose.x;
+    // The calf just beyond the capsule, running east at its cruise.
+    place(&mut f, calf, jaw + reach + 1.5, MID_Z, EAST);
+    drive(&mut f, calf, 1.0, false);
+    assert!(animal(&f, calf).pose.x - hx < f.config.founder(CH).pack.unwrap().close_in_m + reach);
+    let mut struck = false;
+    for _ in 0..400 {
+        f.step_with(&w, &mut flora, 1);
+        if f.view().animal(calf).is_none_or(|a| a.wound > 0.0) {
+            struck = true;
+            break;
+        }
+    }
+    assert!(struck, "the calf is struck: hound {:?}, calf {:?}", f.hounds.get(&h), f.view().animal(calf).map(|a| (a.pose, a.wound)));
+}
+
+// ------------------------------------------------------------------ VH-FIX: usable meals
+
+/// Hound `h`'s stomach holds `s` of its capacity in carrion and its reserve `r` of its cap.
+fn fill(f: &mut Fauna, h: u64, s: f64, r: f64) {
+    let a = animal(f, h);
+    let cap = crate::body::effective_config(&f.config, &a).reserve_of(a.body);
+    let k = f.config.founder(CH).gut.capacity(a.body);
+    let m = animal_mut(f, h);
+    m.stomach = crate::Stomach::default();
+    m.stomach.pools[crate::Food::Carrion.index()].organic = s * k;
+    m.reserve = r * cap;
+}
+
+/// **The meals a hound can use from one carcass** (VH-FIX step 2) come from its own body:
+/// with no time to come back (`carcass_keep_s` 0) they are its stomach's room now; given time
+/// they grow by what its gut takes, until its reserve's room bounds them; a fuller reserve
+/// leaves fewer; a full stomach and a full reserve with no time leave none.
+#[test]
+fn the_usable_meals_are_the_hounds_gut_room_and_what_it_can_absorb_in_the_keep() {
+    let (_, _, mut f, [h, _], _) = lone_calf_scene();
+    let usable = |f: &Fauna, keep: f64| {
+        let mut g = f.clone();
+        g.config.founders[CH.index()].pack.as_mut().unwrap().tactics.carcass_keep_s = keep;
+        Me::usable_meals(&g, &animal(&g, h))
+    };
+    fill(&mut f, h, 0.25, 0.2);
+    let k = f.config.founder(CH).gut.stomach_k;
+    assert!((usable(&f, 0.0) - 0.75 * k).abs() < 1e-9, "no keep: the stomach's room, {} of k {}", usable(&f, 0.0), k);
+    let tau = f.config.founder(CH).gut.digestion_s[crate::Food::Carrion.index()];
+    let (short, long, longer) = (usable(&f, 0.5 * tau), usable(&f, 50.0 * tau), usable(&f, 500.0 * tau));
+    assert!(usable(&f, 0.0) < short && short < long, "the gut's take grows with the keep");
+    assert!(longer < usable(&f, 0.0) + 500.0 * k, "the reserve's room bounds it, not the gut alone");
+    let mut fuller = f.clone();
+    fill(&mut fuller, h, 0.25, 0.9);
+    assert!(usable(&fuller, 50.0 * tau) < long, "a fuller reserve uses less");
+    fill(&mut f, h, 1.0, 1.0);
+    assert_eq!(usable(&f, 0.0), 0.0, "full and no keep: nothing");
+    let mut off = f.clone();
+    off.config.founders[CH.index()].pack.as_mut().unwrap().tactics.usable_meals = false;
+    assert_eq!(Me::usable_meals(&off, &animal(&off, h)), f64::INFINITY, "the switch off: no bound");
+}
+
+/// **With usable meat counted, a pack that cannot eat an adult values an exposed calf above
+/// a guarded adult** (VH-FIX step 2, "Checks"): the hounds at hand can use no more than the
+/// calf's meat; the adult's counted meat is cut to that, not its whole carcass, and the calf,
+/// alone and young, with the adult standing with another and facing the hound, is worth
+/// more. Config weights; only the hound's gut room is set by the case.
+#[test]
+fn a_pack_that_cannot_eat_an_adult_values_an_exposed_calf_above_a_guarded_adult() {
+    let f = Fauna::new(config());
+    let t = tac(&f);
+    let pk = f.config.founder(CH).pack.unwrap();
+    let adult_len = f.config.founder(LS).adult_length_m;
+    let hound = (15.0, 2.0);
+    let calf = tr(1, LS, class::PREY, 0.5 * t.young_length_fraction * adult_len, (10.0, 8.0), 0.0);
+    let at = (20.0, 8.0);
+    let adult = tr(2, LS, class::PREY, adult_len, at, bearing(at, hound));
+    let other = tr(3, LS, class::PREY, adult_len, (at.0 + 0.4 * t.guard_m, at.1), bearing(at, hound));
+    let prey = [calf, adult, other];
+    let mut me = hound_me(&f, hound.0, hound.1);
+    let whole = |x: &Track| assess(&f.config, &t, &pk, &me, &Hound::default(), x, &prey, &[], 0, RING).meat_raw;
+    assert!(whole(&adult) > whole(&calf), "an adult carries more meat than a calf");
+    me.usable = whole(&calf);
+    let (c, a) = (
+        assess(&f.config, &t, &pk, &me, &Hound::default(), &calf, &prey, &[], 0, RING),
+        assess(&f.config, &t, &pk, &me, &Hound::default(), &adult, &prey, &[], 0, RING),
+    );
+    assert!(a.meat < a.meat_raw && (a.meat - me.usable).abs() < 1e-12, "the adult counts only what the pack can eat: {a:?}");
+    assert!((c.meat - c.meat_raw).abs() < 1e-12, "the calf is eaten whole");
+    assert!(c.value > a.value, "the exposed calf {} over the guarded adult {}", c.value, a.value);
+    let off = Tactics { usable_meals: false, ..t };
+    assert_eq!(assess(&f.config, &off, &pk, &me, &Hound::default(), &adult, &prey, &[], 0, RING).meat, a.meat_raw, "the switch off counts the whole carcass");
+}
+
+/// **A break-off when the value falls below zero during a test** (VH-FIX step 2, "Checks"):
+/// a hound tests a family; by the rush's end it has nothing left to eat a kill with (its gut
+/// and reserve full, no time to come back), so every member's value is under the configured
+/// `commit_value` and it breaks off — the break-off counted, the group shunned, the howl —
+/// with the configured commitment, not one set by the case.
+#[test]
+fn a_test_breaks_off_when_the_value_falls_below_zero() {
+    let (w, flora, mut f, h, fam) = family_scene();
+    let t = tac(&f);
+    assert!(t.chase_cost_per_m > 0.0 && t.commit_value >= 0.0, "a chase costs and a commitment needs a positive value");
+    let all: Vec<(u64, u8)> = fam.iter().map(|&id| (id, class::PREY)).collect();
+    sees(&mut f, h, &all);
+    decide(&mut f, &w, &flora, h);
+    assert!(f.hounds[&h].test == TestPhase::Approach, "a group is tested");
+    // Mid-test it has eaten its fill, with no time to come back for more.
+    f.config.founders[CH.index()].pack.as_mut().unwrap().tactics.carcass_keep_s = 0.0;
+    fill(&mut f, h, 1.0, 1.0);
+    let rush = cubarium_voxel::ticks_at_least_one(t.test_rush_s);
+    f.tick += rush + 1;
+    f.hounds.get_mut(&h).unwrap().test = TestPhase::Rush;
+    f.hounds.get_mut(&h).unwrap().phase_tick = f.tick - rush - 1;
+    sees(&mut f, h, &all);
+    let i = index(&f, h);
+    assert!(fam.iter().all(|&id| assess_of(&f, i, id).unwrap().assess.value < 0.0), "every member below zero");
+    decide(&mut f, &w, &flora, h);
+    let m = f.hounds[&h];
+    assert_eq!(m.target, None, "broken off");
+    assert!(fam.iter().all(|&id| m.shuns(id, f.tick)), "the group shunned");
+    assert_eq!(f.ledger.hound_give_ups, 1);
+    assert!(f.take_pack_events().iter().any(|e| matches!(e, crate::PackEvent::ChaseEnd { why: crate::ChaseEnd::BrokeOff, .. })), "logged as a break-off");
 }

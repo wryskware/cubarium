@@ -148,7 +148,11 @@ fn world(seed: u64) -> (World, Fauna) {
 /// One sample of body `me`'s defence layer.
 fn decide(f: &mut Fauna, w: &World, me: u64) -> Option<crate::Actions> {
     let i = index(f, me);
-    steer(f, i, &w.view())
+    let (act, kick) = steer(f, i, &w.view())?;
+    if let Some(t) = kick {
+        kick_now(f, i, t);
+    }
+    Some(act)
 }
 
 /// Body `me`'s defence hold cleared: its next sample chooses afresh.
@@ -456,7 +460,7 @@ fn the_hounds_target_value_reads_the_guard_stance() {
     let pk = f.config.founder(CH).pack.expect("the Veilhound's pack table");
     let tac = pk.tactics;
     let ls_len = f.config.founder(LS).adult_length_m;
-    let me = Me { x: 10.0, z: MID_Z, len: f.config.founder(CH).adult_length_m, wound: 0.0, hunger: 0.5, spent: 0.0 };
+    let me = Me { x: 10.0, z: MID_Z, len: f.config.founder(CH).adult_length_m, wound: 0.0, hunger: 0.5, spent: 0.0, body: f.config.founder(CH).core.body_max, usable: f64::INFINITY };
     let tr = |id: u64, x: f64, stance: u8| Track {
         known: true, id, lineage: LS.index() as u8, class: class::PREY, modes: SIGHT, x, z: MID_Z, grounded: true,
         size_m: ls_len, heading: WEST, stance, ..Track::default()

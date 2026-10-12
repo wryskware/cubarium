@@ -541,7 +541,7 @@ fn calm(k: usize) -> bool {
 /// **The defence layer** (module note) for body `i`, after its ground response: `Some` holds
 /// a defence intent and replaces the actions; `None` leaves them (a calm intent held). Its
 /// teacher labels go to [`Fauna::ls_teach`] for its intent record.
-pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<Actions> {
+pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option<(Actions, Option<u64>)> {
     let a = fauna.animals[i];
     let f = a.founder?;
     let phys = *fauna.config.founder(f);
@@ -596,20 +596,31 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option
     let prop = ps.iter().find(|p| ix(p.name) == proposal).copied().unwrap_or(*plan);
     let call = called_now(fauna, a.id, f);
     // The aimed kick (§3.3): a grown body whose kick is ready kicks a hound it sees in reach
-    // and in its front arc, whatever defence intent it holds; it stands for the windup.
+    // and in its front arc, whatever defence intent it holds; it stands for the windup. The
+    // write side starts it ([`kick_now`]) once no later layer has replaced the steering.
     let mut act = plan.act;
-    let kicked = match (s.young, phys.kick) {
-        (false, Some(kk)) if a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring)
-            .is_some_and(|t| crate::kick::request(fauna, i, t, crate::kick::Source::Aimed).is_ok()),
-        _ => false,
+    let target = match (s.young, phys.kick) {
+        (false, Some(kk)) if a.kick.phase == crate::kick::Phase::Ready => kick_target(fauna, &kk, &s, ring),
+        _ => None,
     };
-    if kicked {
+    if target.is_some() {
         act.forward = 0.0;
         act.feed = 0.0;
     }
-    fauna.ls_teach.insert(a.id, Teach { name: Some(prop.name), subject: plan.subject, held: Some(plan.name), call, kick: kicked });
+    fauna.ls_teach.insert(a.id, Teach { name: Some(prop.name), subject: plan.subject, held: Some(plan.name), call, kick: false });
     fauna.ledger.defence_samples[ix(plan.name)] += 1;
-    Some(act)
+    Some((act, target))
+}
+
+/// **Start the aimed kick** [`steer`] chose for body `i` at `target` (the write side, after
+/// the layers that may replace its steering); recorded on its teacher label.
+pub(crate) fn kick_now(fauna: &mut Fauna, i: usize, target: u64) -> bool {
+    let ok = crate::kick::request(fauna, i, target, crate::kick::Source::Aimed).is_ok();
+    let id = fauna.animals[i].id;
+    if let Some(t) = fauna.ls_teach.get_mut(&id) {
+        t.kick |= ok;
+    }
+    ok
 }
 
 /// **The hound to kick** (§3.3), from what body `s.me` sees: the nearest threat it sees whose

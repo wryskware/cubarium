@@ -64,6 +64,19 @@ pub struct Tactics {
     /// **Meat**: a prey of length `l` is worth `(l / own length)^meat_exp` (mass goes as
     /// length cubed).
     pub meat_exp: f64,
+    /// **Meat by mass** (VH-FIX): on, a prey is worth the organic matter its lineage carries
+    /// at the length the hound sees (the lineage's `body_max × (length / adult length)³`) over
+    /// the hound's own body — the same unit as its gut room. Off: `meat_exp` on lengths. A
+    /// switch.
+    pub meat_by_mass: bool,
+    /// **Usable meals** (VH-FIX): on, the meat counted is at most what the hounds at hand can
+    /// eat before the carcass is gone ([`Me::usable`] × the hounds): their gut room now plus
+    /// what the gut takes over `carcass_keep_s`, bounded by what their reserves and upkeep
+    /// can absorb. A carcass bigger than that is worth no more than that. A switch.
+    pub usable_meals: bool,
+    /// ...the time a kill stays worth returning to, as a hound judges it, seconds (about the
+    /// carrion's e-folding time: 1 / `flora.carrion_decomposition`).
+    pub carcass_keep_s: f64,
     /// **Chase cost**: value spent per metre between the hound and the prey.
     pub chase_cost_per_m: f64,
     /// **`p_kill`**, one hound's chance on a grown, sound, alert prey of its own length with
@@ -230,6 +243,17 @@ pub struct Tactics {
     /// **Strikes** (§11.4): a young body in the capsule whose one-hound `p_kill` is at least
     /// this may be struck in place of the target (an explicit substitution).
     pub substitute_p_kill: f64,
+    /// **Strike timing** (VH-FIX): with the target in its capsule, a hound strikes only when
+    /// the lunge it would start now lands on the target as it senses it moving (its sighting
+    /// carried on at its velocity estimate over the track's age, the windup and the lunge);
+    /// else it holds the strike and keeps closing. Off: it strikes whatever is in the capsule
+    /// at once (a body fleeing at the lunge's own pace is then never hit). A switch.
+    pub time_strikes: bool,
+    /// **Closing on a moving target** (VH-FIX): the last metres' approach ([`close_in`]) adds
+    /// the target's pace away from the hound, from its own velocity estimate, so it closes to
+    /// its stand on a fleeing body instead of trailing it where the approach's slowing matches
+    /// the body's pace. Off: the plain approach. A switch.
+    pub lead_close: bool,
     /// A carcass within this of where its target was last sensed, when the target is gone
     /// from its senses, is its kill. Metres.
     pub kill_site_m: f64,
@@ -258,6 +282,9 @@ impl Tactics {
     pub const VEILHOUND: Tactics = Tactics {
         enabled: true,
         meat_exp: 3.0,
+        meat_by_mass: true,
+        usable_meals: true,
+        carcass_keep_s: 3600.0,
         chase_cost_per_m: 0.02,
         p_one: 0.25,
         size_exp: 2.0,
@@ -336,6 +363,8 @@ impl Tactics {
         follow_m: 3.0,
         den_howl_s: 300.0,
         substitute_p_kill: 0.5,
+        time_strikes: true,
+        lead_close: true,
         kill_site_m: 2.0,
     };
 }
@@ -462,6 +491,10 @@ pub(crate) struct Me {
     /// 1 − its reserve fraction, 0..1.
     pub hunger: f64,
     pub spent: f64,
+    /// Its own body (organic matter) and the meals it can still use from one carcass
+    /// ([`Me::usable_meals`]), in units of that body.
+    pub body: f64,
+    pub usable: f64,
 }
 
 impl Me {
@@ -474,7 +507,32 @@ impl Me {
             wound: a.wound.max(0.0),
             hunger: (1.0 - reserve_fraction(fauna, a)).clamp(0.0, 1.0),
             spent: a.founder_state.sprint_spent,
+            body: a.body,
+            usable: Me::usable_meals(fauna, a),
         }
+    }
+
+    /// **The meals a hound can still use from one carcass** (VH-FIX, [`Tactics::usable_meals`]),
+    /// in units of its own body, from its own body's state: its stomach's room now, plus what
+    /// its gut takes over `carcass_keep_s` (the stomach `k · body` emptied every digestion
+    /// time `τ` of carrion), the latter bounded by what it can absorb in that time (its
+    /// reserve's room and its upkeep over the keep, at its carrion yield). Infinite when the
+    /// switch is off or the body is no founder.
+    pub(crate) fn usable_meals(fauna: &Fauna, a: &Animal) -> f64 {
+        let Some(f) = a.founder else { return f64::INFINITY };
+        let phys = fauna.config.founder(f);
+        let Some(tac) = phys.pack.map(|p| p.tactics).filter(|t| t.usable_meals) else { return f64::INFINITY };
+        let body = a.body.max(1e-9);
+        let core = crate::body::effective_config(&fauna.config, a);
+        let carrion = crate::Food::Carrion.index();
+        let gut = phys.gut;
+        let room = (gut.capacity(body) - a.stomach.organic()).max(0.0) / body;
+        let tau = gut.digestion_s[carrion] / gut.throughput_factor(body, core.body_max).max(1e-9);
+        let keep = tac.carcass_keep_s.max(0.0);
+        let through = if tau > 0.0 { gut.stomach_k * keep / tau } else { f64::INFINITY };
+        let yield_ = phys.yield_by_food[carrion].max(1e-9);
+        let absorb = ((core.reserve_of(a.body) - a.reserve).max(0.0) + core.maintenance_per_s * body * keep) / yield_ / body;
+        room + through.min(absorb)
     }
 }
 
@@ -571,7 +629,11 @@ fn age_s(t: &Track, now: u64) -> f64 {
 /// **What a hound makes of a prey** (§4.3), from its own senses.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Assess {
+    /// The meat counted (at most `usable`), the carcass's whole meat, and what the hounds at
+    /// hand can use of it (meals of the hound's body).
     pub meat: f64,
+    pub meat_raw: f64,
+    pub usable: f64,
     /// One hound's chance, and the chance with the hounds at hand (itself and the packmates
     /// it senses within `pack_radius_m`).
     pub p_one: f64,
@@ -656,11 +718,17 @@ pub(crate) fn assess(config: &crate::FaunaConfig, tac: &Tactics, pk: &Pack, me: 
         .map(|k| tac.kick_chance * if facing_pack(k) { 1.0 + tac.kick_facing_gain } else { 1.0 } * if guarding(k) { 1.0 + tac.kick_guard_gain } else { 1.0 })
         .sum();
     let risk = expected_kicks * tac.wound_cost * (1.0 + me.wound) * (1.0 - tac.hunger_relief * me.hunger).clamp(0.0, 1.0);
-    let meat = (len / me.len.max(1e-6)).powf(tac.meat_exp);
+    let raw = if tac.meat_by_mass { body_est(config, t) / me.body.max(1e-9) } else { (len / me.len.max(1e-6)).powf(tac.meat_exp) };
+    // Usable meals (VH-FIX): no more than the hounds at hand can eat before it is gone — its
+    // own room taken for each packmate it senses (their guts are not sensed).
+    let usable = if tac.usable_meals { me.usable * f64::from(hounds) } else { f64::INFINITY };
+    let meat = raw.min(usable);
     let chase_cost = tac.chase_cost_per_m * d;
     let at_bay = !t.moving && facing_pack(t);
     Assess {
         meat,
+        meat_raw: raw,
+        usable,
         p_one,
         p_kill,
         chase_cost,
@@ -766,6 +834,15 @@ pub(crate) fn assess_of(fauna: &Fauna, i: usize, id: u64) -> Option<Pick> {
     let prey = prey_of(fauna, a.id, lost);
     let mates = mates_of(fauna, a.id, &tac, lost);
     Some(Pick { track, assess: assess(&fauna.config, &tac, &pk, &me, &mem, &track, &prey, &mates, fauna.tick, ring) })
+}
+
+/// **What a hound makes of each prey it senses now** (a readout: the harness's trace; no rule
+/// reads it): `(id, assessment)` for every fresh prey track of hound `id`.
+pub(crate) fn values(fauna: &Fauna, id: u64) -> Vec<(u64, Assess)> {
+    let Ok(i) = fauna.animals.binary_search_by_key(&id, |a| a.id) else { return Vec::new() };
+    let a = &fauna.animals[i];
+    let Some(phys) = a.founder.map(|f| fauna.config.founder(f)) else { return Vec::new() };
+    prey_of(fauna, id, phys.intent.subject_lost_s).iter().filter_map(|t| assess_of(fauna, i, t.id).map(|p| (t.id, p.assess))).collect()
 }
 
 /// Why a hound gives a hunt up.
@@ -1654,9 +1731,10 @@ fn test_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &
             label(fauna, a.id, "test", subject);
             let top = crate::gait::sprint_forward(&fauna.config, founder);
             if let Some(act) = close_in(fauna, view, founder, &a, &t, geometry, h, pk, ring) {
-                return act;
+                return timed(fauna, tac, &a, geometry, h, &t, &mem, ring, act);
             }
-            walk_to(fauna, view, founder, &a, geometry, h, pk, (t.x, t.z), t.site.1, top, 0.0, 1.0)
+            let act = walk_to(fauna, view, founder, &a, geometry, h, pk, (t.x, t.z), t.site.1, top, 0.0, 1.0);
+            timed(fauna, tac, &a, geometry, h, &t, &mem, ring, act)
         }
     }
 }
@@ -1857,7 +1935,7 @@ fn chase(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &Tact
         }
         _ => drive_step(fauna, i, view, own, pk, h, geometry, &t),
     };
-    Some(act)
+    Some(timed(fauna, tac, &a, geometry, h, &t, &memory(fauna, a.id), ring, act))
 }
 
 /// **Drive**: the old driver's chase on the target as this hound senses it — the last
@@ -1989,6 +2067,75 @@ pub(crate) fn strike_rule(fauna: &Fauna, i: usize) -> Option<StrikeRule> {
         .map(|t| t.id)
         .collect();
     Some(StrikeRule { target, substitutes })
+}
+
+/// **The last metres** (the pack's [`super::close_in`]) for a tactics hound: with
+/// [`Tactics::lead_close`] and the target seen moving, its forward gains the target's pace
+/// away from it (its own velocity estimate over cruise), up to its sprint, while it walks on
+/// the target (a pivot or a step off is left as it is).
+#[allow(clippy::too_many_arguments)]
+fn close_in(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, t: &Track, geometry: &crate::Body, h: &crate::Hunter, pk: &Pack, ring: f64) -> Option<Actions> {
+    let act = super::close_in(fauna, view, founder, a, t, geometry, h, pk, ring)?;
+    if !pk.tactics.lead_close || !t.moving || act.forward <= 0.0 {
+        return Some(act);
+    }
+    let mem = memory(fauna, a.id);
+    let (dx, dz, d) = gap(a.pose.x, a.pose.z, t.x, t.z, ring);
+    let away = if d > 1e-9 { (mem.vel[0] * dx + mem.vel[1] * dz) / d } else { 0.0 };
+    let cruise = fauna.config.manifest(founder).cruise_m_per_s;
+    if !(away > 0.0) || !(cruise > 0.0) {
+        return Some(act);
+    }
+    let top = crate::gait::sprint_forward(&fauna.config, founder);
+    Some(Actions { forward: (act.forward + away / cruise).min(top.max(act.forward)), ..act })
+}
+
+/// The horizontal distance from `p` to the segment `a → b`, on the ring.
+fn to_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64), ring: f64) -> f64 {
+    let (bx, bz, _) = gap(a.0, a.1, b.0, b.1, ring);
+    let (px, pz, _) = gap(a.0, a.1, p.0, p.1, ring);
+    let len2 = bx * bx + bz * bz;
+    let k = if len2 > 0.0 { ((px * bx + pz * bz) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    ((px - k * bx).powi(2) + (pz - k * bz).powi(2)).sqrt()
+}
+
+/// **Strike timing** (VH-FIX, [`Tactics::time_strikes`]): for hound `a` (body `geometry`,
+/// strike `h`) on target track `t` with its velocity estimate `vel` (its own sightings),
+/// `Some(lands)` when the target sits in its strike capsule as it senses it — the jaw's sweep
+/// from where it stands, `strike_reach` ahead — and `None` when it does not. `lands`: the
+/// sweep of a lunge begun now (the windup standing, then `strike_reach` forward) meets the
+/// target carried on at `vel` over the track's age, the windup and the lunge. Reads its own
+/// body and what it senses (the track's place, size and age).
+pub(crate) fn lunge_lands(config: &crate::FaunaConfig, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, t: &Track, vel: (f64, f64), now: u64, ring: f64) -> Option<bool> {
+    let Some(&pf) = crate::Founder::ALL.get(usize::from(t.lineage)) else { return None };
+    let pg = config.founder(pf).body_at(body_est(config, t));
+    let radii = geometry.footprint_radius() + pg.footprint_radius();
+    let (sin, cos) = a.pose.heading_rad.sin_cos();
+    let jaw = h.jaw_forward_length_fraction * geometry.length_m;
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let from = (a.pose.x + jaw * sin, a.pose.z + jaw * cos);
+    let to = (from.0 + reach * sin, from.1 + reach * cos);
+    if to_segment(from, to, (t.x, t.z), ring) > radii {
+        return None;
+    }
+    let lead = age_s(t, now) + h.windup_s + h.lunge_s;
+    let there = (t.x + vel.0 * lead, t.z + vel.1 * lead);
+    Some(to_segment(from, to, there, ring) <= radii)
+}
+
+/// [`lunge_lands`] applied to a tactics hound's actions: with the strike timed and its target
+/// in the capsule where a lunge now would miss, the strike is held (`feed` 0) and it keeps
+/// closing.
+#[allow(clippy::too_many_arguments)]
+fn timed(fauna: &Fauna, tac: &Tactics, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, t: &Track, mem: &Hound, ring: f64, act: Actions) -> Actions {
+    if !tac.time_strikes || act.feed <= 0.0 || a.strike.is_some() {
+        return act;
+    }
+    let vel = if t.moving { (mem.vel[0], mem.vel[1]) } else { (0.0, 0.0) };
+    match lunge_lands(&fauna.config, a, geometry, h, t, vel, fauna.tick, ring) {
+        Some(false) => Actions { feed: 0.0, ..act },
+        _ => act,
+    }
 }
 
 /// **A prey seen running** (§2.1) for the stalk's rush: with tactics on, its track shows it
