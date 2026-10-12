@@ -1528,7 +1528,10 @@ pub(crate) fn stalk(fauna: &mut Fauna, a: &Animal, t: &Track, d: f64, asked: f64
     let now = fauna.tick;
     let prey = fauna.view().animal(t.id).copied()?;
     let pv = fauna.percept(prey.id).map(|p| p.vigil).unwrap_or_default();
-    if d <= pk.commit_m || pv.running(now) {
+    // VH-TACTICS (§2.1): a tactics hound reads the prey running from its own track; the old
+    // tactic (the comparison arm) its flight state.
+    let running = crate::pack::tactics::seen_running(fauna, a, t).unwrap_or_else(|| pv.running(now));
+    if d <= pk.commit_m || running {
         fauna.ledger.vigil.rush_samples += 1;
         // GAIT: the rush is its sprint.
         return Some(asked * crate::gait::sprint_forward(&fauna.config, a.founder?));

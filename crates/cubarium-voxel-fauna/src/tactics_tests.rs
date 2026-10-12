@@ -916,3 +916,22 @@ fn a_calf_behind_rock_is_not_taken_by_a_hound_that_cannot_sense_it() {
         assert_eq!(took, !walled, "walled {walled}: taken only when sensed (sensed now: {sensed})");
     }
 }
+
+/// **The stalk's rush reads the track** (§2.1): with tactics on, a prey is running only when
+/// the hound's track shows it moving away, whatever its own flight state; with tactics off the
+/// old tactic keeps its own read (`None`).
+#[test]
+fn a_prey_is_seen_running_only_from_the_hounds_track() {
+    let (_, _, mut f, [h, _], calf) = lone_calf_scene();
+    let mut t = seen(&f, h, calf, class::PREY);
+    f.percepts.entry(calf).or_default().vigil.fleeing = true;
+    let a = animal(&f, h);
+    assert_eq!(seen_running(&f, &a, &t), Some(false), "a still track is not running, whatever its flight state");
+    t.moving = true;
+    t.heading = EAST;
+    assert_eq!(seen_running(&f, &a, &t), Some(true), "moving away from the hound");
+    t.heading = WEST;
+    assert_eq!(seen_running(&f, &a, &t), Some(false), "moving at the hound");
+    old_tactic(&mut f.config);
+    assert_eq!(seen_running(&f, &a, &t), None);
+}

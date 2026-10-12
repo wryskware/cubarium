@@ -1991,6 +1991,16 @@ pub(crate) fn strike_rule(fauna: &Fauna, i: usize) -> Option<StrikeRule> {
     Some(StrikeRule { target, substitutes })
 }
 
+/// **A prey seen running** (§2.1) for the stalk's rush: with tactics on, its track shows it
+/// moving away from the hound (`flee_deg`), never its flight state; `None` with tactics off
+/// (the old tactic reads the flight state).
+pub(crate) fn seen_running(fauna: &Fauna, a: &Animal, t: &Track) -> Option<bool> {
+    let tac = a.founder.and_then(|f| fauna.config.founder(f).pack).map(|p| p.tactics).filter(|t| t.enabled)?;
+    let ring = fauna.world_geometry.map_or(f64::INFINITY, |(r, _)| r);
+    let (dx, dz, d) = gap(a.pose.x, a.pose.z, t.x, t.z, ring);
+    Some(t.moving && d > 1e-9 && angle_between(t.heading, dx.atan2(dz)) < tac.flee_deg.to_radians())
+}
+
 /// **Who works a hunkered prey** (§11.6, HERD's pry): hound `o` attacks `prey` by its own
 /// local attack state — its tactics memory's target — with tactics on; with them off, the
 /// old pack target.
