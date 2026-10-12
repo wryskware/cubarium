@@ -368,17 +368,19 @@ fn mode(a: &Animal, view: &VoxelView<'_>) -> [f64; 5] {
 }
 
 /// The Veilhound's pack (`breeder, pup, target ×4, feast ×4`); all zero outside a pack.
+/// VH-TACTICS (§2.1): the target at its last-known point in the body's own record, and a
+/// carcass it knows, never a true pose ([`crate::pack::tactics::social_target`]).
 fn social(fauna: &Fauna, a: &Animal, frame: &Frame, v: f64, range_m: f64) -> [f64; 10] {
     let mut out = [0.0; 10];
     let Some(member) = a.pack else { return out };
     let Some(pack) = fauna.packs.iter().find(|p| p.id == member.pack) else { return out };
     out[0] = f64::from(pack.breeder == Some(a.id));
     out[1] = f64::from(member.pup);
-    if let Some(t) = pack.target.and_then(|id| fauna.animals.iter().find(|o| o.id == id)) {
-        let (s, c, d) = frame.toward(t.pose.x, t.pose.z);
+    if let Some((x, z)) = crate::pack::tactics::social_target(fauna, a) {
+        let (s, c, d) = frame.toward(x, z);
         out[2..6].copy_from_slice(&[1.0, s, c, proximity(d, range_m)]);
     }
-    if let Some(f) = pack.feast {
+    if let Some(f) = crate::pack::tactics::social_feast(fauna, a) {
         let (x, z) = site_xz(f, v);
         let (s, c, d) = frame.toward(x, z);
         out[6..10].copy_from_slice(&[1.0, s, c, proximity(d, range_m)]);

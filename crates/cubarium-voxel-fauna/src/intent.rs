@@ -480,6 +480,11 @@ pub fn intent_mask(menu: &Menu, young: bool, fits: impl Fn(Fits) -> bool) -> Vec
 pub(crate) struct Teach {
     pub name: Option<&'static str>,
     pub subject: Subject,
+    /// A teacher that runs its own hold (VH-TACTICS, [`crate::HoundTeach`]): the intent it
+    /// held, recorded as held without a second hold over the proposal.
+    pub held: Option<&'static str>,
+    /// The call it made this sample (0 none, `k + 1` its lineage's kind `k`).
+    pub call: u8,
 }
 
 /// The nearest track of `class` in body `id`'s record, as a body subject.
@@ -527,7 +532,7 @@ pub(crate) fn teacher_label(
     let a = &fauna.animals[i];
     let resting = a.rest_ticks > 0 || a.state == crate::State::Resting && actions == crate::Actions::REST;
     let still = actions.forward <= fauna.config.teachers.forage_stay_forward;
-    let t = |name: &'static str, subject: Subject| Teach { name: Some(name), subject };
+    let t = |name: &'static str, subject: Subject| Teach { name: Some(name), subject, ..Teach::default() };
     match founder {
         Founder::Seedporter => match src {
             S::Flee => t("flee_to_trees", nearest(fauna, a.id, class::THREAT)),
@@ -550,6 +555,11 @@ pub(crate) fn teacher_label(
             _ => Teach::default(),
         },
         Founder::Chorister => match src {
+            // VH-TACTICS: the tactic's own proposal, hold and call.
+            S::Pack if fauna.hound_teach.contains_key(&a.id) => {
+                let h = fauna.hound_teach[&a.id];
+                Teach { name: Some(h.proposal), subject: h.subject, held: Some(h.held), call: h.call }
+            }
             S::Pack => {
                 let name = fauna.pack_hint.get(&a.id).copied().unwrap_or("search");
                 let target = a.pack.and_then(|m| fauna.pack(m.pack)).and_then(|p| p.target);
@@ -567,7 +577,7 @@ pub(crate) fn teacher_label(
                     }),
                     _ => Subject::None,
                 };
-                Teach { name: Some(name), subject }
+                Teach { name: Some(name), subject, ..Teach::default() }
             }
             S::Heuristic | S::Search => t("search", Subject::None),
             _ => Teach::default(),
@@ -645,20 +655,33 @@ pub(crate) fn record(
     if ended.is_none() && rec.overridden != Override::None {
         ended = Some(EarlyEnd::Emergency);
     }
-    let mut probs = vec![0.0; menu.len()];
-    if let Some(p) = probs.get_mut(usize::from(rec.proposal)) {
-        *p = 1.0;
-    }
     let first = rec.sample_tick == 0 && rec.since_tick == 0;
-    let next = arbitrate(&knobs, valid, &probs, held, rec.hold_age_s(now), ended.is_some() || first);
-    if next != held || first {
-        rec.held = next as u8;
-        rec.since_tick = now;
-        rec.subject = if next == usize::from(rec.proposal) { rec.proposal_subject } else { Subject::None };
-    } else if next == usize::from(rec.proposal) {
-        rec.subject = rec.proposal_subject;
+    if let Some(k) = teach.held.and_then(|n| menu.index(n)) {
+        // A teacher that held its own intent (VH-TACTICS): recorded as it held it.
+        if k != held || first {
+            rec.since_tick = now;
+        }
+        rec.held = k as u8;
+        rec.subject = teach.subject;
+    } else {
+        let mut probs = vec![0.0; menu.len()];
+        if let Some(p) = probs.get_mut(usize::from(rec.proposal)) {
+            *p = 1.0;
+        }
+        let next = arbitrate(&knobs, valid, &probs, held, rec.hold_age_s(now), ended.is_some() || first);
+        if next != held || first {
+            rec.held = next as u8;
+            rec.since_tick = now;
+            rec.subject = if next == usize::from(rec.proposal) { rec.proposal_subject } else { Subject::None };
+        } else if next == usize::from(rec.proposal) {
+            rec.subject = rec.proposal_subject;
+        }
     }
     rec.ended = ended;
+    let mut executed = executed;
+    if teach.call > 0 {
+        executed.call = teach.call;
+    }
     rec.executed = executed;
     rec.sample_tick = now;
     rec.last_wound = fauna.animals[i].wound;

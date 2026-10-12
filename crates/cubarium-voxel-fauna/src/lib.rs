@@ -77,6 +77,7 @@ pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
+pub use pack::tactics::{Hound, HoundTeach, Tactics, TestPhase};
 mod registry;
 pub use registry::registry;
 mod senses;
@@ -3437,6 +3438,19 @@ pub struct FaunaLedger {
     /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
     #[serde(default)]
     pub pack_switches: u64,
+    /// **VH-TACTICS** readouts: tests begun, tests that ended in a commitment, hunts given up
+    /// (a test broken off or a chase given up), strikes on a substituted young body, and
+    /// lunges that met a body before their prey (taken by it or blocked).
+    #[serde(default)]
+    pub hound_tests: u64,
+    #[serde(default)]
+    pub hound_test_commits: u64,
+    #[serde(default)]
+    pub hound_give_ups: u64,
+    #[serde(default)]
+    pub hound_substitutions: u64,
+    #[serde(default)]
+    pub lunges_blocked: u64,
     /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
     /// steps off from a prey inside the outline and pivots to face one; and chases broken off
     /// as out of reach (no face beside the target puts it in the jaw band).
@@ -4251,6 +4265,15 @@ pub struct Fauna {
     /// CONTRACTS: each hearer's call records ([`calls::Heard`]). Saved: simpler than not.
     #[serde(default)]
     pub(crate) heard: FxHashMap<u64, calls::Heard>,
+    /// VH-TACTICS: each Veilhound's tactical memory ([`Hound`]): its target and commitment,
+    /// its test, its progress, the bodies it shuns, the kicks it saw, a carcass it knows, the
+    /// last regroup howl it heard. Saved: a load continues a hunt.
+    #[serde(default)]
+    pub(crate) hounds: FxHashMap<u64, Hound>,
+    /// VH-TACTICS: each hound's teacher labels at its last sample ([`HoundTeach`]), read by
+    /// its intent record. Session state.
+    #[serde(skip)]
+    pub(crate) hound_teach: FxHashMap<u64, HoundTeach>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4821,6 +4844,8 @@ impl Fauna {
             rest_asks: FxHashMap::default(),
             calls: Vec::new(),
             last_call: FxHashMap::default(),
+            hounds: FxHashMap::default(),
+            hound_teach: FxHashMap::default(),
             heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),

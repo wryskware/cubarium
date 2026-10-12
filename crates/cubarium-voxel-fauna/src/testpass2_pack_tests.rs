@@ -67,6 +67,8 @@ fn config() -> FaunaConfig {
     pk.chase_give_up_s = 1e6;
     pk.switch_stall_s = 1e6;
     pk.route_reach_fraction = 8.0 / (cruise * pk.chase_give_up_s);
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

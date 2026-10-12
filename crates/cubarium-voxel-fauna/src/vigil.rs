@@ -1485,7 +1485,8 @@ pub(crate) fn pry(fauna: &mut Fauna, ring: f64) {
             let Some(ol) = crate::body_of(&fauna.config, o).map(|b| b.length_m) else { continue };
             // HERD: work belongs to the pack's selected prey. Passing a grazer on the
             // way to another prey, or resting at its feast, must not pry that grazer.
-            if hk.herd_enabled && o.pack.is_some_and(|m| !fauna.packs.iter().any(|r| r.id == m.pack && r.target == Some(p.id))) {
+            // VH-TACTICS (§11.6): read from the hound's own attack state, not the pack target.
+            if hk.herd_enabled && o.pack.is_some() && !crate::pack::tactics::attacks(fauna, o, p.id) {
                 continue;
             }
             if d <= 0.5 * (pl + ol) + hk.pry_reach_m {

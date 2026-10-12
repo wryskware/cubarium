@@ -59,6 +59,8 @@ fn config(close_in_m: f64) -> FaunaConfig {
     pk.route_reach_fraction = 8.0 / (cruise * pk.chase_give_up_s);
     pk.close_in_m = close_in_m;
     pk.stand_off_reach_fraction = 0.0;
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

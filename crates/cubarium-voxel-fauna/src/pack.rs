@@ -129,6 +129,11 @@ pub(crate) fn upkeep(fauna: &mut Fauna, view: &VoxelView<'_>) {
     }
     succession(fauna);
     provision(fauna, view);
+    // VH-TACTICS: the dead's tactical memories go.
+    if fauna.tick % 64 == 0 && !fauna.hounds.is_empty() {
+        let alive: rustc_hash::FxHashSet<u64> = fauna.animals.iter().map(|a| a.id).collect();
+        fauna.hounds.retain(|id, _| alive.contains(id));
+    }
 }
 
 /// **Succession**: a breeder that is gone (or no adult of the pack) gives way to the oldest
@@ -1391,7 +1396,14 @@ pub(crate) fn steer(
 ) -> Option<Actions> {
     let id = fauna.animals[i].id;
     fauna.pack_hint.remove(&id);
-    let act = tactic(fauna, i, view, fv, clock_on, daylight, held, occupancy)?;
+    // VH-TACTICS: the Veilhound hunts by its own senses; off, the old tactic (the comparison
+    // arm).
+    let on = fauna.animals[i].founder.and_then(|f| fauna.config.founder(f).pack).is_some_and(|p| p.tactics.enabled);
+    let act = if on {
+        tactics::tactic(fauna, i, view, fv, clock_on, daylight, held, occupancy)?
+    } else {
+        tactic(fauna, i, view, fv, clock_on, daylight, held, occupancy)?
+    };
     fauna.pack_hint.entry(id).or_insert("search");
     Some(out_of_pit(fauna, i, view, act).unwrap_or(act))
 }
@@ -2229,6 +2241,9 @@ pub(crate) fn carcass_yield(fauna: &mut Fauna, i: usize, ring: f64, at_carcass: 
     };
     Some(head(&a, (-dx).atan2(-dz), 1.0, 0.0))
 }
+
+#[path = "tactics.rs"]
+pub(crate) mod tactics;
 
 #[cfg(test)]
 #[path = "pit_tests.rs"]

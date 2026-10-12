@@ -76,6 +76,8 @@ fn config((sight, half, hearing, smell): Senses) -> FaunaConfig {
         ..crate::SenseTable::default()
     };
     c.perception.remote_hz = f64::from(crate::TICK_HZ);
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

@@ -34,6 +34,8 @@ fn meal_config(hunt: HuntConfig, prey: Founder) -> FaunaConfig {
     }
     c.founders[prey.index()].agility = 0.0;
     c.hunt = hunt;
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 
@@ -133,6 +135,8 @@ fn quick_meal_config(hunt: HuntConfig, prey: Founder) -> FaunaConfig {
         let per = p.gut.throughput_factor(body, body) * body * period;
         c.founders[f.index()].gut.bite_per_body_s = 0.25 * p.gut.capacity(body) / per;
     }
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

@@ -179,7 +179,12 @@ use crate::{Fauna, FaunaConfig};
 //     held intent, subject, hold start, executed actions, override; the kick's phase),
 //     `Fauna::heard` (call records), `Track::lame`, and the envelope's brains' memories
 //     (`Controller::memory`). The intent, kick and call tables are named config.
-pub const SCHEMA: u32 = 81;
+// 82: taken by CALLS-REST (branch `calls-rest`, unmerged at VH-TACTICS' commit).
+// 83: VH-TACTICS (behaviour-AI §4, §11.4-§11.6) — `Fauna::hounds` (each Veilhound's tactical
+//     memory, `Hound`) and the ledger's `hound_tests`, `hound_test_commits`, `hound_give_ups`,
+//     `hound_substitutions` and `lunges_blocked` (a state layout change). `Pack::tactics`
+//     (`Tactics`) and `Hunter::lunge_blocks` are named config, not bumps.
+pub const SCHEMA: u32 = 83;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

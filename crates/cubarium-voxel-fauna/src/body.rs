@@ -912,6 +912,11 @@ pub struct Pack {
     /// A target dropped alive (broken off, late or lost) is not taken again for this, seconds.
     #[serde(default = "pack_shun_s")]
     pub shun_s: f64,
+    /// **VH-TACTICS** ([`crate::Tactics`]): the Veilhound hunts by its own senses — tests,
+    /// cuts off, intercepts, encircles, harries and gives up. On for the Veilhound; off runs
+    /// the old pack tactic above (the comparison arm).
+    #[serde(default)]
+    pub tactics: crate::Tactics,
 }
 
 fn pack_select_kin_m() -> f64 {
@@ -1106,6 +1111,7 @@ impl Pack {
         select_min_prospect: 0.1,
         break_off_below: 0.05,
         shun_s: 120.0,
+        tactics: crate::Tactics::VEILHOUND,
     };
 }
 
@@ -1763,6 +1769,14 @@ pub struct Hunter {
     /// Switches, so no registry row.
     #[serde(default)]
     pub prey_ashore_only: [bool; Founder::COUNT],
+    /// **Bodies block** (VH-TACTICS, behaviour-AI §11.4; a switch, no registry row): its
+    /// lunge contacts the first body along the jaw's sweep. A body before the prey that the
+    /// strike takes (on its list, in its window) takes it; any other — an adult loftstrider
+    /// between a hound and a calf, a packmate — blocks it. On for the Veilhound; off (today's)
+    /// for the rest, whose strike meets only its prey (the frondgrazer's HERD cover is its own
+    /// knob).
+    #[serde(default)]
+    pub lunge_blocks: bool,
 }
 
 fn ones_by_founder() -> [f64; Founder::COUNT] {
@@ -1816,6 +1830,7 @@ impl Hunter {
         prey_weight: [0.5, 0.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.25, 1.0],
         prey_juveniles_only: [false, true, false, false, false, false, false, true, false],
         prey_ashore_only: [false, false, false, false, false, true, false, false, false],
+        lunge_blocks: false,
     };
 
     /// Whether `prey`'s lineage is on its list.
@@ -2724,6 +2739,7 @@ impl FounderPhysiology {
                         prey_weight: [1.0; Founder::COUNT],
                         prey_juveniles_only: [false; Founder::COUNT],
                         prey_ashore_only: [false; Founder::COUNT],
+                        lunge_blocks: false,
                     }),
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -2819,6 +2835,9 @@ impl FounderPhysiology {
                         prey_weight: [1.0; Founder::COUNT],
                         prey_juveniles_only: [false; Founder::COUNT],
                         prey_ashore_only: [false; Founder::COUNT],
+                        // VH-TACTICS: an adult between a hound and a calf takes or blocks
+                        // its lunge.
+                        lunge_blocks: true,
                         ..Hunter::LANTERNJAW
                     }),
                     diet: crate::Diet::only(crate::Food::Carrion),

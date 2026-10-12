@@ -45,6 +45,8 @@ fn config() -> FaunaConfig {
     pk.select_aware_factor = 1.0;
     pk.select_wound_gain = 0.0;
     pk.select_airborne_factor = 1.0;
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

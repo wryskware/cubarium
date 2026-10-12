@@ -256,6 +256,8 @@ fn the_chorister_table_scales_the_lanternjaws_and_hunts_its_list() {
             prey_weight: h.prey_weight,
             prey_juveniles_only: h.prey_juveniles_only,
             prey_ashore_only: h.prey_ashore_only,
+            // VH-TACTICS: its lunge meets the first body in its way.
+            lunge_blocks: h.lunge_blocks,
             ..Hunter::LANTERNJAW
         },
         h,

@@ -486,6 +486,7 @@ fn a_pack_hunts_when_half_want_food_or_one_is_in_emergency() {
         // The hunt-start rule alone: a grazer that does not hunker (PACK-TUNE's prey choice
         // would leave an armoured one to a lone member in emergency).
         c.founders[Founder::Browser.index()].hunker.enabled = false;
+        crate::pack::tactics::old_tactic(&mut c);
         let mut fauna = Fauna::new(c);
         fauna.set_births_enabled(false);
         let den = Site { x: 8, y: SURFACE_Y, z: 6 };
@@ -993,6 +994,7 @@ fn pack_scene_on(world: World, at: &[(f64, f64, bool)], prey: (f64, f64)) -> (Wo
     let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
     pk.pack_size = at.len();
     c.founders[Founder::Chorister.index()].pack = Some(pk);
+    crate::pack::tactics::old_tactic(&mut c);
     let mut fauna = Fauna::new(c);
     fauna.set_births_enabled(false);
     assert!(fauna.apply(
@@ -1323,6 +1325,7 @@ fn the_reserve_fallback_does_not_need_the_pups_latch() {
     let mut pk = c.founders[Founder::Chorister.index()].pack.expect("a pack");
     pk.pack_size = 1;
     c.founders[Founder::Chorister.index()].pack = Some(pk);
+    crate::pack::tactics::old_tactic(&mut c);
     let mut fauna = Fauna::new(c);
     fauna.set_births_enabled(false);
     assert!(fauna.apply(
