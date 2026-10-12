@@ -53,7 +53,9 @@ pub struct Config {
     pub soil_layers: u32,
     /// Metres from family centre to pack centre, inclusive range.
     pub distance_m: [f64; 2],
-    /// Metres between adjacent starting bodies in a group.
+    /// Metres of clear ground between neighbouring starting bodies in a group (BALANCE): each
+    /// body counts as the circle its length sweeps (half its length about its centre), so no two
+    /// start overlapping at any heading, whatever the lineage's size.
     pub spacing_m: f64,
     /// Metres of centre placement jitter in depth, each side of arena middle.
     pub depth_jitter_m: f64,
@@ -154,7 +156,7 @@ pub fn registry() -> &'static Registry {
                 Range::positive(),
                 "Family to pack centre distance",
             ),
-            ("spacing_m", "m", Range::positive(), "Body separation"),
+            ("spacing_m", "m", Range::nonneg(), "Clear gap between neighbouring bodies"),
             (
                 "depth_jitter_m",
                 "m",
@@ -234,7 +236,7 @@ impl Config {
         if self.arms.is_empty() || self.soil_layers + 1 >= self.height {
             return Err("empty arms or soil above ceiling".into());
         }
-        let room = self.distance_m[1] + self.depth_jitter_m + self.spacing_m * 2.0;
+        let room = self.distance_m[1] + self.depth_jitter_m;
         if room >= f64::from(self.depth) * self.voxel_m / 2.0
             || room >= f64::from(self.width) * self.voxel_m / 2.0
         {
@@ -319,6 +321,25 @@ fn calf_to_mother(fauna: &cubarium_voxel_fauna::Fauna, calf: Option<u64>, ring: 
     Some(dx.hypot(m.pose.z - c.pose.z))
 }
 
+/// Offsets along a row, centred on its middle, for bodies of radii `radii` in order, each
+/// `gap` metres of clear ground from the next.
+fn row_offsets(radii: &[f64], gap: f64) -> Vec<f64> {
+    let mut at = Vec::with_capacity(radii.len());
+    let mut x = 0.0;
+    for (k, &r) in radii.iter().enumerate() {
+        if k > 0 {
+            x += radii[k - 1] + r + gap;
+        }
+        at.push(x);
+    }
+    let (lo, hi) = match (radii.first(), radii.last(), at.last()) {
+        (Some(r0), Some(rn), Some(&xn)) => (-r0, xn + rn),
+        _ => (0.0, 0.0),
+    };
+    let mid = 0.5 * (lo + hi);
+    at.iter().map(|x| x - mid).collect()
+}
+
 /// Found a start with stable IDs for all seven roster slots, even in smaller arms.
 /// Bodies omitted by an arm are removed only after all draws and ancestry are assigned.
 pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
@@ -351,7 +372,23 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         }
     }
     let flora = Flora::new(FloraConfig::for_voxel_size(cfg.voxel_m));
-    let mut fauna = Fauna::new(FaunaConfig::default());
+    // The arm's settings first, so bodies are placed at the sizes they will have.
+    let params = crate::params::Params::resolve_over(
+        crate::params::Params {
+            world: world.config().clone(),
+            flora: flora.config().clone(),
+            fauna: FaunaConfig::default(),
+        },
+        &crate::params::Layers {
+            sets: arm.sets.clone(),
+            ..Default::default()
+        },
+    )?;
+    if params.world != *world.config() || params.flora != *flora.config() {
+        return Err("engagement arms may override fauna only".into());
+    }
+    let fauna_config = params.fauna;
+    let mut fauna = Fauna::new(fauna_config.clone());
     let angle = draw(seed, 1, [0.0, std::f64::consts::TAU]);
     let cx = draw(seed, 2, [0.0, f64::from(cfg.width) * cfg.voxel_m]);
     let cz = f64::from(cfg.depth) * cfg.voxel_m / 2.0
@@ -362,22 +399,26 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
     let face = |x: f64, z: f64| Site {
         x: (x / cfg.voxel_m).floor().rem_euclid(f64::from(cfg.width)) as u32,
         y: cfg.soil_layers,
-        z: (z / cfg.voxel_m).floor() as u32,
+        // Inside the closed depth: a row longer than a small arena's room stands at its edge.
+        z: ((z / cfg.voxel_m).floor().max(0.0) as u32).min(cfg.depth.saturating_sub(1)),
     };
+    let family_bodies: Vec<f64> = (0..3u64)
+        .map(|slot| draw(seed, 20 + slot, if slot == 2 { cfg.calf_body } else { cfg.adult_body }))
+        .collect();
+    let ls = fauna_config.founder(Founder::Loftstrider);
+    let family_sides = row_offsets(
+        &family_bodies
+            .iter()
+            .map(|&b| 0.5 * ls.body_at(b * ls.core.body_max).length_m)
+            .collect::<Vec<_>>(),
+        cfg.spacing_m,
+    );
     let mut family = vec![];
     for slot in 0..3u64 {
-        let side = (slot as f64 - 1.0) * cfg.spacing_m;
+        let side = family_sides[slot as usize];
         let site = face(cx + angle.cos() * side, cz - angle.sin() * side);
         let fullness = draw(seed, 10 + slot, cfg.family_fullness);
-        let body = draw(
-            seed,
-            20 + slot,
-            if slot == 2 {
-                cfg.calf_body
-            } else {
-                cfg.adult_body
-            },
-        );
+        let body = family_bodies[slot as usize];
         if !fauna.apply(
             &world,
             Command::IntroduceFounderOnFace {
@@ -432,8 +473,21 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         .filter(|a| a.pack.is_some())
         .map(|a| a.id)
         .collect();
+    let hound_sides = row_offsets(
+        &all_hounds
+            .iter()
+            .map(|&id| {
+                fauna
+                    .view()
+                    .animal(id)
+                    .and_then(|a| cubarium_voxel_fauna::body_of(&fauna_config, a))
+                    .map_or(0.0, |b| 0.5 * b.length_m)
+            })
+            .collect::<Vec<_>>(),
+        cfg.spacing_m,
+    );
     for (slot, &id) in all_hounds.iter().enumerate() {
-        let side = (slot as f64 - 1.5) * cfg.spacing_m;
+        let side = hound_sides[slot];
         fauna.probe_place(
             id,
             face(px + angle.cos() * side, pz - angle.sin() * side),
@@ -496,22 +550,7 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
             }
         }
     }
-    let mut params = crate::params::Params {
-        world: world.config().clone(),
-        flora: flora.config().clone(),
-        fauna: fauna.config().clone(),
-    };
-    params = crate::params::Params::resolve_over(
-        params,
-        &crate::params::Layers {
-            sets: arm.sets.clone(),
-            ..Default::default()
-        },
-    )?;
-    if params.world != *world.config() || params.flora != *flora.config() {
-        return Err("engagement arms may override fauna only".into());
-    }
-    fauna.replace_config(params.fauna)?;
+    fauna.replace_config(fauna_config)?;
     habitat::reinstall_heuristics(&mut fauna);
     fauna.set_census_readout(true);
     Ok(Episode {
@@ -936,6 +975,42 @@ mod tests {
         assert!(row.time_s <= cfg.duration_s + cubarium_voxel_fauna::DT);
         assert_eq!(row.pack_size, cfg.arms[0].pack_size);
         assert_eq!(row.captures, None);
+    }
+    /// **Family and pack bodies start clear of each other** (BALANCE step 1), whatever the
+    /// lineages' sizes: the circles their lengths sweep, `spacing_m` apart at least.
+    #[test]
+    fn starting_bodies_do_not_overlap_for_any_body_size() {
+        let base = Config { width: 160, depth: 160, distance_m: [10.0, 14.0], ..fixture() };
+        let d = FaunaConfig::default();
+        let ls = d.founder(Founder::Loftstrider).adult_length_m;
+        let vh = d.founder(Founder::Chorister).adult_length_m;
+        for scale in [0.5, 1.0, 2.0] {
+            let arm = Arm {
+                name: "family-4".into(),
+                composition: Composition::Family,
+                pack_size: 4,
+                sets: vec![
+                    format!("fauna.founders.loftstrider.adult_length_m={}", scale * ls),
+                    format!("fauna.founders.chorister.adult_length_m={}", scale * vh),
+                ],
+            };
+            for seed in 1..=4 {
+                let ep = found(&base, seed, &arm).unwrap();
+                let view = ep.sim.fauna().view();
+                let config = view.config;
+                let bodies: Vec<_> = ep.adults.iter().chain(ep.calf.iter()).chain(&ep.hounds).filter_map(|&id| view.animal(id)).collect();
+                for (k, a) in bodies.iter().enumerate() {
+                    for b in &bodies[k + 1..] {
+                        let ra = 0.5 * cubarium_voxel_fauna::body_of(config, a).unwrap().length_m;
+                        let rb = 0.5 * cubarium_voxel_fauna::body_of(config, b).unwrap().length_m;
+                        let gap = (a.pose.x - b.pose.x).hypot(a.pose.z - b.pose.z) - ra - rb;
+                        // A body stands at its voxel's centre: up to half a voxel's diagonal off.
+                        let snap = base.voxel_m * std::f64::consts::SQRT_2;
+                        assert!(gap >= base.spacing_m - snap, "scale {scale} seed {seed}: bodies {} and {} {gap:.2} m apart", a.id, b.id);
+                    }
+                }
+            }
+        }
     }
     #[test]
     fn different_arms_share_all_common_starting_bodies() {

@@ -356,6 +356,8 @@ fn a_calm_young_sets_off_at_its_chance_and_never_as_an_infant_or_under_threat() 
             (if p.nursing.on() { p.nursing.weaning_age_s } else { 0.0 }, p.young.independence_s)
         };
         let (mother, calf) = family(&mut f, &w, founder, 10.0, 2.0, 0.3, 0.5 * (start + end));
+        // The goal's distance fits the 40 m ring unwrapped (the defaults may not).
+        f.config.founders[founder.index()].young.excursion_m = 0.25 * RING;
         // A certain chance: it sets off, toward a goal, recorded.
         f.config.founders[founder.index()].young.excursion_per_h = [1e9, 1e9];
         let go = run_excursion(&mut f, calf).expect("it sets off");

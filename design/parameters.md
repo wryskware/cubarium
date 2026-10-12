@@ -1776,7 +1776,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.littershredder.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.littershredder.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.littershredder.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.littershredder.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.littershredder.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.littershredder.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.littershredder.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -2238,7 +2238,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.frondgrazer.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.frondgrazer.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.frondgrazer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.frondgrazer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.frondgrazer.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.frondgrazer.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.frondgrazer.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -2700,7 +2700,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.lanternjaw.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.lanternjaw.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.lanternjaw.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.lanternjaw.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.lanternjaw.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.lanternjaw.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.lanternjaw.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -3162,7 +3162,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.capgnawer.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.capgnawer.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.capgnawer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.capgnawer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.capgnawer.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.capgnawer.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.capgnawer.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -3624,7 +3624,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.loftstrider.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.loftstrider.kick.windup_s` | 0.4 | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.loftstrider.kick.recovery_s` | 2.5 | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.loftstrider.kick.recovery_s` | 1.25 | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.loftstrider.kick.reach_m` | 1.3 | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.loftstrider.kick.origin_forward_fraction` | 0.5 | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.loftstrider.kick.arc_deg` | 60.0 | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -3653,7 +3653,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.young.roam_m` | 10.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
 | `fauna.founders.loftstrider.young.follow_pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
 | `fauna.founders.loftstrider.young.excursion_per_h.*` | 1.0, 4.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
-| `fauna.founders.loftstrider.young.excursion_m` | 20.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.loftstrider.young.excursion_m` | 40.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
 | `fauna.founders.loftstrider.young.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
 | `fauna.founders.loftstrider.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
@@ -4086,7 +4086,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.ripple-snail.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.ripple-snail.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.ripple-snail.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.ripple-snail.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.ripple-snail.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.ripple-snail.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.ripple-snail.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -4548,7 +4548,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.bellwing.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.bellwing.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.bellwing.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.bellwing.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.bellwing.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.bellwing.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.bellwing.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -5010,7 +5010,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.seedporter.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.seedporter.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.seedporter.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.seedporter.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.seedporter.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.seedporter.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.seedporter.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -5472,7 +5472,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.chorister.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
 | `fauna.founders.chorister.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.chorister.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.chorister.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s) |
 | `fauna.founders.chorister.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
 | `fauna.founders.chorister.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
 | `fauna.founders.chorister.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
@@ -5945,7 +5945,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `engagement.voxel_m` | 0.25 | m | (0, inf) | Voxel pitch |
 | `engagement.soil_layers` | 2 | voxel | [1, inf) | Soil thickness |
 | `engagement.distance_m.*` | 4.0, 6.0 | m | (0, inf) | Family to pack centre distance |
-| `engagement.spacing_m` | 1.5 | m | (0, inf) | Body separation |
+| `engagement.spacing_m` | 1.5 | m | [0, inf) | Clear gap between neighbouring bodies |
 | `engagement.depth_jitter_m` | 1.0 | m | [0, inf) | Centre depth jitter |
 | `engagement.adult_body.*` | 0.9, 1.0 | fraction | (0, 1] | Adult structure |
 | `engagement.calf_body.*` | 0.16, 0.22 | fraction | (0, 1] | Calf structure |

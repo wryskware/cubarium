@@ -394,7 +394,7 @@ fn founder_rows() -> Vec<Row> {
         // The kick (`kick::Kick`, CONTRACTS, behaviour-AI §3.3): the loftstrider's (LS-DEFEND),
         // `None` on every other lineage; `step_in_windup` and `kick_back` are switches: no row.
         r("kick.windup_s", "s", nonneg, "CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s").optional(),
-        r("kick.recovery_s", "s", nonneg, "CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s").optional(),
+        r("kick.recovery_s", "s", nonneg, "CONTRACTS: after contact before the next kick, aimed or back (one budget); 1.25 s (BALANCE; the contract's ~2.5 s)").optional(),
         r("kick.reach_m", "m", nonneg, "CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m)").optional(),
         r("kick.origin_forward_fraction", "x body length", nonneg, "CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw").optional(),
         r("kick.arc_deg", "deg", nonneg, "CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it").optional(),

@@ -1,0 +1,48 @@
+# BALANCE sweep from config/engagement-young-roam.toml; knobs ['gtc:fauna.founders.loftstrider.defence.w_go_to_calf:1.5,2.5,4.0', 'thr:fauna.founders.loftstrider.defence.threat_m:8,16']; sets []
+duration_s = 300.0
+episodes = 40
+width = 480
+height = 48
+depth = 400
+voxel_m = 0.25
+soil_layers = 2
+distance_m = [40.0, 44.0]
+spacing_m = 0.5
+depth_jitter_m = 1.0
+adult_body = [0.9, 1.0]
+calf_body = [0.3, 0.35]
+family_fullness = [0.85, 0.95]
+pack_fullness = [0.1, 0.2]
+adult_age_s = [20000.0, 20000.0]
+calf_age_s = [7500.0, 7500.0]
+usual_prey = false
+
+[[arms]]
+name = "strays-3--gtc1p5"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.defence.w_go_to_calf=1.5"]
+
+[[arms]]
+name = "strays-3--gtc2p5"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.defence.w_go_to_calf=2.5"]
+
+[[arms]]
+name = "strays-3--gtc4p0"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.defence.w_go_to_calf=4.0"]
+
+[[arms]]
+name = "strays-3--thr8"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.defence.threat_m=8"]
+
+[[arms]]
+name = "strays-3--thr16"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120", "fauna.founders.loftstrider.defence.threat_m=16"]

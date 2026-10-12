@@ -58,13 +58,14 @@ impl Default for Kick {
 }
 
 impl Kick {
-    /// §3.3's loftstrider kick: a 0.4 s windup, 2.5 s recovery, about 1.3 m of reach (beyond a
+    /// §3.3's loftstrider kick: a 0.4 s windup, 1.25 s recovery (BALANCE 2026-10-12: from 2.5,
+    /// so two adults' kicks can land three on one hound in a fight), about 1.3 m of reach (beyond a
     /// hound's 0.84 m bite, so a hound must step inside it to bite), a front arc, the legs'
     /// band, and 0.18 at equal size — about a third off a grown hound at the size ratio 1.9
     /// (Wrysk, topic 6: kicks wound). The loftstrider's ([`kick_of`]).
     pub const LOFTSTRIDER: Kick = Kick {
         windup_s: 0.4,
-        recovery_s: 2.5,
+        recovery_s: 1.25,
         reach_m: 1.3,
         origin_forward_fraction: 0.5,
         arc_deg: 60.0,

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Write an ENGAGE batch spec from the harness arm list and episode count.
-Usage: engagement-spec.py --probe target/release/examples/engagement_probe --film-seed N --out SPEC
-The chosen film seed must come from a successful quick run's family-3 rows.
+Usage: engagement-spec.py --probe target/release/examples/engagement_probe [--film-seed N] --out SPEC
+The chosen film seed must come from a successful quick run's family-3 rows. Without
+--film-seed no video is rendered (sweeps).
 """
 import argparse
 import hashlib
@@ -16,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--probe', type=Path, required=True)
     parser.add_argument('--config', type=Path, default=Path('config/engagement.toml'))
-    parser.add_argument('--film-seed', type=int, required=True)
+    parser.add_argument('--film-seed', type=int, help='render this family-3 seed after the batch (none: no video)')
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--name', default='engage-baseline', help='the labd job name')
     parser.add_argument('--runs', type=Path,
@@ -35,9 +36,9 @@ def main():
     args = ['--config', str(cfg_path), '--required', str(repo / 'config/engagement-required.toml'),
             '--seeds', f"1-{cfg['episodes']}", '--hours', str(cfg['duration_s'] / 3600), '--threads', '1']
     for arm in cfg['arms']:
-        extra = shlex.join([f"arm={arm['name']}", f'probe={probe}', f'probe_sha256={digest}',
-                            f'film_seed={options.film_seed}', f'film_out={movie}',
-                            'render_tree=/home/wrysk/wryskware/cubarium'])
+        film = [] if options.film_seed is None else [f'film_seed={options.film_seed}', f'film_out={movie}',
+                                                     'render_tree=/home/wrysk/wryskware/cubarium']
+        extra = shlex.join([f"arm={arm['name']}", f'probe={probe}', f'probe_sha256={digest}'] + film)
         args += ['--arm', f"{arm['name']}={extra}"]
     quick = '\nquick = true' if options.quick else ''
     text = f'''# ENGAGE source commit {commit}; binary sha256 {digest}
@@ -52,7 +53,8 @@ args = {json.dumps(args, indent=2)}
 '''
     options.out.write_text(text)
     print(options.out.resolve())
-    print(f'video {movie}')
+    if options.film_seed is not None:
+        print(f'video {movie}')
 
 
 if __name__ == '__main__':
