@@ -25,17 +25,9 @@ impl drm::Device for Card {}
 impl ControlDevice for Card {}
 
 /// A linear XR24 allocation, exported once and written only while its slot is free.
-#[ouroboros::self_referencing]
-struct MappedBuffer {
-    card: Card,
-    buffer: DumbBuffer,
-    #[borrows(card, mut buffer)]
-    #[covariant]
-    mapped: DumbMapping<'this>,
-}
-
 pub struct ScanoutBuffer {
-    mapping: Option<MappedBuffer>,
+    card: Card,
+    mapping: Option<DumbMapping<'static>>,
     buffer: DumbBuffer,
 }
 
@@ -56,14 +48,18 @@ impl ScanoutBuffer {
         let buffer = card
             .create_dumb_buffer((width, height), DrmFourcc::Xrgb8888, 32)
             .context("allocate linear DRM scanout buffer")?;
-        let mapping = MappedBufferTryBuilder {
-            card,
-            buffer,
-            mapped_builder: |card, buffer| card.map_dumb_buffer(buffer),
-        }
-        .try_build()
-        .context("map DRM scanout allocation once")?;
+        // drm ties the mapping to the mutable handle, not to the card. Leak only
+        // this tiny Copy handle; the mapping, allocation and card still drop normally.
+        let handle = Box::leak(Box::new(buffer));
+        let mapping = match card.map_dumb_buffer(handle) {
+            Ok(mapping) => mapping,
+            Err(error) => {
+                let _ = card.destroy_dumb_buffer(buffer);
+                return Err(error).context("map DRM scanout allocation once");
+            }
+        };
         Ok(Self {
+            card,
             mapping: Some(mapping),
             buffer,
         })
@@ -75,10 +71,7 @@ impl ScanoutBuffer {
 
     pub fn export(&self) -> Result<OwnedFd> {
         let flags = rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::RDWR;
-        self.mapping
-            .as_ref()
-            .unwrap()
-            .borrow_card()
+        self.card
             .buffer_to_prime_fd(self.buffer.handle(), flags.bits())
             .context("export DRM scanout allocation as dma-buf")
     }
@@ -86,36 +79,34 @@ impl ScanoutBuffer {
     pub fn clear(&mut self) {
         let pitch = self.buffer.pitch() as usize;
         let (width, height) = self.buffer.size();
-        self.mapping.as_mut().unwrap().with_mapped_mut(|mapped| {
-            mapped.fill(0);
-            for row in mapped.chunks_mut(pitch).take(height as usize) {
-                for pixel in row[..width as usize * 4].chunks_exact_mut(4) {
-                    pixel[3] = 255;
-                }
+        let mapped = self.mapping.as_mut().unwrap();
+        mapped.fill(0);
+        for row in mapped.chunks_mut(pitch).take(height as usize) {
+            for pixel in row[..width as usize * 4].chunks_exact_mut(4) {
+                pixel[3] = 255;
             }
-        });
+        }
     }
     pub fn write_rows(&mut self, rgba: &[u8], source_pitch: usize) -> Result<()> {
         let (width, height) = self.buffer.size();
         let row_bytes = width as usize * 4;
         let pitch = self.buffer.pitch() as usize;
-        self.mapping.as_mut().unwrap().with_mapped_mut(|mapped| {
-            copy_rows_strided(
-                rgba,
-                source_pitch,
-                mapped,
-                row_bytes,
-                pitch,
-                height as usize,
-            )
-        })
+        copy_rows_strided(
+            rgba,
+            source_pitch,
+            self.mapping.as_mut().unwrap(),
+            row_bytes,
+            pitch,
+            height as usize,
+        )
     }
+
     /// Diagnostic captures alone copy pixels back out of scanout memory.
     pub fn read_rgba(&self) -> Vec<u8> {
         let (width, height) = self.buffer.size();
         let row_bytes = width as usize * 4;
         let mut rgba = vec![0; row_bytes * height as usize];
-        let mapped = self.mapping.as_ref().unwrap().borrow_mapped();
+        let mapped = self.mapping.as_ref().unwrap();
         for (source, target) in mapped
             .chunks(self.buffer.pitch() as usize)
             .zip(rgba.chunks_exact_mut(row_bytes))
@@ -173,10 +164,8 @@ fn copy_rows_strided(
 
 impl Drop for ScanoutBuffer {
     fn drop(&mut self) {
-        if let Some(mapping) = self.mapping.take() {
-            let heads = mapping.into_heads();
-            let _ = heads.card.destroy_dumb_buffer(self.buffer);
-        }
+        drop(self.mapping.take());
+        let _ = self.card.destroy_dumb_buffer(self.buffer);
     }
 }
 
