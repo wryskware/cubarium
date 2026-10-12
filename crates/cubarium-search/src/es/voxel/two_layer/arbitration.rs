@@ -10,70 +10,12 @@
 
 use serde::{Deserialize, Serialize};
 
-use cubarium_voxel::registry::{Range, Registry, Row};
-
-/// A lineage's intent-holding knobs. Per-lineage, not trained weights.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct IntentArbitration {
-    /// The top layer's rate, decisions per second (Hz). The bottom runs at every controller
-    /// sample; the top decides on a credit that accrues `sample period × intent_hz` per
-    /// sample (§2.2: 4 Hz).
-    pub intent_hz: f64,
-    /// Minimum hold, seconds: a held intent or subject is not switched on the top's own
-    /// account before it has been held this long. An early end ignores it.
-    pub hold_s: f64,
-    /// Switch margin, probability (`[0, 1]`): a proposal replaces the held choice only when
-    /// its probability exceeds the held choice's by at least this, both at `temperature`.
-    pub switch_margin: f64,
-    /// The fixed softmax temperature the margin is read at (dimensionless, > 0). Fixed, so
-    /// a change of logit scale is read as a change of confidence at a known calibration.
-    pub temperature: f64,
-    /// Time scale of the bottom's and top's time-in-intent input, seconds: the input is
-    /// `1 − exp(−t / scale)` for `t` seconds in the current intent.
-    pub intent_time_scale_s: f64,
-}
-
-impl Default for IntentArbitration {
-    fn default() -> IntentArbitration {
-        IntentArbitration {
-            intent_hz: 4.0,
-            hold_s: 1.0,
-            switch_margin: 0.1,
-            temperature: 1.0,
-            intent_time_scale_s: 10.0,
-        }
-    }
-}
-
-impl IntentArbitration {
-    /// Refuse an out-of-range set by name ([`registry`]'s ranges).
-    pub fn validate(&self) -> Result<(), String> {
-        registry().check(self)
-    }
-}
-
-/// The knobs' registry rows, under `prefix` (`"brain"` standalone; the adapter mounts
-/// them per lineage, e.g. `fauna.founders.*.brain`).
-pub fn arbitration_rows(prefix: &str) -> Vec<Row> {
-    vec![
-        Row::new("intent_hz", "Hz", Range::positive(), "TWO-LAYER: top-layer decision rate; the bottom runs every controller sample"),
-        Row::new("hold_s", "s", Range::nonneg(), "TWO-LAYER: minimum hold before the top may switch intent or subject on its own account (an early end ignores it)"),
-        Row::new("switch_margin", "probability", Range::fraction(), "TWO-LAYER: a proposal must beat the held choice's probability by this, both at `temperature`"),
-        Row::new("temperature", "-", Range::positive(), "TWO-LAYER: fixed softmax temperature the hold and margin read probabilities at"),
-        Row::new("intent_time_scale_s", "s", Range::positive(), "TWO-LAYER: time-in-intent input is 1 - exp(-t / this)"),
-    ]
-    .into_iter()
-    .map(|r| r.under(prefix))
-    .collect()
-}
-
-/// The standalone table, root `brain`. The adapter (second half) mounts the same rows per
-/// lineage in the fauna's table; until then this is where the rows live.
-pub fn registry() -> &'static Registry {
-    static TABLE: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
-    TABLE.get_or_init(|| Registry::new("brain", arbitration_rows("brain"), Vec::new(), Vec::new()))
-}
+/// A lineage's intent-holding knobs: the fauna's per-lineage brain table
+/// (`fauna.founders.<lineage>.brain`, [`cubarium_voxel_fauna::BrainArbitration`]), so the
+/// config and its registry rows live with every other per-lineage table.
+pub use cubarium_voxel_fauna::BrainArbitration as IntentArbitration;
+/// The knobs' registry rows under a prefix, and the standalone `brain` table.
+pub use cubarium_voxel_fauna::brain_knobs::{arbitration_rows, registry};
 
 /// Why the fauna ends a hold early (the interface's early-end flag).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

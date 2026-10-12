@@ -13,18 +13,24 @@
 //! - [`arbitration`]: the per-lineage holding knobs ([`IntentArbitration`]) and the rule;
 //! - [`brain`]: one body's brain ([`TwoLayerBrain`]) and its saved state ([`BrainState`]);
 //! - [`file`]: the versioned two-layer policy file and the plain-file bridge;
-//! - [`clone`]: trajectory records and the teacher-forced fit of both layers.
+//! - [`clone`]: trajectory records and the teacher-forced fit of both layers;
+//! - [`adapter`]: the brain behind the fauna's menu seam (`Controller::decide`, saves).
 
+pub mod adapter;
 pub mod arbitration;
 pub mod brain;
 pub mod clone;
 pub mod file;
 pub mod net;
+pub mod record;
 pub mod shape;
 
 #[cfg(test)]
+mod fauna_tests;
+#[cfg(test)]
 mod tests;
 
+pub use adapter::{BRAIN_MEMORY_TAG, MenuHeads};
 pub use arbitration::{EarlyEnd, HoldChange, IntentArbitration};
 pub use brain::{
     BrainAnswer, BrainState, CandidateRow, DecisionSample, HeldChoice, ProposalRecord,

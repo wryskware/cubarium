@@ -89,7 +89,7 @@ pub fn install_centres(fauna: &mut Fauna, drivers: &[(Founder, EpisodeDriver)]) 
     // The reflexes a centre falls back on run on the layer's own numbers.
     let teachers = fauna.config().teachers;
     for (founder, driver) in drivers {
-        let driver = driver.clone();
+        let driver = driver.clone().with_brain_table(fauna.config().founder(*founder).brain);
         fauna.set_founder_factory(
             *founder,
             std::sync::Arc::new(move || -> Box<dyn Controller> { driver.fresh(teachers) }),

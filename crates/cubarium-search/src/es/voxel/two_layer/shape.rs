@@ -8,9 +8,12 @@
 //!
 //! - **Bottom:** today's GRU tensors in [`crate::es::tensor`]'s order
 //!   (`w_i, w_h, b_i, b_h, w_o, b_o`) over the widened input and output described on
-//!   [`TwoLayerShape::bottom_inputs`] and [`TwoLayerShape::bottom_outputs`]. For a plain
-//!   shape (a one-item menu, no subjects, no discrete heads) this is **exactly** today's
-//!   vector, value for value.
+//!   [`TwoLayerShape::bottom_inputs`] and [`TwoLayerShape::bottom_outputs`], then the
+//!   **same-sample readout** `w_c` (`[O × C]`, `C` = [`TwoLayerShape::conditioning`]): the
+//!   action readout's weights over the intent and subject **settled at this sample**
+//!   (§11.3, amended 2026-10-12), `y = w_o h + b_o + w_c c`. For a plain shape (a one-item
+//!   menu, no subjects, no discrete heads) `C = 0` and this is **exactly** today's vector,
+//!   value for value.
 //! - **Top** (absent on a plain shape), in this order:
 //!
 //! | name | shape | what |
@@ -191,10 +194,17 @@ impl TwoLayerShape {
         usize::from(self.has_top())
     }
 
+    /// Width `C` of the conditioning block: `[intent one-hot | subject row + tag | time in
+    /// intent]`. The recurrent update reads it for the hold **before** a sample's decision;
+    /// the same-sample readout reads it for the hold **after** it. Zero without a top.
+    pub fn conditioning(&self) -> usize {
+        self.intent_block() + self.subject_block() + self.time_block()
+    }
+
     /// The bottom GRU's input: `[observation | held intent one-hot | subject row + tag |
     /// time in intent]`.
     pub fn bottom_inputs(&self) -> usize {
-        self.observation + self.intent_block() + self.subject_block() + self.time_block()
+        self.observation + self.conditioning()
     }
 
     /// Logits of the call head (silence first), zero without one.
@@ -311,6 +321,9 @@ pub enum Layer {
 pub struct TwoLayerLayout {
     /// The bottom GRU's tensor offsets, starting at 0.
     pub bottom: ShapeOffsets,
+    /// The same-sample readout `w_c` (`[O × C]`, row-major by output), right after the GRU
+    /// (empty without a top). Part of the bottom layer.
+    pub readout: Range<usize>,
     /// The top's tensors, when the shape has a top.
     pub top: Option<TopOffsets>,
     /// Total parameters.
@@ -321,15 +334,17 @@ impl TwoLayerLayout {
     pub fn new(shape: &TwoLayerShape) -> TwoLayerLayout {
         let bottom =
             shape_offsets_hidden(shape.bottom_inputs(), shape.bottom_outputs(), shape.hidden);
+        let readout = bottom.params..bottom.params + shape.bottom_outputs() * shape.conditioning();
         if !shape.has_top() {
             return TwoLayerLayout {
                 bottom,
+                readout: readout.clone(),
                 top: None,
-                params: bottom.params,
+                params: readout.end,
             };
         }
         let (t, u, m) = (shape.top_hidden, shape.top_inputs(), shape.intents());
-        let w1 = bottom.params;
+        let w1 = readout.end;
         let b1 = w1 + t * u;
         let w2 = b1 + t;
         let b2 = w2 + m * t;
@@ -360,6 +375,7 @@ impl TwoLayerLayout {
         };
         TwoLayerLayout {
             bottom,
+            readout,
             top: Some(top),
             params: end,
         }
@@ -368,8 +384,8 @@ impl TwoLayerLayout {
     /// The index range a layer occupies (empty for the top of a plain brain).
     pub fn range(&self, layer: Layer) -> Range<usize> {
         match layer {
-            Layer::Bottom => 0..self.bottom.params,
-            Layer::Top => self.bottom.params..self.params,
+            Layer::Bottom => 0..self.readout.end,
+            Layer::Top => self.readout.end..self.params,
         }
     }
 
@@ -402,6 +418,9 @@ impl TwoLayerLayout {
             ("bottom.w_o", Layer::Bottom, b.w_o..b.b_o),
             ("bottom.b_o", Layer::Bottom, b.b_o..b.params),
         ];
+        if !self.readout.is_empty() {
+            out.push(("bottom.readout", Layer::Bottom, self.readout.clone()));
+        }
         if let Some(t) = &self.top {
             for (name, r) in [
                 ("top.w1", t.w1..t.b1),
@@ -429,8 +448,9 @@ const TOP_INIT_KEYS: [u64; 5] = [16, 17, 18, 19, 20];
 
 /// A seeded starting vector for `shape`. The bottom is
 /// [`tensor::initial_center_runtime`] over the widened input and output, so a plain
-/// shape starts exactly where today's GRU does; the top's matrices are fan-in-scaled
-/// Gaussians on their own sub-streams, its biases zero.
+/// shape starts exactly where today's GRU does; the same-sample readout starts at zero (the
+/// settled hold adds nothing until a fit or a search gives it weight); the top's matrices
+/// are fan-in-scaled Gaussians on their own sub-streams, its biases zero.
 pub fn initial_center(shape: &TwoLayerShape, seed: u64) -> Vec<f64> {
     let layout = TwoLayerLayout::new(shape);
     let mut theta = tensor::initial_center_runtime(
