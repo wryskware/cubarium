@@ -11,6 +11,9 @@ use cubarium_gpu::{
 };
 fn main() -> Result<()> {
     let gpu = Gpu::open()?;
+    if std::env::args().any(|arg| arg == "--cache-warm") {
+        return cache_probe(&gpu);
+    }
     for (lit, plants) in [(false, false), (true, false), (true, true)] {
         let mut p = params();
         p.width = 8;
@@ -118,6 +121,80 @@ fn main() -> Result<()> {
     }
     Ok(())
 }
+fn cache_probe(gpu: &Gpu) -> Result<()> {
+    use cubarium_gpu::voxel::Pipelines;
+    // Eight simultaneous requests must publish exactly one compiled descriptor.
+    let before = gpu.pipeline_cache_stats();
+    std::thread::scope(|scope| {
+        let jobs: Vec<_> = (0..8)
+            .map(|_| {
+                scope.spawn(|| {
+                    cubarium_gpu::wgpu_backend::PresentPass::new(
+                        gpu,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                    )
+                })
+            })
+            .collect();
+        for job in jobs {
+            drop(job.join().expect("concurrent presenter builder panicked"));
+        }
+    });
+    let concurrent = gpu.pipeline_cache_stats();
+    ensure!(
+        concurrent.misses == before.misses + 1 && concurrent.hits >= before.hits + 7,
+        "same-key requests must compile once: {before:?} -> {concurrent:?}"
+    );
+    {
+        let other = Gpu::open()?;
+        let _ =
+            cubarium_gpu::wgpu_backend::PresentPass::new(&other, wgpu::TextureFormat::Rgba8Unorm);
+        ensure!(
+            other.pipeline_cache_stats().misses == 1 && gpu.pipeline_cache_stats() == concurrent,
+            "a new device must compile its own pipeline"
+        );
+    }
+    let mut p = params();
+    p.width = 8;
+    p.height = 4;
+    p.depth = 4;
+    p.raster_w = 32;
+    p.raster_h = 32;
+    p.base = 24;
+    p.lit = true;
+    let textures = VoxelTextures::empty(p.s, p.rise);
+    let mut still = VoxelRenderer::with_pipelines(gpu, p, &textures, Pipelines::Still)?;
+    let first = gpu.pipeline_cache_stats();
+    still.destroy(gpu);
+    let mut all = VoxelRenderer::with_pipelines(gpu, p, &textures, Pipelines::All)?;
+    let second = gpu.pipeline_cache_stats();
+    ensure!(
+        second.misses == first.misses + 6,
+        "All should add exactly the six missing walk variants: {first:?} -> {second:?}"
+    );
+    all.destroy(gpu);
+    let mut repeated = VoxelRenderer::with_pipelines(gpu, p, &textures, Pipelines::All)?;
+    let third = gpu.pipeline_cache_stats();
+    ensure!(
+        third.misses == second.misses && third.hits > second.hits,
+        "same-device warming must reuse all compiled descriptors: {second:?} -> {third:?}"
+    );
+    repeated.destroy(gpu);
+    // Target-format separation must not return a pipeline built for another format.
+    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8Unorm);
+    let before = gpu.pipeline_cache_stats();
+    let _ = cubarium_gpu::wgpu_backend::PresentPass::new(gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let after = gpu.pipeline_cache_stats();
+    ensure!(
+        after.misses == before.misses + 1,
+        "target formats must have distinct pipeline keys"
+    );
+    println!(
+        "PASS Still->All resident cache {first:?} -> {second:?} -> {third:?}; format separation {before:?} -> {after:?}"
+    );
+    Ok(())
+}
+
 fn params() -> VoxelParams {
     VoxelParams {
         s: 4,

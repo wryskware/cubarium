@@ -237,6 +237,37 @@ vec3 tap(vec2 uv) {
             .map_err(|e| anyhow::anyhow!("{}: {}", self.name(), e.emit_to_string(&source)))
     }
 
+    /// Parse immutable runtime override metadata once per shader, shared by all
+    /// devices. Pipeline constants vary per world; no branch is specialized here.
+    pub fn runtime_constants(self, specialization: Specialization) -> Result<Vec<(String, f64)>> {
+        type Metadata = std::result::Result<Vec<u16>, String>;
+        static METADATA: [std::sync::OnceLock<Metadata>; 19] =
+            [const { std::sync::OnceLock::new() }; 19];
+        let ids = METADATA[self as usize]
+            .get_or_init(|| {
+                naga::front::wgsl::parse_str(self.runtime_source())
+                    .map(|module| {
+                        module
+                            .overrides
+                            .iter()
+                            .filter_map(|(_, item)| item.id)
+                            .collect()
+                    })
+                    .map_err(|error| error.emit_to_string(self.runtime_source()))
+            })
+            .as_ref()
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        Ok(ids
+            .iter()
+            .map(|&id| {
+                (
+                    id.to_string(),
+                    f64::from(u8::from(specialization.0[usize::from(id)])),
+                )
+            })
+            .collect())
+    }
+
     /// One-time conversion: retain overrides and all branches in the emitted
     /// source. Native pipeline specialization happens only after this step.
     pub fn wgsl(self) -> Result<String> {

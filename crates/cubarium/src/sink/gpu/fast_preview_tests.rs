@@ -1,6 +1,6 @@
 //! The fast preview tier on a headless renderer: the sky plane's ease over a picture
 //! already drawn, and the pictures the fast and refined tiers end at. Each test returns
-//! early, saying so, where no Vulkan device opens.
+//! early, saying so, where no GPU device opens.
 
 use super::*;
 use crate::voxel::project::Projection;
@@ -53,7 +53,7 @@ fn open(c: &Config, o: OffscreenOptions) -> Option<VoxelGpuSink<Offscreen>> {
     match VoxelGpuSink::offscreen_with(&cfg, proj, None, o) {
         Ok(s) => Some(s),
         Err(e) => {
-            eprintln!("no Vulkan device: {e:#}");
+            eprintln!("no GPU device: {e:#}");
             None
         }
     }
@@ -61,12 +61,12 @@ fn open(c: &Config, o: OffscreenOptions) -> Option<VoxelGpuSink<Offscreen>> {
 
 /// Draw one frame and read it back, as the hosted presenter does.
 fn draw(sink: &mut VoxelGpuSink<Offscreen>) -> Vec<u8> {
-    let mut ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), 2).unwrap();
+    let mut ring = ReadbackRing::new(&sink.gpu, sink.renderer.raster_size(), 2).unwrap();
     let mut out = Vec::new();
     sink.renderer.set_view_x(0);
-    assert!(ring.submit(&mut sink.renderer, (), sink.frames).unwrap(), "a frame was submitted");
+    assert!(ring.submit_source(&sink.gpu, &mut sink.renderer, (), sink.frames).unwrap(), "a frame was submitted");
     sink.frames += 1;
-    ring.drain(&mut sink.renderer, |_, bytes| out.extend_from_slice(bytes)).unwrap();
+    ring.drain_source(&sink.gpu, &mut sink.renderer, |_, bytes| out.extend_from_slice(bytes)).unwrap();
     assert!(!out.is_empty(), "a frame was read back");
     out
 }

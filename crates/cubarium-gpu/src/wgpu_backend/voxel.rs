@@ -4,7 +4,7 @@ use super::{
     FrameSource, Gpu, PresentPass, TargetSlot,
     bloom::Bloom,
     geometry::{Figures, Plants},
-    shader::{Shader, Specialization, constants},
+    shader::{Shader, Specialization},
     sunvis::SunVisVolume,
 };
 use crate::voxel::*;
@@ -24,6 +24,15 @@ struct Staging {
     canopy: Vec<u8>,
     glow: Vec<u8>,
 }
+/// Walk variants to prepare. Still omits posing and emitting-plant walks;
+/// frames requesting those variants use the plain walk with the same depth mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Pipelines {
+    #[default]
+    All,
+    Still,
+}
+
 pub struct VoxelRenderer {
     closed: bool,
     timing: super::timing::Timing,
@@ -40,7 +49,9 @@ pub struct VoxelRenderer {
     figures: Figures,
     plants: Option<Plants>,
     world_layout: wgpu::BindGroupLayout,
-    walk: Vec<wgpu::RenderPipeline>,
+    pipelines: Pipelines,
+    sky_lift: f32,
+    walk: Vec<Option<wgpu::RenderPipeline>>,
     sky_pipeline: Option<wgpu::RenderPipeline>,
     weather_pipeline: Option<wgpu::RenderPipeline>,
     nearest: wgpu::Sampler,
@@ -85,6 +96,19 @@ pub struct VoxelRenderer {
     figures_dropped: u64,
 }
 impl VoxelRenderer {
+    /// Preview refinement: lift unbaked sky visibility toward fully open sky.
+    pub fn set_sky_lift(&mut self, lift: f32) {
+        let lift = lift.clamp(0.0, 1.0);
+        if lift != self.sky_lift {
+            self.sky_lift = lift;
+            self.raster_current = false;
+            self.version += 1;
+        }
+    }
+    pub fn sky_lift(&self) -> f32 {
+        self.sky_lift
+    }
+
     pub fn set_params(&mut self, params: VoxelParams) -> Result<()> {
         let fixed = |p: &VoxelParams| {
             (
@@ -441,6 +465,27 @@ impl VoxelRenderer {
 }
 impl VoxelRenderer {
     pub fn new(gpu: &Gpu, params: VoxelParams, textures: &VoxelTextures) -> Result<Self> {
+        Self::with_pipelines(gpu, params, textures, Pipelines::All)
+    }
+
+    pub fn pipelines(&self) -> Pipelines {
+        self.pipelines
+    }
+
+    #[cfg(test)]
+    pub(crate) fn built_walk_variants(&self) -> [bool; 8] {
+        std::array::from_fn(|i| self.walk[i].is_some())
+    }
+
+    /// Pipeline compilation is CPU work and may run on the caller's warm worker.
+    /// Same-device descriptors are reused from the resident cache; each missing
+    /// walk variant compiles independently, behind the driver's first-load guard.
+    pub fn with_pipelines(
+        gpu: &Gpu,
+        params: VoxelParams,
+        textures: &VoxelTextures,
+        pipelines: Pipelines,
+    ) -> Result<Self> {
         params.validate()?;
         ensure!(
             gpu.device.limits().max_sampled_textures_per_shader_stage >= 21,
@@ -628,12 +673,10 @@ impl VoxelRenderer {
                 count: None,
             });
         }
-        let world_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("world ABI"),
-                entries: &entries,
-            });
+        let world_layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("world ABI"),
+            entries: &entries,
+        });
         let nearest = gpu
             .device
             .create_sampler(&wgpu::SamplerDescriptor::default());
@@ -684,13 +727,11 @@ impl VoxelRenderer {
             }
             None => None,
         };
-        let layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("world passes"),
-                bind_group_layouts: &[Some(&world_layout)],
-                immediate_size: 0,
-            });
+        let layout = gpu.cached_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("world passes"),
+            bind_group_layouts: &[Some(&world_layout)],
+            immediate_size: 0,
+        });
         let targets = if p.lit {
             vec![
                 Some(raster_format),
@@ -704,53 +745,81 @@ impl VoxelRenderer {
                 Some(wgpu::TextureFormat::R32Float),
             ]
         };
-        let mut walk = vec![];
-        for plant_light in [false, true] {
-            for weather in [false, true] {
-                for pose in [false, true] {
+        let (walk, sky_pipeline, weather_pipeline) = std::thread::scope(|scope| -> Result<_> {
+            let all = pipelines == Pipelines::All;
+            let jobs: Vec<_> = (0..8)
+                .map(|index| {
+                    let weather = index & 2 != 0;
+                    let pose = index & 1 != 0;
+                    let plant_light = index & 4 != 0;
+                    let wanted = (!weather || p.lit) && (all || (!pose && !plant_light));
                     let mut flags = spec;
                     flags.0[8] = weather;
                     flags.0[9] = pose;
                     flags.0[11] = plant_light;
-                    walk.push(fullscreen(
+                    let layout = &layout;
+                    let targets = &targets;
+                    wanted.then(|| {
+                        scope.spawn(move || {
+                            fullscreen(gpu, layout, Shader::Voxel, flags, targets, false)
+                        })
+                    })
+                })
+                .collect();
+            let sky = p.lit.then(|| {
+                scope.spawn(|| {
+                    let mut flags = spec;
+                    flags.0[6] = true;
+                    fullscreen(
                         gpu,
                         &layout,
                         Shader::Voxel,
                         flags,
-                        &targets,
+                        &[Some(wgpu::TextureFormat::Rgba16Float)],
                         false,
-                    )?);
-                }
+                    )
+                })
+            });
+            let weather = p.lit.then(|| {
+                scope.spawn(|| {
+                    let mut flags = spec;
+                    flags.0[7] = true;
+                    fullscreen(
+                        gpu,
+                        &layout,
+                        Shader::Weather,
+                        flags,
+                        &[Some(raster_format)],
+                        true,
+                    )
+                })
+            });
+            let mut walk = Vec::with_capacity(8);
+            for job in jobs {
+                walk.push(match job {
+                    Some(job) => Some(
+                        job.join()
+                            .map_err(|_| anyhow::anyhow!("walk pipeline builder panicked"))??,
+                    ),
+                    None => None,
+                });
             }
-        }
-        let sky_pipeline = if p.lit {
-            let mut flags = spec;
-            flags.0[6] = true;
-            Some(fullscreen(
-                gpu,
-                &layout,
-                Shader::Voxel,
-                flags,
-                &[Some(wgpu::TextureFormat::Rgba16Float)],
-                false,
-            )?)
-        } else {
-            None
-        };
-        let weather_pipeline = if p.lit {
-            let mut flags = spec;
-            flags.0[7] = true;
-            Some(fullscreen(
-                gpu,
-                &layout,
-                Shader::Weather,
-                flags,
-                &[Some(raster_format)],
-                true,
-            )?)
-        } else {
-            None
-        };
+            let sky = match sky {
+                Some(job) => Some(
+                    job.join()
+                        .map_err(|_| anyhow::anyhow!("sky pipeline builder panicked"))??,
+                ),
+                None => None,
+            };
+            let weather = match weather {
+                Some(job) => Some(
+                    job.join()
+                        .map_err(|_| anyhow::anyhow!("weather pipeline builder panicked"))??,
+                ),
+                None => None,
+            };
+            Ok((walk, sky, weather))
+        })?;
         let staging = (0..STAGING_RING)
             .map(|_| Staging {
                 voxels: vec![VoxelTexel::default(); p.voxel_count()],
@@ -778,6 +847,8 @@ impl VoxelRenderer {
             figures,
             plants,
             world_layout,
+            pipelines,
+            sky_lift: 0.0,
             walk,
             sky_pipeline,
             weather_pipeline,
@@ -906,25 +977,20 @@ fn fullscreen(
     formats: &[Option<wgpu::TextureFormat>],
     blend: bool,
 ) -> Result<wgpu::RenderPipeline> {
-    let vertex = gpu
-        .device
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("fullscreen"),
-            source: wgpu::ShaderSource::Wgsl(Shader::Fullscreen.runtime_source().into()),
-        });
+    let vertex = gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("fullscreen"),
+        source: wgpu::ShaderSource::Wgsl(Shader::Fullscreen.runtime_source().into()),
+    });
     let source = shader.runtime_source();
-    let module = naga::front::wgsl::parse_str(source)?;
-    let owned_constants = constants(&module, spec);
+    let owned_constants = shader.runtime_constants(spec)?;
     let constants: Vec<_> = owned_constants
         .iter()
         .map(|(k, v)| (k.as_str(), *v))
         .collect();
-    let fragment = gpu
-        .device
-        .create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some(shader.name()),
-            source: wgpu::ShaderSource::Wgsl(source.into()),
-        });
+    let fragment = gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some(shader.name()),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
     let targets: Vec<_> = formats
         .iter()
         .map(|&format| {
@@ -935,32 +1001,30 @@ fn fullscreen(
             })
         })
         .collect();
-    Ok(gpu
-        .device
-        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(shader.name()),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module: &vertex,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                buffers: &[],
+    Ok(gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(shader.name()),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &vertex,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &fragment,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
             },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &constants,
-                    ..Default::default()
-                },
-                targets: &targets,
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        }))
+            targets: &targets,
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    }))
 }
 
 impl VoxelRenderer {
@@ -1046,6 +1110,7 @@ impl VoxelRenderer {
             block.hi_cells = cells;
         }
         block.fog_k[1] = self.fog_floor;
+        block.clock[3] = self.sky_lift;
         // The emitter table into this frame's own region (GLOW-EASE).
         let cap = emit_table(&self.emit_cells, &mut self.emit_scratch);
         if cap > 0 {}
@@ -1324,7 +1389,11 @@ impl VoxelRenderer {
             let mut attachments = vec![colour(&self.raster.view, true)];
             attachments.push(emission.and_then(|v| colour(v, true)));
             attachments.push(colour(&self.figures.walk_depth.view, true));
-            draw_fullscreen(encoder, &self.walk[index], &walk_world, &attachments);
+            let walk = self.walk[index]
+                .as_ref()
+                .or_else(|| self.walk[index & 2].as_ref())
+                .expect("plain walk exists for this depth mode");
+            draw_fullscreen(encoder, walk, &walk_world, &attachments);
             if let Some(t) = &timing {
                 t.stamp(encoder, 4);
             }

@@ -12,11 +12,11 @@
     "--tree",
     "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
     "--fixture",
-    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity-main/fixture",
     "--out",
-    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/ash",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity-main/ash",
     "--source",
-    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/ash/ring-scale1.png"
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity-main/ash/ring-scale1.png"
   ],
   "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
   "threads": 2,
@@ -26,10 +26,11 @@
   "local_only": true,
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "f6d55be5",
-    "name": "parity-window_fit",
+    "commit": "b1867d30e658f09b17ac938b304159cefcc6b931",
+    "name": "ash-main-window_fit",
     "package": "cubarium-gpu",
-    "example": "window_fit"
+    "example": "window_fit",
+    "pinned": true
   },
   "priority": 1
 }

@@ -1,17 +1,16 @@
 //! `pipeline_probe`: what holds a compiled shader pipeline. Opens a headless renderer for a
-//! world of `--size` once per step, each on a Vulkan device of its own (as every preview card
-//! and live world does), and prints how long each open took. A timing, not a check; no window.
+//! world of `--size` once per step, sharing the app's headless GPU and resident pipelines, and prints how long each open took. A timing, not a check; no window.
 //!
 //! ```text
 //! cargo run --release -p cubarium --example pipeline_probe -- \
 //!     [--config config/desktop/terrarium.toml] [--size 288,138,48] [--screen 576x324] \
-//!     [--steps still,still,all] [--together N] [--cache DIR]
+//!     [--steps still,still,all] [--together N]
 //! ```
 //!
 //! A step is `still` or `all` ([`Pipelines`]); `--together N` opens N renderers of the first
-//! step's kind at once instead (each on its own device and thread). `--cache DIR` keeps the
-//! app's own pipeline cache there (`cubarium_gpu::pipeline_cache`). Point the NVIDIA driver at
-//! an empty `__GL_SHADER_DISK_CACHE_PATH` for a cold driver cache.
+//! step's kind at once instead (each on its own thread, sharing the device).
+//! Resident pipeline reuse lasts for this process. Point the NVIDIA driver at an
+//! empty `__GL_SHADER_DISK_CACHE_PATH` for a cold driver cache.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -43,7 +42,6 @@ fn main() -> Result<()> {
             }
             "--steps" => steps = v()?,
             "--together" => together = v()?.parse()?,
-            "--cache" => cubarium_gpu::pipeline_cache::set_dir(Some(PathBuf::from(v()?))),
             _ => bail!("unexpected argument {k}"),
         }
     }
@@ -83,13 +81,16 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Open a renderer on a new device, then drop it: milliseconds.
+/// Open a renderer on the shared device, then drop it: milliseconds.
 fn open(cfg: &VoxelConfig, proj: Projection, kind: Pipelines) -> Result<f64> {
     let started = Instant::now();
     let models = load_models(cfg);
     let o = OffscreenOptions { pipelines: kind, sky: SkyBake::Never, sky_fade_s: 0.0 };
     let sink: VoxelGpuSink<Offscreen> = VoxelGpuSink::offscreen_with(cfg, proj, models, o)?;
     let ms = started.elapsed().as_secs_f64() * 1e3;
+    let cache = sink.gpu.pipeline_cache_stats();
+    println!("PROBE resident pipelines={} shader_modules={} layouts={} hits={} misses={}",
+        cache.pipelines, cache.shader_modules, cache.layouts, cache.hits, cache.misses);
     drop(sink);
     Ok(ms)
 }

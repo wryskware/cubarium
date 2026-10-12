@@ -1,11 +1,9 @@
 //! **Shader pipelines compiled ahead of need**, on a thread of their own, from when the app asks
 //! ([`super::hosted::Hosted::warm_pipelines`]; the Godot app does as its first renderer starts).
 //!
-//! A driver meeting this build's shaders compiles every pipeline from scratch, seconds each.
-//! Compiles are held per Vulkan device, and every preview card and live world opens a device
-//! of its own, so a compile reaches the next device only through a cache (the driver's disk
-//! cache, and the app's own, `cubarium_gpu::pipeline_cache`). Two devices compiling the same
-//! pipelines at once each pay in full.
+//! Hosted renderers and this warm-up share one GPU in the app process. Compiled
+//! pipelines stay resident on that device, so previews and live worlds reuse
+//! them safely. A new process warms its pipelines again.
 //!
 //! So [`start`] compiles once, in the background: first the pipelines a still terrain draws
 //! with ([`Pipelines::Still`], every new-world preview), then the rest ([`Pipelines::All`],
@@ -21,7 +19,7 @@
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -65,6 +63,19 @@ static WARM: Warm = Warm {
     moved: Condvar::new(),
 };
 
+/// The app's headless/hosted device. Window surfaces select their own device.
+static GPU: Mutex<Option<Arc<Gpu>>> = Mutex::new(None);
+
+pub(crate) fn shared_gpu() -> Result<Arc<Gpu>> {
+    let mut stored = GPU.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(gpu) = stored.as_ref() {
+        return Ok(gpu.clone());
+    }
+    let gpu = Arc::new(Gpu::open().context("opening the shared GPU device")?);
+    *stored = Some(gpu.clone());
+    Ok(gpu)
+}
+
 /// The warm-up's thread, for [`stop`].
 static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 /// [`stop`] was called: no further phase starts.
@@ -79,6 +90,7 @@ pub fn stop() {
     if let Some(t) = thread {
         let _ = t.join();
     }
+    GPU.lock().unwrap_or_else(|e| e.into_inner()).take();
 }
 
 /// The key a config's warm-up goes by.
@@ -94,6 +106,8 @@ fn timing(what: std::fmt::Arguments<'_>) {
 /// already started in this process (a second config's renderers compile for themselves).
 /// `screen` sizes the projection as a hosted renderer's would be. Returns at once.
 pub fn start(key: String, cfg: &VoxelConfig, screen: (u32, u32)) -> bool {
+    // Serialize publication with stop, which must join even a just-started compile.
+    let mut thread = THREAD.lock().unwrap_or_else(|e| e.into_inner());
     {
         let mut s = WARM.state.lock().unwrap_or_else(|e| e.into_inner());
         if s.key.is_some() || STOPPING.load(Ordering::SeqCst) {
@@ -135,7 +149,7 @@ pub fn start(key: String, cfg: &VoxelConfig, screen: (u32, u32)) -> bool {
         // Whatever happened, nobody waits on it any more.
         finish(Pipelines::All);
     });
-    let spawned = spawned.map(|t| *THREAD.lock().unwrap_or_else(|e| e.into_inner()) = Some(t));
+    let spawned = spawned.map(|t| *thread = Some(t));
     if let Err(e) = spawned {
         eprintln!("cubarium: no pipeline warm-up thread: {e}");
         let mut s = WARM.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -184,7 +198,7 @@ pub fn wait(key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration 
 /// for a small world with `cfg` and destroying it, calling `done` after each. One device for
 /// all of them: opening a device stalls the app's own frame for about as long as it takes
 /// (~60 ms on the desktop's NVIDIA driver, 2026-10-11), so the warm-up opens one. Each
-/// renderer merges what it compiled into the process's pipeline cache (and its file).
+/// renderer leaves its compiled pipelines resident on the shared device.
 fn compile(cfg: &VoxelConfig, screen: (u32, u32), kinds: &[Pipelines], mut done: impl FnMut(Pipelines, Result<()>)) -> Result<()> {
     let mut cfg = cfg.clone();
     // The real world's pixels per voxel, so the small world's raster is small too.
@@ -197,7 +211,7 @@ fn compile(cfg: &VoxelConfig, screen: (u32, u32), kinds: &[Pipelines], mut done:
     cfg.sim.world.depth = d;
     let proj = Projection::new(cfg.tilt_degrees, cfg.px_per_voxel, cfg.raster_height, &cfg.sim.world)?;
     let params = params_of(&cfg, proj, true);
-    let gpu = Gpu::open(&[]).context("opening the Vulkan device for the pipeline warm-up")?;
+    let gpu = shared_gpu()?;
     let textures = load_textures(&cfg, None, &params);
     for &kind in kinds {
         if STOPPING.load(Ordering::SeqCst) {

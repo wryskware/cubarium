@@ -1,0 +1,22 @@
+{
+  "kind": "command",
+  "name": "wgpu-resident-cache-warm",
+  "argv": [
+    "{bin}",
+    "--cache-warm"
+  ],
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "7a4b53c0f6b503f44eeb37385818512ae24f27c7",
+    "name": "wgpu_voxel_probe",
+    "package": "cubarium-gpu",
+    "example": "wgpu_voxel_probe",
+    "pinned": true
+  },
+  "threads": 1,
+  "priority": 1,
+  "est_h": 0.01,
+  "mem_gb": 4,
+  "timeout_h": 0.2,
+  "local_only": true
+}

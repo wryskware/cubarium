@@ -316,7 +316,7 @@ impl VoxelGpuSink<Offscreen> {
             pipelines: o.pipelines,
             ..Default::default()
         };
-        let mut sink = Self::build(cfg, proj, options, None, |_, _| Ok(Offscreen))?;
+        let mut sink = Self::build(cfg, proj, options, Some(warm::shared_gpu()?), |_, _| Ok(Offscreen))?;
         if let Some(l) = sink.packer.light.as_mut() {
             match o.sky {
                 SkyBake::Now => {}

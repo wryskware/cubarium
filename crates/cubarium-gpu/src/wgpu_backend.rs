@@ -80,6 +80,7 @@ pub struct Gpu {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub name: String,
+    pub(crate) resident: crate::pipeline_cache::Resident,
 }
 
 static PREFERRED_DEVICE: Mutex<Option<String>> = Mutex::new(None);
@@ -202,7 +203,36 @@ impl Gpu {
             device,
             queue,
             name,
+            resident: Default::default(),
         })
+    }
+
+    pub fn pipeline_cache_stats(&self) -> crate::pipeline_cache::Stats {
+        self.resident.stats()
+    }
+    pub(crate) fn cached_shader_module(
+        &self,
+        d: wgpu::ShaderModuleDescriptor<'_>,
+    ) -> wgpu::ShaderModule {
+        self.resident.shader(&self.device, d)
+    }
+    pub(crate) fn cached_bind_group_layout(
+        &self,
+        d: &wgpu::BindGroupLayoutDescriptor<'_>,
+    ) -> wgpu::BindGroupLayout {
+        self.resident.group(&self.device, d)
+    }
+    pub(crate) fn cached_pipeline_layout(
+        &self,
+        d: &wgpu::PipelineLayoutDescriptor<'_>,
+    ) -> wgpu::PipelineLayout {
+        self.resident.layout(&self.device, d)
+    }
+    pub(crate) fn cached_render_pipeline(
+        &self,
+        d: &wgpu::RenderPipelineDescriptor<'_>,
+    ) -> wgpu::RenderPipeline {
+        self.resident.pipeline(&self.device, d)
     }
 
     pub fn encoder(&self, label: &str) -> wgpu::CommandEncoder {
@@ -311,70 +341,62 @@ impl PresentPass {
     }
 
     pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
-        let shader = gpu
-            .device
-            .create_shader_module(wgpu::include_wgsl!("../shaders/present.wgsl"));
-        let layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("present resources"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let shader = gpu.cached_shader_module(wgpu::include_wgsl!("../shaders/present.wgsl"));
+        let layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("present resources"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: wgpu::BufferSize::new(32),
-                        },
-                        count: None,
-                    },
-                ],
-            });
-        let pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("present"),
-                bind_group_layouts: &[Some(&layout)],
-                immediate_size: 0,
-            });
-        let pipeline = gpu
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("present"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
+                    count: None,
                 },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            });
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: wgpu::BufferSize::new(32),
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = gpu.cached_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("present"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+        let pipeline = gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("present"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         Self { pipeline, layout }
     }
 

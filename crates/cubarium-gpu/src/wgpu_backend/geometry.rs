@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 use super::{
     Gpu,
-    shader::{self, Shader, Specialization},
+    shader::{Shader, Specialization},
 };
 use crate::{
     figures::{self, FigureAtlasStats, FigureFrame, FigureVoxel, Packed},
@@ -79,11 +79,10 @@ fn image_layout(gpu: &Gpu, types: &[wgpu::TextureSampleType]) -> wgpu::BindGroup
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
         count: None,
     });
-    gpu.device
-        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("geometry images"),
-            entries: &entries,
-        })
+    gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("geometry images"),
+        entries: &entries,
+    })
 }
 fn image_group(
     gpu: &Gpu,
@@ -165,72 +164,62 @@ fn pipeline(
     depth: Option<wgpu::CompareFunction>,
     strip: bool,
 ) -> Result<wgpu::RenderPipeline> {
-    let layout = gpu
-        .device
-        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(fragment.name()),
-            bind_group_layouts: &layouts.iter().map(|l| Some(*l)).collect::<Vec<_>>(),
-            immediate_size,
-        });
+    let layout = gpu.cached_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some(fragment.name()),
+        bind_group_layouts: &layouts.iter().map(|l| Some(*l)).collect::<Vec<_>>(),
+        immediate_size,
+    });
     let module = |s: Shader| {
-        gpu.device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(s.name()),
-                source: wgpu::ShaderSource::Wgsl(s.runtime_source().into()),
-            })
+        gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(s.name()),
+            source: wgpu::ShaderSource::Wgsl(s.runtime_source().into()),
+        })
     };
     let (vs, fs) = (module(vertex), module(fragment));
-    let constants = |s: Shader| -> Result<Vec<(String, f64)>> {
-        Ok(shader::constants(
-            &naga::front::wgsl::parse_str(s.runtime_source())?,
-            spec,
-        ))
-    };
+    let constants = |s: Shader| -> Result<Vec<(String, f64)>> { s.runtime_constants(spec) };
     let (vc_owned, fc_owned) = (constants(vertex)?, constants(fragment)?);
     let vc: Vec<_> = vc_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     let fc: Vec<_> = fc_owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
-    Ok(gpu
-        .device
-        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(fragment.name()),
-            layout: Some(&layout),
-            vertex: wgpu::VertexState {
-                module: &vs,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &vc,
-                    ..Default::default()
-                },
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: if strip {
-                    wgpu::PrimitiveTopology::TriangleStrip
-                } else {
-                    wgpu::PrimitiveTopology::TriangleList
-                },
+    Ok(gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(fragment.name()),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &vs,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &vc,
                 ..Default::default()
             },
-            depth_stencil: depth.map(|depth_compare| wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(depth_compare),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &fs,
-                entry_point: Some("main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &fc,
-                    ..Default::default()
-                },
-                targets,
-            }),
-            multiview_mask: None,
-            cache: None,
-        }))
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: if strip {
+                wgpu::PrimitiveTopology::TriangleStrip
+            } else {
+                wgpu::PrimitiveTopology::TriangleList
+            },
+            ..Default::default()
+        },
+        depth_stencil: depth.map(|depth_compare| wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(depth_compare),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &fs,
+            entry_point: Some("main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &fc,
+                ..Default::default()
+            },
+            targets,
+        }),
+        multiview_mask: None,
+        cache: None,
+    }))
 }
 fn attachment(
     view: &wgpu::TextureView,
@@ -317,12 +306,10 @@ impl Figures {
         weather: bool,
         spec: Specialization,
     ) -> Result<Self> {
-        let data_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("figure data"),
-                entries: &(0..5).map(storage).collect::<Vec<_>>(),
-            });
+        let data_layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("figure data"),
+            entries: &(0..5).map(storage).collect::<Vec<_>>(),
+        });
         let image_layout = image_layout(
             gpu,
             &[wgpu::TextureSampleType::Float { filterable: false }; 4],
@@ -699,12 +686,10 @@ impl Plants {
                 wgpu::TextureFormat::Rgba16Float,
             )
         });
-        let data_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("plant data"),
-                entries: &[storage(0), storage(1)],
-            });
+        let data_layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("plant data"),
+            entries: &[storage(0), storage(1)],
+        });
         let image_layout = image_layout(
             gpu,
             &[

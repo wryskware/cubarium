@@ -2369,7 +2369,7 @@ fn skyOpen(x_50: i32, y_44: i32, z_50: i32) -> f32 {
     let _e197: i32 = y_45;
     let _e198: i32 = z_51;
     let _e201: vec4<u32> = textureLoad(wgpu_skyTex, vec3<i32>(_e196, _e197, _e198), 0i);
-    return (f32(_e201.x) / 255f);
+    return mix((f32(_e201.x) / 255f), 1f, u.clock.w);
 }
 
 fn canopyAt(x_52: i32, z_52: i32, yv: i32) -> f32 {

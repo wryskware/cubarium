@@ -94,45 +94,43 @@ impl Bloom {
             }
         }
         let linear = p.bloom_style == BloomStyle::Smooth;
-        let layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("bloom inputs"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: linear },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+        let layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("bloom inputs"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: linear },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 32,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 33,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-            });
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 32,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 33,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
         let nearest = gpu
             .device
             .create_sampler(&wgpu::SamplerDescriptor::default());
@@ -179,57 +177,50 @@ impl Bloom {
                 }
             })
             .collect();
-        let pl = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("bloom"),
-                bind_group_layouts: &[Some(&layout)],
-                immediate_size: 48,
-            });
-        let vertex = gpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("fullscreen"),
-                source: wgpu::ShaderSource::Wgsl(Shader::Fullscreen.runtime_source().into()),
-            });
+        let pl = gpu.cached_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("bloom"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 48,
+        });
+        let vertex = gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("fullscreen"),
+            source: wgpu::ShaderSource::Wgsl(Shader::Fullscreen.runtime_source().into()),
+        });
         let shader = if linear {
             Shader::BloomSmooth
         } else {
             Shader::Bloom
         };
-        let fragment = gpu
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(shader.name()),
-                source: wgpu::ShaderSource::Wgsl(shader.runtime_source().into()),
-            });
+        let fragment = gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(shader.name()),
+            source: wgpu::ShaderSource::Wgsl(shader.runtime_source().into()),
+        });
         let pipeline = |format, blend| {
-            gpu.device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("bloom"),
-                    layout: Some(&pl),
-                    vertex: wgpu::VertexState {
-                        module: &vertex,
-                        entry_point: Some("main"),
-                        compilation_options: Default::default(),
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &fragment,
-                        entry_point: Some("main"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format,
-                            blend,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: Default::default(),
-                    depth_stencil: None,
-                    multisample: Default::default(),
-                    multiview_mask: None,
-                    cache: None,
-                })
+            gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("bloom"),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState {
+                    module: &vertex,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &fragment,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
         };
         let cell = pipeline(wgpu::TextureFormat::Rgba16Float, None);
         let add = pipeline(

@@ -1,0 +1,23 @@
+{
+  "kind": "cargo-test",
+  "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "commit": "ROOT_FILL_PINNED_COMMIT",
+  "profile": "debug",
+  "threads": 4,
+  "mem_gb": 8,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "priority": 1,
+  "pinned": true,
+  "name": "wgpu-fast-preview-tests",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "cubarium",
+    "--lib",
+    "fast_preview_tests",
+    "--",
+    "--test-threads=1"
+  ]
+}

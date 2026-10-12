@@ -1,0 +1,35 @@
+{
+  "kind": "command",
+  "name": "wgpu-hosted-preview-probe",
+  "argv": [
+    "{bin}",
+    "--config",
+    "runs/wgpu-parity/fixture/smoke.toml",
+    "--size",
+    "64,32,16",
+    "--screen",
+    "128x64",
+    "--count",
+    "1",
+    "--batches",
+    "1",
+    "--seed",
+    "5",
+    "--fast"
+  ],
+  "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "threads": 2,
+  "mem_gb": 8,
+  "timeout_h": 0.25,
+  "est_h": 0.03,
+  "priority": 1,
+  "local_only": true,
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "ROOT_FILL_PINNED_COMMIT",
+    "name": "preview_probe",
+    "package": "cubarium",
+    "example": "preview_probe",
+    "pinned": true
+  }
+}

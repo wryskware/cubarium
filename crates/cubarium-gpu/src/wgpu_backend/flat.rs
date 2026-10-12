@@ -134,19 +134,15 @@ impl Renderer {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             count: None,
         });
-        let bind_layout = gpu
-            .device
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("scene ABI"),
-                entries: &entries,
-            });
-        let pipeline_layout = gpu
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("scene"),
-                bind_group_layouts: &[Some(&bind_layout)],
-                immediate_size: 0,
-            });
+        let bind_layout = gpu.cached_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene ABI"),
+            entries: &entries,
+        });
+        let pipeline_layout = gpu.cached_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene"),
+            bind_group_layouts: &[Some(&bind_layout)],
+            immediate_size: 0,
+        });
         let background = pipeline(
             gpu,
             &pipeline_layout,
@@ -560,46 +556,44 @@ fn pipeline(
     buffers: &[Option<wgpu::VertexBufferLayout<'_>>],
 ) -> wgpu::RenderPipeline {
     let module = |shader: Shader| {
-        gpu.device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some(shader.name()),
-                source: wgpu::ShaderSource::Wgsl(shader.runtime_source().into()),
-            })
+        gpu.cached_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(shader.name()),
+            source: wgpu::ShaderSource::Wgsl(shader.runtime_source().into()),
+        })
     };
     let (vs, fs) = (module(vertex), module(fragment));
-    gpu.device
-        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(fragment.name()),
-            layout: Some(layout),
-            vertex: wgpu::VertexState {
-                module: &vs,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                buffers,
+    gpu.cached_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(fragment.name()),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: &vs,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: if buffers.is_empty() {
+                wgpu::PrimitiveTopology::TriangleList
+            } else {
+                wgpu::PrimitiveTopology::TriangleStrip
             },
-            primitive: wgpu::PrimitiveState {
-                topology: if buffers.is_empty() {
-                    wgpu::PrimitiveTopology::TriangleList
-                } else {
-                    wgpu::PrimitiveTopology::TriangleStrip
-                },
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &fs,
-                entry_point: Some("main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: RASTER_FORMAT,
-                    blend: blend.then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        })
+            ..Default::default()
+        },
+        depth_stencil: None,
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: &fs,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: RASTER_FORMAT,
+                blend: blend.then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 impl Renderer {

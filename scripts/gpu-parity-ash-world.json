@@ -12,9 +12,9 @@
     "--tree",
     "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
     "--fixture",
-    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity-main/fixture",
     "--out",
-    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/ash"
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity-main/ash"
   ],
   "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
   "threads": 2,
@@ -24,10 +24,11 @@
   "local_only": true,
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "f6d55be5",
-    "name": "parity-light_capture",
+    "commit": "b1867d30e658f09b17ac938b304159cefcc6b931",
+    "name": "ash-main-light_capture",
     "package": "cubarium",
-    "example": "light_capture"
+    "example": "light_capture",
+    "pinned": true
   },
   "priority": 1
 }

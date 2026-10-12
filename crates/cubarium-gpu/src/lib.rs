@@ -13,6 +13,7 @@ pub mod figures;
 mod figures_order_tests;
 pub mod palette;
 pub mod plants;
+pub mod pipeline_cache;
 pub mod present;
 pub mod render;
 pub mod scene;

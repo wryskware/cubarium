@@ -46,12 +46,7 @@ impl WorldRenderer {
             fps,
             highlight_mix: HIGHLIGHT_MIX,
         };
-        // Compiled pipelines are kept under the app's user data (`CUBARIUM_PIPELINE_CACHE`
-        // overrides), so the next launch finds them whatever the driver's cache evicted.
-        let user = godot::classes::Os::singleton().get_user_data_dir().to_string();
-        if !user.is_empty() && cubarium_gpu::pipeline_cache::dir().is_none() {
-            cubarium_gpu::pipeline_cache::use_dir(Some(PathBuf::from(user).join("pipeline-cache")));
-        }
+        // Hosted renderers share the warm-up's device and resident pipelines.
         match Hosted::new(options) {
             Ok(h) => {
                 // The first renderer the app starts compiles every pipeline in the background.

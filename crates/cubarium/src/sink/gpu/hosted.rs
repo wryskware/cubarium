@@ -48,6 +48,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use cubarium_gpu::target::readback::ReadbackRing;
+use cubarium_gpu::FrameSource;
 use cubarium_gpu::voxel::Highlight;
 use cubarium_session::{CandidateSource, HookClock, LoopHook, Prepared};
 use cubarium_voxel::World;
@@ -697,6 +698,14 @@ struct SinkState {
     gave_up: bool,
 }
 
+impl Drop for SinkState {
+    fn drop(&mut self) {
+        if let Err(error) = self.ring.drain_source(&self.sink.gpu, &mut self.sink.renderer, |_, _| {}) {
+            eprintln!("cubarium: hosted readback completion failed: {error:#}");
+        }
+    }
+}
+
 /// Names renderers in the `CUBARIUM_RENDER_TIMING` log across every host in the process.
 static TRACE_IDS: AtomicU64 = AtomicU64::new(0);
 
@@ -704,9 +713,8 @@ fn timing(what: std::fmt::Arguments<'_>) {
     super::super::pack_timer::render_timing(what);
 }
 
-// The state is genuinely `Send`: the loop's pack and the presenter's record take it in
-// turn under one `Mutex`, and nothing in it is tied to a thread (the GPU's mapped buffers
-// hold their pointers in `AtomicPtr`s, `cubarium_gpu::vk::HostBuffer`).
+// Safe wgpu resources are Send; the packer and presenter access them in turn
+// under the state mutex.
 
 struct Shared {
     options: HostedOptions,
@@ -790,7 +798,7 @@ impl Shared {
 
     /// Install a renderer for a world just staged into it. Returns its generation.
     fn install(&self, sink: VoxelGpuSink<Offscreen>, proj: Projection, ready: bool) -> Result<u64> {
-        let ring = ReadbackRing::new(sink.gpu.clone(), &sink.renderer, sink.renderer.raster_image(), RING)?;
+        let ring = ReadbackRing::new(&sink.gpu, sink.renderer.raster_size(), RING)?;
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
         self.baseline_s.store(proj.s, Ordering::SeqCst);
         let trace = TRACE_IDS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -916,7 +924,7 @@ impl Shared {
         {
             let flight = &mut st.flight;
             let (trace, traced) = (st.trace, &mut st.traced);
-            st.ring.poll(&mut st.sink.renderer, |tag, bytes| {
+            st.ring.poll_source(&gpu, &mut st.sink.renderer, |tag, bytes| {
                 let at = Instant::now();
                 let mut buf = self.spare.lock().ok().and_then(|mut s| s.pop()).unwrap_or_default();
                 buf.clear();
@@ -947,11 +955,11 @@ impl Shared {
         let (proj, target) = detail_projection(st.overview, factor, camera.map_or((1, 1), |c| c.screen))?;
         let p = st.sink.renderer.params();
         if due && st.ready && (factor != st.factor || u32::from(target.raster_w) != p.raster_w || u32::from(target.raster_h) != p.raster_h) {
-            // Retire readbacks before replacing their renderer's command pool.
-            st.ring.drain(&mut st.sink.renderer, |_, _| {})?;
+            // Retire readbacks before replacing their renderer resources.
+            st.ring.drain_source(&gpu, &mut st.sink.renderer, |_, _| {})?;
             st.flight.clear();
             let mut next = st.sink.projected_renderer(&self.cfg, target)?;
-            let ring = match ReadbackRing::new(gpu.clone(), &next, next.raster_image(), RING) {
+            let ring = match ReadbackRing::new(&gpu, next.raster_size(), RING) {
                 Ok(ring) => ring,
                 Err(e) => { next.destroy(&gpu); return Err(e.into()); }
             };
@@ -966,7 +974,7 @@ impl Shared {
                 *map = Some(Arc::new(new));
             }
         }
-        if due && st.ready && st.ring.can_submit(&st.sink.renderer) {
+        if due && st.ready && st.ring.can_submit_source(&st.sink.renderer) {
             let t = self.clock.lock().map(|mut c| c.now()).unwrap_or(0.0);
             let (view_x, highlight, motion) =
                 self.controls.lock().map(|c| (c.view_x, c.highlight, c.motion)).unwrap_or((0, None, None));
@@ -1014,7 +1022,7 @@ impl Shared {
                     sv.frame(st.sink.clock_s, st.sink.renderer.params().sun, &mut st.sink.renderer);
                 }
                 let tag = st.sink.frames;
-                if st.ring.submit(&mut st.sink.renderer, (), tag)? {
+                if st.ring.submit_source(&gpu, &mut st.sink.renderer, (), tag)? {
                     st.sink.frames += 1;
                     st.flight.push_back((tag, HostedFrame {
                         width: p.raster_w, height: p.raster_h,
@@ -1912,12 +1920,12 @@ mod tests {
     use super::super::super::light::{hold_plane_turns, preview_queues};
     use super::super::fast_preview_tests::sheltered;
 
-    /// A Vulkan device opens here; a test needing one says so and passes without it.
+    /// A GPU device opens here; a test needing one says so and passes without it.
     fn gpu_here() -> bool {
-        match cubarium_gpu::vk::Gpu::open(&[]) {
+        match cubarium_gpu::Gpu::open() {
             Ok(_) => true,
             Err(e) => {
-                eprintln!("skipped: no Vulkan device: {e:#}");
+                eprintln!("skipped: no GPU device: {e:#}");
                 false
             }
         }

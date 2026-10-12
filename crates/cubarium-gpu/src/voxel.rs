@@ -2086,7 +2086,7 @@ impl SlowPlanes {
 
 #[cfg(test)]
 use crate::wgpu_backend::Gpu;
-pub use crate::wgpu_backend::voxel::VoxelRenderer;
+pub use crate::wgpu_backend::voxel::{Pipelines, VoxelRenderer};
 // --- the shader's arithmetic, in Rust -------------------------------------------------
 
 /// Which voxel level and which row inside it a raster pixel falls on, in one slab.
@@ -2148,6 +2148,10 @@ pub(crate) fn weather_drawn(look: &crate::weather::Look, params: &VoxelParams) -
 #[cfg(test)]
 #[path = "fog_occlude_tests.rs"]
 mod fog_occlude_tests;
+
+#[cfg(test)]
+#[path = "still_pipelines_tests.rs"]
+mod still_pipelines_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
