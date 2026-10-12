@@ -2001,7 +2001,12 @@ fn print_header() {
     // SCORE-V3: configured floor (not dry/support area), projected wooded floor,
     // second-largest connected vaulttree grove, and direct leaf growth/offtake books.
     header.push_str(",floor_area_m2,voxel_m,forest_floor_faces,forest_patch_second_max");
-    header.push_str(",glowcap_lit_share,leaf_produced,leaf_eaten,seed");
+    header.push_str(",glowcap_lit_share,leaf_produced,leaf_eaten");
+    // BALANCE (2026-10-12), cumulative: the Veilhounds' tests begun, tests ending in a
+    // commitment and hunts given up (the standoffs), and kicks landed by the loftstriders and
+    // the kick-backs bites drew.
+    header.push_str(",hound_tests,hound_test_commits,hound_give_ups,kicks_landed_loftstrider,kick_backs");
+    header.push_str(",seed");
     println!("{header}");
 }
 
@@ -2324,6 +2329,14 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
             .map(|s| book[s.index()]).sum::<f64>();
         row.push(format!("{:.6}", leaves(&f.ledger.foliage_built)));
         row.push(format!("{:.6}", leaves(&f.ledger.foliage_taken)));
+    }
+    {
+        let l = &sim.fauna().view().ledger;
+        row.push(l.hound_tests.to_string());
+        row.push(l.hound_test_commits.to_string());
+        row.push(l.hound_give_ups.to_string());
+        row.push(l.kicks_landed_by_founder[Founder::Loftstrider.index()].to_string());
+        row.push(l.kick_backs.to_string());
     }
     // Read the kept world's seed, including fallback and loaded-world starts.
     row.push(sim.world().config().seed.to_string());
