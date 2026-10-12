@@ -47,6 +47,8 @@ pub fn sources(flora: &FloraConfig, food: Food) -> Vec<&'static str> {
                 Food::Nectar => c.nectar_per_s > 0.0 && c.nectar_cap > 0.0,
                 Food::Fruit => c.fruit_per_s > 0.0 && c.fruit_cap > 0.0,
                 Food::Litter | Food::Carrion | Food::Film => false,
+                // LARVA: the bellwing's larvae live on crowned vaulttrees (and vines).
+                Food::Larva => s == cubarium_voxel_fauna::larva::STAND_HOST,
             }
         })
         .map(Species::name)
@@ -55,6 +57,7 @@ pub fn sources(flora: &FloraConfig, food: Food) -> Vec<&'static str> {
     let from_vine = match food {
         Food::Nectar => vine.nectar_per_face_s > 0.0,
         Food::Fruit => vine.fruit_per_face_s > 0.0,
+        Food::Larva => true,
         _ => false,
     };
     if from_vine {

@@ -192,7 +192,10 @@ use crate::{Fauna, FaunaConfig};
 //     `defence_samples`, `kicks_landed_by_founder` and `kick_backs` (a state layout change).
 //     `FounderPhysiology::defence` (`Defence`) and the loftstrider's kick table are named
 //     config, not bumps.
-pub const SCHEMA: u32 = 84;
+// 85: LARVA — `Fauna::larvae` (the larva field: hosts, cohorts), `FaunaLedger::larva` (its
+//     books) and `Food::Larva` (every per-food array gains an entry: a state layout change).
+//     `FounderPhysiology::{larva, larva_bite_half_stock, larva_sight_m}` are named config.
+pub const SCHEMA: u32 = 85;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

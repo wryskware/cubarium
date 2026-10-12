@@ -6130,7 +6130,7 @@ impl Flora {
     /// The stand is the site's **plant** ([`FaceLayer::Plant`]); a fungus's cap tissue is
     /// [`Flora::take_foliage_of`].
     pub fn take_foliage(&mut self, site: Site, want: f64) -> Option<Taken> {
-        self.withdraw_foliage(site, FaceLayer::Plant, want, None).map(|t| t.taken)
+        self.withdraw_foliage(site, FaceLayer::Plant, want, None, true).map(|t| t.taken)
     }
 
     /// A consumer eats the foliage the **layers whose disc cells lie in `layers`** hold,
@@ -6157,7 +6157,7 @@ impl Flora {
         want: f64,
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
-        self.withdraw_foliage(site, FaceLayer::Plant, want, Some(layers))
+        self.withdraw_foliage(site, FaceLayer::Plant, want, Some(layers), true)
     }
 
     /// [`Flora::take_foliage_in_layers`] off the stand holding `place` on `site`: a bite's
@@ -6170,7 +6170,16 @@ impl Flora {
         want: f64,
         layers: &std::ops::RangeInclusive<i64>,
     ) -> Option<TakenFoliage> {
-        self.withdraw_foliage(site, place, want, Some(layers))
+        self.withdraw_foliage(site, place, want, Some(layers), true)
+    }
+
+    /// **Leaf eaten by insects on the plant** (LARVA, `design/larva-nuts-plan-2026-10-12.md`
+    /// §3): [`Flora::take_foliage`]'s withdrawal off the site's plant, every layer, lowest
+    /// first, above each layer's grazing floor, booked the same way, but outside the
+    /// induced browse defence: larvae feeding every few seconds would otherwise hold it at
+    /// its ceiling, and the defence answers a browser's bites.
+    pub fn take_foliage_by_insects(&mut self, site: Site, want: f64) -> Option<TakenFoliage> {
+        self.withdraw_foliage(site, FaceLayer::Plant, want, None, false)
     }
 
     /// Take exposed living mycelium from the fungal place, with mineral pro rata.
@@ -6198,6 +6207,7 @@ impl Flora {
         place: FaceLayer,
         want: f64,
         layers: Option<&std::ops::RangeInclusive<i64>>,
+        defended: bool,
     ) -> Option<TakenFoliage> {
         if !(want > 0.0) || !want.is_finite() {
             return None;
@@ -6205,9 +6215,10 @@ impl Flora {
         let i = find_stand(&self.config, &self.stands, site, place).ok()?;
         let e_v = self.config.species(self.stands[i].species).energy_density;
         // The induced defence: the bite takes `(1 − defence)` of what was asked, and a
-        // bite that took anything raises the defence (below, once it is known).
-        let rise = self.config.species(self.stands[i].species).defence_per_bite;
-        let want = want * (1.0 - self.stands[i].defence.clamp(0.0, 1.0));
+        // bite that took anything raises the defence (below, once it is known). Insects on
+        // the plant (`defended` false) neither meet it nor raise it.
+        let rise = if defended { self.config.species(self.stands[i].species).defence_per_bite } else { 0.0 };
+        let want = if defended { want * (1.0 - self.stands[i].defence.clamp(0.0, 1.0)) } else { want };
         if !(want > 0.0) {
             return None;
         }

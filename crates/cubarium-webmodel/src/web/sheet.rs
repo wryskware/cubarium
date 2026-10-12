@@ -29,6 +29,7 @@ pub fn food_name(f: Food) -> &'static str {
         Food::Film => "film",
         Food::Nectar => "nectar",
         Food::Fruit => "fruit",
+        Food::Larva => "larva",
     }
 }
 

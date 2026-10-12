@@ -1190,7 +1190,8 @@ fn glider_feed(
     }
     let founder = fauna.animals[i].founder.expect("a founder body");
     let Some((source, stock)) = glider_fruit_in_reach(view, &flora.view(), &fauna.animals[i], phys) else {
-        return false;
+        // LARVA: no fruit at the mouth, so the larvae of a host it holds or touches.
+        return glider_larva_feed(fauna, i, view, flora, manifest, phys, effort);
     };
     // FORAGE-LEAVE: what this crown or vine offers the mouth; a crown is the stand the
     // fruit search would walk back to.
@@ -1264,6 +1265,82 @@ fn glider_feed(
     l.bites_by_founder[founder.index()] += 1;
     l.bites_by_founder_food[founder.index()][Food::Fruit.index()] += 1;
     swallow(fauna, i, Food::Fruit, rest);
+    true
+}
+
+/// **The larvae a glider's mouth reaches** (LARVA §4): a vaulttree host's when it is perched
+/// in that crown, or climbing its stem with its mouth up in the crown's band; else a vine
+/// host's on any leafy face of that vine within its mouth's reach (the fruit mouth's point
+/// and reach). Only larvae it would see ([`crate::larva::visible`]). `(the host, its hatched
+/// larvae's tissue)`.
+pub(crate) fn glider_larva_in_reach(
+    fauna: &Fauna,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    phys: &crate::FounderPhysiology,
+) -> Option<(crate::larva::LarvaHost, f64)> {
+    if !phys.eating_diet().eats(Food::Larva) || fauna.larvae.is_empty() {
+        return None;
+    }
+    let (p, reach) = fruit_mouth(a, phys);
+    if let (
+        MobilityMode::Perched | MobilityMode::Climb,
+        Some(Perch { anchor: PerchAnchor::Stand { site, .. }, .. }),
+    ) = (a.mobility.mode, a.mobility.perch)
+        && let Some(stand) = fv.stand_at(site)
+        && let Some((_, stock)) = crate::larva::visible(fauna, crate::larva::LarvaHost::Stand(stand.id))
+    {
+        let in_band = a.mobility.mode == MobilityMode::Perched
+            || crate::larva::crown_band(fv, stand).is_some_and(|(low, _)| p.1 + reach >= low);
+        if in_band {
+            return Some((crate::larva::LarvaHost::Stand(stand.id), stock));
+        }
+    }
+    let mut near = flight::vine_faces_within(view, fv, p, p, reach, |c| (c.leafiness > 0.0).then_some(0.0));
+    near.sort_by(|x, y| x.d.total_cmp(&y.d).then(x.face.cmp(&y.face)));
+    near.into_iter().find_map(|r| {
+        let host = crate::larva::LarvaHost::Vine(fv.cover.face(r.face)?.owner);
+        crate::larva::visible(fauna, host).map(|(_, stock)| (host, stock))
+    })
+}
+
+/// **A larva bite** (LARVA §4, the twin of [`glider_feed`]): the gut's bite of the larvae
+/// its mouth reaches ([`glider_larva_in_reach`]) at [`crate::FounderPhysiology::larva_bite_half_stock`],
+/// out of the field's oldest cohorts first ([`crate::larva::take_larvae`]), into the stomach's
+/// larva pool: insect flesh at its tissue mineral and energy. Only while the eating latch is on.
+fn glider_larva_feed(
+    fauna: &mut Fauna,
+    i: usize,
+    view: &VoxelView<'_>,
+    flora: &mut Flora,
+    manifest: &crate::Manifest,
+    phys: &crate::FounderPhysiology,
+    effort: f64,
+) -> bool {
+    if !fauna.animals[i].eating {
+        return false;
+    }
+    let founder = fauna.animals[i].founder.expect("a founder body");
+    let Some((host, stock)) = glider_larva_in_reach(fauna, view, &flora.view(), &fauna.animals[i], phys) else {
+        return false;
+    };
+    let key = match host {
+        crate::larva::LarvaHost::Stand(id) => Some(id),
+        crate::larva::LarvaHost::Vine(_) => None,
+    };
+    super::forage::note_bite(fauna, i, phys, Food::Larva, manifest.controller_period_s, effort, stock, key);
+    let bite = gut_bite(&fauna.animals[i], phys, Food::Larva, manifest.controller_period_s, effort, stock);
+    if !(bite > 0.0) {
+        return false;
+    }
+    let Some((taken, _)) = crate::larva::take_larvae(fauna, host, bite) else {
+        return false;
+    };
+    let l = &mut fauna.ledger;
+    l.bites_by_founder[founder.index()] += 1;
+    l.bites_by_founder_food[founder.index()][Food::Larva.index()] += 1;
+    swallow(fauna, i, Food::Larva, taken);
     true
 }
 
@@ -1813,7 +1890,7 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if !a.eating {
         return None;
     }
-    if glider_fruit_in_reach(view, fv, &a, &phys).is_some() {
+    if glider_fruit_in_reach(view, fv, &a, &phys).is_some() || glider_larva_in_reach(fauna, view, fv, &a, &phys).is_some() {
         return None;
     }
     // A hungry body with no reachable food may cling at an unmountable lip or
@@ -1841,8 +1918,17 @@ pub(super) fn fruit_reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv
     if phys.senses.live {
         return fruit_by_sight(fauna, i, view, fv, day);
     }
-    let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| s.fruit > 0.0 && climbable(fv, s, &glider));
+    let larva_stand = |s: &cubarium_voxel_flora::Stand| crate::larva::visible(fauna, crate::larva::LarvaHost::Stand(s.id)).is_some();
+    let cands = stands_within(view, fv, &a, glider.fruit_search_m, |s| (s.fruit > 0.0 || larva_stand(s)) && climbable(fv, s, &glider));
     walk_to_stand(fauna, i, view, fv, &cands, glider.fruit_search_m, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
+}
+
+/// A vine face that is food to a glider: in fruit, or the anchor face of a vine whose larvae
+/// it would see (LARVA).
+fn face_has_food(fauna: &Fauna, f: &cubarium_voxel_flora::CoveredFace) -> bool {
+    f.fruit > 0.0
+        || fauna.larvae.host(crate::larva::LarvaHost::Vine(f.owner)).is_some_and(|h| h.anchor == Some(f.face))
+            && crate::larva::visible(fauna, crate::larva::LarvaHost::Vine(f.owner)).is_some()
 }
 
 // Face food keys use a separate namespace from stand IDs and vine ledge walks.
@@ -1858,7 +1944,7 @@ fn fruit_wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     let phys = *fauna.config.founder(founder);
     // Both sight and remembered-face approaches must honour the walk's shun list.
     if fauna.walk_shunned(a.id, founder).contains(&id) { return None; }
-    let fruit = fv.cover.iter().find(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id)?;
+    let fruit = fv.cover.iter().find(|f| face_has_food(fauna, f) && vine_fruit_key(view, f.face) == id)?;
     let (x, _, z) = fruit.face.front(view)?;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
@@ -1941,6 +2027,51 @@ pub(crate) fn fruit_candidates(fauna: &Fauna, i: usize, view: &VoxelView<'_>, fv
             seen.push((d3, vine_fruit_key(view, face), foot, (sx, my, sz)));
         }
     }
+    // LARVA §4: a host's larvae are seen by close search, within its larva sight.
+    let near = range.min(phys.larva_sight_m);
+    if near > 0.0 && phys.eating_diet().eats(Food::Larva) {
+        for (host, h) in fauna.larvae.hosts() {
+            if crate::larva::visible(fauna, *host).is_none() {
+                continue;
+            }
+            match *host {
+                crate::larva::LarvaHost::Stand(id) => {
+                    let Some(stand) = fv.stand_in(h.site, cubarium_voxel_flora::FaceLayer::Plant).filter(|s| s.id == id) else { continue };
+                    if !climbable(fv, stand, &glider) || seen.iter().any(|s| s.1 == id) {
+                        continue;
+                    }
+                    let Some((low, high)) = crate::larva::crown_band(fv, stand) else { continue };
+                    let sx = (f64::from(stand.site.x) + 0.5) * v;
+                    let sz = (f64::from(stand.site.z) + 0.5) * v;
+                    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+                    let dh = dx.hypot(dz);
+                    let my = 0.5 * (low + high);
+                    let d3 = dh.hypot(my - origin.1);
+                    if d3 > near || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
+                        continue;
+                    }
+                    seen.push((d3, id, stand.site, (sx, my, sz)));
+                }
+                crate::larva::LarvaHost::Vine(_) => {
+                    let Some(face) = h.anchor else { continue };
+                    let Some((x, y, z)) = face.front(view) else { continue };
+                    let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
+                    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+                    let dh = dx.hypot(dz);
+                    let d3 = dh.hypot(my - origin.1);
+                    if d3 > near || (dh > 0.0 && (dx * fx + dz * fz) / dh < cos_half) {
+                        continue;
+                    }
+                    let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
+                    let key = vine_fruit_key(view, face);
+                    if seen.iter().any(|s| s.1 == key) {
+                        continue;
+                    }
+                    seen.push((d3, key, foot, (sx, my, sz)));
+                }
+            }
+        }
+    }
     seen.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
     // EDGE: of those it sees, the nearest it can walk to on its route graph.
     let clear: Vec<(f64, u64, Site, (f64, f64, f64))> = seen.into_iter().filter(|s| crate::perception::line_clear(view, a.id, origin, s.3)).collect();
@@ -1981,8 +2112,8 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
     let food = crate::perception::class::FOOD as usize;
     let m = fauna.percepts.get(&a.id).map(|p| p.best[food]).unwrap_or_default();
     let memory = cubarium_voxel::ticks_at_least_one(fauna.config.perception.give_up_s);
-    let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && s.fruit > 0.0)
-        || fv.cover.iter().any(|f| f.fruit > 0.0 && vine_fruit_key(view, f.face) == id);
+    let fruits = |id: u64| fv.stands.iter().any(|s| s.id == id && (s.fruit > 0.0 || crate::larva::visible(fauna, crate::larva::LarvaHost::Stand(id)).is_some()))
+        || fv.cover.iter().any(|f| face_has_food(fauna, f) && vine_fruit_key(view, f.face) == id);
     if !(m.known && now.saturating_sub(m.tick) <= memory && fruits(m.id)) {
         return None;
     }

@@ -1352,6 +1352,7 @@ fn report_diet(minute: u64, fv: &FloraView<'_>, av: &cubarium_voxel_fauna::Fauna
             Food::Film => fv.ground.iter().map(|g| g.film).sum(),
             Food::Nectar => fv.stands.iter().map(|s| s.nectar).sum(),
             Food::Fruit => fv.stands.iter().map(|s| s.fruit).sum(),
+            Food::Larva => av.larvae.organic(),
             Food::CapTissue => fv
                 .stands
                 .iter()

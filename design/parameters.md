@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4383 rows)
+**`fauna.*`** (4509 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1627,6 +1627,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.littershredder.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.littershredder.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.littershredder.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.littershredder.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.littershredder.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.littershredder.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.littershredder.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.littershredder.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.littershredder.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.littershredder.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.littershredder.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.littershredder.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.littershredder.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.littershredder.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.littershredder.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.littershredder.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.littershredder.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.littershredder.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.littershredder.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -1677,7 +1691,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.littershredder.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.littershredder.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.littershredder.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.littershredder.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.littershredder.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.littershredder.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -1703,7 +1717,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.littershredder.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.littershredder.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.littershredder.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.littershredder.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.littershredder.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.littershredder.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -2089,6 +2103,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.frondgrazer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.frondgrazer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.frondgrazer.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.frondgrazer.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.frondgrazer.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.frondgrazer.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.frondgrazer.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.frondgrazer.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.frondgrazer.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.frondgrazer.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.frondgrazer.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.frondgrazer.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.frondgrazer.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.frondgrazer.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.frondgrazer.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.frondgrazer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.frondgrazer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.frondgrazer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.frondgrazer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2139,7 +2167,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.frondgrazer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.frondgrazer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.frondgrazer.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.frondgrazer.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.frondgrazer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.frondgrazer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2165,7 +2193,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.frondgrazer.gut.stomach_k` | 0.06 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.frondgrazer.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.frondgrazer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.frondgrazer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.frondgrazer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.frondgrazer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -2551,6 +2579,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.lanternjaw.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.lanternjaw.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.lanternjaw.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.lanternjaw.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.lanternjaw.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.lanternjaw.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.lanternjaw.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.lanternjaw.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.lanternjaw.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.lanternjaw.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.lanternjaw.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.lanternjaw.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.lanternjaw.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.lanternjaw.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.lanternjaw.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.lanternjaw.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.lanternjaw.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.lanternjaw.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.lanternjaw.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -2601,7 +2643,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.lanternjaw.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.lanternjaw.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.lanternjaw.yield_by_food.*` | 0.6, 0.6, 0.6, 0.6 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.lanternjaw.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.lanternjaw.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.lanternjaw.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -2627,7 +2669,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.lanternjaw.gut.stomach_k` | 0.15 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.lanternjaw.gut.bite_per_body_s` | 0.001 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.lanternjaw.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.lanternjaw.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.lanternjaw.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.lanternjaw.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3013,6 +3055,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.capgnawer.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.capgnawer.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.capgnawer.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.capgnawer.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.capgnawer.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.capgnawer.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.capgnawer.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.capgnawer.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.capgnawer.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.capgnawer.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.capgnawer.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.capgnawer.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.capgnawer.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.capgnawer.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.capgnawer.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.capgnawer.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.capgnawer.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.capgnawer.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.capgnawer.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3063,7 +3119,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.capgnawer.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.capgnawer.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.capgnawer.yield_by_food.*` | 0.25, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.capgnawer.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.capgnawer.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.capgnawer.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3089,7 +3145,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.capgnawer.gut.stomach_k` | 0.02 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.capgnawer.gut.bite_per_body_s` | 0.0003333333333333333 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.capgnawer.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.capgnawer.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.capgnawer.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.capgnawer.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3475,6 +3531,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.loftstrider.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.loftstrider.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.loftstrider.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.loftstrider.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.loftstrider.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.loftstrider.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.loftstrider.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.loftstrider.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.loftstrider.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.loftstrider.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.loftstrider.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.loftstrider.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.loftstrider.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.loftstrider.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.loftstrider.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.loftstrider.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.loftstrider.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.loftstrider.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.loftstrider.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3525,7 +3595,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.loftstrider.contact_height_fraction` | 0.15 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.loftstrider.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.loftstrider.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.loftstrider.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.loftstrider.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.loftstrider.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -3551,7 +3621,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.loftstrider.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.loftstrider.gut.bite_per_body_s` | 0.0008333333333333334 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.loftstrider.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.loftstrider.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.loftstrider.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.loftstrider.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -3937,6 +4007,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.ripple-snail.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.ripple-snail.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.ripple-snail.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.ripple-snail.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.ripple-snail.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.ripple-snail.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.ripple-snail.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.ripple-snail.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.ripple-snail.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.ripple-snail.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.ripple-snail.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.ripple-snail.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.ripple-snail.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.ripple-snail.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.ripple-snail.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.ripple-snail.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.ripple-snail.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.ripple-snail.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.ripple-snail.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -3987,7 +4071,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.amphibious.graze_search_m` | 1.0 | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.ripple-snail.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.ripple-snail.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.ripple-snail.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.ripple-snail.organ_structure_fraction` | 0.05 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.ripple-snail.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.ripple-snail.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4013,7 +4097,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.ripple-snail.gut.stomach_k` | 0.012 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.ripple-snail.gut.bite_per_body_s` | 0.0002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.ripple-snail.gut.digestion_s.*` | 120.0, 120.0, 120.0, 120.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.ripple-snail.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.ripple-snail.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.ripple-snail.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -4361,7 +4445,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
-| `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
+| `fauna.founders.bellwing.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
 | `fauna.founders.bellwing.core.body_max` | 0.03 | org-units | [0, inf) |  | D | placeholder | adult structure |
 | `fauna.founders.bellwing.core.growth_max_per_s` | 0.00000816 | org-units/s | [0, inf) | 0.000001–0.01 log | B | derived | fastest structure grows from the reserve |
 | `fauna.founders.bellwing.core.body_min` | 0.003 | org-units | (0, inf) | yes | B | placeholder | death threshold, and a newborn's body |
@@ -4380,10 +4464,10 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.gestation_loss_fraction` | 0.25 | fraction | [0, 1] | 0–1 | C | placeholder | organic respired when a gestation fails |
 | `fauna.founders.bellwing.core.reproduction.birth_interval_s` | 1800.0 | s | [0, inf) | 300–10000 log | B | derived | refractory after a birth or a laying |
 | `fauna.founders.bellwing.core.reproduction.clutch_size` | 1 | eggs | [0, inf) | yes | D | derived | eggs per clutch (an egg-layer's at least 1) |
-| `fauna.founders.bellwing.core.reproduction.egg_organic` | 0.0035000000000000005 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
+| `fauna.founders.bellwing.core.reproduction.egg_organic` | 0.00030000000000000003 | org-units per egg | [0, inf) | yes | D | placeholder | one egg; at least the lineage's body_min |
 | `fauna.founders.bellwing.core.reproduction.litter_min` | 0.0 | organic units | [0, inf) | 0–0.2 | - | placeholder | litter an egg-layer's face must hold (more than this) for it to lay |
 | `fauna.founders.bellwing.core.reproduction.incubation_s` | 300.0 | s | [0, inf) | 60–6000 log | B | placeholder | a clutch incubates this long |
-| `fauna.founders.bellwing.core.reproduction.clutch_max` | 6 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
+| `fauna.founders.bellwing.core.reproduction.clutch_max` | 5 | eggs | [0, inf) | 0–8 | - | placeholder | clutch from surplus: most eggs a clutch holds, sized at laying from the reserve above the floor (0: the fixed clutch_size) |
 | `fauna.founders.bellwing.core.reproduction.nest_radius_m` | 0.0 | m | [0, inf) | 0.25–3 | - | placeholder | nest-site brake: radius an egg-layer counts its own lineage (bodies and unhatched eggs) in (0 off) |
 | `fauna.founders.bellwing.core.reproduction.nest_crowd_max` | 0 | bodies and eggs | [0, inf) | 1–30 | - | placeholder | nest-site brake: more of its own lineage than this within the radius refuses a clutch |
 | `fauna.founders.bellwing.core.reproduction.nest_retry_s` | 60.0 | s | [0, inf) | 5–600 log | - | placeholder | a refused layer (nest site, body ceiling) waits this long before trying again |
@@ -4399,6 +4483,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.bellwing.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.bellwing.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.bellwing.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.bellwing.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.bellwing.larva.vaulttree_share` | 0.5 | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.bellwing.larva.period_s` | 14400.0 | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.bellwing.larva.death_per_s` | 0.00015 | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.bellwing.larva.emerge_body_fraction` | 1.0 | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.bellwing.larva.emerge_reserve_fraction` | 0.16666666666666666 | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.bellwing.larva.foliage_yield` | 0.4 | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.bellwing.larva.cohorts_max` | 3 | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.bellwing.larva.visible_count` | 1.0 | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.bellwing.larva.step_s` | 10.0 | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.bellwing.larva.lay_reach_m` | 0.25 | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.bellwing.larva.founding_emerge_per_h` | 15.0 | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.bellwing.larva.founding_hosts` | 12 | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.bellwing.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.bellwing.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.bellwing.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -4449,7 +4547,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.bellwing.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.bellwing.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.bellwing.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.bellwing.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.bellwing.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.bellwing.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4475,7 +4573,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.bellwing.gut.stomach_k` | 0.03 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.bellwing.gut.bite_per_body_s` | 0.002 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.bellwing.gut.digestion_s.*` | 30.0, 30.0, 30.0, 30.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.bellwing.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.bellwing.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.bellwing.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -4861,6 +4959,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.core.reproduction.gestation_upkeep_factor` | 1.0 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.seedporter.fruit_bite_half_stock` | 0.00001 | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.seedporter.give_up_fraction` | 0.05 | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.seedporter.larva_bite_half_stock` | 0.01 | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.seedporter.larva_sight_m` | 2.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.seedporter.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.seedporter.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.seedporter.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.seedporter.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.seedporter.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.seedporter.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.seedporter.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.seedporter.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.seedporter.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.seedporter.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.seedporter.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.seedporter.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.seedporter.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.seedporter.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.seedporter.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -4911,7 +5023,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.seedporter.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.seedporter.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.seedporter.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.seedporter.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.seedporter.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.seedporter.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -4937,7 +5049,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.seedporter.gut.stomach_k` | 0.05 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.seedporter.gut.bite_per_body_s` | 0.0016666666666666668 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.seedporter.gut.digestion_s.*` | 60.0, 60.0, 60.0, 60.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.seedporter.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.seedporter.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.seedporter.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |
@@ -5323,6 +5435,20 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.core.reproduction.gestation_upkeep_factor` | 1.5 | x basal upkeep | [0, inf) |  | - | placeholder | pregnancy: a gestating body's basal upkeep is multiplied by this (1: no raise) |
 | `fauna.founders.chorister.fruit_bite_half_stock` | (absent) | org-units at the mouth | [0, inf) |  | - | derived | fruit-only K override; absent uses core.bite_half_stock, other foods retain core K |
 | `fauna.founders.chorister.give_up_fraction` | (absent) | fraction of the fill rate | [0, inf) |  | - | derived | lineage override of teachers.give_up_fraction; absent inherits, zero disables giving up |
+| `fauna.founders.chorister.larva_bite_half_stock` | (absent) | org-units of visible larvae | [0, inf) |  | - | decision | larva-only K override for a larva eater's bite; absent uses core.bite_half_stock |
+| `fauna.founders.chorister.larva_sight_m` | 0.0 | m | [0, inf) |  | - | decision | LARVA: a host's hatched larvae are seen within this (close visual search; 0 never looks for larvae) |
+| `fauna.founders.chorister.larva.vaulttree_share` | (absent) | chance | [0, 1] |  | - | decision | LARVA: a clutch goes to a crowned vaulttree with this chance, else a latticevine (his split: 0.5) |
+| `fauna.founders.chorister.larva.period_s` | (absent) | s | (0, inf) |  | - | decision | LARVA: hatch to emergence size at full food (today's hatch-to-adult median, 4 h) |
+| `fauna.founders.chorister.larva.death_per_s` | (absent) | 1/s | [0, inf) |  | - | placeholder | LARVA: background larval death rate (parasitoids, disease); set so emergence matches today's adults |
+| `fauna.founders.chorister.larva.emerge_body_fraction` | (absent) | x body_max | (0, inf) |  | - | decision | LARVA: an adult emerges at this body (adult insects do not grow) |
+| `fauna.founders.chorister.larva.emerge_reserve_fraction` | (absent) | x emerged body | [0, inf) |  | - | placeholder | LARVA: an emerging adult's reserve (a moth's fat body); the larva grows to body x (1 + this) |
+| `fauna.founders.chorister.larva.foliage_yield` | (absent) | fraction | [0, 1] |  | - | placeholder | LARVA: tissue built per unit of leaf at most (caterpillar ECI 0.1-0.2); the leaf's mineral may bind lower |
+| `fauna.founders.chorister.larva.cohorts_max` | (absent) | cohorts | [0, inf) |  | - | placeholder | LARVA: cohorts a host holds; a new clutch merges the two oldest |
+| `fauna.founders.chorister.larva.visible_count` | (absent) | larvae | [0, inf) |  | - | placeholder | LARVA: a host is food in sight with at least this many hatched larvae |
+| `fauna.founders.chorister.larva.step_s` | (absent) | s | (0, inf) |  | - | placeholder | LARVA: the field's clock (deaths, growth, emergence run this often) |
+| `fauna.founders.chorister.larva.lay_reach_m` | (absent) | m | [0, inf) |  | - | placeholder | LARVA: a layer lays at a vaulttree within this of its crown's disc and band |
+| `fauna.founders.chorister.larva.founding_emerge_per_h` | (absent) | adults/h | [0, inf) |  | - | placeholder | LARVA: founding cohorts are sized for this many adults emerging an hour |
+| `fauna.founders.chorister.larva.founding_hosts` | (absent) | hosts | [0, inf) |  | - | placeholder | LARVA: the nearest this many hosts to the founders take the founding cohorts |
 | `fauna.founders.chorister.dispersal.group_max` | 0 | bodies | [0, inf) |  | - | placeholder | closed-world dispersal: a transitioning young leaves when its pack or herd's established members plus itself exceed this; dependent young never count |
 | `fauna.founders.chorister.dispersal.enabled` | (absent) | switch | [0, 1] |  | - | placeholder | closed-world dispersal switch (false by default; true enables it) |
 | `fauna.founders.chorister.dispersal.at` | (absent) | transition | [0, inf) |  | - | placeholder | closed-world dispersal transition: adult (breeding size) or independent (pack pup age) |
@@ -5373,7 +5499,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.amphibious.graze_search_m` | (absent) | m | [0, inf) |  | - | placeholder | ... within this distance (in water at any hour, out of water in its roam hours) |
 | `fauna.founders.chorister.contact_height_fraction` | 0.5 | x body height | [0, inf) |  | - | placeholder, digest | the contact receptors' height |
 | `fauna.founders.chorister.mouth_reach_length_fraction` | 0.25 | x body length | [0, inf) | yes | - | placeholder, digest | the mouth's reach ahead of the footprint |
-| `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (7 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
+| `fauna.founders.chorister.yield_by_food.*` | 0.5, 0.5, 0.5, 0.5 … (8 values) | fraction | [0, 1] | 0.05–0.99 | - | placeholder | assimilation yield of one food class |
 | `fauna.founders.chorister.organ_structure_fraction` | 0.1 | fraction of body | [0, 1) |  | N | placeholder | sensor/organ share of structure |
 | `fauna.founders.chorister.flower_ambush_m` | 1.0 | m | [0, inf) |  | - | placeholder | MIMIC: holds an ambush this close to a flower |
 | `fauna.founders.chorister.catch_ceiling_m` | 0.4 | m above hunter base | [0, inf) |  | - | placeholder | MIMIC: highest bellwing base a catch can reach |
@@ -5399,7 +5525,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.emergency_clear_hunger` | 0.6 | hunger 0..1 | [0, 1] | 0–0.9 | - | decision | the emergency latch goes off below this reserve hunger |
 | `fauna.founders.chorister.gut.stomach_k` | 0.2 | raw org-units per unit current body | [0, inf) | 0.002–1 log | - | decision | k: stomach capacity K = k x body |
 | `fauna.founders.chorister.gut.bite_per_body_s` | 0.0013333333333333335 | raw org-units/s per unit current body | [0, inf) | 0.00001–0.01 log | - | derived | b: a bite's rate at full effort (default 2k / tau) |
-| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (7 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
+| `fauna.founders.chorister.gut.digestion_s.*` | 300.0, 300.0, 300.0, 300.0 … (8 values) | s | (0, inf) | 5–10000 log | - | decision | tau: a food class's pool empties at S / tau into the reserve's room |
 | `fauna.founders.chorister.gut.s0` | 0.15 | fraction of K | [0, 1] | 0–0.8 | - | decision | appetite floor: a fed body wants food at S <= s0 K |
 | `fauna.founders.chorister.gut.full_tolerance` | 0.98 | fraction of K | (0, 1] |  | - | decision | the eating latch goes off at S >= this x K |
 | `fauna.founders.chorister.gut.refill_gap` | 0.1 | fraction of K | [0, 1] | 0–0.5 | - | decision | s_start is capped at full_tolerance - this, so appetite never overlaps the full event |

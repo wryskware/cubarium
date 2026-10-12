@@ -258,7 +258,7 @@ fn main() {
     let mut fauna = start::fauna(&p, start::closed_fits(), &census, &Founder::ALL, 1.0);
     cubarium_webmodel::web::to_whole(&mut fauna);
     fauna.area_scale = flora.zones.zones.iter().map(|z| z.area).sum::<f64>() / 4748.0;
-    fauna.ref_area = [74.19, 30.66, 74.19, 32.69, 15.09, 0.0, 0.0];
+    fauna.ref_area = [74.19, 30.66, 74.19, 32.69, 15.09, 0.0, 0.0, 0.0];
     let zero = rows.values().next().unwrap();
     for f in Founder::ALL {
         let n = zero.n.get(f.name()).copied().unwrap_or(0.0);

@@ -409,6 +409,8 @@ impl Mirror {
             tick: a.tick,
             animals: &a.animals,
             clutches: &a.clutches,
+            // Larvae are undrawn (LARVA: "a for now, art later").
+            larvae: &cubarium_voxel_fauna::larva::NO_LARVAE,
             ledger: &a.ledger,
         };
         (view, flora, fauna)

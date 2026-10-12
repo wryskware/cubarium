@@ -1139,6 +1139,12 @@ pub(crate) fn seed_pre_rolled_watched(
                 fauna.record_founding_family(&ids, first);
             }
         }
+        // LARVA (design/larva-nuts-plan-2026-10-12.md §3): a larva lineage's founders arrive
+        // with larvae already on the hosts nearest them, at ages staggered over the time to
+        // emergence, so adults emerge from the first hour rather than from h4-5.
+        if phys.larva.is_some() && placed.placed > 0 {
+            let _ = fauna.found_larvae(world, flora, founder);
+        }
         seeded.founders[founder.index()] += placed.placed;
         seeded.litter_tiles += placed.litter_tiles;
         seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);
