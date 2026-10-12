@@ -7,7 +7,7 @@ use cubarium_gpu::{
         open_faces,
     },
     target::Headless,
-    vk::Gpu,
+    Gpu,
     voxel::{VoxelRenderer, VoxelStyle, VoxelTexel, VoxelTextures},
 };
 
