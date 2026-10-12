@@ -462,3 +462,54 @@ fn the_shadow_teacher_does_not_change_the_brain_driven_body() {
     assert!(!log.is_empty(), "the shadow labelled the learner's samples");
     assert!(log.iter().all(|s| s.proposal.is_none() && s.actions.len() == shape.actions.len()));
 }
+
+/// BRAIN-NEXT step 2: the dry-run teacher beside two-layer seedporter brains labels the
+/// states they reach — a top label (the rules' proposal before their hold) on every sample,
+/// conditioning from the rules' own hold — and the brain-driven bodies move exactly as they
+/// do with it off.
+#[test]
+fn the_dry_teacher_labels_the_learners_states_with_intents_and_changes_nothing() {
+    let founder = Founder::Seedporter;
+    let shape = TwoLayerShape::menu_from_manifest(
+        &founder.manifest(),
+        MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: 8, pointer_width: 6 },
+    );
+    let net = Arc::new(TwoLayerNet::new(shape.clone(), initial_center(&shape, 8)).unwrap());
+    let arb = cubarium_voxel_fauna::BrainArbitration::default();
+    let period = founder.manifest().controller_period_s;
+    let (w, mut flora_a, mut a, ids) = teacher_scene();
+    let (_, mut flora_b, mut b, _) = teacher_scene();
+    for &(id, f) in &ids {
+        if f == founder {
+            assert!(a.set_controller(id, Box::new(net.brain(arb, period))));
+            assert!(b.set_controller(id, Box::new(net.brain(arb, period))));
+        }
+    }
+    a.dry_teach(founder, Some(cubarium_voxel_fauna::DryScope::Brains));
+    a.start_tap();
+    b.start_tap();
+    for t in 0..300 {
+        a.step(&w, &mut flora_a);
+        b.step(&w, &mut flora_b);
+        for &(id, _) in &ids {
+            assert_eq!(a.view().animal(id).map(|x| (x.pose, x.intent)), b.view().animal(id).map(|x| (x.pose, x.intent)), "tick {t}");
+        }
+    }
+    assert!(a.save() == b.save(), "the saved layer is the same");
+    let tap = a.take_tap().unwrap();
+    let records = super::record::closed_loop_records(&tap, founder, &shape, 1);
+    assert!(!records.is_empty(), "the learner's samples were labelled");
+    let menu = founder.manifest().menu;
+    for (_, r) in &records {
+        assert_eq!(r.source, RecordSource::ClosedLoop);
+        for s in &r.samples {
+            let p = s.proposal.expect("every closed-loop sample carries the teacher's intent");
+            assert!(p.intent < menu.named.len());
+            if let Some(sub) = s.held.subject {
+                assert!(s.candidates.iter().any(|c| c.key == sub.key));
+            }
+        }
+    }
+    let only: Vec<_> = records.into_iter().map(|(_, r)| r).collect();
+    CloneSet::new(&shape, &arb, &only).expect("the records fit the shape");
+}

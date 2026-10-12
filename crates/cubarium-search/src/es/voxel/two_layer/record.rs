@@ -164,6 +164,69 @@ pub fn records_from_tap(
     out
 }
 
+/// **Closed-loop records from the dry-run teacher** (BRAIN-NEXT step 2,
+/// [`cubarium_voxel_fauna::Fauna::dry_teach`]): per brain-driven body of `founder`, every
+/// decision sample's observation and candidates as the brain had them, labelled by the rules
+/// run dry beside it — the proposal before their hold (the top's label) and what they held
+/// (the bottom's conditioning, teacher forcing), with the actions their layer would have
+/// held (their own answer where a physical way out set them). A stretch shorter than
+/// `min_samples` is dropped.
+pub fn closed_loop_records(
+    tap: &ActionTap,
+    founder: Founder,
+    shape: &TwoLayerShape,
+    min_samples: usize,
+) -> Vec<(u64, TrajectoryRecord)> {
+    let manifest = founder.manifest();
+    let mut out = Vec::new();
+    for (id, f, stream) in tap.streams() {
+        if f != founder {
+            continue;
+        }
+        let (Some(decisions), Some(labels)) = (tap.decisions(id), tap.teacher_labels(id)) else { continue };
+        let by_tick: std::collections::HashMap<u64, &TapSample> = stream.iter().map(|s| (s.tick, s)).collect();
+        let taught: std::collections::HashMap<u64, &cubarium_voxel_fauna::TeacherLabel> =
+            labels.iter().map(|l| (l.tick, l)).collect();
+        let mut samples = Vec::new();
+        let flush = |samples: &mut Vec<RecordedSample>, out: &mut Vec<(u64, TrajectoryRecord)>| {
+            let done = std::mem::take(samples);
+            if done.len() >= min_samples.max(1) {
+                out.push((id, TrajectoryRecord { source: RecordSource::ClosedLoop, sample_period_s: manifest.controller_period_s, samples: done }));
+            }
+        };
+        for d in decisions {
+            let (Some(s), Some(l)) = (by_tick.get(&d.tick), taught.get(&d.tick)) else {
+                // A gap (a sample with no label) ends the stretch: replay is sequential.
+                flush(&mut samples, &mut out);
+                continue;
+            };
+            if s.observation.len() != shape.observation {
+                continue;
+            }
+            let input = d.prep.input();
+            let rows = recorded_rows(&input, shape.menu);
+            let held: &Held = match l.steer {
+                Steer::Drop | Steer::Wade | Steer::Shallows => &l.own,
+                _ => &l.executed,
+            };
+            samples.push(RecordedSample {
+                observation: s.observation.clone(),
+                intent_valid: d.prep.intent_mask[..shape.menu].to_vec(),
+                early_end: d.prep.early_end.map(early_end),
+                proposal: Some(choice(usize::from(l.proposal), l.proposal_row, &rows)),
+                held: choice(usize::from(l.held), l.held_row, &rows),
+                actions: held_actions(&manifest, held),
+                kick: None,
+                call: None,
+                rest: None,
+                candidates: rows,
+            });
+        }
+        flush(&mut samples, &mut out);
+    }
+    out
+}
+
 /// **The shadow teacher** (§11.3's closed-loop correction): the brain drives; the lineage's
 /// heuristic controller reads the same observation beside it and its own answer labels the
 /// state the learner reached. The teacher's answer never reaches the body.

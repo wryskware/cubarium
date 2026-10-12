@@ -94,7 +94,7 @@ fn control_at(fauna: &mut Fauna, world: &World, flora: &Flora, id: u64, sky: &su
     fauna.tick += 1;
     let founder = animal(fauna, id).founder.expect("a founder");
     animal_mut(fauna, id).age_ticks = founder.manifest().cadence_ticks();
-    super::controllers(fauna, &world.view(), flora, None, sky, 1);
+    super::controllers(fauna, &world.view(), flora, None, sky, 1, None);
 }
 
 fn control(fauna: &mut Fauna, world: &World, flora: &Flora, id: u64) {
