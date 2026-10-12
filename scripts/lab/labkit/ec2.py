@@ -31,6 +31,7 @@ from types import SimpleNamespace
 from .hosts import Host, allowed, could_ever_fit, fits, mem_available_gb
 from .core import SpecError, Task
 from .census_resume import latest_checkpoint
+from . import budget as budget_mod
 from . import providers
 from .kinds.build import Build
 
@@ -165,6 +166,16 @@ class Ec2Pool:
     # ---------------------------------------------------------------- helpers
     def save(self):
         self.d.store.kv_set("ec2", self.s)
+
+    def budget(self):
+        """Granted, spent, committed and remaining EC2 dollars (budget.summary)."""
+        return budget_mod.summary(self.d.store, self.s, lambda t: self.type_info(t)[1].get("spot_usd_h"),
+                                  self.d.clock(), self.d.paths.events)
+
+    def ended(self, reason, hours, usd):
+        """Record a terminated instance's spend (the budget's source of truth)."""
+        budget_mod.record_spend(self.d.store, self.s.get("instance"), self.s.get("approval"), self.d.clock(),
+                                hours, usd, reason)
 
     def type_info(self, name=None):
         name = name or (self.cfg.get("types") or ["c7g.16xlarge"])[0]
@@ -322,6 +333,11 @@ class Ec2Pool:
                     request = row
         if request is None or request["state"] != "open":
             raise ValueError(f"no open EC2 approval request {request_id}")
+        try:  # before anything launches; a running instance's cap is already committed
+            budget_mod.check(self.budget(), max_usd)
+        except budget_mod.BudgetError as error:
+            self.d.events.emit("approval-refused", approval=request["id"], max_usd=max_usd, reason=str(error))
+            raise
         details = json.loads(request["request"])
         instance_type = instance_type or details["instance_type"]
         grant = dict(instance_type=instance_type, max_hours=max_hours, max_usd=max_usd)
@@ -353,6 +369,7 @@ class Ec2Pool:
         launched_type = re.search(r"\blaunched\s+([^\s;]+);", done.stderr)
         if launched_type:
             self.s["type"] = launched_type[1]
+        self.s["price_usd_h"] = float(self.type_info(self.s["type"])[1].get("spot_usd_h", 0))
         self.forget_host()
         self.s.update(state="launching", instance=match[0] if match else None, launched=self.d.clock(), ip=None)
         self.d.events.emit("ec2-launching", approval=self.s.get("approval"), instance=self.s["instance"],
@@ -378,8 +395,10 @@ class Ec2Pool:
         done = self.d.transports["ec2"].run(f"test -f {marker} && echo ready\n", timeout=20)
         return "ready" in done.stdout
 
-    def cost(self):
+    def cost(self, cap_h=None):
         elapsed_h = (self.d.clock() - self.s.get("launched", self.d.clock())) / 3600
+        if cap_h is not None:
+            elapsed_h = min(elapsed_h, cap_h)
         _, info = self.type_info(self.s.get("type"))
         return elapsed_h, elapsed_h * float(info.get("spot_usd_h", 0))
 
@@ -406,6 +425,7 @@ class Ec2Pool:
             self.d.task_lost(row, f"ec2 down: {reason}")
         self.forget_host()
         self.host = None
+        self.ended(reason, hours, usd)
         self.d.events.emit("host-down", host="ec2", reason=reason, instance=self.s.get("instance"),
                            hours=round(hours, 3), est_usd=round(usd, 2))
         self.s = dict(state="idle", last=dict(reason=reason, hours=hours, usd=usd))
@@ -424,7 +444,8 @@ class Ec2Pool:
                        request_id, json.dumps(details), self.d.clock())
         self.s.update(state="approval-needed", approval=request_id)
         self.d.events.emit("approval-needed", approval=request_id,
-                           command=f"lab approve ec2 {request_id} --max-hours H --max-usd D", **details)
+                           command=f"lab approve ec2 {request_id} --max-hours H --max-usd D",
+                           budget_left_usd=round(self.budget()["remaining"], 2), **details)
         self.save()
 
     def move_tail(self, pending):
@@ -537,7 +558,11 @@ class Ec2Pool:
             self.d.events.emit("ec2-error", reason=f"status at start failed: {error}")
             return
         if self.s.get("instance") not in rows and self.s["state"] != "down-failed":
-            self.d.events.emit("host-down", host="ec2", reason="instance gone while labd was down")
+            # When it went is unknown: charge up to now, at most its own shutdown timer.
+            hours, usd = self.cost(cap_h=math.ceil(self.s.get("max_hours") or 0) or None)
+            self.ended("instance gone while labd was down", hours, usd)
+            self.d.events.emit("host-down", host="ec2", reason="instance gone while labd was down",
+                               instance=self.s.get("instance"), hours=round(hours, 3), est_usd=round(usd, 2))
             for row in self.on_ec2():
                 self.d.task_lost(row, "ec2 instance gone")
             self.s = dict(state="idle")
@@ -605,7 +630,10 @@ class Ec2Pool:
             if self.d._due("ec2-status", float(self.cfg.get("status_s", 60))):
                 rows, error = self.status()
                 if rows is not None and self.s.get("instance") not in rows:
-                    self.d.events.emit("host-down", host="ec2", reason="spot loss", instance=self.s.get("instance"))
+                    hours, usd = self.cost()
+                    self.ended("spot loss", hours, usd)
+                    self.d.events.emit("host-down", host="ec2", reason="spot loss", instance=self.s.get("instance"),
+                                       hours=round(hours, 3), est_usd=round(usd, 2))
                     for row in self.on_ec2():
                         self.d.task_lost(row, "spot loss")
                     self.host = None
