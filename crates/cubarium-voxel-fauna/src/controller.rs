@@ -168,6 +168,97 @@ pub trait Controller: Send + Sync {
     fn reads_tail(&self) -> bool {
         true
     }
+
+    /// **A menu lineage's decision sample** (CONTRACTS, behaviour-AI §11.3; the interface
+    /// shared with TWO-LAYER): the observation as [`Controller::drive`] gets it, plus the
+    /// intent mask, the subject candidates and the early-end flag ([`DecisionInput`]). The
+    /// answer is today's response plus, for a brain with a top layer, its [`Decision`].
+    ///
+    /// The step calls this only for a menu lineage's brain; a plain lineage is driven through
+    /// [`Controller::drive`] exactly as before. The default answers `drive` and no decision,
+    /// so every controller that predates the contract behaves as it did.
+    fn decide(&mut self, observation: &[f64], input: &DecisionInput<'_>) -> (Response, Option<Decision>) {
+        let _ = input;
+        (self.drive(observation), None)
+    }
+
+    /// **Its recurrent state for a save** (§11.3): `None` for a controller with nothing to
+    /// keep (every heuristic, and a brain that does not opt in). A load hands it back through
+    /// [`Controller::restore`] before the body's next sample, so a mid-hold save continues.
+    fn memory(&self) -> Option<BrainMemory> {
+        None
+    }
+
+    /// Restore a [`Controller::memory`]; `false` when this controller cannot read it (it
+    /// then starts fresh, as after [`Controller::reset`]).
+    fn restore(&mut self, memory: &BrainMemory) -> bool {
+        let _ = memory;
+        false
+    }
+}
+
+/// **What a menu brain receives** at a decision sample beyond its observation (CONTRACTS;
+/// the TWO-LAYER interface). Dimensions are the manifest's ([`Manifest::menu`],
+/// [`Manifest::candidates`], [`Manifest::row_width`]).
+#[derive(Clone, Copy, Debug)]
+pub struct DecisionInput<'a> {
+    /// Intents on the menu, spares included.
+    pub menu: usize,
+    /// Which intents may be held now (spares, the wrong age and a required subject with no
+    /// fitting candidate are masked).
+    pub intent_mask: &'a [bool],
+    /// `K` rows of `row_width` channels each, row-major ([`crate::subjects::ROW_CHANNELS`]).
+    pub candidates: &'a [f64],
+    pub row_width: usize,
+    /// Each row's type: empty, a body or a place.
+    pub kinds: &'a [crate::subjects::RowKind],
+    /// Each row's stable key, never for a network: a body's id, a place's own key
+    /// ([`crate::subjects::subject_key`]), [`crate::subjects::EMPTY_KEY`] for an empty row. A
+    /// brain holds its subject by it and re-finds the row after rows reorder (§11.1). "No
+    /// subject" needs no row.
+    pub keys: &'a [u64],
+    /// `mask[r * menu + k]`: row `r` may be intent `k`'s subject.
+    pub candidate_mask: &'a [bool],
+    /// The held subject's current row, if it has one.
+    pub held_row: Option<usize>,
+    /// Why the hold must end at this sample, if it must: the subject lost or dead, the held
+    /// intent masked, or a physical emergency at the last sample.
+    pub early_end: Option<crate::EarlyEnd>,
+}
+
+impl DecisionInput<'_> {
+    /// `K`, the candidate rows.
+    pub fn rows(&self) -> usize {
+        self.kinds.len()
+    }
+}
+
+/// **A menu brain's answer** beyond its continuous actions (CONTRACTS; the TWO-LAYER
+/// interface): the discrete actions where the lineage has them, and its held intent and
+/// subject row after its own hold and margin, with the proposal for logging.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Decision {
+    /// Start a kick at the subject (or the nearest threat), if the body's kick is ready.
+    pub kick: bool,
+    /// The call kind to emit: 0 none, `k + 1` the lineage's kind `k`.
+    pub call: u8,
+    /// Ask to rest ([`crate::RestAsk::Rest`]); the body checks eligibility.
+    pub rest: bool,
+    /// The held intent, after the hold.
+    pub intent: usize,
+    /// The held subject's candidate row, or none.
+    pub subject: Option<usize>,
+    /// The proposal's probabilities over the menu (first `menu` entries), for logging.
+    pub proposal: [f64; crate::intent::MAX_MENU],
+}
+
+/// **A brain's saved memory** (§11.3): an opaque record the brain writes and reads back
+/// (its recurrent state, its own hold). Saved with the world.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrainMemory {
+    /// What kind of brain wrote it, for its own check on restore.
+    pub tag: u32,
+    pub bytes: Vec<u8>,
 }
 
 /// **The reflex contract** (v3 B, P4). Both layers retain sleep (gliders only
@@ -319,6 +410,18 @@ impl FounderControllers {
             Ok(at) => self.entries[at].1 = controller,
             Err(at) => self.entries.insert(at, (id, controller)),
         }
+    }
+
+    /// Every controller's memory that has one ([`Controller::memory`]), in id order.
+    pub fn memories(&self) -> Vec<(u64, BrainMemory)> {
+        self.entries.iter().filter_map(|(id, c)| c.memory().map(|m| (*id, m))).collect()
+    }
+
+    /// Restore body `id`'s controller from `memory`; `false` without one or when it cannot.
+    pub fn restore(&mut self, id: u64, memory: &BrainMemory) -> bool {
+        self.entries
+            .binary_search_by_key(&id, |e| e.0)
+            .is_ok_and(|at| self.entries[at].1.restore(memory))
     }
 
     /// Take a body's controller back, if it has one.

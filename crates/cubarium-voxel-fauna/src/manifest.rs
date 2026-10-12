@@ -463,6 +463,16 @@ pub struct Manifest {
     pub fresh_s: f64,
     /// The `Carcass` block's range, metres: the hunt's carcass scan as shipped.
     pub carcass_range_m: f64,
+    /// **The intent menu** (CONTRACTS, [`crate::intent`]): its named intents and masked
+    /// spares; a one-item menu for a plain lineage, whose canonical text then does not
+    /// change.
+    pub menu: &'static crate::Menu,
+    /// The subject candidate rows (§11.1): kin, threat, prey and place slots, each row
+    /// [`crate::subjects::ROW_WIDTH`] wide. All 0 for a plain lineage.
+    pub kin_slots: usize,
+    pub threat_slots: usize,
+    pub prey_slots: usize,
+    pub place_slots: usize,
 }
 
 /// The `Self` energy, reserve, structural-loss and intake references are the manifest's
@@ -859,6 +869,14 @@ const MODULE_PLACE_ROOST: Module = tail("Place(roost)", &PLACE_CHANNELS);
 const MODULE_PLACE_FRUIT: Module = tail("Place(fruit)", &PLACE_CHANNELS);
 const MODULE_PLACE_NEST: Module = tail("Place(nest)", &PLACE_CHANNELS);
 const MODULE_PLACE_DEN: Module = tail("Place(den)", &PLACE_CHANNELS);
+/// CONTRACTS (behaviour-AI §2.1): per call kind of the lineage (`calls::kinds_of` order), its
+/// freshest record: valid, bearing, proximity, freshness and whether the voice is its mother's
+/// or its own young's.
+const CALLS1_CHANNELS: [&str; 6] = ["valid0", "sin0", "cos0", "proximity0", "fresh0", "mine0"];
+const CALLS2_CHANNELS: [&str; 12] =
+    ["valid0", "sin0", "cos0", "proximity0", "fresh0", "mine0", "valid1", "sin1", "cos1", "proximity1", "fresh1", "mine1"];
+const MODULE_CALLS1: Module = tail("Calls", &CALLS1_CHANNELS);
+const MODULE_CALLS2: Module = tail("Calls", &CALLS2_CHANNELS);
 
 /// The littershredder: v2's 23, then its body state, the tremor it freezes on, the threat
 /// it flees, and the shore its shallows reflex walks to.
@@ -924,7 +942,7 @@ const BROWSER_MODULES: [Module; 12] = layout([
 ]);
 /// The loftstrider: as the frondgrazer without the hunker (its calves' following pull reads
 /// the kin slot).
-const LOFTSTRIDER_MODULES: [Module; 11] = layout([
+const LOFTSTRIDER_MODULES: [Module; 12] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -936,6 +954,7 @@ const LOFTSTRIDER_MODULES: [Module; 11] = layout([
     MODULE_SCENT_HUNTER,
     MODULE_TREMOR,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS2,
 ]);
 /// The bellwing: v2's 43, then its body state (the latch fed rest reads), the
 /// photoreceptor its light steering follows, the nectar plume, perch tremor and the vine
@@ -954,7 +973,7 @@ const BELLWING_MODULES: [Module; 9] = layout([
 /// The seedporter: v2's 37, then its body state, threat, kin (the troop pull), prey (the
 /// insect catch), carcass, hunter and carrion scent, tremor, its mode and height, and the
 /// roost, fruiting stand and shore its reflexes walk to.
-const SEEDPORTER_MODULES: [Module; 17] = layout([
+const SEEDPORTER_MODULES: [Module; 18] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -972,6 +991,7 @@ const SEEDPORTER_MODULES: [Module; 17] = layout([
     MODULE_PLACE_ROOST,
     MODULE_PLACE_FRUIT,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS1,
 ]);
 /// The lanternjaw: v2's 37, then its body state, prey, threat, carcass, the scents of its
 /// prey and of carrion, tremor, the light at its face (the lure pays only in the dark) and
@@ -997,7 +1017,7 @@ const LANTERNJAW_MODULES: [Module; 15] = layout([
 /// The Veilhound: v2's 37, then its body state, prey, kin (packmates), carcass, four
 /// scents, tremor, its pack (breeder, pup, target by call, feast), its den (always known)
 /// and the shore.
-const CHORISTER_MODULES: [Module; 17] = layout([
+const CHORISTER_MODULES: [Module; 18] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -1015,6 +1035,7 @@ const CHORISTER_MODULES: [Module; 17] = layout([
     MODULE_SOCIAL,
     MODULE_PLACE_DEN,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS2,
 ]);
 
 /// The two shapes the search runtime is compiled for until P3 makes it generic: the
@@ -1180,6 +1201,8 @@ struct Anchors {
     mass: f64,
     taste_ref: Option<f64>,
     slot_range: f64,
+    /// The intent slots: kin, threat, prey, place.
+    slots: [usize; 4],
 }
 
 fn anchors(founder: Founder) -> Anchors {
@@ -1208,6 +1231,12 @@ fn anchors(founder: Founder) -> Anchors {
             Some(p.taste_reference_stock(crate::CueConfig::default().emit_reference))
         },
         slot_range: p.senses.sight_m.max(p.senses.hearing_m).max(p.senses.tremor_m).max(0.0),
+        slots: [
+            p.intent.kin_slots as usize,
+            p.intent.threat_slots as usize,
+            p.intent.prey_slots as usize,
+            p.intent.place_slots as usize,
+        ],
     }
 }
 
@@ -1303,6 +1332,11 @@ impl Manifest {
             slot_range_m: a.slot_range,
             fresh_s: crate::PerceptionConfig::default().give_up_s,
             carcass_range_m: crate::HuntConfig::default().carcass_scan_m,
+            menu: &crate::intent::PLAIN,
+            kin_slots: 0,
+            threat_slots: 0,
+            prey_slots: 0,
+            place_slots: 0,
         }
     }
 
@@ -1362,6 +1396,11 @@ impl Manifest {
             slot_range_m: a.slot_range,
             fresh_s: crate::PerceptionConfig::default().give_up_s,
             carcass_range_m: crate::HuntConfig::default().carcass_scan_m,
+            menu: &crate::intent::PLAIN,
+            kin_slots: 0,
+            threat_slots: 0,
+            prey_slots: 0,
+            place_slots: 0,
         }
     }
 
@@ -1374,6 +1413,11 @@ impl Manifest {
             schema_version: SCHEMA_VERSION,
             founder: Founder::Lanternjaw,
             modules: &LANTERNJAW_MODULES,
+            menu: crate::intent::menu_of(Founder::Lanternjaw),
+            kin_slots: a.slots[0],
+            threat_slots: a.slots[1],
+            prey_slots: a.slots[2],
+            place_slots: a.slots[3],
             actions: &LANTERNJAW_ACTIONS,
             deadband: ACTION_DEADBAND,
             controller_period_s: CONTROLLER_PERIOD_S,
@@ -1496,6 +1540,11 @@ impl Manifest {
             mass_scale: a.mass,
             slot_range_m: a.slot_range,
             modules: &LOFTSTRIDER_MODULES,
+            menu: crate::intent::menu_of(Founder::Loftstrider),
+            kin_slots: a.slots[0],
+            threat_slots: a.slots[1],
+            prey_slots: a.slots[2],
+            place_slots: a.slots[3],
             actions: &ACTIONS,
             cone_banded_to_mouth: true,
             ..Manifest::browser()
@@ -1624,6 +1673,11 @@ impl Manifest {
             mass_scale: a.mass,
             slot_range_m: a.slot_range,
             modules: &SEEDPORTER_MODULES,
+            menu: crate::intent::menu_of(Founder::Seedporter),
+            kin_slots: a.slots[0],
+            threat_slots: a.slots[1],
+            prey_slots: a.slots[2],
+            place_slots: a.slots[3],
             actions: &SPRINT_ACTIONS,
             taste_reference: a.taste_ref,
             taste_cue: "fruit",
@@ -1667,6 +1721,11 @@ impl Manifest {
             mass_scale: a.mass,
             slot_range_m: a.slot_range,
             modules: &CHORISTER_MODULES,
+            menu: crate::intent::menu_of(Founder::Chorister),
+            kin_slots: a.slots[0],
+            threat_slots: a.slots[1],
+            prey_slots: a.slots[2],
+            place_slots: a.slots[3],
             actions: &SPRINT_ACTIONS,
             ..Manifest::lanternjaw()
         }
@@ -1858,7 +1917,57 @@ impl Manifest {
             TREMOR_REFERENCE,
             HEIGHT_REFERENCE_M
         );
+        // CONTRACTS: the intent menu and the subject candidates, named only for a menu
+        // lineage, so a plain lineage's text (and digest) is what it was.
+        if !self.menu.plain() {
+            let _ = write!(s, "|intent:v1|menu:");
+            for k in 0..self.menu.len() {
+                let _ = write!(s, "{},", self.menu.name(k));
+            }
+            let _ = write!(
+                s,
+                "|slots:kin={},threat={},prey={},place={}|row:",
+                self.kin_slots, self.threat_slots, self.prey_slots, self.place_slots
+            );
+            for c in crate::subjects::ROW_CHANNELS {
+                let _ = write!(s, "{c},");
+            }
+            let _ = write!(s, "|rows:{}", crate::subjects::CANDIDATE_RULE);
+        }
         s
+    }
+
+    /// Subject candidate rows `K` per decision sample (0 for a plain lineage).
+    pub fn candidates(&self) -> usize {
+        self.kin_slots + self.threat_slots + self.prey_slots + self.place_slots
+    }
+
+    /// A candidate row's width `F` (0 for a plain lineage).
+    pub fn row_width(&self) -> usize {
+        if self.menu.plain() { 0 } else { crate::subjects::ROW_WIDTH }
+    }
+
+    /// **Why a stored policy digest is refused**, for a loader's error: a menu lineage's
+    /// policy made before the intent contract (CONTRACTS) is named as that. No migration.
+    pub fn digest_refusal(&self, stored: u64) -> String {
+        let mut before = *self;
+        before.menu = &crate::intent::PLAIN;
+        let pre = fnv1a(before.canonical_text().as_bytes());
+        if !self.menu.plain() && stored == pre {
+            format!(
+                "{} policy digest {stored:#018x} was made before the intent contract (CONTRACTS, \
+                 behaviour-AI §11: menus, subject candidates, calls); it is not this build's \
+                 {:#018x} and is refused, not migrated: retrain or re-clone it",
+                self.founder.name(),
+                self.digest()
+            )
+        } else {
+            format!(
+                "{} policy digest {stored:#018x} is not this build's {:#018x}: the schemas differ",
+                self.founder.name(),
+                self.digest()
+            )
+        }
     }
 
     /// FNV-1a 64 over [`Manifest::canonical_text`]. A policy whose stored digest differs is
@@ -1874,6 +1983,11 @@ impl Manifest {
 }
 
 /// FNV-1a 64, field for field `cubarium-core`'s `neural::fnv1a`.
+#[cfg(test)]
+pub(crate) fn fnv1a_pub(bytes: &[u8]) -> u64 {
+    fnv1a(bytes)
+}
+
 fn fnv1a(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in bytes {

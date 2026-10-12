@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (2978 rows)
+**`fauna.*`** (3204 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1766,6 +1766,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.littershredder.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.littershredder.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.littershredder.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.littershredder.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.littershredder.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.littershredder.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.littershredder.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.littershredder.intent.threat_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.littershredder.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.littershredder.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.littershredder.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.littershredder.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.littershredder.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.littershredder.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.littershredder.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.littershredder.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.littershredder.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.littershredder.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.littershredder.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.littershredder.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.littershredder.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.littershredder.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.littershredder.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.littershredder.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.littershredder.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2072,6 +2097,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.frondgrazer.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.frondgrazer.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.frondgrazer.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.frondgrazer.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.frondgrazer.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.frondgrazer.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.frondgrazer.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.frondgrazer.intent.threat_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.frondgrazer.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.frondgrazer.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.frondgrazer.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.frondgrazer.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.frondgrazer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.frondgrazer.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.frondgrazer.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.frondgrazer.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.frondgrazer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.frondgrazer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.frondgrazer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.frondgrazer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.frondgrazer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.frondgrazer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.frondgrazer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.frondgrazer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.frondgrazer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2378,6 +2428,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.lanternjaw.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.lanternjaw.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.lanternjaw.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.lanternjaw.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.lanternjaw.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.lanternjaw.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.lanternjaw.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.lanternjaw.intent.threat_slots` | 2 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.lanternjaw.intent.prey_slots` | 2 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.lanternjaw.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.lanternjaw.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.lanternjaw.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.lanternjaw.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.lanternjaw.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.lanternjaw.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.lanternjaw.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.lanternjaw.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.lanternjaw.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.lanternjaw.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.lanternjaw.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.lanternjaw.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.lanternjaw.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.lanternjaw.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.lanternjaw.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.lanternjaw.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2684,6 +2759,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.capgnawer.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.capgnawer.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.capgnawer.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.capgnawer.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.capgnawer.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.capgnawer.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.capgnawer.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.capgnawer.intent.threat_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.capgnawer.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.capgnawer.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.capgnawer.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.capgnawer.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.capgnawer.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.capgnawer.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.capgnawer.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.capgnawer.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.capgnawer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.capgnawer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.capgnawer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.capgnawer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.capgnawer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.capgnawer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.capgnawer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.capgnawer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.capgnawer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2990,6 +3090,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.loftstrider.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.loftstrider.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.loftstrider.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.loftstrider.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.loftstrider.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.loftstrider.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.loftstrider.intent.kin_slots` | 4 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.loftstrider.intent.threat_slots` | 3 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.loftstrider.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.loftstrider.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.loftstrider.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.loftstrider.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.loftstrider.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.loftstrider.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.loftstrider.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.loftstrider.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.loftstrider.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.loftstrider.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.loftstrider.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.loftstrider.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.loftstrider.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.loftstrider.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.loftstrider.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.loftstrider.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3296,6 +3421,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.ripple-snail.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.ripple-snail.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.ripple-snail.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.ripple-snail.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.ripple-snail.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.ripple-snail.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.ripple-snail.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.ripple-snail.intent.threat_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.ripple-snail.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.ripple-snail.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.ripple-snail.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.ripple-snail.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.ripple-snail.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.ripple-snail.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.ripple-snail.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.ripple-snail.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.ripple-snail.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.ripple-snail.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.ripple-snail.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.ripple-snail.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.ripple-snail.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.ripple-snail.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.ripple-snail.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.ripple-snail.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.ripple-snail.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3602,6 +3752,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.bellwing.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.bellwing.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.bellwing.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.bellwing.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.bellwing.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.bellwing.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.bellwing.intent.kin_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.bellwing.intent.threat_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.bellwing.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.bellwing.intent.place_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.bellwing.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.bellwing.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.bellwing.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.bellwing.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.bellwing.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.bellwing.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.bellwing.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.bellwing.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.bellwing.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.bellwing.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.bellwing.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.bellwing.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.bellwing.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.bellwing.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.bellwing.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3908,6 +4083,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.grooming.groom_radius_m` | 0.5 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.seedporter.grooming.groom_s` | 10.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.seedporter.grooming.groom_seek_m` | 4.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.seedporter.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.seedporter.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.seedporter.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.seedporter.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.seedporter.intent.kin_slots` | 4 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.seedporter.intent.threat_slots` | 2 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.seedporter.intent.prey_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.seedporter.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.seedporter.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.seedporter.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.seedporter.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.seedporter.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.seedporter.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.seedporter.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.seedporter.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.seedporter.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.seedporter.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.seedporter.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.seedporter.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.seedporter.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.seedporter.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.seedporter.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.seedporter.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4214,6 +4414,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.grooming.groom_radius_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length |
 | `fauna.founders.chorister.grooming.groom_s` | 0.0 | s | [0, inf) |  | - | placeholder | SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds |
 | `fauna.founders.chorister.grooming.groom_seek_m` | 0.0 | m | [0, inf) |  | - | placeholder | SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom |
+| `fauna.founders.chorister.intent.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples |
+| `fauna.founders.chorister.intent.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable |
+| `fauna.founders.chorister.intent.temperature` | 1.0 | logit units | (0, inf) |  | - | placeholder | CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at |
+| `fauna.founders.chorister.intent.subject_lost_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes |
+| `fauna.founders.chorister.intent.kin_slots` | 4 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4) |
+| `fauna.founders.chorister.intent.threat_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: threat rows a menu lineage's brain sees |
+| `fauna.founders.chorister.intent.prey_slots` | 3 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
+| `fauna.founders.chorister.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
+| `fauna.founders.chorister.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
+| `fauna.founders.chorister.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.chorister.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.chorister.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.chorister.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.chorister.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.chorister.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.chorister.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.chorister.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
+| `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.chorister.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.chorister.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
+| `fauna.founders.chorister.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.chorister.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
+| `fauna.founders.chorister.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
+| `fauna.founders.chorister.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4475,6 +4700,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.perception.hearing_near_m` | 0.5 | m | (0, inf) |  | - | placeholder | received loudness is emission over the distance, read as at least this |
 | `fauna.perception.place_memory_fade_s` | 600.0 | s | [0, inf) | 60–7200 log | - | placeholder | time for last-used home-place freshness to fall linearly to zero without a physical revisit; 0 disables recall |
 | `fauna.perception.give_up_s` | 10.0 | s | [0, inf) | 1–60 log | - | placeholder | a body not sensed again within this is given up; a pursuit walks to its last-known point until then |
+| `fauna.perception.lame_wound` | 0.3 | wound | [0, 1] |  | - | placeholder | CONTRACTS: a body seen with at least this wound reads lame (a visible limp) on a sight track |
 | `fauna.scent.cell_m` | 0.5 | m | (0, inf) | 0.25–2 | - | placeholder | the scent field's cell (rounded to whole voxels): the connected surface faces in a cell are one node |
 | `fauna.scent.half_life_s` | 60.0 | s | (0, inf) | 5–1200 log | - | placeholder | scent's half-life |
 | `fauna.scent.diffuse_fraction` | 0.5 | fraction per update | [0, 1] | 0.05–1 | - | placeholder | the share of a node's difference to its neighbours mixed in per 0.5 s update |

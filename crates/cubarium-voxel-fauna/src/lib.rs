@@ -51,6 +51,16 @@ pub use herding::{HerdTally, Herding};
 mod groom;
 pub use groom::Grooming;
 pub mod nurse;
+/// CONTRACTS (behaviour-AI §11): intents, subjects and their records.
+pub mod intent;
+/// CONTRACTS (behaviour-AI §11.1): slots and subject candidates.
+pub mod subjects;
+/// CONTRACTS (behaviour-AI §3.3, §11.4): the kick, one state machine with one budget.
+pub mod kick;
+/// CONTRACTS (behaviour-AI §11.2): calls and hearing.
+pub mod calls;
+#[cfg(test)]
+mod intent_tests;
 pub use nurse::Nursing;
 #[cfg(test)]
 mod nurse_tests;
@@ -134,7 +144,7 @@ pub use edit::{BodySpec, BodyStage, Group, Lifted, Placed, Spot};
 pub use controller::{
     Actions, BlindForager, BrowserForager, Controller, ControllerFactory, FounderControllers,
     FounderFactories, FruitForager, HoverSip, LanternjawAmbush, LanternjawPatrol, PackHunter, Response, Scripted, Seek, heuristic, resolve_actions,
-    BodyActions, Layer, Resolved, resolve,
+    BodyActions, Layer, Resolved, resolve, BrainMemory, Decision, DecisionInput,
 };
 pub use predation::{
     BodyKind, Dormancy, Hit, Rest, Strike, StrikePhase, apply_hit, dodge_chance, dodge_chance_with, dodges,
@@ -162,6 +172,39 @@ pub use pose::Pose;
 pub use flight::{flyer_fits_on_face, flyer_sheltered};
 pub use senses::{Senses, UPDATE_TICKS};
 pub use snapshot::SCHEMA;
+
+/// **A founding mother id** (CONTRACTS, behaviour-AI §11.6): the high bit set over a family's
+/// or a pack's own number. Founders of one family are recorded as sisters, and of one pack as
+/// littermates, by sharing one: kin reward and recognition hold from the first generation. It
+/// names no living animal (body ids never reach the bit), so everything that reads
+/// [`Animal::mother`] for a body (nursing, the mother pull, the census) treats it as no mother.
+pub const FOUNDING_MOTHER_BIT: u64 = 1 << 63;
+
+/// A pack's founding group: this bit over its pack id (a family's group is its first
+/// founder's id, which never reaches it).
+pub const FOUNDING_PACK_TAG: u64 = 1 << 40;
+
+/// The founding mother id of founding group `group` ([`FOUNDING_MOTHER_BIT`]).
+pub const fn founding_mother(group: u64) -> u64 {
+    FOUNDING_MOTHER_BIT | group
+}
+
+/// Whether a recorded mother id is a founding one, naming no body ([`FOUNDING_MOTHER_BIT`]).
+pub const fn is_founding_mother(id: u64) -> bool {
+    id & FOUNDING_MOTHER_BIT != 0
+}
+
+/// Body `a`'s mother as a body: its recorded mother unless that is a founding id.
+pub fn mother_body(a: &Animal) -> Option<u64> {
+    a.mother.filter(|&m| !is_founding_mother(m))
+}
+
+/// **Siblings** (§11.6): two different bodies sharing a recorded mother id, a real one or a
+/// founding one; two bodies with none are not siblings.
+pub fn siblings(a: &Animal, b: &Animal) -> bool {
+    a.id != b.id && a.mother.is_some() && a.mother == b.mother
+}
+pub use intent::{EarlyEnd, Executed, IntentKnobs, IntentRecord, Menu, Override, PlaceKind, RestAsk, Subject, menu_of};
 
 /// The browser's three cone sectors as `(foliage_fraction, foliage_proximity)` pairs.
 /// This is a read-only diagnostic projection of the same ray result the founder
@@ -1108,6 +1151,15 @@ pub struct Animal {
     /// while the young is dependent and the mother is alive.
     #[serde(default)]
     pub mother: Option<u64>,
+    /// **Its intent record** (CONTRACTS, [`crate::intent`]): the proposal, the held intent,
+    /// its subject and hold, the executed actions and any physical override. Records only:
+    /// no rule reads it.
+    #[serde(default)]
+    pub intent: IntentRecord,
+    /// **Its kick** (CONTRACTS, [`crate::kick`]): ready, winding up at a target, or recovering.
+    /// Always ready for a lineage without one.
+    #[serde(default)]
+    pub kick: kick::KickState,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -2638,6 +2690,12 @@ impl FaunaConfig {
         m.cruise_m_per_s = p.cruise_body_lengths_per_s * p.adult_length_m;
         m.yaw_cap_rad_per_s = p.yaw_cap_rad_per_s;
         m.forward_reference_m = m.cruise_m_per_s * m.controller_period_s;
+        if !m.menu.plain() {
+            m.kin_slots = p.intent.kin_slots as usize;
+            m.threat_slots = p.intent.threat_slots as usize;
+            m.prey_slots = p.intent.prey_slots as usize;
+            m.place_slots = p.intent.place_slots as usize;
+        }
         let film_reference = p.taste_reference.is_none() && p.diet == Diet::only(Food::Film);
         m.taste_reference_rule = if film_reference {
             manifest::TASTE_REFERENCE_FILM_RULE
@@ -4172,6 +4230,27 @@ pub struct Fauna {
     /// actions ([`Steer`]). Session state for probes and studies: not saved.
     #[serde(skip)]
     steer: FxHashMap<u64, Steer>,
+    /// CONTRACTS: the pack tactic's own reading of what its last answer was for (an intent
+    /// name of the Veilhound's menu), the label its intent record takes. Session state.
+    #[serde(skip)]
+    pub(crate) pack_hint: FxHashMap<u64, &'static str>,
+    /// CONTRACTS: brains' memories read from a save, each handed back to its body's
+    /// controller ([`Controller::restore`]) before the body's next sample.
+    #[serde(skip)]
+    pub(crate) brain_memory: FxHashMap<u64, BrainMemory>,
+    /// CONTRACTS: a brain's rest request at its last sample ([`RestAsk`]), which the
+    /// circadian stage grants when the body may rest. Session state.
+    #[serde(skip)]
+    pub(crate) rest_asks: FxHashMap<u64, RestAsk>,
+    /// CONTRACTS: the calls emitted since the last hearing ([`calls`]). Session state.
+    #[serde(skip)]
+    pub(crate) calls: Vec<calls::CallEvent>,
+    /// CONTRACTS: each caller's last call of each kind, for its cooldown. Session state.
+    #[serde(skip)]
+    pub(crate) last_call: FxHashMap<(u64, u8), u64>,
+    /// CONTRACTS: each hearer's call records ([`calls::Heard`]). Saved: simpler than not.
+    #[serde(default)]
+    pub(crate) heard: FxHashMap<u64, calls::Heard>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4406,13 +4485,42 @@ pub struct TapSample {
     pub steer: Steer,
 }
 
+/// **One decision sample in the tap** (CONTRACTS, the cloning record of §10.2 and §11.3): the
+/// inputs a menu brain would get ([`subjects::DecisionPrep`]: mask, candidates, row masks, the
+/// held row and the early end), the intent held before the sample, the label **before** the
+/// hold (`proposal`, its subject's row), and what was held after it, with the executed
+/// actions and any physical override.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TapDecision {
+    pub tick: u64,
+    pub prep: subjects::DecisionPrep,
+    pub held_before: u8,
+    pub proposal: u8,
+    pub proposal_row: Option<usize>,
+    pub held: u8,
+    pub held_row: Option<usize>,
+    pub executed: Executed,
+    pub overridden: Override,
+}
+
 /// The tap's recording: one stream per body, by id ([`Fauna::tap`]).
 #[derive(Clone, Debug, Default)]
 pub struct ActionTap {
     streams: std::collections::BTreeMap<u64, (Founder, Vec<TapSample>)>,
+    /// CONTRACTS: the menu bodies' decision samples, by id.
+    decisions: std::collections::BTreeMap<u64, (Founder, Vec<TapDecision>)>,
 }
 
 impl ActionTap {
+    /// Body `id`'s decision samples so far (menu lineages only).
+    pub fn decisions(&self, id: u64) -> Option<&[TapDecision]> {
+        self.decisions.get(&id).map(|(_, s)| s.as_slice())
+    }
+
+    pub(crate) fn push_decision(&mut self, id: u64, founder: Founder, sample: TapDecision) {
+        self.decisions.entry(id).or_insert_with(|| (founder, Vec::new())).1.push(sample);
+    }
+
     /// Body `id`'s stream so far.
     pub fn stream(&self, id: u64) -> Option<&[TapSample]> {
         self.streams.get(&id).map(|(_, s)| s.as_slice())
@@ -4425,7 +4533,7 @@ impl ActionTap {
 
     /// A recording from per-body streams (tools and tests that read a saved one).
     pub fn from_streams(streams: impl IntoIterator<Item = (u64, Founder, Vec<TapSample>)>) -> ActionTap {
-        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect() }
+        ActionTap { streams: streams.into_iter().map(|(id, f, s)| (id, (f, s))).collect(), decisions: Default::default() }
     }
 
     /// Finalize only this tick's sample, after the motor's stamina gate runs.
@@ -4708,6 +4816,12 @@ impl Fauna {
             next_pack: 0,
             face_sky: (None, FxHashMap::default()),
             steer: FxHashMap::default(),
+            pack_hint: FxHashMap::default(),
+            brain_memory: FxHashMap::default(),
+            rest_asks: FxHashMap::default(),
+            calls: Vec::new(),
+            last_call: FxHashMap::default(),
+            heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),
@@ -5278,6 +5392,8 @@ impl Fauna {
                 });
             }
         }
+        // CONTRACTS (§11.6): one pack's founders are littermates of a founding mother.
+        self.record_founding_family(&members, FOUNDING_PACK_TAG | id);
         self.next_pack += 1;
         self.packs.push(PackRecord {
             id,
@@ -5301,6 +5417,21 @@ impl Fauna {
             season: Season::default(),
         });
         Some(id)
+    }
+
+    /// **Record founders as one family** (CONTRACTS, behaviour-AI §11.6): `ids` share the
+    /// founding mother id of `group` ([`founding_mother`]), so they are sisters (a family) or
+    /// littermates (a pack) from the first generation; nothing reads it as a living mother.
+    /// A body that already has a recorded mother keeps it.
+    pub fn record_founding_family(&mut self, ids: &[u64], group: u64) {
+        let m = founding_mother(group & !FOUNDING_MOTHER_BIT);
+        for &id in ids {
+            if let Ok(i) = self.animals.binary_search_by_key(&id, |a| a.id) {
+                if self.animals[i].mother.is_none() {
+                    self.animals[i].mother = Some(m);
+                }
+            }
+        }
     }
 
     pub fn view(&self) -> FaunaView<'_> {
@@ -5700,6 +5831,8 @@ impl Fauna {
             bout: None,
             hunt: crate::HuntMemory::default(),
             mother: None,
+            intent: IntentRecord::default(),
+            kick: kick::KickState::default(),
             bite: LastBite::default(),
         };
         let mut animal = animal;

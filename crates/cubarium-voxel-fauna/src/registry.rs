@@ -26,6 +26,7 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_juveniles_only".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_ashore_only".into(), names: founders },
+                Alias { pattern: "fauna.founders.*.calls.loudness".into(), names: vec!["first", "second"] },
             ],
             Vec::new(),
         )
@@ -375,6 +376,35 @@ fn founder_rows() -> Vec<Row> {
         r("grooming.groom_radius_m", "m", nonneg, "SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length"),
         r("grooming.groom_s", "s", nonneg, "SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds"),
         r("grooming.groom_seek_m", "m", nonneg, "SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom"),
+        // CONTRACTS (`IntentKnobs`, behaviour-AI §2.2, §11.1, §11.3).
+        r("intent.hold_s", "s", nonneg, "CONTRACTS: the least time an intent is held before another may replace it (an early end skips it); §2.2 ~1 s, a decision every few controller samples"),
+        r("intent.switch_margin", "probability", fraction, "CONTRACTS: after the hold, a new intent replaces the held one only when this much more probable"),
+        r("intent.temperature", "logit units", Range::positive(), "CONTRACTS: the fixed softmax temperature the margin's probabilities are taken at"),
+        r("intent.subject_lost_s", "s", nonneg, "CONTRACTS: a subject unsensed for this long becomes none and ends its hold; an animal that loses sight of another searches for seconds, not minutes"),
+        r("intent.kin_slots", "slots", nonneg, "CONTRACTS: kin rows a menu lineage's brain sees (a sensed mother or calf keeps one); a family or pack member sees its group (§2.1 kin 1 -> 4)").digest(),
+        r("intent.threat_slots", "slots", nonneg, "CONTRACTS: threat rows a menu lineage's brain sees").digest(),
+        r("intent.prey_slots", "slots", nonneg, "CONTRACTS: prey rows a menu lineage's brain sees").digest(),
+        r("intent.place_slots", "slots", nonneg, "CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees").digest(),
+        r("intent.adult_fraction", "x body_max", fraction, "CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard)"),
+        // The kick (`kick::Kick`, CONTRACTS, behaviour-AI §3.3): `None` on every lineage until
+        // LS-DEFEND; `step_in_windup` and `kick_back` are switches: no row.
+        r("kick.windup_s", "s", nonneg, "CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s").optional(),
+        r("kick.recovery_s", "s", nonneg, "CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s").optional(),
+        r("kick.reach_m", "m", nonneg, "CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m)").optional(),
+        r("kick.origin_forward_fraction", "x body length", nonneg, "CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw").optional(),
+        r("kick.arc_deg", "deg", nonneg, "CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it").optional(),
+        r("kick.band_low_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's floor over the kicker's base").optional(),
+        r("kick.band_high_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's top over the kicker's base").optional(),
+        r("kick.damage", "wound at equal size", nonneg, "CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6)").optional(),
+        // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
+        r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
+        r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),
+        r("calls.cooldown_s", "s", nonneg, "CONTRACTS: a caller emits a kind at most once per this"),
+        r("calls.records", "records", nonneg, "CONTRACTS: call records a hearer keeps"),
+        r("calls.keep_s", "s", nonneg, "CONTRACTS: a call record is dropped this long after its call"),
+        r("calls.refractory_s", "s", nonneg, "CONTRACTS: a call of a kind from near a record younger than this is ignored"),
+        r("calls.dedup_m", "m", nonneg, "CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller)"),
+        r("calls.asleep_loudness", "loudness", nonneg, "CONTRACTS: a sleeper records a call only at least this loud after occlusion"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),
@@ -750,6 +780,7 @@ fn knob_rows() -> Vec<Row> {
         pk("hearing_near_m", "m", pos, "received loudness is emission over the distance, read as at least this"),
         pk("place_memory_fade_s", "s", nonneg, "time for last-used home-place freshness to fall linearly to zero without a physical revisit; 0 disables recall").search(60.0, 7200.0).log(),
         pk("give_up_s", "s", nonneg, "a body not sensed again within this is given up; a pursuit walks to its last-known point until then").search(1.0, 60.0).log(),
+        pk("lame_wound", "wound", fraction, "CONTRACTS: a body seen with at least this wound reads lame (a visible limp) on a sight track"),
     ]);
 
     // `fauna.scent.*`: the scent field (SENSES-CORE).

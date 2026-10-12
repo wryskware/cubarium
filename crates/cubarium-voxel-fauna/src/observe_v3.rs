@@ -241,6 +241,7 @@ pub(crate) fn encode(
                 });
             }
             "Social" => out.copy_from_slice(&social(fauna, a, &frame, v, range)),
+            "Calls" => crate::calls::encode(fauna, a, &frame, out),
             name => match name.strip_prefix("Place(").and_then(|r| r.strip_suffix(')')) {
                 Some(kind) => out.copy_from_slice(&place(fauna, a, kind, &frame, v)),
                 None => panic!("the {} manifest's v3 block {name} has no encoder", founder.name()),
