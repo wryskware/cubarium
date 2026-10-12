@@ -104,16 +104,16 @@ struct Bin {
 }
 
 fn wide(args: &[String]) -> Result<(), String> {
-    if args.len() < 5 {
+    if args.len() < 4 {
         return Err("usage: young_roam_study wide CONFIG SEED MINUTES OUT [set=K=V]...".into());
     }
     cubarium_voxel_sim::experiment_args(args);
-    let file = std::fs::read_to_string(&args[1]).map_err(|e| e.to_string())?.parse::<toml::Table>().map_err(|e| e.to_string())?;
+    let file = std::fs::read_to_string(&args[0]).map_err(|e| e.to_string())?.parse::<toml::Table>().map_err(|e| e.to_string())?;
     let sets: Vec<String> = args.iter().filter_map(|a| a.strip_prefix("set=")).map(str::to_string).collect();
     let p = Params::resolve(&Layers { file: Some(file), sets: sets.clone(), ..Layers::default() })?;
-    let seed: u64 = args[2].parse().map_err(|e| format!("{e}"))?;
-    let minutes: f64 = args[3].parse().map_err(|e| format!("{e}"))?;
-    let out = Path::new(&args[4]);
+    let seed: u64 = args[1].parse().map_err(|e| format!("{e}"))?;
+    let minutes: f64 = args[2].parse().map_err(|e| format!("{e}"))?;
+    let out = Path::new(&args[3]);
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     let f = found(&p.world, &LayerConfig::new(&p, p.world.voxel_m), p.fauna.founder_counts(), Seeds::from(seed), false);
     let mut sim = Sim::ambient(f.world, f.flora, f.fauna, SimConfig::experiment());
