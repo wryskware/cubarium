@@ -41,7 +41,7 @@ hosts = ["desktop"]
 parallel = 2
 mem_gb = 4
 bin = {json.dumps(str(repo / 'scripts/studies/engagement-task.py'))}
-args = {json.dumps(args)}
+args = {json.dumps(args, indent=2)}
 '''
     options.out.write_text(text)
     print(options.out.resolve())
