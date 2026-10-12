@@ -307,16 +307,14 @@ pub fn stand_hosts(fv: &FloraView<'_>, s: &Stand) -> bool {
     s.species == STAND_HOST && s.profile_stage >= 1 && fv.edible_foliage(s) > 0.0
 }
 
-/// **NUTS stand-in: may this plant hold food the eater cannot see from where it is?**
-/// LARVA's part of the seedporter's tree check (NUTS builds the check and names the
-/// predicate `may_hold_hidden_food`): a latticevine with leaves or a crowned vaulttree may
-/// hold larvae. One place, so the check's predicate takes it in at merge.
-#[allow(dead_code)] // The parent wires it into NUTS's `may_hold_hidden_food` at merge.
-pub(crate) fn may_hold_hidden_larvae(fv: &FloraView<'_>, host: LarvaHost) -> bool {
+/// **May this plant hold larvae an eater cannot see from where it is?** LARVA's part of the
+/// seedporter's tree check ([`crate::treecheck::may_hold_hidden_food`] takes it in): a
+/// crowned vaulttree with leaves ([`stand_hosts`]), or a latticevine that is not dormant, as
+/// found at one of its leafy faces.
+pub(crate) fn may_hold_hidden_larvae(fv: &FloraView<'_>, host: crate::treecheck::Host<'_>) -> bool {
     match host {
-        LarvaHost::Vine(id) => fv.cover.vine(id).is_some_and(|v| !v.dormant)
-            && fv.cover.iter().any(|f| f.owner == id && f.leafiness > 0.0),
-        LarvaHost::Stand(id) => fv.stands.iter().any(|s| s.id == id && stand_hosts(fv, s)),
+        crate::treecheck::Host::Vine(v, face) => !v.dormant && face.owner == v.id && face.leafiness > 0.0,
+        crate::treecheck::Host::Stand(s) => stand_hosts(fv, s),
     }
 }
 

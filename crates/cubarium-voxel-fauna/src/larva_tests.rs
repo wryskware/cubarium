@@ -637,3 +637,138 @@ fn a_bellwing_lays_into_the_field_and_no_juvenile_body_is_made() {
     assert_eq!(fauna.view().ledger.hatched, 0, "nothing hatched from a clutch");
     let _ = id;
 }
+
+// ------------------------------------------------------------------ 10. the tree check (ECO-INT)
+
+/// Every lineage awake, no ground response, no troop pull, no bellwing catching: a seedporter
+/// on its own heuristic forages and checks without other pulls.
+fn check_config() -> FaunaConfig {
+    let mut c = FaunaConfig::default();
+    for p in &mut c.founders {
+        p.active = crate::Activity::Always;
+        p.vigilance = crate::Vigilance::default();
+        p.catch_bellwings = false;
+        p.herding = crate::Herding::default();
+    }
+    c
+}
+
+/// A hungry seedporter on the ground at column `(x, z)` facing `heading`, on its heuristic.
+fn hungry_on_ground(fauna: &mut Fauna, world: &World, x: i64, z: u32, heading: f64) -> u64 {
+    assert!(fauna.apply(world, Command::IntroduceFounder { x, z, founder: SP, stores: StartingStores { body: 1.0, reserve: 0.3 }, heading_rad: heading }));
+    let id = fauna.animals.last().expect("introduced").id;
+    let teachers = fauna.config.teachers;
+    fauna.controllers.set(id, crate::heuristic(SP, teachers));
+    id
+}
+
+fn larva_bites(fauna: &Fauna) -> u64 {
+    fauna.view().ledger.bites_by_founder_food[SP.index()][Food::Larva.index()]
+}
+
+/// **A hungry seedporter with no food in sight goes to a leafy latticevine holding hatched
+/// larvae, reaches them and eats them** (ECO-INT; Wrysk 2026-10-12: seedporters "check" plants
+/// for food they cannot see): standing along the wall farther than its larva sight and inside
+/// its check search, it sees no food, walks on the check, and the vine's larvae fall by what
+/// it eats, into its larva pool.
+#[test]
+fn a_hungry_seedporter_checks_a_leafy_vine_and_eats_its_larvae() {
+    let world = world(40, 64, 40);
+    let mut flora = Flora::new(flora_config());
+    let vine = vine(&mut flora, &world);
+    let mut fauna = Fauna::new(check_config());
+    fauna.set_births_enabled(false);
+    let egg = fauna.config().founder(BW).core.reproduction.egg_organic;
+    let inc = incubation(&fauna);
+    let root = flora.view().cover.vine(vine.0).expect("the vine").root;
+    put(&mut fauna, LarvaHost::Vine(vine.0), root, Some(vine.1[1]), (20.0, 5.0 * egg, inc + 100.0));
+    assert!(crate::larva::visible(&fauna, LarvaHost::Vine(vine.0)).is_some(), "fixture: hatched larvae it would see");
+    // Along the wall's west side, farther than its larva sight, within its check search,
+    // facing away.
+    let phys = *fauna.config().founder(SP);
+    let (sight, search) = (phys.larva_sight_m, phys.glider.expect("a glider").check_search_m);
+    let z = WALL_Z + ((2.0 * sight + 1.0) / V).ceil() as u32;
+    let gap = f64::from(z - WALL_Z) * V;
+    assert!(gap > sight && gap + 2.0 < search, "fixture: beyond larva sight ({gap} m > {sight} m), inside the check ({search} m)");
+    let id = hungry_on_ground(&mut fauna, &world, WALL_X - 2, z, 0.0);
+    let i = fauna.animals.iter().position(|a| a.id == id).expect("alive");
+    let seen = crate::step::fruit_candidates(&fauna, i, &world.view(), &flora.view(), 100.0).expect("a glider");
+    assert!(seen.is_empty(), "fixture: no food in sight: {seen:?}");
+    let n0 = count(&fauna);
+    let mut checked = false;
+    for _ in 0..8000 {
+        fauna.step(&world, &mut flora);
+        checked |= fauna.steer_of(id) == Some(crate::Steer::Check);
+        if larva_bites(&fauna) > 0 {
+            break;
+        }
+    }
+    assert!(checked, "it walks to the vine on the check");
+    assert!(larva_bites(&fauna) > 0, "it eats the vine's larvae: {:?}", animal(&fauna, id).mobility);
+    assert!(count(&fauna) < n0, "the vine's larvae fell");
+    assert!(animal(&fauna, id).stomach.pools[Food::Larva.index()].organic > 0.0, "into its larva pool");
+    assert!(ledger(&fauna).eaten_seedporter > 0.0, "booked as eaten by a seedporter");
+    let memory = fauna.tree_checks_of(id).expect("a memory");
+    assert!(memory.seen.iter().any(|c| c.host == LarvaHost::Vine(vine.0)), "it remembers the vine: {memory:?}");
+    layers_close(&fauna, &flora);
+}
+
+/// **A vine host and a stand host with the same numeric id are remembered apart**: a vine
+/// checked empty does not mark the stand of that number, nor the other way round, and the
+/// check's order drops only the one remembered empty.
+#[test]
+fn a_vine_and_a_stand_of_the_same_number_are_remembered_apart() {
+    use crate::treecheck::{order, recall, remember};
+    let world = world(40, 64, 16);
+    let mut fauna = Fauna::new(check_config());
+    let id = hungry_on_ground(&mut fauna, &world, 2, 8, 0.0);
+    let n = 7u64;
+    let (vine, stand) = (LarvaHost::Vine(n), LarvaHost::Stand(n));
+    let memory = 1_000u64;
+    remember(&mut fauna, id, vine, false);
+    let now = fauna.tick;
+    assert_eq!(recall(&fauna, id, vine, now, memory).map(|c| c.held_food), Some(false), "the vine is remembered empty");
+    assert!(recall(&fauna, id, stand, now, memory).is_none(), "the stand of the same number is not remembered");
+    let cands = [(3.0, stand, ()), (3.0, vine, ())];
+    let left: Vec<LarvaHost> = order(&cands, None, |h| recall(&fauna, id, h, now, memory)).into_iter().map(|c| c.1).collect();
+    assert_eq!(left, vec![stand], "only the empty vine is dropped");
+    remember(&mut fauna, id, stand, true);
+    assert_eq!(recall(&fauna, id, stand, now, memory).map(|c| c.held_food), Some(true), "the stand is its own entry");
+    assert_eq!(recall(&fauna, id, vine, now, memory).map(|c| c.held_food), Some(false), "the vine's entry is unchanged");
+}
+
+/// **A vaulttree holding larvae but no nuts counts as holding food when checked**: it is a
+/// host to check, what it holds is food, and a hungry seedporter that checks it finds food
+/// there (the check's readout) and eats the larvae.
+#[test]
+fn a_vaulttree_with_larvae_and_no_nuts_holds_food_when_checked() {
+    let world = world(40, 64, 16);
+    let mut flora = Flora::new(flora_config());
+    let tree = vaulttree(&mut flora, &world, 26, 8);
+    let mut fauna = Fauna::new(check_config());
+    fauna.set_births_enabled(false);
+    let egg = fauna.config().founder(BW).core.reproduction.egg_organic;
+    let inc = incubation(&fauna);
+    put(&mut fauna, LarvaHost::Stand(tree.1), tree.0, None, (20.0, 5.0 * egg, inc + 100.0));
+    let phys = *fauna.config().founder(SP);
+    {
+        let fv = flora.view();
+        let s = fv.stand_at(tree.0).expect("the tree");
+        assert_eq!(s.fruit, 0.0, "fixture: no nuts");
+        let host = crate::treecheck::Host::Stand(s);
+        assert!(crate::treecheck::may_hold_hidden_food(&fauna, &fv, &phys, host), "a crowned vaulttree is a host to check");
+        assert!(crate::treecheck::hidden_food(&fauna, &fv, host), "its larvae are food it holds");
+    }
+    let id = hungry_on_ground(&mut fauna, &world, 26 - 16, 8, -EAST);
+    let n0 = count(&fauna);
+    for _ in 0..8000 {
+        fauna.step(&world, &mut flora);
+        if larva_bites(&fauna) > 0 {
+            break;
+        }
+    }
+    let t = fauna.check_tally();
+    assert!(t.checks >= 1 && t.found >= 1, "the check found food in the tree: {t:?}, {:?}", animal(&fauna, id).mobility);
+    assert!(larva_bites(&fauna) > 0 && count(&fauna) < n0, "it eats the tree's larvae");
+    layers_close(&fauna, &flora);
+}

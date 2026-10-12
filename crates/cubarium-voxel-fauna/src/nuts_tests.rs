@@ -431,7 +431,7 @@ fn after_an_empty_tree_it_checks_another_and_not_the_empty_one_again() {
     assert_eq!(ate_on, Some(far), "the meal is at the other tree: {visits:?}");
     let memory = f.tree_checks_of(id).expect("a memory");
     let near_id = stand_id(&flora, near);
-    assert!(memory.seen.iter().any(|c| c.host == near_id && !c.held_food), "it remembers the empty tree empty");
+    assert!(memory.seen.iter().any(|c| c.host == crate::larva::LarvaHost::Stand(near_id) && !c.held_food), "it remembers the empty tree empty");
     let t = f.check_tally();
     assert!(t.checks >= 2 && t.found >= 1 && t.checkers == 1, "the readout counts the checks: {t:?}");
 }
@@ -443,21 +443,22 @@ fn the_checks_order_drops_remembered_empty_trees_until_the_memory_lapses_and_put
     use crate::treecheck::{Checked, order};
     let memory = 100u64;
     let now = 1_000u64;
-    let cands = [(4.0, 7u64, ()), (4.0, 9u64, ())];
-    let recall_of = |seen: Vec<Checked>| move |host: u64| seen.iter().find(|c| c.host == host && now.saturating_sub(c.tick) < memory).copied();
-    let ids = |v: Vec<(f64, u64, ())>| v.into_iter().map(|c| c.1).collect::<Vec<_>>();
+    let (h7, h9) = (crate::larva::LarvaHost::Stand(7), crate::larva::LarvaHost::Stand(9));
+    let cands = [(4.0, h7, ()), (4.0, h9, ())];
+    let recall_of = |seen: Vec<Checked>| move |host: crate::larva::LarvaHost| seen.iter().find(|c| c.host == host && now.saturating_sub(c.tick) < memory).copied();
+    let ids = |v: Vec<(f64, crate::larva::LarvaHost, ())>| v.into_iter().map(|c| match c.1 { crate::larva::LarvaHost::Stand(n) => n, crate::larva::LarvaHost::Vine(_) => unreachable!("stands only") }).collect::<Vec<_>>();
     // Empty within the memory: dropped; lapsed: back, as unchecked.
-    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: false }]))), vec![9]);
-    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - memory, held_food: false }]))), vec![7, 9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: h7, tick: now - 10, held_food: false }]))), vec![9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: h7, tick: now - memory, held_food: false }]))), vec![7, 9]);
     // Fed first, whichever id it carries.
-    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 9, tick: now - 10, held_food: true }]))), vec![9, 7]);
-    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: true }]))), vec![7, 9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: h9, tick: now - 10, held_food: true }]))), vec![9, 7]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: h7, tick: now - 10, held_food: true }]))), vec![7, 9]);
     // The tree it is walking to stays first, over a fed one; not if remembered empty.
-    assert_eq!(ids(order(&cands, Some(9), recall_of(vec![Checked { host: 7, tick: now - 10, held_food: true }]))), vec![9, 7]);
-    assert_eq!(ids(order(&cands, Some(9), recall_of(vec![Checked { host: 9, tick: now - 10, held_food: false }]))), vec![7]);
+    assert_eq!(ids(order(&cands, Some(h9), recall_of(vec![Checked { host: h7, tick: now - 10, held_food: true }]))), vec![9, 7]);
+    assert_eq!(ids(order(&cands, Some(h9), recall_of(vec![Checked { host: h9, tick: now - 10, held_food: false }]))), vec![7]);
     // In the layer: a remembered-empty host is not offered within the memory, and is after it.
     let (w, flora, mut f, id, near, _) = two_trees(true);
-    let host = stand_id(&flora, near);
+    let host = crate::larva::LarvaHost::Stand(stand_id(&flora, near));
     let g = f.config.founder(SP).glider.expect("a glider");
     let ticks = cubarium_voxel::ticks_at_least_one(g.check_memory_s);
     f.tree_checks.entry(id).or_default().seen.push(Checked { host, tick: 0, held_food: false });
@@ -480,7 +481,7 @@ fn a_tree_remembered_with_food_is_checked_before_an_unchecked_one_at_equal_dista
         let mut f = Fauna::new(config());
         f.set_births_enabled(false);
         let id = on_ground(&mut f, &w, 10.125, 0.0, HUNGRY);
-        let host = stand_id(&flora, if remember_east { east } else { west });
+        let host = crate::larva::LarvaHost::Stand(stand_id(&flora, if remember_east { east } else { west }));
         f.tree_checks.entry(id).or_default().seen.push(crate::treecheck::Checked { host, tick: 0, held_food: true });
         for _ in 0..6000 {
             step(&mut f, &w, &mut flora);

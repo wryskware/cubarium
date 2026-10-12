@@ -1247,8 +1247,9 @@ pub struct Glider {
     /// \"check\" trees and stuff cuz they wont be able to see larvae or nuts from the ground in
     /// a tall vaulttree"): a hungry grounded glider on its heuristic, with no food in sight,
     /// walks to the nearest host plant that may hold food it cannot see
-    /// ([`crate::treecheck::may_hold_hidden_food`]) within this horizontal distance, metres,
-    /// climbs into its crown and looks. A heuristic world query over the plant layer (a tree
+    /// ([`crate::treecheck::may_hold_hidden_food`]: a crowned vaulttree, or a leafy
+    /// latticevine for larvae) within this horizontal distance, metres, climbs into its crown
+    /// (or goes to the vine's leafy face) and looks. A heuristic world query over the plant layer (a tree
     /// is a big, plain object), not a sense of the food. Real: tamarins and marmosets travel
     /// tens of metres between feeding trees (Garber 1988, *Behaviour* 105). 0 turns the
     /// check off. 16.0 (two fruit searches).

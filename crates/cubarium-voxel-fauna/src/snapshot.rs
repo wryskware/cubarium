@@ -201,6 +201,8 @@ use crate::{Fauna, FaunaConfig};
 // 87: LARVA — `Fauna::larvae` (the larva field: hosts, cohorts), `FaunaLedger::larva` (its
 //     books) and `Food::Larva` (every per-food array gains an entry: a state layout change).
 //     `FounderPhysiology::{larva, larva_bite_half_stock, larva_sight_m}` are named config.
+//     ECO-INT (same bump): the tree-check memory keys its hosts by `LarvaHost` (a stand or a
+//     vine), not a stand id.
 pub const SCHEMA: u32 = 87;
 
 #[derive(Serialize)]

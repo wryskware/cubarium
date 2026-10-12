@@ -113,7 +113,7 @@ pub(crate) mod places;
 pub(crate) use glider::{better_roost, safe_crown, Roost};
 #[cfg(test)]
 pub(crate) use glider::fruit_candidates;
-pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, off_graph_exit};
+pub(crate) use glider::{on_ledge_top, refuge_height_m, OffGraph, glider_fruit_in_reach, glider_larva_in_reach, leafy_vine_in_reach, off_graph_exit};
 #[cfg(test)]
 pub(crate) use glider::fruit_candidates as glider_fruit_candidates;
 #[path = "jump.rs"]

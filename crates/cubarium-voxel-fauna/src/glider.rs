@@ -364,6 +364,8 @@ pub(super) fn glider_act(
             return;
         }
         ground_tick(fauna, view, flora, seed, tick, glider, i, hits);
+        // ECO-INT: on its feet at a vine's leafy face it looks at what the vine holds.
+        crate::treecheck::note(fauna, i, view, &flora.view());
         return;
     }
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
@@ -1322,6 +1324,22 @@ pub(crate) fn glider_larva_in_reach(
     })
 }
 
+/// **The vine a glider's mouth is at** (ECO-INT, the tree check's look): the vine of the
+/// nearest leafy face within its fruit mouth's reach, as [`glider_larva_in_reach`] reads it.
+pub(crate) fn leafy_vine_in_reach<'a>(
+    view: &VoxelView<'_>,
+    fv: &FloraView<'a>,
+    a: &Animal,
+    phys: &crate::FounderPhysiology,
+) -> Option<crate::treecheck::Host<'a>> {
+    let (p, reach) = fruit_mouth(a, phys);
+    let mut near = flight::vine_faces_within(view, fv, p, p, reach, |c| (c.leafiness > 0.0).then_some(0.0));
+    near.sort_by(|x, y| x.d.total_cmp(&y.d).then(x.face.cmp(&y.face)));
+    let cover: &'a cubarium_voxel_flora::Cover = fv.cover;
+    let face = cover.face(near.first()?.face)?;
+    Some(crate::treecheck::Host::Vine(cover.vine(face.owner)?, face))
+}
+
 /// **A larva bite** (LARVA §4, the twin of [`glider_feed`]): the gut's bite of the larvae
 /// its mouth reaches ([`glider_larva_in_reach`]) at [`crate::FounderPhysiology::larva_bite_half_stock`],
 /// out of the field's oldest cohorts first ([`crate::larva::take_larvae`]), into the stomach's
@@ -1975,12 +1993,21 @@ fn vine_fruit_key(view: &VoxelView<'_>, face: VineFace) -> u64 {
 
 fn fruit_wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, id: u64) -> Option<Actions> {
     let a = fauna.animals[i];
+    // Both sight and remembered-face approaches must honour the walk's shun list.
+    if fauna.walk_shunned(a.id, a.founder?).contains(&id) { return None; }
+    let face = fv.cover.iter().find(|f| face_has_food(fauna, f) && vine_fruit_key(view, f.face) == id)?.face;
+    wall_approach(fauna, i, view, fv, face, id, crate::Steer::Fruit)
+}
+
+/// The last steps of a walk to vine `face` (walk key `id`, steered as `kind`): once within
+/// its reach of the face's front, into the face, where its footprint touches the plane, with
+/// feeding on. `None` farther off, shunned, or with no covered face in its body rows there.
+fn wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, face: VineFace, id: u64, kind: crate::Steer) -> Option<Actions> {
+    let a = fauna.animals[i];
     let founder = a.founder?;
     let phys = *fauna.config.founder(founder);
-    // Both sight and remembered-face approaches must honour the walk's shun list.
     if fauna.walk_shunned(a.id, founder).contains(&id) { return None; }
-    let fruit = fv.cover.iter().find(|f| face_has_food(fauna, f) && vine_fruit_key(view, f.face) == id)?;
-    let (x, _, z) = fruit.face.front(view)?;
+    let (x, _, z) = face.front(view)?;
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, ring);
@@ -1989,14 +2016,14 @@ fn fruit_wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     let (low, high) = body_rows(a.pose.y_m, s, v);
     // Above or below every covered body row, this stance cannot attach. Let the
     // route find its accessible foot instead of aiming into an unreachable face.
-    if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(fruit.face.x, row as u32, fruit.face.z, fruit.face.dir)).is_some()) {
+    if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(face.x, row as u32, face.z, face.dir)).is_some()) {
         return None;
     }
-    let (wx, wz) = crate::pack::centre(Site { x: fruit.face.x, y: fruit.face.y, z: fruit.face.z }, v);
+    let (wx, wz) = crate::pack::centre(Site { x: face.x, y: face.y, z: face.z }, v);
     // Align with a point just outside the plane, where this body's footprint
     // touches it. A wall's voxel centre is inside solid terrain, and a ledge
     // above that centre can otherwise produce a permanent zero-length aim.
-    let (nx, nz) = match fruit.face.dir {
+    let (nx, nz) = match face.dir {
         FaceDir::PosX => (1.0, 0.0), FaceDir::NegX => (-1.0, 0.0),
         FaceDir::PosZ => (0.0, 1.0), FaceDir::NegZ => (0.0, -1.0),
         FaceDir::Down => return None,
@@ -2006,7 +2033,7 @@ fn fruit_wall_approach(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &F
     let (dx, dz) = if dx.hypot(dz) <= PRESSED_M + EPS { (-nx, -nz) } else { (dx, dz) };
     let mut into = aim_toward(&a, dx, dz, 0.5 * v);
     into.feed = 1.0;
-    fauna.walking_to(a.id, id, crate::Steer::Fruit);
+    fauna.walking_to(a.id, id, kind);
     Some(into)
 }
 
@@ -2128,25 +2155,101 @@ fn fruit_in_sight(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, d3: f
 /// walks to the nearest host that may hold food it cannot see, within `check_search_m`, that
 /// it can climb and can walk to — the one it is already walking to first, then a host it
 /// remembers holding food, one it remembers empty not at all — and walking into the stem
-/// climbs it to the crown, where it looks.
+/// climbs it to the crown, where it looks. **ECO-INT**: a latticevine with leaves is a host
+/// too (for an eater that seeks larvae); its walk goes to the foot of the vine's nearest
+/// leafy face it can reach from the ground, then into that face, as a walk to vine fruit
+/// does, and it looks with its mouth at the face.
 /// `None` with the check off or no host to check.
 fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
+    use crate::larva::LarvaHost;
+    use crate::treecheck::Host;
     let a = fauna.animals[i];
-    let glider = fauna.config.founder(a.founder?).glider?;
+    let phys = *fauna.config.founder(a.founder?);
+    let glider = phys.glider?;
     let search = glider.check_search_m;
     if !(search > 0.0) {
         return None;
     }
     let (now, memory) = (fauna.tick, cubarium_voxel::ticks_at_least_one(glider.check_memory_s.max(0.0)));
-    let near = {
+    // `(distance, host, (walk key, the walk's site, the vine face a vine walk goes into))`.
+    let mut near: Vec<(f64, LarvaHost, (u64, Site, Option<VineFace>))> = {
         let f: &Fauna = fauna;
-        stands_within(view, fv, &a, search, |s| climbable(fv, s, &glider) && crate::treecheck::may_hold_hidden_food(f, fv, s))
+        stands_within(view, fv, &a, search, |s| climbable(fv, s, &glider) && crate::treecheck::may_hold_hidden_food(f, fv, &phys, Host::Stand(s)))
+            .into_iter()
+            .map(|(d, id, site)| (d, LarvaHost::Stand(id), (id, site, None)))
+            .collect()
     };
+    if crate::treecheck::seeks_larvae(fauna, &phys) {
+        near.extend(vine_hosts_within(fauna, view, fv, &a, &phys, search));
+        near.sort_by(|p, q| p.0.total_cmp(&q.0).then(p.1.cmp(&q.1)));
+    }
     let aim = crate::treecheck::aim_of(fauna, a.id);
     let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
-    let (go, k) = walk_to_stand(fauna, i, view, fv, &cands, search, 1.0, crate::Steer::Check)?;
+    let walk: Vec<(f64, u64, Site)> = cands.iter().map(|c| (c.0, c.2.0, c.2.1)).collect();
+    let (go, k) = walk_to_stand(fauna, i, view, fv, &walk, search, 1.0, crate::Steer::Check)?;
     crate::treecheck::aim(fauna, a.id, cands[k].1);
+    if let Some(face) = cands[k].2.2
+        && let Some(into) = wall_approach(fauna, i, view, fv, face, walk[k].1, crate::Steer::Check)
+    {
+        return Some(into);
+    }
     Some(go)
+}
+
+/// **ECO-INT: the vine hosts within `search_m`** of body `a` (horizontally, across the ring):
+/// for each latticevine that may hold hidden food ([`crate::treecheck::may_hold_hidden_food`]),
+/// its leafy wall face nearest the body that the body can reach from the ground below it (a
+/// covered face of that column within its body rows at the foot, as for vine fruit):
+/// `(distance, host, (walk key, foot, face))`, in no particular order.
+fn vine_hosts_within(
+    fauna: &Fauna,
+    view: &VoxelView<'_>,
+    fv: &FloraView<'_>,
+    a: &Animal,
+    phys: &crate::FounderPhysiology,
+    search_m: f64,
+) -> Vec<(f64, crate::larva::LarvaHost, (u64, Site, Option<VineFace>))> {
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let shape = shape(phys, a.body);
+    let col_m = |x: u32| {
+        let (dx, _) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(x) + 0.5) * v, a.pose.z, ring);
+        dx.abs()
+    };
+    // Per vine: (horizontal distance, 3-D distance, face, foot).
+    let mut best: rustc_hash::FxHashMap<cubarium_voxel_flora::VineId, (f64, f64, VineFace, Site)> = rustc_hash::FxHashMap::default();
+    for face in fv.cover.wall_faces_in_columns(|x| col_m(x) <= search_m + v) {
+        let Some(cf) = fv.cover.face(face) else { continue };
+        if !(cf.leafiness > 0.0) {
+            continue;
+        }
+        let Some((x, y, z)) = face.front(view) else { continue };
+        let (sx, sz, my) = ((f64::from(x) + 0.5) * v, (f64::from(z) + 0.5) * v, (f64::from(y) + 0.5) * v);
+        let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+        let dh = dx.hypot(dz);
+        if dh > search_m {
+            continue;
+        }
+        let d3 = dh.hypot(my - a.pose.y_m);
+        if best.get(&cf.owner).is_some_and(|b| (b.1, b.2) <= (d3, face)) {
+            continue;
+        }
+        let Some(foot) = flight::support_below(view, sx, sz, my) else { continue };
+        let (low, high) = body_rows(crate::surface_m(foot.y, v), shape, v);
+        if !(low..=high).any(|row| row >= 0 && fv.cover.face(VineFace::new(face.x, row as u32, face.z, face.dir)).is_some()) {
+            continue;
+        }
+        best.insert(cf.owner, (dh, d3, face, foot));
+    }
+    best.into_iter()
+        .filter_map(|(owner, (dh, _, face, foot))| {
+            let vine = fv.cover.vine(owner)?;
+            let cf = fv.cover.face(face)?;
+            crate::treecheck::may_hold_hidden_food(fauna, fv, phys, crate::treecheck::Host::Vine(vine, cf))
+                .then(|| (dh, crate::larva::LarvaHost::Vine(owner), (vine_fruit_key(view, face), foot, Some(face))))
+        })
+        .collect()
 }
 
 fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, day: bool) -> Option<Actions> {
