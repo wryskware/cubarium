@@ -55,6 +55,8 @@ pub mod nurse;
 pub mod intent;
 /// CONTRACTS (behaviour-AI §11.1): slots and subject candidates.
 pub mod subjects;
+/// CONTRACTS (behaviour-AI §3.3, §11.4): the kick, one state machine with one budget.
+pub mod kick;
 #[cfg(test)]
 mod intent_tests;
 pub use nurse::Nursing;
@@ -1148,6 +1150,10 @@ pub struct Animal {
     /// no rule reads it.
     #[serde(default)]
     pub intent: IntentRecord,
+    /// **Its kick** (CONTRACTS, [`crate::kick`]): ready, winding up at a target, or recovering.
+    /// Always ready for a lineage without one.
+    #[serde(default)]
+    pub kick: kick::KickState,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -4226,6 +4232,10 @@ pub struct Fauna {
     /// controller ([`Controller::restore`]) before the body's next sample.
     #[serde(skip)]
     pub(crate) brain_memory: FxHashMap<u64, BrainMemory>,
+    /// CONTRACTS: a brain's rest request at its last sample ([`RestAsk`]), which the
+    /// circadian stage grants when the body may rest. Session state.
+    #[serde(skip)]
+    pub(crate) rest_asks: FxHashMap<u64, RestAsk>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4793,6 +4803,7 @@ impl Fauna {
             steer: FxHashMap::default(),
             pack_hint: FxHashMap::default(),
             brain_memory: FxHashMap::default(),
+            rest_asks: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),
@@ -5770,6 +5781,7 @@ impl Fauna {
             hunt: crate::HuntMemory::default(),
             mother: None,
             intent: IntentRecord::default(),
+            kick: kick::KickState::default(),
             bite: LastBite::default(),
         };
         let mut animal = animal;

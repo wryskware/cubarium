@@ -336,6 +336,8 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
         act(fauna, &view, flora, seed, tick, &sky, &mut hits);
+        // CONTRACTS: the kicks' windups, contacts and recoveries (none without a kick table).
+        let kicks = crate::kick::advance(fauna, &view, seed);
         let ring = f64::from(view.config.width) * view.config.voxel_m;
         // HUNKER: the pack's work on its hunkered prey, before this tick's strikes land.
         crate::vigil::pry(fauna, ring);
@@ -356,6 +358,9 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
             let tapped = hit.by == crate::Founder::Seedporter && prey_founder == Some(crate::Founder::Bellwing) && sp_miss_enabled();
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by, Some(&view));
+            // CONTRACTS: a bite that landed may draw the bitten body's kick-back (its kick
+            // table's switch; no lineage has one by default).
+            crate::kick::kick_back(fauna, hit.prey, hit.striker);
             if tapped { eprintln!("SPMISS hit tick={} hunter={} prey={} damage={} killed={}", tick, hit.striker, hit.prey, hit.damage, fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err()); }
 
             if let (true, Some(f)) = (lure_kill, prey_founder) {
@@ -369,6 +374,9 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                     crate::hunt::remember_kill(fauna, hit.striker, x, z, ring);
                 }
             }
+        }
+        for k in kicks {
+            wound(fauna, flora, k.target, k.damage, k.by, Some(&view));
         }
     });
     crate::groom::step(fauna, &view, flora);
@@ -960,19 +968,20 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         // ROOSTS (backlog §12): a glider under its own heuristic, about to fall asleep on a
         // perch, stays up while a better roost (a vaulttree crown, a vine-climbed ledge top)
         // is in reach of its budget and reserve — den rest's rule. One already asleep stays.
-        let rest = match rest {
-            Some(_) if crate::pack::must_walk_home(fauna, i, view) => None,
-            Some(_)
-                if phys.glider.is_some()
-                    && !downpour
-                    && fauna.animals[i].state != State::Asleep
-                    && (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic)
-                    && glider::better_roost(fauna, i, view, fv).is_some() =>
-            {
-                None
-            }
-            Some(r) => Some(r),
-            None => {
+        // CONTRACTS: rest through the action interface. A heuristic's rest decisions are its
+        // requests to stay up (the walk home, the better roost), unchanged; a brain's request
+        // to rest is granted when the body is free and not in an emergency. The rhythm stays
+        // the backstop.
+        let ask = match rest {
+            Some(_) => heuristic_rest_ask(fauna, i, view, fv, downpour),
+            None => fauna.rest_asks.get(&fauna.animals[i].id).copied().unwrap_or_default(),
+        };
+        fauna.animals[i].intent.executed.rest = ask;
+        let rest = match (rest, ask) {
+            (Some(_), crate::RestAsk::Stay) => None,
+            (Some(r), _) => Some(r),
+            (None, crate::RestAsk::Rest) if free && !emergency => Some(Rest::Sleep),
+            (None, _) => {
                 fauna.animals[i].homing_ticks = 0;
                 None
             }
@@ -1031,6 +1040,25 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         if let Some(b) = a.bout.as_mut() {
             b.kind = b.kind.max(kind);
         }
+    }
+}
+
+/// **A heuristic's rest request** when its rhythm would put it to rest (CONTRACTS): stay up
+/// while a pack adult must walk home to its den, or a glider under its own heuristic has a
+/// better roost in reach (unless in a downpour or already asleep); else no request.
+fn heuristic_rest_ask(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, downpour: bool) -> crate::RestAsk {
+    let founder = fauna.animals[i].founder.expect("a founder");
+    let phys = *fauna.config.founder(founder);
+    if crate::pack::must_walk_home(fauna, i, view)
+        || (phys.glider.is_some()
+            && !downpour
+            && fauna.animals[i].state != State::Asleep
+            && (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic)
+            && glider::better_roost(fauna, i, view, fv).is_some())
+    {
+        crate::RestAsk::Stay
+    } else {
+        crate::RestAsk::Default
     }
 }
 
@@ -2228,9 +2256,24 @@ fn controllers(
             let held_before = fauna.animals[i].intent;
             match (sensed[k].decision, sensed[k].prep.as_ref()) {
                 (Some(d), Some(prep)) => {
+                    // The discrete actions: a rest request for the circadian stage, and a
+                    // kick at the subject (or the nearest threat it senses) when ready.
+                    if d.rest {
+                        fauna.rest_asks.insert(id, crate::RestAsk::Rest);
+                    } else {
+                        fauna.rest_asks.remove(&id);
+                    }
+                    let kicked = d.kick && {
+                        let target = d
+                            .subject
+                            .and_then(|r| prep.candidates.rows.get(r))
+                            .and_then(|c| c.subject.body())
+                            .or_else(|| fauna.percepts.get(&id).map(|p| p.best[usize::from(crate::perception::class::THREAT)]).filter(|t| t.known).map(|t| t.id));
+                        target.is_some_and(|t| crate::kick::request(fauna, i, t, crate::kick::Source::Aimed).is_ok())
+                    };
                     let executed = crate::Executed {
                         actions,
-                        kick: false,
+                        kick: kicked,
                         call: d.call,
                         rest: if d.rest { crate::RestAsk::Rest } else { crate::RestAsk::Default },
                     };
@@ -5367,6 +5410,7 @@ fn newborn(
         hunt: crate::HuntMemory::default(),
         mother: None,
         intent: crate::IntentRecord::default(),
+        kick: crate::kick::KickState::default(),
         bite: crate::LastBite::default(),
     }
 }

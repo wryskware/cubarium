@@ -652,6 +652,10 @@ pub struct FounderPhysiology {
     /// expiry and §11.1's bounded slots.
     #[serde(default)]
     pub intent: crate::IntentKnobs,
+    /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): `None`, no kick, for every lineage
+    /// until LS-DEFEND turns the loftstrider's on.
+    #[serde(default)]
+    pub kick: Option<crate::kick::Kick>,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2163,6 +2167,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                kick: None,
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2261,6 +2266,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                kick: None,
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2404,6 +2410,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                kick: None,
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),

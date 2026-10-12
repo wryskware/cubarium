@@ -438,3 +438,99 @@ fn the_tap_records_a_menu_teachers_decision_samples_with_the_label_before_the_ho
     }
     assert!(n > 0);
 }
+
+// ---- Step 4: the kick (one budget), the rest request ----
+
+use crate::kick::{self, Kick, Phase, Refused, Source};
+
+/// A loftstrider with the kick on and a Veilhound `ahead_m` in front of it (east), awake,
+/// neither dodging; the clock off, no controllers (both rest).
+fn kick_world(ahead_m: f64, k: Kick) -> (World, Flora, Fauna, u64, u64) {
+    let w = clock_off(9);
+    let flora = Flora::new(FloraConfig::default());
+    let mut c = quiet_config();
+    c.founders[Founder::Loftstrider.index()].kick = Some(k);
+    c.founders[Founder::Chorister.index()].agility = 0.0;
+    let mut f = Fauna::new(c);
+    let ls = introduce(&mut f, &w, Founder::Loftstrider, StartingStores::FULL);
+    let vh = introduce(&mut f, &w, Founder::Chorister, StartingStores::FULL);
+    place(&mut f, ls, 4.0, LANE_Z, EAST);
+    place(&mut f, vh, 4.0 + ahead_m, LANE_Z, EAST);
+    (w, flora, f, ls, vh)
+}
+
+fn ticks(s: f64) -> usize {
+    (s / crate::DT).round() as usize
+}
+
+#[test]
+fn a_kick_lands_only_after_its_windup_on_a_target_in_reach_then_recovers() {
+    let k = Kick::LOFTSTRIDER;
+    let (w, mut flora, mut f, ls, vh) = kick_world(1.0, k);
+    let i = index_of(&f, ls);
+    kick::request(&mut f, i, vh, Source::Aimed).unwrap();
+    let w0 = animal(&f, vh).wound;
+    for _ in 0..ticks(k.windup_s) - 1 {
+        f.step(&w, &mut flora);
+        assert_eq!(animal(&f, vh).wound, w0, "nothing lands during the windup");
+        assert_eq!(animal(&f, ls).kick.phase, Phase::Windup);
+    }
+    f.step(&w, &mut flora);
+    assert!(animal(&f, vh).wound > w0, "contact at the windup's end");
+    assert_eq!(animal(&f, ls).kick.phase, Phase::Recovery);
+    // One budget: another request, aimed or back, is refused through the recovery.
+    let i = index_of(&f, ls);
+    assert_eq!(kick::request(&mut f, i, vh, Source::Aimed), Err(Refused::Busy));
+    assert!(!kick::kick_back(&mut f, ls, vh));
+    for _ in 0..ticks(k.recovery_s) {
+        f.step(&w, &mut flora);
+    }
+    assert_eq!(animal(&f, ls).kick.phase, Phase::Ready);
+    // Ready again, a bite from inside the arc draws a kick-back.
+    assert!(kick::kick_back(&mut f, ls, vh));
+    assert_eq!(animal(&f, ls).kick.source, Source::Back);
+}
+
+#[test]
+fn a_kick_misses_a_target_beyond_reach_and_a_kick_back_from_behind_is_refused() {
+    let k = Kick::LOFTSTRIDER;
+    let (w, mut flora, mut f, ls, vh) = kick_world(k.reach_m + 3.0, k);
+    let i = index_of(&f, ls);
+    kick::request(&mut f, i, vh, Source::Aimed).unwrap();
+    for _ in 0..ticks(k.windup_s) {
+        f.step(&w, &mut flora);
+    }
+    assert_eq!(animal(&f, vh).wound, 0.0);
+    assert_eq!(animal(&f, ls).kick.phase, Phase::Recovery, "a miss spends the budget too");
+    // Behind it: out of the arc.
+    let (_, _, mut g, ls2, vh2) = kick_world(1.0, k);
+    place(&mut g, vh2, 3.0, LANE_Z, EAST);
+    let j = index_of(&g, ls2);
+    assert_eq!(kick::request(&mut g, j, vh2, Source::Back), Err(Refused::OutOfArc));
+    assert!(!kick::kick_back(&mut g, ls2, vh2));
+}
+
+#[test]
+fn the_kick_tracks_a_target_moving_during_the_windup_within_the_turn_rate() {
+    let k = Kick { windup_s: 1.0, ..Kick::LOFTSTRIDER };
+    let (w, mut flora, mut f, ls, vh) = kick_world(1.0, k);
+    // The target stands to its left-front: the kicker turns toward it, no faster than its cap.
+    place(&mut f, vh, 4.7, LANE_Z + 0.7, EAST);
+    let h0 = animal(&f, ls).pose.heading_rad;
+    let i = index_of(&f, ls);
+    kick::request(&mut f, i, vh, Source::Aimed).unwrap();
+    f.step(&w, &mut flora);
+    let cap = f.config.founder(Founder::Loftstrider).yaw_cap_rad_per_s * crate::DT;
+    let turned = (animal(&f, ls).pose.heading_rad - h0).abs();
+    assert!(turned > 0.0 && turned <= cap + 1e-9, "turned {turned} within {cap}");
+}
+
+#[test]
+fn no_lineage_kicks_by_default() {
+    let c = FaunaConfig::default();
+    assert!(Founder::ALL.iter().all(|&f| c.founder(f).kick.is_none()));
+    let (_, _, mut f, ls, vh) = kick_world(1.0, Kick::LOFTSTRIDER);
+    f.config.founders[Founder::Loftstrider.index()].kick = None;
+    let i = index_of(&f, ls);
+    assert_eq!(kick::request(&mut f, i, vh, Source::Aimed), Err(Refused::NoKick));
+}
