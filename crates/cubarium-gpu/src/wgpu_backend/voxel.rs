@@ -1235,7 +1235,12 @@ impl VoxelRenderer {
         for (binding, view) in [
             (10, &self.sunvis.view),
             (11, &self.backdrop.view),
-            (12, &self.figures.walk_depth.view),
+            (
+                12,
+                self.bloom
+                    .as_ref()
+                    .map_or(&self.backdrop.view, |b| &b.emission),
+            ),
             (13, &self.figures.sun.view),
             (15, plant_z),
             (16, &self.figures.comp_depth.view),
@@ -1286,11 +1291,11 @@ impl VoxelRenderer {
         let world = world_group(&[]);
         let sky_world = world_group(&[11, 17, 18]);
         let sun_world = world_group(&[13]);
-        // Without model plants, binding 15 falls back to walk_depth too. Both
-        // descriptors must be replaced while that texture is a colour attachment.
+        // Weather reads the walk end from emission alpha (12), not linear
+        // model depth. Both attached planes and the plant fallback need dummies.
         let walk_world = world_group(&[12, 15]);
-        let plant_world = world_group(&[15, 17]);
-        let figure_world = world_group(&[16, 18]);
+        let plant_world = world_group(&[12, 15, 17]);
+        let figure_world = world_group(&[12, 16, 18]);
         if redraw {
             if let Some(pipeline) = &self.sky_pipeline {
                 draw_fullscreen(
