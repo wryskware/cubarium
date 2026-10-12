@@ -1,0 +1,39 @@
+# YOUNG-ROAM's staged check (design/handoffs/young-roam-2026-10-12.md, step 5): a family of
+# two adults and an older calf (midway through its roam: 7,500 s of its 15,000 s), a pack of
+# three starting 40-44 m out, past the family's 12 m day sight, so the family starts calm.
+# 120 m periodic width x 100 m depth, bare soil, ordinary heuristics. Arms:
+# - leashed-3: no excursions (the leash only);
+# - roam-3: the shipped knobs;
+# - strays-3: excursions at 120 an hour (staged, to show the mechanism inside 300 s).
+duration_s = 300.0
+episodes = 20
+width = 480
+height = 48
+depth = 400
+voxel_m = 0.25
+soil_layers = 2
+distance_m = [40.0, 44.0]
+spacing_m = 1.5
+depth_jitter_m = 1.0
+adult_body = [0.9, 1.0]
+calf_body = [0.3, 0.35]
+family_fullness = [0.85, 0.95]
+pack_fullness = [0.1, 0.2]
+adult_age_s = [20000.0, 20000.0]
+calf_age_s = [7500.0, 7500.0]
+usual_prey = false
+
+[[arms]]
+name = "leashed-3"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=0", "fauna.founders.loftstrider.young.excursion_per_h.independence=0"]
+[[arms]]
+name = "roam-3"
+composition = "family"
+pack_size = 3
+[[arms]]
+name = "strays-3"
+composition = "family"
+pack_size = 3
+sets = ["fauna.founders.loftstrider.young.excursion_per_h.start=120", "fauna.founders.loftstrider.young.excursion_per_h.independence=120"]

@@ -289,6 +289,34 @@ pub struct Episode {
     calf_chases: u64,
     adult_chases: u64,
     ends: BTreeMap<String, u64>,
+    roam: RoamRead,
+}
+
+/// YOUNG-ROAM's readout of one episode (the calf and its mother).
+#[derive(Clone, Debug, Default)]
+struct RoamRead {
+    explore_ticks: u64,
+    answer_ticks: u64,
+    far_m: f64,
+    /// The tick of the calf's last unanswered bleat (its excursion's end), where the calf
+    /// was and how far its mother was from there.
+    bleat: Option<(u64, f64, f64, f64)>,
+    mother_approach_m: Vec<f64>,
+    bleats_seen: u64,
+    reunions_s: Vec<f64>,
+    chase_from_mother_m: Vec<f64>,
+}
+
+/// The calf's distance to its mother now, metres on the ring (`None`: either gone).
+fn calf_to_mother(fauna: &cubarium_voxel_fauna::Fauna, calf: Option<u64>, ring: f64) -> Option<f64> {
+    let view = fauna.view();
+    let c = view.animal(calf?)?;
+    let m = view.animal(c.mother?)?;
+    let mut dx = (m.pose.x - c.pose.x).rem_euclid(ring);
+    if dx > 0.5 * ring {
+        dx -= ring;
+    }
+    Some(dx.hypot(m.pose.z - c.pose.z))
 }
 
 /// Found a start with stable IDs for all seven roster slots, even in smaller arms.
@@ -518,6 +546,7 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         calf_chases: 0,
         adult_chases: 0,
         ends: BTreeMap::new(),
+        roam: RoamRead::default(),
     })
 }
 
@@ -583,6 +612,32 @@ pub struct RowOut {
     /// wounded or winded hound `Spent`, a stalled chase `Late`.
     #[serde(default)]
     pub ends: BTreeMap<String, u64>,
+    /// YOUNG-ROAM readouts (the loftstrider's session tally and the calf and its mother):
+    /// excursions started by goal (food, animal, place), ended by reason, the bleats at their
+    /// ends, the calf's ticks out on one and its mother's answering one, the farthest the calf
+    /// got from its mother, the seconds from each bleat until its mother was within the calf's
+    /// birth comfort (`young.follow_m`), and the calf's distance to its mother at each chase
+    /// started on it.
+    #[serde(default)]
+    pub excursions: [u64; 3],
+    #[serde(default)]
+    pub excursion_ends: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub bleats: u64,
+    #[serde(default)]
+    pub explore_ticks: u64,
+    #[serde(default)]
+    pub answer_ticks: u64,
+    #[serde(default)]
+    pub calf_far_m: f64,
+    #[serde(default)]
+    pub reunions_s: Vec<f64>,
+    #[serde(default)]
+    pub calf_chase_from_mother_m: Vec<f64>,
+    /// For each reunion, how much nearer the bleat's point the mother came (her share of the
+    /// closing), metres.
+    #[serde(default)]
+    pub mother_approach_m: Vec<f64>,
 }
 impl Episode {
     /// Step once and read state/events. Does not infer giving up or death from positions.
@@ -602,6 +657,53 @@ impl Episode {
             .iter()
             .filter(|&&id| matches!(fauna.steer_of(id), Some(cubarium_voxel_fauna::Steer::Flee)))
             .count() as u64;
+        // YOUNG-ROAM: the calf's excursions, its bleats and its mother's coming.
+        {
+            let w = self.sim.world().config();
+            let ring = f64::from(w.width) * w.voxel_m;
+            let calf_mother = self.calf.and_then(|c| fauna.view().animal(c)).and_then(|c| c.mother);
+            if let Some(c) = self.calf {
+                if matches!(fauna.steer_of(c), Some(cubarium_voxel_fauna::Steer::Explore)) {
+                    self.roam.explore_ticks += 1;
+                }
+            }
+            if calf_mother.is_some_and(|m| matches!(fauna.steer_of(m), Some(cubarium_voxel_fauna::Steer::Answer))) {
+                self.roam.answer_ticks += 1;
+            }
+            let d = calf_to_mother(fauna, self.calf, ring);
+            if let Some(d) = d {
+                self.roam.far_m = self.roam.far_m.max(d);
+            }
+            // From the calf's bleat point to its mother, now.
+            let to_point = |x: f64, z: f64| -> Option<f64> {
+                let m = fauna.view().animal(calf_mother?)?;
+                let mut dx = (m.pose.x - x).rem_euclid(ring);
+                if dx > 0.5 * ring {
+                    dx -= ring;
+                }
+                Some(dx.hypot(m.pose.z - z))
+            };
+            let bleats = fauna.roam_tally(Founder::Loftstrider).bleats;
+            if bleats > self.roam.bleats_seen {
+                self.roam.bleats_seen = bleats;
+                if self.roam.bleat.is_none() {
+                    if let Some(c) = self.calf.and_then(|c| fauna.view().animal(c)) {
+                        let (x, z) = (c.pose.x, c.pose.z);
+                        if let Some(dm) = to_point(x, z) {
+                            self.roam.bleat = Some((self.tick, x, z, dm));
+                        }
+                    }
+                }
+            }
+            let comfort = fauna.view().config.founder(Founder::Loftstrider).young.follow_m;
+            if let (Some((at, x, z, dm)), Some(d)) = (self.roam.bleat, d) {
+                if d <= comfort {
+                    self.roam.reunions_s.push((self.tick - at) as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ));
+                    self.roam.mother_approach_m.push(dm - to_point(x, z).unwrap_or(dm));
+                    self.roam.bleat = None;
+                }
+            }
+        }
         for &id in &self.hounds {
             if let Some(p) = fauna.percept(id) {
                 for t in p.tracks() {
@@ -641,6 +743,11 @@ impl Episode {
                     self.chases += 1;
                     if self.calf == Some(target) {
                         self.calf_chases += 1;
+                        let w = self.sim.world().config();
+                        let ring = f64::from(w.width) * w.voxel_m;
+                        if let Some(d) = calf_to_mother(self.sim.fauna(), self.calf, ring) {
+                            self.roam.chase_from_mother_m.push(d);
+                        }
                     } else {
                         self.adult_chases += 1;
                     }
@@ -755,6 +862,18 @@ impl Episode {
             calf_chases: self.calf_chases,
             adult_chases: self.adult_chases,
             ends: self.ends.clone(),
+            excursions: self.sim.fauna().roam_tally(Founder::Loftstrider).started,
+            excursion_ends: {
+                let t = self.sim.fauna().roam_tally(Founder::Loftstrider);
+                cubarium_voxel_fauna::roam::End::ALL.iter().map(|e| (e.name().to_string(), t.ended[e.index()])).collect()
+            },
+            bleats: self.sim.fauna().roam_tally(Founder::Loftstrider).bleats,
+            explore_ticks: self.roam.explore_ticks,
+            answer_ticks: self.roam.answer_ticks,
+            calf_far_m: self.roam.far_m,
+            reunions_s: self.roam.reunions_s.clone(),
+            calf_chase_from_mother_m: self.roam.chase_from_mother_m.clone(),
+            mother_approach_m: self.roam.mother_approach_m.clone(),
         }
     }
 }
