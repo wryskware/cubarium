@@ -21,12 +21,17 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
+#[cfg(unix)]
+use std::sync::Arc;
+#[cfg(unix)]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use cubarium_session::{SaveMeta, SessionStop};
+#[cfg(unix)]
 use signal_hook::consts::{SIGINT, SIGTERM, SIGUSR1};
+#[cfg(unix)]
 use signal_hook::iterator::{Handle, Signals};
 
 /// The slot a world never loaded or saved goes to. It passes `saves.gd`'s `name_problem`.
@@ -36,9 +41,11 @@ pub const FRESH_SLOT: &str = "Autosave";
 const AUTOSAVE_SUFFIX: &str = " (autosave)";
 
 /// How long a terminating signal waits for its save before ending the process anyway.
+#[cfg(unix)]
 pub const QUIT_SAVE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a `SIGUSR1` save may take.
+#[cfg(unix)]
 const SAVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The shell's thumbnail, kept across a save.
@@ -121,10 +128,13 @@ static STOPPING: AtomicBool = AtomicBool::new(false);
 
 /// Raised by the first terminating signal: a second ends the process at once. Also raised at
 /// teardown, when nothing takes the signals any more.
+#[cfg(unix)]
 static TERM_NOW: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 /// Raised at teardown: `SIGUSR1` then has its default action again.
+#[cfg(unix)]
 static USR1_DEFAULT: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 
+#[cfg(unix)]
 static SIGNALS: Mutex<Option<(Handle, JoinHandle<()>)>> = Mutex::new(None);
 
 /// Remember the default slots' root and start taking the signals, once. Called on Godot's
@@ -134,15 +144,19 @@ pub(crate) fn init(root: impl FnOnce() -> PathBuf) {
         return;
     }
     let _ = ROOT.set(root());
-    let mut signals = SIGNALS.lock().unwrap_or_else(|e| e.into_inner());
-    if signals.is_none() {
-        match start_signals() {
-            Ok(s) => *signals = Some(s),
-            Err(e) => eprintln!("cubarium: could not install the save signal handlers ({e}); signals end the app unsaved"),
+    #[cfg(unix)]
+    {
+        let mut signals = SIGNALS.lock().unwrap_or_else(|e| e.into_inner());
+        if signals.is_none() {
+            match start_signals() {
+                Ok(s) => *signals = Some(s),
+                Err(e) => eprintln!("cubarium: could not install the save signal handlers ({e}); signals end the app unsaved"),
+            }
         }
     }
 }
 
+#[cfg(unix)]
 fn start_signals() -> std::io::Result<(Handle, JoinHandle<()>)> {
     let term_now = TERM_NOW.get_or_init(|| Arc::new(AtomicBool::new(false)));
     let usr1_default = USR1_DEFAULT.get_or_init(|| Arc::new(AtomicBool::new(false)));
@@ -164,6 +178,7 @@ fn start_signals() -> std::io::Result<(Handle, JoinHandle<()>)> {
     Ok((handle, thread))
 }
 
+#[cfg(unix)]
 fn on_signal(sig: i32) {
     let quit = sig != SIGUSR1;
     let name = match sig {
@@ -369,13 +384,16 @@ pub(crate) fn stop() {
     if let Some(request) = REQUEST.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = request.join();
     }
-    for flag in [TERM_NOW.get(), USR1_DEFAULT.get()].into_iter().flatten() {
-        flag.store(true, Ordering::SeqCst);
-    }
-    let taken = SIGNALS.lock().unwrap_or_else(|e| e.into_inner()).take();
-    if let Some((handle, thread)) = taken {
-        handle.close();
-        let _ = thread.join();
+    #[cfg(unix)]
+    {
+        for flag in [TERM_NOW.get(), USR1_DEFAULT.get()].into_iter().flatten() {
+            flag.store(true, Ordering::SeqCst);
+        }
+        let taken = SIGNALS.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some((handle, thread)) = taken {
+            handle.close();
+            let _ = thread.join();
+        }
     }
 }
 

@@ -13,7 +13,7 @@ cubarium-session = { workspace = true }
 # The world's renderer (D-0005): `cubarium-gpu` and its pack, hosted on the session's loop
 # (`cubarium::sink::gpu::hosted`), drawn into a texture under the app's UI.
 cubarium = { path = "../cubarium" }
-# Only for `vk::prefer_device`: the renderer opens the GPU Godot draws on.
+# Adapter preference: the renderer opens the GPU Godot draws on.
 cubarium-gpu = { path = "../cubarium-gpu" }
 cubarium-observatory = { path = "../cubarium-observatory", default-features = false }
 # gdext, pinned. 0.5.5 ships the Godot 4.7 API (`api-4-7`), the version at /usr/bin/godot,
@@ -22,7 +22,9 @@ godot = { version = "=0.5.5", default-features = false, features = ["api-4-7"] }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 rustc-hash = { workspace = true }
-# The signal saves (src/world_save.rs): safe handlers that queue the signal for a thread.
+
+[target.'cfg(unix)'.dependencies]
+# Safe signal saves queue Unix signals for a worker thread.
 signal-hook = "0.3"
 
 [lints.rust]
