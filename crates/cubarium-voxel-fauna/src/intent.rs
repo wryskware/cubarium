@@ -557,7 +557,11 @@ pub(crate) fn teacher_label(
             S::Heuristic | S::Search | S::Leave | S::Fruit | S::Light if herded => {
                 t("stay_with_troop", nearest(fauna, a.id, class::KIN))
             }
-            S::Heuristic if resting => t("rest", Subject::None),
+            // BRAIN-REST: its `rest` is the pause, a rest bout it holds still in. A glider sleeps
+            // only perched (`roost`), so on open ground its heuristic walks on through a rest
+            // bout; that walk is labelled what it is, `forage` (traced: 382 of 465 rest-labelled
+            // seconds walked).
+            S::Heuristic if resting && still => t("rest", Subject::None),
             S::Heuristic | S::Search | S::Leave | S::Fruit | S::Light => t("forage", Subject::None),
             _ => Teach::default(),
         },

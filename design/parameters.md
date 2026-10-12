@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4509 rows)
+**`fauna.*`** (4518 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1848,6 +1848,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.littershredder.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.littershredder.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.littershredder.rest.brain_bout_s` | 2.5 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2324,6 +2325,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.frondgrazer.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.frondgrazer.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.frondgrazer.rest.brain_bout_s` | 3.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2800,6 +2802,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.lanternjaw.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.lanternjaw.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.lanternjaw.rest.brain_bout_s` | 1.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3276,6 +3279,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.capgnawer.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.capgnawer.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.capgnawer.rest.brain_bout_s` | 2.5 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3752,6 +3756,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.rest.rush_over_cruise` | 1.2 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.loftstrider.rest.bed_scent` | 1.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.loftstrider.rest.bed_search_s` | 30.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.loftstrider.rest.brain_bout_s` | 180.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4228,6 +4233,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.ripple-snail.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.ripple-snail.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.ripple-snail.rest.brain_bout_s` | 1.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4704,6 +4710,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.bellwing.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.bellwing.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.bellwing.rest.brain_bout_s` | 1.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -5180,6 +5187,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.seedporter.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.seedporter.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.seedporter.rest.brain_bout_s` | 2.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -5656,6 +5664,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
 | `fauna.founders.chorister.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
 | `fauna.founders.chorister.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
+| `fauna.founders.chorister.rest.brain_bout_s` | 180.0 | s | [0, inf) |  | - | placeholder | BRAIN-REST: sleep granted on a brain's own rest ask lasts this, then the ask clears and the brain is sampled again (0: until a wake) |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
