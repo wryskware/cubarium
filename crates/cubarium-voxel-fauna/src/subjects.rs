@@ -88,7 +88,32 @@ impl Default for Candidate {
     }
 }
 
+/// The key of an empty row (never a body's or a place's).
+pub const EMPTY_KEY: u64 = u64::MAX;
+/// The bit a place key carries (body ids never reach it; founding mother ids use bit 63).
+pub const PLACE_KEY_BIT: u64 = 1 << 62;
+
+/// **A subject's stable key** (the TWO-LAYER brain holds its subject by it, re-finding its
+/// row after rows reorder; it never enters a network): a body's id; for a place,
+/// [`PLACE_KEY_BIT`] with its kind and its point quantised to 0.25 m cells; [`EMPTY_KEY`]
+/// for none.
+pub fn subject_key(s: Subject) -> u64 {
+    match s {
+        Subject::None => EMPTY_KEY,
+        Subject::Body { id, .. } => id,
+        Subject::Place { kind, x, z, .. } => {
+            let q = |v: f64| ((v / 0.25).floor() as i64 as u64) & 0x0FFF_FFFF;
+            PLACE_KEY_BIT | ((kind.index() as u64) << 56) | (q(x) << 28) | q(z)
+        }
+    }
+}
+
 impl Candidate {
+    /// This row's stable key ([`subject_key`]).
+    pub fn key(&self) -> u64 {
+        subject_key(self.subject)
+    }
+
     /// Whether this row may be a subject that `fits` asks for.
     pub fn fits(&self, f: Fits) -> bool {
         match f {
@@ -119,9 +144,10 @@ impl Candidates {
         match subject {
             Subject::None => None,
             Subject::Body { id, .. } => self.rows.iter().position(|c| c.subject.body() == Some(id)),
-            Subject::Place { kind, x, z, .. } => self.rows.iter().position(|c| {
-                matches!(c.subject, Subject::Place { kind: k, x: cx, z: cz, .. } if k == kind && cx == x && cz == z)
-            }),
+            Subject::Place { .. } => {
+                let key = subject_key(subject);
+                self.rows.iter().position(|c| c.kind == RowKind::Place && c.key() == key)
+            }
         }
     }
 
@@ -336,6 +362,8 @@ pub struct DecisionPrep {
     pub candidates: Candidates,
     pub flat: Vec<f64>,
     pub kinds: Vec<RowKind>,
+    /// Each row's stable key ([`subject_key`]).
+    pub keys: Vec<u64>,
     pub candidate_mask: Vec<bool>,
     pub held_row: Option<usize>,
     pub early_end: Option<crate::EarlyEnd>,
@@ -350,6 +378,7 @@ impl DecisionPrep {
             candidates: &self.flat,
             row_width: ROW_WIDTH,
             kinds: &self.kinds,
+            keys: &self.keys,
             candidate_mask: &self.candidate_mask,
             held_row: self.held_row,
             early_end: self.early_end,
@@ -379,6 +408,7 @@ pub fn decision_prep(fauna: &Fauna, i: usize, founder: Founder) -> DecisionPrep 
         candidate_mask: candidates.mask(menu),
         flat: candidates.flat(),
         kinds: candidates.rows.iter().map(|c| c.kind).collect(),
+        keys: candidates.rows.iter().map(|c| c.key()).collect(),
         intent_mask,
         candidates,
         held_row,

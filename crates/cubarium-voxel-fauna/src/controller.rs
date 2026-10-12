@@ -212,6 +212,11 @@ pub struct DecisionInput<'a> {
     pub row_width: usize,
     /// Each row's type: empty, a body or a place.
     pub kinds: &'a [crate::subjects::RowKind],
+    /// Each row's stable key, never for a network: a body's id, a place's own key
+    /// ([`crate::subjects::subject_key`]), [`crate::subjects::EMPTY_KEY`] for an empty row. A
+    /// brain holds its subject by it and re-finds the row after rows reorder (§11.1). "No
+    /// subject" needs no row.
+    pub keys: &'a [u64],
     /// `mask[r * menu + k]`: row `r` may be intent `k`'s subject.
     pub candidate_mask: &'a [bool],
     /// The held subject's current row, if it has one.

@@ -223,6 +223,7 @@ fn slot_order_does_not_change_the_subject_or_its_row() {
     let (r1, r2) = (c1.row_of(subject).unwrap(), c2.row_of(subject).unwrap());
     assert_eq!(c1.rows[r1].subject.body(), Some(ids[1]));
     assert_eq!(c1.rows[r1].row, c2.rows[r2].row, "the same body reads the same row");
+    assert_eq!((c1.rows[r1].key(), c2.rows[r2].key()), (ids[1], ids[1]), "keyed by its id");
     assert_eq!(c1.rows.len(), f.config.manifest(Founder::Loftstrider).candidates());
     assert!(c1.rows.iter().all(|c| c.row.len() == ROW_WIDTH));
 }
