@@ -1420,8 +1420,9 @@ fn grow(fauna: &mut Fauna) -> Vec<u64> {
 /// **established** members plus itself exceed `group_max`:
 /// - a pack's group is its record; established is every member past independence (not a
 ///   pup), so pups at the den never count; the breeder never leaves;
-/// - a herding-young lineage's group is its herd ([`crate::herd_labels`]: chains within
-///   `herding.comfort_m`, x wrapping); established is every adult.
+/// - a herding lineage's group is its herd ([`crate::herd_labels`]: chains within
+///   `herding.comfort_m`, x wrapping), whatever `herding.young_only`; established is every
+///   adult.
 ///
 /// Candidates still to be judged are not established yet; one that stays counts for the
 /// candidates after it, so the order of a tick's arrivals cannot overfill a group.
@@ -1463,10 +1464,9 @@ fn disperse(
                 })
                 .count()
         } else {
-            if at != crate::DispersalAt::Adult
-                || !phys.herding.young_only
-                || phys.herding.comfort_m <= 0.0
-            {
+            // LS-DEFEND (§11.6): a herding lineage's group is its herd whether the pull is for
+            // the young only or for all ages (`herding.young_only` no longer gates it).
+            if at != crate::DispersalAt::Adult || phys.herding.comfort_m <= 0.0 {
                 continue;
             }
             let lineage: Vec<&Animal> =

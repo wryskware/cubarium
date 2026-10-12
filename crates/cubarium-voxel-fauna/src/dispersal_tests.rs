@@ -557,3 +557,22 @@ fn the_session_dispersal_counter_does_not_change_saved_state_bytes() {
         "the counter starts a new session at load"
     );
 }
+
+#[test]
+fn dispersal_still_happens_with_all_age_herding_on() {
+    // LS-DEFEND (§11.6): the herd is the group whether the pull is for calves or every age.
+    for young_only in [true, false] {
+        let world = clock_off(505);
+        let mut c = configuration(L, 1, DispersalAt::Adult);
+        c.founders[L.index()].herding.young_only = young_only;
+        let mut f = Fauna::new(c);
+        let mut plants = flora();
+        let parent = member(&mut f, &world, L, 2.0, 1.5, false);
+        let calf = member(&mut f, &world, L, 2.1, 1.5, true);
+        let crossed = grow_and_disperse(&mut f, &world, &mut plants);
+        assert_eq!(crossed, vec![calf]);
+        assert!(alive(&f, parent));
+        assert!(!alive(&f, calf), "young_only {young_only}: over its limit, the new adult leaves");
+        assert_eq!(f.ledger.dispersed_by_founder[L.index()], 1);
+    }
+}
