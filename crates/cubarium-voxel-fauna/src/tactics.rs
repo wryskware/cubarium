@@ -67,7 +67,8 @@ pub struct Tactics {
     /// **Chase cost**: value spent per metre between the hound and the prey.
     pub chase_cost_per_m: f64,
     /// **`p_kill`**, one hound's chance on a grown, sound, alert prey of its own length with
-    /// no factor applied, 0..1.
+    /// no factor applied, 0..1. The factors below (each "×") multiply its odds, `p / (1 − p)`,
+    /// so none saturates at certainty.
     pub p_one: f64,
     /// ...× `(own length / prey length)^size_exp`: a bigger body is harder to pull down.
     pub size_exp: f64,
@@ -159,10 +160,23 @@ pub struct Tactics {
     pub dc_kick_m: f64,
     /// ...the approach force reaches full pace `approach_band_m` off `dc` (bounded approach).
     pub approach_band_m: f64,
-    /// ...the repulsion's strength, and a tangential bias by the hound's approach side (a
-    /// stable per-hound tie-break, so symmetric hounds part).
+    /// ...the repulsion's strength, `repel_gain × dc / max(distance, repel_floor × dc)` from
+    /// each body (the floor keeps it finite for bodies on top of each other). Factor, × dc.
     pub repel_gain: f64,
+    pub repel_floor: f64,
+    /// ...and a tangential bias by the hound's approach side, `side_bias × (1 − r / dc)` for
+    /// each repelling body nearer than `dc` (a stable per-hound tie-break, so symmetric hounds
+    /// part; it fades once they stand apart, so a settled ring does not circle).
     pub side_bias: f64,
+    /// ...under this pace (a share of full pace) a hound on the ring stands, facing the
+    /// target.
+    pub still_pace: f64,
+    /// A walk to a point (the test's stand, the cut-off point) has arrived within this,
+    /// metres.
+    pub arrive_m: f64,
+    /// A moving body seen heading within this of straight away from the hound is running
+    /// away (`fleeing_gain`), degrees.
+    pub flee_deg: f64,
     /// **Cut off**: the point between the target and its nearest grown kin, this share of the
     /// way along the safe part of the line, 0..1; a packmate within `cut_taken_m` of it holds
     /// it already. Fraction, metres.
@@ -172,6 +186,11 @@ pub struct Tactics {
     /// `lead_min_s`, then the interception fails. Seconds.
     pub lead_max_s: f64,
     pub lead_min_s: f64,
+    /// ...worth taking when straight pursuit lags: the target crossing the hound's line at
+    /// more than `intercept_cross_deg`, or running at `intercept_pace_ratio` of the hound's
+    /// sprint or faster. Degrees, ratio.
+    pub intercept_cross_deg: f64,
+    pub intercept_pace_ratio: f64,
     /// **Harry**: dart in when the target faces another hound within `harry_face_deg`, or
     /// recovers from a kick the hound saw; out again after `harry_s`; only with at least
     /// `harry_hounds` hounds (itself included) within `da` of it. Degrees, seconds, hounds.
@@ -286,11 +305,17 @@ impl Tactics {
         dc_kick_m: 0.5,
         approach_band_m: 1.0,
         repel_gain: 1.0,
+        repel_floor: 0.25,
         side_bias: 0.2,
+        still_pace: 0.15,
+        arrive_m: 0.25,
+        flee_deg: 60.0,
         cut_fraction: 0.3,
         cut_taken_m: 1.5,
         lead_max_s: 4.0,
         lead_min_s: 0.25,
+        intercept_cross_deg: 45.0,
+        intercept_pace_ratio: 0.8,
         harry_face_deg: 45.0,
         harry_s: 1.5,
         harry_hounds: 2,
@@ -459,6 +484,11 @@ fn gap(ax: f64, az: f64, bx: f64, bz: f64, ring: f64) -> (f64, f64, f64) {
     (dx, dz, (dx * dx + dz * dz).sqrt())
 }
 
+/// `x` around a ring of circumference `ring` (unchanged off the ring: `ring` infinite).
+fn on_ring(x: f64, ring: f64) -> f64 {
+    if ring.is_finite() && ring > 0.0 { x.rem_euclid(ring) } else { x }
+}
+
 /// The smallest angle between two bearings, radians in `[0, π]`.
 fn angle_between(a: f64, b: f64) -> f64 {
     let d = (a - b).rem_euclid(TAU);
@@ -590,10 +620,15 @@ pub(crate) fn assess(config: &crate::FaunaConfig, tac: &Tactics, pk: &Pack, me: 
     let facing = grown.iter().filter(|k| facing_pack(k)).count() as u32;
     let guarding_n = guards.iter().filter(|k| guarding(k)).count() as u32;
     let lame = t.lame;
-    let resting = matches!(t.posture, posture::REST | posture::ASLEEP);
+    // Asleep, or still and not seen facing a hound (a still body facing the pack stands at
+    // bay: alert, not resting).
+    let resting = t.posture == posture::ASLEEP || (t.posture == posture::REST && !facing_pack(t));
     let (mx, mz, md) = gap(me.x, me.z, t.x, t.z, ring);
-    let fleeing = t.moving && md > 1e-9 && angle_between(t.heading, mx.atan2(mz)) < FRAC_PI_2 * (2.0 / 3.0);
-    let mut p = tac.p_one * (me.len / len).powf(tac.size_exp);
+    let fleeing = t.moving && md > 1e-9 && angle_between(t.heading, mx.atan2(mz)) < tac.flee_deg.to_radians();
+    // The factors multiply the odds, `p / (1 − p)`, so none saturates: a calf near the top of
+    // the scale is still worth less guarded than alone.
+    let base = tac.p_one.clamp(0.0, 1.0 - 1e-9);
+    let mut p = base / (1.0 - base) * (me.len / len).powf(tac.size_exp);
     p *= 1.0 + tac.young_gain * (1.0 - len / alen).max(0.0);
     if lame {
         p *= 1.0 + tac.lame_gain;
@@ -610,7 +645,7 @@ pub(crate) fn assess(config: &crate::FaunaConfig, tac: &Tactics, pk: &Pack, me: 
     p *= tac.adult_factor.powi((guards.len() as u32).min(tac.adults_max) as i32);
     p *= tac.facing_factor.powi(facing as i32);
     p *= tac.guard_factor.powi(guarding_n as i32);
-    let p_one = p.clamp(0.0, 1.0);
+    let p_one = (p / (1.0 + p)).clamp(0.0, 1.0);
     let hounds = 1 + mates.iter().filter(|m| gap(me.x, me.z, m.x, m.z, ring).2 <= pk.pack_radius_m).count() as u32;
     let p_kill = 1.0 - (1.0 - p_one).powi(hounds as i32);
     // Risk: the kickers about it.
@@ -792,38 +827,48 @@ pub(crate) fn safe_m(tac: &Tactics, t: &Track, s: &Assess, mem: &Hound, now: u64
 
 /// **Encircle** (Escobedo et al. 2014; §4.2, §7): the velocity, in units of its pace, of a
 /// hound at `me` around a target at `t`, with the bodies it repels from (`others`: packmates
-/// and the target's grown kin it senses). Two forces:
-/// - **approach** to `dc`: along the line to the target, `(d − dc) / band` clamped to ±1 (it
-///   backs off inside `dc`, bounded: never past the target);
+/// and the target's grown kin it senses), its approach `side` (±1) and the knobs `tac`. Two
+/// forces:
+/// - **approach** to `dc`: along the line to the target, `(d − dc) / approach_band_m`
+///   clamped to ±1 (it backs off inside `dc`, bounded: never past the target);
 /// - **repulsion**, only while it is within `da` of the target, from each other body within
-///   `da` of the target: away from it, `gain × dc / max(distance, 0.25 dc)` — packmates
-///   close to the prey spread around it;
-/// - and a tangential `side` bias (±`bias`) inside `da`, so symmetric hounds part.
-#[allow(clippy::too_many_arguments)]
-pub fn encircle_velocity(me: (f64, f64), t: (f64, f64), others: &[(f64, f64)], dc: f64, da: f64, band: f64, gain: f64, side: f64, bias: f64, ring: f64) -> (f64, f64) {
+///   `da` of the target: away from it, `repel_gain × dc / max(r, repel_floor × dc)` —
+///   packmates close to the prey spread around it. The switch is soft: the repulsion ramps in
+///   from nothing at `da` to full at `dc` (`(da − d) / (da − dc)`), so the two forces balance
+///   at one distance between `dc` and `da` and a ring settles there instead of chattering
+///   across the `da` boundary (a hard switch over a controller period's step does);
+/// - and, as a tie-break, a tangential `side × side_bias × (1 − r / dc)` for each repelling
+///   body nearer than `dc`, so symmetric hounds part; it is gone once they stand `dc` apart.
+pub fn encircle_velocity(me: (f64, f64), t: (f64, f64), others: &[(f64, f64)], dc: f64, da: f64, tac: &Tactics, side: f64, ring: f64) -> (f64, f64) {
     let (dx, dz, d) = gap(me.0, me.1, t.0, t.1, ring);
     if !(d > 1e-9) {
         return (0.0, 0.0);
     }
     let (ux, uz) = (dx / d, dz / d);
-    let pull = ((d - dc) / band.max(1e-6)).clamp(-1.0, 1.0);
+    let pull = ((d - dc) / tac.approach_band_m.max(1e-6)).clamp(-1.0, 1.0);
     let (mut vx, mut vz) = (ux * pull, uz * pull);
     if d <= da {
+        let on = if da > dc { ((da - d) / (da - dc)).clamp(0.0, 1.0) } else { 1.0 };
+        let dc = dc.max(1e-6);
+        let mut tangent = 0.0;
         for &(ox, oz) in others {
             if gap(ox, oz, t.0, t.1, ring).2 > da {
                 continue;
             }
             let (rx, rz, r) = gap(ox, oz, me.0, me.1, ring);
+            if r < dc {
+                tangent += 1.0 - r / dc;
+            }
             if !(r > 1e-9) {
                 continue;
             }
-            let k = gain * dc.max(1e-6) / r.max(0.25 * dc.max(1e-6));
+            let k = on * tac.repel_gain * dc / r.max(tac.repel_floor * dc);
             vx += k * rx / r;
             vz += k * rz / r;
         }
         // Tangential: perpendicular to the line to the target.
-        vx += side * bias * uz;
-        vz -= side * bias * ux;
+        vx += side * tac.side_bias * tangent * uz;
+        vz -= side * tac.side_bias * tangent * ux;
     }
     (vx, vz)
 }
@@ -843,7 +888,7 @@ pub fn cut_off_point(t: (f64, f64), d: (f64, f64), t_safe: f64, d_safe: f64, fra
     let f = fraction.clamp(0.0, 1.0);
     let tries = [f, 0.0, 0.25, 0.5, 0.75, 1.0];
     tries.into_iter().map(|g| t_safe + g * room).find_map(|r| {
-        let p = (t.0 + ux * r, t.1 + uz * r);
+        let p = (on_ring(t.0 + ux * r, ring), t.1 + uz * r);
         ok(p).then_some(p)
     })
 }
@@ -877,7 +922,7 @@ pub fn intercept_point(me: (f64, f64), t: (f64, f64), vel: (f64, f64), speed: f6
     }
     let mut l = lead;
     while l >= lead_min_s.max(1e-6) {
-        let p = (t.0 + vel.0 * l, t.1 + vel.1 * l);
+        let p = (on_ring(t.0 + vel.0 * l, ring), t.1 + vel.1 * l);
         if clear(p) {
             return Some((p, l));
         }
@@ -1564,7 +1609,7 @@ fn test_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &
             let (dx, dz, dd) = gap(t.x, t.z, a.pose.x, a.pose.z, ring);
             let (ux, uz) = if dd > 1e-9 { (dx / dd, dz / dd) } else { (0.0, 1.0) };
             let goal = (t.x + ux * tac.test_m, t.z + uz * tac.test_m);
-            walk_to(fauna, view, founder, &a, geometry, h, pk, goal, t.site.1, 1.0, 0.25, 0.0)
+            walk_to(fauna, view, founder, &a, geometry, h, pk, goal, t.site.1, 1.0, tac.arrive_m, 0.0)
         }
         TestPhase::Watch => {
             label(fauna, a.id, "test", subject);
@@ -1710,8 +1755,8 @@ fn options(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, tac: &Tactics, pk:
         if let Some((q, _)) = intercept_point((a.pose.x, a.pose.z), (t.x, t.z), vel, speed, tac.lead_max_s, tac.lead_min_s, ring, &mut clear) {
             // Worth it when straight pursuit lags: crossing its path or as fast as it.
             let (bx, bz, _) = gap(a.pose.x, a.pose.z, t.x, t.z, ring);
-            let crossing = angle_between(vel.0.atan2(vel.1), bx.atan2(bz)) > std::f64::consts::FRAC_PI_4;
-            if crossing || vs >= 0.8 * speed {
+            let crossing = angle_between(vel.0.atan2(vel.1), bx.atan2(bz)) > tac.intercept_cross_deg.to_radians();
+            if crossing || vs >= tac.intercept_pace_ratio * speed {
                 intercept = Some(q);
                 sc[ix("intercept")] = tac.w_intercept;
             }
@@ -1773,10 +1818,10 @@ fn chase(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &Tact
             let c = o.cut.expect("checked");
             if let Some(act) = close_in(fauna, view, founder, &a, &t, geometry, h, pk, ring) {
                 act
-            } else if distance(&a, c.0, c.1, ring) <= 0.5 {
+            } else if distance(&a, c.0, c.1, ring) <= tac.arrive_m {
                 face_point(&a, t.x, t.z, ring, 1.0)
             } else {
-                walk_to(fauna, view, founder, &a, geometry, h, pk, c, t.site.1, top, 0.25, 1.0)
+                walk_to(fauna, view, founder, &a, geometry, h, pk, c, t.site.1, top, tac.arrive_m, 1.0)
             }
         }
         "intercept" if o.intercept.is_some() => {
@@ -1798,13 +1843,13 @@ fn chase(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &Tact
             if darting && a.strike.is_none() {
                 close_in(fauna, view, founder, &a, &t, geometry, h, pk, ring).unwrap_or_else(|| walk_to(fauna, view, founder, &a, geometry, h, pk, (t.x, t.z), t.site.1, top, 0.0, 1.0))
             } else {
-                let vel = encircle_velocity((a.pose.x, a.pose.z), (t.x, t.z), &o.others, o.dc, o.da, tac.approach_band_m, tac.repel_gain, side_of(a.id), tac.side_bias, ring);
+                let vel = encircle_velocity((a.pose.x, a.pose.z), (t.x, t.z), &o.others, o.dc, o.da, tac, side_of(a.id), ring);
                 let speed = (vel.0 * vel.0 + vel.1 * vel.1).sqrt();
-                if speed < 0.15 {
+                if speed < tac.still_pace {
                     face_point(&a, t.x, t.z, ring, 0.0)
                 } else {
                     let m = fauna.config.manifest(founder);
-                    let step = (m.cruise_m_per_s * m.controller_period_s).max(0.25);
+                    let step = (m.cruise_m_per_s * m.controller_period_s).max(tac.arrive_m);
                     let goal = (a.pose.x + vel.0 / speed * step, a.pose.z + vel.1 / speed * step);
                     walk_to(fauna, view, founder, &a, geometry, h, pk, goal, a.site.y, speed.min(1.0), 0.0, 0.0)
                 }
