@@ -1925,10 +1925,9 @@ fn controllers(
         // SP-FOLLOW (`crate::nurse::mother_goal`): a dependent young goes to its mother as to
         // food, over its own heuristic, the fruit walk, the herd and the roost (it roosts where
         // she does), and holds still beside her to nurse; flight wins, as do the reflexes
-        // below (deep water, thirst, a trapped body's way out).
+        // below (deep water, thirst, a trapped body's way out), but not its catch.
         if driven && prey && !fled && fauna.config.founder(founder).glider.is_some() {
-            let ring = f64::from(view.config.width) * view.config.voxel_m;
-            let go = match crate::nurse::mother_goal(fauna, i, ring) {
+            let go = match crate::nurse::mother_goal(fauna, i, view) {
                 Some(crate::nurse::MotherGoal::Hold) => Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 }),
                 Some(crate::nurse::MotherGoal::Go { x, z, y_m, lift_m, site }) => glider::to_mother(fauna, i, view, &fv, x, z, y_m, lift_m, site),
                 None => None,
@@ -2011,9 +2010,13 @@ fn controllers(
                 actions.feed = 0.0;
             }
         }
+        // The seedporter's catch: its carrion meal, a prey in reach, a foray. SP-FOLLOW-2: not
+        // over a dependent young's walk to its mother or its nursing hold; it ran after them,
+        // left the readout at Nurse, and held young eating at a carcass 20 m from their mothers.
         if driven
             && !fled
             && prey
+            && src != crate::Steer::Nurse
             && founder == crate::Founder::Seedporter
             && (!sky.clock_on || sky.daylight >= fauna.config.life.day_line)
         {
