@@ -7,7 +7,7 @@
   ],
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "ed757f2e431bc9e527a3923d28c9581e31975b0d",
+    "commit": "b14697ffb3816a90626531ce6304d96313ae33ed",
     "name": "wgpu_device_probe",
     "package": "cubarium-gpu",
     "example": "wgpu_device_probe",

@@ -1,0 +1,43 @@
+{
+  "kind": "command",
+  "name": "wgpu-headless-main-smoke",
+  "argv": [
+    "{bin}",
+    "voxel",
+    "--config",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture/smoke.toml",
+    "--load",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture/smoke-state/headless",
+    "--sink",
+    "gpu",
+    "--gpu-target",
+    "headless",
+    "--seconds",
+    "0.1",
+    "--fps",
+    "60",
+    "--serve",
+    "127.0.0.1:0",
+    "--set",
+    "world.width = 128",
+    "--set",
+    "world.height = 64",
+    "--set",
+    "world.depth = 32"
+  ],
+  "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "threads": 2,
+  "mem_gb": 4,
+  "timeout_h": 0.15,
+  "est_h": 0.03,
+  "priority": 1,
+  "local_only": true,
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "b14697ffb3816a90626531ce6304d96313ae33ed",
+    "name": "cubarium",
+    "package": "cubarium",
+    "bin": "cubarium",
+    "pinned": true
+  }
+}

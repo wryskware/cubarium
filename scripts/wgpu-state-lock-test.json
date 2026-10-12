@@ -1,0 +1,24 @@
+{
+  "kind": "cargo-test",
+  "name": "wgpu-state-lock-tests",
+  "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "commit": "cbe0a8151224a27f8765b9ad1a66d82ede27d835",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "cubarium",
+    "--lib",
+    "state::tests"
+  ],
+  "profile": "debug",
+  "threads": 4,
+  "mem_gb": 8,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "priority": 1,
+  "pinned": true,
+  "hosts": [
+    "desktop"
+  ]
+}

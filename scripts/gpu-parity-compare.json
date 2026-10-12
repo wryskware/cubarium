@@ -1,0 +1,22 @@
+{
+  "kind": "command",
+  "name": "wgpu-parity-pixel-compare",
+  "argv": [
+    "python3",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/scripts/gpu-parity.py",
+    "compare",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/ash",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/wgpu",
+    "--diff",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/diff",
+    "--gallery",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/index.html",
+    "--report",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/comparison.json"
+  ],
+  "local_only": true,
+  "threads": 1,
+  "mem_gb": 2,
+  "est_h": 0.005,
+  "priority": 1
+}

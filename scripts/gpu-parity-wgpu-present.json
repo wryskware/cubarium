@@ -1,0 +1,36 @@
+{
+  "kind": "command",
+  "name": "wgpu-parity-wgpu-present",
+  "argv": [
+    "python3",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/scripts/gpu-parity.py",
+    "capture",
+    "--suite",
+    "present",
+    "--binary",
+    "{bin}",
+    "--tree",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "--fixture",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture",
+    "--out",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/wgpu",
+    "--source",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/ash/ring-scale1.png"
+  ],
+  "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "threads": 2,
+  "mem_gb": 4,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "local_only": true,
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "254608c2af6f474ae46bc164024144fa51da8e41",
+    "name": "wgpu-window_fit",
+    "package": "cubarium-gpu",
+    "example": "window_fit",
+    "pinned": true
+  },
+  "priority": 1
+}

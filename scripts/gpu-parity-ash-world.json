@@ -24,9 +24,10 @@
   "local_only": true,
   "binary": {
     "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-    "commit": "48dd6600",
+    "commit": "f6d55be5",
     "name": "parity-light_capture",
     "package": "cubarium",
     "example": "light_capture"
-  }
+  },
+  "priority": 1
 }

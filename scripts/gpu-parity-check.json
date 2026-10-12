@@ -1,10 +1,16 @@
 {
   "kind": "command",
   "name": "wgpu-parity-harness-check",
-  "argv": ["python3", "-c", "import ast, json; from pathlib import Path; from PIL import Image; p=Path('scripts/gpu-parity.py'); ast.parse(p.read_text()); specs=list(Path('scripts').glob('gpu-parity-ash-*.json')); assert len(specs)==3; [json.loads(p.read_text()) for p in specs]; print('capture harness syntax, job specs, and Pillow verified')"],
+  "argv": [
+    "python3",
+    "-c",
+    "import ast, json; from pathlib import Path; from PIL import Image; p=Path('scripts/gpu-parity.py'); ast.parse(p.read_text()); specs=list(Path('scripts').glob('gpu-parity-ash-*.json')); assert len(specs)>=3; [json.loads(p.read_text()) for p in specs]; print('capture harness syntax, job specs, and Pillow verified')"
+  ],
   "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
   "threads": 1,
   "mem_gb": 1,
   "timeout_h": 0.02,
-  "local_only": true
+  "local_only": true,
+  "priority": 1,
+  "est_h": 0.03
 }

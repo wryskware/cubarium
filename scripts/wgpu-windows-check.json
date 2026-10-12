@@ -1,0 +1,27 @@
+{
+  "kind": "cargo-test",
+  "name": "wgpu-windows-main-godot-check",
+  "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "commit": "b14697ffb3816a90626531ce6304d96313ae33ed",
+  "command": [
+    "cargo",
+    "check",
+    "-p",
+    "cubarium",
+    "-p",
+    "cubarium-godot",
+    "--all-targets",
+    "--target",
+    "x86_64-pc-windows-gnu"
+  ],
+  "profile": "debug",
+  "threads": 4,
+  "mem_gb": 8,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "priority": 1,
+  "hosts": [
+    "desktop"
+  ],
+  "pinned": true
+}

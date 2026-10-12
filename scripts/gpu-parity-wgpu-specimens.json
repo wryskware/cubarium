@@ -1,0 +1,34 @@
+{
+  "kind": "command",
+  "name": "wgpu-parity-wgpu-specimens",
+  "argv": [
+    "python3",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/scripts/gpu-parity.py",
+    "capture",
+    "--suite",
+    "specimens",
+    "--binary",
+    "{bin}",
+    "--tree",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "--fixture",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/fixture",
+    "--out",
+    "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer/runs/wgpu-parity/wgpu"
+  ],
+  "cwd": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "threads": 2,
+  "mem_gb": 4,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "local_only": true,
+  "binary": {
+    "tree": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+    "commit": "b14697ffb3816a90626531ce6304d96313ae33ed",
+    "name": "wgpu-voxel_specimens",
+    "package": "cubarium",
+    "example": "voxel_specimens",
+    "pinned": true
+  },
+  "priority": 1
+}

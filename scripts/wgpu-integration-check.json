@@ -1,0 +1,22 @@
+{
+  "kind": "cargo-test",
+  "name": "wgpu-main-godot-integration-check",
+  "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
+  "commit": "147066c750f3929332884420458da6db1bf30bcf",
+  "command": [
+    "cargo",
+    "check",
+    "-p",
+    "cubarium",
+    "-p",
+    "cubarium-godot",
+    "--all-targets"
+  ],
+  "profile": "debug",
+  "threads": 8,
+  "mem_gb": 8,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "priority": 1,
+  "pinned": true
+}
