@@ -609,6 +609,10 @@ pub(crate) fn teacher_label(
             S::Patrol if a.hunt.mode == crate::HuntMode::Wait => t("ambush", Subject::None),
             S::Patrol => t("patrol", Subject::None),
             S::Yield => t("give_way", nearest(fauna, a.id, class::THREAT)),
+            // BRAIN-FIX-2 step 2: the ambush answers "eat" to carrion at its mouth from taste
+            // alone, and the patrol then stands back; with the eating latch off the body takes
+            // nothing and digests where it stands (traced: sated, still, stomach falling).
+            S::Heuristic if at_carcass && !a.eating => t("rest", Subject::None),
             S::Heuristic if at_carcass => t("feed", Subject::None),
             S::Heuristic if resting => t("rest", Subject::None),
             S::Heuristic => t("ambush", Subject::None),

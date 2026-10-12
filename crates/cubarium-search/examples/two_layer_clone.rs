@@ -56,16 +56,23 @@ fn seeds(args: &[String], key: &str, default: &str) -> Vec<u64> {
     arg(args, key).unwrap_or(default).split(',').filter_map(|s| s.trim().parse().ok()).collect()
 }
 
+/// The top-up's fullness for every world this run founds (`fullness=`; unset: `None`).
+static FULLNESS: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+
 const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 
 /// The training world (`small`, still water) with the ecology's own founders, then the
 /// lineage topped up to `bodies` grown bodies under its heuristic, placed on the faces
 /// other bodies stand on (the lanternjaw founds as an egg bank, the seedporter is off in
 /// the default roster). `Err` for a terrain seed the founding refuses.
+///
+/// `fullness=` (BRAIN-FIX-2 step 3) sets the topped-up bodies' stores as a fraction of
+/// capacity, so a lanternjaw recording sees hungry bodies (patrol and ambush) rather than
+/// sated ones digesting; unset, a placed body's default, as before.
 fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
     let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
-    world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: None });
+    world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
     Ok(sim)
 }
 
@@ -202,6 +209,9 @@ fn main() {
     let closed_record_s = num(&args, "closed_record_s", 300u64);
     let heads = MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: num(&args, "top_hidden", 32usize), pointer_width: num(&args, "pointer_width", 16usize) };
     let bodies = num(&args, "bodies", 8usize);
+    let fullness: Option<f64> = arg(&args, "fullness").map(|v| v.parse().expect("fullness: a fraction"));
+    assert!(fullness.is_none_or(|x| (0.0..=1.0).contains(&x)), "fullness is a fraction");
+    FULLNESS.set(fullness).expect("set once");
     let mut scene_cfg = mode_scenes::Config::default();
     if let Some(s) = arg(&args, "scene_s").and_then(|v| v.parse().ok()) {
         scene_cfg.duration_s = s;
@@ -370,7 +380,7 @@ fn main() {
 
     let summary = json!({
         "founder": f.name(),
-        "bodies": bodies, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
+        "bodies": bodies, "fullness": fullness, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
         "scene_s": scene_cfg.duration_s, "scene_seeds": scene_seeds, "scene_heldout": scene_heldout, "refit_rounds": refit_rounds,
         "samples": {"train_teacher": samples(&train, RecordSource::Teacher), "train_alternative_mode": samples(&train, RecordSource::AlternativeMode),
                     "train_scene": samples(&train_scene, RecordSource::Teacher), "heldout_teacher": held_all.iter().map(|r| r.samples.len()).sum::<usize>()},

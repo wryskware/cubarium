@@ -440,27 +440,32 @@ fn update(spec: &LiveSpec, l: &mut Lineage, results: &[WindowResult], generation
     }
 }
 
-fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> LiveWorld {
+/// Found training world `slot` from `base`. A base the founding refuses is redrawn
+/// deterministically ([`world::found_world_redrawing`], noted in the run log); an accepted
+/// first base founds exactly as before. Past the redraw cap this is a clean `Err`.
+fn found(spec: &LiveSpec, slot: usize, base: u64, lineages: &[Lineage]) -> Result<LiveWorld, String> {
     let cfg = spec.world.clone().unwrap_or_else(world::training_config);
     let ecology = spec.ecology.clone();
-    let (mut sim, info) = world::found_world(
+    let (mut sim, info) = world::found_world_redrawing(
         &cfg,
         base,
         ecology.fauna().founder_counts_without_egg_bank(),
         &ecology,
-    );
+        |note| println!("# world {slot}: {note}"),
+    )
+    .map_err(|why| format!("world {slot}: {why}"))?;
     for t in &spec.top_up {
         world::top_up(&mut sim, *t);
     }
     prepare(&mut sim, spec, lineages);
-    LiveWorld {
+    Ok(LiveWorld {
         id: slot,
         sim,
         ecology,
         info,
         windows: 0,
         memory: Default::default(),
-    }
+    })
 }
 
 /// The per-world setup a founded or copied world gets: coarse water, and every trained
@@ -703,7 +708,8 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
         load_checkpoint(spec, dir, &mut lineages)?
     } else {
         let bases: Vec<_> = (0..spec.worlds).map(|i| (i, spec.world_seed + i as u64 * WORLD_SEED_STRIDE)).collect();
-        (parallel(bases, spec.threads, |(slot, base)| found(spec, slot, base, &lineages)),
+        (parallel(bases, spec.threads, |(slot, base)| found(spec, slot, base, &lineages))
+            .into_iter().collect::<Result<Vec<_>, String>>()?,
             spec.world_seed + spec.worlds as u64 * WORLD_SEED_STRIDE, 0)
     };
     for world in &worlds { check_world(run, world, None)?; }
@@ -800,7 +806,7 @@ fn train_inner(spec: &LiveSpec, run: &std::sync::Arc<super::staging::Run>) -> Re
             .collect();
         let founded: Vec<LiveWorld> = parallel(fresh.clone(), spec.threads, |(slot, seed)| {
             found(spec, slot, seed, &lineages)
-        });
+        }).into_iter().collect::<Result<_, String>>()?;
         for (((i, reason), (_, seed)), new) in bad.into_iter().zip(fresh).zip(founded) {
             check_world(run, &new, None)?;
             worlds[i] = new;
@@ -858,7 +864,10 @@ fn run_checks(spec: &LiveSpec, lineages: &[Lineage], generation: u32, log: &mut 
     let Some(c) = &spec.check else { return Ok(()) };
     let cfg = spec.world.clone().unwrap_or_else(world::training_config);
     let found = |seed: u64| -> Result<Sim, String> {
-        let (mut sim, _) = world::try_found_world(&cfg, seed, spec.ecology.fauna().founder_counts_without_egg_bank(), &spec.ecology)?;
+        // The same deterministic redraw as the training worlds: both arms of a seed found
+        // the same world, and a refused check seed (21) is redrawn, not skipped.
+        let (mut sim, _) = world::found_world_redrawing(&cfg, seed, spec.ecology.fauna().founder_counts_without_egg_bank(),
+            &spec.ecology, |note| println!("# check generation {generation} seed {seed}: {note}"))?;
         for t in &spec.top_up {
             world::top_up(&mut sim, *t);
         }
