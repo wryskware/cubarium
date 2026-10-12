@@ -46,6 +46,8 @@ class Task:
     done_marker: str | None = None   # relative to outputs; required for success when set
     deps: list = field(default_factory=list)        # task names in the same job
     priority: int = 0
+    quick: bool = False              # quick lane: own overcommit pool, skips reservations, local first,
+                                     # timeout capped at [lab] quick_timeout_min (a job spec's quick sets all)
     cwd: str | None = None
     env: dict = field(default_factory=dict)
     stdout: str | None = None        # default {out}/stdout.log

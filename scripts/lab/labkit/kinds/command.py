@@ -7,17 +7,20 @@
     binary = { commit = "HEAD", name = "voxel_census" }   # optional: {bin} in argv
     liveness = { stall_min = 30, paths = ["run/status"] }
     done_marker = "run/DONE"     hidden = false    timeout_h = 3
+    quick = true         # quick lane (`lab quick -- argv...` writes this spec for you)
 
 Placeholders: {out} task outputs, {job} job dir, {bin} the requested binary,
 {input:KEY} any artifact, {python}, {lab}. Display variables are scrubbed for every
 task; a window needs hidden = true (scripts/hidden.sh, local host only).
 """
 
+from pathlib import Path
+
 from ..core import Kind, SpecError, Task
 
 FIELDS = ("threads", "mem_gb", "l3", "arch", "hosts", "local_only", "done_marker", "cwd", "env", "stdout",
           "stderr", "hidden", "liveness", "timeout_h", "est_h", "retries", "resume_argv", "produces",
-          "rlimit_as_gb", "inputs")
+          "rlimit_as_gb", "inputs", "quick")
 WINDOWED = ("window",)
 
 
@@ -25,6 +28,28 @@ def headless_check(argv, hidden):
     for flag, value in zip(argv, argv[1:]):
         if flag in ("--gpu-target", "--sink-target") and value in WINDOWED and not hidden:
             raise SpecError("a windowed target needs hidden = true (scripts/hidden.sh); tasks are headless")
+
+
+def local_paths(argv, cwd, files):
+    """argv tokens (or the value of key=value / --flag=value) naming an existing local file:
+    relative to the task's local cwd, or absolute under $HOME (a worktree binary, local data).
+    Placeholders and staged `files` are portable, and system paths exist on every host."""
+    home = Path.home()
+    found = []
+    for arg in argv:
+        for token in {arg, arg.partition("=")[2]}:
+            if not token or "{" in token or token in files:
+                continue
+            path = Path(token)
+            if not path.is_absolute():
+                if not cwd or "/" not in token:   # bare words (true, python3, seed=3) are not paths
+                    continue
+                path = Path(cwd) / path
+            elif not path.is_relative_to(home):
+                continue
+            if path.exists():
+                found.append(token)
+    return found
 
 
 class Command(Kind):
@@ -75,6 +100,8 @@ class Command(Kind):
             fields["cwd"] = str(ctx.path(spec, cwd))
         elif not cwd:
             fields["cwd"] = str(ctx.repo) if local else None   # remote default: {out}
+        if (cwd and "{" not in cwd) or local_paths(argv, fields.get("cwd"), fields.get("files", {})):
+            fields["meta"] = dict(fields.get("meta", {}), local_inputs=True)   # placement: local hosts first
         return [Task(name=spec.get("task", "run"), argv=argv, **fields)]
 
     def finish(self, job, ctx):

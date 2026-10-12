@@ -1,9 +1,10 @@
-"""lab: submit, status, top, hosts, cancel, approve, wait, events, kinds, install, daemon."""
+"""lab: submit, quick, status, top, hosts, cancel, approve, wait, events, kinds, install, daemon."""
 
 import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 import sys
@@ -13,10 +14,11 @@ import tomllib
 from .core import Context, SpecError, load_kinds
 from .top import cmd_top
 from .ec2 import fill_label
-from .hosts import Inventory
+from .hosts import Inventory, lane
 from .store import TERMINAL, Paths, Store, new_id, read_events, spool
 from .stops import rule_labels, validate_rules
 
+SAFE_NAME = re.compile(r"[^A-Za-z0-9_.-]+")
 WAKE = set(TERMINAL) | {"approval-needed", "ec2-auth-expired", "ec2-down-failed", "ec2-limit"}
 
 
@@ -31,6 +33,31 @@ def cmd_submit(args, paths):
         spec["name"] = args.name
     spec.setdefault("_cwd", os.getcwd())
     spec["_spec_file"] = str(Path(args.spec).resolve())
+    print(submit_spec(spec, paths))
+
+
+def quick_spec(argv, cwd, name=None, threads=1, mem_gb=2.0, out=None):
+    """The `lab quick` job: one command task in the quick lane, run in cwd."""
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        raise SpecError("lab quick needs a command after --")
+    spec = dict(kind="command", name=name or SAFE_NAME.sub("-", Path(argv[0]).name)[:40].strip("-.") or "quick",
+                argv=list(argv), cwd=str(cwd), _cwd=str(cwd), quick=True, threads=threads, mem_gb=mem_gb)
+    if out:
+        spec["out"] = str(Path(cwd, out).resolve())
+    return spec
+
+
+def cmd_quick(args, paths):
+    spec = quick_spec(args.argv, os.getcwd(), args.name, args.threads, args.mem_gb, args.out)
+    job_id = submit_spec(spec, paths)
+    print(job_id)
+    print(f"out {spec.get('out') or paths.runs / job_id}")
+
+
+def submit_spec(spec, paths):
+    """Validate (pinning commits at submit time), spool for labd; return the job id."""
     kinds = load_kinds()
     kind = kinds.get(spec.get("kind"))
     if kind is None:
@@ -44,7 +71,7 @@ def cmd_submit(args, paths):
     spec = validate_rules(kind.validate(spec, ctx), ctx, kind)
     job_id = new_id(spec["kind"], spec.get("name"))
     spool(paths, "incoming", dict(id=job_id, spec=spec, submitted=time.time()), job_id)
-    print(job_id)
+    return job_id
 
 
 def fmt_h(hours):
@@ -124,6 +151,8 @@ def print_hosts(store, paths, brief=False):
         up = host.kind == "local" or probe.get("up")
         mine = [r for r in running if r["host"] == name]
         threads = sum(json.loads(r["spec"])["threads"] for r in mine)
+        build, quick = (sum(json.loads(r["spec"])["threads"] for r in mine if lane(json.loads(r["spec"])) == which)
+                        for which in ("build", "quick"))
         mem = sum(json.loads(r["spec"])["mem_gb"] for r in mine)
         groups = probe.get("groups") or host.groups or []
         per = []
@@ -141,7 +170,7 @@ def print_hosts(store, paths, brief=False):
         if not host.enabled:
             notes += "; disabled"
         state = "up" if up else "down"
-        thread_label = host.thread_label(threads)
+        thread_label = host.thread_label(threads, build, quick)
         if brief:
             print(f"  {name:9} {state:5} {thread_label} threads  {mem:.0f}/{host.max_mem_gb:.0f} GB  {notes}")
         else:
@@ -271,6 +300,13 @@ def main(argv=None):
     p = sub.add_parser("submit", help="validate SPEC (toml/json), pin commits, spool it; prints the job id")
     p.add_argument("spec")
     p.add_argument("--name")
+    p = sub.add_parser("quick", help="lab quick [--name N] [--mem-gb G] [--threads T] [--out DIR] -- CMD...: "
+                       "one command task in the quick lane, run here; prints the job id and output dir")
+    p.add_argument("--name")
+    p.add_argument("--threads", type=int, default=1)
+    p.add_argument("--mem-gb", type=float, default=2.0)
+    p.add_argument("--out", help="output dir (default: the runs dir / job id)")
+    p.add_argument("argv", nargs=argparse.REMAINDER)
     p = sub.add_parser("status")
     p.add_argument("--all", action="store_true")
     p.add_argument("--json", action="store_true")
