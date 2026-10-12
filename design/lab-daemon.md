@@ -259,6 +259,10 @@ size. Running tasks across **all** jobs are charged. An `l3` task goes to the fi
 preferred group with room, and its affinity is that group's CPUs. Other tasks float, and
 their threads count against every group in proportion. Memory is checked against
 `max_mem_gb`, and on the local host against live MemAvailable minus `reserve_mem_gb`.
+A task's `mem_gb` is only this placement charge (each unit's MemoryMax is the host's
+`max_mem_gb`), so ask what the task really uses: every task's measured peak (private resident
+memory of its process tree, sampled every 2 s by taskwrap) is `mem_peak_gb` in its rc.json and
+in the task-done/failed event. Wrysk 2026-10-12: no job asks 16 GB unless it needs it.
 With `external_load`, the load labd does not own (loadavg minus labd's threads) is
 charged too: on the local host every tick, on a remote host at each probe. A task that
 cannot fit on any host even when idle aborts its job at plan time. Otherwise it waits

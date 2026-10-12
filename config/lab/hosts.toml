@@ -14,7 +14,9 @@ quick_timeout_min = 15 # quick tasks (quick = true, `lab quick`) are killed past
 
 [build]
 threads = 8           # cargo -j and the thread charge for build / cargo-test tasks (Wrysk 2026-10-10: not -j 32; rust-lld hammers IO)
-mem_gb = 16           # memory charge for build / cargo-test tasks
+mem_gb = 12           # memory charge for build / cargo-test tasks: measured peak + ~25 % (the
+                      # workspace + GPU suites at -j 8 peaked at 9.8 GB, 2026-10-12; was 16).
+                      # Every task's peak is in labd's events (mem_peak_gb); follow those.
 keep_trees = 3        # snapshot trees kept (newest first) under ~/.cache/labd/trees as seeds
 # Seed candidates for target/<profile>, relative to the built tree and to this checkout.
 # The newest existing one is reflinked (cp -a --reflink=always); failure means a cold build.
