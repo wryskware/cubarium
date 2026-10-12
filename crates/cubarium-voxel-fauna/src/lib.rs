@@ -48,6 +48,10 @@ pub use perception::{Percept, Track};
 pub use vigil::{Hunker, Vigil, VigilLedger, VigilMode, Vigilance};
 pub mod herding;
 pub use herding::{HerdTally, Herding};
+pub mod nurse;
+pub use nurse::Nursing;
+#[cfg(test)]
+mod nurse_tests;
 #[cfg(test)]
 mod herding_tests;
 mod gait;
@@ -1094,6 +1098,12 @@ pub struct Animal {
     /// search image, the encounter memory per prey lineage. Default for every other body.
     #[serde(default)]
     pub hunt: HuntMemory,
+    /// **Its mother** (SP-NURSE, [`crate::nurse`]): the id of the live-bearer whose
+    /// gestation it was born from, set at birth; `None` for a body introduced, founded or
+    /// hatched. Kept for life (an id never repeats); the nursing and the follow read it only
+    /// while the young is dependent and the mother is alive.
+    #[serde(default)]
+    pub mother: Option<u64>,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -3518,6 +3528,14 @@ pub struct FaunaLedger {
     /// food regurgitated into their stomachs (raw organic).
     #[serde(default)]
     pub provision_by_founder: [f64; Founder::COUNT],
+    /// **Nursing** (SP-NURSE, [`crate::nurse`]) by the mother's lineage: organic matter mothers
+    /// passed out of their reserves to their dependent young (also inside
+    /// `provision_by_founder`), and what the young received of it (`nurse_efficiency` of it;
+    /// the rest is respired, inside `respired_out`).
+    #[serde(default)]
+    pub nursed_given_by_founder: [f64; Founder::COUNT],
+    #[serde(default)]
+    pub nursed_received_by_founder: [f64; Founder::COUNT],
     /// What riders took out of hosts of this lineage (the host's loss).
     #[serde(default)]
     pub rider_take_lost_by_founder: [f64; Founder::COUNT],
@@ -5632,6 +5650,7 @@ impl Fauna {
             emergency: false,
             bout: None,
             hunt: crate::HuntMemory::default(),
+            mother: None,
             bite: LastBite::default(),
         };
         let mut animal = animal;

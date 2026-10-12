@@ -170,7 +170,10 @@ use crate::{Fauna, FaunaConfig};
 //     flushes in progress are session state.
 // 78: FUEL — `Animal::{fuel, fuel_energy}` (a state layout change). The relative
 //     `SpeciesConfig::fuel_cap` is named config, not itself a schema bump.
-pub const SCHEMA: u32 = 78;
+// 79: SP-NURSE — `Animal::mother` and the ledger's `nursed_given_by_founder` and
+//     `nursed_received_by_founder` (a state layout change). `FounderPhysiology::nursing`
+//     (`Nursing`) is config, not a bump.
+pub const SCHEMA: u32 = 79;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -619,6 +622,7 @@ mod tests {
             emergency: false,
             bout: None,
             hunt: crate::HuntMemory::default(),
+            mother: None,
             bite: crate::LastBite::default(),
         }
     }
