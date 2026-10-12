@@ -196,7 +196,7 @@ pub struct Vigilance {
     /// **FEAR-2** (module note): a flight, or a refuge watch, whose hunter it has not known
     /// within `flee_stop_m` for this long ends where it is, seconds; 0 never (S2's hold).
     pub lost_calm_s: f64,
-    /// **Woken by an alarm** (RHYTHMS-CADENCE, [`crate::rhythm::alarm_wakes`]): asleep it hears
+    /// **Woken by an alarm** (RHYTHMS-CADENCE, [`crate::rhythm::wakes`]): asleep it hears
     /// a running body (fleeing or bolting) at this share of its awake sensitivity (its hearing
     /// floor over this) and wakes; 0 sleeps through. Fraction.
     pub sleep_hearing: f64,
@@ -695,6 +695,18 @@ fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, v
         .collect();
     out.sort_by(|p, q| p.d.total_cmp(&q.d).then(p.id.cmp(&q.id)));
     out
+}
+
+/// **A pressing threat sensed since `since`** (CALLS-REST: a light rester's wake): body `a`'s
+/// record holds a threat it senses pressing (seen moving or near, heard, felt; not one it
+/// watches), fresh and from a sensing at or after `since`.
+pub(crate) fn pressing_since(fauna: &Fauna, a: &Animal, since: u64, view: &VoxelView<'_>) -> bool {
+    let Some(p) = fauna.percepts.get(&a.id) else { return false };
+    if p.tick < since {
+        return false;
+    }
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    threats(&fauna.config, a, p, fauna.tick, ring, view.config.voxel_m).iter().any(|t| t.pressing)
 }
 
 /// **A readout** (FEAR-2's probe; no rule reads it): the threats the body `a` knows from its

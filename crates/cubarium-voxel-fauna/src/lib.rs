@@ -3654,6 +3654,12 @@ pub struct FaunaLedger {
     pub deep_sleep_ticks_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub deep_bouts_by_founder: [u64; Founder::COUNT],
+    /// CALLS-REST (`rhythm::wakes`): sleepers woken by a heeded call, and light resters woken
+    /// by a pressing threat they sensed (a footfall's wake counts in `alarm_wakes_by_founder`).
+    #[serde(default)]
+    pub call_wakes_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub sight_wakes_by_founder: [u64; Founder::COUNT],
     /// Ticks a heuristic walker was paced (searching or foraging on its own steering, moving
     /// faster than a stay on food, not fleeing) and, of them, paused ([`crate::Cadence`]).
     #[serde(default)]

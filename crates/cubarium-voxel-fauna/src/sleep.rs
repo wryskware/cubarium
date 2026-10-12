@@ -136,6 +136,9 @@ pub struct Doze {
     /// **Rest sites** (step 5): the tick its current search for a scent-free bed ends (0: no
     /// search under way).
     pub bed_until: u64,
+    /// The tick it last lay down (fell asleep): a call or a sensing since wakes it
+    /// ([`crate::rhythm::wakes`]).
+    pub asleep_since: u64,
 }
 
 /// Whether `a` is in deep sleep: asleep and not in light rest. Blind and hard of hearing.
@@ -179,6 +182,9 @@ fn note_kin(fauna: &mut Fauna, i: usize) {
 pub(crate) fn step(fauna: &mut Fauna, i: usize, f: Founder, was_asleep: bool, seed: u64) -> bool {
     let t = fauna.config.founder(f).rest;
     let now = fauna.tick;
+    if !was_asleep && fauna.animals[i].state == State::Asleep {
+        fauna.animals[i].doze.asleep_since = now;
+    }
     if !t.light {
         let a = &mut fauna.animals[i];
         a.doze.light = false;

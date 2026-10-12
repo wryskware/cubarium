@@ -868,8 +868,8 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
     // may hear (none to read while nobody sleeps).
     let hours = crate::rhythm::hours_per_tick(&view.config.day);
     let seed = view.config.seed;
-    let running = if fauna.animals.iter().any(|a| a.state == State::Asleep) {
-        crate::rhythm::running_bodies(fauna)
+    let loud = if fauna.animals.iter().any(|a| a.state == State::Asleep) {
+        crate::rhythm::loud_bodies(fauna)
     } else {
         Vec::new()
     };
@@ -919,13 +919,19 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
                 a.rest_ticks = 0;
             }
         }
-        // A sleeper that hears a run (the alarm wave) wakes and stays up for `alert_s`.
-        if fauna.animals[i].state == State::Asleep
-            && !running.is_empty()
-            && crate::rhythm::alarm_wakes(fauna, i, &running)
-        {
-            fauna.animals[i].alert_ticks = fauna.animals[i].alert_ticks.max(alert_ticks);
-            fauna.ledger.alarm_wakes_by_founder[founder.index()] += 1;
+        // CALLS-REST: the one wake rule (`rhythm::wakes`): a footfall it hears (a run, or a
+        // rush where its lineage hears one), a heeded call, or in light rest a pressing threat.
+        // It stays up for `alert_s`.
+        if fauna.animals[i].state == State::Asleep {
+            if let Some(why) = crate::rhythm::wakes(fauna, view, i, &loud) {
+                fauna.animals[i].alert_ticks = fauna.animals[i].alert_ticks.max(alert_ticks);
+                let k = founder.index();
+                match why {
+                    crate::rhythm::Wake::Footfall => fauna.ledger.alarm_wakes_by_founder[k] += 1,
+                    crate::rhythm::Wake::Call => fauna.ledger.call_wakes_by_founder[k] += 1,
+                    crate::rhythm::Wake::Sight => fauna.ledger.sight_wakes_by_founder[k] += 1,
+                }
+            }
         }
         let a = &fauna.animals[i];
         let hungry = hunger(a, &phys.core);

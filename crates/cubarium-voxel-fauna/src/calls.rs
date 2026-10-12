@@ -9,9 +9,9 @@
 //!   the pair's terrain ray: blocked, the loudness is multiplied by the perception's
 //!   `occlusion`, so its range shrinks the same way.
 //! - **A sleeper** records a call only when its loudness after occlusion is at least
-//!   `asleep_loudness` (and it is in range). Recording is all: waking on it is CALLS-REST's.
-//!   Unlike today's alarm wake (`rhythm::alarm_wakes`: a running body's emission over the
-//!   3D distance, no terrain ray), this path marches the ray.
+//!   `asleep_loudness` (and it is in range); light rest hears as awake (CALLS-REST).
+//!   Waking on it is CALLS-REST's one wake rule (`rhythm::wakes`), which marches the ray for a
+//!   footfall too.
 //! - **The record** ([`CallRecord`]) holds the kind, where the call came from (bearing and
 //!   proximity are encoded from it), its age, and the caller's relation when the hearer
 //!   recognises the voice (`recognise_voice`: its mother or its own young); never the

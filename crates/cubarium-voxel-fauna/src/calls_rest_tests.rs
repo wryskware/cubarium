@@ -512,3 +512,146 @@ fn deep_bouts_are_rarer_with_no_relative_seen_awake_and_the_need_ceiling_still_b
     rest_table(&mut c).need_s = 2.0;
     assert!(run(c, None) > 0, "the need ceiling");
 }
+
+// ------------------------------------------------------------------ step 4: waking
+
+/// A loftstrider asleep at `x` (deep unless `light`), lying down at the current tick.
+fn sleeper(f: &mut Fauna, w: &World, x: f64, light: bool) -> u64 {
+    let id = body(f, w, LS, x, EAST, 0.0);
+    let now = f.tick;
+    let a = animal_mut(f, id);
+    a.state = crate::State::Asleep;
+    a.doze.light = light;
+    a.doze.asleep_since = now;
+    id
+}
+
+fn wakes(f: &Fauna, w: &World, id: u64) -> Option<crate::rhythm::Wake> {
+    let i = f.animals.iter().position(|a| a.id == id).unwrap();
+    crate::rhythm::wakes(f, &w.view(), i, &crate::rhythm::loud_bodies(f))
+}
+
+/// Hearing only (no sight), sized to the ring, sleeping at half its awake sensitivity.
+fn hearing_config() -> FaunaConfig {
+    let mut c = config();
+    let s = &mut c.founders[LS.index()].senses;
+    s.sight_m = 0.0;
+    s.sight_night_m = 0.0;
+    s.tremor_m = 0.0;
+    s.hearing_m = 5.0;
+    s.still_gain = 1.0;
+    c.founders[LS.index()].vigilance.sleep_hearing = 0.5;
+    c.founders[LS.index()].rest.rush_over_cruise = 1.2;
+    c.perception.occlusion = 0.25;
+    c
+}
+
+/// A deep sleeper misses a stalking hound (at its cruise, however close) and wakes to a
+/// rushing one within hearing; beyond its hearing, or behind rock that muffles the rush below
+/// its asleep threshold, the rush does not wake it. The threshold is set from the config: the
+/// rush is heard asleep at the test distance on open ground and not at the occluded loudness.
+#[test]
+fn a_deep_sleeper_misses_a_stalking_hound_and_wakes_to_a_rushing_one_within_hearing() {
+    let tall = || plain_of_height(DayClock { mode: DayMode::Off, ..DayClock::default() }, 44, 40);
+    let open = tall();
+    let mut rocky = tall();
+    for z in 0..12 {
+        for y in 1..40 {
+            rocky.apply(cubarium_voxel::Command::SetMaterial { x: 12, y, z, material: cubarium_voxel::Material::Rock });
+        }
+    }
+    let mut c = hearing_config();
+    let probe = Fauna::new(c.clone());
+    let cruise_vh = cruise(&probe, VH);
+    let rush = 2.5 * cruise_vh;
+    let d = 2.5;
+    // The asleep threshold between the rush's open and occluded loudness at d.
+    let e_rush = {
+        let mut f = Fauna::new(c.clone());
+        let h = body(&mut f, &open, VH, 1.0, WEST, rush);
+        crate::perception::emission(&f.config, &animal(&f, h))
+    };
+    let at_d = e_rush / d;
+    c.founders[LS.index()].senses.hearing_min = 0.5 * 0.5 * (at_d + at_d * 0.25);
+    for (w, speed, x_hound, wakes_up) in [
+        (&open, cruise_vh, 2.0 + d, false),
+        (&open, rush, 2.0 + d, true),
+        (&open, rush, 2.0 + 1.1 * 5.0, false),
+        (&rocky, rush, 2.0 + d, false),
+    ] {
+        let mut f = Fauna::new(c.clone());
+        f.set_births_enabled(false);
+        let me = sleeper(&mut f, w, 2.0, false);
+        body(&mut f, w, VH, x_hound, WEST, speed);
+        let got = wakes(&f, w, me);
+        assert_eq!(got.is_some(), wakes_up, "hound at {x_hound} m, {speed} m/s, rock {}", std::ptr::eq(w, &rocky));
+        if wakes_up {
+            assert_eq!(got, Some(crate::rhythm::Wake::Footfall));
+        }
+    }
+}
+
+/// With `rest.rush_over_cruise` 0 (every lineage but the loftstrider), a rush wakes no one: the
+/// sleeper wakes to running prey only, as before.
+#[test]
+fn without_the_rush_knob_a_rush_wakes_no_one() {
+    let w = world(45);
+    let mut c = hearing_config();
+    c.founders[LS.index()].rest.rush_over_cruise = 0.0;
+    c.founders[LS.index()].senses.hearing_min = 1e-9;
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let me = sleeper(&mut f, &w, 2.0, false);
+    let speed = 2.5 * cruise(&f, VH);
+    body(&mut f, &w, VH, 3.0, WEST, speed);
+    assert_eq!(wakes(&f, &w, me), None);
+}
+
+/// A heeded call heard since the sleeper lay down wakes it; one heard before does not; and a
+/// kind it does not heed (a calf and the bleat, heeded by adults) does not.
+#[test]
+fn a_heeded_call_heard_since_lying_down_wakes_a_sleeper() {
+    let w = world(46);
+    let c = config();
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let caller = body(&mut f, &w, LS, 2.0, EAST, 0.0);
+    let adult = sleeper(&mut f, &w, 3.0, false);
+    let young = calf(&mut f, &w, 3.5, EAST);
+    {
+        let now = f.tick;
+        let a = animal_mut(&mut f, young);
+        a.state = crate::State::Asleep;
+        a.doze.asleep_since = now;
+    }
+    let i = f.animals.iter().position(|a| a.id == caller).unwrap();
+    f.tick += 1;
+    assert!(calls::emit(&mut f, i, 1));
+    calls::hear(&mut f, &w.view());
+    assert_eq!(wakes(&f, &w, adult), Some(crate::rhythm::Wake::Call), "an adult heeds the bleat");
+    assert_eq!(wakes(&f, &w, young), None, "a calf does not heed a bleat");
+    // Lying down after the call: it does not wake to it.
+    let t = f.tick + 1;
+    animal_mut(&mut f, adult).doze.asleep_since = t;
+    assert_eq!(wakes(&f, &w, adult), None);
+}
+
+/// In light rest a sleeper wakes to a stalking hound it sees moving within its reduced range;
+/// in deep sleep the same hound does not wake it.
+#[test]
+fn a_light_rester_wakes_to_a_stalking_hound_it_sees_and_a_deep_sleeper_does_not() {
+    let w = world(47);
+    let mut c = config();
+    sight_only(&mut c, 5.0);
+    rest_table(&mut c).light = true;
+    rest_table(&mut c).rest_sense = 0.5;
+    for light in [true, false] {
+        let mut f = Fauna::new(c.clone());
+        f.set_births_enabled(false);
+        let me = sleeper(&mut f, &w, 2.0, light);
+        let speed = cruise(&f, VH);
+        body(&mut f, &w, VH, 2.0 + 0.8 * 2.5, WEST, speed);
+        sense(&mut f, &w);
+        assert_eq!(wakes(&f, &w, me), light.then_some(crate::rhythm::Wake::Sight), "light {light}");
+    }
+}
