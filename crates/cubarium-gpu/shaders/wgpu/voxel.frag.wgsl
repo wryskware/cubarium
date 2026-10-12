@@ -464,9 +464,8 @@ fn texOn(slot: i32) -> bool {
 
     slot_1 = slot;
     let _e169: i32 = slot_1;
-    let _e172: VoxelScene = u;
     let _e176: i32 = slot_1;
-    return ((_e169 >= 0i) && ((_e172.tex.x & (1i << u32(_e176))) != 0i));
+    return ((_e169 >= 0i) && ((u.tex.x & (1i << u32(_e176))) != 0i));
 }
 
 fn cellHash(x_12: i32, y_14: i32, z_12: i32, salt: i32) -> u32 {
@@ -562,10 +561,9 @@ fn isVine(v_11: vec4<u32>) -> bool {
     var v_12: vec4<u32>;
 
     v_12 = v_11;
-    let _e173: VoxelScene = u;
     let _e178: vec4<u32> = v_12;
     let _e185: vec4<u32> = v_12;
-    return (((_e173.tex.y != 0i) && ((_e178.x & 31u) == 0u)) && ((_e185.x >> 5u) != 0u));
+    return (((u.tex.y != 0i) && ((_e178.x & 31u) == 0u)) && ((_e185.x >> 5u) != 0u));
 }
 
 fn vineKind(v_13: vec4<u32>) -> i32 {
@@ -712,12 +710,11 @@ fn cordCell(v_17: vec4<u32>) -> bool {
     var v_18: vec4<u32>;
 
     v_18 = v_17;
-    let _e173: VoxelScene = u;
     let _e178: vec4<u32> = v_18;
     let _e179: i32 = partOf(_e178);
     let _e183: vec4<u32> = v_18;
     let _e188: vec4<f32> = textureLoad(wgpu_styleTex, vec2<i32>(0i, i32(_e183.w)), 0i);
-    return (((_e173.tex.z > 0i) && (_e179 == CROWN)) && (i32((_e188.w + 0.5f)) == ROLE_DRAPE));
+    return (((u.tex.z > 0i) && (_e179 == CROWN)) && (i32((_e188.w + 0.5f)) == ROLE_DRAPE));
 }
 
 fn cordJoin(x_20: i32, yf: i32, z_20: i32) -> f32 {
@@ -733,14 +730,12 @@ fn cordJoin(x_20: i32, yf: i32, z_20: i32) -> f32 {
     x_21 = x_20;
     yf_1 = yf;
     z_21 = z_20;
-    let _e177: VoxelScene = u;
-    w = _e177.tex.z;
+    w = u.tex.z;
     let _e181: i32 = S;
     let _e182: i32 = w;
     free = max((_e181 - _e182), 0i);
     let _e187: i32 = free;
-    let _e189: VoxelScene = u;
-    span = i32((((f32(_e187) * f32(((_e189.tex.w >> 8u) & 255i))) / 100f) + 0.5f));
+    span = i32((((f32(_e187) * f32(((u.tex.w >> 8u) & 255i))) / 100f) + 0.5f));
     let _e205: i32 = free;
     let _e206: i32 = span;
     lo = ((_e205 - _e206) / 2i);
@@ -786,8 +781,7 @@ fn cordAt(a_3: f32, b: f32, t_1: f32) -> f32 {
     a_4 = a_3;
     b_1 = b;
     t_2 = t_1;
-    let _e177: VoxelScene = u;
-    if ((_e177.tex.w & 1i) == 1i) {
+    if ((u.tex.w & 1i) == 1i) {
         let _e184: f32 = t_2;
         let _e185: f32 = t_2;
         let _e189: f32 = t_2;
@@ -821,8 +815,7 @@ fn cordCovers(a_5: f32, b_2: f32, t_3: f32, xp: f32) -> bool {
     b_3 = b_2;
     t_4 = t_3;
     xp_1 = xp;
-    let _e179: VoxelScene = u;
-    w_1 = f32(_e179.tex.z);
+    w_1 = f32(u.tex.z);
     let _e184: f32 = a_6;
     let _e185: f32 = b_3;
     let _e186: f32 = t_4;
@@ -860,13 +853,11 @@ fn cordCovers(a_5: f32, b_2: f32, t_3: f32, xp: f32) -> bool {
 }
 
 fn cordPeriod() -> f32 {
-    let _e171: VoxelScene = u;
-    return (f32(((_e171.tex.w >> 16u) & 255i)) / 4f);
+    return (f32(((u.tex.w >> 16u) & 255i)) / 4f);
 }
 
 fn cordWave() -> bool {
-    let _e171: VoxelScene = u;
-    return (((_e171.tex.w >> 16u) & 255i) != 0i);
+    return (((u.tex.w >> 16u) & 255i) != 0i);
 }
 
 fn cordAmp(walk: bool) -> f32 {
@@ -875,15 +866,13 @@ fn cordAmp(walk: bool) -> f32 {
     var local_6: f32;
 
     walk_1 = walk;
-    let _e173: VoxelScene = u;
-    a_7 = (f32(((_e173.tex.w >> 24u) & 255i)) / 32f);
+    a_7 = (f32(((u.tex.w >> 24u) & 255i)) / 32f);
     let _e185: bool = walk_1;
     if _e185 {
         let _e186: f32 = a_7;
         let _e187: i32 = S;
-        let _e188: VoxelScene = u;
         let _e194: i32 = S;
-        local_6 = min(_e186, max((f32((_e187 - _e188.tex.z)) / (2f * f32(_e194))), 0f));
+        local_6 = min(_e186, max((f32((_e187 - u.tex.z)) / (2f * f32(_e194))), 0f));
     } else {
         let _e201: f32 = a_7;
         local_6 = _e201;
@@ -921,8 +910,7 @@ fn cordFreq(x_26: i32, z_26: i32, k_2: i32) -> f32 {
     let _e178: i32 = k_3;
     o = f32((1i << u32(_e178)));
     let _e183: i32 = k_3;
-    let _e186: VoxelScene = u;
-    if ((_e183 == 0i) || ((_e186.tex.w & 2i) == 0i)) {
+    if ((_e183 == 0i) || ((u.tex.w & 2i) == 0i)) {
         {
             let _e194: f32 = o;
             return _e194;
@@ -940,8 +928,7 @@ fn cordFreq(x_26: i32, z_26: i32, k_2: i32) -> f32 {
 }
 
 fn cordOctaves() -> i32 {
-    let _e171: VoxelScene = u;
-    return max(((_e171.tex.w >> 4u) & 15i), 1i);
+    return max(((u.tex.w >> 4u) & 15i), 1i);
 }
 
 fn cordWaveAt(x_28: i32, z_28: i32, yw: f32, amp: f32) -> f32 {
@@ -1037,8 +1024,7 @@ fn cordSpan(c_3: f32, up_1: f32, down_1: f32, xp_2: f32) -> bool {
     up_2 = up_1;
     down_2 = down_1;
     xp_3 = xp_2;
-    let _e179: VoxelScene = u;
-    w_2 = f32(_e179.tex.z);
+    w_2 = f32(u.tex.z);
     let _e185: f32 = up_2;
     let _e186: f32 = down_2;
     ext_1 = max(((0.5f * max(_e185, _e186)) - 0.5f), 0f);
@@ -1187,26 +1173,22 @@ fn strataOf(m_2: i32) -> vec3<f32> {
     let _e173: i32 = m_3;
     if (_e173 == 0i) {
         {
-            let _e176: VoxelScene = u;
-            return _e176.skyC.xyz;
+            return u.skyC.xyz;
         }
     }
     let _e179: i32 = m_3;
     if (_e179 == 1i) {
         {
-            let _e182: VoxelScene = u;
-            return _e182.bedrockC.xyz;
+            return u.bedrockC.xyz;
         }
     }
     let _e185: i32 = m_3;
     if (_e185 == 2i) {
         {
-            let _e188: VoxelScene = u;
-            return _e188.rockC.xyz;
+            return u.rockC.xyz;
         }
     }
-    let _e191: VoxelScene = u;
-    return _e191.soilC.xyz;
+    return u.soilC.xyz;
 }
 
 fn holdsPore(m_4: i32) -> bool {
@@ -1228,10 +1210,9 @@ fn hazeAt(zf: f32) -> f32 {
             return 0f;
         }
     }
-    let _e177: VoxelScene = u;
     let _e183: f32 = zf_1;
     let _e184: i32 = D;
-    return (clamp(_e177.knobs.x, 0f, 1f) * clamp((_e183 / f32((_e184 - 1i))), 0f, 1f));
+    return (clamp(u.knobs.x, 0f, 1f) * clamp((_e183 / f32((_e184 - 1i))), 0f, 1f));
 }
 
 fn hazed(c_6: vec3<f32>, t_10: f32) -> vec3<f32> {
@@ -1241,9 +1222,8 @@ fn hazed(c_6: vec3<f32>, t_10: f32) -> vec3<f32> {
     c_7 = c_6;
     t_11 = t_10;
     let _e175: vec3<f32> = c_7;
-    let _e176: VoxelScene = u;
     let _e179: f32 = t_11;
-    return mix(_e175, _e176.hazeC.xyz, vec3(clamp(_e179, 0f, 1f)));
+    return mix(_e175, u.hazeC.xyz, vec3(clamp(_e179, 0f, 1f)));
 }
 
 fn roofShade(gap: i32) -> f32 {
@@ -1258,12 +1238,9 @@ fn roofShade(gap: i32) -> f32 {
         }
     }
     let _e178: i32 = gap_1;
-    let _e183: VoxelScene = u;
-    t_12 = (1f - exp((-(f32((_e178 - 1i))) / _e183.roofK.y)));
-    let _e190: VoxelScene = u;
-    let _e194: VoxelScene = u;
+    t_12 = (1f - exp((-(f32((_e178 - 1i))) / u.roofK.y)));
     let _e198: f32 = t_12;
-    return (_e190.roofK.x + ((1f - _e194.roofK.x) * _e198));
+    return (u.roofK.x + ((1f - u.roofK.x) * _e198));
 }
 
 fn roofGap(x_32: i32, y_26: i32, z_32: i32) -> i32 {
@@ -1275,8 +1252,7 @@ fn roofGap(x_32: i32, y_26: i32, z_32: i32) -> i32 {
     x_33 = x_32;
     y_27 = y_26;
     z_33 = z_32;
-    let _e177: VoxelScene = u;
-    if (_e177.geom.w != 0i) {
+    if (u.geom.w != 0i) {
         {
             let _e182: i32 = x_33;
             let _e183: i32 = wrapX(_e182);
@@ -1361,8 +1337,7 @@ fn cellEntry(x_34: i32, y_28: i32, z_34: i32) -> i32 {
     x_35 = x_34;
     y_29 = y_28;
     z_35 = z_34;
-    let _e178: VoxelScene = u;
-    cap = (u32(_e178.view.w) & 1048575u);
+    cap = (u32(u.view.w) & 1048575u);
     let _e187: u32 = cap;
     if (_e187 == 0u) {
         {
@@ -1386,17 +1361,15 @@ fn cellEntry(x_34: i32, y_28: i32, z_34: i32) -> i32 {
             break;
         }
         {
-            let _e232: VoxelScene = u;
             let _e235: u32 = h_4;
-            let _e239: vec4<u32> = global.emitCells[(_e232.view.z + i32(_e235))];
+            let _e239: vec4<u32> = global.emitCells[(u.view.z + i32(_e235))];
             c_8 = _e239;
             let _e241: vec4<u32> = c_8;
             let _e243: u32 = key;
             if (_e241.x == _e243) {
                 {
-                    let _e245: VoxelScene = u;
                     let _e248: u32 = h_4;
-                    return (_e245.view.z + i32(_e248));
+                    return (u.view.z + i32(_e248));
                 }
             }
             let _e251: vec4<u32> = c_8;
@@ -1479,8 +1452,7 @@ fn entryVineFrom(i_3: i32, v_21: ptr<function, vec4<u32>>) -> f32 {
 
     i_4 = i_3;
     let _e175: i32 = i_4;
-    let _e178: VoxelScene = u;
-    if ((_e175 < 0i) || ((u32(_e178.view.w) & EMIT_VINES) == 0u)) {
+    if ((_e175 < 0i) || ((u32(u.view.w) & EMIT_VINES) == 0u)) {
         {
             return 0f;
         }
@@ -1515,8 +1487,7 @@ fn plantSize(x_38: i32, y_32: i32, z_38: i32) -> f32 {
     x_39 = x_38;
     y_33 = y_32;
     z_39 = z_38;
-    let _e180: VoxelScene = u;
-    if (!(PLANT_LIGHT) || ((u32(_e180.view.w) & EMIT_PLANTS) == 0u)) {
+    if (!(PLANT_LIGHT) || ((u32(u.view.w) & EMIT_PLANTS) == 0u)) {
         {
             return 1f;
         }
@@ -1561,11 +1532,10 @@ fn crownEdge(x_40: i32, y_34: i32, z_40: i32, dx_10: i32) -> f32 {
     y_35 = y_34;
     z_41 = z_40;
     dx_11 = dx_10;
-    let _e182: VoxelScene = u;
     let _e190: i32 = dx_11;
     let _e193: i32 = dx_11;
     let _e194: i32 = S;
-    if ((!(PLANT_LIGHT) || ((u32(_e182.view.w) & EMIT_PLANTS) == 0u)) || ((_e190 != 0i) && (_e193 != (_e194 - 1i)))) {
+    if ((!(PLANT_LIGHT) || ((u32(u.view.w) & EMIT_PLANTS) == 0u)) || ((_e190 != 0i) && (_e193 != (_e194 - 1i)))) {
         {
             return 1f;
         }
@@ -1622,8 +1592,7 @@ fn emitterTrans(trans: vec3<f32>, drawn: vec3<f32>, haze: f32) -> vec3<f32> {
     let _e179: vec3<f32> = trans_1;
     let _e180: vec3<f32> = drawn_1;
     let _e181: f32 = haze_1;
-    let _e185: VoxelScene = u;
-    return (-((_e179 * max((_e180 - (clamp(_e181, 0f, 1f) * _e185.hazeC.xyz)), vec3(0f)))) - vec3(1f));
+    return (-((_e179 * max((_e180 - (clamp(_e181, 0f, 1f) * u.hazeC.xyz)), vec3(0f)))) - vec3(1f));
 }
 
 fn vineEmits(t_13: vec4<f32>) -> bool {
@@ -1644,10 +1613,7 @@ fn plantLit(c_10: vec3<f32>, shade: f32) -> vec3<f32> {
     c_11 = c_10;
     shade_1 = shade;
     let _e178: vec3<f32> = c_11;
-    let _e179: VoxelScene = u;
-    let _e183: VoxelScene = u;
-    let _e186: VoxelScene = u;
-    lit = mix((_e178 * _e179.plantA.x), _e183.lightC.xyz, vec3(_e186.plantA.y));
+    lit = mix((_e178 * u.plantA.x), u.lightC.xyz, vec3(u.plantA.y));
     let _e192: f32 = shade_1;
     if (_e192 < 1f) {
         let _e195: vec3<f32> = c_11;
@@ -1724,10 +1690,8 @@ fn blockBody(v_22: vec4<u32>, base: vec3<f32>) -> vec3<f32> {
     let _e193: f32 = local_12;
     wet = _e193;
     let _e195: vec3<f32> = base_1;
-    let _e196: VoxelScene = u;
     let _e199: f32 = wet;
-    let _e200: VoxelScene = u;
-    return mix(_e195, _e196.waterDeepC.xyz, vec3((_e199 * _e200.shadeB.w)));
+    return mix(_e195, u.waterDeepC.xyz, vec3((_e199 * u.shadeB.w)));
 }
 
 fn blockLit(body: vec3<f32>, shade_2: f32) -> vec3<f32> {
@@ -1739,10 +1703,7 @@ fn blockLit(body: vec3<f32>, shade_2: f32) -> vec3<f32> {
     body_1 = body;
     shade_3 = shade_2;
     let _e178: vec3<f32> = body_1;
-    let _e179: VoxelScene = u;
-    let _e183: VoxelScene = u;
-    let _e186: VoxelScene = u;
-    lit_1 = mix((_e178 * _e179.shadeA.x), _e183.lightC.xyz, vec3(_e186.shadeA.y));
+    lit_1 = mix((_e178 * u.shadeA.x), u.lightC.xyz, vec3(u.shadeA.y));
     let _e192: f32 = shade_3;
     if (_e192 < 1f) {
         let _e195: vec3<f32> = body_1;
@@ -1942,8 +1903,7 @@ fn creaseBands(l: f32, r_2: f32, lo_1: f32, hi: f32, cLL: f32, cRL: f32, cLH: f3
             band = ((((((((_e221 && (_e222 > 0.5f)) || (_e226 && (_e227 > 0.5f))) || (_e232 && (_e233 > 0.5f))) || (_e238 && (_e239 > 0.5f))) || ((_e244 && _e245) && (_e247 > 0.5f))) || ((_e252 && _e253) && (_e255 > 0.5f))) || ((_e260 && _e261) && (_e263 > 0.5f))) || ((_e268 && _e269) && (_e271 > 0.5f)));
             let _e277: bool = band;
             if _e277 {
-                let _e279: VoxelScene = u;
-                local_16 = (1f - _e279.lightK.w);
+                local_16 = (1f - u.lightK.w);
             } else {
                 local_16 = 1f;
             }
@@ -2022,9 +1982,8 @@ fn creaseBands(l: f32, r_2: f32, lo_1: f32, hi: f32, cLL: f32, cRL: f32, cLH: f3
     }
     let _e339: f32 = local_24;
     k_5 = max(_e310, max(max(_e317, _e324), max(_e332, _e339)));
-    let _e344: VoxelScene = u;
     let _e347: f32 = k_5;
-    return (1f - (_e344.lightK.w * _e347));
+    return (1f - (u.lightK.w * _e347));
 }
 
 fn crease(l_2: f32, r_4: f32, lo_3: f32, hi_2: f32, cLL_2: f32, cRL_2: f32, cLH_2: f32, cRH_2: f32, du_2: i32, dv_2: i32, nu_2: i32, nv_2: i32) -> f32 {
@@ -2198,9 +2157,8 @@ fn creaseOpen(o_1: vec3<i32>, U: vec3<i32>, V: vec3<i32>, du_4: i32, dv_4: i32, 
             k_6 = max(_e277, _e283);
         }
     }
-    let _e286: VoxelScene = u;
     let _e289: f32 = k_6;
-    return (1f - (_e286.lightK.w * _e289));
+    return (1f - (u.lightK.w * _e289));
 }
 
 fn modelCrease(mask: u32, dx_14: i32, dy_8: i32, size: vec2<i32>) -> f32 {
@@ -2511,12 +2469,9 @@ fn ladderLight(a_9: f32, sun: f32, local_25: vec3<f32>) -> vec3<f32> {
     a_10 = a_9;
     sun_1 = sun;
     local_26 = local_25;
-    let _e181: VoxelScene = u;
-    smoothLight = (_e181.lightK.z < 1.5f);
-    let _e187: VoxelScene = u;
-    n_1 = max((_e187.lightK.z - 1f), 1f);
-    let _e195: VoxelScene = u;
-    hue = _e195.ambientC.xyz;
+    smoothLight = (u.lightK.z < 1.5f);
+    n_1 = max((u.lightK.z - 1f), 1f);
+    hue = u.ambientC.xyz;
     let _e199: vec3<f32> = local_26;
     l_4 = dot(_e199, vec3<f32>(0.2126f, 0.7152f, 0.0722f));
     let _e206: f32 = l_4;
@@ -2552,24 +2507,19 @@ fn ladderLight(a_9: f32, sun: f32, local_25: vec3<f32>) -> vec3<f32> {
     if _e244 {
         let _e245: f32 = a_10;
         let _e249: f32 = sun_1;
-        let _e250: VoxelScene = u;
-        local_28 = (clamp(_e245, 0f, 1f) + (_e249 * _e250.dayK.y));
+        local_28 = (clamp(_e245, 0f, 1f) + (_e249 * u.dayK.y));
     } else {
         let _e255: f32 = a_10;
         let _e259: f32 = n_1;
         let _e264: f32 = sun_1;
-        let _e265: VoxelScene = u;
         let _e270: f32 = n_1;
-        local_28 = ((floor(((clamp(_e255, 0f, 1f) * _e259) + 0.5f)) + (_e264 * _e265.dayK.x)) / _e270);
+        local_28 = ((floor(((clamp(_e255, 0f, 1f) * _e259) + 0.5f)) + (_e264 * u.dayK.x)) / _e270);
     }
     let _e273: f32 = local_28;
     t_15 = _e273;
     let _e275: vec3<f32> = hue;
-    let _e276: VoxelScene = u;
-    let _e279: VoxelScene = u;
-    let _e283: VoxelScene = u;
     let _e287: f32 = t_15;
-    return (_e275 * (_e276.lightK.x * (_e279.lightK.y + ((1f - _e283.lightK.y) * _e287))));
+    return (_e275 * (u.lightK.x * (u.lightK.y + ((1f - u.lightK.y) * _e287))));
 }
 
 fn ladderRef(sunOn: f32) -> vec3<f32> {
@@ -2580,10 +2530,8 @@ fn ladderRef(sunOn: f32) -> vec3<f32> {
     var t_16: f32;
 
     sunOn_1 = sunOn;
-    let _e177: VoxelScene = u;
-    smoothLight_1 = (_e177.lightK.z < 1.5f);
-    let _e183: VoxelScene = u;
-    n_2 = max((_e183.lightK.z - 1f), 1f);
+    smoothLight_1 = (u.lightK.z < 1.5f);
+    n_2 = max((u.lightK.z - 1f), 1f);
     let _e191: bool = smoothLight_1;
     if _e191 {
         let _e193: f32 = sunOn_1;
@@ -2596,13 +2544,8 @@ fn ladderRef(sunOn: f32) -> vec3<f32> {
     }
     let _e205: f32 = local_29;
     t_16 = _e205;
-    let _e207: VoxelScene = u;
-    let _e210: VoxelScene = u;
-    let _e215: VoxelScene = u;
-    let _e218: VoxelScene = u;
-    let _e222: VoxelScene = u;
     let _e226: f32 = t_16;
-    return ((_e207.ambientC.xyz / vec3(_e210.dayK.z)) * (_e215.lightK.x * (_e218.lightK.y + ((1f - _e222.lightK.y) * _e226))));
+    return ((u.ambientC.xyz / vec3(u.dayK.z)) * (u.lightK.x * (u.lightK.y + ((1f - u.lightK.y) * _e226))));
 }
 
 fn glowAt(p_13: vec3<f32>) -> vec3<f32> {
@@ -2650,40 +2593,32 @@ fn figureShades(p_15: vec3<f32>) -> bool {
     var top: f32;
 
     p_16 = p_15;
-    let _e178: VoxelScene = u;
-    if (_e178.figSun.w < 0.5f) {
+    if (u.figSun.w < 0.5f) {
         {
             return false;
         }
     }
     let _e184: vec3<f32> = p_16;
     let _e186: vec3<f32> = p_16;
-    let _e188: VoxelScene = u;
-    fx = (_e184.x - (_e186.y * _e188.figSun.x));
+    fx = (_e184.x - (_e186.y * u.figSun.x));
     let _e194: vec3<f32> = p_16;
     let _e196: vec3<f32> = p_16;
-    let _e198: VoxelScene = u;
-    let _e203: VoxelScene = u;
-    fz = ((_e194.z - (_e196.y * _e198.figSun.y)) - _e203.figSun.z);
+    fz = ((_e194.z - (_e196.y * u.figSun.y)) - u.figSun.z);
     let _e208: f32 = fx;
     let _e209: i32 = W;
     let _e211: f32 = fx;
     let _e212: i32 = W;
-    let _e218: VoxelScene = u;
     let _e222: f32 = fz;
-    let _e223: VoxelScene = u;
-    t_17 = vec2<f32>(((_e208 - (f32(_e209) * floor((_e211 / f32(_e212))))) * _e218.figMap.x), (_e222 * _e223.figMap.y));
+    t_17 = vec2<f32>(((_e208 - (f32(_e209) * floor((_e211 / f32(_e212))))) * u.figMap.x), (_e222 * u.figMap.y));
     let _e229: vec2<f32> = t_17;
     let _e233: vec2<f32> = t_17;
-    let _e235: VoxelScene = u;
-    if ((_e229.y < 0f) || (_e233.y >= _e235.figMap.w)) {
+    if ((_e229.y < 0f) || (_e233.y >= u.figMap.w)) {
         {
             return false;
         }
     }
     let _e241: vec2<f32> = t_17;
-    let _e242: VoxelScene = u;
-    let _e251: f32 = textureLoad(wgpu_figSunTex, vec2<i32>(min(_e241, (_e242.figMap.zw - vec2(1f)))), 0i);
+    let _e251: f32 = textureLoad(wgpu_figSunTex, vec2<i32>(min(_e241, (u.figMap.zw - vec2(1f)))), 0i);
     let _e253: i32 = H;
     top = (f32(_e251) * f32(_e253));
     let _e257: f32 = top;
@@ -2726,8 +2661,7 @@ fn sunReaches(p_17: vec3<f32>, c_16: vec3<i32>) -> f32 {
             return 0f;
         }
     }
-    let _e185: VoxelScene = u;
-    L = _e185.sunK.xyz;
+    L = u.sunK.xyz;
     let _e189: vec3<f32> = L;
     dir = vec3<i32>(sign(_e189));
     let _e193: vec3<f32> = L;
@@ -2973,11 +2907,9 @@ fn litBy(base_2: vec3<f32>, ambient: f32, sun_2: f32, ndl: f32, local_38: vec3<f
     let _e190: vec3<f32> = ladderLight(_e187, _e188, _e189);
     c_18 = (_e186 * _e190);
     let _e193: vec3<f32> = c_18;
-    let _e194: VoxelScene = u;
-    let _e197: VoxelScene = u;
     let _e200: f32 = sun_3;
     let _e202: f32 = ndl_1;
-    return mix(_e193, _e194.sunLean.xyz, vec3(clamp(((_e197.sunK.w * _e200) * _e202), 0f, 1f)));
+    return mix(_e193, u.sunLean.xyz, vec3(clamp(((u.sunK.w * _e200) * _e202), 0f, 1f)));
 }
 
 fn shadeFront(base_4: vec3<f32>, x_54: i32, y_46: i32, z_54: i32, dx_20: i32, dy_14: i32, canopy: f32) -> vec3<f32> {
@@ -3000,8 +2932,7 @@ fn shadeFront(base_4: vec3<f32>, x_54: i32, y_46: i32, z_54: i32, dx_20: i32, dy
     dx_21 = dx_20;
     dy_15 = dy_14;
     canopy_1 = canopy;
-    let _e190: VoxelScene = u;
-    ndl_2 = max(-(_e190.sunK.z), 0f);
+    ndl_2 = max(-(u.sunK.z), 0f);
     let _e199: i32 = x_55;
     let _e201: i32 = dx_21;
     let _e205: i32 = S;
@@ -3011,8 +2942,7 @@ fn shadeFront(base_4: vec3<f32>, x_54: i32, y_46: i32, z_54: i32, dx_20: i32, dy
     let _e221: i32 = z_55;
     p_19 = vec3<f32>((f32(_e199) + ((f32(_e201) + 0.5f) / f32(_e205))), (f32((_e209 + 1i)) - ((f32(_e213) + 0.5f) / f32(_e217))), f32(_e221));
     let _e225: f32 = ndl_2;
-    let _e228: VoxelScene = u;
-    if ((_e225 > 0f) && (_e228.sunK.y > 0f)) {
+    if ((_e225 > 0f) && (u.sunK.y > 0f)) {
         {
             let _e234: vec3<f32> = p_19;
             let _e235: i32 = x_55;
@@ -3064,8 +2994,7 @@ fn shadeTop(base_6: vec3<f32>, x_56: i32, y_48: i32, z_56: i32, dx_22: i32, dy_1
     dx_23 = dx_22;
     dy_17 = dy_16;
     canopy_3 = canopy_2;
-    let _e190: VoxelScene = u;
-    ndl_3 = max(_e190.sunK.y, 0f);
+    ndl_3 = max(u.sunK.y, 0f);
     let _e198: i32 = x_57;
     let _e200: i32 = dx_23;
     let _e204: i32 = S;
@@ -3230,8 +3159,7 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
     let _e287: vec3<f32> = blockBody(_e277, _e286);
     body_2 = _e287;
     let _e289: i32 = m_9;
-    let _e292: VoxelScene = u;
-    if ((_e289 != 0i) && (_e292.roofK.z > 0f)) {
+    if ((_e289 != 0i) && (u.roofK.z > 0f)) {
         {
             let _e298: vec3<f32> = body_2;
             let _e300: i32 = x_61;
@@ -3240,8 +3168,7 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
             let _e303: i32 = dx_27;
             let _e304: i32 = dy_20;
             let _e305: f32 = faceGrain(_e300, _e301, _e302, _e303, _e304);
-            let _e306: VoxelScene = u;
-            body_2 = (_e298 * (1f + (_e305 * (_e306.roofK.z / 0.04f))));
+            body_2 = (_e298 * (1f + (_e305 * (u.roofK.z / 0.04f))));
         }
     }
     let _e314: vec3<f32> = body_2;
@@ -3283,9 +3210,8 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
             t_18 = _e355;
             let _e357: vec3<f32> = lit_2;
             let _e358: vec3<f32> = own;
-            let _e359: VoxelScene = u;
             let _e362: f32 = t_18;
-            slope = mix(_e357, _e358, vec3((_e359.shadeB.z * _e362)));
+            slope = mix(_e357, _e358, vec3((u.shadeB.z * _e362)));
             let _e367: i32 = z_61;
             let _e369: f32 = t_18;
             let _e371: f32 = hazeAt((f32(_e367) - _e369));
@@ -3293,8 +3219,7 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
             let _e373: bool = onSide;
             if _e373 {
                 let _e374: vec3<f32> = slope;
-                let _e375: VoxelScene = u;
-                local_44 = (_e374 * _e375.shadeB.x);
+                local_44 = (_e374 * u.shadeB.x);
             } else {
                 let _e379: vec3<f32> = slope;
                 local_44 = _e379;
@@ -3331,8 +3256,7 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
             } else {
                 let _e410: vec3<f32> = own;
                 let _e411: vec3<f32> = lit_3;
-                let _e412: VoxelScene = u;
-                local_45 = mix(_e410, _e411, vec3(_e412.shadeA.w));
+                local_45 = mix(_e410, _e411, vec3(u.shadeA.w));
             }
             let _e418: vec3<f32> = local_45;
             c_19 = _e418;
@@ -3342,8 +3266,7 @@ fn blockFrontLit(x_60: i32, y_52: i32, z_60: i32, v_32: vec4<u32>, r_6: i32, dx_
             let _e419: bool = onSide;
             if _e419 {
                 let _e420: vec3<f32> = own;
-                let _e421: VoxelScene = u;
-                local_46 = (_e420 * _e421.shadeB.x);
+                local_46 = (_e420 * u.shadeB.x);
             } else {
                 let _e425: vec3<f32> = own;
                 local_46 = _e425;
@@ -3466,8 +3389,7 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
     let _e294: vec3<f32> = blockBody(_e284, _e293);
     body_3 = _e294;
     let _e296: i32 = m_10;
-    let _e299: VoxelScene = u;
-    if ((_e296 != 0i) && (_e299.roofK.z > 0f)) {
+    if ((_e296 != 0i) && (u.roofK.z > 0f)) {
         {
             let _e305: vec3<f32> = body_3;
             let _e307: i32 = x_63;
@@ -3476,8 +3398,7 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
             let _e310: i32 = dx_29;
             let _e311: i32 = dy_21;
             let _e312: f32 = faceGrain(_e307, _e308, _e309, _e310, _e311);
-            let _e313: VoxelScene = u;
-            body_3 = (_e305 * (1f + (_e312 * (_e313.roofK.z / 0.04f))));
+            body_3 = (_e305 * (1f + (_e312 * (u.roofK.z / 0.04f))));
         }
     }
     let _e321: vec3<f32> = body_3;
@@ -3503,9 +3424,8 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
             t_19 = _e342;
             let _e344: vec3<f32> = lit_4;
             let _e345: vec3<f32> = body_3;
-            let _e346: VoxelScene = u;
             let _e349: f32 = t_19;
-            slope_1 = mix(_e344, _e345, vec3((_e346.shadeB.z * _e349)));
+            slope_1 = mix(_e344, _e345, vec3((u.shadeB.z * _e349)));
             let _e354: i32 = z_63;
             let _e356: f32 = t_19;
             let _e358: f32 = hazeAt((f32(_e354) - _e356));
@@ -3513,8 +3433,7 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
             let _e360: bool = onSide_1;
             if _e360 {
                 let _e361: vec3<f32> = slope_1;
-                let _e362: VoxelScene = u;
-                local_49 = (_e361 * _e362.shadeB.x);
+                local_49 = (_e361 * u.shadeB.x);
             } else {
                 let _e366: vec3<f32> = slope_1;
                 local_49 = _e366;
@@ -3541,8 +3460,7 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
             } else {
                 let _e385: vec3<f32> = body_3;
                 let _e386: vec3<f32> = lit_4;
-                let _e387: VoxelScene = u;
-                local_50 = mix(_e385, _e386, vec3(_e387.shadeA.w));
+                local_50 = mix(_e385, _e386, vec3(u.shadeA.w));
             }
             let _e393: vec3<f32> = local_50;
             c_20 = _e393;
@@ -3552,8 +3470,7 @@ fn blockFront(x_62: i32, y_54: i32, z_62: i32, v_34: vec4<u32>, r_8: i32, dx_28:
             let _e394: bool = onSide_1;
             if _e394 {
                 let _e395: vec3<f32> = body_3;
-                let _e396: VoxelScene = u;
-                local_51 = (_e395 * _e396.shadeB.x);
+                local_51 = (_e395 * u.shadeB.x);
             } else {
                 let _e400: vec3<f32> = body_3;
                 local_51 = _e400;
@@ -3648,8 +3565,7 @@ fn blockTopLit(x_64: i32, y_56: i32, z_64: i32, v_36: vec4<u32>, r_10: i32, dx_3
     let _e280: vec3<f32> = blockBody(_e264, _e279);
     body_4 = _e280;
     let _e282: i32 = m_11;
-    let _e285: VoxelScene = u;
-    if ((_e282 != 0i) && (_e285.roofK.z > 0f)) {
+    if ((_e282 != 0i) && (u.roofK.z > 0f)) {
         {
             let _e291: vec3<f32> = body_4;
             let _e293: i32 = x_65;
@@ -3658,8 +3574,7 @@ fn blockTopLit(x_64: i32, y_56: i32, z_64: i32, v_36: vec4<u32>, r_10: i32, dx_3
             let _e296: i32 = dx_31;
             let _e297: i32 = dy_22;
             let _e300: f32 = faceGrain(_e293, _e294, _e295, _e296, (_e297 + 100i));
-            let _e301: VoxelScene = u;
-            body_4 = (_e291 * (1f + (_e300 * (_e301.roofK.z / 0.04f))));
+            body_4 = (_e291 * (1f + (_e300 * (u.roofK.z / 0.04f))));
         }
     }
     let _e309: vec3<f32> = body_4;
@@ -3675,8 +3590,7 @@ fn blockTopLit(x_64: i32, y_56: i32, z_64: i32, v_36: vec4<u32>, r_10: i32, dx_3
     let _e319: vec3<f32> = shadeTop(_e309, _e310, _e311, _e312, _e313, _e314, _e318);
     own_1 = _e319;
     let _e321: vec3<f32> = own_1;
-    let _e322: VoxelScene = u;
-    dark = (_e321 / vec3(_e322.shadeA.x));
+    dark = (_e321 / vec3(u.shadeA.x));
     let _e328: i32 = z_65;
     let _e330: i32 = r_11;
     let _e332: i32 = RISE;
@@ -3688,8 +3602,7 @@ fn blockTopLit(x_64: i32, y_56: i32, z_64: i32, v_36: vec4<u32>, r_10: i32, dx_3
     if (((_e338 == 0i) && (_e341 > 2i)) && !(_e345)) {
         let _e348: vec3<f32> = own_1;
         let _e349: vec3<f32> = dark;
-        let _e350: VoxelScene = u;
-        local_52 = mix(_e348, _e349, vec3(_e350.shadeA.z));
+        local_52 = mix(_e348, _e349, vec3(u.shadeA.z));
     } else {
         let _e355: vec3<f32> = own_1;
         local_52 = _e355;
@@ -3706,8 +3619,7 @@ fn blockTopLit(x_64: i32, y_56: i32, z_64: i32, v_36: vec4<u32>, r_10: i32, dx_3
     if _e373 {
         let _e374: vec3<f32> = plane;
         let _e375: vec3<f32> = dark;
-        let _e376: VoxelScene = u;
-        local_53 = mix(_e374, _e375, vec3(_e376.shadeB.y));
+        local_53 = mix(_e374, _e375, vec3(u.shadeB.y));
     } else {
         let _e381: vec3<f32> = plane;
         local_53 = _e381;
@@ -3809,8 +3721,7 @@ fn blockTop(x_66: i32, y_58: i32, z_66: i32, v_38: vec4<u32>, r_12: i32, dx_32: 
     let _e287: vec3<f32> = blockBody(_e271, _e286);
     body_5 = _e287;
     let _e289: i32 = m_12;
-    let _e292: VoxelScene = u;
-    if ((_e289 != 0i) && (_e292.roofK.z > 0f)) {
+    if ((_e289 != 0i) && (u.roofK.z > 0f)) {
         {
             let _e298: vec3<f32> = body_5;
             let _e300: i32 = x_67;
@@ -3819,8 +3730,7 @@ fn blockTop(x_66: i32, y_58: i32, z_66: i32, v_38: vec4<u32>, r_12: i32, dx_32: 
             let _e303: i32 = dx_33;
             let _e304: i32 = dy_23;
             let _e307: f32 = faceGrain(_e300, _e301, _e302, _e303, (_e304 + 100i));
-            let _e308: VoxelScene = u;
-            body_5 = (_e298 * (1f + (_e307 * (_e308.roofK.z / 0.04f))));
+            body_5 = (_e298 * (1f + (_e307 * (u.roofK.z / 0.04f))));
         }
     }
     let _e316: vec3<f32> = body_5;
@@ -3842,8 +3752,7 @@ fn blockTop(x_66: i32, y_58: i32, z_66: i32, v_38: vec4<u32>, r_12: i32, dx_32: 
     if (((_e334 == 0i) && (_e337 > 2i)) && !(_e341)) {
         let _e344: vec3<f32> = lit_5;
         let _e345: vec3<f32> = body_5;
-        let _e346: VoxelScene = u;
-        local_54 = mix(_e344, _e345, vec3(_e346.shadeA.z));
+        local_54 = mix(_e344, _e345, vec3(u.shadeA.z));
     } else {
         let _e351: vec3<f32> = lit_5;
         local_54 = _e351;
@@ -3860,8 +3769,7 @@ fn blockTop(x_66: i32, y_58: i32, z_66: i32, v_38: vec4<u32>, r_12: i32, dx_32: 
     if _e369 {
         let _e370: vec3<f32> = plane_1;
         let _e371: vec3<f32> = body_5;
-        let _e372: VoxelScene = u;
-        local_55 = mix(_e370, _e371, vec3(_e372.shadeB.y));
+        local_55 = mix(_e370, _e371, vec3(u.shadeB.y));
     } else {
         let _e377: vec3<f32> = plane_1;
         local_55 = _e377;
@@ -4299,8 +4207,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                     if (_e411 == 1i) {
                         {
                             let _e414: vec3<f32> = c_21;
-                            let _e415: VoxelScene = u;
-                            c_21 = (_e414 * _e415.plantA.w);
+                            c_21 = (_e414 * u.plantA.w);
                         }
                     } else {
                         let _e419: i32 = tone;
@@ -4311,10 +4218,8 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                                 gain = (0.5f + (f32((_e427 & 15i)) / 16f));
                                 let _e435: vec3<f32> = c_21;
                                 let _e436: vec3<f32> = tl;
-                                let _e437: VoxelScene = u;
                                 let _e442: f32 = gain;
-                                let _e444: VoxelScene = u;
-                                c_21 = mix(_e435, ((_e436 / vec3(_e437.plantA.x)) * _e442), vec3(_e444.shadeB.y));
+                                c_21 = mix(_e435, ((_e436 / vec3(u.plantA.x)) * _e442), vec3(u.shadeB.y));
                             }
                         }
                     }
@@ -4327,8 +4232,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                         if (_e452 == 1i) {
                             {
                                 let _e455: vec3<f32> = base_9;
-                                let _e456: VoxelScene = u;
-                                base_9 = (_e455 * _e456.shadeB.x);
+                                base_9 = (_e455 * u.shadeB.x);
                             }
                         } else {
                             let _e460: i32 = tone;
@@ -4338,19 +4242,17 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                                     let _e467: vec3<f32> = base_9;
                                     let _e468: vec4<u32> = v_49;
                                     let _e472: vec3<f32> = styleAt(i32(_e468.w), 0i);
-                                    let _e473: VoxelScene = u;
-                                    base_9 = mix(_e467, _e472, vec3(_e473.plantB.x));
+                                    base_9 = mix(_e467, _e472, vec3(u.plantB.x));
                                     let _e478: i32 = tone;
                                     if (_e478 == 5i) {
                                         {
                                             let _e481: vec3<f32> = base_9;
-                                            let _e483: VoxelScene = u;
                                             let _e486: i32 = x_73;
                                             let _e487: i32 = y_65;
                                             let _e488: i32 = z_73;
                                             let _e489: i32 = dx_39;
                                             let _e490: f32 = crownEdge(_e486, _e487, _e488, _e489);
-                                            base_9 = (_e481 * mix(1f, _e483.plantA.w, _e490));
+                                            base_9 = (_e481 * mix(1f, u.plantA.w, _e490));
                                         }
                                     }
                                 }
@@ -4379,8 +4281,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                         if _e519 {
                             let _e520: vec3<f32> = f;
                             let _e521: vec3<f32> = tl;
-                            let _e522: VoxelScene = u;
-                            local_65 = mix(_e520, _e521, vec3(_e522.plantA.z));
+                            local_65 = mix(_e520, _e521, vec3(u.plantA.z));
                         } else {
                             let _e527: vec3<f32> = f;
                             local_65 = _e527;
@@ -4414,8 +4315,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
             if (_e547 == 1i) {
                 {
                     let _e550: vec3<f32> = c_22;
-                    let _e551: VoxelScene = u;
-                    c_22 = (_e550 * _e551.plantA.w);
+                    c_22 = (_e550 * u.plantA.w);
                 }
             } else {
                 let _e555: i32 = tone;
@@ -4427,8 +4327,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                         let _e571: vec3<f32> = c_22;
                         let _e572: vec3<f32> = base_9;
                         let _e573: f32 = gain_1;
-                        let _e575: VoxelScene = u;
-                        c_22 = mix(_e571, (_e572 * _e573), vec3(_e575.shadeB.y));
+                        c_22 = mix(_e571, (_e572 * _e573), vec3(u.shadeB.y));
                     }
                 }
             }
@@ -4461,8 +4360,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
     if (_e614 == 1i) {
         {
             let _e617: vec3<f32> = base_9;
-            let _e618: VoxelScene = u;
-            base_9 = (_e617 * _e618.shadeB.x);
+            base_9 = (_e617 * u.shadeB.x);
         }
     } else {
         let _e622: i32 = tone;
@@ -4477,8 +4375,7 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                 let _e633: i32 = roofGap(_e630, _e631, _e632);
                 let _e634: f32 = roofShade(_e633);
                 let _e635: vec3<f32> = plantLit(_e629, _e634);
-                let _e636: VoxelScene = u;
-                base_9 = mix(_e628, _e635, vec3(_e636.plantA.z));
+                base_9 = mix(_e628, _e635, vec3(u.plantA.z));
             }
         } else {
             let _e641: i32 = tone;
@@ -4501,19 +4398,17 @@ fn glyphFrontAt(x_72: i32, y_64: i32, z_72: i32, v_48: vec4<u32>, row_5: i32, dx
                         let _e658: vec3<f32> = base_9;
                         let _e659: vec4<u32> = v_49;
                         let _e663: vec3<f32> = styleAt(i32(_e659.w), 0i);
-                        let _e664: VoxelScene = u;
-                        base_9 = mix(_e658, _e663, vec3(_e664.plantB.x));
+                        base_9 = mix(_e658, _e663, vec3(u.plantB.x));
                         let _e669: i32 = tone;
                         if (_e669 == 5i) {
                             {
                                 let _e672: vec3<f32> = base_9;
-                                let _e674: VoxelScene = u;
                                 let _e677: i32 = x_73;
                                 let _e678: i32 = y_65;
                                 let _e679: i32 = z_73;
                                 let _e680: i32 = dx_39;
                                 let _e681: f32 = crownEdge(_e677, _e678, _e679, _e680);
-                                base_9 = (_e672 * mix(1f, _e674.plantA.w, _e681));
+                                base_9 = (_e672 * mix(1f, u.plantA.w, _e681));
                             }
                         }
                     }
@@ -4677,13 +4572,12 @@ fn glyphCapAt(x_74: i32, y_66: i32, z_74: i32, v_50: vec4<u32>, localY_1: i32, d
             if (_e332 == 1i) {
                 {
                     let _e335: vec3<f32> = lc;
-                    let _e337: VoxelScene = u;
                     let _e340: i32 = x_75;
                     let _e341: i32 = y_67;
                     let _e342: i32 = z_75;
                     let _e343: i32 = dx_41;
                     let _e344: f32 = crownEdge(_e340, _e341, _e342, _e343);
-                    lc = (_e335 * mix(1f, _e337.plantA.w, _e344));
+                    lc = (_e335 * mix(1f, u.plantA.w, _e344));
                 }
             } else {
                 let _e347: i32 = tone_1;
@@ -4694,10 +4588,8 @@ fn glyphCapAt(x_74: i32, y_66: i32, z_74: i32, v_50: vec4<u32>, localY_1: i32, d
                         gain_2 = (0.5f + (f32((_e355 & 15i)) / 16f));
                         let _e363: vec3<f32> = lc;
                         let _e364: vec3<f32> = own_3;
-                        let _e365: VoxelScene = u;
                         let _e370: f32 = gain_2;
-                        let _e372: VoxelScene = u;
-                        lc = mix(_e363, ((_e364 / vec3(_e365.plantA.x)) * _e370), vec3(_e372.shadeB.y));
+                        lc = mix(_e363, ((_e364 / vec3(u.plantA.x)) * _e370), vec3(u.shadeB.y));
                     }
                 }
             }
@@ -4727,13 +4619,12 @@ fn glyphCapAt(x_74: i32, y_66: i32, z_74: i32, v_50: vec4<u32>, localY_1: i32, d
     if (_e403 == 1i) {
         {
             let _e406: vec3<f32> = cap_1;
-            let _e408: VoxelScene = u;
             let _e411: i32 = x_75;
             let _e412: i32 = y_67;
             let _e413: i32 = z_75;
             let _e414: i32 = dx_41;
             let _e415: f32 = crownEdge(_e411, _e412, _e413, _e414);
-            cap_1 = (_e406 * mix(1f, _e408.plantA.w, _e415));
+            cap_1 = (_e406 * mix(1f, u.plantA.w, _e415));
         }
     } else {
         let _e418: i32 = tone_1;
@@ -4745,8 +4636,7 @@ fn glyphCapAt(x_74: i32, y_66: i32, z_74: i32, v_50: vec4<u32>, localY_1: i32, d
                 let _e434: vec3<f32> = cap_1;
                 let _e435: vec3<f32> = base_10;
                 let _e436: f32 = gain_3;
-                let _e438: VoxelScene = u;
-                cap_1 = mix(_e434, (_e435 * _e436), vec3(_e438.shadeB.y));
+                cap_1 = mix(_e434, (_e435 * _e436), vec3(u.shadeB.y));
             }
         }
     }
@@ -5136,9 +5026,7 @@ fn waterLitReset() {
 }
 
 fn waterSigma() -> vec3<f32> {
-    let _e186: VoxelScene = u;
-    let _e196: VoxelScene = u;
-    return (-(log(max(_e186.waterDeepC.xyz, vec3(0.00024414063f)))) * _e196.waterL.x);
+    return (-(log(max(u.waterDeepC.xyz, vec3(0.00024414063f)))) * u.waterL.x);
 }
 
 fn fallingAt(x_80: i32, y_70: i32, z_80: i32) -> bool {
@@ -5408,15 +5296,12 @@ fn waterAtLit(x_82: i32, y_72: i32, z_82: i32, v_58: vec4<u32>, row_10: i32, acc
                     let _e427: bool = openUp_2;
                     if ((_e422 && (_e423 == _e424)) && _e427) {
                         {
-                            let _e429: VoxelScene = u;
-                            let _e435: VoxelScene = u;
-                            a_11 = min((clamp(_e429.knobs.y, 0f, 1f) * _e435.waterK.x), 0.95f);
+                            a_11 = min((clamp(u.knobs.y, 0f, 1f) * u.waterK.x), 0.95f);
                             let _e442: vec3<f32> = wScatter;
                             let _e443: vec3<f32> = (*trans_2);
                             let _e444: f32 = a_11;
                             let _e447: f32 = h_7;
-                            let _e450: VoxelScene = u;
-                            wScatter = (_e442 + (((_e443 * _e444) * (1f - _e447)) * _e450.waterSurfaceC.xyz));
+                            wScatter = (_e442 + (((_e443 * _e444) * (1f - _e447)) * u.waterSurfaceC.xyz));
                             let _e455: f32 = wHaze;
                             let _e456: vec3<f32> = (*trans_2);
                             let _e457: f32 = a_11;
@@ -5434,19 +5319,15 @@ fn waterAtLit(x_82: i32, y_72: i32, z_82: i32, v_58: vec4<u32>, row_10: i32, acc
     let _e470: i32 = wEntry;
     if ((_e470 & ENTRY_FLAT) != 0i) {
         {
-            let _e474: VoxelScene = u;
-            alpha = clamp(_e474.knobs.y, 0f, 1f);
+            alpha = clamp(u.knobs.y, 0f, 1f);
             let _e481: f32 = alpha;
-            let _e482: VoxelScene = u;
-            skinAlpha = min((_e481 * _e482.waterK.x), 0.95f);
+            skinAlpha = min((_e481 * u.waterK.x), 0.95f);
             let _e492: bool = topRow;
             if _e492 {
                 {
                     let _e493: f32 = skinAlpha;
-                    let _e494: VoxelScene = u;
-                    a_12 = (_e493 * _e494.waterK.y);
-                    let _e498: VoxelScene = u;
-                    c_28 = _e498.waterSurfaceC.xyz;
+                    a_12 = (_e493 * u.waterK.y);
+                    c_28 = u.waterSurfaceC.xyz;
                     let _e501: i32 = z_83;
                     let _e503: i32 = RISE;
                     let _e506: i32 = row_11;
@@ -5476,11 +5357,9 @@ fn waterAtLit(x_82: i32, y_72: i32, z_82: i32, v_58: vec4<u32>, row_10: i32, acc
                         a_12 = _e529;
                         let _e530: bool = isSkin;
                         if _e530 {
-                            let _e531: VoxelScene = u;
-                            local_77 = _e531.waterSurfaceC.xyz;
+                            local_77 = u.waterSurfaceC.xyz;
                         } else {
-                            let _e534: VoxelScene = u;
-                            local_77 = _e534.waterDeepC.xyz;
+                            local_77 = u.waterDeepC.xyz;
                         }
                         let _e538: vec3<f32> = local_77;
                         c_28 = _e538;
@@ -5544,11 +5423,8 @@ fn waterAtLit(x_82: i32, y_72: i32, z_82: i32, v_58: vec4<u32>, row_10: i32, acc
     let _e623: f32 = k_7;
     let _e628: f32 = k_7;
     depth = ((max((_e612 - (0.5f * (_e614 + _e615))), 0f) * sqrt((1f + (_e622 * _e623)))) / _e628);
-    let _e631: VoxelScene = u;
-    let _e634: VoxelScene = u;
-    let _e638: VoxelScene = u;
     let _e642: f32 = depth;
-    cin = mix(_e631.waterSurfaceC.xyz, _e634.waterDeepC.xyz, vec3((1f - exp((-(_e638.waterL.x) * _e642)))));
+    cin = mix(u.waterSurfaceC.xyz, u.waterDeepC.xyz, vec3((1f - exp((-(u.waterL.x) * _e642)))));
     let _e649: vec3<f32> = wScatter;
     let _e650: vec3<f32> = (*trans_2);
     let _e652: vec3<f32> = T;
@@ -5625,11 +5501,9 @@ fn waterAt(x_84: i32, y_74: i32, z_84: i32, v_60: vec4<u32>, row_12: i32, acc_1:
     let _e222: i32 = bottom_1;
     let _e223: i32 = fill_2;
     skinRow_1 = (_e222 - _e223);
-    let _e226: VoxelScene = u;
-    alpha_1 = clamp(_e226.knobs.y, 0f, 1f);
+    alpha_1 = clamp(u.knobs.y, 0f, 1f);
     let _e233: f32 = alpha_1;
-    let _e234: VoxelScene = u;
-    skinAlpha_1 = min((_e233 * _e234.waterK.x), 0.95f);
+    skinAlpha_1 = min((_e233 * u.waterK.x), 0.95f);
     let _e241: i32 = x_85;
     let _e242: i32 = y_75;
     let _e243: i32 = z_85;
@@ -5652,17 +5526,15 @@ fn waterAt(x_84: i32, y_74: i32, z_84: i32, v_60: vec4<u32>, row_12: i32, acc_1:
             let _e265: i32 = skinRow_1;
             let _e266: i32 = RISE;
             dy_29 = (_e264 - (_e265 - _e266));
-            let _e270: VoxelScene = u;
             let _e273: i32 = z_85;
             let _e275: i32 = RISE;
             let _e278: i32 = dy_29;
             let _e281: i32 = RISE;
             let _e285: f32 = hazeAt((f32(_e273) + (f32(((_e275 - 1i) - _e278)) / f32(_e281))));
-            let _e286: vec3<f32> = hazed(_e270.waterSurfaceC.xyz, _e285);
+            let _e286: vec3<f32> = hazed(u.waterSurfaceC.xyz, _e285);
             c_29 = _e286;
             let _e288: f32 = skinAlpha_1;
-            let _e289: VoxelScene = u;
-            a_13 = (_e288 * _e289.waterK.y);
+            a_13 = (_e288 * u.waterK.y);
             let _e294: vec3<f32> = (*acc_1);
             let _e295: vec3<f32> = (*trans_3);
             let _e296: f32 = a_13;
@@ -5743,11 +5615,9 @@ fn waterAt(x_84: i32, y_74: i32, z_84: i32, v_60: vec4<u32>, row_12: i32, acc_1:
             haze_4 = _e376;
             let _e378: bool = isSkin_1;
             if _e378 {
-                let _e379: VoxelScene = u;
-                local_80 = _e379.waterSurfaceC.xyz;
+                local_80 = u.waterSurfaceC.xyz;
             } else {
-                let _e382: VoxelScene = u;
-                local_80 = _e382.waterDeepC.xyz;
+                local_80 = u.waterDeepC.xyz;
             }
             let _e386: vec3<f32> = local_80;
             let _e387: f32 = haze_4;
@@ -5786,19 +5656,15 @@ fn bandAt(t_23: f32) -> vec3<f32> {
     t_24 = t_23;
     let _e192: f32 = t_24;
     b_8 = smoothstep(0.04f, 0.56f, _e192);
-    let _e195: VoxelScene = u;
-    let _e198: VoxelScene = u;
     let _e203: f32 = b_8;
-    c_31 = mix(_e195.bandA.xyz, _e198.bandB.xyz, vec3(smoothstep(0f, 0.5f, _e203)));
+    c_31 = mix(u.bandA.xyz, u.bandB.xyz, vec3(smoothstep(0f, 0.5f, _e203)));
     let _e208: vec3<f32> = c_31;
-    let _e209: VoxelScene = u;
     let _e214: f32 = b_8;
-    c_31 = mix(_e208, _e209.bandC.xyz, vec3(smoothstep(0.5f, 1f, _e214)));
+    c_31 = mix(_e208, u.bandC.xyz, vec3(smoothstep(0.5f, 1f, _e214)));
     let _e218: vec3<f32> = c_31;
     let _e219: f32 = b_8;
     let _e220: f32 = b_8;
-    let _e222: VoxelScene = u;
-    return (_e218 * ((_e219 * _e220) * _e222.dayK.w));
+    return (_e218 * ((_e219 * _e220) * u.dayK.w));
 }
 
 fn skyAt(py: i32) -> vec3<f32> {
@@ -5807,19 +5673,13 @@ fn skyAt(py: i32) -> vec3<f32> {
     var c_32: vec3<f32>;
 
     py_1 = py;
-    let _e190: VoxelScene = u;
-    if (_e190.roofK.w > 0.5f) {
+    if (u.roofK.w > 0.5f) {
         {
             let _e195: i32 = py_1;
-            let _e196: VoxelScene = u;
-            let _e201: VoxelScene = u;
-            t_25 = clamp((f32((_e195 + _e196.camera.x)) / f32(max(_e201.camera.y, 1i))), 0f, 1f);
-            let _e212: VoxelScene = u;
-            let _e215: VoxelScene = u;
+            t_25 = clamp((f32((_e195 + u.camera.x)) / f32(max(u.camera.y, 1i))), 0f, 1f);
             let _e218: f32 = t_25;
-            c_32 = mix(_e212.skyC.xyz, _e215.skyHorizon.xyz, vec3(_e218));
-            let _e222: VoxelScene = u;
-            if (_e222.dayK.w > 0f) {
+            c_32 = mix(u.skyC.xyz, u.skyHorizon.xyz, vec3(_e218));
+            if (u.dayK.w > 0f) {
                 {
                     let _e227: vec3<f32> = c_32;
                     let _e228: f32 = t_25;
@@ -5831,8 +5691,7 @@ fn skyAt(py: i32) -> vec3<f32> {
             return _e231;
         }
     }
-    let _e232: VoxelScene = u;
-    return _e232.skyC.xyz;
+    return u.skyC.xyz;
 }
 
 fn skyColor(px_x: i32, px_y: i32) -> vec3<f32> {
@@ -5865,15 +5724,12 @@ fn skyColor(px_x: i32, px_y: i32) -> vec3<f32> {
     let _e198: i32 = px_y_1;
     let _e199: vec3<f32> = skyAt(_e198);
     sky = _e199;
-    let _e201: VoxelScene = u;
-    moisture = clamp(_e201.knobs.z, 0f, 1f);
-    let _e208: VoxelScene = u;
-    mistRows = min((_e208.extent.w / 3i), 56i);
-    let _e216: VoxelScene = u;
+    moisture = clamp(u.knobs.z, 0f, 1f);
+    mistRows = min((u.extent.w / 3i), 56i);
     let _e221: f32 = moisture;
     let _e225: i32 = px_y_1;
     let _e226: i32 = mistRows;
-    if (((_e216.roofK.w > 0.5f) && (_e221 > 0f)) && (_e225 < _e226)) {
+    if (((u.roofK.w > 0.5f) && (_e221 > 0f)) && (_e225 < _e226)) {
         {
             let _e230: i32 = px_y_1;
             let _e232: i32 = mistRows;
@@ -5882,8 +5738,7 @@ fn skyColor(px_x: i32, px_y: i32) -> vec3<f32> {
             let _e238: f32 = verticalT;
             let _e240: f32 = moisture;
             rowFactor = ((_e237 * _e238) * _e240);
-            let _e243: VoxelScene = u;
-            driftX = (i32(_e243.knobs.w) / 2i);
+            driftX = (i32(u.knobs.w) / 2i);
             let _e250: i32 = px_x_1;
             let _e251: i32 = driftX;
             let _e253: i32 = px_y_1;
@@ -6301,8 +6156,7 @@ fn rippleNormal(w_7: vec2<f32>, flow_2: vec2<f32>, glint: ptr<function, f32>) ->
 
     w_8 = w_7;
     flow_3 = flow_2;
-    let _e204: VoxelScene = u;
-    st = _e204.clock.y;
+    st = u.clock.y;
     let _e208: f32 = st;
     c1_ = (_e208 / FLOW_CYCLE);
     let _e211: f32 = c1_;
@@ -6334,11 +6188,9 @@ fn rippleNormal(w_7: vec2<f32>, flow_2: vec2<f32>, glint: ptr<function, f32>) ->
         }
     }
     let _e257: vec2<f32> = s_1;
-    let _e260: VoxelScene = u;
-    n_4 = normalize(vec3<f32>(0f, 1f, (-(_e257.x) * _e260.waterL.z)));
+    n_4 = normalize(vec3<f32>(0f, 1f, (-(_e257.x) * u.waterL.z)));
     let _e267: vec3<f32> = n_4;
-    let _e269: VoxelScene = u;
-    if ((_e267.z * _e269.sunK.z) > 0f) {
+    if ((_e267.z * u.sunK.z) > 0f) {
         {
             let _e275: vec2<f32> = s_1;
             (*glint) = _e275.y;
@@ -6620,13 +6472,11 @@ fn starAt(px: i32, py_2: i32, t_29: f32) -> vec4<f32> {
     ph1_ = (f32((_e427 >> 16u)) * 0.0000958738f);
     let _e435: u32 = g_2;
     ph2_ = (f32((_e435 >> 24u)) * 0.024543693f);
-    let _e446: VoxelScene = u;
     let _e449: f32 = w1_;
     let _e451: f32 = ph1_;
-    let _e456: VoxelScene = u;
     let _e459: f32 = w2_;
     let _e461: f32 = ph2_;
-    wave = (0.5f + (0.5f * ((0.65f * sin(((_e446.cloudK.w * _e449) + _e451))) + (0.35f * sin(((_e456.cloudK.w * _e459) + _e461))))));
+    wave = (0.5f + (0.5f * ((0.65f * sin(((u.cloudK.w * _e449) + _e451))) + (0.35f * sin(((u.cloudK.w * _e459) + _e461))))));
     let _e470: f32 = b_12;
     faint = (1f - smoothstep(STAR_MIN, STAR_BRIGHT, _e470));
     let _e476: f32 = faint;
@@ -6653,22 +6503,14 @@ fn starAt(px: i32, py_2: i32, t_29: f32) -> vec4<f32> {
     if (_e544 == 0u) {
         {
             let _e547: vec3<f32> = c_36;
-            let _e548: VoxelScene = u;
-            let _e551: VoxelScene = u;
-            let _e554: VoxelScene = u;
-            let _e558: VoxelScene = u;
-            c_36 = mix(_e547, (_e548.lightC.xyz / vec3(max(max(_e551.lightC.x, _e554.lightC.y), max(_e558.lightC.z, 0.001f)))), vec3(0.5f));
+            c_36 = mix(_e547, (u.lightC.xyz / vec3(max(max(u.lightC.x, u.lightC.y), max(u.lightC.z, 0.001f)))), vec3(0.5f));
         }
     }
     let _e569: u32 = rare;
     if (_e569 == 1u) {
         {
             let _e572: vec3<f32> = c_36;
-            let _e573: VoxelScene = u;
-            let _e576: VoxelScene = u;
-            let _e579: VoxelScene = u;
-            let _e583: VoxelScene = u;
-            c_36 = mix(_e572, (_e573.bandB.xyz / vec3(max(max(_e576.bandB.x, _e579.bandB.y), max(_e583.bandB.z, 0.001f)))), vec3(0.4f));
+            c_36 = mix(_e572, (u.bandB.xyz / vec3(max(max(u.bandB.x, u.bandB.y), max(u.bandB.z, 0.001f)))), vec3(0.4f));
         }
     }
     let _e594: f32 = b_12;
@@ -6736,8 +6578,7 @@ fn cloudNoise(q_14: vec2<f32>) -> f32 {
 
     q_15 = q_14;
     let _e211: vec2<f32> = q_15;
-    let _e213: VoxelScene = u;
-    wq = (_e211 - vec2<f32>((0.5f * _e213.cloudK.y), 0f));
+    wq = (_e211 - vec2<f32>((0.5f * u.cloudK.y), 0f));
     let _e221: vec2<f32> = wq;
     let _e224: f32 = cloudFbm(_e221, 3i, 120i);
     let _e225: vec2<f32> = wq;
@@ -6757,14 +6598,11 @@ fn daySkyAt(t_31: f32) -> vec3<f32> {
     t_32 = t_31;
     let _e213: f32 = t_32;
     g_3 = smoothstep(0f, DAY_HORIZON_T, _e213);
-    let _e216: VoxelScene = u;
-    let _e219: VoxelScene = u;
     let _e224: f32 = g_3;
-    c_37 = mix(_e216.dayA.xyz, _e219.dayB.xyz, vec3(smoothstep(0f, 0.55f, _e224)));
+    c_37 = mix(u.dayA.xyz, u.dayB.xyz, vec3(smoothstep(0f, 0.55f, _e224)));
     let _e229: vec3<f32> = c_37;
-    let _e230: VoxelScene = u;
     let _e235: f32 = g_3;
-    return mix(_e229, _e230.dayC.xyz, vec3(smoothstep(0.45f, 1f, _e235)));
+    return mix(_e229, u.dayC.xyz, vec3(smoothstep(0.45f, 1f, _e235)));
 }
 
 fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
@@ -6803,38 +6641,28 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
     px_3 = px_2;
     py_5 = py_4;
     let _e214: i32 = py_5;
-    let _e215: VoxelScene = u;
-    py_5 = (_e214 + _e215.camera.x);
+    py_5 = (_e214 + u.camera.x);
     let _e219: i32 = py_5;
-    let _e221: VoxelScene = u;
-    t_33 = clamp((f32(_e219) / f32(max(_e221.camera.y, 1i))), 0f, 1f);
-    let _e232: VoxelScene = u;
-    gradient = (_e232.roofK.w > 0.5f);
+    t_33 = clamp((f32(_e219) / f32(max(u.camera.y, 1i))), 0f, 1f);
+    gradient = (u.roofK.w > 0.5f);
     let _e238: bool = gradient;
     if _e238 {
-        let _e239: VoxelScene = u;
-        let _e242: VoxelScene = u;
         let _e245: f32 = t_33;
-        local_87 = mix(_e239.skyC.xyz, _e242.skyHorizon.xyz, vec3(_e245));
+        local_87 = mix(u.skyC.xyz, u.skyHorizon.xyz, vec3(_e245));
     } else {
-        let _e248: VoxelScene = u;
-        local_87 = _e248.skyC.xyz;
+        local_87 = u.skyC.xyz;
     }
     let _e252: vec3<f32> = local_87;
     sky_1 = _e252;
-    let _e254: VoxelScene = u;
-    day = _e254.dayA.w;
+    day = u.dayA.w;
     let _e258: f32 = day;
     if (_e258 > 0f) {
         {
             let _e263: f32 = t_33;
             b_13 = smoothstep(0.04f, 0.56f, _e263);
-            let _e266: VoxelScene = u;
-            let _e269: VoxelScene = u;
             let _e274: f32 = b_13;
-            let _e278: VoxelScene = u;
             let _e283: f32 = b_13;
-            warm = mix(mix(_e266.bandA.xyz, _e269.bandB.xyz, vec3(smoothstep(0f, 0.5f, _e274))), _e278.bandC.xyz, vec3(smoothstep(0.5f, 1f, _e283)));
+            warm = mix(mix(u.bandA.xyz, u.bandB.xyz, vec3(smoothstep(0f, 0.5f, _e274))), u.bandC.xyz, vec3(smoothstep(0.5f, 1f, _e283)));
             let _e288: vec3<f32> = sky_1;
             let _e289: vec3<f32> = warm;
             let _e290: f32 = t_33;
@@ -6845,8 +6673,7 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
         }
     }
     let _e301: bool = gradient;
-    let _e302: VoxelScene = u;
-    if (_e301 && (_e302.dayK.w > 0f)) {
+    if (_e301 && (u.dayK.w > 0f)) {
         {
             let _e308: i32 = px_3;
             let _e310: i32 = W;
@@ -6855,31 +6682,26 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             let _e322: vec3<f32> = sky_1;
             let _e323: f32 = t_33;
             let _e324: vec3<f32> = bandAt(_e323);
-            let _e327: VoxelScene = u;
             let _e331: f32 = xs;
-            sky_1 = (_e322 + (_e324 * (1f + ((0.4f * _e327.sunLean.w) * _e331))));
+            sky_1 = (_e322 + (_e324 * (1f + ((0.4f * u.sunLean.w) * _e331))));
         }
     }
-    let _e338: VoxelScene = u;
-    if (_e338.cloudBody.w > 0.001f) {
+    if (u.cloudBody.w > 0.001f) {
         {
             let _e343: i32 = px_3;
             let _e344: i32 = py_5;
             let _e345: f32 = t_33;
             let _e346: vec4<f32> = starAt(_e343, _e344, _e345);
-            let _e347: VoxelScene = u;
             let _e353: f32 = t_33;
-            st_1 = (_e346 * (_e347.cloudBody.w * (1f - smoothstep(0.25f, 0.6f, _e353))));
+            st_1 = (_e346 * (u.cloudBody.w * (1f - smoothstep(0.25f, 0.6f, _e353))));
             let _e359: vec3<f32> = sky_1;
             let _e360: vec4<f32> = st_1;
             sky_1 = (_e359 + (_e360.xyz * STAR_GAIN));
             let _e364: vec4<f32> = st_1;
-            let _e366: VoxelScene = u;
-            glow_2 = (_e364.w * _e366.dayB.w);
+            glow_2 = (_e364.w * u.dayB.w);
         }
     }
-    let _e370: VoxelScene = u;
-    flash = _e370.flashC.w;
+    flash = u.flashC.w;
     let _e376: f32 = flash;
     if (_e376 > 0f) {
         {
@@ -6887,9 +6709,8 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             let _e380: i32 = S;
             ringPx = f32((_e379 * _e380));
             let _e384: i32 = px_3;
-            let _e388: VoxelScene = u;
             let _e391: i32 = S;
-            dx_42 = abs(((f32(_e384) + 0.5f) - (_e388.strikeK.x * f32(_e391))));
+            dx_42 = abs(((f32(_e384) + 0.5f) - (u.strikeK.x * f32(_e391))));
             let _e397: f32 = dx_42;
             let _e398: f32 = ringPx;
             let _e399: f32 = dx_42;
@@ -6899,13 +6720,11 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             let _e409: f32 = dx_42;
             nearStrike = exp((-(_e407) * _e409));
             let _e412: vec3<f32> = sky_1;
-            let _e413: VoxelScene = u;
             let _e418: f32 = nearStrike;
-            sky_1 = (_e412 + (_e413.flashC.xyz * (0.04f + (0.06f * _e418))));
+            sky_1 = (_e412 + (u.flashC.xyz * (0.04f + (0.06f * _e418))));
         }
     }
-    let _e423: VoxelScene = u;
-    cover = _e423.cloudK.x;
+    cover = u.cloudK.x;
     let _e427: f32 = cover;
     if (_e427 < 0.001f) {
         {
@@ -6914,8 +6733,7 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             return vec4<f32>(_e430.x, _e430.y, _e430.z, _e431);
         }
     }
-    let _e436: VoxelScene = u;
-    storm = _e436.cloudK.z;
+    storm = u.cloudK.z;
     let _e443: f32 = storm;
     let _e447: f32 = storm;
     let _e449: f32 = t_33;
@@ -6930,10 +6748,9 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
     }
     let _e462: i32 = px_3;
     let _e466: i32 = S;
-    let _e469: VoxelScene = u;
     let _e473: i32 = py_5;
     let _e477: i32 = S;
-    q_16 = vec2<f32>((((f32(_e462) + 0.5f) / f32(_e466)) + _e469.cloudK.y), (((f32(_e473) + 0.5f) / f32(_e477)) * CLOUD_FLAT));
+    q_16 = vec2<f32>((((f32(_e462) + 0.5f) / f32(_e466)) + u.cloudK.y), (((f32(_e473) + 0.5f) / f32(_e477)) * CLOUD_FLAT));
     let _e483: vec2<f32> = q_16;
     let _e484: f32 = cloudNoise(_e483);
     n_5 = _e484;
@@ -6954,9 +6771,7 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             return vec4<f32>(_e512.x, _e512.y, _e512.z, _e513);
         }
     }
-    let _e518: VoxelScene = u;
-    let _e521: VoxelScene = u;
-    toSun = normalize(vec2<f32>(_e518.sunK.x, (-(max(_e521.sunK.y, 0.25f)) * CLOUD_FLAT)));
+    toSun = normalize(vec2<f32>(u.sunK.x, (-(max(u.sunK.y, 0.25f)) * CLOUD_FLAT)));
     let _e531: vec2<f32> = q_16;
     let _e532: vec2<f32> = toSun;
     let _e536: f32 = cloudNoise((_e531 + (_e532 * 2f)));
@@ -6965,17 +6780,14 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
     let _e539: f32 = n2_;
     edge = clamp((((_e538 - _e539) * 10f) + 0.2f), 0f, 1f);
     let _e549: f32 = edge;
-    let _e550: VoxelScene = u;
-    lit_6 = (_e549 * _e550.cloudLit.w);
-    let _e555: VoxelScene = u;
+    lit_6 = (_e549 * u.cloudLit.w);
     let _e560: f32 = d_2;
     let _e563: f32 = lit_6;
     let _e570: f32 = storm;
-    body_6 = ((_e555.cloudBody.xyz * (1.15f - ((0.45f * _e560) * (1f - _e563)))) * (1f - (0.5f * _e570)));
+    body_6 = ((u.cloudBody.xyz * (1.15f - ((0.45f * _e560) * (1f - _e563)))) * (1f - (0.5f * _e570)));
     let _e575: vec3<f32> = body_6;
-    let _e576: VoxelScene = u;
     let _e579: f32 = lit_6;
-    col_2 = (_e575 + (_e576.cloudLit.xyz * _e579));
+    col_2 = (_e575 + (u.cloudLit.xyz * _e579));
     let _e583: f32 = day;
     if (_e583 > 0f) {
         {
@@ -6984,11 +6796,9 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
             let _e594: f32 = cover;
             let _e602: f32 = storm;
             sunward = (clamp((((_e586 * 2f) + 0.3f) - ((0.4f * _e592) * _e594)), 0f, 1f) * (1f - (0.7f * _e602)));
-            let _e607: VoxelScene = u;
-            let _e610: VoxelScene = u;
             let _e613: f32 = sunward;
             let _e618: f32 = storm;
-            dayCol = (mix(_e607.cloudShade.xyz, _e610.cloudDay.xyz, vec3(_e613)) * (1f - (0.72f * _e618)));
+            dayCol = (mix(u.cloudShade.xyz, u.cloudDay.xyz, vec3(_e613)) * (1f - (0.72f * _e618)));
             let _e623: vec3<f32> = col_2;
             let _e624: vec3<f32> = dayCol;
             let _e625: f32 = day;
@@ -6999,10 +6809,9 @@ fn litSky(px_2: i32, py_4: i32) -> vec4<f32> {
     if (_e628 > 0f) {
         {
             let _e631: vec3<f32> = col_2;
-            let _e632: VoxelScene = u;
             let _e637: f32 = nearStrike;
             let _e643: f32 = d_2;
-            col_2 = (_e631 + ((_e632.flashC.xyz * (0.12f + (0.5f * _e637))) * (0.4f + (0.6f * _e643))));
+            col_2 = (_e631 + ((u.flashC.xyz * (0.12f + (0.5f * _e637))) * (0.4f + (0.6f * _e643))));
         }
     }
     let _e648: vec3<f32> = sky_1;
@@ -7233,8 +7042,7 @@ fn foamAt(c_42: vec3<i32>, p_25: vec3<f32>, fill_3: i32) -> f32 {
     let _e221: i32 = fill_4;
     let _e222: i32 = S;
     brim_2 = (_e221 >= _e222);
-    let _e225: VoxelScene = u;
-    st_2 = _e225.clock.y;
+    st_2 = u.clock.y;
     let _e231: vec3<i32> = c_43;
     let _e232: vec3<f32> = p_26;
     let _e233: bool = brim_2;
@@ -7319,9 +7127,8 @@ fn rainRing(w_14: vec2<f32>, copy: i32) -> f32 {
 
     w_15 = w_14;
     copy_1 = copy;
-    let _e223: VoxelScene = u;
     let _e228: i32 = copy_1;
-    tt = ((_e223.clock.y / RAIN_SLOT) + (0.5f * f32(_e228)));
+    tt = ((u.clock.y / RAIN_SLOT) + (0.5f * f32(_e228)));
     let _e233: f32 = tt;
     let _e237: i32 = wrapI(i32(floor(_e233)), 256i);
     slot_9 = _e237;
@@ -7347,8 +7154,7 @@ fn rainRing(w_14: vec2<f32>, copy: i32) -> f32 {
     let _e284: i32 = copy_1;
     let _e286: u32 = cellHash(_e279, _e280.y, _e282, (90i + _e284));
     h_10 = _e286;
-    let _e288: VoxelScene = u;
-    chance = min(_e288.rainK.w, 0.98f);
+    chance = min(u.rainK.w, 0.98f);
     let _e294: u32 = h_10;
     hv = (f32((_e294 & 65535u)) / 65535f);
     let _e301: f32 = hv;
@@ -7665,8 +7471,7 @@ fn reflectMarch(p_27: vec3<f32>, r_21: vec3<f32>, hit: ptr<function, vec3<i32>>,
     let _e344: f32 = local_100;
     let _e345: vec3<f32> = inv_1;
     next_1 = vec3<f32>((_e298 * _e299.x), (_e321 * _e322.y), (_e344 * _e345.z));
-    let _e350: VoxelScene = u;
-    cap_2 = i32(_e350.waterL.w);
+    cap_2 = i32(u.waterL.w);
     (*axis_5) = -1i;
     let _e359: vec3<i32> = c_50;
     (*hit) = _e359;
@@ -7837,8 +7642,7 @@ fn reflectionShade(found: bool, c_51: vec3<i32>, hp_7: vec3<f32>, axis_6: i32, r
             col_6 = _e260;
             let _e262: i32 = col_6;
             let _e263: i32 = row_18;
-            let _e265: VoxelScene = u;
-            let _e273: vec4<f32> = textureLoad(wgpu_backdropTex, vec2<i32>(_e262, clamp(_e263, 0i, (_e265.extent.w - 1i))), 0i);
+            let _e273: vec4<f32> = textureLoad(wgpu_backdropTex, vec2<i32>(_e262, clamp(_e263, 0i, (u.extent.w - 1i))), 0i);
             return _e273.xyz;
         }
     }
@@ -8062,8 +7866,7 @@ fn flowDebug(fl: vec3<f32>, top_12: bool, p_29: vec3<f32>) -> vec3<f32> {
         {
             let _e229: i32 = PX;
             let _e230: i32 = PY;
-            let _e231: VoxelScene = u;
-            let _e234: bool = fallStreak(_e229, _e230, _e231.clock.y);
+            let _e234: bool = fallStreak(_e229, _e230, u.clock.y);
             if _e234 {
                 local_105 = vec3(1f);
             } else {
@@ -8203,10 +8006,8 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
         {
             let _e225: vec3<f32> = colour_1;
             let _e226: vec3<f32> = wScatter;
-            let _e227: VoxelScene = u;
             let _e231: f32 = wHaze;
-            let _e232: VoxelScene = u;
-            colour_1 = (_e225 + ((_e226 * _e227.dayL.x) + (_e231 * _e232.hazeC.xyz)));
+            colour_1 = (_e225 + ((_e226 * u.dayL.x) + (_e231 * u.hazeC.xyz)));
             let _e238: i32 = wEntry;
             if ((_e238 & ENTRY_FALLING) == 0i) {
                 {
@@ -8214,13 +8015,11 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
                     return _e242;
                 }
             }
-            let _e243: VoxelScene = u;
-            if (_e243.clock.z > 0.5f) {
+            if (u.clock.z > 0.5f) {
                 {
                     let _e248: i32 = PX;
                     let _e249: i32 = PY;
-                    let _e250: VoxelScene = u;
-                    let _e253: bool = fallStreak(_e248, _e249, _e250.clock.y);
+                    let _e253: bool = fallStreak(_e248, _e249, u.clock.y);
                     if _e253 {
                         local_107 = vec3(1f);
                     } else {
@@ -8234,14 +8033,11 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
             zf_2 = ((_e262 >> 12u) & 4095i);
             let _e269: i32 = PX;
             let _e270: i32 = PY;
-            let _e271: VoxelScene = u;
-            let _e274: bool = fallStreak(_e269, _e270, _e271.clock.y);
+            let _e274: bool = fallStreak(_e269, _e270, u.clock.y);
             if _e274 {
-                let _e275: VoxelScene = u;
-                let _e278: VoxelScene = u;
                 let _e282: i32 = zf_2;
                 let _e284: f32 = hazeAt(f32(_e282));
-                let _e285: vec3<f32> = hazed((_e275.waterSurfaceC.xyz * _e278.dayL.x), _e284);
+                let _e285: vec3<f32> = hazed((u.waterSurfaceC.xyz * u.dayL.x), _e284);
                 local_108 = _e285;
             } else {
                 let _e286: vec3<f32> = colour_1;
@@ -8342,8 +8138,7 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
     let _e416: i32 = z_91;
     let _e418: vec3<f32> = flowAt(vec3<i32>(_e414, _e415, _e416));
     fl_2 = _e418;
-    let _e420: VoxelScene = u;
-    if (_e420.clock.z > 0.5f) {
+    if (u.clock.z > 0.5f) {
         {
             let _e425: vec3<f32> = fl_2;
             let _e426: bool = top_14;
@@ -8352,8 +8147,7 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
             return _e428;
         }
     }
-    let _e429: VoxelScene = u;
-    if (_e429.sunK.y > 0f) {
+    if (u.sunK.y > 0f) {
         local_113 = 1f;
     } else {
         local_113 = 0f;
@@ -8362,11 +8156,9 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
     sunOn_2 = _e437;
     let _e439: bool = top_14;
     if _e439 {
-        let _e440: VoxelScene = u;
-        local_114 = _e440.sunK.y;
+        local_114 = u.sunK.y;
     } else {
-        let _e443: VoxelScene = u;
-        local_114 = -(_e443.sunK.z);
+        local_114 = -(u.sunK.z);
     }
     let _e448: f32 = local_114;
     ndl_4 = _e448;
@@ -8410,8 +8202,7 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
     let _e503: vec3<f32> = wScatter;
     let _e504: vec3<f32> = ratio;
     let _e506: f32 = wHaze;
-    let _e507: VoxelScene = u;
-    colour_1 = (_e502 + ((_e503 * _e504) + (_e506 * _e507.hazeC.xyz)));
+    colour_1 = (_e502 + ((_e503 * _e504) + (_e506 * u.hazeC.xyz)));
     let _e513: bool = top_14;
     if !(_e513) {
         {
@@ -8428,9 +8219,8 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
     let _e532: vec3<f32> = d_6;
     let _e533: vec3<f32> = n_6;
     cosi = clamp(-(dot(_e532, _e533)), 0f, 1f);
-    let _e540: VoxelScene = u;
     let _e546: f32 = cosi;
-    f_6 = clamp((_e540.waterL.y * (0.02f + (0.98f * pow((1f - _e546), 5f)))), 0f, 1f);
+    f_6 = clamp((u.waterL.y * (0.02f + (0.98f * pow((1f - _e546), 5f)))), 0f, 1f);
     let _e557: vec3<f32> = d_6;
     let _e558: vec3<f32> = n_6;
     r_25 = reflect(_e557, _e558);
@@ -8461,21 +8251,17 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
     let _e597: i32 = z_91;
     let _e601: f32 = hazeAt((f32(_e597) + 0.5f));
     hz_5 = _e601;
-    let _e603: VoxelScene = u;
-    let _e606: VoxelScene = u;
-    surf = (_e603.waterSurfaceC.xyz * _e606.dayL.x);
+    surf = (u.waterSurfaceC.xyz * u.dayL.x);
     let _e611: vec3<f32> = colour_1;
     let _e612: vec3<f32> = surf;
     let _e613: f32 = hz_5;
     let _e614: vec3<f32> = hazed(_e612, _e613);
     froth = max(_e611, _e614);
-    let _e617: VoxelScene = u;
-    let _e622: VoxelScene = u;
     let _e628: vec3<i32> = open;
     let _e630: vec3<i32> = open;
     let _e632: vec3<i32> = open;
     let _e634: f32 = skyOpen(_e628.x, _e630.y, _e632.z);
-    if (((_e617.waterM.z > 0f) && (_e622.rainK.w > 0f)) && (_e634 > 0f)) {
+    if (((u.waterM.z > 0f) && (u.rainK.w > 0f)) && (_e634 > 0f)) {
         {
             let _e638: vec3<f32> = p_31;
             let _e641: f32 = rainRing(_e638.xz, 0i);
@@ -8484,20 +8270,16 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
             ring = max(_e641, _e645);
             let _e648: vec3<f32> = colour_1;
             let _e649: vec3<f32> = surf;
-            let _e650: VoxelScene = u;
-            let _e654: VoxelScene = u;
             let _e659: f32 = hz_5;
-            let _e660: vec3<f32> = hazed(mix(_e649, vec3(_e650.dayL.x), vec3(_e654.waterM.w)), _e659);
+            let _e660: vec3<f32> = hazed(mix(_e649, vec3(u.dayL.x), vec3(u.waterM.w)), _e659);
             ringC = max(_e648, _e660);
             let _e663: vec3<f32> = colour_1;
             let _e664: vec3<f32> = ringC;
-            let _e665: VoxelScene = u;
             let _e668: f32 = ring;
-            colour_1 = mix(_e663, _e664, vec3(clamp((_e665.waterM.z * _e668), 0f, 1f)));
+            colour_1 = mix(_e663, _e664, vec3(clamp((u.waterM.z * _e668), 0f, 1f)));
         }
     }
-    let _e675: VoxelScene = u;
-    if (_e675.waterM.x > 0f) {
+    if (u.waterM.x > 0f) {
         {
             let _e680: i32 = x_91;
             let _e681: i32 = y_81;
@@ -8508,27 +8290,21 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
             foam = _e686;
             let _e688: vec3<f32> = colour_1;
             let _e689: vec3<f32> = froth;
-            let _e690: VoxelScene = u;
             let _e693: f32 = foam;
-            colour_1 = mix(_e688, _e689, vec3(clamp((_e690.waterM.x * _e693), 0f, 1f)));
+            colour_1 = mix(_e688, _e689, vec3(clamp((u.waterM.x * _e693), 0f, 1f)));
         }
     }
-    let _e700: VoxelScene = u;
     let _e705: f32 = glint_1;
     let _e709: f32 = sun_6;
-    if (((_e700.waterM.y > 0f) && (_e705 > 0f)) && (_e709 > 0f)) {
+    if (((u.waterM.y > 0f) && (_e705 > 0f)) && (_e709 > 0f)) {
         {
-            let _e713: VoxelScene = u;
-            let _e718: VoxelScene = u;
             let _e723: f32 = hz_5;
-            let _e724: vec3<f32> = hazed(mix(_e713.sunLean.xyz, vec3(1f), vec3(_e718.waterM.w)), _e723);
+            let _e724: vec3<f32> = hazed(mix(u.sunLean.xyz, vec3(1f), vec3(u.waterM.w)), _e723);
             glintC = _e724;
             let _e726: vec3<f32> = colour_1;
             let _e727: vec3<f32> = glintC;
-            let _e728: VoxelScene = u;
             let _e731: f32 = glint_1;
-            let _e733: VoxelScene = u;
-            colour_1 = mix(_e726, _e727, vec3(clamp(((_e728.waterM.y * _e731) * _e733.dayL.y), 0f, 1f)));
+            colour_1 = mix(_e726, _e727, vec3(clamp(((u.waterM.y * _e731) * u.dayL.y), 0f, 1f)));
         }
     }
     let _e742: vec3<f32> = colour_1;
@@ -8536,8 +8312,7 @@ fn litWaterFinish(colour: vec3<f32>) -> vec3<f32> {
 }
 
 fn wxTime() -> f32 {
-    let _e219: VoxelScene = u;
-    return _e219.cloudK.w;
+    return u.cloudK.w;
 }
 
 fn wholeIn3600_(speed_1: f32, period_2: f32) -> f32 {
@@ -8559,16 +8334,13 @@ fn fogShape(y_82: f32) -> f32 {
 
     y_83 = y_82;
     let _e221: f32 = y_83;
-    let _e222: VoxelScene = u;
-    let _e225: VoxelScene = u;
-    h_12 = (_e221 - (_e222.fogK.y + _e225.fogK.z));
+    h_12 = (_e221 - (u.fogK.y + u.fogK.z));
     let _e231: f32 = h_12;
     if (_e231 <= 0f) {
         local_117 = 1f;
     } else {
         let _e235: f32 = h_12;
-        let _e237: VoxelScene = u;
-        local_117 = exp((-(_e235) / max(_e237.fogK.w, 0.001f)));
+        local_117 = exp((-(_e235) / max(u.fogK.w, 0.001f)));
     }
     let _e245: f32 = local_117;
     return _e245;
@@ -8591,14 +8363,12 @@ fn fogNoise(x_92: f32, z_92: f32) -> f32 {
 
     x_93 = x_92;
     z_93 = z_92;
-    let _e226: VoxelScene = u;
-    mode = i32((_e226.fogM.x + 0.5f));
+    mode = i32((u.fogM.x + 0.5f));
     let _e233: i32 = mode;
     if (_e233 >= 2i) {
         let _e236: f32 = wxTime();
-        let _e237: VoxelScene = u;
         let _e240: i32 = W;
-        let _e242: f32 = wholeIn3600_(_e237.fogM.w, f32(_e240));
+        let _e242: f32 = wholeIn3600_(u.fogM.w, f32(_e240));
         let _e243: f32 = (_e236 * _e242);
         let _e244: i32 = W;
         let _e245: f32 = f32(_e244);
@@ -8609,10 +8379,9 @@ fn fogNoise(x_92: f32, z_92: f32) -> f32 {
     let _e252: f32 = local_118;
     flow_4 = _e252;
     let _e254: f32 = x_93;
-    let _e255: VoxelScene = u;
     let _e259: f32 = flow_4;
     let _e261: f32 = z_93;
-    w_16 = vec2<f32>(((_e254 - _e255.cloudK.y) - _e259), (_e261 * 1.6f));
+    w_16 = vec2<f32>(((_e254 - u.cloudK.y) - _e259), (_e261 * 1.6f));
     let _e267: vec2<f32> = w_16;
     let _e268: f32 = wxTime();
     let _e271: f32 = vnoiseT(_e267, FOG_FREQ, (_e268 * FOG_EVOLVE), 140i);
@@ -8634,18 +8403,16 @@ fn fogNoise(x_92: f32, z_92: f32) -> f32 {
             let _e311: vec2<f32> = wb_1;
             let _e314: f32 = vnoise(_e311, FOG_BANK_FREQ, 12i, 143i);
             b_14 = ((2f * _e314) - 1f);
-            let _e322: VoxelScene = u;
-            per = (3600f / max(1f, floor(((3600f / max(_e322.fogM.z, 1f)) + 0.5f))));
+            per = (3600f / max(1f, floor(((3600f / max(u.fogM.z, 1f)) + 0.5f))));
             let _e335: f32 = wxTime();
             let _e337: f32 = per;
             ph_1 = ((6.2831855f * _e335) / _e337);
             let _e340: f32 = d_7;
-            let _e343: VoxelScene = u;
             let _e346: f32 = a_23;
             let _e347: f32 = ph_1;
             let _e350: f32 = b_14;
             let _e351: f32 = ph_1;
-            d_7 = (_e340 * max(0f, (1f + (_e343.fogM.y * ((_e346 * cos(_e347)) + (_e350 * sin(_e351)))))));
+            d_7 = (_e340 * max(0f, (1f + (u.fogM.y * ((_e346 * cos(_e347)) + (_e350 * sin(_e351)))))));
         }
     }
     let _e359: f32 = d_7;
@@ -8662,9 +8429,7 @@ fn fogSpan(y0_1: f32, k_10: f32, zEnd: f32) -> vec2<f32> {
     y0_2 = y0_1;
     k_11 = k_10;
     zEnd_1 = zEnd;
-    let _e228: VoxelScene = u;
-    let _e231: VoxelScene = u;
-    top_15 = (_e228.fogK.y + _e231.fogK.z);
+    top_15 = (u.fogK.y + u.fogK.z);
     let _e236: f32 = y0_2;
     let _e237: f32 = top_15;
     let _e239: f32 = k_11;
@@ -8696,11 +8461,8 @@ fn fogDepth(y0_3: f32, k_12: f32, zEnd_2: f32, noise: f32) -> f32 {
     let _e232: f32 = zEnd_3;
     let _e233: vec2<f32> = fogSpan(_e230, _e231, _e232);
     span_2 = _e233;
-    let _e235: VoxelScene = u;
-    let _e238: VoxelScene = u;
-    top_16 = (_e235.fogK.y + _e238.fogK.z);
-    let _e243: VoxelScene = u;
-    fw = max(_e243.fogK.w, 0.001f);
+    top_16 = (u.fogK.y + u.fogK.z);
+    fw = max(u.fogK.w, 0.001f);
     let _e249: f32 = y0_4;
     let _e250: f32 = top_16;
     if (_e249 > _e250) {
@@ -8720,13 +8482,12 @@ fn fogDepth(y0_3: f32, k_12: f32, zEnd_2: f32, noise: f32) -> f32 {
     }
     let _e278: f32 = local_119;
     above = _e278;
-    let _e280: VoxelScene = u;
     let _e283: f32 = noise_1;
     let _e285: f32 = above;
     let _e286: vec2<f32> = span_2;
     let _e291: f32 = k_13;
     let _e292: f32 = k_13;
-    return (((_e280.fogK.x * _e283) * (_e285 + _e286.y)) * sqrt((1f + (_e291 * _e292))));
+    return (((u.fogK.x * _e283) * (_e285 + _e286.y)) * sqrt((1f + (_e291 * _e292))));
 }
 
 fn fogNoiseFor(xw_1: f32, y0_5: f32, k_14: f32, zEnd_4: f32) -> f32 {
@@ -8771,9 +8532,7 @@ fn fogDepthDeep(xw_3: f32, y0_7: f32, k_16: f32, zEnd_6: f32) -> f32 {
     y0_8 = y0_7;
     k_17 = k_16;
     zEnd_7 = zEnd_6;
-    let _e231: VoxelScene = u;
-    let _e234: VoxelScene = u;
-    base_15 = (_e231.fogK.y + _e234.fogK.z);
+    base_15 = (u.fogK.y + u.fogK.z);
     let _e239: f32 = xw_4;
     let _e240: f32 = y0_8;
     let _e241: f32 = base_15;
@@ -8796,8 +8555,7 @@ fn fogDepthDeep(xw_3: f32, y0_7: f32, k_16: f32, zEnd_6: f32) -> f32 {
     let _e270: f32 = zEnd_7;
     let _e271: f32 = zb_1;
     band_1 = (_e270 - _e271);
-    let _e274: VoxelScene = u;
-    fw_1 = max(_e274.fogK.w, 0.001f);
+    fw_1 = max(u.fogK.w, 0.001f);
     let _e280: f32 = y0_8;
     let _e281: f32 = top_17;
     if (_e280 > _e281) {
@@ -8817,7 +8575,6 @@ fn fogDepthDeep(xw_3: f32, y0_7: f32, k_16: f32, zEnd_6: f32) -> f32 {
     }
     let _e308: f32 = local_120;
     above_1 = _e308;
-    let _e310: VoxelScene = u;
     let _e313: f32 = nb;
     let _e314: f32 = above_1;
     let _e316: f32 = band_1;
@@ -8825,7 +8582,7 @@ fn fogDepthDeep(xw_3: f32, y0_7: f32, k_16: f32, zEnd_6: f32) -> f32 {
     let _e323: f32 = band_1;
     let _e328: f32 = k_17;
     let _e329: f32 = k_17;
-    return ((_e310.fogK.x * ((_e313 * (_e314 + (0.5f * _e316))) + ((_e320 * 0.5f) * _e323))) * sqrt((1f + (_e328 * _e329))));
+    return ((u.fogK.x * ((_e313 * (_e314 + (0.5f * _e316))) + ((_e320 * 0.5f) * _e323))) * sqrt((1f + (_e328 * _e329))));
 }
 
 fn gustAt(xv: f32) -> f32 {
@@ -9089,8 +8846,7 @@ fn splashAt(w_17: vec2<f32>, copy_2: i32) -> f32 {
     let _e278: i32 = copy_3;
     let _e280: u32 = cellHash(_e272, _e273.y, i32(_e275), (180i + _e278));
     h_14 = _e280;
-    let _e282: VoxelScene = u;
-    chance_1 = dot(_e282.rainK.xyz, SPLASH_CHANCE);
+    chance_1 = dot(u.rainK.xyz, SPLASH_CHANCE);
     let _e287: u32 = h_14;
     hv_1 = (f32((_e287 & 65535u)) / 65535f);
     let _e294: f32 = hv_1;
@@ -9177,11 +8933,9 @@ fn boltHash(i_13: i32, salt_18: i32) -> f32 {
 
     i_14 = i_13;
     salt_19 = salt_18;
-    let _e248: VoxelScene = u;
-    let _e252: VoxelScene = u;
     let _e256: i32 = i_14;
     let _e257: i32 = salt_19;
-    let _e258: u32 = cellHash(i32(_e248.strikeL.x), i32(_e252.strikeL.y), _e256, _e257);
+    let _e258: u32 = cellHash(i32(u.strikeL.x), i32(u.strikeL.y), _e256, _e257);
     h_15 = _e258;
     let _e260: u32 = h_15;
     return ((f32((_e260 & 65535u)) / 65535f) - 0.5f);
@@ -9251,15 +9005,12 @@ fn boltAt(p_36: vec2<f32>) -> vec3<f32> {
     p_37 = p_36;
     let _e246: i32 = S;
     Sf_1 = f32(_e246);
-    let _e249: VoxelScene = u;
     let _e252: f32 = Sf_1;
     let _e254: i32 = BASE;
-    let _e256: VoxelScene = u;
     let _e259: i32 = RISE;
-    let _e263: VoxelScene = u;
     let _e268: f32 = Sf_1;
     let _e272: i32 = RISE;
-    end = vec2<f32>((_e249.strikeK.x * _e252), (((f32(_e254) - (_e256.strikeK.z * f32(_e259))) - ((_e263.strikeK.y + 1f) * _e268)) - (0.5f * f32(_e272))));
+    end = vec2<f32>((u.strikeK.x * _e252), (((f32(_e254) - (u.strikeK.z * f32(_e259))) - ((u.strikeK.y + 1f) * _e268)) - (0.5f * f32(_e272))));
     let _e278: i32 = W;
     let _e280: f32 = Sf_1;
     ringPx_2 = (f32(_e278) * _e280);
@@ -9283,8 +9034,7 @@ fn boltAt(p_36: vec2<f32>) -> vec3<f32> {
     let _e321: vec2<f32> = end;
     let _e325: f32 = boltHash(0i, 192i);
     let _e328: f32 = Sf_1;
-    let _e333: VoxelScene = u;
-    top_18 = vec2<f32>((_e321.x + ((_e325 * 8f) * _e328)), (-0.03f * f32(_e333.extent.w)));
+    top_18 = vec2<f32>((_e321.x + ((_e325 * 8f) * _e328)), (-0.03f * f32(u.extent.w)));
     let _e340: vec2<f32> = end;
     let _e342: vec2<f32> = top_18;
     segH = ((_e340.y - _e342.y) / 18f);
@@ -9475,14 +9225,12 @@ fn boltAt(p_36: vec2<f32>) -> vec3<f32> {
     let _e637: f32 = fd;
     let _e640: f32 = Sf_1;
     glow_4 = (exp((-(_e629) / (0.9f * _e632))) + (0.4f * exp((-(_e637) / (0.6f * _e640)))));
-    let _e652: VoxelScene = u;
-    glowC = mix(_e652.lightC.xyz, vec3<f32>(0.62f, 0.42f, 1f), vec3(0.6f));
-    let _e663: VoxelScene = u;
+    glowC = mix(u.lightC.xyz, vec3<f32>(0.62f, 0.42f, 1f), vec3(0.6f));
     let _e667: f32 = core;
     let _e669: vec3<f32> = coreC;
     let _e672: f32 = glow_4;
     let _e674: vec3<f32> = glowC;
-    return (_e663.strikeK.w * (((2.2f * _e667) * _e669) + ((0.6f * _e672) * _e674)));
+    return (u.strikeK.w * (((2.2f * _e667) * _e669) + ((0.6f * _e672) * _e674)));
 }
 
 fn over(c_55: ptr<function, vec3<f32>>, a_30: ptr<function, f32>, lc_1: vec3<f32>, la: f32) {
@@ -9563,11 +9311,9 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
     let _e283: i32 = PX;
     let _e284: i32 = S;
     x_96 = (_e283 / _e284);
-    let _e293: VoxelScene = u;
-    if (!(VOLUMETRIC) && (_e293.fogK.x > 0f)) {
+    if (!(VOLUMETRIC) && (u.fogK.x > 0f)) {
         {
-            let _e299: VoxelScene = u;
-            if (i32((_e299.fogM.x + 0.5f)) == 3i) {
+            if (i32((u.fogM.x + 0.5f)) == 3i) {
                 let _e307: f32 = xw_5;
                 let _e308: f32 = y0_11;
                 let _e309: f32 = k_20;
@@ -9591,25 +9337,19 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
             let _e328: f32 = t_40;
             if (_e328 < 0.999f) {
                 {
-                    let _e331: VoxelScene = u;
-                    let _e334: VoxelScene = u;
-                    let _e337: VoxelScene = u;
-                    let _e341: VoxelScene = u;
-                    fl_3 = (_e331.fogC.xyz + ((_e334.rainC.w * _e337.dayL.y) * _e341.sunLean.xyz));
-                    let _e347: VoxelScene = u;
-                    if (GLOW && (_e347.fogC.w > 0f)) {
+                    fl_3 = (u.fogC.xyz + ((u.rainC.w * u.dayL.y) * u.sunLean.xyz));
+                    if (GLOW && (u.fogC.w > 0f)) {
                         {
                             let _e353: f32 = zEnd_8;
                             zg = max((_e353 - 1.5f), 0.5f);
                             let _e359: vec3<f32> = fl_3;
-                            let _e360: VoxelScene = u;
                             let _e363: f32 = xw_5;
                             let _e364: f32 = y0_11;
                             let _e365: f32 = k_20;
                             let _e366: f32 = zg;
                             let _e371: f32 = zg;
                             let _e373: vec3<f32> = glowAt(vec3<f32>(_e363, max((_e364 - (_e365 * _e366)), 0.5f), _e371));
-                            fl_3 = (_e359 + (_e360.fogC.w * _e373));
+                            fl_3 = (_e359 + (u.fogC.w * _e373));
                         }
                     }
                     let _e378: vec3<f32> = fl_3;
@@ -9619,23 +9359,15 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
             }
         }
     }
-    let _e384: VoxelScene = u;
-    let _e387: VoxelScene = u;
-    let _e391: VoxelScene = u;
-    wsum = ((_e384.rainK.x + _e387.rainK.y) + _e391.rainK.z);
+    wsum = ((u.rainK.x + u.rainK.y) + u.rainK.z);
     let _e396: f32 = wsum;
-    let _e399: VoxelScene = u;
-    let _e402: VoxelScene = u;
-    let _e406: VoxelScene = u;
-    if ((_e396 > 0f) || (((_e399.rainH.x + _e402.rainH.y) + _e406.rainH.z) > 0f)) {
+    if ((_e396 > 0f) || (((u.rainH.x + u.rainH.y) + u.rainH.z) > 0f)) {
         {
             let _e413: f32 = zEnd_8;
             let _e414: i32 = D;
             let _e417: i32 = D;
             depth_2 = (min(_e413, f32(_e414)) / f32(max(_e417, 1i)));
-            let _e423: VoxelScene = u;
-            let _e428: VoxelScene = u;
-            if ((_e423.rainK.z > 0f) || (_e428.rainH.z > 0f)) {
+            if ((u.rainK.z > 0f) || (u.rainH.z > 0f)) {
                 let _e434: f32 = xw_5;
                 let _e436: f32 = y0_11;
                 let _e439: f32 = gustAt((_e434 - (0.24f * _e436)));
@@ -9652,24 +9384,21 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
                     let _e453: vec2<i32> = px_10;
                     let _e455: vec4<f32> = textureLoad(wgpu_backdropTex, _e453, 0i);
                     bg = _e455.xyz;
-                    let _e465: VoxelScene = u;
                     let _e468: vec3<f32> = Y;
                     let _e470: vec3<f32> = bg;
                     let _e471: vec3<f32> = Y;
-                    dark_1 = (1f - smoothstep(0f, RAIN_CURTAIN_RAMP, (dot(_e465.rainC.xyz, _e468) - dot(_e470, _e471))));
+                    dark_1 = (1f - smoothstep(0f, RAIN_CURTAIN_RAMP, (dot(u.rainC.xyz, _e468) - dot(_e470, _e471))));
                     let _e476: vec3<f32> = bg;
                     curtain = (_e476 * RAIN_CURTAIN);
                 }
             }
-            let _e478: VoxelScene = u;
             let _e483: f32 = gust;
             let _e487: f32 = depth_2;
-            veil = (dot(_e478.rainH.xyz, (RAIN_VEIL * vec3<f32>(1f, 1f, _e483))) * _e487);
+            veil = (dot(u.rainH.xyz, (RAIN_VEIL * vec3<f32>(1f, 1f, _e483))) * _e487);
             let _e490: f32 = veil;
             if (_e490 > 0f) {
                 {
-                    let _e495: VoxelScene = u;
-                    let _e499: vec3<f32> = hazed(_e495.rainC.xyz, 0.5f);
+                    let _e499: vec3<f32> = hazed(u.rainC.xyz, 0.5f);
                     let _e500: vec3<f32> = curtain;
                     let _e501: f32 = dark_1;
                     let _e504: f32 = veil;
@@ -9736,11 +9465,9 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
                             let _e607: f32 = sp_4;
                             if (_e607 > 0f) {
                                 {
-                                    let _e610: VoxelScene = u;
-                                    let _e613: VoxelScene = u;
                                     let _e620: f32 = zEnd_8;
                                     let _e621: f32 = hazeAt(_e620);
-                                    let _e622: vec3<f32> = hazed(mix(_e610.rainC.xyz, vec3(_e613.dayL.x), vec3(0.15f)), _e621);
+                                    let _e622: vec3<f32> = hazed(mix(u.rainC.xyz, vec3(u.dayL.x), vec3(0.15f)), _e621);
                                     sc = _e622;
                                     let _e626: vec3<f32> = sc;
                                     let _e628: f32 = sp_4;
@@ -9773,10 +9500,9 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
                             continue;
                         }
                     }
-                    let _e660: VoxelScene = u;
                     let _e663: f32 = zl_2;
                     let _e664: f32 = hazeAt(_e663);
-                    let _e665: vec3<f32> = hazed(_e660.rainC.xyz, _e664);
+                    let _e665: vec3<f32> = hazed(u.rainC.xyz, _e664);
                     let _e666: vec3<f32> = curtain;
                     let _e667: f32 = dark_1;
                     rc = mix(_e665, _e666, vec3(_e667));
@@ -9843,10 +9569,8 @@ fn weatherOver(px_9: vec2<i32>) -> vec4<f32> {
             }
         }
     }
-    let _e740: VoxelScene = u;
     let _e745: f32 = zEnd_8;
-    let _e746: VoxelScene = u;
-    if ((_e740.strikeK.w > 0f) && (_e745 >= _e746.strikeK.z)) {
+    if ((u.strikeK.w > 0f) && (_e745 >= u.strikeK.z)) {
         {
             let _e751: vec3<f32> = c_56;
             let _e752: vec2<i32> = px_10;
@@ -9873,19 +9597,11 @@ fn flatRain(px_11: i32, py_10: i32, colour_2: vec3<f32>) -> vec3<f32> {
     px_12 = px_11;
     py_11 = py_10;
     colour_3 = colour_2;
-    let _e250: VoxelScene = u;
-    let _e253: VoxelScene = u;
-    let _e257: VoxelScene = u;
-    wsum_1 = ((_e250.rainK.x + _e253.rainK.y) + _e257.rainK.z);
-    let _e262: VoxelScene = u;
-    let _e265: VoxelScene = u;
-    let _e268: VoxelScene = u;
-    if (_e262.rainK.z >= max(_e265.rainK.x, _e268.rainK.y)) {
+    wsum_1 = ((u.rainK.x + u.rainK.y) + u.rainK.z);
+    if (u.rainK.z >= max(u.rainK.x, u.rainK.y)) {
         local_138 = 2i;
     } else {
-        let _e274: VoxelScene = u;
-        let _e277: VoxelScene = u;
-        if (_e274.rainK.y >= _e277.rainK.x) {
+        if (u.rainK.y >= u.rainK.x) {
             local_137 = 1i;
         } else {
             local_137 = 0i;
@@ -9908,12 +9624,11 @@ fn flatRain(px_11: i32, py_10: i32, colour_2: vec3<f32>) -> vec3<f32> {
         }
     }
     let _e300: vec3<f32> = colour_3;
-    let _e301: VoxelScene = u;
     let _e304: f32 = st_6;
     let _e305: f32 = wsum_1;
     let _e309: i32 = m_20;
     let _e313: f32 = local_139[_e309];
-    return mix(_e300, _e301.rainC.xyz, vec3(clamp((((_e304 * min(_e305, 1f)) * _e313) * 0.8f), 0f, 1f)));
+    return mix(_e300, u.rainC.xyz, vec3(clamp((((_e304 * min(_e305, 1f)) * _e313) * 0.8f), 0f, 1f)));
 }
 
 fn sunInAir(p_38: vec3<f32>) -> f32 {
@@ -9929,37 +9644,32 @@ fn sunInAir(p_38: vec3<f32>) -> f32 {
     v_68 = _e257.xy;
     let _e260: vec2<f32> = v_68;
     let _e262: vec2<f32> = v_68;
-    let _e264: VoxelScene = u;
-    return mix(_e260.x, _e262.y, _e264.volK.w);
+    return mix(_e260.x, _e262.y, u.volK.w);
 }
 
 fn fogDensity(p_40: vec3<f32>) -> f32 {
     var p_41: vec3<f32>;
 
     p_41 = p_40;
-    let _e248: VoxelScene = u;
-    if (_e248.fogK.x <= 0f) {
+    if (u.fogK.x <= 0f) {
         {
             return 0f;
         }
     }
-    let _e254: VoxelScene = u;
     let _e257: f32 = fogPixelNoise;
     let _e259: vec3<f32> = p_41;
     let _e261: f32 = fogShape(_e259.y);
-    return ((_e254.fogK.x * _e257) * _e261);
+    return ((u.fogK.x * _e257) * _e261);
 }
 
 fn airDensity(p_42: vec3<f32>) -> f32 {
     var p_43: vec3<f32>;
 
     p_43 = p_42;
-    let _e248: VoxelScene = u;
     let _e251: vec3<f32> = p_43;
-    let _e256: VoxelScene = u;
     let _e262: vec3<f32> = p_43;
     let _e263: f32 = fogDensity(_e262);
-    return ((_e248.volK.x * exp((-(max(_e251.y, 0f)) / _e256.volK.z))) + _e263);
+    return ((u.volK.x * exp((-(max(_e251.y, 0f)) / u.volK.z))) + _e263);
 }
 
 fn inScatter(zEnd_9: i32) -> vec4<f32> {
@@ -10009,8 +9719,7 @@ fn inScatter(zEnd_9: i32) -> vec4<f32> {
     let _e290: i32 = PY;
     let _e297: i32 = S;
     y0_12 = ((f32(((_e289 - _e290) - 1i)) + 0.5f) / f32(_e297));
-    let _e301: VoxelScene = u;
-    if (_e301.fogK.x > 0f) {
+    if (u.fogK.x > 0f) {
         {
             let _e306: f32 = xw_6;
             let _e307: f32 = y0_12;
@@ -10045,17 +9754,13 @@ fn inScatter(zEnd_9: i32) -> vec4<f32> {
             let _e350: f32 = zs;
             let _e351: f32 = hazeAt(_e350);
             d_10 = ((_e346 - _e347) * (1f - _e351));
-            let _e355: VoxelScene = u;
-            let _e358: VoxelScene = u;
             let _e361: vec3<f32> = p_44;
             let _e362: f32 = sunInAir(_e361);
-            sun_7 = (_e355.sunLean.xyz * (_e358.dayL.y * _e362));
+            sun_7 = (u.sunLean.xyz * (u.dayL.y * _e362));
             let _e366: vec3<f32> = sun_7;
-            let _e368: VoxelScene = u;
-            light = (_e366 + (0.5f * _e368.flashC.xyz));
-            let _e374: VoxelScene = u;
+            light = (_e366 + (0.5f * u.flashC.xyz));
             let _e379: f32 = fog;
-            if (GLOW && ((_e374.volK.y > 0f) || (_e379 > 0f))) {
+            if (GLOW && ((u.volK.y > 0f) || (_e379 > 0f))) {
                 let _e384: vec3<f32> = p_44;
                 let _e385: vec3<f32> = glowAt(_e384);
                 local_140 = _e385;
@@ -10065,9 +9770,8 @@ fn inScatter(zEnd_9: i32) -> vec4<f32> {
             let _e389: vec3<f32> = local_140;
             glow_5 = _e389;
             let _e391: vec3<f32> = light;
-            let _e392: VoxelScene = u;
             let _e395: vec3<f32> = glow_5;
-            light = (_e391 + (_e392.volK.y * _e395));
+            light = (_e391 + (u.volK.y * _e395));
             let _e398: f32 = d_10;
             let _e399: vec3<f32> = light;
             here_1 = (_e398 * _e399);
@@ -10076,12 +9780,9 @@ fn inScatter(zEnd_9: i32) -> vec4<f32> {
                 {
                     let _e405: vec3<f32> = here_1;
                     let _e406: f32 = fog;
-                    let _e407: VoxelScene = u;
-                    let _e410: VoxelScene = u;
                     let _e413: vec3<f32> = sun_7;
-                    let _e416: VoxelScene = u;
                     let _e419: vec3<f32> = glow_5;
-                    here_1 = (_e405 + (_e406 * ((_e407.fogC.xyz + (_e410.rainC.w * _e413)) + (_e416.fogC.w * _e419))));
+                    here_1 = (_e405 + (_e406 * ((u.fogC.xyz + (u.rainC.w * _e413)) + (u.fogC.w * _e419))));
                 }
             }
             let _e424: vec3<f32> = acc_2;
@@ -10129,9 +9830,8 @@ fn worldCol(sx_1: i32) -> i32 {
     let _e250: i32 = S;
     rw = (_e249 * _e250);
     let _e253: i32 = sx_2;
-    let _e254: VoxelScene = u;
     let _e258: i32 = rw;
-    v_71 = ((_e253 + _e254.view.x) % _e258);
+    v_71 = ((_e253 + u.view.x) % _e258);
     let _e261: i32 = v_71;
     if (_e261 < 0i) {
         let _e264: i32 = v_71;
@@ -10156,34 +9856,26 @@ fn highlighted(x_97: i32, y_86: i32, z_94: i32) -> bool {
     x_98 = x_97;
     y_87 = y_86;
     z_95 = z_94;
-    let _e253: VoxelScene = u;
-    if (_e253.view.y == 0i) {
+    if (u.view.y == 0i) {
         {
             return false;
         }
     }
     let _e259: i32 = x_98;
-    let _e260: VoxelScene = u;
     let _e264: i32 = W;
-    let _e265: i32 = wrapMod((_e259 - _e260.hiMin.x), _e264);
+    let _e265: i32 = wrapMod((_e259 - u.hiMin.x), _e264);
     dxh = _e265;
     let _e267: i32 = dxh;
-    let _e268: VoxelScene = u;
     let _e272: i32 = y_87;
-    let _e273: VoxelScene = u;
     let _e278: i32 = y_87;
-    let _e279: VoxelScene = u;
     let _e284: i32 = z_95;
-    let _e285: VoxelScene = u;
     let _e290: i32 = z_95;
-    let _e291: VoxelScene = u;
-    if (((((_e267 > _e268.hiMax.x) || (_e272 < _e273.hiMin.y)) || (_e278 > _e279.hiMax.y)) || (_e284 < _e285.hiMin.z)) || (_e290 > _e291.hiMax.z)) {
+    if (((((_e267 > u.hiMax.x) || (_e272 < u.hiMin.y)) || (_e278 > u.hiMax.y)) || (_e284 < u.hiMin.z)) || (_e290 > u.hiMax.z)) {
         {
             return false;
         }
     }
-    let _e297: VoxelScene = u;
-    if (_e297.view.y < 0i) {
+    if (u.view.y < 0i) {
         {
             return true;
         }
@@ -10195,8 +9887,7 @@ fn highlighted(x_97: i32, y_86: i32, z_94: i32) -> bool {
     key_1 = ((u32(_e304) | (u32(_e306) << 12u)) | (u32(_e312) << 22u));
     loop {
         let _e321: i32 = i_17;
-        let _e322: VoxelScene = u;
-        if !((_e321 < _e322.view.y)) {
+        if !((_e321 < u.view.y)) {
             break;
         }
         {
@@ -10223,8 +9914,7 @@ fn hiTint(c_57: vec3<f32>) -> vec3<f32> {
 
     c_58 = c_57;
     let _e249: vec3<f32> = c_58;
-    let _e252: VoxelScene = u;
-    return mix(_e249, vec3(1f), vec3(_e252.hiK.x));
+    return mix(_e249, vec3(1f), vec3(u.hiK.x));
 }
 
 fn vineDraw(vv: vec4<u32>, x_99: i32, level_5: i32, zc: i32, z_96: i32, dx_46: i32, r_28: i32, acc_3: ptr<function, vec3<f32>>, trans_6: ptr<function, vec3<f32>>) -> f32 {
@@ -10280,8 +9970,7 @@ fn vineDraw(vv: vec4<u32>, x_99: i32, level_5: i32, zc: i32, z_96: i32, dx_46: i
     let _e278: bool = vineEmits(_e277);
     en = (LIT && _e278);
     let _e281: bool = en;
-    let _e282: VoxelScene = u;
-    if (_e281 || ((u32(_e282.view.w) & EMIT_VINES) != 0u)) {
+    if (_e281 || ((u32(u.view.w) & EMIT_VINES) != 0u)) {
         let _e290: i32 = x_100;
         let _e291: i32 = level_6;
         let _e292: i32 = zc_1;
@@ -10481,18 +10170,12 @@ fn main_1() {
     var colour_4: vec3<f32>;
     var sc_1: vec4<f32>;
 
-    let _e247: VoxelScene = u;
-    S = _e247.geom.x;
-    let _e250: VoxelScene = u;
-    RISE = _e250.geom.y;
-    let _e253: VoxelScene = u;
-    BASE = _e253.geom.z;
-    let _e256: VoxelScene = u;
-    W = _e256.extent.x;
-    let _e259: VoxelScene = u;
-    H = _e259.extent.y;
-    let _e262: VoxelScene = u;
-    D = _e262.extent.z;
+    S = u.geom.x;
+    RISE = u.geom.y;
+    BASE = u.geom.z;
+    W = u.extent.x;
+    H = u.extent.y;
+    D = u.extent.z;
     let _e266: vec4<f32> = gl_FragCoord_1;
     px_13 = vec2<i32>(_e266.xy);
     if WEATHER {
@@ -10582,8 +10265,7 @@ fn main_1() {
                     if _e358 {
                         {
                             let _e359: i32 = z_98;
-                            let _e362: VoxelScene = u;
-                            if ((_e359 > 0i) && (_e362.tex.y != 0i)) {
+                            if ((_e359 > 0i) && (u.tex.y != 0i)) {
                                 {
                                     let _e368: i32 = x_101;
                                     let _e369: i32 = level_7;
@@ -10912,8 +10594,7 @@ fn main_1() {
     let _e720: vec2<i32> = px_13;
     let _e722: vec3<f32> = skyColor(_e718.x, _e720.y);
     sky_2 = _e722;
-    let _e724: VoxelScene = u;
-    if (LIT && (_e724.dayB.w > 0f)) {
+    if (LIT && (u.dayB.w > 0f)) {
         {
             let _e730: vec3<f32> = emitted;
             let _e731: vec3<f32> = trans_7;
@@ -10958,8 +10639,7 @@ fn main_1() {
         local_152 = _e777;
     } else {
         let _e778: vec3<f32> = acc_4;
-        let _e779: VoxelScene = u;
-        local_152 = (_e778 * _e779.tint.xyz);
+        local_152 = (_e778 * u.tint.xyz);
     }
     let _e784: vec3<f32> = local_152;
     let _e785: vec3<f32> = trans_7;
@@ -10986,10 +10666,7 @@ fn main_1() {
     }
     let _e807: vec3<f32> = colour_4;
     outColour = vec4<f32>(_e807.x, _e807.y, _e807.z, 1f);
-    let _e814: VoxelScene = u;
-    let _e817: VoxelScene = u;
-    let _e821: VoxelScene = u;
-    if (!(LIT) && (((_e814.rainK.x + _e817.rainK.y) + _e821.rainK.z) > 0f)) {
+    if (!(LIT) && (((u.rainK.x + u.rainK.y) + u.rainK.z) > 0f)) {
         {
             let _e828: vec4<f32> = outColour;
             let _e830: vec2<i32> = px_13;

@@ -1102,7 +1102,7 @@ impl VoxelGpuSink<GpuTarget> {
         // The panel presents on its own thread. Development-window rendering stays
         // inside the host event loop's redraw callback on every platform.
         let (gpu, window) = GpuTarget::prepare(
-            kind, "cubarium — voxel strip (GPU)", (u32::from(proj.raster_w), u32::from(proj.raster_h)),
+            kind, "cubarium — voxel strip (GPU)", (u32::from(proj.raster_w), u32::from(proj.raster_h)), 21,
         )?;
         Self::build(cfg, proj, options, Some(gpu), |gpu, renderer| {
             GpuTarget::open(kind, gpu, renderer, "cubarium — voxel strip (GPU)", true, window)

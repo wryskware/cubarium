@@ -249,7 +249,7 @@ impl GpuSink {
         let atlas = Atlas::load(art)
             .with_context(|| format!("loading {} for the GPU atlas", art.display()))?;
         let (gpu, window) = GpuTarget::prepare(
-            kind, "cubarium — ring (GPU)", (layout.w, layout.h),
+            kind, "cubarium — ring (GPU)", (layout.w, layout.h), 0,
         )?;
         eprintln!("cubarium: --sink gpu on {}", gpu.name);
         let mut renderer = Renderer::new(&gpu, &atlas, layout)?;

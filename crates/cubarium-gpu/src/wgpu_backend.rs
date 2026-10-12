@@ -177,7 +177,8 @@ impl Gpu {
         // use the largest immediate block (64 bytes). Preserve adapter texture
         // resolution for wide worlds/displays; those caps reserve no images.
         let required_limits = wgpu::Limits {
-            max_sampled_textures_per_shader_stage: 21,
+            max_sampled_textures_per_shader_stage: 21
+                .min(adapter.limits().max_sampled_textures_per_shader_stage),
             max_immediate_size: if required_features.contains(wgpu::Features::IMMEDIATES) {
                 64
             } else {

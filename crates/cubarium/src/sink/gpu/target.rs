@@ -40,13 +40,19 @@ pub enum GpuTarget {
 impl GpuTarget {
     /// Select the device against the owned display surface before creating any
     /// renderer resources. Readback fallback still uses a headless device.
-    pub fn prepare(kind: GpuTargetKind, title: &str, raster_size: (u32, u32))
+    pub fn prepare(kind: GpuTargetKind, title: &str, raster_size: (u32, u32), required_sampled_textures: u32)
         -> Result<(Arc<Gpu>, Option<WgpuWindowTarget>)>
     {
         if kind == GpuTargetKind::Window {
             crate::sink::hidden::window_allowed()?;
             match WgpuWindowTarget::prepare(title, raster_size) {
-                Ok((gpu, window)) => return Ok((gpu, Some(window))),
+                Ok((gpu, window)) => {
+                    let available = gpu.device.limits().max_sampled_textures_per_shader_stage;
+                    if available >= required_sampled_textures {
+                        return Ok((gpu, Some(window)));
+                    }
+                    eprintln!("cubarium: GPU development window supports {available} sampled textures per stage, renderer needs {required_sampled_textures}; reading the raster back instead");
+                }
                 Err(error) => eprintln!("cubarium: no GPU development window ({error:#}); reading the raster back instead"),
             }
         }

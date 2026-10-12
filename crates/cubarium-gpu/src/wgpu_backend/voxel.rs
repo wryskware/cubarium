@@ -443,6 +443,12 @@ impl VoxelRenderer {
     pub fn new(gpu: &Gpu, params: VoxelParams, textures: &VoxelTextures) -> Result<Self> {
         params.validate()?;
         ensure!(
+            gpu.device.limits().max_sampled_textures_per_shader_stage >= 21,
+            "voxel rendering requires 21 sampled textures per shader stage; adapter {} supports {}",
+            gpu.name,
+            gpu.device.limits().max_sampled_textures_per_shader_stage
+        );
+        ensure!(
             (textures.s, textures.rise) == (params.s, params.rise),
             "face texture projection differs"
         );

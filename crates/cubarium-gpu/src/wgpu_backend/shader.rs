@@ -254,6 +254,7 @@ vec3 tap(vec2 uv) {
             naga::back::wgsl::WriterFlags::EXPLICIT_TYPES,
         )
         .context("emit WGSL without specializing")?;
+        let source = compact_uniform_members(&source);
         let roundtrip = naga::front::wgsl::parse_str(&source).context("parse generated WGSL")?;
         ensure!(
             roundtrip.overrides.len() == module.overrides.len(),
@@ -261,6 +262,79 @@ vec3 tap(vec2 uv) {
         );
         Ok(source)
     }
+}
+
+/// Naga's GLSL frontend loads the complete uniform struct before each member
+/// access. Keep generated WGSL at member granularity, as the maintained shaders
+/// do, to avoid copying the 3984-byte scene (including three large arrays).
+/// Only immutable aliases used exclusively through member access are removed.
+fn compact_uniform_members(source: &str) -> String {
+    if !source.contains("var<uniform> u: VoxelScene;") {
+        return source.to_owned();
+    }
+    let mut chunks = source.split("\nfn ");
+    let mut output = chunks.next().unwrap_or_default().to_owned();
+    for chunk in chunks {
+        let declarations: BTreeMap<_, _> = chunk
+            .lines()
+            .filter_map(|line| {
+                let declaration = line.trim();
+                let name = declaration
+                    .strip_prefix("let ")?
+                    .strip_suffix(": VoxelScene = u;")?;
+                Some((name.to_owned(), line))
+            })
+            .collect();
+        let without_declarations = chunk
+            .lines()
+            .filter(|line| !declarations.values().any(|declaration| declaration == line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut removable: BTreeSet<_> = declarations.keys().cloned().collect();
+        // Token boundaries prevent handle names such as _e1 and _e10 colliding.
+        for (start, end) in identifiers(&without_declarations) {
+            let name = &without_declarations[start..end];
+            if removable.contains(name) && !without_declarations[end..].starts_with('.') {
+                removable.remove(name);
+            }
+        }
+        let retained = chunk
+            .lines()
+            .filter(|line| {
+                !removable
+                    .iter()
+                    .any(|name| declarations.get(name) == Some(line))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        output.push_str("\nfn ");
+        let mut previous = 0;
+        for (start, end) in identifiers(&retained) {
+            output.push_str(&retained[previous..start]);
+            let name = &retained[start..end];
+            output.push_str(if removable.contains(name) { "u" } else { name });
+            previous = end;
+        }
+        output.push_str(&retained[previous..]);
+    }
+    output.push('\n');
+    output
+}
+
+fn identifiers(source: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (index, ch) in source.char_indices() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            start.get_or_insert(index);
+        } else if let Some(first) = start.take() {
+            spans.push((first, index));
+        }
+    }
+    if let Some(first) = start {
+        spans.push((first, source.len()));
+    }
+    spans
 }
 
 /// Vulkan allowed sampler2D loads from depth views. WebGPU makes that image
