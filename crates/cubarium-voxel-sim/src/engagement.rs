@@ -617,10 +617,9 @@ impl Episode {
             }
         }
         let fauna = self.sim.fauna();
-        let eating_kill = fauna.pack(self.pack).is_some_and(|p| p.feast_eaten > 0.0)
-            || fauna.view().ledger.funnel[Founder::Chorister.index()][Founder::Loftstrider.index()]
-                [cubarium_voxel_fauna::perception::EATEN]
-                > 0;
+        let eating_kill = fauna.view().ledger.funnel[Founder::Chorister.index()]
+            [Founder::Loftstrider.index()][cubarium_voxel_fauna::perception::EATEN]
+            > 0;
         if eating_kill && !self.kills.is_empty() {
             self.outcome = Some(if self.calf.is_some_and(|id| self.kills.contains(&id)) {
                 Outcome::CalfKilled

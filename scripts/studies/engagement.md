@@ -30,7 +30,8 @@ Rows use kill identity events plus recorded carcass consumption for a kill
 outcome. Giving up requires a recorded abandoned chase and homeward state for
 all survivors; all hounds gone also ends the encounter. Other episodes timeout.
 Wounds are sums/worst of each body's peak wound stock, with a recorded wound
-kill represented by stock 1. Encounters are distinct sensed hound/family pairs;
+kill represented by stock 1. Hound deaths include every mortality cause in the
+fixed pack roster ledger, excluding setup removals. Encounters are distinct sensed hound/family pairs;
 tests are recorded BrokeOff chase endings, chases are ChaseStart events on the
 family, kills are exact family victim IDs. Captures are null: today's bites
 have no holding stage. These definitions are explicit and should be retained
