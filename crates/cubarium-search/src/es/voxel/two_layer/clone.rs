@@ -15,15 +15,18 @@
 //!
 //! # The order, and why no label leaks
 //!
-//! Exactly the runtime's ([`super::brain`]): the bottom at sample `t` reads the intent and
-//! subject held **after sample `t − 1`'s** arbitration, with that intent's time held; the
-//! top at `t` reads the GRU state that update produced, the same held intent and time, and
-//! is scored against the proposal at `t`. Nothing derived from sample `t`'s proposal or
-//! hold is in any input at `t` ([`bottom_inputs`] is the one place the inputs are built).
+//! Exactly the runtime's ([`super::brain`]): the GRU's update at sample `t` reads the
+//! intent and subject held **after sample `t − 1`'s** arbitration, with that intent's time
+//! held; the top at `t` reads the GRU state that update produced, the same held intent and
+//! time, and is scored against the proposal at `t`. Nothing derived from sample `t`'s
+//! proposal or hold reaches the top's input at `t` ([`top_inputs`] shows it).
 //!
-//! The teacher acts at `t` under its own hold at `t`, while the bottom acts at `t` under the
-//! hold from `t − 1` (the runtime's order: a settled intent conditions the bottom from the
-//! next sample), so at a switch the action label leads the conditioning by one sample.
+//! **The same-sample readout** (§11.3, amended 2026-10-12): the bottom's actions at `t`
+//! read that new hidden state plus the intent and subject **held at `t`**
+//! ([`readout_conditioning`]), teacher-forced on the teacher's hold, so at a switch the
+//! action label and its conditioning line up. The held intent at `t` is the bottom's
+//! conditioning, never a label the bottom is scored on, and it reaches the recurrent state
+//! only from `t + 1`.
 //!
 //! # Room for the second half
 //!
@@ -37,8 +40,8 @@ use serde::{Deserialize, Serialize};
 use super::arbitration::{EarlyEnd, IntentArbitration};
 use super::brain::{CandidateRow, DecisionSample, SubjectRef, TwoLayerNet};
 use super::net::{
-    SubjectKind, TopForward, bottom_input, none_score, pointer_query, pointer_row, pointer_score,
-    squash_time, top_forward,
+    SubjectKind, TopForward, bottom_input, conditioning as conditioning_block, none_score,
+    pointer_query, pointer_row, pointer_score, readout, squash_time, top_forward,
 };
 use super::shape::{TYPE_TAGS, TwoLayerLayout, TwoLayerShape, initial_center};
 use crate::es::optimizer::Adam;
@@ -126,9 +129,59 @@ pub fn bottom_inputs(
 }
 
 struct Conditioning {
+    /// The GRU's input: the observation and the hold before this sample.
     x: Vec<f64>,
+    /// The hold before this sample and its squashed time: the top's input.
     held: Option<usize>,
     time: f64,
+    /// The same-sample readout's conditioning: the hold at this sample.
+    c: Vec<f64>,
+}
+
+/// The same-sample readout's conditioning at every sample of `record`: the intent and
+/// subject held **at** that sample (after its arbitration) and the squashed time in that
+/// intent, as the runtime builds it after settling.
+pub fn readout_conditioning(
+    shape: &TwoLayerShape,
+    arbitration: &IntentArbitration,
+    record: &TrajectoryRecord,
+) -> Vec<Vec<f64>> {
+    conditioning(shape, arbitration, record)
+        .into_iter()
+        .map(|c| c.c)
+        .collect()
+}
+
+/// The top's input `u = [h | held one-hot | time]` at every sample of `record`, run
+/// teacher-forced under `theta` in the runtime's order (empty without a top). The order
+/// test reads it: the label at `t` never reaches `u` at `t`.
+pub fn top_inputs(
+    shape: &TwoLayerShape,
+    arbitration: &IntentArbitration,
+    theta: &[f64],
+    record: &TrajectoryRecord,
+) -> Vec<Vec<f64>> {
+    let layout = TwoLayerLayout::new(shape);
+    let Some(t) = layout.top else {
+        return Vec::new();
+    };
+    let mut hidden = vec![0.0; shape.hidden];
+    let mut next = vec![0.0; shape.hidden];
+    let mut y = vec![0.0; shape.bottom_outputs()];
+    let mut top = TopForward::new(shape);
+    conditioning(shape, arbitration, record)
+        .into_iter()
+        .map(|c| {
+            crate::es::tensor::gru_view(theta, &layout.bottom).forward(
+                &c.x,
+                &mut hidden,
+                &mut next,
+                &mut y,
+            );
+            top_forward(shape, &t, theta, &hidden, c.held, c.time, &mut top);
+            top.u.clone()
+        })
+        .collect()
 }
 
 fn conditioning(
@@ -158,14 +211,33 @@ fn conditioning(
             time,
             &mut x,
         );
+        // The hold at this sample, with its time after any switch: the readout's.
+        if before.is_none_or(|b| b.intent != sample.held.intent) {
+            age = 0.0;
+        }
+        let mut c = vec![0.0; shape.conditioning()];
+        if shape.has_top() {
+            let row = sample.held.subject.and_then(|s| {
+                sample
+                    .candidates
+                    .iter()
+                    .find(|c| c.key == s.key && c.kind == s.kind)
+                    .map(|c| (c.features.as_slice(), c.kind))
+            });
+            conditioning_block(
+                shape,
+                Some(sample.held.intent),
+                row,
+                squash_time(age, arbitration.intent_time_scale_s),
+                &mut c,
+            );
+        }
         out.push(Conditioning {
             x,
             held: held.map(|h| h.intent),
             time,
+            c,
         });
-        if before.is_none_or(|b| b.intent != sample.held.intent) {
-            age = 0.0;
-        }
         age += record.sample_period_s;
         before = Some(sample.held);
     }
@@ -273,7 +345,8 @@ fn prepare(
                 shape.actions.len()
             ));
         }
-        if s.candidates.len() > k {
+        // A shape without subjects reads no rows: the same records clone a plain brain.
+        if k > 0 && s.candidates.len() > k {
             return Err(format!("sample {t}: {} candidates, K is {k}", s.candidates.len()));
         }
         counts.samples += 1;
@@ -548,6 +621,7 @@ fn window(
             }
             *yo = a;
         }
+        readout(layout, theta, &prep.cond[t].c, &mut y);
 
         // The bottom's losses.
         let s = &record.samples[t];
@@ -714,10 +788,15 @@ fn window(
         for j in 0..hw {
             dh[j] = dh_next[j] + dh_top[i * hw + j];
         }
+        let c = &prep.cond[t].c;
+        let cw = c.len();
         for o in 0..outputs {
             let d = dy[i * outputs + o];
             if d == 0.0 {
                 continue;
+            }
+            for (j, cv) in c.iter().enumerate() {
+                grad[layout.readout.start + o * cw + j] += d * cv;
             }
             grad[b.b_o + o] += d;
             for j in 0..hw {

@@ -2199,6 +2199,16 @@ fn controllers(
         if driven && prey && actions.feed > 0.5 && actions.forward <= fauna.config.teachers.forage_stay_forward {
             fauna.ledger.feed_still_ticks_by_founder[founder.index()] += 1;
         }
+        // TWO-LAYER staged scenes (`Fauna::force_own`): a forced body holds its controller's
+        // own answer over every heuristic-layer override above; the physical ways out below
+        // (DROP, WADE-OUT) and the shallows still win.
+        let forced = driven && !fauna.forced_own.is_empty() && fauna.forced_own.contains(&id) && src != crate::Steer::Shallows;
+        if forced {
+            (actions, lure, lift) = own;
+            src = crate::Steer::Heuristic;
+            fled = false;
+            herded = false;
+        }
         // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
         // lineage's `drop.after_s` jumps down; last, as it is the only way out.
         if driven {
@@ -2236,7 +2246,7 @@ fn controllers(
         // SP-GROOM: an available body approaches infested kin through its normal routes.
         // Flight, a strike, and emergency feeding retain priority; escape routes also win, as
         // does a dependent young's walk to its mother (SP-FOLLOW).
-        if driven && !fled && !matches!(src, crate::Steer::Drop | crate::Steer::Wade | crate::Steer::Nurse) {
+        if driven && !fled && !forced && !matches!(src, crate::Steer::Drop | crate::Steer::Wade | crate::Steer::Nurse) {
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
             if let Some(go) = crate::groom::steer(fauna, i, view, &fv, day) {
                 actions = go;

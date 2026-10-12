@@ -15,7 +15,10 @@ use crate::es::voxel::store::{POLICY_SCHEMA, VoxelPolicyFile};
 use crate::es::voxel::{parse_founder, voxel_schema_digest};
 
 /// The two-layer policy file's schema token. A file that is not this is refused by name.
-pub const TWO_LAYER_POLICY_SCHEMA: &str = "cub-voxel-policy-two-layer-1";
+///
+/// `-2` (2026-10-12): the bottom gained the same-sample readout (§11.3, amended), so a `-1`
+/// vector is a different layout and is refused, never reinterpreted.
+pub const TWO_LAYER_POLICY_SCHEMA: &str = "cub-voxel-policy-two-layer-2";
 
 /// One two-layer centre, self-contained.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -112,12 +115,7 @@ impl TwoLayerPolicyFile {
             ));
         }
         if self.digest != voxel_schema_digest(founder) {
-            return Err(format!(
-                "{name}: policy digest {:#018x} is not this build's {} manifest digest {:#018x}",
-                self.digest,
-                founder.name(),
-                voxel_schema_digest(founder)
-            ));
+            return Err(format!("{name}: {}", manifest.digest_refusal(self.digest)));
         }
         if s.is_plain() {
             return Err(format!(

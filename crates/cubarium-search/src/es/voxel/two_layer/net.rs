@@ -2,7 +2,7 @@
 //! the top's forward pass. One implementation, so a clone is fitted on exactly the
 //! inputs the runtime will build.
 
-use super::shape::{TYPE_TAGS, TopOffsets, TwoLayerShape};
+use super::shape::{TYPE_TAGS, TopOffsets, TwoLayerLayout, TwoLayerShape};
 
 /// What a subject is: a body (sensed or remembered) or a place (§11.1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -46,25 +46,62 @@ pub fn bottom_input(
 ) {
     assert_eq!(observation.len(), shape.observation, "observation width");
     assert_eq!(x.len(), shape.bottom_inputs(), "bottom input width");
-    let mut at = shape.observation;
+    let at = shape.observation;
     x[..at].copy_from_slice(observation);
+    conditioning(shape, held, subject, time, &mut x[at..]);
+}
+
+/// Fill the conditioning block `c` (width [`TwoLayerShape::conditioning`]):
+/// `[intent one-hot | subject features + tag | squashed time]`. The recurrent update reads
+/// it for the hold before a sample's decision ([`bottom_input`]); the same-sample readout
+/// ([`readout`]) for the hold after it.
+pub fn conditioning(
+    shape: &TwoLayerShape,
+    held: Option<usize>,
+    subject: Option<(&[f64], SubjectKind)>,
+    time: f64,
+    c: &mut [f64],
+) {
+    assert_eq!(c.len(), shape.conditioning(), "conditioning width");
+    let mut at = 0;
     let block = shape.intent_block();
-    x[at..at + block].fill(0.0);
+    c[at..at + block].fill(0.0);
     if let Some(i) = held.filter(|_| block > 0) {
-        x[at + i] = 1.0;
+        c[at + i] = 1.0;
     }
     at += block;
     let block = shape.subject_block();
     if block > 0 {
-        x[at..at + block].fill(0.0);
+        c[at..at + block].fill(0.0);
         if let Some((features, kind)) = subject {
-            x[at..at + shape.row_width].copy_from_slice(features);
-            x[at + shape.row_width + kind.tag()] = 1.0;
+            c[at..at + shape.row_width].copy_from_slice(features);
+            c[at + shape.row_width + kind.tag()] = 1.0;
         }
         at += block;
     }
     if shape.time_block() > 0 {
-        x[at] = time;
+        c[at] = time;
+    }
+}
+
+/// **The same-sample readout** (§11.3, amended 2026-10-12): add `w_c c` to the bottom's
+/// outputs `y` (already `w_o h + b_o` on this sample's new hidden state), `c` the
+/// conditioning of the intent and subject **settled at this sample**. A no-op without a
+/// top (`C = 0`), so a plain brain's outputs are today's.
+pub fn readout(layout: &TwoLayerLayout, theta: &[f64], c: &[f64], y: &mut [f64]) {
+    let cw = c.len();
+    if cw == 0 {
+        return;
+    }
+    assert_eq!(layout.readout.len(), y.len() * cw, "readout width");
+    let w = &theta[layout.readout.clone()];
+    for (o, yo) in y.iter_mut().enumerate() {
+        let row = &w[o * cw..(o + 1) * cw];
+        let mut a = 0.0;
+        for (wv, cv) in row.iter().zip(c) {
+            a += wv * cv;
+        }
+        *yo += a;
     }
 }
 

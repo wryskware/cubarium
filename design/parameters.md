@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (3852 rows)
+**`fauna.*`** (3897 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1990,6 +1990,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.littershredder.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.littershredder.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.littershredder.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.littershredder.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.littershredder.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.frondgrazer.core.maintenance_per_s` | 0.000008333333333333334 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.frondgrazer.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.frondgrazer.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2393,6 +2398,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.frondgrazer.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.frondgrazer.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.frondgrazer.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.frondgrazer.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.frondgrazer.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.lanternjaw.core.maintenance_per_s` | 0.000009722222222222223 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.lanternjaw.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.lanternjaw.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -2796,6 +2806,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.counter.reach` | 0.5 | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.lanternjaw.counter.damage` | 0.7 | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.lanternjaw.counter.cost` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.lanternjaw.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.lanternjaw.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.lanternjaw.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.lanternjaw.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.lanternjaw.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.capgnawer.core.maintenance_per_s` | 0.000004166666666666667 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.capgnawer.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.capgnawer.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -3199,6 +3214,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.capgnawer.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.capgnawer.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.capgnawer.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.capgnawer.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.capgnawer.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.loftstrider.core.maintenance_per_s` | 0.000005555555555555556 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.loftstrider.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.loftstrider.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -3602,6 +3622,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.loftstrider.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.loftstrider.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.loftstrider.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.loftstrider.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.loftstrider.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.ripple-snail.core.maintenance_per_s` | 0.000002777777777777778 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.ripple-snail.core.bite_half_stock` | 0.00125 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.ripple-snail.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -4005,6 +4030,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.ripple-snail.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.ripple-snail.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.ripple-snail.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.ripple-snail.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.ripple-snail.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.bellwing.core.maintenance_per_s` | 0.000020833333333333333 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.bellwing.core.bite_half_stock` | 0.002 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.bellwing.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -4408,6 +4438,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.bellwing.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.bellwing.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.bellwing.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.bellwing.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.bellwing.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.seedporter.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.seedporter.core.bite_half_stock` | 0.005 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.seedporter.core.n_tissue` | 0.05 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -4811,6 +4846,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.seedporter.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.seedporter.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.seedporter.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.seedporter.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.seedporter.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.founders.chorister.core.maintenance_per_s` | 0.000011111111111111112 | org-units/s per unit body | [0, inf) | 0.0000005–0.004 log | B | placeholder | basal upkeep, paid from reserve then body: daily need f / 7200 s |
 | `fauna.founders.chorister.core.bite_half_stock` | 0.0035 | org-units at the mouth | [0, inf) | 0.0001–0.05 log | C | tuned | K: a bite is want * E / (E + K) |
 | `fauna.founders.chorister.core.n_tissue` | 0.02 | mineral per org-unit | [0, inf) | 0.01–0.12 log | A | placeholder | tissue stoichiometry: a bite builds at most mineral / n_tissue |
@@ -5214,6 +5254,11 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.chorister.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
+| `fauna.founders.chorister.brain.intent_hz` | 4.0 | Hz | (0, inf) |  | - | placeholder | TWO-LAYER: top-layer decision rate; the bottom runs every controller sample |
+| `fauna.founders.chorister.brain.hold_s` | 1.0 | s | [0, inf) |  | - | placeholder | TWO-LAYER: minimum hold before the brain's top may switch intent or subject on its own account (an early end ignores it) |
+| `fauna.founders.chorister.brain.switch_margin` | 0.1 | probability | [0, 1] |  | - | placeholder | TWO-LAYER: a brain's proposal must beat the held choice's probability by this, both at `temperature` |
+| `fauna.founders.chorister.brain.temperature` | 1.0 | - | (0, inf) |  | - | placeholder | TWO-LAYER: fixed softmax temperature the brain's hold and margin read probabilities at |
+| `fauna.founders.chorister.brain.intent_time_scale_s` | 10.0 | s | (0, inf) |  | - | placeholder | TWO-LAYER: the brain's time-in-intent input is 1 - exp(-t / this) |
 | `fauna.predation.still_after_s` | 2.0 | s | [0, inf) | 0.5–10 | - | decision | a body is still once it has not moved this long |
 | `fauna.predation.still_speed_bl_per_s` | 0.1 | body lengths/s | [0, inf) | 0.02–0.5 | - | decision | ground speed that counts as moving |
 | `fauna.predation.still_threat_near_m` | 0.5 | m | [0, inf) | 0.1–2 | - | decision | a still threat reads as a threat inside this distance |

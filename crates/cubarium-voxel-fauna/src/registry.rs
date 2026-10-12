@@ -627,6 +627,7 @@ fn rows() -> Vec<Row> {
         let at = format!("fauna.founders.{}", f.name());
         rows.extend(species_rows().into_iter().map(|row| row.under(&format!("{at}.core"))));
         rows.extend(founder_rows().into_iter().map(|row| row.under(&at)));
+        rows.extend(crate::brain_knobs::arbitration_rows(&format!("{at}.brain")));
     }
     rows.extend(knob_rows());
     rows.extend([

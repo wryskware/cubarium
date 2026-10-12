@@ -424,6 +424,9 @@ pub enum EpisodeKind {
     Gru(Arc<EpisodeGru>),
     /// The disclosed diagnostic controls and the observation-only heuristic.
     Control(VoxelControl),
+    /// A menu lineage's two-layer brain (TWO-LAYER): its validated weights and the
+    /// lineage's holding knobs (`fauna.founders.<lineage>.brain`).
+    TwoLayer(Arc<super::two_layer::TwoLayerNet>, super::two_layer::IntentArbitration),
 }
 
 /// One lineage's manifest-shaped GRU and two linear heads on the same hidden state.
@@ -553,6 +556,32 @@ impl EpisodeDriver {
         })
     }
 
+    /// A two-layer brain driver for `founder` (TWO-LAYER): weights validated against its
+    /// manifest by the policy file, holding by `arbitration`.
+    pub fn two_layer(
+        net: Arc<super::two_layer::TwoLayerNet>,
+        arbitration: super::two_layer::IntentArbitration,
+        founder: Founder,
+    ) -> EpisodeDriver {
+        EpisodeDriver {
+            founder,
+            kind: EpisodeKind::TwoLayer(net, arbitration),
+            ablate_senses: false,
+            record: None,
+            tap: None,
+        }
+    }
+
+    /// The same driver holding by the world's own brain table for its lineage (a no-op for
+    /// anything but a two-layer brain): what [`super::live::install_centres`] calls, so a
+    /// world's `fauna.founders.<lineage>.brain` knobs reach the brains it installs.
+    pub fn with_brain_table(mut self, arbitration: super::two_layer::IntentArbitration) -> EpisodeDriver {
+        if let EpisodeKind::TwoLayer(_, a) = &mut self.kind {
+            *a = arbitration;
+        }
+        self
+    }
+
     /// The same driver with the policy's sense channels zeroed before every forward
     /// pass. A no-op on a control, which reads no observation in the first place.
     pub fn with_ablated_senses(mut self) -> EpisodeDriver {
@@ -621,6 +650,9 @@ impl EpisodeDriver {
     pub fn fresh(&self, teachers: TeacherConfig) -> Box<dyn Controller> {
         let mut controller: Box<dyn Controller> = match &self.kind {
             EpisodeKind::Gru(policy) => Box::new(policy.controller(self.ablate_senses)),
+            EpisodeKind::TwoLayer(net, arbitration) => Box::new(
+                net.brain(*arbitration, self.founder.manifest().controller_period_s),
+            ),
             EpisodeKind::Control(VoxelControl::NoIntake) => Box::new(NoIntake),
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => Box::new(StationaryFeeding),
             EpisodeKind::Control(VoxelControl::Cruise) => Box::new(Cruise),
@@ -655,6 +687,7 @@ impl EpisodeDriver {
         match &self.kind {
             EpisodeKind::Gru(_) if self.ablate_senses => "gru-ablated".into(),
             EpisodeKind::Gru(_) => "gru".into(),
+            EpisodeKind::TwoLayer(..) => "two-layer".into(),
             EpisodeKind::Control(VoxelControl::NoIntake) => "no-intake".into(),
             EpisodeKind::Control(VoxelControl::StationaryFeeding) => "stationary-feeding".into(),
             EpisodeKind::Control(VoxelControl::Cruise) => "cruise".into(),
@@ -675,6 +708,7 @@ impl EpisodeDriver {
     pub fn digest(&self) -> u64 {
         match &self.kind {
             EpisodeKind::Gru(policy) => weights_fnv1a(policy.theta()),
+            EpisodeKind::TwoLayer(net, _) => weights_fnv1a(net.theta()),
             EpisodeKind::Control(_) => 0,
         }
     }

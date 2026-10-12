@@ -2016,13 +2016,7 @@ pub fn brain_driver(founder: Founder, spec: &str) -> Result<EpisodeDriver, Strin
             "herding reads the browser's cone; the {} lineage has none",
             founder.name()
         )),
-        path => {
-            let file = VoxelPolicyFile::load_or_transfer(std::path::Path::new(path))?;
-            if file.founder()? != founder {
-                return Err(format!("{path} is not a {} centre", founder.name()));
-            }
-            file.driver()
-        }
+        path => crate::es::voxel::store::load_brain_driver(std::path::Path::new(path), founder),
     }
 }
 
@@ -2437,7 +2431,11 @@ pub fn check_world_config(world: Option<&std::path::Path>) -> Result<cubarium_vo
 pub fn check_mass(drivers: &[(Founder, EpisodeDriver)], e: &EcologyParams) -> Result<(), String> {
     let fauna = e.fauna();
     for (f, d) in drivers {
-        if !matches!(d.kind(), crate::es::voxel::controller::EpisodeKind::Gru(_)) {
+        if !matches!(
+            d.kind(),
+            crate::es::voxel::controller::EpisodeKind::Gru(_)
+                | crate::es::voxel::controller::EpisodeKind::TwoLayer(..)
+        ) {
             continue;
         }
         let (world, trained) = (fauna.founder(*f).mass_scale, f.manifest().mass_scale);
