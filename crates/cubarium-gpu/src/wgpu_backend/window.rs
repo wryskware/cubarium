@@ -60,11 +60,21 @@ impl WindowPresenter {
         owner: Arc<W>,
         physical_size: (u32, u32),
     ) -> Result<Self> {
-        let owner: Arc<dyn wgpu::DisplayAndWindowHandle> = owner;
         let surface = gpu
             .instance
             .create_surface(owner.clone())
             .context("create owned window surface")?;
+        Self::from_surface(gpu, owner, surface, physical_size)
+    }
+
+    /// Reuse the surface that constrained adapter selection in `Gpu::open_for_window`.
+    pub fn from_surface<W: wgpu::DisplayAndWindowHandle + 'static>(
+        gpu: Arc<Gpu>,
+        owner: Arc<W>,
+        surface: wgpu::Surface<'static>,
+        physical_size: (u32, u32),
+    ) -> Result<Self> {
+        let owner: Arc<dyn wgpu::DisplayAndWindowHandle> = owner;
         let config = configuration(&gpu, &surface, physical_size)?;
         let present = PresentPass::new(&gpu, config.format);
         Ok(Self {

@@ -127,6 +127,10 @@ impl WindowHost {
         Ok(host)
     }
 
+    pub fn display(&self) -> winit::event_loop::OwnedDisplayHandle {
+        self.event_loop.owned_display_handle()
+    }
+
     pub fn window(&self) -> Arc<Window> {
         self.events.window.as_ref().expect("initialized development window").clone()
     }

@@ -106,17 +106,49 @@ impl Gpu {
         pollster::block_on(Self::open_async())
     }
 
+    /// Create the window's instance and surface before selecting its adapter.
+    /// The owned display is essential for GLES presentation. The surface retains
+    /// the window owner, so neither handle borrows the platform event loop.
+    pub fn open_for_window<D, W>(
+        display: D,
+        window: Arc<W>,
+    ) -> Result<(Self, wgpu::Surface<'static>)>
+    where
+        D: wgpu::WgpuHasDisplayHandle,
+        W: wgpu::DisplayAndWindowHandle + 'static,
+    {
+        let descriptor =
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display));
+        let backends = descriptor.backends;
+        let instance = wgpu::Instance::new(descriptor);
+        let surface = instance
+            .create_surface(window)
+            .context("create owned window surface")?;
+        let gpu = pollster::block_on(Self::open_instance(instance, backends, Some(&surface)))?;
+        Ok((gpu, surface))
+    }
+
     async fn open_async() -> Result<Self> {
         let descriptor = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         let backends = descriptor.backends;
-        let instance = wgpu::Instance::new(descriptor);
+        Self::open_instance(wgpu::Instance::new(descriptor), backends, None).await
+    }
+
+    async fn open_instance(
+        instance: wgpu::Instance,
+        backends: wgpu::Backends,
+        surface: Option<&wgpu::Surface<'_>>,
+    ) -> Result<Self> {
         let preferred = if let Some(name) = preferred_device() {
             let name = name.to_lowercase();
             instance
                 .enumerate_adapters(backends)
                 .await
                 .into_iter()
-                .find(|adapter| adapter.get_info().name.to_lowercase().contains(&name))
+                .find(|adapter| {
+                    adapter.get_info().name.to_lowercase().contains(&name)
+                        && surface.is_none_or(|surface| adapter.is_surface_supported(surface))
+                })
         } else {
             None
         };
@@ -125,6 +157,7 @@ impl Gpu {
             None => instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::HighPerformance,
+                    compatible_surface: surface,
                     ..Default::default()
                 })
                 .await

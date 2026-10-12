@@ -248,9 +248,9 @@ impl GpuSink {
             .with_context(|| format!("loading the art pack {}", art.display()))?;
         let atlas = Atlas::load(art)
             .with_context(|| format!("loading {} for the GPU atlas", art.display()))?;
-        let gpu = std::sync::Arc::new(
-            Gpu::open().context("opening the GPU device for --sink gpu")?,
-        );
+        let (gpu, window) = GpuTarget::prepare(
+            kind, "cubarium — ring (GPU)", (layout.w, layout.h),
+        )?;
         eprintln!("cubarium: --sink gpu on {}", gpu.name);
         let mut renderer = Renderer::new(&gpu, &atlas, layout)?;
         renderer.bend_substep =
@@ -262,7 +262,7 @@ impl GpuSink {
         renderer.art_scale = art_scale.unwrap_or(1.0);
         // Not threaded: this renderer writes its instance buffers every frame and has
         // no ring to keep them off a frame the GPU is still reading.
-        let target = GpuTarget::open(kind, &gpu, &mut renderer, "cubarium — ring (GPU)", false)?;
+        let target = GpuTarget::open(kind, &gpu, &mut renderer, "cubarium — ring (GPU)", false, window)?;
         // The canopy line comes from `ArtGeometry::new`, which is `CANOPY_TOP = 0.67` on
         // a ring — FW-5's constant, so the GPU and the CPU cannot disagree about where
         // the canopy starts.

@@ -133,7 +133,24 @@ fn data_group(
 fn target(format: wgpu::TextureFormat, blend: bool) -> Option<wgpu::ColorTargetState> {
     Some(wgpu::ColorTargetState {
         format,
-        blend: blend.then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+        // Geometry colours are premultiplied. Keep the destination alpha:
+        // emission alpha carries the walk's encoded depth for the weather pass.
+        blend: blend.then_some(wgpu::BlendState {
+            color: wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING.color,
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        }),
+        write_mask: wgpu::ColorWrites::ALL,
+    })
+}
+// Figure-only coverage accumulates separately from the raster/depth alpha.
+fn coverage_target(format: wgpu::TextureFormat) -> Option<wgpu::ColorTargetState> {
+    Some(wgpu::ColorTargetState {
+        format,
+        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         write_mask: wgpu::ColorWrites::ALL,
     })
 }
@@ -337,7 +354,7 @@ impl Figures {
                 target(raster_format, true),
                 emission_format.and_then(|f| target(f, true)),
                 weather
-                    .then(|| target(wgpu::TextureFormat::Rgba16Float, false))
+                    .then(|| coverage_target(wgpu::TextureFormat::Rgba16Float))
                     .flatten(),
             ],
             Some(wgpu::CompareFunction::LessEqual),
@@ -577,7 +594,7 @@ impl Figures {
             emission.and_then(|v| attachment(v, None)),
             self.weather_surface
                 .as_ref()
-                .and_then(|p| attachment(&p.view, None)),
+                .and_then(|p| attachment(&p.view, Some(wgpu::Color::TRANSPARENT))),
         ];
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("figure composite"),

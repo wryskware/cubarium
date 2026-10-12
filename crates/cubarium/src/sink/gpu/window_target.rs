@@ -23,12 +23,15 @@ pub struct WgpuWindowTarget {
 }
 
 impl WgpuWindowTarget {
-    pub fn open(gpu: Arc<Gpu>, title: &str, raster_size: (u32, u32)) -> Result<Self> {
+    pub fn prepare(title: &str, raster_size: (u32, u32)) -> Result<(Arc<Gpu>, Self)> {
         let (rw, rh) = (raster_size.0.max(1), raster_size.1.max(1));
         let zoom = ((1600 / rw).min(900 / rh)).max(1);
         let host = WindowHost::open(title, (rw * zoom, rh * zoom))?;
-        let presenter = WindowPresenter::open(gpu.clone(), host.window(), host.size())?;
-        Ok(Self { presenter, host, gpu, open: true, save: false, flight: VecDeque::new() })
+        let (gpu, surface) = Gpu::open_for_window(host.display(), host.window())?;
+        let gpu = Arc::new(gpu);
+        let presenter = WindowPresenter::from_surface(gpu.clone(), host.window(), surface, host.size())?;
+        let target = Self { presenter, host, gpu: gpu.clone(), open: true, save: false, flight: VecDeque::new() };
+        Ok((gpu, target))
     }
 
     /// Acquire, record, submit and present inside Winit's redraw callback. If no

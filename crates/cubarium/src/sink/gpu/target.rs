@@ -38,8 +38,24 @@ pub enum GpuTarget {
 }
 
 impl GpuTarget {
+    /// Select the device against the owned display surface before creating any
+    /// renderer resources. Readback fallback still uses a headless device.
+    pub fn prepare(kind: GpuTargetKind, title: &str, raster_size: (u32, u32))
+        -> Result<(Arc<Gpu>, Option<WgpuWindowTarget>)>
+    {
+        if kind == GpuTargetKind::Window {
+            crate::sink::hidden::window_allowed()?;
+            match WgpuWindowTarget::prepare(title, raster_size) {
+                Ok((gpu, window)) => return Ok((gpu, Some(window))),
+                Err(error) => eprintln!("cubarium: no GPU development window ({error:#}); reading the raster back instead"),
+            }
+        }
+        Ok((Arc::new(Gpu::open().context("opening the GPU device for --sink gpu")?), None))
+    }
+
     pub fn open<S: FrameSource>(
         kind: GpuTargetKind, gpu: &Arc<Gpu>, src: &mut S, title: &str, present_thread: bool,
+        window: Option<WgpuWindowTarget>,
     ) -> Result<Self> {
         match kind {
             #[cfg(target_os = "linux")]
@@ -59,12 +75,9 @@ impl GpuTarget {
             }
             GpuTargetKind::Window => {
                 crate::sink::hidden::window_allowed()?;
-                match WgpuWindowTarget::open(gpu.clone(), title, src.raster_size()) {
-                    Ok(window) => Ok(Self::WindowThread(Box::new(window))),
-                    Err(error) => {
-                        eprintln!("cubarium: no GPU development window ({error:#}); reading the raster back instead");
-                        Ok(Self::Window(Box::new(WindowTarget::open(gpu, src, title)?)))
-                    }
+                match window {
+                    Some(window) => Ok(Self::WindowThread(Box::new(window))),
+                    None => Ok(Self::Window(Box::new(WindowTarget::open(gpu, src, title)?))),
                 }
             }
             GpuTargetKind::Headless => Ok(Self::Headless(Box::new(Headless::new(gpu, src)?))),

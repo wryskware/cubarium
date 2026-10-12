@@ -316,7 +316,7 @@ impl VoxelGpuSink<Offscreen> {
             pipelines: o.pipelines,
             ..Default::default()
         };
-        let mut sink = Self::build(cfg, proj, options, |_, _| Ok(Offscreen))?;
+        let mut sink = Self::build(cfg, proj, options, None, |_, _| Ok(Offscreen))?;
         if let Some(l) = sink.packer.light.as_mut() {
             match o.sky {
                 SkyBake::Now => {}
@@ -342,6 +342,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         cfg: &VoxelConfig,
         proj: Projection,
         options: VoxelGpuSinkOptions,
+        prepared_gpu: Option<std::sync::Arc<Gpu>>,
         open: impl FnOnce(&std::sync::Arc<Gpu>, &mut VoxelRenderer) -> Result<T>,
     ) -> Result<Self> {
         anyhow::ensure!(cfg.figures.supersample > 0, "figures.supersample must be positive");
@@ -364,10 +365,10 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         }
         let params = params_of(cfg, proj, options.roof_from_texture);
         let opened = Instant::now();
-        let gpu = std::sync::Arc::new(
-            Gpu::open()
-                .context("opening the GPU device for --sink gpu")?,
-        );
+        let gpu = match prepared_gpu {
+            Some(gpu) => gpu,
+            None => std::sync::Arc::new(Gpu::open().context("opening the GPU device for --sink gpu")?),
+        };
         eprintln!(
             "cubarium voxel: --sink gpu on {} ({:.0} KiB voxel buffers)",
             gpu.name,
@@ -1100,8 +1101,11 @@ impl VoxelGpuSink<GpuTarget> {
         let kind = options.target;
         // The panel presents on its own thread. Development-window rendering stays
         // inside the host event loop's redraw callback on every platform.
-        Self::build(cfg, proj, options, |gpu, renderer| {
-            GpuTarget::open(kind, gpu, renderer, "cubarium — voxel strip (GPU)", true)
+        let (gpu, window) = GpuTarget::prepare(
+            kind, "cubarium — voxel strip (GPU)", (u32::from(proj.raster_w), u32::from(proj.raster_h)),
+        )?;
+        Self::build(cfg, proj, options, Some(gpu), |gpu, renderer| {
+            GpuTarget::open(kind, gpu, renderer, "cubarium — voxel strip (GPU)", true, window)
         })
     }
 

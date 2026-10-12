@@ -359,6 +359,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "cubarium-gpu",
+ "pollster",
  "wgpu",
  "winit",
 ]

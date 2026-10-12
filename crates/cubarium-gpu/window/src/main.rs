@@ -172,13 +172,19 @@ impl State {
                     .with_inner_size(size),
             )?,
         );
-        let gpu = Arc::new(Gpu::open()?);
+        let (gpu, surface) =
+            Gpu::open_for_window(event_loop.owned_display_handle(), window.clone())?;
+        let gpu = Arc::new(gpu);
         println!("device: {}", gpu.name);
         let renderer = Renderer::new(&gpu, atlas, layout)?;
         let world = SyntheticWorld::new(layout, seed);
         let size = window.inner_size();
-        let presenter =
-            WindowPresenter::open(gpu.clone(), window.clone(), (size.width, size.height))?;
+        let presenter = WindowPresenter::from_surface(
+            gpu.clone(),
+            window.clone(),
+            surface,
+            (size.width, size.height),
+        )?;
         let mut state = State {
             window,
             gpu,
