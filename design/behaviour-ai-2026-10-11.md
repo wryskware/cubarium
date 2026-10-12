@@ -757,8 +757,15 @@ numbers are in brackets.
   apart. `Steer` stays the executed steering source, which a physical override can replace.
 - **Order at a decision sample.** The GRU updates once with the observation and the
   previously held intent. The top reads that state and proposes. Arbitration settles the
-  held intent and subject, which condition the bottom from the next sample. Cloning uses
-  exactly this order, so the label never leaks in through the input.
+  held intent and subject. The bottom's action readout then reads the new hidden state with
+  the newly settled intent and subject, in the same sample; the recurrent update reads them
+  from the next sample. Cloning uses exactly this order, so the top's label never leaks in
+  through its input.
+  - *Amended 2026-10-12 after the TWO-LAYER core (cb6f2fd2).* Conditioning the whole bottom
+    only from the next sample put every mode change one sample late. On a synthetic teacher
+    whose modes act at once, a plain GRU then out-copied the two-layer clone (mode 0.993,
+    action error 0.0023 against 0.0146). A same-sample readout removes the lag without
+    leaking the label: the top still reads only state built from the previous hold.
 - **What the top imitates:** the teacher's proposal before its hold (its best-scoring
   intent). The brain then runs the same hold and margin, so hysteresis isn't applied twice.
 - **Hold semantics.** The margin is on probabilities at a fixed temperature, a knob per
