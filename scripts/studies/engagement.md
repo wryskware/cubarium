@@ -31,7 +31,8 @@ outcome. Giving up requires a recorded abandoned chase and homeward state for
 all survivors; all hounds gone also ends the encounter. Other episodes timeout.
 Wounds are sums/worst of each body's peak wound stock, with a recorded wound
 kill represented by stock 1. Hound deaths include every mortality cause in the
-fixed pack roster ledger, excluding setup removals. Encounters are distinct sensed hound/family pairs;
+fixed pack roster ledger, excluding setup removals. Encounters are distinct
+sensed hound/family pairs;
 tests are recorded BrokeOff chase endings, chases are ChaseStart events on the
 family, kills are exact family victim IDs. Captures are null: today's bites
 have no holding stage. These definitions are explicit and should be retained
@@ -60,7 +61,8 @@ row by checking at child completion, not by a polling loop. Desktop-only
 placement keeps the built executable and presentation assets local. The adapter
 checks the submitted executable hash before every episode.
 
-Outputs are in `<job>/batch-task/batch/`: per-seed rows, per-arm JSONL,
+The generated spec writes to main's
+`art/gen/runs/engage-2026-10-12/baseline/batch-task/batch/`: per-seed rows, per-arm JSONL,
 `summary.tsv`, `video.log`, `VIDEO_DONE` or `VIDEO_FAILED`. A missing/failed
 child is visible in `STATE.tsv`; no partial table pretends to be complete.
 Video uses the normal headless voxel sink and existing art/models, one panel,

@@ -35,6 +35,7 @@ def main():
     text = f'''# ENGAGE source commit {commit}; binary sha256 {digest}
 kind = "batch"
 name = "engage-baseline"
+out = "/home/wrysk/wryskware/cubarium/art/gen/runs/engage-2026-10-12/baseline"
 hosts = ["desktop"]
 parallel = 2
 mem_gb = 4
