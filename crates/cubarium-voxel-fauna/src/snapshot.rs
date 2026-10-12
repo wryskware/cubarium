@@ -179,7 +179,10 @@ use crate::{Fauna, FaunaConfig};
 //     held intent, subject, hold start, executed actions, override; the kick's phase),
 //     `Fauna::heard` (call records), `Track::lame`, and the envelope's brains' memories
 //     (`Controller::memory`). The intent, kick and call tables are named config.
-// 82: taken by CALLS-REST (branch `calls-rest`, unmerged at VH-TACTICS' commit).
+// 82: CALLS-REST (behaviour-AI §2.1, §3.4) — `Animal::doze` (light rest and deep bouts),
+//     `Vigil::{wound_seen, heard_from}`, `CallRecord::heading`, the vigil ledger's `calls` and
+//     `call_reactions`, the ledger's light, deep and deep-bout counters. The rest and call
+//     tables are named config.
 // 83: VH-TACTICS (behaviour-AI §4, §11.4-§11.6) — `Fauna::hounds` (each Veilhound's tactical
 //     memory, `Hound`) and the ledger's `hound_tests`, `hound_test_commits`, `hound_give_ups`,
 //     `hound_substitutions` and `lunges_blocked` (a state layout change). `Pack::tactics`
@@ -631,6 +634,7 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             rest_ticks: 0,
+            doze: crate::sleep::Doze::default(),
             yielding: false,
             hunkered: false,
             stomach: crate::Stomach::default(),

@@ -43,12 +43,14 @@
 //! farther ([`crate::SenseTable::still_gain`], read by the perception core), and a still body is
 //! harder to see ([`crate::SenseTable::sight_still_fraction`]). Nothing rewards a pause.
 //!
-//! # Waking to an alarm ([`alarm_wakes`])
+//! # Waking ([`wakes`], CALLS-REST: one rule)
 //!
 //! A sleeping body whose lineage hears wakes to a **running** body (fleeing or bolting: the alarm
-//! wave, [`crate::vigil`]) it would hear at `sleep_hearing` of its awake sensitivity
-//! ([`crate::Vigilance::sleep_hearing`]); it is kept awake for the predation table's `alert_s`
-//! and hears the wave at its next sensing.
+//! wave, [`crate::vigil`]) — or, where its lineage's `rest.rush_over_cruise` says so, a
+//! **rushing** one — it would hear at `sleep_hearing` of its awake sensitivity
+//! ([`crate::Vigilance::sleep_hearing`]) through the terrain between them; to a heeded **call**;
+//! and, in light rest, to a **pressing threat** it senses. It is kept awake for the predation
+//! table's `alert_s` and hears the wave at its next sensing.
 
 use serde::{Deserialize, Serialize};
 
@@ -365,44 +367,104 @@ pub fn cadence_of(founder: Founder) -> Cadence {
     }
 }
 
-/// **A sleeper woken by an alarm** (module note): body `i`, asleep, of a lineage that hears and
-/// keeps `sleep_hearing` of it asleep, hears a running body (fleeing or bolting) within its
-/// hearing at that sensitivity. `running` lists the running bodies' indices.
-pub(crate) fn alarm_wakes(fauna: &crate::Fauna, i: usize, running: &[usize]) -> bool {
-    let b = &fauna.animals[i];
-    let Some(f) = b.founder else { return false };
-    let phys = fauna.config.founder(f);
-    let (table, keep) = (phys.senses, phys.vigilance.sleep_hearing);
-    if !table.live || !(table.hearing_m > 0.0) || !(keep > 0.0) {
-        return false;
-    }
-    let Some((ring, _)) = fauna.world_geometry else { return false };
-    let threshold = table.hearing_min / keep;
-    let near = fauna.config.perception.hearing_near_m.max(1e-9);
-    running.iter().any(|&k| {
-        if k == i {
-            return false;
-        }
-        let o = &fauna.animals[k];
-        let (dx, dz) = crate::pose::wrapped_delta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
-        let dy = if o.pose.y_m.is_finite() && b.pose.y_m.is_finite() { o.pose.y_m - b.pose.y_m } else { 0.0 };
-        let d = (dx * dx + dy * dy + dz * dz).sqrt();
-        if d > table.hearing_m {
-            return false;
-        }
-        let e = crate::perception::emission(&fauna.config, o) * crate::perception::run_noise(fauna, o, fauna.tick);
-        e > 0.0 && e / d.max(near) >= threshold
-    })
+/// Why a sleeper woke ([`wakes`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Wake {
+    /// A loud body heard: a running prey (fleeing or bolting) or, for a lineage with
+    /// `rest.rush_over_cruise`, a rushing one.
+    Footfall,
+    /// A heeded call of its lineage heard since it lay down.
+    Call,
+    /// In light rest, a pressing threat in its own record.
+    Sight,
 }
 
-/// The indices of every body running (fleeing or bolting) now: the alarms a sleeper may hear.
-pub(crate) fn running_bodies(fauna: &crate::Fauna) -> Vec<usize> {
+/// **The one wake rule** (module note; CALLS-REST step 4, behaviour-AI §3.4 and §11.2) for
+/// body `i`, asleep:
+/// - **footfall**: a body in `loud` (awake, and running or above its cruise) that is running
+///   (its flight or bolt: the alarm wave, [`crate::vigil`]) or, for a sleeper whose lineage's
+///   `rest.rush_over_cruise` is above 0, moving faster than that × its own lineage's cruise (a
+///   rush; a stalk at or under cruise never wakes it), heard at `sleep_hearing` of its awake
+///   sensitivity within its `hearing_m` (3D), its loudness through the pair's terrain ray
+///   (× `perception.occlusion` when blocked, as waking hearing);
+/// - **a call**: a call record of a kind its lineage heeds ([`crate::calls::heeds`]) heard since
+///   it lay down — for a deep sleeper only one at least `calls.asleep_loudness` after
+///   occlusion is recorded at all ([`crate::calls::hear`]);
+/// - **sight**: in light rest ([`crate::sleep`]), a pressing threat (seen moving or near, heard,
+///   felt; not one it watches) in its record from a sensing since it lay down.
+///
+/// This replaces RHYTHMS-CADENCE's alarm wake (a running body's emission with no terrain ray):
+/// that is the footfall clause, now through the ray.
+pub(crate) fn wakes(fauna: &crate::Fauna, view: &cubarium_voxel::VoxelView<'_>, i: usize, loud: &[usize]) -> Option<Wake> {
+    let b = &fauna.animals[i];
+    let f = b.founder?;
+    let phys = fauna.config.founder(f);
+    let since = b.doze.asleep_since;
+    // A heeded call heard since it lay down.
+    if crate::calls::heard(fauna, b.id)
+        .iter()
+        .any(|r| r.tick >= since && !phys.calls.sensed_kind(usize::from(r.kind)) && crate::calls::heeds(&fauna.config, f, b, usize::from(r.kind)))
+    {
+        return Some(Wake::Call);
+    }
+    // In light rest, a pressing threat it sensed since lying down.
+    if crate::sleep::light_rest(b) && crate::vigil::pressing_since(fauna, b, since, view) {
+        return Some(Wake::Sight);
+    }
+    let (table, keep) = (phys.senses, phys.vigilance.sleep_hearing);
+    if loud.is_empty() || !table.live || !(table.hearing_m > 0.0) || !(keep > 0.0) {
+        return None;
+    }
+    let v = view.config.voxel_m;
+    let ring = f64::from(view.config.width) * v;
+    let threshold = table.hearing_min / keep;
+    let pc = fauna.config.perception;
+    let near = pc.hearing_near_m.max(1e-9);
+    let rush = phys.rest.rush_over_cruise;
+    let ear = crate::perception::base_m(b, v) + crate::body_of(&fauna.config, b).map_or(0.0, |g| g.height_m);
+    let now = fauna.tick;
+    loud.iter()
+        .any(|&k| {
+            if k == i {
+                return false;
+            }
+            let o = &fauna.animals[k];
+            let running = fauna.percepts.get(&o.id).is_some_and(|p| p.vigil.running(now));
+            let rushing = rush > 0.0
+                && o.founder.is_some_and(|of| o.speed_m_s > rush * fauna.config.manifest(of).cruise_m_per_s);
+            if !(running || rushing) {
+                return false;
+            }
+            let (dx, dz) = crate::pose::wrapped_delta(b.pose.x, b.pose.z, o.pose.x, o.pose.z, ring);
+            let dy = if o.pose.y_m.is_finite() && b.pose.y_m.is_finite() { o.pose.y_m - b.pose.y_m } else { 0.0 };
+            let d = (dx * dx + dy * dy + dz * dz).sqrt();
+            if d > table.hearing_m {
+                return false;
+            }
+            let e = crate::perception::emission(&fauna.config, o) * crate::perception::run_noise(fauna, o, now);
+            if !(e > 0.0 && e / d.max(near) >= threshold) {
+                return false;
+            }
+            let mid = crate::perception::base_m(o, v) + 0.5 * crate::body_of(&fauna.config, o).map_or(0.0, |g| g.height_m);
+            crate::perception::line_clear(view, b.id, (b.pose.x, ear, b.pose.z), (o.pose.x, mid, o.pose.z))
+                || e * pc.occlusion.max(0.0) / d.max(near) >= threshold
+        })
+        .then_some(Wake::Footfall)
+}
+
+/// The indices of every awake body that is running (fleeing or bolting) or moving faster than
+/// its lineage's cruise: the footfalls a sleeper may hear ([`wakes`]).
+pub(crate) fn loud_bodies(fauna: &crate::Fauna) -> Vec<usize> {
     let now = fauna.tick;
     fauna
         .animals
         .iter()
         .enumerate()
-        .filter(|(_, a)| a.state != crate::State::Asleep && fauna.percepts.get(&a.id).is_some_and(|p| p.vigil.running(now)))
+        .filter(|(_, a)| {
+            a.state != crate::State::Asleep
+                && (fauna.percepts.get(&a.id).is_some_and(|p| p.vigil.running(now))
+                    || a.founder.is_some_and(|f| a.speed_m_s > fauna.config.manifest(f).cruise_m_per_s))
+        })
         .map(|(k, _)| k)
         .collect()
 }

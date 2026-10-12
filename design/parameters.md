@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (3951 rows)
+**`fauna.*`** (4113 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1785,12 +1785,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.littershredder.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.littershredder.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.littershredder.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.littershredder.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.littershredder.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.littershredder.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.littershredder.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.littershredder.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.littershredder.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.littershredder.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.littershredder.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.littershredder.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.littershredder.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.littershredder.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.littershredder.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.littershredder.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.littershredder.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.littershredder.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.littershredder.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.littershredder.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.littershredder.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.littershredder.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.littershredder.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.littershredder.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2199,12 +2217,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.frondgrazer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.frondgrazer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.frondgrazer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.frondgrazer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.frondgrazer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.frondgrazer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.frondgrazer.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.frondgrazer.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.frondgrazer.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.frondgrazer.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.frondgrazer.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.frondgrazer.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.frondgrazer.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.frondgrazer.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.frondgrazer.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.frondgrazer.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.frondgrazer.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.frondgrazer.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.frondgrazer.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.frondgrazer.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.frondgrazer.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.frondgrazer.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.frondgrazer.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.frondgrazer.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2613,12 +2649,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.lanternjaw.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.lanternjaw.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.lanternjaw.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.lanternjaw.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.lanternjaw.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.lanternjaw.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.lanternjaw.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.lanternjaw.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.lanternjaw.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.lanternjaw.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.lanternjaw.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.lanternjaw.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.lanternjaw.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.lanternjaw.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.lanternjaw.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.lanternjaw.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.lanternjaw.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.lanternjaw.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.lanternjaw.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.lanternjaw.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.lanternjaw.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.lanternjaw.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.lanternjaw.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.lanternjaw.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3027,12 +3081,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.capgnawer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.capgnawer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.capgnawer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.capgnawer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.capgnawer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.capgnawer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.capgnawer.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.capgnawer.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.capgnawer.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.capgnawer.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.capgnawer.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.capgnawer.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.capgnawer.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.capgnawer.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.capgnawer.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.capgnawer.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.capgnawer.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.capgnawer.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.capgnawer.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.capgnawer.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.capgnawer.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.capgnawer.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.capgnawer.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.capgnawer.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3381,7 +3453,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.loftstrider.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.loftstrider.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
-| `fauna.founders.loftstrider.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.loftstrider.senses.kin_tracks` | 4 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.loftstrider.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
 | `fauna.founders.loftstrider.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -3441,12 +3513,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.loftstrider.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.loftstrider.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
-| `fauna.founders.loftstrider.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.loftstrider.calls.keep_s` | 20.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.loftstrider.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.loftstrider.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.loftstrider.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.loftstrider.calls.trigger_m.*` | 8.0, 6.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.loftstrider.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.loftstrider.calls.alone_m` | 6.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.loftstrider.calls.heed_s.*` | 10.0, 15.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.loftstrider.calls.stranger_delay_s.*` | 0.0, 3.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.loftstrider.calls.gather_m` | 2.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.loftstrider.calls.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.loftstrider.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.loftstrider.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.loftstrider.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.loftstrider.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.loftstrider.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.loftstrider.rest.deep_alone_scale` | 0.2 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.loftstrider.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.loftstrider.rest.need_s` | 1200.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.loftstrider.rest.rush_over_cruise` | 1.2 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.loftstrider.rest.bed_scent` | 1.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.loftstrider.rest.bed_search_s` | 30.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3855,12 +3945,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.ripple-snail.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.ripple-snail.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.ripple-snail.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.ripple-snail.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.ripple-snail.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.ripple-snail.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.ripple-snail.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.ripple-snail.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.ripple-snail.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.ripple-snail.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.ripple-snail.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.ripple-snail.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.ripple-snail.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.ripple-snail.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.ripple-snail.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.ripple-snail.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.ripple-snail.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.ripple-snail.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.ripple-snail.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.ripple-snail.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.ripple-snail.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.ripple-snail.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.ripple-snail.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.ripple-snail.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4269,12 +4377,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.bellwing.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.bellwing.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.bellwing.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.bellwing.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.bellwing.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.bellwing.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.bellwing.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.bellwing.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.bellwing.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.bellwing.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.bellwing.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.bellwing.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.bellwing.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.bellwing.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.bellwing.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.bellwing.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.bellwing.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.bellwing.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.bellwing.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.bellwing.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.bellwing.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.bellwing.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.bellwing.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.bellwing.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4683,12 +4809,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.seedporter.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.seedporter.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.seedporter.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.seedporter.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.seedporter.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.seedporter.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.seedporter.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.seedporter.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.seedporter.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.seedporter.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.seedporter.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.seedporter.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.seedporter.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.seedporter.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.seedporter.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.seedporter.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.seedporter.rest.deep_alone_scale` | 1.0 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.seedporter.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.seedporter.rest.need_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.seedporter.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.seedporter.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.seedporter.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -5037,7 +5181,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.senses.cyan_m` | 0.0 | m | [0, inf) |  | - | placeholder | FLOWER-FRUIT: a still cyan light (a glowcap) draws only within this (3D); 0: light_m alone |
 | `fauna.founders.chorister.senses.loom_m` | 0.0 | m | [0, inf) |  | - | placeholder | a moving body of another lineage within this (3D) looms: a shadow falling on it (0: none) |
 | `fauna.founders.chorister.senses.feeding_sight_fraction` | 1.0 | fraction | [0, inf) |  | - | placeholder | S2: head down cropping between scans, sight reaches this fraction of its range (1: no change) |
-| `fauna.founders.chorister.senses.kin_tracks` | 1 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
+| `fauna.founders.chorister.senses.kin_tracks` | 4 | bodies | [0, inf) |  | - | placeholder | S2: at most this many of its own lineage weighed per remote sensing, nearest first |
 | `fauna.founders.chorister.senses.still_gain` | 1.25 | factor | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still for still_settle_s, its sight, hearing and tremor reach this x farther and hear and feel this x fainter (1: no change) |
 | `fauna.founders.chorister.senses.still_settle_s` | 0.5 | s | [0, inf) |  | - | placeholder | RHYTHMS-CADENCE: still this long before still_gain applies |
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
@@ -5097,12 +5241,30 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.chorister.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.chorister.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.chorister.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.chorister.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.chorister.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.chorister.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.chorister.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.chorister.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.chorister.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.chorister.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.chorister.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.chorister.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.chorister.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.chorister.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
+| `fauna.founders.chorister.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
+| `fauna.founders.chorister.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
+| `fauna.founders.chorister.rest.deep_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s |
+| `fauna.founders.chorister.rest.deep_max_s` | 120.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min |
+| `fauna.founders.chorister.rest.deep_alone_scale` | 0.2 | x rate | [0, inf) |  | - | placeholder | CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s |
+| `fauna.founders.chorister.rest.kin_awake_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a sight of a relative up or in light rest counts this long |
+| `fauna.founders.chorister.rest.need_s` | 1200.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none) |
+| `fauna.founders.chorister.rest.rush_over_cruise` | 0.0 | x cruise | [0, inf) |  | - | placeholder | CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no) |
+| `fauna.founders.chorister.rest.bed_scent` | 0.0 | x smell_min | [0, inf) |  | - | placeholder | CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands) |
+| `fauna.founders.chorister.rest.bed_search_s` | 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |

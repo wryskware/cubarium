@@ -62,6 +62,8 @@ pub mod subjects;
 pub mod kick;
 /// CONTRACTS (behaviour-AI §11.2): calls and hearing.
 pub mod calls;
+/// CALLS-REST (behaviour-AI §3.4): rest physiology, light rest and deep bouts.
+pub mod sleep;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -1115,6 +1117,9 @@ pub struct Animal {
     /// awake one starts a bout at random. Always 0 for every other body and with the clock off.
     #[serde(default)]
     pub rest_ticks: u32,
+    /// **Light rest or deep sleep** (CALLS-REST, [`sleep`]): its rest physiology's state.
+    #[serde(default)]
+    pub doze: sleep::Doze,
     /// **Yielding a carcass** (roster R3, the lanternjaw's heuristic): set when a body that
     /// hunts it came within `carcass_yield_radius_m` while it fed, cleared once none is
     /// within `threat_clear_m` ([`crate::PredationConfig`]); while set it walks directly
@@ -3660,6 +3665,20 @@ pub struct FaunaLedger {
     pub rest_bouts_by_founder: [u64; Founder::COUNT],
     #[serde(default)]
     pub alarm_wakes_by_founder: [u64; Founder::COUNT],
+    /// CALLS-REST ([`sleep`]): ticks asleep in light rest and in deep sleep, and deep bouts
+    /// begun, by lineage (a lineage without light rest counts every sleeping tick deep).
+    #[serde(default)]
+    pub light_rest_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub deep_sleep_ticks_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub deep_bouts_by_founder: [u64; Founder::COUNT],
+    /// CALLS-REST (`rhythm::wakes`): sleepers woken by a heeded call, and light resters woken
+    /// by a pressing threat they sensed (a footfall's wake counts in `alarm_wakes_by_founder`).
+    #[serde(default)]
+    pub call_wakes_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub sight_wakes_by_founder: [u64; Founder::COUNT],
     /// Ticks a heuristic walker was paced (searching or foraging on its own steering, moving
     /// faster than a stay on food, not fleeing) and, of them, paused ([`crate::Cadence`]).
     #[serde(default)]
@@ -4434,11 +4453,13 @@ pub enum Steer {
     /// SP-FOLLOW: a dependent young going to its mother, or holding still in contact with her
     /// to nurse ([`nurse::mother_goal`]).
     Nurse,
+    /// CALLS-REST: the walk down the hunter scent to a bed ([`sleep::bed_reflex`]).
+    Bed,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 20] = [
+    pub const ALL: [Steer; 21] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4459,6 +4480,7 @@ impl Steer {
         Steer::Host,
         Steer::Groom,
         Steer::Nurse,
+        Steer::Bed,
     ];
 
     /// A short name for tables.
@@ -4484,6 +4506,7 @@ impl Steer {
             Steer::Host => "host",
             Steer::Groom => "groom",
             Steer::Nurse => "nurse",
+            Steer::Bed => "bed",
         }
     }
 }
@@ -5879,6 +5902,7 @@ impl Fauna {
             pack: None,
             homing_ticks: 0,
             rest_ticks: 0,
+            doze: sleep::Doze::default(),
             yielding: false,
             hunkered: false,
             stomach: Stomach::default(),
