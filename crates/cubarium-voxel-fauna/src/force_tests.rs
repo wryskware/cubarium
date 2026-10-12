@@ -105,3 +105,22 @@ fn an_unforced_world_is_unchanged_by_the_hook() {
         }
     }
 }
+
+/// **The seedporter's `rest` is the pause** (BRAIN-REST): in a rest bout and held still it is
+/// labelled `rest`; walking on through the bout (a glider can't sleep on open ground) it is
+/// labelled `forage`, what it does.
+#[test]
+fn a_seedporter_walking_through_a_rest_bout_is_labelled_forage() {
+    let (_, _, mut f, ids) = scene();
+    let (id, founder) = ids[0];
+    assert_eq!(founder, Founder::Seedporter);
+    let i = f.animals.iter().position(|a| a.id == id).expect("the seedporter");
+    f.animals[i].rest_ticks = 10;
+    let stay = f.config.teachers.forage_stay_forward;
+    let name = |f: &Fauna, forward: f64| {
+        let held = crate::Actions { forward, turn: 0.0, feed: 0.0 };
+        crate::intent::teacher_label(f, i, founder, Steer::Heuristic, held, false, false).name
+    };
+    assert_eq!(name(&f, stay), Some("rest"), "still in a rest bout");
+    assert_eq!(name(&f, stay + 0.25), Some("forage"), "walking through a rest bout");
+}

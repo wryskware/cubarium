@@ -192,7 +192,10 @@ use crate::{Fauna, FaunaConfig};
 //     `defence_samples`, `kicks_landed_by_founder` and `kick_backs` (a state layout change).
 //     `FounderPhysiology::defence` (`Defence`) and the loftstrider's kick table are named
 //     config, not bumps.
-pub const SCHEMA: u32 = 84;
+// 85: BRAIN-REST — `Fauna::rest_asks` (a brain's rest ask, now saved) and
+//     `Fauna::brain_bouts` (the end tick of a granted brain rest bout). `rest.brain_bout_s`
+//     is named config, not a bump.
+pub const SCHEMA: u32 = 85;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
