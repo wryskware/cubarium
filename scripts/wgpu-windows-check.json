@@ -2,7 +2,7 @@
   "kind": "cargo-test",
   "name": "wgpu-windows-main-godot-check",
   "repo": "/home/wrysk/wryskware/cubarium/.claude/worktrees/wgpu-renderer",
-  "commit": "5116f722f522942ebb92dc369b1400cf8a3f7a91",
+  "commit": "3650682ef8f19ae1f61f0396feddb96e39c72f26",
   "command": [
     "cargo",
     "check",
@@ -23,5 +23,6 @@
   "hosts": [
     "desktop"
   ],
-  "pinned": true
+  "pinned": true,
+  "quick": false
 }

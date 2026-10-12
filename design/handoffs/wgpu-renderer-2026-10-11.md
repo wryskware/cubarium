@@ -7,98 +7,75 @@ decision_refs:
 
 # Renderer backend migration
 
-Wrysk requested the complete ash-to-wgpu migration, in a new worktree, with
-renderer parity verified by screenshots. This is an execution handoff; it does
-not add ecological or visual design decisions. Backlog item 11 supplies history.
+Implemented on `codex/wgpu-renderer` in `.claude/worktrees/wgpu-renderer`.
+Wrysk requested complete renderer parity, maintained WGSL where practical, and
+screenshots. This records implementation and verification, not new canon.
 
-Worktree: `.claude/worktrees/wgpu-renderer`, branch `codex/wgpu-renderer`.
-Source baseline: `48dd6600`. The additive capture harness and pan control are
-committed at `f6d55be5`; its rendering algorithms are the ash baseline.
-The final rebase includes `main` at `69316ce7` and its merged `pipeline-warm`
-work. The matching ash capture tree is `b1867d30` (tag
-`wgpu-ash-main-2026-10-11`): that main revision plus the same additive pan
-control. Main changed the animal save format, so its final comparison freezes
-a fresh matching world rather than migrating the old schema-78 fixture.
+The GPU crate uses wgpu 30.0.1, maintained WGSL and `#![forbid(unsafe_code)]`.
+Direct ash resources are removed. Flat/voxel, water, figures, plants, lighting,
+weather, bloom, presentation and tagged asynchronous readback retain their
+existing CPU interfaces and visual behavior. Encoder-owned uploads preserve
+discard, bounded capacity and retirement. Windows choose a display-compatible
+device and draw/present inside Winit callbacks. Agent windows use `hidden.sh`.
 
-The picture follows D-0005 and
-`design/art-direction/Cubarium_Art_Direction_v0.1.md`. Preserve the cutaway
-projection, pixel raster, nearest presentation, materials, illumination,
-occlusion, reflections, weather, plants, animal interpolation and bloom.
-No new repository unsafe code is allowed. The completed GPU crate must carry
-`#![forbid(unsafe_code)]`; unsafe within external dependencies is excluded by
-the working policy. Hardware ray queries are absent from this baseline.
+Main's merged `pipeline-warm` is ported: Still/All policies, parallel walk
+builds, NVIDIA's first-compile guard, queued preview lighting/fade, cancellation
+and teardown remain. Godot previews, live worlds and warm-up share `Arc<Gpu>`;
+per-device modules, layouts and pipelines are interned with concurrent
+same-descriptor creation deduplicated. Normal desktop windows retain their
+surface-compatible device selection.
 
-## Work sequence
+The original renderer was frozen at `f6d55be5` (base `48dd6600` plus additive
+capture controls). After rebasing, main's animal save format had changed. The
+final ash baseline is `b1867d30`, tag `wgpu-ash-main-2026-10-11`: main at
+`69316ce7` plus the same additive pan control. A fresh world was frozen there;
+no old save migration or baseline edits were used to obtain a match.
 
-1. Freeze ash screenshots before changing rendering algorithms. Use the same
-   saved world and explicit presentation clocks for both backends.
-2. Prove the safe wgpu device, shader input, presentation and padded readback
-   route before porting world passes. Use wgpu 30.0.1. Naga rejected twelve
-   baseline SPIR-V modules; convert their GLSL algorithms to WGSL through its
-   GLSL frontend, preserving specialization overrides. Wrysk prefers maintained
-   WGSL when this does not require a substantial manual rewrite. Validate the
-   generated WGSL before adopting it as the shipped source.
-3. Port flat background/water/sprites and voxel sky, figure shadows, voxel
-   walk, plant visibility/shading, figures/composite, weather and bloom.
-   Preserve CPU-facing scene/packing representations and specialization values.
-4. Replace Vulkan handles at the FrameSource boundary with safe textures,
-   command encoders and target views. Preserve recording discard, capacity,
-   retirement, version tags and ordered, nonblocking Godot readback.
-5. Port standalone and application window presentation and legacy panel
-   targets. Ordinary safe wgpu does not expose the old Vulkan dma-buf export:
-   the panel fallback uses completed readbacks copied into safely allocated DRM
-   buffers, then the existing shim handoff. This retains output pixels and
-   release ownership, but adds CPU copy cost. The panel no longer constrains
-   backend choice (backlog item 11 / D-0005).
-6. Remove direct ash dependencies and Vulkan-only resource code. Check native
-   platform conditionals, shader portability and both default/no-scanout builds.
-7. Preserve main's Still/All preview policies, parallel walk builds, NVIDIA
-   first-compile guard, queued lighting/fade and cancellable async warming.
-   Hosted previews, live worlds and their warm worker share an `Arc<Gpu>`.
-   Shader modules, layouts and pipelines are interned on that device; concurrent
-   requests for one descriptor compile once. Safe wgpu cannot construct its
-   native disk cache without unsafe, so this cache lives until the device drops.
-   Desktop windows retain display-compatible adapter selection.
+`runs/wgpu-parity-main/index.html` is the standalone comparison gallery.
+`comparison.json` reports 45 pairs, 13,417,632 pixels, 4,836 changed pixels
+(0.03604%) and maximum channel difference 2/255. The pictures were also
+inspected. Wrysk explicitly accepted the tiny rounding differences; the strict
+comparator still exits 1 whenever any pixel differs. Coverage includes ring
+scales, day/dusk/night, plain/textured terrain, rain/fog, two water clocks, pan,
+plant/model/glow specimens, classic/crisp/smooth animal motion, upscale,
+letterbox, downscale and portrait presentation.
 
-## Verification
+`source.json` records commits, the GPU tree and frozen input hashes. Capture
+revisions `dc439d11` / `5116f722`, cache revision `61017541`, and final Rust
+verification revision `3650682e` have the same GPU source tree. Main/Godot
+verification includes the final cross-platform explicit-save import fix.
+The branch also includes main's later Godot chrome work.
 
-All builds, tests and capture commands go through labd. Keep Rust builds at
-eight jobs or fewer, use the common build cache and small headless fixtures.
-An agent window always launches through `scripts/hidden.sh`.
+All Rust builds, tests and captures ran through labd, with at most eight build
+jobs and serial GPU tests. Completed checks:
 
-`scripts/gpu-parity.py` captures ring scale 1/2; plain/textured terrain and
-water at day/dusk/night; rain/fog; two water clocks; a frozen pan; and specimens
-with plants, models and glow. Additional existing fixtures cover fractional
-animal motion and WindowFit upscale, letterbox, downscale and portrait output.
-The comparator reports changed pixels, maximum and mean channel error, and
-writes differences. Review the pictures and numerical errors. Wrysk accepted
-the tiny 1–2/255 rounding differences on 2026-10-11; do not chase every last
-pixel, silently widen a tolerance or replace a baseline to make a check pass.
-The strict comparator deliberately still returns 1 when any pixel differs.
+- 140 GPU tests passed (65 s); 978 main/Godot tests passed (366 s); no skips.
+- Linux workspace/all-target and no-scanout checks; Windows main/Godot
+  all-target cross-check.
+- 36 maintained WGSL cases, MSL/HLSL output and real Linux pipeline creation;
+  padded readback, ordered tags, slot reuse and discarded upload.
+- Cache probe: eight concurrent requests create one pipeline; device isolation;
+  Still-to-All adds six variants; repeated All adds none; format separation.
+- Actual hosted fast preview and shared-device warm reuse; main headless and
+  private-window startup/shutdown; three-frame real private-display surface.
+- Device create/drop cycles and eight independent panel mapping/rotation cases.
 
-Exercise asynchronous readback ordering, backpressure, retirement, slot reuse
-and dropped recording behavior with a tiny asymmetric texture. Run tests for
-each changed crate and one integrator workspace pass. Inspect screenshots in
-addition to numerical differences. Verify Metal/HLSL shader translation where
-available; a Linux capture does not establish a macOS or Windows runtime pass.
+The final source checks found and fixed a test trait import, a diagnostic's
+private field access and Unix-gated imports needed by Windows app saves. A
+lab cache seeding collision was avoided by reusing the existing snapshot target
+and Cargo's build lock. The full integration test ran in the normal lane after
+its cold build exceeded the quick lane's 15-minute limit.
 
-Keep the final requested screenshot pairs and concise comparison result under
-`runs/wgpu-parity-main/`. Source history is commits, not frozen binaries or build
-copies. Update backlog/status after the full migration and verification pass.
+Material limits: native pipeline disk-cache construction requires unsafe, so
+our cache is process-resident; the driver may maintain its own disk cache. The
+legacy Linux panel copies completed readback into safe DRM buffers before the
+existing shim handoff, adding CPU copy cost. Full voxel rendering requires 21
+sampled textures per shader stage; a weaker window adapter uses the existing
+headless-GPU/CPU-window fallback. Physical panel output and native Windows/macOS
+runtime are untested here. MSL/HLSL emission and a Windows cross-check are not
+native runtime verification.
 
-Final verification is in progress. The pre-rebase wgpu revision `b14697ff`
-passed all 139 GPU tests, Linux workspace checks, Windows main/Godot cross-checks,
-36 shader cases with MSL/HLSL output, and a three-frame real surface test on a
-private Xvfb display. Its 45 screenshot pairs contained 4,836 changed pixels
-out of 13,417,632 (0.036%), with maximum channel error 2/255. Final checks also
-exercise concurrent cache reuse, device isolation and Still-to-All warming.
-
-After the final rebase, all 140 GPU tests pass (65 s, no skips); the Linux
-workspace and no-scanout checks pass. The actual device cache probe confirms
-one creation for eight concurrent requests, separate caches on separate
-devices, six new variants for Still-to-All, no new variants for repeated All,
-and distinct presentation pipelines for distinct output formats. The GPU
-source tree is identical at `61017541`, `dc439d11` and `5116f722`; the latter
-commits fix a test import and expose read-only diagnostic counters.
-
-Physical panel output and native Windows/macOS runtime remain untested here.
+Only the final requested pairs and frozen inputs are retained. Superseded
+captures and smoke worlds are task-owned temporary data; source history lives
+in Git commits and lightweight tags. Backlog item 11 records the original
+renderer deferral. No ecological or visual decisions were promoted.

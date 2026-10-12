@@ -260,7 +260,7 @@ bug gunk that builds up round the mouth ring, between the six tusks. Not designe
 
 ## 11. Move the renderer to wgpu (Wrysk, 2026-10-08: "yeah this is why we shouldve been using wgpu... backlog it i guess. no need to switch graphics backends tonight")
 
-**Implemented on `codex/wgpu-renderer`, 2026-10-11; final verification in progress.**
+**Implemented and verified on `codex/wgpu-renderer`, 2026-10-11.**
 The safe wgpu renderer covers the existing flat/voxel, figure, plant, weather,
 bloom and presentation passes, with maintained WGSL. Godot's async warm-up and
 preview tiers share per-device resident pipelines. Direct ash resources are

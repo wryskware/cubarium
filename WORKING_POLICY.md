@@ -352,6 +352,7 @@ What prompted it (2026-10-08):
     pass, until the renderer moves to wgpu (backlog item 11). Only the FFI call itself sits in
     the `unsafe` block; nothing else in that crate may use `unsafe`. Reaffirmed 2026-10-10
     ("im fine with the unsafe ash -- that crate is exampt"), ray-tracing calls included.
+    Retired on `codex/wgpu-renderer`, 2026-10-11: the safe wgpu GPU crate now forbids unsafe code.
   - `cubarium-godot`'s one `unsafe impl ExtensionLibrary`, which gdext requires.
   - Everything else goes: CPU pinning, perf counters and topology move to safe wrapper crates,
     and `save.rs`, `placement.rs`, `state.rs`, the web sink and `render_bench` become safe code.
