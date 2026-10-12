@@ -388,7 +388,7 @@ Wrysk and the art direction. This is effortful placeholder work, not a stage-2 d
 
 **Where:**
 - `crates/cubarium-gpu/shaders/` (`voxel.frag`, `scene.glsl`, `background.frag`, the bloom
-  passes) and `crates/cubarium-gpu/src/voxel.rs` (uniforms; `update_weather` grows to
+  passes; WGSL since 2026-10-12: `voxel.wgsl`, `scene.wgsl`, ...) and `crates/cubarium-gpu/src/voxel.rs` (uniforms; `update_weather` grows to
   take the `WeatherView`);
 - `crates/cubarium/src/sink/gpu/voxel.rs` (feeds it);
 - the CPU renderer stays basic and untouched.

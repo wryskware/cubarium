@@ -20,7 +20,7 @@ Read `design/handoffs/worker-rules-2026-10-07.md`. In brief:
   targets under `/tmp`.
 - **Commits:**
   - Explicit paths only.
-  - Recompile the shaders with `crates/cubarium-gpu/shaders/compile.sh`, and commit the `.spv`.
+  - Edit the WGSL in `crates/cubarium-gpu/shaders/` (the only shader source since WGSL-SOURCE, 2026-10-12; no compile step).
   - Sign commits `Co-Authored-By: Codex (gpt-6.1-sol) <noreply@openai.com>`.
 - **Unsafe:** only the `ash` FFI calls in `cubarium-gpu`.
 - **Tests:** they check mechanisms, never tuned numbers.

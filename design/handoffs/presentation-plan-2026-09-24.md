@@ -234,8 +234,8 @@ Common to all three:
   not take focus or re-tile.
 - **Scope:** don't touch the CPU renderer, the Tachyon and cube configs, or the panel
   targets.
-- **Tests:** run only the crates you touched, `cubarium-gpu` needing the GPU. Rebuild
-  SPIR-V with `crates/cubarium-gpu/shaders/compile.sh`.
+- **Tests:** run only the crates you touched, `cubarium-gpu` needing the GPU. Shaders are
+  the hand-written WGSL in `crates/cubarium-gpu/shaders/` (no compile step since 2026-10-12).
 - **The commit message is the report.** Return at most about 40 lines: commits,
   screenshot absolute paths, GPU ms flat/lit at 6 px and 13 px, the pack-ms change,
   the defaults you chose and their visible effect, and open questions.
@@ -555,7 +555,7 @@ editing `voxel.frag`, `crates/cubarium-gpu/src/voxel.rs`, `sink/gpu/voxel.rs` an
 `light_capture.rs` heavily.
 
 - Put new code in new files:
-  - a shader include, e.g. `shaders/volumetric.glsl`;
+  - a shader module, e.g. `shaders/volumetric.wgsl` (pulled in with `// #import`);
   - a volume module, e.g. `crates/cubarium-gpu/src/sunvis.rs`;
   - the CPU bake, if you choose one, under `crates/cubarium/src/sink/gpu/`.
 - Keep edits to the shared files small:
