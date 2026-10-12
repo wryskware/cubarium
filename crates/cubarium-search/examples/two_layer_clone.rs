@@ -6,7 +6,8 @@
 //! ```text
 //! two_layer_clone founder=seedporter train_seeds=1,2,3 heldout_seed=9 record_s=600 \
 //!     scene_seeds=1,2,3,4,5,6,7,8 scene_heldout=101,102,103,104 refit_rounds=1 \
-//!     closed_seeds=21,22 closed_s=300 updates=300 workers=8 out=DIR
+//!     closed_seeds=21,22 closed_s=300 updates=300 workers=8 out=DIR \
+//!     [fullness=F] [also=LINEAGE=N[:FULLNESS],...]
 //! ```
 //!
 //! 1. **Record** each seed's training world (`small`, still water, default founders) under
@@ -59,6 +60,11 @@ fn seeds(args: &[String], key: &str, default: &str) -> Vec<u64> {
 /// The top-up's fullness for every world this run founds (`fullness=`; unset: `None`).
 static FULLNESS: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
 
+/// Other lineages topped up in every world this run founds, before the cloned one
+/// (`also=LINEAGE=N[:FULLNESS],...`; BRAIN-REST step 4): a loftstrider's defence modes need
+/// Veilhounds, which the training worlds found none of.
+static ALSO: std::sync::OnceLock<Vec<world::TopUp>> = std::sync::OnceLock::new();
+
 const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 
 /// The training world (`small`, still water) with the ecology's own founders, then the
@@ -72,6 +78,10 @@ const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
     let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
+    for t in ALSO.get().map(Vec::as_slice).unwrap_or_default() {
+        let placed = world::top_up(&mut sim, *t);
+        eprintln!("# seed {seed}: {placed} {} placed beside it", t.founder.name());
+    }
     let had = lineage_ids(&sim, f).len();
     let placed = world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
     eprintln!("# seed {seed}: {had} {} founded, {placed} placed by the top-up", f.name());
@@ -231,6 +241,11 @@ fn main() {
     let fullness: Option<f64> = arg(&args, "fullness").map(|v| v.parse().expect("fullness: a fraction"));
     assert!(fullness.is_none_or(|x| (0.0..=1.0).contains(&x)), "fullness is a fraction");
     FULLNESS.set(fullness).expect("set once");
+    let also: Vec<world::TopUp> = arg(&args, "also")
+        .map(|v| v.split(',').filter(|x| !x.is_empty()).map(|x| world::TopUp::parse(x).expect("also: LINEAGE=N[:FULLNESS]")).collect())
+        .unwrap_or_default();
+    assert!(also.iter().all(|t| t.founder != f), "also= tops up other lineages");
+    ALSO.set(also.clone()).expect("set once");
     let mut scene_cfg = mode_scenes::Config::default();
     if let Some(s) = arg(&args, "scene_s").and_then(|v| v.parse().ok()) {
         scene_cfg.duration_s = s;
@@ -408,7 +423,7 @@ fn main() {
 
     let summary = json!({
         "founder": f.name(),
-        "bodies": bodies, "fullness": fullness, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
+        "bodies": bodies, "fullness": fullness, "also": also.iter().map(|t| json!({"founder": t.founder.name(), "bodies": t.bodies, "fullness": t.fullness})).collect::<Vec<_>>(), "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
         "scene_s": scene_cfg.duration_s, "scene_seeds": scene_seeds, "scene_heldout": scene_heldout, "refit_rounds": refit_rounds,
         "train_labels": train_labels,
         "samples": {"train_teacher": samples(&train, RecordSource::Teacher), "train_alternative_mode": samples(&train, RecordSource::AlternativeMode),
