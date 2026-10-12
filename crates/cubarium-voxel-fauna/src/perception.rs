@@ -43,7 +43,8 @@
 //! two inputs from their responses ([`crate::vigil`]): a grazer with its head down between
 //! scans sees [`crate::SenseTable::feeding_sight_fraction`] of its range, and a running body
 //! is louder by its [`crate::Vigilance::run_noise`]. An observer weighs up to
-//! [`crate::SenseTable::kin_tracks`] of its own lineage.
+//! [`crate::SenseTable::kin_tracks`] of its own lineage, and a dependent young its mother
+//! besides (SP-FOLLOW, [`crate::nurse::weighs_as_mother`]).
 //!
 //! Every other lineage's record is filled by the **interim rules** its reflexes ran on before
 //! the senses pass ([`refresh`]), so it behaves as before until S2 and S3 turn its table on:
@@ -607,8 +608,13 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
     // S2: head down between scans, it sees a fraction of its range.
     let now = fauna.tick;
     let sight_scale = if fauna.percepts.get(&b.id).is_some_and(|p| p.vigil.head_down(now)) { table.feeding_sight_fraction } else { 1.0 };
-    for &(_, _, k, c) in &cand {
-        if c == class::KIN {
+    // SP-FOLLOW: a dependent young weighs its mother over its kin cap
+    // ([`crate::nurse::weighs_as_mother`]); `None` when it has none to weigh, or once weighed.
+    let mut mother = b.mother.filter(|&m| crate::nurse::weighs_as_mother(fauna, i, m) && cand.iter().any(|c| c.1 == m));
+    for &(_, oid, k, c) in &cand {
+        if c == class::KIN && mother == Some(oid) {
+            mother = None;
+        } else if c == class::KIN {
             if kin >= kin_cap {
                 continue;
             }
@@ -624,7 +630,7 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
         if let Some(t) = sense_pair(&fauna.config, view, &table, day, b, o, c, now, cost, sight_scale, noise) {
             out.push(t);
         }
-        if weighed >= cap && kin >= kin_cap {
+        if weighed >= cap && kin >= kin_cap && mother.is_none() {
             break;
         }
     }
