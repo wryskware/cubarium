@@ -537,3 +537,89 @@ fn a_veilhound_pack_is_not_held_by_a_feast_it_cannot_reach() {
     assert!(flora.view().ground_at(feast).is_some_and(|g| g.carcass.is_some()), "the feast still stands: it did not end the hold");
     assert_closes(&fauna, "after the unreachable feast");
 }
+
+// ------------------------------------------------------------------ BRAIN-FIX step 2
+
+/// Step to `id`'s next decision sample; its steer source, its rules' proposal by name and its
+/// patrol's mode there.
+fn next_label(fauna: &mut Fauna, world: &World, flora: &mut Flora, id: u64) -> (Option<crate::Steer>, &'static str, crate::HuntMode) {
+    let menu = crate::intent::menu_of(LJ);
+    for _ in 0..200 {
+        fauna.step(world, flora);
+        let a = animal(fauna, id);
+        if a.intent.sample_tick == fauna.tick {
+            return (fauna.steer_of(id), menu.name(usize::from(a.intent.proposal)), a.hunt.mode);
+        }
+    }
+    panic!("no decision sample in 200 ticks");
+}
+
+/// **The lanternjaw's teacher labels come from its patrol's state** (BRAIN-FIX step 2): fed,
+/// it holds still to digest → `rest`; at a carcass → `feed`; waiting on a patch → `ambush`;
+/// walking to one → `patrol`. Its only threat response, the carcass yield, is `give_way`
+/// (the staged give-way scene), so no state is labelled `flee`.
+#[test]
+fn the_lanternjaws_patrol_states_map_to_its_menu() {
+    let world = clock_off(11);
+    let fresh = |stores| {
+        let mut fauna = Fauna::new(meal_config(patrol(), Founder::Blind));
+        let id = patroller_with(&mut fauna, &world, STRIKER_X, LANE_Z, EAST, stores);
+        (fauna, Flora::new(FloraConfig::default()), id)
+    };
+    // Fed: its stomach full, the eating latch off.
+    let (mut fauna, mut flora, id) = fresh(StartingStores::FULL);
+    let k = fauna.config.founder(LJ).gut.capacity(animal(&fauna, id).body);
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.stomach = crate::Stomach::default();
+        a.stomach.pools[crate::Food::Carrion.index()] = cubarium_voxel_flora::Taken { organic: k, mineral: 0.05 * k, energy: 2.0 * k };
+        a.eating = false;
+    }
+    let (src, label, _) = next_label(&mut fauna, &world, &mut flora, id);
+    assert_eq!((src, label), (Some(crate::Steer::Patrol), "rest"), "fed, it digests where it stands");
+    // Waiting on a patch where it stands.
+    let (mut fauna, mut flora, id) = fresh(HUNTING);
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.eating = true;
+        a.hunt.mode = crate::HuntMode::Wait;
+        a.hunt.patch = (a.pose.x, a.pose.z);
+        a.hunt.samples = 0;
+    }
+    let (src, label, mode) = next_label(&mut fauna, &world, &mut flora, id);
+    assert_eq!(mode, crate::HuntMode::Wait, "still waiting at the sample");
+    assert_eq!((src, label), (Some(crate::Steer::Patrol), "ambush"));
+    // Walking to a patch far off.
+    let (mut fauna, mut flora, id) = fresh(HUNTING);
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.eating = true;
+        a.hunt.mode = crate::HuntMode::Travel;
+        a.hunt.patch = (a.pose.x + 6.0, a.pose.z);
+        a.hunt.samples = 0;
+    }
+    let (src, label, mode) = next_label(&mut fauna, &world, &mut flora, id);
+    assert_eq!(mode, crate::HuntMode::Travel);
+    assert_eq!((src, label), (Some(crate::Steer::Patrol), "patrol"));
+    // A carcass at its mouth: feed, whichever layer answers.
+    let (mut fauna, mut flora, id) = fresh(HUNTING);
+    animal_mut(&mut fauna, id).eating = true;
+    let (mx, mz) = ahead_of(&fauna, id, 0.0);
+    carcass_at(&mut flora, mx, mz, SURFACE_Y, 0.5);
+    let mut fed = false;
+    for _ in 0..3 {
+        let (_, label, _) = next_label(&mut fauna, &world, &mut flora, id);
+        assert_ne!(label, "flee");
+        fed |= label == "feed";
+    }
+    assert!(fed, "at a carcass it is labelled feed");
+}
+
+/// A lanternjaw on its own heuristic with the given stores.
+fn patroller_with(fauna: &mut Fauna, world: &World, x: f64, z: f64, heading: f64, stores: StartingStores) -> u64 {
+    let id = introduce(fauna, world, LJ, stores);
+    place(fauna, id, x, z, heading);
+    let teachers = fauna.config.teachers;
+    fauna.controllers.set(id, crate::controller::heuristic(LJ, teachers));
+    id
+}

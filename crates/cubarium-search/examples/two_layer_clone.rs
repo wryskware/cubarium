@@ -42,7 +42,7 @@ use cubarium_search::es::voxel::two_layer::record::{closed_loop_records, per_mod
 use cubarium_search::es::voxel::two_layer::scenes;
 use cubarium_search::es::voxel::two_layer::{MenuHeads, TwoLayerNet, TwoLayerPolicyFile, TwoLayerShape};
 use cubarium_search::es::voxel::EpisodeDriver;
-use cubarium_voxel_fauna::{BodySpec, BodyStage, DryScope, Founder, Placed, Spot};
+use cubarium_voxel_fauna::{DryScope, Founder};
 use cubarium_voxel_sim::mode_scenes::{self, ModeScene};
 use serde_json::json;
 
@@ -65,23 +65,7 @@ const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
     let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
-    let have = lineage_ids(&sim, f).len();
-    if have < bodies {
-        let (w, flora) = (sim.world().clone(), sim.flora().clone());
-        let sites: Vec<_> = sim.fauna().view().animals.iter().map(|a| a.site).collect();
-        let teachers = sim.fauna().config().teachers;
-        let mut placed = 0;
-        for (k, site) in sites.iter().enumerate() {
-            if have + placed >= bodies {
-                break;
-            }
-            let spec = BodySpec { stage: BodyStage::Adult, heading_rad: k as f64 * 1.3, ..BodySpec::default() };
-            if let Ok(Placed::Body { id, .. }) = sim.fauna_mut().place_body(&w, &flora, f, Spot::Face(*site), spec) {
-                sim.fauna_mut().set_controller(id, cubarium_voxel_fauna::heuristic(f, teachers));
-                placed += 1;
-            }
-        }
-    }
+    world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: None });
     Ok(sim)
 }
 
@@ -313,9 +297,11 @@ fn main() {
         let (agree, err2) = m2.rates(two.actions.len());
         let (agree1, err1) = m1.rates(two.actions.len());
         let (_, errp) = mp.rates(plain.actions.len());
+        let (switch2, switch1) = (m2.switch_rates(), m1.switch_rates());
         (0..names.len())
             .map(|k| {
                 json!({"intent": names[k], "labels": m2.intent_labels[k], "mode_samples": m2.mode_samples[k],
+                       "switch_labels": m2.switch_labels[k], "switch_agreement_two_layer": switch2[k], "switch_agreement_two_layer_before_refit": switch1[k],
                        "agreement_two_layer": agree[k], "agreement_two_layer_before_refit": agree1[k],
                        "action_mse_two_layer": err2[k], "action_mse_two_layer_before_refit": err1[k], "action_mse_plain": errp[k]})
             })
@@ -398,13 +384,30 @@ fn main() {
     });
     std::fs::write(out.join("summary.json"), serde_json::to_string_pretty(&summary).expect("json")).expect("summary");
     // The per-mode table: held-out agreement and action error, competence by arm.
-    println!("{:16} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6}", "intent", "labels", "agree2", "mse2", "mseP", "compH", "comp2", "compP");
+    println!(
+        "{:16} {:>7} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6} | {:>6} {:>6}",
+        "intent", "labels", "agree2", "switch2", "mse2", "mseP", "compH", "comp2", "compP", "shareH", "share2"
+    );
     let rows = summary["held_out"]["all_teacher"].as_array().cloned().unwrap_or_default();
     for r in rows {
         let intent = r["intent"].as_str().unwrap_or("?");
         let comp = summary["competence"].as_array().and_then(|c| c.iter().find(|c| c["intent"] == intent)).cloned();
         let c = |arm: &str| comp.as_ref().and_then(|c| c[arm]["competence"].as_f64()).map_or("-".into(), |x| format!("{x:.2}"));
+        let share = |arm: &str| comp.as_ref().and_then(|c| c[arm]["mode_share"].as_f64()).map_or("-".into(), |x| format!("{x:.2}"));
         let g = |k: &str| r[k].as_f64().map_or("-".into(), |x| format!("{x:.4}"));
-        println!("{:16} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6}", intent, r["labels"], g("agreement_two_layer"), g("action_mse_two_layer"), g("action_mse_plain"), c("heuristic"), c("two_layer"), c("plain"));
+        println!(
+            "{:16} {:>7} {:>7} {:>7} {:>9} {:>9} | {:>6} {:>6} {:>6} | {:>6} {:>6}",
+            intent,
+            r["labels"],
+            g("agreement_two_layer"),
+            g("switch_agreement_two_layer"),
+            g("action_mse_two_layer"),
+            g("action_mse_plain"),
+            c("heuristic"),
+            c("two_layer"),
+            c("plain"),
+            share("heuristic"),
+            share("two_layer")
+        );
     }
 }

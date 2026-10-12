@@ -559,6 +559,12 @@ fn the_competence_check_reads_each_modes_purpose() {
         assert_eq!(h.null_gap, 0.0, "{}: one arm's copies are identical", scene.name());
         assert!(h.competence > 0.0, "{}: the heuristic does what its mode is for ({h:?})", scene.name());
         assert!(h.mode_share > 0.0, "{}: and holds the mode", scene.name());
+        // BRAIN-FIX step 1: the scene gives the mode room, and the test asks what the rules
+        // do — grooming in contact or the larva gone, biting while hungry — so the rules do
+        // what the mode is for through most of the scene.
+        if matches!(scene, ModeScene::Groom | ModeScene::Feed) {
+            assert!(h.competence > 0.5, "{}: the rules achieve the mode's purpose most of the scene ({h:?})", scene.name());
+        }
         let f = scene.founder();
         let shape = TwoLayerShape::plain_from_manifest(&f.manifest());
         let still = vec![0.0; super::shape::TwoLayerLayout::new(&shape).params];

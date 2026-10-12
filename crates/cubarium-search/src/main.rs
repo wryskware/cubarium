@@ -1097,6 +1097,25 @@ enum Command {
         /// Experimental energy potential includes digestible stomach; both deltas are logged.
         #[arg(long)]
         stomach_aware_reward: bool,
+        /// BRAIN-FIX brain checks: every two-layer lineage's centre beside its heuristic on
+        /// matched starts (energy, holds, per-mode competence), on the starting centre and
+        /// every N generations, into `checks.jsonl`. 0 (the default) runs none.
+        #[arg(long, default_value_t = 0)]
+        check_every: u32,
+        /// The checks' matched live seeds (founding seed bases).
+        #[arg(long, default_value = "21,31,32,41,42,51")]
+        check_seeds: String,
+        /// Simulated seconds per live check arm.
+        #[arg(long, default_value_t = 600)]
+        check_seconds: u64,
+        /// The checks' staged scene seeds.
+        #[arg(long, default_value = "101,102,103,104")]
+        check_scene_seeds: String,
+        /// BRAIN-FIX training top-up, `LINEAGE=N[:FULLNESS]`, repeatable: after every
+        /// founding, that lineage is brought up to N grown bodies on its heuristic (the
+        /// lanternjaw, which the training worlds found none of).
+        #[arg(long = "top-up")]
+        top_up: Vec<String>,
     },
     /// Phase-one voxel slice (P1-D): the bounded ES run over one founder's manifest, with
     /// shape-aware antithetic pairs, the initial centre evaluation, and the plan's caps.
@@ -2274,6 +2293,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             curiosity,
             kin,
             stomach_aware_reward,
+            check_every,
+            check_seeds,
+            check_seconds,
+            check_scene_seeds,
+            top_up,
         } => {
             // A scenario map (`base = "<file>"`) is resolved through its chain, so its
             // `[world]` and its founding table reach the training worlds.
@@ -2317,6 +2341,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 resume,
                 curiosity: es::voxel::live::curiosity::Curiosity::from_flag(curiosity.as_deref())?,
                 kin: es::voxel::kin::KinConfig::from_flag(kin.as_deref())?,
+                check: (check_every > 0).then(|| -> Result<_, String> {
+                    Ok(es::voxel::two_layer::check::CheckSpec {
+                        every: check_every,
+                        seeds: parse_seed_list(&check_seeds)?,
+                        seconds: check_seconds,
+                        scene_seeds: parse_seed_list(&check_scene_seeds)?,
+                        threads,
+                    })
+                }).transpose()?,
+                top_up: top_up.iter().map(|s| es::voxel::live::world::TopUp::parse(s)).collect::<Result<_, _>>()?,
             };
             es::voxel::live::trainer::train(&spec)?;
             Ok(())
