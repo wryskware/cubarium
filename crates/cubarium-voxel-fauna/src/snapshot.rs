@@ -170,7 +170,9 @@ use crate::{Fauna, FaunaConfig};
 //     flushes in progress are session state.
 // 78: FUEL — `Animal::{fuel, fuel_energy}` (a state layout change). The relative
 //     `SpeciesConfig::fuel_cap` is named config, not itself a schema bump.
-pub const SCHEMA: u32 = 78;
+// 79: SP-GROOM — saved continuous contacts, grooming counters, and a departure cause.
+//     The per-founder grooming table is named config, not itself a schema bump.
+pub const SCHEMA: u32 = 79;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {

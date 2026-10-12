@@ -639,6 +639,9 @@ pub struct FounderPhysiology {
     /// it knows (a herd, a troop, a calf's family). Off for the lineages that do not herd.
     #[serde(default)]
     pub herding: crate::Herding,
+    /// Picking attached larvae off another body of the same lineage; missing table is off.
+    #[serde(default)]
+    pub grooming: crate::Grooming,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2016,6 +2019,7 @@ impl FounderPhysiology {
         p.sprint = crate::gait::sprint_of(founder);
         p.hunker = crate::vigil::hunker_of(founder);
         p.herding = crate::herding::herding_of(founder);
+        p.grooming = crate::groom::grooming_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2144,6 +2148,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2239,6 +2244,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2379,6 +2385,7 @@ impl FounderPhysiology {
                 sprint: crate::Sprint::default(),
                 hunker: crate::Hunker::default(),
                 herding: crate::Herding::default(),
+                grooming: crate::Grooming::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),

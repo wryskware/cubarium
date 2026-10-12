@@ -259,6 +259,10 @@ mass_scale = 60.0
 # between groves, founded on the ground within its roost reach of fruit (lanternberry
 # crowns, latticevine faces); the code default is 0, so training worlds are unchanged.
 [fauna.founders.seedporter]
+# SP-GROOM (Wrysk 2026-10-11): 'another one should be able to "groom" it off them and eat it.'
+grooming.groom_radius_m = 0.5
+grooming.groom_s = 10.0
+grooming.groom_seek_m = 4.0
 # SP-FLUSH: a short arm grab gives less visual warning than a whole-body lunge.
 hunter.strike_warning_scale = 0.065
 # SP-SHREDDER: small ground prey supplements fruit; the catch switch gates this table.

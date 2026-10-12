@@ -362,6 +362,9 @@ fn founder_rows() -> Vec<Row> {
         r("herding.pull", "fraction", fraction, "HERD-PULL: the pull's share of its walking turn (1: straight at the kin's mean point)"),
         r("herding.herd_max", "kin", nonneg, "HERD-PULL: with more kin known than this the pull is scaled by this over their number (0: never fades)"),
         r("herding.memory_s", "s", nonneg, "HERD-PULL: with no kin in sense, the kin it last sensed draws it this long (0: only kin in sense)"),
+        r("grooming.groom_radius_m", "m", nonneg, "SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length"),
+        r("grooming.groom_s", "s", nonneg, "SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds"),
+        r("grooming.groom_seek_m", "m", nonneg, "SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),

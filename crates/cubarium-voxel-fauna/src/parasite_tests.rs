@@ -819,7 +819,7 @@ fn a_hosts_departure_of_any_cause_frees_every_rider() {
                     }
                 ));
             }
-            Departure::Drowned | Departure::Desiccation | Departure::Fell => unreachable!(),
+            Departure::Drowned | Departure::Desiccation | Departure::Fell | Departure::Groomed => unreachable!(),
         }
         assert!(
             s.fauna.view().animal(host).is_none(),

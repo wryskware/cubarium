@@ -331,6 +331,70 @@ fn departures_take_their_causes_from_the_ledger_and_a_kill_names_the_striker() {
 }
 
 #[test]
+fn a_groomed_rider_is_logged_with_its_ledger_cause_once() {
+    let mut recorder = LifeRecorder::new();
+    let mut rider = body(1, Founder::Lanternjaw);
+    rider.riding = Some(2);
+    let host = body(2, Founder::Seedporter);
+    let free = body(3, Founder::Lanternjaw);
+    recorder.observe_census(&mut census(10, vec![rider, host.clone(), free]));
+    recorder.take_events();
+    let mut after = census(11, vec![host]);
+    after.departed[Founder::Lanternjaw.index()][Departure::Groomed.index()] = 1;
+    after.departed[Founder::Lanternjaw.index()][Departure::Starved.index()] = 1;
+    recorder.observe_census(&mut after);
+    let events = recorder.take_events();
+    assert!(events.iter().any(|e| e.animal == 1 && matches!(&e.what,
+        What::Died { cause, by: None } if cause == "groomed")));
+    assert!(events.iter().any(|e| e.animal == 3 && matches!(&e.what,
+        What::Died { cause, by: None } if cause == "starved")));
+    let mut repeated = census(12, vec![body(2, Founder::Seedporter)]);
+    repeated.departed = after.departed;
+    recorder.observe_census(&mut repeated);
+    assert!(!recorder.take_events().iter().any(|e| matches!(e.what, What::Died { .. })));
+}
+
+#[test]
+fn grooming_reaches_life_csv_and_both_founder_vitals() {
+    use cubarium_voxel_fauna::{BodySpec, BodyStage, Placed, Spot};
+    let world = plain(DayClock { mode: cubarium_voxel::weather::DayMode::Off, ..DayClock::default() });
+    let mut flora = Flora::new(FloraConfig::default());
+    let mut config = FaunaConfig::default();
+    let p = &mut config.founders[Founder::Seedporter.index()];
+    p.active = cubarium_voxel_fauna::Activity::Always;
+    p.grooming = cubarium_voxel_fauna::Grooming { groom_radius_m:0.4,groom_s:0.1,groom_seek_m:1.0 };
+    p.vigilance = cubarium_voxel_fauna::Vigilance::default();
+    let mut fauna = Fauna::new(config);
+    fauna.set_births_enabled(false);
+    for x in [3,4] {
+        fauna.place_body(&world,&flora,Founder::Seedporter,Spot::Face(Site {x,y:2,z:3}),
+            BodySpec { fullness:Some(1.0),..BodySpec::default() }).unwrap();
+    }
+    let rider = fauna.place_body(&world,&flora,Founder::Lanternjaw,Spot::Face(Site {x:4,y:2,z:3}),
+        BodySpec {stage:BodyStage::Rider,fullness:Some(1.0),..BodySpec::default()}).unwrap();
+    let Placed::Body { id:rider, .. } = rider else { panic!("a rider body"); };
+    let options = crate::vitals::Options::default();
+    let mut recorder = crate::vitals::Recorder::new(options,3.0,0,&fauna,0.0);
+    let ticks = (config.founder(Founder::Seedporter).grooming.groom_s / DT).ceil() as u64;
+    for tick in 1..=ticks {
+        fauna.step_with(&world,&mut flora,1);
+        recorder.observe(&fauna,tick);
+    }
+    assert!(fauna.view().animal(rider).is_none());
+    let dead = recorder.take_dead();
+    assert!(dead.iter().any(|r| r.id == rider && r.cause == "groomed"));
+    let (rows,_) = recorder.minute(&flora,&fauna,ticks as f64*DT/60.0);
+    let sp = rows.iter().find(|r| r.lineage == Founder::Seedporter.name()).unwrap();
+    let lj = rows.iter().find(|r| r.lineage == Founder::Lanternjaw.name()).unwrap();
+    assert_eq!((sp.groomed,sp.groomed_riders),(1,0));
+    assert_eq!((lj.groomed,lj.groomed_riders),(0,1));
+    let columns:Vec<_> = crate::vitals::VITALS_HEADER.split(',').collect();
+    let cells=sp.cells();
+    assert_eq!(columns.len(),cells.len());
+    assert_eq!(cells[columns.iter().position(|c| *c=="groomed").unwrap()],"1");
+}
+
+#[test]
 fn a_clutch_names_its_layer_and_its_hatchlings_that_layer() {
     let mut r = LifeRecorder::new();
     let mut hen = body(1, Founder::Blind);

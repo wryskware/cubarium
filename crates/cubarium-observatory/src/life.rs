@@ -467,6 +467,9 @@ impl LifeRecorder {
                     Some(f) => {
                         let d = &mut rises[f.index()];
                         let mut likely: Vec<Departure> = Vec::new();
+                        if v.riding.is_some() {
+                            likely.push(Departure::Groomed);
+                        }
                         if v.aged {
                             likely.push(Departure::Aged);
                         }
