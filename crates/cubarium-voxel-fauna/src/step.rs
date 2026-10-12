@@ -1580,6 +1580,8 @@ fn controllers(
     // SENSES-CORE: the live lineages' remote senses, staggered by id, before any controller
     // of the tick reads a record.
     crate::perception::sense_pass(fauna, view, sky.clock_on, sky.daylight, threads);
+    // CONTRACTS: the calls emitted since the last tick, heard by their own range, asleep too.
+    crate::calls::hear(fauna, view);
     crate::places::refresh(fauna, view, &flora.view(), sky);
     let due: Vec<usize> = fauna
         .animals
@@ -2271,10 +2273,12 @@ fn controllers(
                             .or_else(|| fauna.percepts.get(&id).map(|p| p.best[usize::from(crate::perception::class::THREAT)]).filter(|t| t.known).map(|t| t.id));
                         target.is_some_and(|t| crate::kick::request(fauna, i, t, crate::kick::Source::Aimed).is_ok())
                     };
+                    // A call kind (none, or the lineage's kind `call − 1`) into the substrate.
+                    let called = d.call > 0 && crate::calls::emit(fauna, i, usize::from(d.call) - 1);
                     let executed = crate::Executed {
                         actions,
                         kick: kicked,
-                        call: d.call,
+                        call: if called { d.call } else { 0 },
                         rest: if d.rest { crate::RestAsk::Rest } else { crate::RestAsk::Default },
                     };
                     crate::intent::record_brain(fauna, i, src, &d, prep, executed);

@@ -57,6 +57,8 @@ pub mod intent;
 pub mod subjects;
 /// CONTRACTS (behaviour-AI §3.3, §11.4): the kick, one state machine with one budget.
 pub mod kick;
+/// CONTRACTS (behaviour-AI §11.2): calls and hearing.
+pub mod calls;
 #[cfg(test)]
 mod intent_tests;
 pub use nurse::Nursing;
@@ -4236,6 +4238,15 @@ pub struct Fauna {
     /// circadian stage grants when the body may rest. Session state.
     #[serde(skip)]
     pub(crate) rest_asks: FxHashMap<u64, RestAsk>,
+    /// CONTRACTS: the calls emitted since the last hearing ([`calls`]). Session state.
+    #[serde(skip)]
+    pub(crate) calls: Vec<calls::CallEvent>,
+    /// CONTRACTS: each caller's last call of each kind, for its cooldown. Session state.
+    #[serde(skip)]
+    pub(crate) last_call: FxHashMap<(u64, u8), u64>,
+    /// CONTRACTS: each hearer's call records ([`calls::Heard`]). Saved: simpler than not.
+    #[serde(default)]
+    pub(crate) heard: FxHashMap<u64, calls::Heard>,
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4804,6 +4815,9 @@ impl Fauna {
             pack_hint: FxHashMap::default(),
             brain_memory: FxHashMap::default(),
             rest_asks: FxHashMap::default(),
+            calls: Vec::new(),
+            last_call: FxHashMap::default(),
+            heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
             pressed: FxHashMap::default(),

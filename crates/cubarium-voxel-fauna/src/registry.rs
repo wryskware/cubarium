@@ -26,6 +26,7 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders.*.hunter.prey_weight".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_juveniles_only".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_ashore_only".into(), names: founders },
+                Alias { pattern: "fauna.founders.*.calls.loudness".into(), names: vec!["first", "second"] },
             ],
             Vec::new(),
         )
@@ -395,6 +396,15 @@ fn founder_rows() -> Vec<Row> {
         r("kick.band_low_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's floor over the kicker's base").optional(),
         r("kick.band_high_fraction", "x own height", nonneg, "CONTRACTS: the kick's height band's top over the kicker's base").optional(),
         r("kick.damage", "wound at equal size", nonneg, "CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6)").optional(),
+        // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
+        r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
+        r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),
+        r("calls.cooldown_s", "s", nonneg, "CONTRACTS: a caller emits a kind at most once per this"),
+        r("calls.records", "records", nonneg, "CONTRACTS: call records a hearer keeps"),
+        r("calls.keep_s", "s", nonneg, "CONTRACTS: a call record is dropped this long after its call"),
+        r("calls.refractory_s", "s", nonneg, "CONTRACTS: a call of a kind from near a record younger than this is ignored"),
+        r("calls.dedup_m", "m", nonneg, "CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller)"),
+        r("calls.asleep_loudness", "loudness", nonneg, "CONTRACTS: a sleeper records a call only at least this loud after occlusion"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),

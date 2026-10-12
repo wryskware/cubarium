@@ -534,3 +534,131 @@ fn no_lineage_kicks_by_default() {
     let i = index_of(&f, ls);
     assert_eq!(kick::request(&mut f, i, vh, Source::Aimed), Err(Refused::NoKick));
 }
+
+// ---- Step 5: calls and hearing (§11.2) ----
+
+use crate::calls;
+use cubarium_voxel::{Command as WorldCommand, Material};
+
+/// A tall plain (10 m; the ring is 12 m round) with loftstriders: a caller at x = 2 m and hearers at the given x, all
+/// facing east; its calls table edited by `edit`; a rock wall at `wall_x` metres if any.
+fn call_world(hearers: &[f64], wall_x: Option<f64>, edit: impl FnOnce(&mut calls::CallTable)) -> (World, Fauna, u64, Vec<u64>) {
+    let mut w = plain_of_height(cubarium_voxel::weather::DayClock { mode: cubarium_voxel::weather::DayMode::Off, ..Default::default() }, 2, 40);
+    if let Some(x) = wall_x {
+        let col = (x / VOXEL_M) as i64;
+        for z in 0..12 {
+            for y in 1..40 {
+                w.apply(WorldCommand::SetMaterial { x: col, y, z, material: Material::Rock });
+            }
+        }
+    }
+    let mut c = quiet_config();
+    let t = &mut c.founders[Founder::Loftstrider.index()].calls;
+    *t = calls::CallTable { range_m: 3.0, loudness: [1.0, 0.3], records: 4, ..*t };
+    edit(t);
+    c.perception.occlusion = 0.25;
+    let mut f = Fauna::new(c);
+    let caller = introduce(&mut f, &w, Founder::Loftstrider, StartingStores::FULL);
+    place(&mut f, caller, 2.0, LANE_Z, EAST);
+    let ids = hearers
+        .iter()
+        .map(|&x| {
+            let id = introduce(&mut f, &w, Founder::Loftstrider, StartingStores::FULL);
+            place(&mut f, id, x, LANE_Z, EAST);
+            id
+        })
+        .collect();
+    f.world_geometry = Some((48.0 * VOXEL_M, VOXEL_M));
+    (w, f, caller, ids)
+}
+
+fn call_and_hear(w: &World, f: &mut Fauna, caller: u64, kind: usize) {
+    let i = index_of(f, caller);
+    assert!(calls::emit(f, i, kind));
+    calls::hear(f, &w.view());
+}
+
+#[test]
+fn a_call_is_heard_in_range_muffled_behind_rock_and_unheard_beyond_it() {
+    // In range at 2 m on open ground; beyond the 3 m range (5 m one way, 7 m the other) unheard.
+    let (w, mut f, caller, ids) = call_world(&[4.0, 7.0], None, |_| {});
+    call_and_hear(&w, &mut f, caller, 0);
+    let near = calls::heard(&f, ids[0]);
+    assert_eq!(near.len(), 1);
+    assert!(near[0].proximity > 0.0 && near[0].loudness == 1.0);
+    assert!(calls::heard(&f, ids[1]).is_empty(), "beyond range");
+    // Behind rock: the same 2 m is past the muffled range (3 × 0.25), and a hearer 0.7 m off
+    // behind it hears it muffled.
+    let (w, mut f, caller, ids) = call_world(&[4.0, 2.7], Some(2.35), |_| {});
+    call_and_hear(&w, &mut f, caller, 0);
+    assert!(calls::heard(&f, ids[0]).is_empty(), "muffled out of range behind rock");
+    let muffled = calls::heard(&f, ids[1]);
+    assert_eq!(muffled.len(), 1);
+    assert!(muffled[0].loudness < 1.0, "muffled");
+}
+
+#[test]
+fn hearing_is_by_range_not_through_the_candidate_cap() {
+    let (w, mut f, caller, ids) = call_world(&[3.0, 4.0, 4.5], None, |_| {});
+    f.config.perception.max_candidates = 0;
+    f.config.founders[Founder::Loftstrider.index()].senses.kin_tracks = 0;
+    call_and_hear(&w, &mut f, caller, 0);
+    assert!(ids.iter().all(|&id| calls::heard(&f, id).len() == 1));
+}
+
+#[test]
+fn a_sleeper_records_a_loud_call_it_could_hear_awake_but_not_a_quiet_one_or_one_behind_rock() {
+    let asleep = |f: &mut Fauna, id: u64| animal_mut(f, id).state = crate::State::Asleep;
+    // Loud (1.0 ≥ 0.5), open: recorded asleep.
+    let (w, mut f, caller, ids) = call_world(&[4.0], None, |t| t.asleep_loudness = 0.5);
+    asleep(&mut f, ids[0]);
+    call_and_hear(&w, &mut f, caller, 0);
+    let r = calls::heard(&f, ids[0]);
+    assert!(r.len() == 1 && r[0].asleep);
+    // Quiet (0.3 < 0.5), in its awake range (0.3 × 3 = 0.9 m at 0.7 m): heard awake, not asleep.
+    let (w, mut f, caller, ids) = call_world(&[2.7, 2.7], None, |t| t.asleep_loudness = 0.5);
+    asleep(&mut f, ids[0]);
+    call_and_hear(&w, &mut f, caller, 1);
+    assert!(calls::heard(&f, ids[0]).is_empty());
+    assert_eq!(calls::heard(&f, ids[1]).len(), 1, "the awake one hears it");
+    // Loud but behind rock (1.0 × 0.25 < 0.5), within the muffled range: heard awake only.
+    let (w, mut f, caller, ids) = call_world(&[2.7, 2.7], Some(2.35), |t| t.asleep_loudness = 0.5);
+    asleep(&mut f, ids[0]);
+    call_and_hear(&w, &mut f, caller, 0);
+    assert!(calls::heard(&f, ids[0]).is_empty());
+    assert_eq!(calls::heard(&f, ids[1]).len(), 1);
+}
+
+#[test]
+fn two_calves_bleating_at_once_are_two_records_and_one_repeating_is_one() {
+    let (w, mut f, a, ids) = call_world(&[4.0, 6.5], None, |t| t.loudness = [1.0, 1.0]);
+    let (hearer, b) = (ids[0], ids[1]);
+    let (ia, ib) = (index_of(&f, a), index_of(&f, b));
+    assert!(calls::emit(&mut f, ia, 1));
+    assert!(calls::emit(&mut f, ib, 1));
+    calls::hear(&mut f, &w.view());
+    let r = calls::heard(&f, hearer);
+    assert_eq!(r.len(), 2, "two bleats from two places");
+    assert!(r[0].kind == 1 && r[1].kind == 1);
+    // A caller cannot repeat within its cooldown; past it, a call from the same spot
+    // refreshes its record rather than adding one.
+    assert!(!calls::emit(&mut f, ia, 1));
+    f.tick += (f.config.founder(Founder::Loftstrider).calls.cooldown_s / crate::DT) as u64 + 1;
+    assert!(calls::emit(&mut f, ia, 1));
+    calls::hear(&mut f, &w.view());
+    assert_eq!(calls::heard(&f, hearer).len(), 2);
+    assert!(calls::heard(&f, hearer).iter().any(|r| r.tick == f.tick));
+}
+
+#[test]
+fn a_mothers_voice_is_recognised_where_the_lineage_knows_voices_and_never_names_the_caller() {
+    let (w, mut f, mother, ids) = call_world(&[4.0], None, |t| t.recognise_voice = true);
+    let calf = ids[0];
+    animal_mut(&mut f, calf).mother = Some(mother);
+    call_and_hear(&w, &mut f, mother, 0);
+    assert_eq!(calls::heard(&f, calf)[0].relation, 1);
+    let (w, mut f, mother, ids) = call_world(&[4.0], None, |t| t.recognise_voice = false);
+    animal_mut(&mut f, ids[0]).mother = Some(mother);
+    call_and_hear(&w, &mut f, mother, 0);
+    assert_eq!(calls::heard(&f, ids[0])[0].relation, 0);
+}

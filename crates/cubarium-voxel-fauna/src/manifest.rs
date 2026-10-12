@@ -869,6 +869,14 @@ const MODULE_PLACE_ROOST: Module = tail("Place(roost)", &PLACE_CHANNELS);
 const MODULE_PLACE_FRUIT: Module = tail("Place(fruit)", &PLACE_CHANNELS);
 const MODULE_PLACE_NEST: Module = tail("Place(nest)", &PLACE_CHANNELS);
 const MODULE_PLACE_DEN: Module = tail("Place(den)", &PLACE_CHANNELS);
+/// CONTRACTS (behaviour-AI §2.1): per call kind of the lineage (`calls::kinds_of` order), its
+/// freshest record: valid, bearing, proximity, freshness and whether the voice is its mother's
+/// or its own young's.
+const CALLS1_CHANNELS: [&str; 6] = ["valid0", "sin0", "cos0", "proximity0", "fresh0", "mine0"];
+const CALLS2_CHANNELS: [&str; 12] =
+    ["valid0", "sin0", "cos0", "proximity0", "fresh0", "mine0", "valid1", "sin1", "cos1", "proximity1", "fresh1", "mine1"];
+const MODULE_CALLS1: Module = tail("Calls", &CALLS1_CHANNELS);
+const MODULE_CALLS2: Module = tail("Calls", &CALLS2_CHANNELS);
 
 /// The littershredder: v2's 23, then its body state, the tremor it freezes on, the threat
 /// it flees, and the shore its shallows reflex walks to.
@@ -934,7 +942,7 @@ const BROWSER_MODULES: [Module; 12] = layout([
 ]);
 /// The loftstrider: as the frondgrazer without the hunker (its calves' following pull reads
 /// the kin slot).
-const LOFTSTRIDER_MODULES: [Module; 11] = layout([
+const LOFTSTRIDER_MODULES: [Module; 12] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -946,6 +954,7 @@ const LOFTSTRIDER_MODULES: [Module; 11] = layout([
     MODULE_SCENT_HUNTER,
     MODULE_TREMOR,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS2,
 ]);
 /// The bellwing: v2's 43, then its body state (the latch fed rest reads), the
 /// photoreceptor its light steering follows, the nectar plume, perch tremor and the vine
@@ -964,7 +973,7 @@ const BELLWING_MODULES: [Module; 9] = layout([
 /// The seedporter: v2's 37, then its body state, threat, kin (the troop pull), prey (the
 /// insect catch), carcass, hunter and carrion scent, tremor, its mode and height, and the
 /// roost, fruiting stand and shore its reflexes walk to.
-const SEEDPORTER_MODULES: [Module; 17] = layout([
+const SEEDPORTER_MODULES: [Module; 18] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -982,6 +991,7 @@ const SEEDPORTER_MODULES: [Module; 17] = layout([
     MODULE_PLACE_ROOST,
     MODULE_PLACE_FRUIT,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS1,
 ]);
 /// The lanternjaw: v2's 37, then its body state, prey, threat, carcass, the scents of its
 /// prey and of carrion, tremor, the light at its face (the lure pays only in the dark) and
@@ -1007,7 +1017,7 @@ const LANTERNJAW_MODULES: [Module; 15] = layout([
 /// The Veilhound: v2's 37, then its body state, prey, kin (packmates), carcass, four
 /// scents, tremor, its pack (breeder, pup, target by call, feast), its den (always known)
 /// and the shore.
-const CHORISTER_MODULES: [Module; 17] = layout([
+const CHORISTER_MODULES: [Module; 18] = layout([
     MODULE_SELF,
     MODULE_CONTACT4,
     MODULE_WET,
@@ -1025,6 +1035,7 @@ const CHORISTER_MODULES: [Module; 17] = layout([
     MODULE_SOCIAL,
     MODULE_PLACE_DEN,
     MODULE_PLACE_SHORE,
+    MODULE_CALLS2,
 ]);
 
 /// The two shapes the search runtime is compiled for until P3 makes it generic: the

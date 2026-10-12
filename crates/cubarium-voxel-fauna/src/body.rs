@@ -656,6 +656,10 @@ pub struct FounderPhysiology {
     /// until LS-DEFEND turns the loftstrider's on.
     #[serde(default)]
     pub kick: Option<crate::kick::Kick>,
+    /// **Its calls and its hearing of them** (CONTRACTS, [`crate::calls::CallTable`]): no
+    /// range for a lineage without call kinds.
+    #[serde(default)]
+    pub calls: crate::calls::CallTable,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2036,6 +2040,7 @@ impl FounderPhysiology {
         p.nursing = crate::nurse::nursing_of(founder);
         p.grooming = crate::groom::grooming_of(founder);
         p.intent = crate::intent::intent_of(founder);
+        p.calls = crate::calls::calls_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2168,6 +2173,7 @@ impl FounderPhysiology {
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
                 kick: None,
+                calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2267,6 +2273,7 @@ impl FounderPhysiology {
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
                 kick: None,
+                calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2411,6 +2418,7 @@ impl FounderPhysiology {
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
                 kick: None,
+                calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
