@@ -1977,6 +1977,9 @@ fn print_header() {
     // bodies that made one.
     header.push_str(",nut_standing,nut_fell,fruit_eaten_seedporter_vaulttree");
     header.push_str(",tree_check_walks,tree_visits,tree_checks,tree_checks_found,tree_checkers");
+    // ... the seedporters' climbs (cumulative) and the oldest check walk under way now, seconds
+    // (a body steered by the check whose aimed host it has not reached).
+    header.push_str(",sp_climbs,tree_check_oldest_s");
     // The woody contest's readouts (package CONTEST, 2026-10-05): the edible foliage
     // standing (above every layer's grazing floor), then plant deaths by cause for the
     // turf, the pad and the two woody species, cumulative.
@@ -2273,6 +2276,16 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         for n in [t.walks, t.visits, t.checks, t.found, t.checkers] {
             row.push(n.to_string());
         }
+        row.push(a.ledger.climbs.to_string());
+        let fa = sim.fauna();
+        let oldest = a
+            .animals
+            .iter()
+            .filter(|b| fa.steer_of(b.id) == Some(cubarium_voxel_fauna::Steer::Check))
+            .filter_map(|b| fa.tree_checks_of(b.id).filter(|m| m.aim.is_some()).map(|m| fa.tick().saturating_sub(m.aim_since)))
+            .max()
+            .unwrap_or(0);
+        row.push(format!("{:.1}", oldest as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ)));
     }
     let edible: f64 = f.stands.iter().flat_map(|s| f.layers(s)).map(|l| l.edible()).sum();
     row.push(format!("{edible:.6}"));

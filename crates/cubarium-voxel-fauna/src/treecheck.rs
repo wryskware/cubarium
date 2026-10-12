@@ -37,12 +37,13 @@ pub struct Checked {
 }
 
 /// **A body's tree-check memory** (saved): the hosts it looked into (at most
-/// [`CHECK_SLOTS`]), the host its check walk is taking it to, the host whose crown it is in,
-/// and how many checks it has made.
+/// [`CHECK_SLOTS`]), the host its check walk is taking it to and the tick it set out, the
+/// host whose crown it is in, and how many checks it has made.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TreeChecks {
     pub seen: Vec<Checked>,
     pub aim: Option<u64>,
+    pub aim_since: u64,
     pub here: Option<u64>,
     pub checks: u64,
 }
@@ -105,9 +106,11 @@ pub(crate) fn order<T: Copy>(cands: &[(f64, u64, T)], recall: impl Fn(u64) -> Op
 
 /// A check walk for body `id` takes it to `host` this sample: a new aim is a walk set out on.
 pub(crate) fn aim(fauna: &mut Fauna, id: u64, host: u64) {
+    let now = fauna.tick;
     let m = fauna.tree_checks.entry(id).or_default();
     if m.aim != Some(host) {
         m.aim = Some(host);
+        m.aim_since = now;
         fauna.check_tally.walks += 1;
     }
 }
