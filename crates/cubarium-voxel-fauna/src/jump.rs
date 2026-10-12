@@ -5,7 +5,9 @@
 //! A grounded body is **trapped** when it stands off its lineage's route graph with no
 //! walking way back on ([`crate::RouteGraph::way_on`]) and no glide off its ledge — EDGE-2's
 //! `off_graph_exit` answers `Cornered` — and has been for its lineage's
-//! [`DropRule::after_s`]. It then jumps down past its step: the lowest drop within its reach
+//! [`DropRule::after_s`]. Off the graph includes standing on an island of it, or by a node
+//! its motor cannot walk to from where it stands ([`crate::RouteGraph::node_under`]); a
+//! brief time off its feet (a climb or a cling) does not restart the clock (SP-STUCK). It then jumps down past its step: the lowest drop within its reach
 //! ([`DropRule::max_m`] × its height over the adult's) off an edge of the pocket it can walk,
 //! onto a face clear for its body, in water it wades, from which its graph is reachable
 //! ([`crate::RouteGraph::drop_way`]). The landing costs a wound of [`DropRule::wound_per_m`]
@@ -32,6 +34,10 @@ use cubarium_voxel_flora::FloraView;
 #[cfg(test)]
 #[path = "testpass3_drop_tests.rs"]
 mod testpass3_drop_tests;
+
+#[cfg(test)]
+#[path = "sp_stuck_tests.rs"]
+mod sp_stuck_tests;
 
 /// **A lineage's jump down** when trapped (DROP). A reach at or under its step is no jump.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,6 +136,8 @@ pub(crate) struct DropPlan {
     pub land: Site,
     /// The column it jumps out over (`from`'s neighbour).
     pub edge: Site,
+    /// Where in `land`'s column it comes down ([`crate::DropWay::at`]).
+    pub at: u8,
 }
 
 /// **The drop reflex** for the due body at `i`, on its controller sample: `None` unless it is
@@ -145,13 +153,31 @@ pub(crate) fn reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flo
     let step = phys.step_limits(v);
     let reach = crate::body::step_voxels(rule.reach_m(&phys, &body), v);
     let grounded = a.mobility.mode == crate::MobilityMode::Ground && a.mobility.climb.is_none() && phys.flight.is_none();
-    if !grounded || reach <= step.down {
+    if reach <= step.down {
         fauna.trapped.remove(&a.id);
         fauna.drop_plans.remove(&a.id);
         return None;
     }
-    // Trapped: re-read only when it has moved to another face or the graph may have changed.
     let now = fauna.tick;
+    if !grounded {
+        // SP-STUCK: off its feet a moment (up a vine it cannot top and back down, a cling)
+        // is no way out, and the clock keeps running. A seedporter on a shelf climbed the
+        // covered riser behind it every few seconds and slid back, and each climb restarted
+        // its clock, so it never jumped. Off the ground longer than the wait, its clock
+        // starts afresh when it is next read on its feet.
+        fauna.drop_plans.remove(&a.id);
+        if let Some(t) = fauna.trapped.get_mut(&a.id) {
+            let aloft = *t.aloft.get_or_insert(now);
+            if (now.saturating_sub(aloft) as f64) * cubarium_voxel::DT > rule.after_s {
+                fauna.trapped.remove(&a.id);
+            }
+        }
+        return None;
+    }
+    if let Some(t) = fauna.trapped.get_mut(&a.id) {
+        t.aloft = None;
+    }
+    // Trapped: re-read only when it has moved to another face or the graph may have changed.
     let every = cubarium_voxel::ticks_at_least_one(fauna.config.teachers.route_refresh_s);
     let cornered = match fauna.trapped.get(&a.id) {
         Some(t) if t.site == a.site && now.saturating_sub(t.checked) < every => t.cornered,
@@ -161,7 +187,7 @@ pub(crate) fn reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flo
                 Some(t) if t.cornered && cornered => t.since,
                 _ => now,
             };
-            fauna.trapped.insert(a.id, Trapped { since, site: a.site, checked: now, cornered });
+            fauna.trapped.insert(a.id, Trapped { since, site: a.site, checked: now, cornered, aloft: None });
             cornered
         }
     };
@@ -178,31 +204,34 @@ pub(crate) fn reflex(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Flo
     let r = body.footprint_radius();
     let own = (r / v).ceil().max(0.0) as u32;
     let cols = if tc.way_on_m.is_finite() && tc.way_on_m > 0.0 { (tc.way_on_m / v).ceil() as u32 } else { 0 };
-    let Some(way) = graph.drop_way(view, a.site, r, body.headroom_voxels(v), step, reach, phys.wade_depth_m(&body), own, cols) else {
+    let Some(way) = graph.drop_way(view, a.site, (a.pose.x, a.pose.z), r, body.headroom_voxels(v), step, reach, phys.wade_depth_m(&body), own, cols) else {
         fauna.drop_plans.remove(&a.id);
         return None;
     };
-    fauna.drop_plans.insert(a.id, DropPlan { from: way.from, land: way.land, edge: way.edge });
-    let aim = if a.site == way.from { way.land } else { way.first };
+    fauna.drop_plans.insert(a.id, DropPlan { from: way.from, land: way.land, edge: way.edge, at: way.at });
+    let aim = if a.site == way.from { way.landing(v, view.config.width) } else { ((f64::from(way.first.x) + 0.5) * v, (f64::from(way.first.z) + 0.5) * v) };
     let ring = f64::from(view.config.width) * v;
-    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, (f64::from(aim.x) + 0.5) * v, (f64::from(aim.z) + 0.5) * v, ring);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, aim.0, aim.1, ring);
     Some(super::glider::walk_toward(&a, dx, dz, 0.0))
 }
 
-/// The trapped clock of one body ([`Fauna::trapped`]): when it was first found cornered, and
-/// the face and tick of the last reading. Session state.
+/// The trapped clock of one body ([`Fauna::trapped`]): when it was first found cornered, the
+/// face and tick of the last reading, and the tick it last left its feet (SP-STUCK: `None`
+/// while it stands). Session state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Trapped {
     pub since: u64,
     pub site: Site,
     pub checked: u64,
     pub cornered: bool,
+    pub aloft: Option<u64>,
 }
 
 /// **The jump**, after the body at `i` walked this tick: standing on the face its plan leaves
 /// from, held forward and facing the landing (within a right angle), with its disc reaching
 /// over the edge (its centre within its radius of the edge column), it comes down on the
-/// landing's centre (out over the edge: a disc wider than half a voxel jumps clear of the
+/// plan's landing point ([`crate::DropWay::landing`]: the landing's centre, or pressed to a
+/// side of its column; out over the edge, a disc wider than half a voxel jumps clear of the
 /// riser). The wound, the ledger, and the plan and the clock cleared.
 pub(crate) fn take_off(fauna: &mut Fauna, i: usize, founder: Founder, view: &VoxelView<'_>, held: Actions) {
     let a = fauna.animals[i];
@@ -212,7 +241,7 @@ pub(crate) fn take_off(fauna: &mut Fauna, i: usize, founder: Founder, view: &Vox
     }
     let v = view.config.voxel_m;
     let ring = f64::from(view.config.width) * v;
-    let (lx, lz) = ((f64::from(plan.land.x) + 0.5) * v, (f64::from(plan.land.z) + 0.5) * v);
+    let (lx, lz) = crate::encounter::drop_landing(plan.land, plan.at, v, view.config.width);
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, lx, lz, ring);
     let (fx, fz) = a.pose.forward();
     if fx * dx + fz * dz <= 0.0 {

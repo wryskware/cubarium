@@ -3521,7 +3521,7 @@ const PENETRATION_EPS_M: f64 = 1e-9;
 /// its `headroom` layers above the highest within-step ground under it ([`pose_clear`]'s
 /// rows): the most by which any solid voxel's square reaches inside the disc, metres; 0 when
 /// the pose is clear.
-fn pose_penetration(view: &VoxelView<'_>, cx: f64, cz: f64, standing_y: u32, r: f64, headroom: u32, step: StepLimits) -> f64 {
+pub(crate) fn pose_penetration(view: &VoxelView<'_>, cx: f64, cz: f64, standing_y: u32, r: f64, headroom: u32, step: StepLimits) -> f64 {
     if headroom == 0 {
         return 0.0;
     }
@@ -3601,9 +3601,27 @@ pub(crate) fn motor_walk(
         return Some(standing_y);
     }
     let dir = (dx / len, dz / len);
-    let sub = (0.25 * view.config.voxel_m).min(r.max(1e-3));
-    let n = (len / sub).ceil().max(1.0) as u32;
-    let width_m = f64::from(view.config.width) * view.config.voxel_m;
+    let v = view.config.voxel_m;
+    let sub = (0.25 * v).min(r.max(1e-3));
+    // SP-STUCK: no sub-step ends on a column boundary. A walk from a face's centre to its
+    // neighbour's in quarter voxels ended one exactly on the boundary, where the centre's
+    // column is already the next one and the disc does not yet reach the column past it: the
+    // standing layer climbed there, and the riser beyond was then judged from the new layer.
+    // So the walk took a step up onto a one-voxel shelf that the motor (sub-steps of its
+    // radius, pressed to a wall by bisection) refuses from anywhere it can stand. The fewest
+    // sub-steps, at most `sub` long, whose ends all miss a boundary.
+    let on_line = |p: f64| {
+        let k = p / v;
+        (k - k.round()).abs() < 1e-9
+    };
+    let n0 = (len / sub).ceil().max(1.0) as u32;
+    let n = (n0..n0 + 8)
+        .find(|&n| (1..n).all(|k| {
+            let t = f64::from(k) / f64::from(n);
+            !on_line(fx + dx * t) && !on_line(fz + dz * t)
+        }))
+        .unwrap_or(n0);
+    let width_m = f64::from(view.config.width) * v;
     let (mut px, mut pz, mut y) = (fx.rem_euclid(width_m), fz, standing_y);
     for _ in 0..n {
         let (nx, nz, moved, ny) = advance_candidate(view, px, pz, dir, y, len / f64::from(n), r, wade_depth_m, headroom, step_limits, None)?;

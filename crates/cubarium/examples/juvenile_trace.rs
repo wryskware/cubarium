@@ -337,7 +337,7 @@ fn main() {
                 let reach = cubarium_voxel_fauna::step_voxels(phys.drop.reach_m(phys, &g), v);
                 let own = (r / v).ceil() as u32;
                 let cols = (cfg.teachers.way_on_m / v).ceil() as u32;
-                eprintln!("graph: node_near={:?} way_on={:?}", graph.node_near(a.site, (a.pose.x, a.pose.z), own), graph.way_on(&w, a.site, r, head, step, phys.wade_depth_m(&g), own, cols));
+                eprintln!("graph: node_near={:?} way_on={:?}", graph.node_near(a.site, (a.pose.x, a.pose.z), own), graph.way_on(&w, a.site, (a.pose.x, a.pose.z), r, head, step, phys.wade_depth_m(&g), own, cols));
                 if let Some(n) = graph.node_near(a.site, (a.pose.x, a.pose.z), own) {
                     let comp = graph.components[n];
                     let size = graph.components.iter().filter(|&&k| k == comp).count();
@@ -348,7 +348,7 @@ fn main() {
                     let biggest = sizes.values().copied().max().unwrap_or(0);
                     eprintln!("graph: node {n} at {:?} component {comp} of {size} nodes (largest {biggest}, {} components)", graph.faces[n], sizes.len());
                 }
-                let way = graph.drop_way(&w, a.site, r, head, step, reach, phys.wade_depth_m(&g), own, cols);
+                let way = graph.drop_way(&w, a.site, (a.pose.x, a.pose.z), r, head, step, reach, phys.wade_depth_m(&g), own, cols);
                 eprintln!("drop_way: {way:?}");
                 let window = 2 * (cfg.teachers.way_on_m / v).ceil() as usize + 1;
                 let sc = (cfg.life.shallows_search_m / v).ceil() as u32;

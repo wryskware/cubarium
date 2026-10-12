@@ -600,7 +600,7 @@ fn assert_off_graph_pocket(fauna: &mut Fauna, world: &World, sp: u64) {
     let wv = world.view();
     let g = fauna.routes(&wv, SP, 1e6);
     assert!(g.node_near(a.site, (a.pose.x, a.pose.z), own).is_none(), "fixture: the ledge is off the route graph");
-    assert!(g.way_on(&wv, a.site, r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64).is_none(), "fixture: no walking way back on");
+    assert!(g.way_on(&wv, a.site, (a.pose.x, a.pose.z), r, body.headroom_voxels(V), p.step_limits(V), p.wade_depth_m(&body), own, 64).is_none(), "fixture: no walking way back on");
 }
 
 /// **A seedporter on a ledge it can neither walk nor glide off does not press.** A young
