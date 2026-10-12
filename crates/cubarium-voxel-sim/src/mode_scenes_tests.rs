@@ -62,3 +62,27 @@ fn a_scene_is_one_start_per_seed_and_its_knobs_are_checked() {
     let cramped = Config { width: 8, ..Config::default() };
     assert!(cramped.validate().is_err());
 }
+
+/// BRAIN-FIX step 1: the groom scene gives grooming room to finish. Its host holds still at
+/// its meal, and its troopmates, facing it, groom the larva off under the rules within the
+/// grooming contact time and a little walking (`grooming.groom_s`, read from the config).
+#[test]
+fn in_the_groom_scene_the_rules_groom_the_larva_off() {
+    use cubarium_voxel_fauna::Founder;
+    for seed in [1, 2, 3] {
+        let mut e = found(&Config::default(), ModeScene::Groom, seed).unwrap();
+        let host = e.others[0];
+        let rider = |e: &crate::mode_scenes::Episode| e.sim.fauna().view().animals.iter().any(|a| a.attached.map(|t| t.host) == Some(host));
+        assert!(rider(&e), "seed {seed}: the larva rides the host");
+        let groom_s = e.sim.fauna().config().founder(Founder::Seedporter).grooming.groom_s;
+        let cap = ((groom_s + 10.0) * f64::from(cubarium_voxel_fauna::TICK_HZ)) as u64;
+        let x0 = e.sim.fauna().view().animal(host).unwrap().pose.x;
+        let mut n = 0;
+        while n < cap && rider(&e) && e.step() {
+            n += 1;
+        }
+        assert!(!rider(&e), "seed {seed}: the larva is still on the host after {n} ticks");
+        let x1 = e.sim.fauna().view().animal(host).unwrap().pose.x;
+        assert!((x1 - x0).abs() < 0.25, "seed {seed}: the host held still at its meal ({x0} → {x1})");
+    }
+}
