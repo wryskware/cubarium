@@ -89,8 +89,18 @@ fn main() {
             for &th in &threads {
                 let mut rows = Vec::new();
                 for seed in 0..seeds {
+                    // The lock-step tests' small still world (the `small` preset refuses some
+                    // seeds outright).
+                    let cfg = world::still_water(cubarium_voxel::Config {
+                        width: 64,
+                        height: 24,
+                        depth: 8,
+                        voxel_m: 0.25,
+                        landform: cubarium_voxel::Landform::Staged(cubarium_voxel::Recipe::DEFAULT),
+                        ..cubarium_voxel::Config::default()
+                    });
                     let (sim, _) = world::found_world(
-                        &world::training_config(),
+                        &cfg,
                         3001 + seed * 1000,
                         ecology.fauna().founder_counts_without_egg_bank(),
                         &ecology,
