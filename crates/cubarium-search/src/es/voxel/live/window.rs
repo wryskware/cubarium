@@ -326,6 +326,10 @@ struct Tracked {
     earned: f64,
 }
 
+/// The ledger reading [`Window::after_step`] needs from before the tick.
+#[derive(Clone, Copy, Debug)]
+pub struct StepMark([f64; Founder::COUNT]);
+
 /// One window in progress on one world: [`Window::begin`], [`Window::step`] once per
 /// tick, [`Window::finish`]. [`run_window`] is the three in a row.
 pub struct Window {
@@ -536,9 +540,22 @@ impl Window {
     /// Step `sim` one tick and follow every body; a newcomer gets its variant the tick it
     /// appears.
     pub fn step(&mut self, sim: &mut Sim) {
-        let assimilated_before = sim.fauna().view().ledger.assimilated_by_founder;
-        let mut seen = [0.0f64; Founder::COUNT];
+        let mark = self.before_step(sim);
         sim.step();
+        self.after_step(sim, mark);
+    }
+
+    /// What [`Window::after_step`] needs from before a tick, for a host that steps the sim
+    /// itself (a staged encounter's own step that reads its events): `before_step`, the
+    /// host's one tick, then `after_step`.
+    pub fn before_step(&self, sim: &Sim) -> StepMark {
+        StepMark(sim.fauna().view().ledger.assimilated_by_founder)
+    }
+
+    /// Follow every body after one tick the host ran ([`Window::before_step`]).
+    pub fn after_step(&mut self, sim: &mut Sim, mark: StepMark) {
+        let assimilated_before = mark.0;
+        let mut seen = [0.0f64; Founder::COUNT];
         self.elapsed += 1;
         self.memory.advance();
         let stamp = self.elapsed;

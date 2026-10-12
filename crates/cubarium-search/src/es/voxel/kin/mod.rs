@@ -5,9 +5,11 @@
 //! - [`config`]: the per-lineage knobs: shares, the comparison switch, the brain stage.
 //! - [`score`]: the kin-weighted score and its parts.
 //! - [`compare`]: the comparison switch's scorers, family placement, the pair update.
+//! - [`matched`]: the matched-copies runner over any scene, and the null pair.
 
 pub mod compare;
 pub mod config;
+pub mod matched;
 pub mod roster;
 pub mod score;
 
