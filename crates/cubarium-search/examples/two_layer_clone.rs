@@ -30,7 +30,7 @@ use cubarium_search::es::voxel::two_layer::clone::{self, CloneSpec, RecordSource
 use cubarium_search::es::voxel::two_layer::record::{ShadowTeacher, per_mode, records_from_tap};
 use cubarium_search::es::voxel::two_layer::{MenuHeads, TwoLayerNet, TwoLayerPolicyFile, TwoLayerShape};
 use cubarium_search::es::voxel::EpisodeDriver;
-use cubarium_voxel_fauna::{Controller, Founder};
+use cubarium_voxel_fauna::{BodySpec, BodyStage, Controller, Founder, Placed, Spot};
 use serde_json::json;
 
 fn arg<'a>(args: &'a [String], key: &str) -> Option<&'a str> {
@@ -45,13 +45,30 @@ fn seeds(args: &[String], key: &str, default: &str) -> Vec<u64> {
 
 const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 
-fn found(seed: u64) -> cubarium_voxel_sim::Sim {
-    let (sim, _) = world::found_world(
-        &world::training_config(),
-        seed,
-        cubarium_voxel_fauna::FaunaConfig::default().founder_counts(),
-        &EcologyParams::defaults(),
-    );
+/// The training world (`small`, still water) with the ecology's own founders, then the
+/// lineage topped up to `bodies` grown bodies under its heuristic, placed on the faces
+/// other bodies stand on (the lanternjaw founds as an egg bank, the seedporter is off in
+/// the default roster).
+fn found(seed: u64, f: Founder, bodies: usize) -> cubarium_voxel_sim::Sim {
+    let eco = EcologyParams::defaults();
+    let (mut sim, _) = world::found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco);
+    let have = lineage_ids(&sim, f).len();
+    if have < bodies {
+        let (w, flora) = (sim.world().clone(), sim.flora().clone());
+        let sites: Vec<_> = sim.fauna().view().animals.iter().map(|a| a.site).collect();
+        let teachers = sim.fauna().config().teachers;
+        let mut placed = 0;
+        for (k, site) in sites.iter().enumerate() {
+            if have + placed >= bodies {
+                break;
+            }
+            let spec = BodySpec { stage: BodyStage::Adult, heading_rad: k as f64 * 1.3, ..BodySpec::default() };
+            if let Ok(Placed::Body { id, .. }) = sim.fauna_mut().place_body(&w, &flora, f, Spot::Face(*site), spec) {
+                sim.fauna_mut().set_controller(id, cubarium_voxel_fauna::heuristic(f, teachers));
+                placed += 1;
+            }
+        }
+    }
     sim
 }
 
@@ -60,8 +77,8 @@ fn lineage_ids(sim: &cubarium_voxel_sim::Sim, f: Founder) -> Vec<u64> {
 }
 
 /// Record one seed: the tap's records, teacher and alternative-mode.
-fn record(seed: u64, f: Founder, shape: &TwoLayerShape, seconds: u64, alt_period_s: u64, alt_len_s: u64) -> Vec<TrajectoryRecord> {
-    let mut sim = found(seed);
+fn record(seed: u64, f: Founder, bodies: usize, shape: &TwoLayerShape, seconds: u64, alt_period_s: u64, alt_len_s: u64) -> Vec<TrajectoryRecord> {
+    let mut sim = found(seed, f, bodies);
     sim.fauna_mut().start_tap();
     let mut forced: Vec<(u64, u64, u64)> = Vec::new(); // (id, from tick, to tick)
     let mut on: Vec<(u64, u64)> = Vec::new();
@@ -112,8 +129,8 @@ enum Arm {
 
 /// One closed-loop arm on one seed; the shadow's labelled samples come back for the
 /// closed-loop correction pass.
-fn closed(seed: u64, f: Founder, arm: &Arm, seconds: u64) -> (serde_json::Value, Vec<TrajectoryRecord>) {
-    let mut sim = found(seed);
+fn closed(seed: u64, f: Founder, bodies: usize, arm: &Arm, seconds: u64) -> (serde_json::Value, Vec<TrajectoryRecord>) {
+    let mut sim = found(seed, f, bodies);
     let logs: Arc<Mutex<Vec<Arc<Mutex<Vec<RecordedSample>>>>>> = Arc::default();
     match arm {
         Arm::Heuristic => {}
@@ -177,17 +194,29 @@ fn main() {
         workers: num(&args, "workers", 8usize),
     };
     let heads = MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: num(&args, "top_hidden", 32usize), pointer_width: num(&args, "pointer_width", 16usize) };
+    let bodies = num(&args, "bodies", 8usize);
     let manifest = f.manifest();
     let two = TwoLayerShape::menu_from_manifest(&manifest, heads);
     let plain = TwoLayerShape::plain_from_manifest(&manifest);
     let arb = cubarium_voxel_fauna::FaunaConfig::default().founder(f).brain;
     let t0 = std::time::Instant::now();
 
-    let mut train = Vec::new();
-    for s in seeds(&args, "train_seeds", "1,2,3") {
-        train.extend(record(s, f, &two, record_s, alt_period_s, alt_len_s));
-    }
-    let held = record(num(&args, "heldout_seed", 9u64), f, &two, record_s, alt_period_s, alt_len_s);
+    // Every seed's recording on its own thread (each world single-threaded).
+    let train_seeds = seeds(&args, "train_seeds", "1,2,3");
+    let heldout_seed = num(&args, "heldout_seed", 9u64);
+    let mut recorded: Vec<Vec<TrajectoryRecord>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = train_seeds
+            .iter()
+            .chain(std::iter::once(&heldout_seed))
+            .map(|&s| {
+                let two = &two;
+                scope.spawn(move || record(s, f, bodies, two, record_s, alt_period_s, alt_len_s))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("recording")).collect()
+    });
+    let held = recorded.pop().expect("held-out");
+    let train: Vec<TrajectoryRecord> = recorded.into_iter().flatten().collect();
     let count = |rs: &[TrajectoryRecord], src: RecordSource| rs.iter().filter(|r| r.source == src).map(|r| r.samples.len()).sum::<usize>();
     eprintln!("# recorded {:.0} s: train teacher {} alt {}; held-out teacher {} alt {}", t0.elapsed().as_secs_f64(),
         count(&train, RecordSource::Teacher), count(&train, RecordSource::AlternativeMode),
@@ -223,31 +252,38 @@ fn main() {
 
     let mut arms = serde_json::Map::new();
     let mut shadow_samples = 0;
-    for s in seeds(&args, "closed_seeds", "21,22") {
-        for (label, arm) in [
-            ("heuristic", Arm::Heuristic),
-            ("two_layer", Arm::Driver(two_driver.clone())),
-            ("two_layer_shadowed", Arm::Shadow(Arc::clone(&net))),
-            ("plain_gru", Arm::Driver(plain_driver.clone())),
-        ] {
-            let (row, shadow) = closed(s, f, &arm, closed_s);
-            shadow_samples += shadow.iter().map(|r| r.samples.len()).sum::<usize>();
-            if label == "two_layer_shadowed" {
-                let m = per_mode(&two, &arb, net.theta(), &shadow, menu.named.len());
-                let (_, err) = m.rates(two.actions.len());
-                let mut row = row;
-                row["shadow_samples"] = json!(shadow.iter().map(|r| r.samples.len()).sum::<usize>());
-                row["shadow_action_mse_by_held_mode"] = json!(names.iter().zip(&err).map(|(n, e)| json!({"intent": n, "mse": e})).collect::<Vec<_>>());
-                arms.entry(label).or_insert_with(|| json!([])).as_array_mut().unwrap().push(row);
-            } else {
-                arms.entry(label).or_insert_with(|| json!([])).as_array_mut().unwrap().push(row);
-            }
-            eprintln!("# closed seed {s} {label} {:.0} s", t0.elapsed().as_secs_f64());
+    let closed_seeds = seeds(&args, "closed_seeds", "21,22");
+    let plan: Vec<(u64, &str, Arm)> = closed_seeds
+        .iter()
+        .flat_map(|&s| {
+            [
+                (s, "heuristic", Arm::Heuristic),
+                (s, "two_layer", Arm::Driver(two_driver.clone())),
+                (s, "two_layer_shadowed", Arm::Shadow(Arc::clone(&net))),
+                (s, "plain_gru", Arm::Driver(plain_driver.clone())),
+            ]
+        })
+        .collect();
+    let results: Vec<(serde_json::Value, Vec<TrajectoryRecord>)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = plan.iter().map(|(s, _, arm)| scope.spawn(move || closed(*s, f, bodies, arm, closed_s))).collect();
+        handles.into_iter().map(|h| h.join().expect("closed loop")).collect()
+    });
+    eprintln!("# closed loop {:.0} s", t0.elapsed().as_secs_f64());
+    for ((_, label, _), (mut row, shadow)) in plan.iter().zip(results) {
+        let n = shadow.iter().map(|r| r.samples.len()).sum::<usize>();
+        shadow_samples += n;
+        if *label == "two_layer_shadowed" {
+            let m = per_mode(&two, &arb, net.theta(), &shadow, menu.named.len());
+            let (_, err) = m.rates(two.actions.len());
+            row["shadow_samples"] = json!(n);
+            row["shadow_action_mse_by_held_mode"] =
+                json!(names.iter().zip(&err).zip(&m.mode_samples).map(|((n, e), c)| json!({"intent": n, "samples": c, "mse": e})).collect::<Vec<_>>());
         }
+        arms.entry(label.to_string()).or_insert_with(|| json!([])).as_array_mut().unwrap().push(row);
     }
     let summary = json!({
         "founder": f.name(),
-        "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
+        "bodies": bodies, "record_s": record_s, "closed_s": closed_s, "alt_period_s": alt_period_s, "alt_len_s": alt_len_s,
         "samples": {"train_teacher": count(&train, RecordSource::Teacher), "train_alternative_mode": count(&train, RecordSource::AlternativeMode),
                     "heldout_teacher": count(&held, RecordSource::Teacher), "heldout_alternative_mode": count(&held, RecordSource::AlternativeMode),
                     "closed_loop_shadow": shadow_samples},
