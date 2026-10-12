@@ -82,6 +82,7 @@ pub mod store;
 pub mod task;
 pub mod trainer;
 pub mod training_world;
+pub mod two_layer;
 #[cfg(test)]
 mod training_world_tests;
 
