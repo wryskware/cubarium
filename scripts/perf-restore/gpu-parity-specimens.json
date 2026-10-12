@@ -1,0 +1,34 @@
+{
+  "kind": "command",
+  "name": "perf-restore-parity-specimens",
+  "argv": [
+    "python3",
+    "{runner_tree}/scripts/gpu-parity.py",
+    "capture",
+    "--suite",
+    "specimens",
+    "--binary",
+    "{bin}",
+    "--tree",
+    "{tree}",
+    "--fixture",
+    "{fixture}",
+    "--out",
+    "{out}/parity/{arm}",
+    "--keep-going"
+  ],
+  "cwd": "{tree}",
+  "threads": 2,
+  "mem_gb": 4,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "local_only": true,
+  "binary": {
+    "tree": "{tree}",
+    "commit": "{commit}",
+    "name": "wgpu-main-voxel_specimens",
+    "package": "cubarium",
+    "example": "voxel_specimens"
+  },
+  "priority": 1
+}

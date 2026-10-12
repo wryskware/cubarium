@@ -6,9 +6,12 @@ pub mod bloom;
 pub mod flat;
 pub mod geometry;
 pub mod headless;
+#[cfg(test)]
+mod perf_tests;
 pub mod shader;
 pub mod sunvis;
 pub mod timing;
+pub(crate) mod upload;
 pub mod voxel;
 pub mod window;
 
@@ -74,6 +77,24 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use wgpu::util::DeviceExt;
 
+pub const WORLD_SAMPLED_TEXTURES: u32 = 21;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CreationCounts {
+    pub buffers: u64,
+    pub bind_groups: u64,
+    pub query_sets: u64,
+    pub textures: u64,
+}
+
+#[derive(Default)]
+struct Creations {
+    buffers: std::sync::atomic::AtomicU64,
+    bind_groups: std::sync::atomic::AtomicU64,
+    query_sets: std::sync::atomic::AtomicU64,
+    textures: std::sync::atomic::AtomicU64,
+}
+
 pub struct Gpu {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
@@ -81,6 +102,10 @@ pub struct Gpu {
     pub queue: wgpu::Queue,
     pub name: String,
     pub(crate) resident: crate::pipeline_cache::Resident,
+    pub(crate) disk_cache: Option<crate::pipeline_cache::Disk>,
+    errors: Arc<Mutex<Vec<String>>>,
+    lost: Arc<Mutex<Option<String>>>,
+    creations: Creations,
 }
 
 static PREFERRED_DEVICE: Mutex<Option<String>> = Mutex::new(None);
@@ -171,14 +196,15 @@ impl Gpu {
             & (wgpu::Features::IMMEDIATES
                 | wgpu::Features::TIMESTAMP_QUERY
                 | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
-                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                | wgpu::Features::PIPELINE_CACHE);
         // Portable defaults cover our 4096x2048 figure atlas, <=4 MiB storage
         // records, <=4 KiB uniforms, six storage buffers and four attachments.
         // Figure composites add four images to the world's seventeen; plants
         // use the largest immediate block (64 bytes). Preserve adapter texture
         // resolution for wide worlds/displays; those caps reserve no images.
         let required_limits = wgpu::Limits {
-            max_sampled_textures_per_shader_stage: 21
+            max_sampled_textures_per_shader_stage: WORLD_SAMPLED_TEXTURES
                 .min(adapter.limits().max_sampled_textures_per_shader_stage),
             max_immediate_size: if required_features.contains(wgpu::Features::IMMEDIATES) {
                 64
@@ -192,12 +218,37 @@ impl Gpu {
                 label: Some("Cubarium"),
                 required_features,
                 required_limits,
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                memory_hints: wgpu::MemoryHints::Performance,
                 ..Default::default()
             })
             .await
             .context("request wgpu device")?;
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let reported = errors.clone();
+        device.on_uncaptured_error(Arc::new(move |error: wgpu::Error| {
+            eprintln!("cubarium GPU: {error}");
+            let mut errors = reported.lock().unwrap_or_else(|e| e.into_inner());
+            if errors.len() < 64 {
+                errors.push(error.to_string());
+            }
+        }));
+        let lost = Arc::new(Mutex::new(None));
+        let reported = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            if reason == wgpu::DeviceLostReason::Destroyed {
+                return;
+            }
+            let message = format!("device lost ({reason:?}): {message}");
+            eprintln!("cubarium GPU: {message}");
+            *reported.lock().unwrap_or_else(|e| e.into_inner()) = Some(message);
+        });
+        crate::pipeline_cache::init_default_dir();
+        let disk_cache = crate::pipeline_cache::Disk::open(&device, &adapter.get_info());
         Ok(Self {
+            disk_cache,
+            errors,
+            lost,
+            creations: Default::default(),
             instance,
             adapter,
             device,
@@ -205,6 +256,12 @@ impl Gpu {
             name,
             resident: Default::default(),
         })
+    }
+
+    pub fn disk_cache_stats(&self) -> Option<(bool, usize)> {
+        self.disk_cache
+            .as_ref()
+            .map(|c| (c.loaded, c.uses.load(std::sync::atomic::Ordering::Relaxed)))
     }
 
     pub fn pipeline_cache_stats(&self) -> crate::pipeline_cache::Stats {
@@ -232,7 +289,53 @@ impl Gpu {
         &self,
         d: &wgpu::RenderPipelineDescriptor<'_>,
     ) -> wgpu::RenderPipeline {
-        self.resident.pipeline(&self.device, d)
+        let mut descriptor = d.clone();
+        descriptor.cache = self.disk_cache.as_ref().map(|c| &c.cache);
+        if let Some(cache) = &self.disk_cache {
+            cache
+                .uses
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.resident.pipeline(&self.device, &descriptor)
+    }
+
+    /// Validation errors are logged at their origin and can be collected without
+    /// poisoning another renderer sharing this device. Device loss is permanent.
+    pub fn take_errors(&self) -> Vec<String> {
+        std::mem::take(&mut *self.errors.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+    pub fn check_alive(&self) -> Result<()> {
+        if let Some(error) = self.lost.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            anyhow::bail!("{error}");
+        }
+        Ok(())
+    }
+    pub fn creation_counts(&self) -> CreationCounts {
+        use std::sync::atomic::Ordering::Relaxed;
+        CreationCounts {
+            buffers: self.creations.buffers.load(Relaxed),
+            bind_groups: self.creations.bind_groups.load(Relaxed),
+            query_sets: self.creations.query_sets.load(Relaxed),
+            textures: self.creations.textures.load(Relaxed),
+        }
+    }
+    pub(crate) fn buffer(&self, d: &wgpu::BufferDescriptor<'_>) -> wgpu::Buffer {
+        self.creations
+            .buffers
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.device.create_buffer(d)
+    }
+    pub(crate) fn bind_group(&self, d: &wgpu::BindGroupDescriptor<'_>) -> wgpu::BindGroup {
+        self.creations
+            .bind_groups
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.device.create_bind_group(d)
+    }
+    pub(crate) fn query_set(&self, d: &wgpu::QuerySetDescriptor<'_>) -> wgpu::QuerySet {
+        self.creations
+            .query_sets
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.device.create_query_set(d)
     }
 
     pub fn encoder(&self, label: &str) -> wgpu::CommandEncoder {
@@ -248,6 +351,9 @@ impl Gpu {
         format: wgpu::TextureFormat,
         usage: wgpu::TextureUsages,
     ) -> wgpu::Texture {
+        self.creations
+            .textures
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size,
@@ -330,6 +436,14 @@ impl Gpu {
 pub struct PresentPass {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
+    resources: Mutex<Vec<PresentResources>>,
+}
+struct PresentResources {
+    raster: wgpu::TextureView,
+    uniform: wgpu::Buffer,
+    stride: u64,
+    groups: Vec<wgpu::BindGroup>,
+    uploads: upload::UploadRing,
 }
 
 impl PresentPass {
@@ -397,7 +511,11 @@ impl PresentPass {
             multiview_mask: None,
             cache: None,
         });
-        Self { pipeline, layout }
+        Self {
+            pipeline,
+            layout,
+            resources: Mutex::new(Vec::new()),
+        }
     }
 
     pub fn record(
@@ -407,28 +525,85 @@ impl PresentPass {
         raster: &wgpu::TextureView,
         target: &wgpu::TextureView,
         transform: [f32; 8],
-    ) {
-        let uniform = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("present transform"),
-                contents: bytemuck::cast_slice(&transform),
-                usage: wgpu::BufferUsages::UNIFORM,
+    ) -> bool {
+        match self.record_inner(gpu, encoder, raster, target, transform) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("cubarium: present recording failed: {error:#}");
+                false
+            }
+        }
+    }
+    fn record_inner(
+        &self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        raster: &wgpu::TextureView,
+        target: &wgpu::TextureView,
+        transform: [f32; 8],
+    ) -> Result<()> {
+        let mut resources = self.resources.lock().unwrap_or_else(|e| e.into_inner());
+        let index = if let Some(i) = resources.iter().position(|r| r.raster == *raster) {
+            i
+        } else {
+            let stride = u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment).max(32);
+            let uniform = upload::buffer(
+                gpu,
+                "present uniform ring",
+                stride * 4,
+                wgpu::BufferUsages::UNIFORM,
+            );
+            let groups = (0..4)
+                .map(|slot| {
+                    gpu.bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("present"),
+                        layout: &self.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(raster),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                    buffer: &uniform,
+                                    offset: stride * slot,
+                                    size: wgpu::BufferSize::new(32),
+                                }),
+                            },
+                        ],
+                    })
+                })
+                .collect();
+            resources.push(PresentResources {
+                raster: raster.clone(),
+                uniform,
+                stride,
+                groups,
+                uploads: upload::UploadRing::new(gpu, 256, 4),
             });
-        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("present"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(raster),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: uniform.as_entire_binding(),
-                },
-            ],
-        });
+            resources.len() - 1
+        };
+        gpu.device.poll(wgpu::PollType::Poll)?;
+        let r = &mut resources[index];
+        r.uploads.reclaim_completed();
+        let slot = r.uploads.available().context("present ring is full")?;
+        let uploaded = (|| -> Result<()> {
+            let mut writer = r.uploads.begin(gpu, slot)?;
+            writer.bytes(
+                encoder,
+                &r.uniform,
+                r.stride * slot as u64,
+                bytemuck::cast_slice(&transform),
+            )?;
+            writer.finish(encoder);
+            Ok(())
+        })();
+        if uploaded.is_err() {
+            r.uploads.discard_slot(slot);
+        }
+        uploaded?;
+        let bind = &r.groups[slot];
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("present"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -443,8 +618,48 @@ impl PresentPass {
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &bind, &[]);
+        pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
+        Ok(())
+    }
+    pub(crate) fn discarded(&self) {
+        for r in self
+            .resources
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter_mut()
+        {
+            r.uploads.discard_last();
+        }
+    }
+}
+
+/// Borrowed GPU mapping. Consumers copy complete rows straight into their final
+/// destination; padding never becomes another frame-sized allocation.
+#[derive(Clone, Copy)]
+pub struct ReadbackRows<'a> {
+    pub data: &'a [u8],
+    pub stride: usize,
+    pub row_bytes: usize,
+    pub height: usize,
+}
+impl ReadbackRows<'_> {
+    pub fn rows(&self) -> impl Iterator<Item = &[u8]> {
+        self.data
+            .chunks_exact(self.stride)
+            .take(self.height)
+            .map(|row| &row[..self.row_bytes])
+    }
+    pub fn copy_into(&self, destination: &mut Vec<u8>) {
+        destination.clear();
+        destination.reserve(self.row_bytes * self.height);
+        if self.row_bytes == self.stride {
+            destination.extend_from_slice(&self.data[..self.row_bytes * self.height]);
+        } else {
+            for row in self.rows() {
+                destination.extend_from_slice(row);
+            }
+        }
     }
 }
 
@@ -464,6 +679,7 @@ pub struct ReadbackRing {
     flight: VecDeque<usize>,
     size: (u32, u32),
     stride: u32,
+    tight: Vec<u8>,
 }
 
 impl ReadbackRing {
@@ -477,7 +693,7 @@ impl ReadbackRing {
             row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let slots = (0..slots)
             .map(|_| ReadbackSlot {
-                buffer: gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                buffer: gpu.buffer(&wgpu::BufferDescriptor {
                     label: Some("readback"),
                     size: u64::from(stride) * u64::from(size.1),
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
@@ -493,6 +709,7 @@ impl ReadbackRing {
             flight: VecDeque::new(),
             size,
             stride,
+            tight: Vec::new(),
         })
     }
 
@@ -534,22 +751,71 @@ impl ReadbackRing {
         source: &mut S,
         mut done: impl FnMut(u64, &[u8]),
     ) -> Result<usize> {
-        self.poll(gpu, |tag, bytes| {
-            source.frame_retired();
-            done(tag, bytes);
-        })
+        let mut tight = std::mem::take(&mut self.tight);
+        let result = self.poll_source_rows(gpu, source, |tag, rows| {
+            if rows.stride == rows.row_bytes {
+                done(tag, rows.data);
+            } else {
+                rows.copy_into(&mut tight);
+                done(tag, &tight);
+            }
+        });
+        self.tight = tight;
+        result
     }
-
     pub fn drain_source<S: FrameSource>(
         &mut self,
         gpu: &Gpu,
         source: &mut S,
         mut done: impl FnMut(u64, &[u8]),
     ) -> Result<usize> {
-        self.drain(gpu, |tag, bytes| {
+        let mut tight = std::mem::take(&mut self.tight);
+        let result = self.drain_source_rows(gpu, source, |tag, rows| {
+            if rows.stride == rows.row_bytes {
+                done(tag, rows.data);
+            } else {
+                rows.copy_into(&mut tight);
+                done(tag, &tight);
+            }
+        });
+        self.tight = tight;
+        result
+    }
+    pub fn poll_source_rows<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        source: &mut S,
+        mut done: impl FnMut(u64, ReadbackRows<'_>),
+    ) -> Result<usize> {
+        let before = self.in_flight();
+        let mut delivered = 0;
+        let result = self.poll_rows(gpu, |tag, rows| {
             source.frame_retired();
-            done(tag, bytes);
-        })
+            delivered += 1;
+            done(tag, rows);
+        });
+        for _ in delivered..before - self.in_flight() {
+            source.frame_retired();
+        }
+        result
+    }
+    pub fn drain_source_rows<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        source: &mut S,
+        mut done: impl FnMut(u64, ReadbackRows<'_>),
+    ) -> Result<usize> {
+        let before = self.in_flight();
+        let mut delivered = 0;
+        let result = self.drain_rows(gpu, |tag, rows| {
+            source.frame_retired();
+            delivered += 1;
+            done(tag, rows);
+        });
+        for _ in delivered..before - self.in_flight() {
+            source.frame_retired();
+        }
+        result
     }
 
     /// Submit the world/present recording and its readback copy in one ordered batch.
@@ -607,44 +873,92 @@ impl ReadbackRing {
     }
 
     pub fn poll(&mut self, gpu: &Gpu, mut done: impl FnMut(u64, &[u8])) -> Result<usize> {
-        gpu.device.poll(wgpu::PollType::Poll)?;
+        let mut tight = std::mem::take(&mut self.tight);
+        let result = self.poll_rows(gpu, |tag, rows| {
+            if rows.stride == rows.row_bytes {
+                done(tag, rows.data);
+            } else {
+                rows.copy_into(&mut tight);
+                done(tag, &tight);
+            }
+        });
+        self.tight = tight;
+        result
+    }
+    pub fn poll_rows(
+        &mut self,
+        gpu: &Gpu,
+        mut done: impl FnMut(u64, ReadbackRows<'_>),
+    ) -> Result<usize> {
+        if let Err(error) = gpu.device.poll(wgpu::PollType::Poll) {
+            self.cancel();
+            return Err(error.into());
+        }
         let mut count = 0;
         while let Some(&i) = self.flight.front() {
             let slot = &mut self.slots[i];
-            let Some(result) = slot.ready.lock().expect("readback callback mutex").take() else {
+            let Some(result) = slot.ready.lock().unwrap_or_else(|e| e.into_inner()).take() else {
                 break;
             };
-            if let Err(error) = result {
-                slot.submission = None;
-                self.flight.pop_front();
-                return Err(error).context("map readback buffer");
-            }
-            let view = slot.buffer.slice(..).get_mapped_range()?;
-            let row = self.size.0 as usize * 4;
-            let bytes: Vec<u8> = view
-                .chunks_exact(self.stride as usize)
-                .flat_map(|r| r[..row].iter().copied())
-                .collect();
-            drop(view);
+            let delivered = result.context("map readback buffer").and_then(|_| {
+                let view = slot.buffer.slice(..).get_mapped_range()?;
+                done(
+                    slot.tag,
+                    ReadbackRows {
+                        data: &view,
+                        stride: self.stride as usize,
+                        row_bytes: self.size.0 as usize * 4,
+                        height: self.size.1 as usize,
+                    },
+                );
+                Ok(())
+            });
             slot.buffer.unmap();
             slot.submission = None;
             self.flight.pop_front();
-            done(slot.tag, &bytes);
+            delivered?;
             count += 1;
         }
         Ok(count)
     }
-
     pub fn drain(&mut self, gpu: &Gpu, mut done: impl FnMut(u64, &[u8])) -> Result<usize> {
+        let mut tight = std::mem::take(&mut self.tight);
+        let result = self.drain_rows(gpu, |tag, rows| {
+            if rows.stride == rows.row_bytes {
+                done(tag, rows.data);
+            } else {
+                rows.copy_into(&mut tight);
+                done(tag, &tight);
+            }
+        });
+        self.tight = tight;
+        result
+    }
+    pub fn drain_rows(
+        &mut self,
+        gpu: &Gpu,
+        mut done: impl FnMut(u64, ReadbackRows<'_>),
+    ) -> Result<usize> {
         let mut count = 0;
         while let Some(&i) = self.flight.front() {
-            gpu.device.poll(wgpu::PollType::Wait {
+            if let Err(error) = gpu.device.poll(wgpu::PollType::Wait {
                 submission_index: self.slots[i].submission.clone(),
                 timeout: Some(Duration::from_secs(30)),
-            })?;
-            count += self.poll(gpu, &mut done)?;
+            }) {
+                self.cancel();
+                return Err(error.into());
+            }
+            count += self.poll_rows(gpu, &mut done)?;
         }
         Ok(count)
+    }
+    fn cancel(&mut self) {
+        for i in self.flight.drain(..) {
+            let slot = &mut self.slots[i];
+            slot.buffer.unmap();
+            slot.ready = Arc::new(Mutex::new(None));
+            slot.submission = None;
+        }
     }
 }
 
@@ -674,5 +988,13 @@ impl Headless {
             view,
             readback,
         })
+    }
+}
+
+impl Drop for Gpu {
+    fn drop(&mut self) {
+        if let Err(error) = crate::pipeline_cache::save(self) {
+            eprintln!("cubarium: save pipeline cache: {error:#}");
+        }
     }
 }

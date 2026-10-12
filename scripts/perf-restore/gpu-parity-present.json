@@ -1,0 +1,36 @@
+{
+  "kind": "command",
+  "name": "perf-restore-parity-present",
+  "argv": [
+    "python3",
+    "{runner_tree}/scripts/gpu-parity.py",
+    "capture",
+    "--suite",
+    "present",
+    "--binary",
+    "{bin}",
+    "--tree",
+    "{tree}",
+    "--fixture",
+    "{fixture}",
+    "--out",
+    "{out}/parity/{arm}",
+    "--source",
+    "{out}/parity/baseline/ring-scale1.png",
+    "--keep-going"
+  ],
+  "cwd": "{tree}",
+  "threads": 2,
+  "mem_gb": 4,
+  "timeout_h": 0.5,
+  "est_h": 0.03,
+  "local_only": true,
+  "binary": {
+    "tree": "{tree}",
+    "commit": "{commit}",
+    "name": "wgpu-main-window_fit",
+    "package": "cubarium-gpu",
+    "example": "window_fit"
+  },
+  "priority": 1
+}

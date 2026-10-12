@@ -76,6 +76,17 @@ pub(crate) fn shared_gpu() -> Result<Arc<Gpu>> {
     Ok(gpu)
 }
 
+/// Completion is published even if a worker unwinds during pipeline creation.
+struct WarmCompletion<'a>(&'a Warm);
+impl Drop for WarmCompletion<'_> {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock().unwrap_or_else(|e| e.into_inner());
+        state.still = Phase::Done;
+        state.all = Phase::Done;
+        self.0.moved.notify_all();
+    }
+}
+
 /// The warm-up's thread, for [`stop`].
 static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 /// [`stop`] was called: no further phase starts.
@@ -117,6 +128,7 @@ pub fn start(key: String, cfg: &VoxelConfig, screen: (u32, u32)) -> bool {
     }
     let cfg = cfg.clone();
     let spawned = std::thread::Builder::new().name("cubarium-pipeline-warm".into()).spawn(move || {
+        let _completion = WarmCompletion(&WARM);
         let t0 = Instant::now();
         let mut lap = Instant::now();
         let finish = |kind: Pipelines| {
@@ -172,8 +184,11 @@ fn lower_priority() {
 /// Block until the warm-up for `key` has compiled what a renderer building `want` needs, or
 /// `give_up` says so. Returns at once when no warm-up runs for `key`. How long it waited.
 pub fn wait(key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration {
+    wait_in(&WARM, key, want, give_up)
+}
+fn wait_in(warm: &Warm, key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration {
     let started = Instant::now();
-    let mut s = WARM.state.lock().unwrap_or_else(|e| e.into_inner());
+    let mut s = warm.state.lock().unwrap_or_else(|e| e.into_inner());
     if s.key.as_deref() != Some(key) {
         return Duration::ZERO;
     }
@@ -187,7 +202,7 @@ pub fn wait(key: &str, want: Pipelines, give_up: impl Fn() -> bool) -> Duration 
     let since = s.started.map_or(Duration::ZERO, |t| t.elapsed());
     timing(format_args!("waiting for the warm-up's {want:?} pipelines ({:.0} ms into it)", since.as_secs_f64() * 1e3));
     while pending(&s) && !give_up() {
-        s = WARM.moved.wait_timeout(s, WAIT_SLICE).unwrap_or_else(|e| e.into_inner()).0;
+        s = warm.moved.wait_timeout(s, WAIT_SLICE).unwrap_or_else(|e| e.into_inner()).0;
     }
     let waited = started.elapsed();
     timing(format_args!("waited {:.0} ms for the warm-up's {want:?} pipelines", waited.as_secs_f64() * 1e3));
@@ -220,5 +235,23 @@ fn compile(cfg: &VoxelConfig, screen: (u32, u32), kinds: &[Pipelines], mut done:
         let made = VoxelRenderer::with_pipelines(&gpu, params, &textures, kind).map(|mut r| r.destroy(&gpu));
         done(kind, made);
     }
+    cubarium_gpu::pipeline_cache::save(&gpu)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+    #[test]
+    fn failed_warmup_releases_the_first_live_world_waiter() {
+        let warm = Warm { state: Mutex::new(State { key: Some("injected".into()), still: Phase::Running, all: Phase::Running, started: None }), moved: Condvar::new() };
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _completion = WarmCompletion(&warm);
+            panic!("injected warm-up failure");
+        }));
+        assert!(failure.is_err());
+        assert_eq!(warm.state.lock().unwrap().still, Phase::Done);
+        assert_eq!(warm.state.lock().unwrap().all, Phase::Done);
+        wait_in(&warm, "injected", Pipelines::All, || panic!("a completed failed warm-up must never wait"));
+    }
 }

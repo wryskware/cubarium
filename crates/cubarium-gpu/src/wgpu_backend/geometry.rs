@@ -1,5 +1,6 @@
 //! Safe geometry passes. CPU packing is shared with the original presenter.
 #![forbid(unsafe_code)]
+use super::upload::{self, Upload};
 use super::{
     Gpu,
     shader::{Shader, Specialization},
@@ -10,7 +11,6 @@ use crate::{
 };
 use anyhow::Result;
 use std::collections::VecDeque;
-use wgpu::util::DeviceExt;
 
 pub struct Plane {
     pub texture: wgpu::Texture,
@@ -33,15 +33,28 @@ impl Plane {
         Self { texture, view }
     }
 }
-fn buffer(gpu: &Gpu, bytes: &[u8], minimum: usize) -> wgpu::Buffer {
-    let mut data = bytes.to_vec();
-    data.resize(data.len().max(minimum), 0);
-    gpu.device
-        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("geometry frame data"),
-            contents: &data,
-            usage: wgpu::BufferUsages::STORAGE,
+pub(crate) fn upload_capacity() -> u64 {
+    (figures::MAX_VOXELS * 16
+        + figures::MAX_TILES * 144
+        + figures::MAX_FIGS * 48
+        + figures::MAX_PALETTE * 32
+        + figures::MAX_BONES * 48
+        + plants::MAX_PLANT_CELLS * 16
+        + plants::MAX_PLANTS * 4) as u64
+}
+fn buffers<const N: usize>(gpu: &Gpu, sizes: [usize; N]) -> Vec<[wgpu::Buffer; N]> {
+    (0..crate::voxel::STAGING_RING)
+        .map(|_| {
+            sizes.map(|size| {
+                upload::buffer(
+                    gpu,
+                    "geometry ring data",
+                    size as u64,
+                    wgpu::BufferUsages::STORAGE,
+                )
+            })
         })
+        .collect()
 }
 fn storage(binding: u32) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
@@ -104,7 +117,7 @@ fn image_group(
         binding: 32,
         resource: wgpu::BindingResource::Sampler(&sampler),
     });
-    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    gpu.bind_group(&wgpu::BindGroupDescriptor {
         label: Some("geometry images"),
         layout,
         entries: &entries,
@@ -123,7 +136,7 @@ fn data_group(
             resource: b.as_entire_binding(),
         })
         .collect();
-    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+    gpu.bind_group(&wgpu::BindGroupDescriptor {
         label: Some("geometry data"),
         layout,
         entries: &entries,
@@ -261,12 +274,15 @@ pub struct Figures {
     emit: Plane,
     z: Plane,
     tile_depth: Plane,
-    data_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
     tile_pipeline: wgpu::RenderPipeline,
     comp_pipeline: wgpu::RenderPipeline,
     sun_pipeline: wgpu::RenderPipeline,
     models: Vec<FigureVoxel>,
+    model_dirty: Option<std::ops::Range<usize>>,
+    model_recorded: Vec<Option<std::ops::Range<usize>>>,
+    buffers: Vec<[wgpu::Buffer; 5]>,
+    groups: Vec<wgpu::BindGroup>,
     packed: Packed,
     data: Option<wgpu::BindGroup>,
     images: Option<wgpu::BindGroup>,
@@ -359,6 +375,28 @@ impl Figures {
             false,
         )?;
         let atlas = (figures::ATLAS_W, figures::ATLAS_H);
+        let models = upload::buffer(
+            gpu,
+            "append-only figure models",
+            (figures::MAX_VOXELS * 16) as u64,
+            wgpu::BufferUsages::STORAGE,
+        );
+        let buffers: Vec<_> = buffers(
+            gpu,
+            [
+                figures::MAX_TILES * 144,
+                figures::MAX_FIGS * 48,
+                figures::MAX_PALETTE * 32,
+                figures::MAX_BONES * 48,
+            ],
+        )
+        .into_iter()
+        .map(|[tiles, figs, palette, bones]| [models.clone(), tiles, figs, palette, bones])
+        .collect();
+        let groups = buffers
+            .iter()
+            .map(|b| data_group(gpu, &data_layout, b))
+            .collect();
         Ok(Self {
             walk_depth: Plane::new(gpu, "walk depth", raster, wgpu::TextureFormat::R32Float),
             sun: Plane::new(
@@ -400,12 +438,15 @@ impl Figures {
                 atlas,
                 wgpu::TextureFormat::Depth32Float,
             ),
-            data_layout,
             image_layout,
             tile_pipeline,
             comp_pipeline,
             sun_pipeline,
             models: vec![],
+            model_dirty: None,
+            model_recorded: vec![None; crate::voxel::STAGING_RING],
+            buffers,
+            groups,
             packed: Packed::default(),
             data: None,
             images: None,
@@ -423,7 +464,12 @@ impl Figures {
         };
         self.models
             .resize(self.models.len().max(end), FigureVoxel::default());
-        self.models[first..end].copy_from_slice(cells);
+        if bytemuck::cast_slice::<_, u8>(&self.models[first..end])
+            != bytemuck::cast_slice::<_, u8>(cells)
+        {
+            self.models[first..end].copy_from_slice(cells);
+            self.owe_models(first..end);
+        }
         true
     }
     pub fn voxels(&self) -> usize {
@@ -440,14 +486,17 @@ impl Figures {
     }
     pub fn prepare(
         &mut self,
-        gpu: &Gpu,
+        _gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        writer: &mut Upload<'_>,
+        slot: usize,
         frame: &FigureFrame,
         s: u32,
         rise: u32,
         base: i32,
         view_x: i32,
         ring_width: u32,
-    ) -> usize {
+    ) -> Result<usize> {
         let p = figures::pack(frame, s, rise, base, ring_width, view_x);
         self.stats = FigureAtlasStats {
             width: figures::ATLAS_W,
@@ -464,17 +513,42 @@ impl Figures {
             dropped: p.dropped,
             omitted_extras: p.omitted_extras,
         };
-        let buffers = [
-            buffer(gpu, bytemuck::cast_slice(&self.models), 16),
-            buffer(gpu, bytemuck::cast_slice(&p.tiles), 144),
-            buffer(gpu, bytemuck::cast_slice(&p.figs), 48),
-            buffer(gpu, bytemuck::cast_slice(&p.palette), 32),
-            buffer(gpu, bytemuck::cast_slice(&p.bones), 48),
-        ];
-        self.data = Some(data_group(gpu, &self.data_layout, &buffers));
+        let buffers = &self.buffers[slot];
+        if let Some(range) = self.model_dirty.take() {
+            self.model_recorded[slot] = Some(range.clone());
+            writer.bytes(
+                encoder,
+                &buffers[0],
+                (range.start * 16) as u64,
+                bytemuck::cast_slice(&self.models[range]),
+            )?;
+        }
+        for (buffer, bytes) in buffers[1..].iter().zip([
+            bytemuck::cast_slice(&p.tiles),
+            bytemuck::cast_slice(&p.figs),
+            bytemuck::cast_slice(&p.palette),
+            bytemuck::cast_slice(&p.bones),
+        ]) {
+            writer.bytes(encoder, buffer, 0, bytes)?;
+        }
+        self.data = Some(self.groups[slot].clone());
         let dropped = p.dropped;
         self.packed = p;
-        dropped
+        Ok(dropped)
+    }
+    fn owe_models(&mut self, range: std::ops::Range<usize>) {
+        self.model_dirty = Some(match self.model_dirty.take() {
+            Some(old) => old.start.min(range.start)..old.end.max(range.end),
+            None => range,
+        });
+    }
+    pub fn retired(&mut self, slot: usize) {
+        self.model_recorded[slot] = None;
+    }
+    pub fn discarded(&mut self, slot: usize) {
+        if let Some(range) = self.model_recorded[slot].take() {
+            self.owe_models(range);
+        }
     }
     pub fn set_occluder(&mut self, gpu: &Gpu, view: &wgpu::TextureView) {
         self.images = Some(image_group(
@@ -634,11 +708,15 @@ pub struct Plants {
     drawn: PlantList,
     tips: Vec<f32>,
     drawn_tips: Vec<f32>,
-    recorded_tips: VecDeque<Vec<f32>>,
+    recorded_tips: VecDeque<Option<Vec<f32>>>,
+    spare_tips: Vec<Vec<f32>>,
+    cell_version: u64,
+    cell_written: Vec<u64>,
+    buffers: Vec<[wgpu::Buffer; 2]>,
+    groups: Vec<wgpu::BindGroup>,
     seconds: f64,
     rain: [f32; 3],
     stats: PlantStats,
-    data_layout: wgpu::BindGroupLayout,
     images: wgpu::BindGroup,
     data: Option<wgpu::BindGroup>,
     vis_pipeline: wgpu::RenderPipeline,
@@ -729,6 +807,11 @@ impl Plants {
             None,
             false,
         )?;
+        let buffers = buffers(gpu, [plants::MAX_PLANT_CELLS * 16, plants::MAX_PLANTS * 4]);
+        let groups = buffers
+            .iter()
+            .map(|b| data_group(gpu, &data_layout, b))
+            .collect();
         Ok(Self {
             ids,
             depth,
@@ -744,10 +827,14 @@ impl Plants {
             tips: vec![],
             drawn_tips: vec![],
             recorded_tips: VecDeque::new(),
+            spare_tips: vec![],
+            cell_version: 0,
+            cell_written: vec![u64::MAX; crate::voxel::STAGING_RING],
+            buffers,
+            groups,
             seconds: 0.,
             rain: [0.; 3],
             stats: PlantStats::default(),
-            data_layout,
             images,
             data: None,
             vis_pipeline,
@@ -763,6 +850,9 @@ impl Plants {
     pub fn adopt(&mut self, from: usize) {
         // Staging stays intact until its upload retires, so a discarded recording
         // can adopt the same list again without toggling back to the old picture.
+        if self.drawn.cells != self.staged[from].cells {
+            self.cell_version += 1;
+        }
         self.drawn.clone_from(&self.staged[from]);
         let n = self.drawn.cells.len();
         self.stats = PlantStats {
@@ -801,31 +891,55 @@ impl Plants {
             &mut self.tips,
         );
     }
-    pub fn prepare(&mut self, gpu: &Gpu) {
+    pub fn prepare(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        writer: &mut Upload<'_>,
+        slot: usize,
+    ) -> Result<()> {
         let n = self.drawn.cells.len().min(plants::MAX_PLANT_CELLS);
-        let buffers = [
-            buffer(gpu, bytemuck::cast_slice(&self.drawn.cells[..n]), 16),
-            buffer(gpu, bytemuck::cast_slice(&self.tips), 4),
-        ];
-        self.data = Some(data_group(gpu, &self.data_layout, &buffers));
+        if self.cell_written[slot] != self.cell_version {
+            writer.bytes(
+                encoder,
+                &self.buffers[slot][0],
+                0,
+                bytemuck::cast_slice(&self.drawn.cells[..n]),
+            )?;
+            self.cell_written[slot] = self.cell_version;
+        }
+        writer.bytes(
+            encoder,
+            &self.buffers[slot][1],
+            0,
+            bytemuck::cast_slice(&self.drawn_tips),
+        )?;
+        self.data = Some(self.groups[slot].clone());
+        Ok(())
     }
-    /// Remember the picture before this recording. Every frame takes a position,
-    /// including frames that reuse the raster, matching the renderer's ring order.
+    pub fn discarded(&mut self, slot: usize) {
+        self.cell_written[slot] = u64::MAX;
+    }
+    /// Move snapshots between recordings instead of cloning plant tips. Skipped
+    /// frames need only an ordering marker; retired snapshots become scratch.
     pub fn frame_recorded(&mut self, redraw: bool) {
-        self.recorded_tips.push_back(self.drawn_tips.clone());
-        if redraw {
-            self.drawn_tips.clone_from(&self.tips);
+        let previous = if redraw {
+            let previous = std::mem::replace(&mut self.drawn_tips, std::mem::take(&mut self.tips));
+            self.tips = self.spare_tips.pop().unwrap_or_default();
+            Some(previous)
+        } else {
+            None
+        };
+        self.recorded_tips.push_back(previous);
+    }
+    pub fn frame_retired(&mut self) {
+        if let Some(Some(previous)) = self.recorded_tips.pop_front() {
+            self.spare_tips.push(previous);
         }
     }
-    /// The oldest recording completed; its optimistic picture needs no rollback.
-    pub fn frame_retired(&mut self) {
-        self.recorded_tips.pop_front();
-    }
-    /// The newest recording was dropped before submission. Restore the picture
-    /// held by the previous recording, without reading the current frame clock.
     pub fn frame_discarded(&mut self) {
-        if let Some(previous) = self.recorded_tips.pop_back() {
-            self.drawn_tips = previous;
+        if let Some(Some(previous)) = self.recorded_tips.pop_back() {
+            self.spare_tips
+                .push(std::mem::replace(&mut self.drawn_tips, previous));
         }
     }
     pub fn drawing(&self) -> bool {

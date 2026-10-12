@@ -924,11 +924,11 @@ impl Shared {
         {
             let flight = &mut st.flight;
             let (trace, traced) = (st.trace, &mut st.traced);
-            st.ring.poll_source(&gpu, &mut st.sink.renderer, |tag, bytes| {
+            st.ring.poll_source_rows(&gpu, &mut st.sink.renderer, |tag, bytes| {
                 let at = Instant::now();
                 let mut buf = self.spare.lock().ok().and_then(|mut s| s.pop()).unwrap_or_default();
                 buf.clear();
-                buf.extend_from_slice(bytes);
+                bytes.copy_into(&mut buf);
                 copy_ms += at.elapsed().as_secs_f64() * 1e3;
                 while let Some((t, mut meta)) = flight.pop_front() {
                     if t == tag {

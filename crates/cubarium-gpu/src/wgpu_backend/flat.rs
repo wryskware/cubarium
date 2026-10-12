@@ -3,8 +3,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use super::upload::{self, UploadRing};
 use anyhow::{Result, ensure};
-use wgpu::util::DeviceExt;
 
 use super::shader::Shader;
 use super::{FrameSource, Gpu, PresentPass, TargetSlot};
@@ -14,13 +14,12 @@ use crate::render::{FillProfile, f16};
 use crate::scene::{LAYERS, Layer, RingLayout, Scene, SpriteInstance};
 
 pub const RASTER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const SCRATCH_SIDE: u32 = 256;
+use crate::render::SCRATCH_SIDE;
 const INSTANCE_CAPACITY: usize = 8192;
 
 struct ScratchRegion {
     origin: wgpu::Origin3d,
     size: wgpu::Extent3d,
-    bytes: Vec<u8>,
 }
 
 pub struct Renderer {
@@ -36,21 +35,24 @@ pub struct Renderer {
     opaque_by_origin: HashMap<[u16; 2], u32>,
     raster: wgpu::Texture,
     raster_view: wgpu::TextureView,
-    atlas_view: wgpu::TextureView,
     scratch: wgpu::Texture,
-    scratch_view: wgpu::TextureView,
     scratch_cursor: (u32, u32, u32),
     scratch_regions: Vec<ScratchRegion>,
     field_images: [wgpu::Texture; 2],
-    field_views: [wgpu::TextureView; 2],
     field_revision: Option<u64>,
     recorded: VecDeque<Option<u64>>,
-    nearest: wgpu::Sampler,
-    bind_layout: wgpu::BindGroupLayout,
     background: wgpu::RenderPipeline,
     water: wgpu::RenderPipeline,
     sprites: wgpu::RenderPipeline,
     present: HashMap<wgpu::TextureFormat, PresentPass>,
+    present_frames: std::collections::VecDeque<Option<wgpu::TextureFormat>>,
+    uploads: UploadRing,
+    uniforms: wgpu::Buffer,
+    uniform_stride: u64,
+    instances: Vec<wgpu::Buffer>,
+    groups: Vec<wgpu::BindGroup>,
+    record_slots: VecDeque<usize>,
+    scratch_bytes: Vec<u16>,
 }
 
 impl Renderer {
@@ -185,6 +187,61 @@ impl Renderer {
             true,
             &buffers,
         );
+        let uniform_size = std::mem::size_of::<SceneUniforms>() as u64;
+        let alignment = u64::from(gpu.device.limits().min_uniform_buffer_offset_alignment);
+        let uniform_stride = uniform_size.div_ceil(alignment) * alignment;
+        let uniforms = upload::buffer(
+            gpu,
+            "scene uniform ring",
+            uniform_stride * crate::voxel::STAGING_RING as u64,
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let instances: Vec<_> = (0..crate::voxel::STAGING_RING)
+            .map(|_| {
+                upload::buffer(
+                    gpu,
+                    "scene instance ring",
+                    (INSTANCE_CAPACITY * std::mem::size_of::<SpriteInstance>()) as u64,
+                    wgpu::BufferUsages::VERTEX,
+                )
+            })
+            .collect();
+        let groups = (0..crate::voxel::STAGING_RING)
+            .map(|slot| {
+                let mut entries = vec![wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &uniforms,
+                        offset: slot as u64 * uniform_stride,
+                        size: wgpu::BufferSize::new(uniform_size),
+                    }),
+                }];
+                for (i, view) in [&field_views[0], &field_views[1], &atlas_view, &scratch_view]
+                    .into_iter()
+                    .enumerate()
+                {
+                    entries.push(wgpu::BindGroupEntry {
+                        binding: i as u32 + 1,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    });
+                }
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 32,
+                    resource: wgpu::BindingResource::Sampler(&nearest),
+                });
+                gpu.bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("scene resources"),
+                    layout: &bind_layout,
+                    entries: &entries,
+                })
+            })
+            .collect();
+        let capacity = uniform_stride
+            + instances[0].size()
+            + 2 * upload::texture_bytes(extent(layout.cells_x(), layout.cells_y()), 8)
+            + upload::texture_bytes(extent(SCRATCH_SIDE, SCRATCH_SIDE), 8)
+            + 1024;
+        let uploads = UploadRing::new(gpu, capacity, crate::voxel::STAGING_RING);
         Ok(Self {
             closed: false,
             atlas: atlas_image,
@@ -202,21 +259,24 @@ impl Renderer {
                 .collect(),
             raster,
             raster_view,
-            atlas_view,
             scratch,
-            scratch_view,
             scratch_cursor: (0, 0, 0),
             scratch_regions: vec![],
             field_images,
-            field_views,
             field_revision: None,
             recorded: VecDeque::new(),
-            nearest,
-            bind_layout,
             background,
             water,
             sprites,
             present: HashMap::new(),
+            present_frames: Default::default(),
+            uploads,
+            uniforms,
+            uniform_stride,
+            instances,
+            groups,
+            record_slots: VecDeque::new(),
+            scratch_bytes: vec![0; (SCRATCH_SIDE * SCRATCH_SIDE * 4) as usize],
         })
     }
 
@@ -252,14 +312,16 @@ impl Renderer {
         if y + h > SCRATCH_SIDE {
             return None;
         }
-        let halves: Vec<_> = pixels[..(w * h) as usize]
-            .iter()
-            .flat_map(|p| p.map(f16))
-            .collect();
+        for row in 0..h {
+            for col in 0..w {
+                let src = pixels[(row * w + col) as usize].map(f16);
+                let dst = ((y + row) * SCRATCH_SIDE + x + col) as usize * 4;
+                self.scratch_bytes[dst..dst + 4].copy_from_slice(&src);
+            }
+        }
         self.scratch_regions.push(ScratchRegion {
             origin: wgpu::Origin3d { x, y, z: 0 },
             size: extent(w, h),
-            bytes: bytemuck::cast_slice(&halves).to_vec(),
         });
         self.scratch_cursor = (x + w, y, shelf.max(h));
         Some([x as u16, y as u16])
@@ -295,49 +357,59 @@ impl Renderer {
             scene.layout == self.layout,
             "scene layout differs from renderer"
         );
-        let uniform = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("scene uniforms"),
-                contents: bytemuck::bytes_of(&SceneUniforms::new(
-                    self.layout,
-                    scene.fields.producer_max,
-                    scene.seconds,
-                    scene.f,
-                    self.bend_substep,
-                    self.filter_bilinear,
-                    self.art_scale,
-                )),
-                usage: wgpu::BufferUsages::UNIFORM,
-            });
-        let mut offsets = [(0u32, 0u32); crate::scene::LAYER_COUNT];
-        let mut instances = Vec::with_capacity(scene.instance_count());
-        for layer in LAYERS {
-            let list = &scene.layers[layer as usize];
-            offsets[layer as usize] = (instances.len() as u32, list.len() as u32);
-            instances.extend_from_slice(list);
-        }
+        gpu.check_alive()?;
         ensure!(
-            instances.len() <= INSTANCE_CAPACITY,
+            self.recorded.len() < crate::voxel::STAGING_RING,
+            "renderer is at frame capacity"
+        );
+        ensure!(
+            scene.instance_count() <= INSTANCE_CAPACITY,
             "too many sprite instances"
         );
-        let instance_buffer = gpu
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("sprite instances"),
-                contents: bytemuck::cast_slice(&instances),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let slot = (0..crate::voxel::STAGING_RING)
+            .find(|slot| !self.record_slots.contains(slot))
+            .unwrap();
+        self.record_slots.push_back(slot);
+        self.present_frames.push_back(None);
+        self.recorded.push_back(self.field_revision);
         let timing = self.timing.begin(gpu, 4);
+        let mut writer = self.uploads.begin(gpu, slot)?;
         if let Some(t) = &timing {
             t.stamp(encoder, 0);
         }
-        let previous = self.field_revision;
-        self.recorded.push_back(previous);
+        let block = SceneUniforms::new(
+            self.layout,
+            scene.fields.producer_max,
+            scene.seconds,
+            scene.f,
+            self.bend_substep,
+            self.filter_bilinear,
+            self.art_scale,
+        );
+        writer.bytes(
+            encoder,
+            &self.uniforms,
+            slot as u64 * self.uniform_stride,
+            bytemuck::bytes_of(&block),
+        )?;
+        let instance_buffer = &self.instances[slot];
+        let mut offsets = [(0u32, 0u32); crate::scene::LAYER_COUNT];
+        let mut count = 0;
+        for layer in LAYERS {
+            let list = &scene.layers[layer as usize];
+            offsets[layer as usize] = (count as u32, list.len() as u32);
+            writer.bytes(
+                encoder,
+                instance_buffer,
+                (count * std::mem::size_of::<SpriteInstance>()) as u64,
+                bytemuck::cast_slice(list),
+            )?;
+            count += list.len();
+        }
         if self.field_revision != Some(scene.fields.revision) {
             let planes = field_halves(self.layout, &scene.fields);
             for (image, halves) in self.field_images.iter().zip(&planes) {
-                gpu.upload_texture(
+                writer.texture(
                     encoder,
                     image,
                     wgpu::Origin3d::ZERO,
@@ -348,44 +420,40 @@ impl Renderer {
             }
             self.field_revision = Some(scene.fields.revision);
         }
-        for region in &self.scratch_regions {
-            gpu.upload_texture(
+        let partial_bytes: u64 = self
+            .scratch_regions
+            .iter()
+            .map(|r| upload::texture_bytes(r.size, 8))
+            .sum();
+        if partial_bytes > upload::texture_bytes(extent(SCRATCH_SIDE, SCRATCH_SIDE), 8) {
+            writer.texture(
                 encoder,
                 &self.scratch,
-                region.origin,
-                region.size,
+                wgpu::Origin3d::ZERO,
+                extent(SCRATCH_SIDE, SCRATCH_SIDE),
                 8,
-                &region.bytes,
+                bytemuck::cast_slice(&self.scratch_bytes),
             )?;
+        } else {
+            for region in &self.scratch_regions {
+                let at = ((region.origin.y * SCRATCH_SIDE + region.origin.x) * 4) as usize;
+                writer.texture_rows(
+                    encoder,
+                    &self.scratch,
+                    region.origin,
+                    region.size,
+                    8,
+                    bytemuck::cast_slice(&self.scratch_bytes[at..]),
+                    SCRATCH_SIDE * 8,
+                    SCRATCH_SIDE,
+                )?;
+            }
         }
+        writer.finish(encoder);
         if let Some(t) = &timing {
             t.stamp(encoder, 1);
         }
-        let views = [
-            &self.field_views[0],
-            &self.field_views[1],
-            &self.atlas_view,
-            &self.scratch_view,
-        ];
-        let mut entries = vec![wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform.as_entire_binding(),
-        }];
-        for (i, view) in views.into_iter().enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: i as u32 + 1,
-                resource: wgpu::BindingResource::TextureView(view),
-            });
-        }
-        entries.push(wgpu::BindGroupEntry {
-            binding: 32,
-            resource: wgpu::BindingResource::Sampler(&self.nearest),
-        });
-        let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scene"),
-            layout: &self.bind_layout,
-            entries: &entries,
-        });
+        let bind = &self.groups[slot];
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene raster"),
@@ -400,7 +468,7 @@ impl Renderer {
                 })],
                 ..Default::default()
             });
-            pass.set_bind_group(0, &bind, &[]);
+            pass.set_bind_group(0, bind, &[]);
             pass.set_pipeline(&self.background);
             pass.draw(0..3, 0..1);
             pass.set_vertex_buffer(0, instance_buffer.slice(..));
@@ -422,7 +490,8 @@ impl Renderer {
             t.stamp(encoder, 2);
         }
         if let Some(target) = target {
-            self.present
+            let shown = self
+                .present
                 .entry(target.format)
                 .or_insert_with(|| PresentPass::new(gpu, target.format))
                 .record(
@@ -432,6 +501,8 @@ impl Renderer {
                     target.view,
                     target.transform,
                 );
+            ensure!(shown, "present recording failed");
+            *self.present_frames.back_mut().unwrap() = Some(target.format);
         }
         if let Some(t) = timing {
             t.stamp(encoder, 3);
@@ -440,7 +511,7 @@ impl Renderer {
         if self.fill_profile {
             self.fill = self.profile(scene);
         }
-        Ok(instances.len())
+        Ok(count)
     }
 
     fn profile(&self, scene: &Scene) -> FillProfile {
@@ -501,10 +572,21 @@ impl FrameSource for Renderer {
     }
     fn frame_retired(&mut self) {
         self.timing.retire();
+        self.present_frames.pop_front();
         self.recorded.pop_front();
+        self.record_slots.pop_front();
+        self.uploads.retire();
     }
     fn frame_discarded(&mut self) {
         self.timing.discard();
+        if let Some(Some(format)) = self.present_frames.pop_back() {
+            if let Some(p) = self.present.get(&format) {
+                p.discarded();
+            }
+        }
+        if let Some(slot) = self.record_slots.pop_back() {
+            self.uploads.discard_slot(slot);
+        }
         if let Some(previous) = self.recorded.pop_back() {
             self.field_revision = previous;
         }

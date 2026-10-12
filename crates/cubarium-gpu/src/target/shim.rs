@@ -194,7 +194,7 @@ impl ShimScanout {
         Ok((
             PANEL.0,
             PANEL.1,
-            self.slots[self.last_presented].image.rgba().to_vec(),
+            self.slots[self.last_presented].image.rgba(),
         ))
     }
 

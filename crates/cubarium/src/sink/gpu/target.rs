@@ -56,6 +56,9 @@ impl GpuTarget {
                 Err(error) => eprintln!("cubarium: no GPU development window ({error:#}); reading the raster back instead"),
             }
         }
+        if kind == GpuTargetKind::Window && std::env::var_os("CUBARIUM_HIDDEN_LAUNCH").is_some() {
+            anyhow::bail!("hidden window initialization failed; refusing a second fallback window");
+        }
         Ok((Arc::new(Gpu::open().context("opening the GPU device for --sink gpu")?), None))
     }
 
@@ -165,6 +168,8 @@ impl GpuTarget {
 pub struct WindowTarget {
     window: minifb::Window,
     headless: Headless,
+    readback: cubarium_gpu::wgpu_backend::ReadbackRing,
+    rgba: Vec<u8>,
     buffer: Vec<u32>,
     zoom: usize,
     size: (usize, usize),
@@ -181,13 +186,14 @@ impl WindowTarget {
         crate::sink::hidden::window_allowed()?;
         let window = minifb::Window::new(title, size.0, size.1, minifb::WindowOptions::default())
             .context("opening the --gpu-target readback window")?;
-        Ok(Self { window, headless: Headless::new(gpu, src)?, buffer: vec![0; size.0 * size.1], zoom, size, open: true, save: false })
+        Ok(Self { window, headless: Headless::new(gpu, src)?, readback: cubarium_gpu::wgpu_backend::ReadbackRing::new(gpu, src.raster_size(), 1)?, rgba: Vec::new(), buffer: vec![0; size.0 * size.1], zoom, size, open: true, save: false })
     }
 
     fn draw<S: FrameSource>(&mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>) -> Result<f64> {
-        let ms = self.headless.draw(gpu, src, frame)?;
-        let rgba = src.read_raster(gpu)?;
-        upscale(&rgba, src.raster_size().0 as usize, self.zoom, &mut self.buffer);
+        anyhow::ensure!(self.readback.submit_source(gpu, src, frame, 0)?, "fallback readback has no free slot");
+        self.readback.drain_source_rows(gpu, src, |_, rows| rows.copy_into(&mut self.rgba))?;
+        let ms = src.gpu_ms(gpu);
+        upscale(&self.rgba, src.raster_size().0 as usize, self.zoom, &mut self.buffer);
         self.open = self.window.is_open() && !self.window.is_key_down(minifb::Key::Escape);
         if !self.open { return Ok(ms); }
         self.save |= self.window.is_key_pressed(minifb::Key::S, minifb::KeyRepeat::No)

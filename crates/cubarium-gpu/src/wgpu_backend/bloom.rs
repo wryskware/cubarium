@@ -146,7 +146,7 @@ impl Bloom {
             .into_iter()
             .map(|(mode, source, target, src)| {
                 let view = source.map_or(&emission.view, |i| &targets[i].view);
-                let bind = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                let bind = gpu.bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("bloom pass"),
                     layout: &layout,
                     entries: &[

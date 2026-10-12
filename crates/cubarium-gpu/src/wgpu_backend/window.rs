@@ -196,8 +196,11 @@ impl WindowPresenter {
         );
         let transform =
             crate::present::WindowFit::fit(raster_size, frame.size, !frame.format.is_srgb()).push();
-        self.present
-            .record(&self.gpu, encoder, raster, &frame.view, transform);
+        ensure!(
+            self.present
+                .record(&self.gpu, encoder, raster, &frame.view, transform),
+            "window present recording failed"
+        );
         Ok(())
     }
 
@@ -205,14 +208,27 @@ impl WindowPresenter {
     /// The caller uses the returned index/callback for renderer retirement.
     pub fn submit(
         &mut self,
-        mut frame: WindowFrame,
+        frame: WindowFrame,
         encoder: wgpu::CommandEncoder,
     ) -> Result<wgpu::SubmissionIndex> {
         ensure!(
             Arc::ptr_eq(&self.acquired, &frame.acquired),
             "frame belongs to another presenter"
         );
+        self.submit_with_callback(frame, encoder, || {})
+    }
+    pub fn submit_with_callback(
+        &mut self,
+        mut frame: WindowFrame,
+        encoder: wgpu::CommandEncoder,
+        completed: impl FnOnce() + Send + 'static,
+    ) -> Result<wgpu::SubmissionIndex> {
+        ensure!(
+            Arc::ptr_eq(&self.acquired, &frame.acquired),
+            "frame belongs to another presenter"
+        );
         let submission = self.gpu.queue.submit([encoder.finish()]);
+        self.gpu.queue.on_submitted_work_done(completed);
         self.gpu
             .queue
             .present(frame.texture.take().expect("acquired window image"));
@@ -245,9 +261,31 @@ fn configuration(
         .copied()
         .find(wgpu::TextureFormat::is_srgb)
         .unwrap_or(config.format);
-    config.present_mode = wgpu::PresentMode::Fifo;
+    config.present_mode = present_mode(
+        &caps.present_modes,
+        std::env::var_os("CUBARIUM_WINDOW_FIFO").is_some_and(|v| v == "1"),
+    );
     if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) {
         config.alpha_mode = wgpu::CompositeAlphaMode::Opaque;
     }
     Ok(config)
+}
+
+fn present_mode(offered: &[wgpu::PresentMode], force_fifo: bool) -> wgpu::PresentMode {
+    if !force_fifo && offered.contains(&wgpu::PresentMode::Mailbox) {
+        wgpu::PresentMode::Mailbox
+    } else {
+        wgpu::PresentMode::Fifo
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::present_mode;
+    use wgpu::PresentMode::{Fifo, Mailbox};
+    #[test]
+    fn mailbox_is_preferred_and_fifo_is_the_fallback_or_explicit_override() {
+        assert_eq!(present_mode(&[Fifo, Mailbox], false), Mailbox);
+        assert_eq!(present_mode(&[Fifo], false), Fifo);
+        assert_eq!(present_mode(&[Fifo, Mailbox], true), Fifo);
+    }
 }
