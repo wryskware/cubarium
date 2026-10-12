@@ -613,6 +613,25 @@ fn the_lanternjaws_patrol_states_map_to_its_menu() {
         fed |= label == "feed";
     }
     assert!(fed, "at a carcass it is labelled feed");
+    // BRAIN-FIX-2: fed, at a carcass, the latch off: it takes nothing and digests, so `rest`,
+    // not `feed`, whichever layer answers.
+    let (mut fauna, mut flora, id) = fresh(StartingStores::FULL);
+    let k = fauna.config.founder(LJ).gut.capacity(animal(&fauna, id).body);
+    {
+        let a = animal_mut(&mut fauna, id);
+        a.stomach = crate::Stomach::default();
+        a.stomach.pools[crate::Food::Carrion.index()] = cubarium_voxel_flora::Taken { organic: k, mineral: 0.05 * k, energy: 2.0 * k };
+        a.eating = false;
+    }
+    let (mx, mz) = ahead_of(&fauna, id, 0.0);
+    carcass_at(&mut flora, mx, mz, SURFACE_Y, 0.5);
+    let before = animal(&fauna, id).stomach.organic();
+    for _ in 0..3 {
+        let (_, label, _) = next_label(&mut fauna, &world, &mut flora, id);
+        assert!(!animal(&fauna, id).eating, "the latch stays off on a full stomach");
+        assert_eq!(label, "rest", "fed at a carcass it digests");
+    }
+    assert!(animal(&fauna, id).stomach.organic() <= before, "and takes nothing");
 }
 
 /// A lanternjaw on its own heuristic with the given stores.
