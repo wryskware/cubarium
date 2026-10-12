@@ -41,7 +41,8 @@ family, kills are exact family victim IDs. Captures are null: today's bites
 have no holding stage. VH-TACTICS adds the fauna ledger's `hound_tests` (tests
 begun), `test_commits`, `give_ups` (tests broken off and chases given up),
 `substitutions` and `lunges_blocked`, and ChaseStart counts split into
-`calf_chases` and `adult_chases`; `tests` keeps its BrokeOff definition (on the
+`calf_chases` and `adult_chases`, and `ends` (the pack's ChaseEnd events on the
+family by reason); `tests` keeps its BrokeOff definition (on the
 new tactic a value give-up also logs BrokeOff). These definitions are explicit and should be retained
 when comparing later arms; they are not position-based proxies.
 

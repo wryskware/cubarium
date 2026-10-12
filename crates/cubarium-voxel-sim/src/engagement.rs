@@ -287,6 +287,7 @@ pub struct Episode {
     family_flee_ticks: u64,
     calf_chases: u64,
     adult_chases: u64,
+    ends: BTreeMap<String, u64>,
 }
 
 /// Found a start with stable IDs for all seven roster slots, even in smaller arms.
@@ -514,6 +515,7 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         family_flee_ticks: 0,
         calf_chases: 0,
         adult_chases: 0,
+        ends: BTreeMap::new(),
     })
 }
 
@@ -566,6 +568,11 @@ pub struct RowOut {
     pub calf_chases: u64,
     #[serde(default)]
     pub adult_chases: u64,
+    /// The pack's ChaseEnd events on the family by reason (`BrokeOff`, `Spent`, `Late`,
+    /// `Lost`, ...): under VH-TACTICS a value give-up or a test broken off logs `BrokeOff`, a
+    /// wounded or winded hound `Spent`, a stalled chase `Late`.
+    #[serde(default)]
+    pub ends: BTreeMap<String, u64>,
 }
 impl Episode {
     /// Step once and read state/events. Does not infer giving up or death from positions.
@@ -631,6 +638,7 @@ impl Episode {
                     if why == ChaseEnd::BrokeOff {
                         self.tests += 1;
                     }
+                    *self.ends.entry(format!("{why:?}")).or_default() += 1;
                     self.abandoned = matches!(
                         why,
                         ChaseEnd::Late
@@ -729,6 +737,7 @@ impl Episode {
             lunges_blocked: self.sim.fauna().view().ledger.lunges_blocked,
             calf_chases: self.calf_chases,
             adult_chases: self.adult_chases,
+            ends: self.ends.clone(),
         }
     }
 }
