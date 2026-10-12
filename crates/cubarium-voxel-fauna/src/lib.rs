@@ -69,6 +69,11 @@ mod dry;
 pub use dry::{DryScope, TeacherLabel};
 #[cfg(test)]
 mod dry_tests;
+/// LS-DEFEND (behaviour-AI §3): the loftstrider's family defence.
+pub mod defend;
+pub use defend::Defence;
+/// YOUNG-ROAM (behaviour-AI §3.5): young pace, the loosening leash and excursions.
+pub mod roam;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -89,6 +94,7 @@ pub use step::forage::ForageTally;
 pub use scent::ScentChannel;
 mod par;
 pub use pack::centre as pack_centre;
+pub use pack::tactics::{Assess, Hound, HoundTeach, Tactics, TestPhase};
 mod registry;
 pub use registry::registry;
 mod senses;
@@ -1175,6 +1181,12 @@ pub struct Animal {
     /// Always ready for a lineage without one.
     #[serde(default)]
     pub kick: kick::KickState,
+    /// **Its stance** (LS-DEFEND, behaviour-AI §2.1: [`perception::stance`]): what a watcher's
+    /// sight shows of its posture beyond moving and resting — [`perception::stance::GUARD`]
+    /// while it holds the guard intent (braced, facing a threat). Set at its controller
+    /// samples; asleep it shows none.
+    #[serde(default)]
+    pub stance: u8,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -2693,6 +2705,18 @@ impl FaunaConfig {
         })
     }
 
+    /// **The manifest a body of `body` runs** (YOUNG-ROAM): [`FaunaConfig::manifest`] with its
+    /// cruise, and so its sprint, at its own length ([`roam::pace_scale`]), and the forward
+    /// reference that follows cruise, so its resolved-forward feedback stays a share of its
+    /// own cruise. An adult's is the lineage's.
+    pub fn body_manifest(&self, founder: Founder, body: f64) -> Manifest {
+        let mut m = self.manifest(founder);
+        let scale = roam::pace_scale(self.founder(founder), body);
+        m.cruise_m_per_s *= scale;
+        m.forward_reference_m *= scale;
+        m
+    }
+
     /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
     /// motor numbers of its physiology in the config — cruise (`cruise_body_lengths_per_s`
     /// × the adult length), the yaw cap, and the forward reference that follows cruise.
@@ -3452,6 +3476,28 @@ pub struct FaunaLedger {
     /// **CHURN**: pack targets given up for a better one (past `Pack::switch_margin`).
     #[serde(default)]
     pub pack_switches: u64,
+    /// **VH-TACTICS** readouts: tests begun, tests that ended in a commitment, hunts given up
+    /// (a test broken off or a chase given up), strikes on a substituted young body, and
+    /// lunges that met a body before their prey (taken by it or blocked).
+    #[serde(default)]
+    pub hound_tests: u64,
+    #[serde(default)]
+    pub hound_test_commits: u64,
+    #[serde(default)]
+    pub hound_give_ups: u64,
+    #[serde(default)]
+    pub hound_substitutions: u64,
+    #[serde(default)]
+    pub lunges_blocked: u64,
+    /// **LS-DEFEND** readouts: controller samples that held a defence intent (by the
+    /// loftstrider menu's index, [`intent::LOFTSTRIDER`]), kicks landed on a body by the
+    /// kicker's lineage, and kick-backs a landed bite drew.
+    #[serde(default)]
+    pub defence_samples: [u64; intent::MAX_MENU],
+    #[serde(default)]
+    pub kicks_landed_by_founder: [u64; Founder::COUNT],
+    #[serde(default)]
+    pub kick_backs: u64,
     /// **STRIKE**: member samples steered by the close-in ([`Pack::close_in_m`]); of them,
     /// steps off from a prey inside the outline and pivots to face one; and chases broken off
     /// as out of reach (no face beside the target puts it in the jaw band).
@@ -4288,6 +4334,26 @@ pub struct Fauna {
     /// CONTRACTS: each hearer's call records ([`calls::Heard`]). Saved: simpler than not.
     #[serde(default)]
     pub(crate) heard: FxHashMap<u64, calls::Heard>,
+    /// VH-TACTICS: each Veilhound's tactical memory ([`Hound`]): its target and commitment,
+    /// its test, its progress, the bodies it shuns, the kicks it saw, a carcass it knows, the
+    /// last regroup howl it heard. Saved: a load continues a hunt.
+    #[serde(default)]
+    pub(crate) hounds: FxHashMap<u64, Hound>,
+    /// VH-TACTICS: each hound's teacher labels at its last sample ([`HoundTeach`]), read by
+    /// its intent record. Session state.
+    #[serde(skip)]
+    pub(crate) hound_teach: FxHashMap<u64, HoundTeach>,
+    /// LS-DEFEND: each loftstrider's teacher labels at its last sample under its defence layer
+    /// ([`defend::steer`]), read by its intent record. Session state.
+    #[serde(skip)]
+    pub(crate) ls_teach: FxHashMap<u64, intent::Teach>,
+    /// YOUNG-ROAM: each young's excursion under way ([`roam::excursion`]). Session state, not
+    /// saved: a load sends it back under its leash.
+    #[serde(skip)]
+    pub(crate) excursions: FxHashMap<u64, roam::Excursion>,
+    /// YOUNG-ROAM's readout per lineage ([`roam::RoamTally`]). Session state: not saved.
+    #[serde(skip)]
+    pub(crate) roam_tally: [roam::RoamTally; Founder::COUNT],
     /// EDGE: per body, the target a reflex walk is taking it to ([`Fauna::walk_key`]: a
     /// stand's id, or a face), the tick it set out (`teachers.press_replan_s` runs from there)
     /// and the last tick it walked there. Session state: not saved.
@@ -4441,11 +4507,17 @@ pub enum Steer {
     Nurse,
     /// CALLS-REST: the walk down the hunter scent to a bed ([`sleep::bed_reflex`]).
     Bed,
+    /// LS-DEFEND: a defence intent's skill ([`defend::steer`]).
+    Defend,
+    /// YOUNG-ROAM: a young's excursion ([`roam::excursion`]).
+    Explore,
+    /// YOUNG-ROAM: a mother's walk to her own young's distress call ([`roam::answer`]).
+    Answer,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 21] = [
+    pub const ALL: [Steer; 24] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4467,6 +4539,9 @@ impl Steer {
         Steer::Groom,
         Steer::Nurse,
         Steer::Bed,
+        Steer::Defend,
+        Steer::Explore,
+        Steer::Answer,
     ];
 
     /// A short name for tables.
@@ -4493,6 +4568,9 @@ impl Steer {
             Steer::Groom => "groom",
             Steer::Nurse => "nurse",
             Steer::Bed => "bed",
+            Steer::Defend => "defend",
+            Steer::Explore => "explore",
+            Steer::Answer => "answer",
         }
     }
 }
@@ -4876,6 +4954,11 @@ impl Fauna {
             dry: Default::default(),
             calls: Vec::new(),
             last_call: FxHashMap::default(),
+            hounds: FxHashMap::default(),
+            hound_teach: FxHashMap::default(),
+            ls_teach: FxHashMap::default(),
+            excursions: FxHashMap::default(),
+            roam_tally: [roam::RoamTally::default(); Founder::COUNT],
             heard: FxHashMap::default(),
             walk_targets: FxHashMap::default(),
             walk_pending: FxHashMap::default(),
@@ -4919,10 +5002,32 @@ impl Fauna {
         self.tap.as_ref()
     }
 
+    /// VH-TACTICS' readout (the engagement harness, census): Veilhound `id`'s tactical memory
+    /// ([`Hound`]), `None` before it has one. Bookkeeping: no rule reads another hound's.
+    pub fn hound(&self, id: u64) -> Option<&Hound> {
+        self.hounds.get(&id)
+    }
+
+    /// VH-FIX's readout (the engagement trace): what Veilhound `id` makes of each prey it
+    /// senses now, `(prey id, assessment)` (§4.3). Bookkeeping: no rule reads it.
+    pub fn hound_values(&self, id: u64) -> Vec<(u64, Assess)> {
+        crate::pack::tactics::values(self, id)
+    }
+
     /// EDGE's readout: which layer set the founder `id`'s held actions on its last
     /// controller sample, `None` before its first.
     pub fn steer_of(&self, id: u64) -> Option<Steer> {
         self.steer.get(&id).copied()
+    }
+
+    /// YOUNG-ROAM's readout for lineage `founder` ([`roam::RoamTally`]).
+    pub fn roam_tally(&self, founder: Founder) -> roam::RoamTally {
+        self.roam_tally[founder.index()]
+    }
+
+    /// Body `id`'s excursion under way, if any ([`roam::excursion`]).
+    pub fn excursion_of(&self, id: u64) -> Option<roam::Excursion> {
+        self.excursions.get(&id).copied()
     }
 
     /// EDGE's readout: the ticks founder `id` has pressed without a break, the target its
@@ -5922,6 +6027,7 @@ impl Fauna {
             mother: None,
             intent: IntentRecord::default(),
             kick: kick::KickState::default(),
+            stance: 0,
             bite: LastBite::default(),
         };
         let mut animal = animal;

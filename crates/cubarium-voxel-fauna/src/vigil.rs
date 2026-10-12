@@ -151,7 +151,8 @@ pub struct Vigilance {
     /// ...once no threat has come within `flee_stop_m` for this long, seconds.
     pub calm_s: f64,
     /// An adult flees only from at least this many threats within `flee_start_m` (a
-    /// juvenile from one): below it it stands its ground, facing them. Count.
+    /// juvenile from one): below it it stands its ground, facing them. Count. Retired for a
+    /// lineage whose defence layer is on (LS-DEFEND: [`crate::Defence`]).
     pub group_min: u32,
     /// Its emission (hearing's `speed^a × length^b`) is multiplied by this while it flees or
     /// bolts: a run is loud. Factor.
@@ -575,6 +576,13 @@ pub struct Vigil {
     /// and the tick its current heeding of a call began (0: none; [`crate::calls::reaction`]).
     pub wound_seen: f64,
     pub heard_from: u64,
+    /// **LS-DEFEND**: its defence layer's own hold ([`crate::defend::steer`]): the menu index
+    /// of the intent it holds and the tick that hold began (0: never sampled). Its intent
+    /// record is written from it and read by no rule.
+    #[serde(default)]
+    pub defend_held: u8,
+    #[serde(default)]
+    pub defend_since: u64,
 }
 
 impl Vigilance {
@@ -609,7 +617,7 @@ fn ticks(s: f64) -> u64 {
 }
 
 /// Steer toward the heading `want`: turn in place beyond 60°, else walk at `forward`.
-fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
+pub(crate) fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
     let d = (want - a.pose.heading_rad).rem_euclid(std::f64::consts::TAU);
     let diff = if d > std::f64::consts::PI { d - std::f64::consts::TAU } else { d };
     Actions {
@@ -621,22 +629,22 @@ fn head(a: &Animal, want: f64, forward: f64, feed: f64) -> Actions {
 
 /// A threat in the record, from where it stands now.
 #[derive(Clone, Copy, Debug)]
-struct Threat {
-    d: f64,
-    x: f64,
-    z: f64,
-    id: u64,
+pub(crate) struct Threat {
+    pub(crate) d: f64,
+    pub(crate) x: f64,
+    pub(crate) z: f64,
+    pub(crate) id: u64,
     /// Seen moving or near, heard, or felt: an approaching body, not a still shape. Never
     /// for a watched one (`calm`).
-    pressing: bool,
+    pub(crate) pressing: bool,
     /// **FEAR**: seen asleep, or resting and not facing it, by a lineage that watches.
-    calm: bool,
+    pub(crate) calm: bool,
     /// From it, 3D (its base to the track's base), metres.
-    d3: f64,
+    pub(crate) d3: f64,
     /// Seen (sight among the senses that hold it).
-    seen: bool,
+    pub(crate) seen: bool,
     /// Gait inferred from a fresh moving track's lineage and visible length, m/s.
-    gait: f64,
+    pub(crate) gait: f64,
 }
 
 /// **FEAR's judgement** of track `t` by the body at `a` with response `vg` (module note):
@@ -664,7 +672,7 @@ fn calm_of(config: &FaunaConfig, vg: &Vigilance, a: &Animal, t: &Track, ring: f6
     }
 }
 
-fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, vm: f64) -> Vec<Threat> {
+pub(crate) fn threats(config: &FaunaConfig, a: &Animal, p: &Percept, now: u64, ring: f64, vm: f64) -> Vec<Threat> {
     let fresh = 2 * config.perception.stagger_ticks();
     let vg = a.founder.map(|f| config.founder(f).vigilance).unwrap_or_default();
     let base = crate::perception::base_m(a, vm);
@@ -954,7 +962,7 @@ pub(crate) fn respond(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &Fl
 }
 
 /// A terrain check uses the same footprint, clearance, steps and water depth as movement.
-fn walk_clear(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, (dx, dz): (f64, f64)) -> bool {
+pub(crate) fn walk_clear(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, (dx, dz): (f64, f64)) -> bool {
     let Some(f) = a.founder else { return false };
     let phys = fauna.config.founder(f);
     let b = phys.body_at(a.body);
@@ -1057,7 +1065,15 @@ fn herd(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, r
     v.calm_walk = false;
     let th = threats(&fauna.config, &a, &p, now, ring, view.config.voxel_m);
     let adult = a.body >= phys.core.birth_body;
-    let need = if adult { vg.group_min.max(1) as usize } else { 1 };
+    // LS-DEFEND: with the defence layer on, `group_min` is retired: a grown body never starts
+    // a flight (it guards), and a young one only while it knows no adult to run to.
+    let need = if phys.defence.enabled {
+        if crate::intent::young(fauna, &a, founder) && !crate::defend::knows_adult(fauna, &a) { 1 } else { usize::MAX }
+    } else if adult {
+        vg.group_min.max(1) as usize
+    } else {
+        1
+    };
     let k = founder.index();
     // CALLS-REST: its calls, from what its record holds (§2.1).
     {
@@ -1526,7 +1542,8 @@ pub(crate) fn pry(fauna: &mut Fauna, ring: f64) {
             let Some(ol) = crate::body_of(&fauna.config, o).map(|b| b.length_m) else { continue };
             // HERD: work belongs to the pack's selected prey. Passing a grazer on the
             // way to another prey, or resting at its feast, must not pry that grazer.
-            if hk.herd_enabled && o.pack.is_some_and(|m| !fauna.packs.iter().any(|r| r.id == m.pack && r.target == Some(p.id))) {
+            // VH-TACTICS (§11.6): read from the hound's own attack state, not the pack target.
+            if hk.herd_enabled && o.pack.is_some() && !crate::pack::tactics::attacks(fauna, o, p.id) {
                 continue;
             }
             if d <= 0.5 * (pl + ol) + hk.pry_reach_m {
@@ -1568,7 +1585,10 @@ pub(crate) fn stalk(fauna: &mut Fauna, a: &Animal, t: &Track, d: f64, asked: f64
     let now = fauna.tick;
     let prey = fauna.view().animal(t.id).copied()?;
     let pv = fauna.percept(prey.id).map(|p| p.vigil).unwrap_or_default();
-    if d <= pk.commit_m || pv.running(now) {
+    // VH-TACTICS (§2.1): a tactics hound reads the prey running from its own track; the old
+    // tactic (the comparison arm) its flight state.
+    let running = crate::pack::tactics::seen_running(fauna, a, t).unwrap_or_else(|| pv.running(now));
+    if d <= pk.commit_m || running {
         fauna.ledger.vigil.rush_samples += 1;
         // GAIT: the rush is its sprint.
         return Some(asked * crate::gait::sprint_forward(&fauna.config, a.founder?));

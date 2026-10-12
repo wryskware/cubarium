@@ -76,14 +76,15 @@ impl Default for Herding {
 ///   pack's `select_kin_m`, so a herd-mate inside it already lowers a pack's prospect on it),
 ///   inside the 5 m it sees a still body at; half its turn leans back beyond it; a herd of more
 ///   than four known draws it less; it remembers where it last saw one for a minute;
-/// - the loftstrider: a calf only, within 6 m of its family (half its 12 m sight, under three
-///   adult lengths), the same half turn and minute;
+/// - the loftstrider: every age (LS-DEFEND, §3.1; a calf only before), within 6 m of its
+///   family (half its 12 m sight, under three adult lengths), the same half turn and minute;
 /// - the seedporter: a troop within 4 m (eight of its 0.5 m lengths, a quarter of its 16 m
 ///   sight), on the ground, the same half turn and minute.
 pub fn herding_of(founder: Founder) -> Herding {
     match founder {
         Founder::Browser => Herding { comfort_m: 3.0, pull: 0.5, herd_max: 4, memory_s: 60.0, young_only: false },
-        Founder::Loftstrider => Herding { comfort_m: 6.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: true },
+        // LS-DEFEND (§3.1, "stay with family: all, today calves only"): every age.
+        Founder::Loftstrider => Herding { comfort_m: 6.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false },
         Founder::Seedporter => Herding { comfort_m: 4.0, pull: 0.5, herd_max: 0, memory_s: 60.0, young_only: false },
         _ => Herding::default(),
     }

@@ -55,6 +55,7 @@ fn config() -> FaunaConfig {
         prey_weight: [1.0; Founder::COUNT],
         prey_juveniles_only: [false; Founder::COUNT],
         prey_ashore_only: [false; Founder::COUNT],
+        lunge_blocks: false,
     });
     sp.catch_bellwings = true;
     sp.catch_ceiling_m = 0.5;

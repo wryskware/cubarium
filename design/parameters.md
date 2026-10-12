@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (3411 rows)
+**`fauna.*`** (4383 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1731,7 +1731,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.littershredder.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.littershredder.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.littershredder.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.littershredder.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.littershredder.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.littershredder.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -1783,6 +1783,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.littershredder.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.littershredder.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.littershredder.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.littershredder.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.littershredder.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.littershredder.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.littershredder.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.littershredder.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.littershredder.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.littershredder.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.littershredder.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.littershredder.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.littershredder.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.littershredder.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.littershredder.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.littershredder.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.littershredder.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.littershredder.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.littershredder.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.littershredder.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.littershredder.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.littershredder.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.littershredder.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.littershredder.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.littershredder.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.littershredder.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.littershredder.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -1933,6 +1958,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.littershredder.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.littershredder.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.littershredder.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.littershredder.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.littershredder.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.littershredder.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.littershredder.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.littershredder.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.littershredder.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.littershredder.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.littershredder.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.littershredder.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.littershredder.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.littershredder.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.littershredder.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.littershredder.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.littershredder.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.littershredder.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.littershredder.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.littershredder.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.littershredder.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.littershredder.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.littershredder.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.littershredder.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.littershredder.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.littershredder.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.littershredder.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.littershredder.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.littershredder.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.littershredder.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.littershredder.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.littershredder.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.littershredder.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.littershredder.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.littershredder.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.littershredder.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.littershredder.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.littershredder.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.littershredder.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.littershredder.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.littershredder.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.littershredder.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.littershredder.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.littershredder.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.littershredder.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.littershredder.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.littershredder.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.littershredder.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.littershredder.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.littershredder.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.littershredder.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.littershredder.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.littershredder.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.littershredder.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.littershredder.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.littershredder.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.littershredder.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.littershredder.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.littershredder.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.littershredder.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.littershredder.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.littershredder.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.littershredder.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.littershredder.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.littershredder.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.littershredder.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.littershredder.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.littershredder.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.littershredder.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.littershredder.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.littershredder.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.littershredder.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.littershredder.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.littershredder.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.littershredder.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.littershredder.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.littershredder.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.littershredder.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.littershredder.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.littershredder.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.littershredder.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.littershredder.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.littershredder.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.littershredder.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.littershredder.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.littershredder.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -2085,7 +2193,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.vigilance.flee_start_m` | 4.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.frondgrazer.vigilance.flee_stop_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.frondgrazer.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.frondgrazer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.frondgrazer.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.frondgrazer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.frondgrazer.vigilance.scan_every_s` | 6.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -2137,6 +2245,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.frondgrazer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.frondgrazer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.frondgrazer.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.frondgrazer.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.frondgrazer.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.frondgrazer.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.frondgrazer.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.frondgrazer.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.frondgrazer.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.frondgrazer.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.frondgrazer.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.frondgrazer.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.frondgrazer.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.frondgrazer.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.frondgrazer.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.frondgrazer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.frondgrazer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.frondgrazer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.frondgrazer.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.frondgrazer.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.frondgrazer.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.frondgrazer.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.frondgrazer.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.frondgrazer.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.frondgrazer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.frondgrazer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.frondgrazer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2287,6 +2420,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.frondgrazer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.frondgrazer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.frondgrazer.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.frondgrazer.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.frondgrazer.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.frondgrazer.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.frondgrazer.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.frondgrazer.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.frondgrazer.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.frondgrazer.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.frondgrazer.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.frondgrazer.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.frondgrazer.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.frondgrazer.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.frondgrazer.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.frondgrazer.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.frondgrazer.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.frondgrazer.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.frondgrazer.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.frondgrazer.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.frondgrazer.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.frondgrazer.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.frondgrazer.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.frondgrazer.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.frondgrazer.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.frondgrazer.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.frondgrazer.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.frondgrazer.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.frondgrazer.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.frondgrazer.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.frondgrazer.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.frondgrazer.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.frondgrazer.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.frondgrazer.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.frondgrazer.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.frondgrazer.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.frondgrazer.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.frondgrazer.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.frondgrazer.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.frondgrazer.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.frondgrazer.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.frondgrazer.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.frondgrazer.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.frondgrazer.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.frondgrazer.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.frondgrazer.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.frondgrazer.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.frondgrazer.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.frondgrazer.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.frondgrazer.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.frondgrazer.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.frondgrazer.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.frondgrazer.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.frondgrazer.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.frondgrazer.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.frondgrazer.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.frondgrazer.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.frondgrazer.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.frondgrazer.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.frondgrazer.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.frondgrazer.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.frondgrazer.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.frondgrazer.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.frondgrazer.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.frondgrazer.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.frondgrazer.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.frondgrazer.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.frondgrazer.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.frondgrazer.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.frondgrazer.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.frondgrazer.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.frondgrazer.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.frondgrazer.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.frondgrazer.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.frondgrazer.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.frondgrazer.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.frondgrazer.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.frondgrazer.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.frondgrazer.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.frondgrazer.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.frondgrazer.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.frondgrazer.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.frondgrazer.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.frondgrazer.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.frondgrazer.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.frondgrazer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -2439,7 +2655,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.lanternjaw.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.lanternjaw.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.lanternjaw.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.lanternjaw.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.lanternjaw.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.lanternjaw.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -2491,6 +2707,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.lanternjaw.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.lanternjaw.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.lanternjaw.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.lanternjaw.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.lanternjaw.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.lanternjaw.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.lanternjaw.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.lanternjaw.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.lanternjaw.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.lanternjaw.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.lanternjaw.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.lanternjaw.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.lanternjaw.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.lanternjaw.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.lanternjaw.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.lanternjaw.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.lanternjaw.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.lanternjaw.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.lanternjaw.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.lanternjaw.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.lanternjaw.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.lanternjaw.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.lanternjaw.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.lanternjaw.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.lanternjaw.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.lanternjaw.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.lanternjaw.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2641,6 +2882,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.lanternjaw.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.lanternjaw.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.lanternjaw.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.lanternjaw.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.lanternjaw.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.lanternjaw.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.lanternjaw.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.lanternjaw.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.lanternjaw.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.lanternjaw.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.lanternjaw.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.lanternjaw.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.lanternjaw.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.lanternjaw.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.lanternjaw.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.lanternjaw.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.lanternjaw.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.lanternjaw.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.lanternjaw.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.lanternjaw.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.lanternjaw.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.lanternjaw.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.lanternjaw.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.lanternjaw.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.lanternjaw.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.lanternjaw.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.lanternjaw.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.lanternjaw.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.lanternjaw.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.lanternjaw.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.lanternjaw.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.lanternjaw.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.lanternjaw.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.lanternjaw.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.lanternjaw.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.lanternjaw.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.lanternjaw.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.lanternjaw.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.lanternjaw.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.lanternjaw.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.lanternjaw.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.lanternjaw.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.lanternjaw.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.lanternjaw.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.lanternjaw.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.lanternjaw.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.lanternjaw.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.lanternjaw.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.lanternjaw.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.lanternjaw.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.lanternjaw.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.lanternjaw.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.lanternjaw.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.lanternjaw.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.lanternjaw.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.lanternjaw.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.lanternjaw.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.lanternjaw.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.lanternjaw.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.lanternjaw.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.lanternjaw.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.lanternjaw.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.lanternjaw.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.lanternjaw.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.lanternjaw.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.lanternjaw.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.lanternjaw.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.lanternjaw.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.lanternjaw.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.lanternjaw.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.lanternjaw.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.lanternjaw.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.lanternjaw.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.lanternjaw.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.lanternjaw.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.lanternjaw.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.lanternjaw.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.lanternjaw.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.lanternjaw.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.lanternjaw.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.lanternjaw.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.lanternjaw.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.lanternjaw.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.lanternjaw.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.lanternjaw.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.lanternjaw.counter.reach` | 0.5 | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.lanternjaw.counter.damage` | 0.7 | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.lanternjaw.counter.cost` | 100.0 | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -2793,7 +3117,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.capgnawer.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.capgnawer.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.capgnawer.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.capgnawer.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.capgnawer.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.capgnawer.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -2845,6 +3169,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.capgnawer.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.capgnawer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.capgnawer.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.capgnawer.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.capgnawer.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.capgnawer.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.capgnawer.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.capgnawer.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.capgnawer.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.capgnawer.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.capgnawer.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.capgnawer.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.capgnawer.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.capgnawer.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.capgnawer.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.capgnawer.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.capgnawer.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.capgnawer.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.capgnawer.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.capgnawer.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.capgnawer.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.capgnawer.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.capgnawer.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.capgnawer.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.capgnawer.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.capgnawer.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.capgnawer.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -2995,6 +3344,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.capgnawer.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.capgnawer.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.capgnawer.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.capgnawer.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.capgnawer.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.capgnawer.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.capgnawer.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.capgnawer.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.capgnawer.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.capgnawer.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.capgnawer.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.capgnawer.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.capgnawer.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.capgnawer.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.capgnawer.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.capgnawer.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.capgnawer.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.capgnawer.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.capgnawer.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.capgnawer.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.capgnawer.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.capgnawer.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.capgnawer.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.capgnawer.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.capgnawer.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.capgnawer.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.capgnawer.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.capgnawer.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.capgnawer.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.capgnawer.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.capgnawer.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.capgnawer.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.capgnawer.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.capgnawer.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.capgnawer.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.capgnawer.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.capgnawer.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.capgnawer.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.capgnawer.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.capgnawer.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.capgnawer.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.capgnawer.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.capgnawer.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.capgnawer.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.capgnawer.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.capgnawer.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.capgnawer.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.capgnawer.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.capgnawer.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.capgnawer.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.capgnawer.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.capgnawer.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.capgnawer.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.capgnawer.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.capgnawer.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.capgnawer.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.capgnawer.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.capgnawer.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.capgnawer.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.capgnawer.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.capgnawer.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.capgnawer.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.capgnawer.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.capgnawer.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.capgnawer.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.capgnawer.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.capgnawer.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.capgnawer.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.capgnawer.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.capgnawer.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.capgnawer.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.capgnawer.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.capgnawer.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.capgnawer.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.capgnawer.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.capgnawer.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.capgnawer.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.capgnawer.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.capgnawer.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.capgnawer.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.capgnawer.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.capgnawer.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.capgnawer.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.capgnawer.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.capgnawer.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.capgnawer.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -3147,7 +3579,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.vigilance.flee_start_m` | 6.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.loftstrider.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.loftstrider.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.loftstrider.vigilance.group_min` | 2 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.loftstrider.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.loftstrider.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.loftstrider.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3191,14 +3623,39 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.intent.prey_slots` | 0 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: prey rows a menu lineage's brain sees |
 | `fauna.founders.loftstrider.intent.place_slots` | 1 | slots | [0, inf) |  | - | placeholder, digest | CONTRACTS: place rows (rest spot, den, guard or cut-off point) a menu lineage's brain sees |
 | `fauna.founders.loftstrider.intent.adult_fraction` | 0.8 | x body_max | [0, 1] |  | - | placeholder | CONTRACTS: a body under this fraction of its lineage's adult body is young for the menu (calves go to adults, adults guard) |
-| `fauna.founders.loftstrider.kick.windup_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
-| `fauna.founders.loftstrider.kick.recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
-| `fauna.founders.loftstrider.kick.reach_m` | (absent) | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
-| `fauna.founders.loftstrider.kick.origin_forward_fraction` | (absent) | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
-| `fauna.founders.loftstrider.kick.arc_deg` | (absent) | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
-| `fauna.founders.loftstrider.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
-| `fauna.founders.loftstrider.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
-| `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.loftstrider.kick.windup_s` | 0.4 | s | [0, inf) |  | - | placeholder | CONTRACTS: from a kick's request to contact; a hoof's swing, ~0.4 s |
+| `fauna.founders.loftstrider.kick.recovery_s` | 2.5 | s | [0, inf) |  | - | placeholder | CONTRACTS: after contact before the next kick, aimed or back (one budget); ~2.5 s |
+| `fauna.founders.loftstrider.kick.reach_m` | 1.3 | m | [0, inf) |  | - | placeholder | CONTRACTS: from the kick's origin to the target's footprint; beyond a hound's bite (~1.3 m vs 0.84 m) |
+| `fauna.founders.loftstrider.kick.origin_forward_fraction` | 0.5 | x body length | [0, inf) |  | - | placeholder | CONTRACTS: the kick's origin ahead of the body's centre, as a bite's jaw |
+| `fauna.founders.loftstrider.kick.arc_deg` | 60.0 | deg | [0, inf) |  | - | placeholder | CONTRACTS: the front arc's half-angle; a kick and a kick-back reach only a body inside it |
+| `fauna.founders.loftstrider.kick.band_low_fraction` | 0.0 | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
+| `fauna.founders.loftstrider.kick.band_high_fraction` | 0.6 | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
+| `fauna.founders.loftstrider.kick.damage` | 0.18 | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.loftstrider.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.loftstrider.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.loftstrider.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.loftstrider.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.loftstrider.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.loftstrider.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.loftstrider.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.loftstrider.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.loftstrider.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.loftstrider.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.loftstrider.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.loftstrider.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.loftstrider.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.loftstrider.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.loftstrider.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.loftstrider.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.loftstrider.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.loftstrider.young.independence_s` | 15000.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.loftstrider.young.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.loftstrider.young.roam_m` | 10.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.loftstrider.young.follow_pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.loftstrider.young.excursion_per_h.*` | 1.0, 4.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.loftstrider.young.excursion_m` | 20.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.loftstrider.young.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.loftstrider.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3349,6 +3806,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.loftstrider.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.loftstrider.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.loftstrider.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.loftstrider.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.loftstrider.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.loftstrider.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.loftstrider.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.loftstrider.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.loftstrider.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.loftstrider.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.loftstrider.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.loftstrider.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.loftstrider.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.loftstrider.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.loftstrider.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.loftstrider.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.loftstrider.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.loftstrider.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.loftstrider.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.loftstrider.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.loftstrider.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.loftstrider.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.loftstrider.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.loftstrider.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.loftstrider.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.loftstrider.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.loftstrider.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.loftstrider.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.loftstrider.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.loftstrider.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.loftstrider.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.loftstrider.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.loftstrider.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.loftstrider.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.loftstrider.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.loftstrider.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.loftstrider.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.loftstrider.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.loftstrider.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.loftstrider.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.loftstrider.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.loftstrider.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.loftstrider.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.loftstrider.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.loftstrider.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.loftstrider.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.loftstrider.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.loftstrider.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.loftstrider.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.loftstrider.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.loftstrider.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.loftstrider.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.loftstrider.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.loftstrider.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.loftstrider.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.loftstrider.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.loftstrider.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.loftstrider.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.loftstrider.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.loftstrider.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.loftstrider.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.loftstrider.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.loftstrider.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.loftstrider.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.loftstrider.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.loftstrider.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.loftstrider.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.loftstrider.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.loftstrider.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.loftstrider.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.loftstrider.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.loftstrider.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.loftstrider.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.loftstrider.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.loftstrider.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.loftstrider.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.loftstrider.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.loftstrider.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.loftstrider.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.loftstrider.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.loftstrider.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.loftstrider.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.loftstrider.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.loftstrider.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.loftstrider.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.loftstrider.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -3501,7 +4041,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.ripple-snail.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.ripple-snail.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.ripple-snail.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.ripple-snail.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.ripple-snail.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.ripple-snail.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3553,6 +4093,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.ripple-snail.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.ripple-snail.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.ripple-snail.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.ripple-snail.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.ripple-snail.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.ripple-snail.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.ripple-snail.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.ripple-snail.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.ripple-snail.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.ripple-snail.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.ripple-snail.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.ripple-snail.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.ripple-snail.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.ripple-snail.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.ripple-snail.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.ripple-snail.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.ripple-snail.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.ripple-snail.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.ripple-snail.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.ripple-snail.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.ripple-snail.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.ripple-snail.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.ripple-snail.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.ripple-snail.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.ripple-snail.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.ripple-snail.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.ripple-snail.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -3703,6 +4268,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.ripple-snail.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.ripple-snail.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.ripple-snail.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.ripple-snail.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.ripple-snail.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.ripple-snail.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.ripple-snail.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.ripple-snail.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.ripple-snail.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.ripple-snail.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.ripple-snail.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.ripple-snail.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.ripple-snail.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.ripple-snail.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.ripple-snail.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.ripple-snail.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.ripple-snail.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.ripple-snail.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.ripple-snail.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.ripple-snail.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.ripple-snail.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.ripple-snail.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.ripple-snail.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.ripple-snail.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.ripple-snail.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.ripple-snail.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.ripple-snail.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.ripple-snail.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.ripple-snail.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.ripple-snail.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.ripple-snail.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.ripple-snail.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.ripple-snail.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.ripple-snail.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.ripple-snail.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.ripple-snail.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.ripple-snail.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.ripple-snail.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.ripple-snail.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.ripple-snail.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.ripple-snail.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.ripple-snail.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.ripple-snail.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.ripple-snail.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.ripple-snail.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.ripple-snail.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.ripple-snail.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.ripple-snail.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.ripple-snail.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.ripple-snail.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.ripple-snail.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.ripple-snail.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.ripple-snail.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.ripple-snail.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.ripple-snail.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.ripple-snail.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.ripple-snail.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.ripple-snail.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.ripple-snail.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.ripple-snail.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.ripple-snail.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.ripple-snail.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.ripple-snail.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.ripple-snail.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.ripple-snail.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.ripple-snail.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.ripple-snail.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.ripple-snail.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.ripple-snail.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.ripple-snail.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.ripple-snail.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.ripple-snail.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.ripple-snail.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.ripple-snail.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.ripple-snail.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.ripple-snail.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.ripple-snail.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.ripple-snail.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.ripple-snail.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.ripple-snail.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.ripple-snail.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.ripple-snail.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.ripple-snail.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.ripple-snail.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.ripple-snail.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.ripple-snail.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -3855,7 +4503,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.bellwing.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.bellwing.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.bellwing.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.bellwing.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.bellwing.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.bellwing.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -3907,6 +4555,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.bellwing.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.bellwing.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.bellwing.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.bellwing.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.bellwing.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.bellwing.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.bellwing.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.bellwing.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.bellwing.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.bellwing.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.bellwing.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.bellwing.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.bellwing.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.bellwing.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.bellwing.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.bellwing.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.bellwing.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.bellwing.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.bellwing.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.bellwing.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.bellwing.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.bellwing.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.bellwing.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.bellwing.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.bellwing.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.bellwing.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.bellwing.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4057,6 +4730,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.bellwing.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.bellwing.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.bellwing.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.bellwing.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.bellwing.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.bellwing.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.bellwing.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.bellwing.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.bellwing.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.bellwing.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.bellwing.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.bellwing.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.bellwing.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.bellwing.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.bellwing.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.bellwing.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.bellwing.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.bellwing.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.bellwing.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.bellwing.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.bellwing.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.bellwing.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.bellwing.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.bellwing.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.bellwing.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.bellwing.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.bellwing.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.bellwing.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.bellwing.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.bellwing.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.bellwing.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.bellwing.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.bellwing.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.bellwing.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.bellwing.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.bellwing.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.bellwing.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.bellwing.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.bellwing.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.bellwing.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.bellwing.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.bellwing.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.bellwing.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.bellwing.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.bellwing.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.bellwing.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.bellwing.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.bellwing.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.bellwing.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.bellwing.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.bellwing.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.bellwing.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.bellwing.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.bellwing.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.bellwing.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.bellwing.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.bellwing.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.bellwing.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.bellwing.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.bellwing.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.bellwing.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.bellwing.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.bellwing.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.bellwing.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.bellwing.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.bellwing.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.bellwing.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.bellwing.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.bellwing.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.bellwing.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.bellwing.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.bellwing.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.bellwing.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.bellwing.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.bellwing.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.bellwing.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.bellwing.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.bellwing.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.bellwing.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.bellwing.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.bellwing.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.bellwing.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.bellwing.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.bellwing.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.bellwing.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.bellwing.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -4209,7 +4965,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.vigilance.flee_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.seedporter.vigilance.flee_stop_m` | 12.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.seedporter.vigilance.calm_s` | 10.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.seedporter.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.seedporter.vigilance.run_noise` | 3.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.seedporter.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.seedporter.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -4261,21 +5017,46 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.seedporter.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.seedporter.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.seedporter.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.seedporter.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.seedporter.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.seedporter.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.seedporter.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.seedporter.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.seedporter.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.seedporter.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.seedporter.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.seedporter.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.seedporter.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.seedporter.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.seedporter.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.seedporter.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.seedporter.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.seedporter.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.seedporter.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.seedporter.young.independence_s` | 18000.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.seedporter.young.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.seedporter.young.roam_m` | 8.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.seedporter.young.follow_pull` | 0.5 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.seedporter.young.excursion_per_h.*` | 2.0, 6.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.seedporter.young.excursion_m` | 12.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.seedporter.young.arrive_m` | 0.5 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.seedporter.young.excursion_s` | 120.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
-| `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
+| `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.seedporter.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
-| `fauna.founders.seedporter.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.seedporter.calls.keep_s` | 20.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.seedporter.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.seedporter.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.seedporter.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
 | `fauna.founders.seedporter.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
 | `fauna.founders.seedporter.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
 | `fauna.founders.seedporter.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
-| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
-| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 15.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 3.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
 | `fauna.founders.seedporter.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
-| `fauna.founders.seedporter.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
+| `fauna.founders.seedporter.calls.arrive_m` | 0.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.seedporter.rest.rest_sense` | 0.5 | x awake ranges | [0, inf) |  | - | placeholder | CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges |
 | `fauna.founders.seedporter.rest.light_min_s` | 60.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: at least this much light rest before a deep bout and between two |
 | `fauna.founders.seedporter.rest.deep_per_min` | 0.5 | /min | [0, inf) |  | - | placeholder | CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest |
@@ -4411,6 +5192,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.select_min_prospect` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.seedporter.pack.break_off_below` | (absent) | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.seedporter.pack.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.seedporter.pack.tactics.meat_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.seedporter.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.seedporter.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.seedporter.pack.tactics.carcass_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.seedporter.pack.tactics.chase_cost_per_m` | (absent) | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.seedporter.pack.tactics.p_one` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.seedporter.pack.tactics.size_exp` | (absent) | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.seedporter.pack.tactics.young_length_fraction` | (absent) | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.seedporter.pack.tactics.young_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.seedporter.pack.tactics.lame_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.seedporter.pack.tactics.isolation_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.seedporter.pack.tactics.isolation_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.seedporter.pack.tactics.resting_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.seedporter.pack.tactics.fleeing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.seedporter.pack.tactics.guard_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.seedporter.pack.tactics.adult_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.seedporter.pack.tactics.adults_max` | (absent) | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.seedporter.pack.tactics.facing_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.seedporter.pack.tactics.facing_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.seedporter.pack.tactics.guard_factor` | (absent) | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.seedporter.pack.tactics.kicker_length_ratio` | (absent) | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.seedporter.pack.tactics.kick_chance` | (absent) | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.seedporter.pack.tactics.kick_facing_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.seedporter.pack.tactics.kick_guard_gain` | (absent) | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.seedporter.pack.tactics.wound_cost` | (absent) | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.seedporter.pack.tactics.hunger_relief` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.seedporter.pack.tactics.kick_reach_fraction` | (absent) | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.seedporter.pack.tactics.kick_memory_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.seedporter.pack.tactics.kick_recovery_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.seedporter.pack.tactics.commit_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.seedporter.pack.tactics.group_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.seedporter.pack.tactics.test_floor` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.seedporter.pack.tactics.test_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.seedporter.pack.tactics.test_watch_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.seedporter.pack.tactics.test_rush_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.seedporter.pack.tactics.commit_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.seedporter.pack.tactics.switch_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.seedporter.pack.tactics.give_up_value` | (absent) | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.seedporter.pack.tactics.give_up_wound` | (absent) | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.seedporter.pack.tactics.give_up_spent` | (absent) | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.seedporter.pack.tactics.give_up_stall_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.seedporter.pack.tactics.progress_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.seedporter.pack.tactics.shun_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.seedporter.pack.tactics.rest_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.seedporter.pack.tactics.retreat_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.seedporter.pack.tactics.dc_margin_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.seedporter.pack.tactics.da_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.seedporter.pack.tactics.dc_lame_factor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.seedporter.pack.tactics.dc_kick_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.seedporter.pack.tactics.approach_band_m` | (absent) | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.seedporter.pack.tactics.repel_gain` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.seedporter.pack.tactics.repel_floor` | (absent) | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.seedporter.pack.tactics.side_bias` | (absent) | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.seedporter.pack.tactics.still_pace` | (absent) | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.seedporter.pack.tactics.arrive_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.seedporter.pack.tactics.flee_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.seedporter.pack.tactics.cut_fraction` | (absent) | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.seedporter.pack.tactics.cut_taken_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.seedporter.pack.tactics.lead_max_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.seedporter.pack.tactics.lead_min_s` | (absent) | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.seedporter.pack.tactics.intercept_cross_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.seedporter.pack.tactics.intercept_pace_ratio` | (absent) | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.seedporter.pack.tactics.harry_face_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.seedporter.pack.tactics.harry_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.seedporter.pack.tactics.harry_hounds` | (absent) | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.seedporter.pack.tactics.role_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.seedporter.pack.tactics.w_drive` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.seedporter.pack.tactics.drive_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.seedporter.pack.tactics.w_cut_off` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.seedporter.pack.tactics.cut_bonus` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.seedporter.pack.tactics.w_intercept` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.seedporter.pack.tactics.w_encircle` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.seedporter.pack.tactics.w_harry` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.seedporter.pack.tactics.role_damp` | (absent) | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.seedporter.pack.tactics.cue_caller_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.seedporter.pack.tactics.cue_heading_deg` | (absent) | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.seedporter.pack.tactics.howl_keep_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.seedporter.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.seedporter.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.seedporter.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.seedporter.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.seedporter.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.seedporter.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.seedporter.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |
@@ -4563,7 +5427,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.vigilance.flee_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight starts with threats (seen moving or near, heard, felt) within this |
 | `fauna.founders.chorister.vigilance.flee_stop_m` | 0.0 | m | [0, inf) |  | - | placeholder | S2: flight stops beyond this of the last-known threat... |
 | `fauna.founders.chorister.vigilance.calm_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: ...once no threat has come within the stop distance for this long |
-| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one) |
+| `fauna.founders.chorister.vigilance.group_min` | 1 | threats | [0, inf) |  | - | placeholder | S2: an adult flees only from at least this many threats (a juvenile from one); retired under a defence layer (LS-DEFEND) |
 | `fauna.founders.chorister.vigilance.run_noise` | 1.0 | x emission | [0, inf) |  | - | placeholder | S2: its emission while it flees or bolts (a run is loud) |
 | `fauna.founders.chorister.vigilance.sleep_hearing` | 0.5 | fraction | [0, 1] |  | - | placeholder | RHYTHMS-CADENCE: asleep, it hears a running body at this share of its awake sensitivity and wakes (0: sleeps through) |
 | `fauna.founders.chorister.vigilance.scan_every_s` | 0.0 | s | [0, inf) |  | - | placeholder | S2: cropping between scan pauses (0: never scans) |
@@ -4615,6 +5479,31 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.kick.band_low_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's floor over the kicker's base |
 | `fauna.founders.chorister.kick.band_high_fraction` | (absent) | x own height | [0, inf) |  | - | placeholder | CONTRACTS: the kick's height band's top over the kicker's base |
 | `fauna.founders.chorister.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
+| `fauna.founders.chorister.defence.threat_m` | 12.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a threat sensed within this engages the defence (watch, move off; a calf runs to its adults); the loftstrider's day sight |
+| `fauna.founders.chorister.defence.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a pressing threat within this of an adult, or of a calf it stands by, is met (guard); its old flee start, ~3 lengths |
+| `fauna.founders.chorister.defence.guard_gap_m` | 0.25 | m | [0, inf) |  | - | placeholder | LS-DEFEND: guard and calf points stand this clear of the two footprints (shoulder to shoulder) |
+| `fauna.founders.chorister.defence.arrive_m` | 0.75 | m | [0, inf) |  | - | placeholder | LS-DEFEND: at a guard or calf point within this, it has arrived |
+| `fauna.founders.chorister.defence.charge_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a hound within this of the guard point, outside kick reach, is charged while the kick is ready (0 never); cows and bulls charge wolves |
+| `fauna.founders.chorister.defence.leash_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a charge turns back this far from the guard point (charge and return) |
+| `fauna.founders.chorister.defence.bunch_m` | 4.0 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a grown body with no calf to stand by keeps within this of its nearest grown kin (adults bunch); under two lengths |
+| `fauna.founders.chorister.defence.cross_m` | 2.5 | m | [0, inf) |  | - | placeholder | LS-DEFEND: a calf's way to an adult (or a guard point) is unsafe with a pressing threat within this of it; a rush's last bound |
+| `fauna.founders.chorister.defence.facing_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | LS-DEFEND: a grown kin seen heading within this of a hound faces it (sector spread: face a hound no other adult faces) |
+| `fauna.founders.chorister.defence.mother_weight` | 1.5 | factor | [0, inf) |  | - | placeholder | LS-DEFEND: a mother's go-to-calf score on her own calf x this (topic 7: mothers most, allomothers too) |
+| `fauna.founders.chorister.defence.w_calm` | 1.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: the calm intents' score (graze, stay with family, rest: today's rules) |
+| `fauna.founders.chorister.defence.w_watch` | 1.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: watch's score (a threat seen within threat_m) |
+| `fauna.founders.chorister.defence.w_move_off` | 2.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: move off's score (a threat approaching at range, no calf in reach of it) |
+| `fauna.founders.chorister.defence.w_go_to_calf` | 2.5 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult) |
+| `fauna.founders.chorister.defence.w_guard` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: guard's score (a pressing threat within guard_m) |
+| `fauna.founders.chorister.defence.w_go_to_adults` | 3.0 | logit | [0, inf) |  | - | placeholder | LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded) |
+| `fauna.founders.chorister.young.pace_floor` | 0.5 | x adult cruise | [0, 1] |  | - | placeholder | YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed |
+| `fauna.founders.chorister.young.independence_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body keeps to its mother on a loosening leash, and makes excursions, until this age (0: off); giraffe calves stay 12-16 months of a ~20-month interbirth |
+| `fauna.founders.chorister.young.follow_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: a young body's comfort distance from its mother at birth (a nursing lineage's at weaning: infants do not stray); 0: off |
+| `fauna.founders.chorister.young.roam_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: ...growing with its age to this at independence (Wrysk: curiosity to stray, increasing the older they get) |
+| `fauna.founders.chorister.young.follow_pull` | 0.0 | fraction | [0, 1] |  | - | placeholder | YOUNG-ROAM: past the comfort, the leash's share of its walking turn back toward its mother (instead of the troop's or family's mean) |
+| `fauna.founders.chorister.young.excursion_per_h.*` | 0.0, 0.0 | 1/h | [0, inf) |  | - | placeholder | YOUNG-ROAM: the chance per hour a calm leashed young sets off toward something it senses (a food, another animal, an unvisited place), at the roam's start and at independence; linear between (balance knobs, topic 8) |
+| `fauna.founders.chorister.young.excursion_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: an unvisited place an excursion makes for is this far, away from its mother |
+| `fauna.founders.chorister.young.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | YOUNG-ROAM: within this of its goal the excursion ends (quietly) |
+| `fauna.founders.chorister.young.excursion_s` | 0.0 | s | [0, inf) |  | - | placeholder | YOUNG-ROAM: an excursion ends (quietly) after this long |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
 | `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
@@ -4765,6 +5654,89 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.select_min_prospect` | 0.1 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: a pack commits only to a prospect of at least this |
 | `fauna.founders.chorister.pack.break_off_below` | 0.05 | fraction | [0, 1] |  | - | placeholder | PACK-TUNE: in a chase, a target whose prospect falls under this is broken off |
 | `fauna.founders.chorister.pack.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | PACK-TUNE: a target dropped alive is not taken again for this |
+| `fauna.founders.chorister.pack.tactics.meat_exp` | 3.0 | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: a prey of length l is worth (l / own length)^this meals (mass as length cubed) |
+| `fauna.founders.chorister.pack.tactics.meat_by_mass` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: a prey is worth the organic matter its lineage carries at the seen length over the hound's own body (false: meat_exp on lengths) |
+| `fauna.founders.chorister.pack.tactics.usable_meals` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the meat counted is at most what the hounds at hand can eat before the carcass is gone: gut room now plus the gut's take over carcass_keep_s, bounded by reserve room and upkeep (false: the whole carcass) |
+| `fauna.founders.chorister.pack.tactics.carcass_keep_s` | 3600.0 | s | [0, inf) |  | - | placeholder | VH-FIX: the time a kill stays worth returning to, as a hound judges it (about the carrion's e-folding time, 1 / flora.carrion_decomposition) |
+| `fauna.founders.chorister.pack.tactics.chase_cost_per_m` | 0.02 | meals/m | [0, inf) |  | - | placeholder | VH-TACTICS: value spent per metre between hound and prey |
+| `fauna.founders.chorister.pack.tactics.p_one` | 0.25 | chance | [0, 1] |  | - | placeholder | VH-TACTICS: one hound's p_kill on a grown, sound, alert prey of its own length before the factors (each p_kill x below multiplies its odds p / (1 - p)) |
+| `fauna.founders.chorister.pack.tactics.size_exp` | 2.0 | exponent | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (own length / prey length)^this: a bigger body is harder to pull down |
+| `fauna.founders.chorister.pack.tactics.young_length_fraction` | 0.8 | x adult length | [0, 1] |  | - | placeholder | VH-TACTICS: a body shorter than this share of its lineage's adult length looks young |
+| `fauna.founders.chorister.pack.tactics.young_gain` | 3.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this x (1 - length / adult length)) |
+| `fauna.founders.chorister.pack.tactics.lame_gain` | 2.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen limping |
+| `fauna.founders.chorister.pack.tactics.isolation_m` | 6.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + isolation_gain x min(d, this) / this), d to its nearest sensed grown kin |
+| `fauna.founders.chorister.pack.tactics.isolation_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...the gain for a prey with no grown kin within isolation_m |
+| `fauna.founders.chorister.pack.tactics.resting_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen lying or asleep |
+| `fauna.founders.chorister.pack.tactics.fleeing_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: p_kill x (1 + this) for a body seen running away from the hound |
+| `fauna.founders.chorister.pack.tactics.guard_m` | 6.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: grown kin within this of a prey guard it |
+| `fauna.founders.chorister.pack.tactics.adult_factor` | 0.6 | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard (numbers) |
+| `fauna.founders.chorister.pack.tactics.adults_max` | 4 | guards | [0, inf) |  | - | placeholder | VH-TACTICS: ...counting at most this many |
+| `fauna.founders.chorister.pack.tactics.facing_factor` | 0.5 | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per grown body (guards and the prey) seen facing a hound |
+| `fauna.founders.chorister.pack.tactics.facing_deg` | 45.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a body faces a point within this of its heading |
+| `fauna.founders.chorister.pack.tactics.guard_factor` | 0.5 | factor | [0, 1] |  | - | placeholder | VH-TACTICS: p_kill x this per guard in guard stance (none shows one until LS-DEFEND) |
+| `fauna.founders.chorister.pack.tactics.kicker_length_ratio` | 1.2 | x own length | [0, inf) |  | - | placeholder | VH-TACTICS: a grown body at least this many hound lengths kicks |
+| `fauna.founders.chorister.pack.tactics.kick_chance` | 0.3 | expected kicks | [0, inf) |  | - | placeholder | VH-TACTICS: risk: each kicker about the prey is worth this many expected kicks |
+| `fauna.founders.chorister.pack.tactics.kick_facing_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) facing a hound |
+| `fauna.founders.chorister.pack.tactics.kick_guard_gain` | 1.0 | factor | [0, inf) |  | - | placeholder | VH-TACTICS: ...x (1 + this) in guard stance |
+| `fauna.founders.chorister.pack.tactics.wound_cost` | 0.5 | meals per kick | [0, inf) |  | - | placeholder | VH-TACTICS: an expected kick costs this much value, x (1 + own wound) |
+| `fauna.founders.chorister.pack.tactics.hunger_relief` | 0.5 | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: risk x (1 - this x hunger): a starving hound risks more |
+| `fauna.founders.chorister.pack.tactics.kick_reach_fraction` | 0.6 | x kicker length | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker's reach as a hound judges it |
+| `fauna.founders.chorister.pack.tactics.kick_memory_s` | 30.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kick it saw keeps it dc_kick_m farther off that body this long |
+| `fauna.founders.chorister.pack.tactics.kick_recovery_s` | 2.5 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a kicker it saw kick is taken as recovering this long (no kick expected; a harry opening) |
+| `fauna.founders.chorister.pack.tactics.commit_value` | 0.0 | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a chase starts on a value of at least this |
+| `fauna.founders.chorister.pack.tactics.group_m` | 6.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a prey with another of its lineage within this is in a group (tested first) |
+| `fauna.founders.chorister.pack.tactics.test_floor` | -1.0 | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a group is tested when its best member is worth at least this (below commit_value) |
+| `fauna.founders.chorister.pack.tactics.test_m` | 5.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: the test's open approach stops this far from the group |
+| `fauna.founders.chorister.pack.tactics.test_watch_s` | 3.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's watch |
+| `fauna.founders.chorister.pack.tactics.test_rush_s` | 3.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: the test's rush at the group, then commit or break off |
+| `fauna.founders.chorister.pack.tactics.commit_s` | 30.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a commitment holds its target this long before another may take the hunt |
+| `fauna.founders.chorister.pack.tactics.switch_ratio` | 1.5 | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: after the commitment, another prey takes the hunt worth this many times the target |
+| `fauna.founders.chorister.pack.tactics.give_up_value` | 0.0 | meals | (-inf, inf) |  | - | placeholder | VH-TACTICS: a committed hound gives up when the target's value falls under this |
+| `fauna.founders.chorister.pack.tactics.give_up_wound` | 0.34 | wound | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its own wound reaches this |
+| `fauna.founders.chorister.pack.tactics.give_up_spent` | 1.0 | stamina spent | [0, 1] |  | - | placeholder | VH-TACTICS: ...or its stamina is spent to this (1: winded) |
+| `fauna.founders.chorister.pack.tactics.give_up_stall_s` | 20.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: ...or this long without closing by progress_m or the target newly limping |
+| `fauna.founders.chorister.pack.tactics.progress_m` | 0.5 | m | [0, inf) |  | - | placeholder | VH-TACTICS: closing this much past its nearest so far is progress |
+| `fauna.founders.chorister.pack.tactics.shun_s` | 120.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a body given up on (or a group broken off) is not taken again for this |
+| `fauna.founders.chorister.pack.tactics.rest_s` | 60.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: after giving up it goes home or walks off and rests this long |
+| `fauna.founders.chorister.pack.tactics.retreat_m` | 8.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: ...walking this far off the target when it cannot go home |
+| `fauna.founders.chorister.pack.tactics.dc_margin_m` | 0.5 | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc is a kicker's reach as judged plus this |
+| `fauna.founders.chorister.pack.tactics.da_factor` | 1.5 | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: packmates and kin within this x dc of the target repel (Escobedo: 1.5) |
+| `fauna.founders.chorister.pack.tactics.dc_lame_factor` | 0.7 | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc x this for a lame target |
+| `fauna.founders.chorister.pack.tactics.dc_kick_m` | 0.5 | m | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: dc + this after a kick seen from the target |
+| `fauna.founders.chorister.pack.tactics.approach_band_m` | 1.0 | m | (0, inf) |  | - | placeholder | VH-TACTICS: encircle: the approach force reaches full pace this far off dc |
+| `fauna.founders.chorister.pack.tactics.repel_gain` | 1.0 | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion's strength |
+| `fauna.founders.chorister.pack.tactics.repel_floor` | 0.25 | x dc | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: the repulsion is taken at no nearer than this x dc (finite for bodies on top of each other) |
+| `fauna.founders.chorister.pack.tactics.side_bias` | 0.2 | x pace | [0, inf) |  | - | placeholder | VH-TACTICS: encircle: a tangential bias by the hound's approach side, x (1 - r / dc) per repelling body nearer than dc (a stable tie-break that fades once apart) |
+| `fauna.founders.chorister.pack.tactics.still_pace` | 0.15 | x pace | [0, 1] |  | - | placeholder | VH-TACTICS: encircle: under this pace a hound on the ring stands, facing the target |
+| `fauna.founders.chorister.pack.tactics.arrive_m` | 0.25 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a walk to a point (the test's stand, the cut-off point) has arrived within this |
+| `fauna.founders.chorister.pack.tactics.flee_deg` | 60.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a moving body heading within this of straight away from the hound is running away |
+| `fauna.founders.chorister.pack.tactics.cut_fraction` | 0.3 | fraction | [0, 1] |  | - | placeholder | VH-TACTICS: the cut-off point lies this share along the safe part of the line from target to its nearest grown kin |
+| `fauna.founders.chorister.pack.tactics.cut_taken_m` | 1.5 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate within this of the cut-off point holds it already |
+| `fauna.founders.chorister.pack.tactics.lead_max_s` | 4.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: the longest lead |
+| `fauna.founders.chorister.pack.tactics.lead_min_s` | 0.25 | s | (0, inf) |  | - | placeholder | VH-TACTICS: intercept: a blocked lead is halved down to this, then the interception fails |
+| `fauna.founders.chorister.pack.tactics.intercept_cross_deg` | 45.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: worth taking when the target crosses the hound's line at more than this |
+| `fauna.founders.chorister.pack.tactics.intercept_pace_ratio` | 0.8 | ratio | [0, inf) |  | - | placeholder | VH-TACTICS: intercept: ...or runs at this share of the hound's sprint or faster |
+| `fauna.founders.chorister.pack.tactics.harry_face_deg` | 45.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a target facing another hound within this is an opening |
+| `fauna.founders.chorister.pack.tactics.harry_s` | 1.5 | s | [0, inf) |  | - | placeholder | VH-TACTICS: harry: a dart lasts this long, and the next starts no sooner than this after |
+| `fauna.founders.chorister.pack.tactics.harry_hounds` | 2 | hounds | [0, inf) |  | - | placeholder | VH-TACTICS: harry only with at least this many hounds (itself included) within da |
+| `fauna.founders.chorister.pack.tactics.role_heading_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate moving within this of straight at the target, nearer, is driving it |
+| `fauna.founders.chorister.pack.tactics.w_drive` | 1.0 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the drive option's base score |
+| `fauna.founders.chorister.pack.tactics.drive_bonus` | 0.5 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per sign the target is driveable (running, young, lame, isolated) |
+| `fauna.founders.chorister.pack.tactics.w_cut_off` | 0.8 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the cut-off option's base score |
+| `fauna.founders.chorister.pack.tactics.cut_bonus` | 0.5 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: ...plus this per reason (young or running to adults; a packmate driving) |
+| `fauna.founders.chorister.pack.tactics.w_intercept` | 0.8 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the intercept option's score |
+| `fauna.founders.chorister.pack.tactics.w_encircle` | 1.5 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the encircle option's score (a kicker at bay) |
+| `fauna.founders.chorister.pack.tactics.w_harry` | 2.5 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: the harry option's score (encircled, an opening) |
+| `fauna.founders.chorister.pack.tactics.role_damp` | 1.0 | logit | (-inf, inf) |  | - | placeholder | VH-TACTICS: off an option a packmate already takes |
+| `fauna.founders.chorister.pack.tactics.cue_caller_m` | 2.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a packmate in sight within this of where a hunt cue came from is its caller |
+| `fauna.founders.chorister.pack.tactics.cue_heading_deg` | 30.0 | deg | [0, inf) |  | - | placeholder | VH-TACTICS: a hearer adopts a prey only with the caller seen heading at it within this |
+| `fauna.founders.chorister.pack.tactics.howl_keep_s` | 120.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: it remembers where a regroup howl came from this long |
+| `fauna.founders.chorister.pack.tactics.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
+| `fauna.founders.chorister.pack.tactics.den_howl_s` | 300.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
+| `fauna.founders.chorister.pack.tactics.substitute_p_kill` | 0.5 | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.chorister.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.chorister.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
+| `fauna.founders.chorister.pack.tactics.kill_site_m` | 2.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
 | `fauna.founders.chorister.counter.cost` | (absent) | s of awake upkeep | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer's cost to the answering body |

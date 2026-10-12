@@ -285,6 +285,38 @@ pub struct Episode {
     abandoned: bool,
     outcome: Option<Outcome>,
     family_flee_ticks: u64,
+    family_defend_ticks: u64,
+    calf_chases: u64,
+    adult_chases: u64,
+    ends: BTreeMap<String, u64>,
+    roam: RoamRead,
+}
+
+/// YOUNG-ROAM's readout of one episode (the calf and its mother).
+#[derive(Clone, Debug, Default)]
+struct RoamRead {
+    explore_ticks: u64,
+    answer_ticks: u64,
+    far_m: f64,
+    /// The tick of the calf's last unanswered bleat (its excursion's end), where the calf
+    /// was and how far its mother was from there.
+    bleat: Option<(u64, f64, f64, f64)>,
+    mother_approach_m: Vec<f64>,
+    bleats_seen: u64,
+    reunions_s: Vec<f64>,
+    chase_from_mother_m: Vec<f64>,
+}
+
+/// The calf's distance to its mother now, metres on the ring (`None`: either gone).
+fn calf_to_mother(fauna: &cubarium_voxel_fauna::Fauna, calf: Option<u64>, ring: f64) -> Option<f64> {
+    let view = fauna.view();
+    let c = view.animal(calf?)?;
+    let m = view.animal(c.mother?)?;
+    let mut dx = (m.pose.x - c.pose.x).rem_euclid(ring);
+    if dx > 0.5 * ring {
+        dx -= ring;
+    }
+    Some(dx.hypot(m.pose.z - c.pose.z))
 }
 
 /// Found a start with stable IDs for all seven roster slots, even in smaller arms.
@@ -510,6 +542,11 @@ pub fn found(cfg: &Config, seed: u64, arm: &Arm) -> Result<Episode, String> {
         abandoned: false,
         outcome: None,
         family_flee_ticks: 0,
+        family_defend_ticks: 0,
+        calf_chases: 0,
+        adult_chases: 0,
+        ends: BTreeMap::new(),
+        roam: RoamRead::default(),
     })
 }
 
@@ -544,6 +581,63 @@ pub struct RowOut {
     pub captures: Option<u64>,
     pub kills: usize,
     pub family_flee_ticks: u64,
+    /// LS-DEFEND: family body-ticks steered by the defence layer, kicks landed by the
+    /// family, and kick-backs drawn by landed bites.
+    #[serde(default)]
+    pub family_defend_ticks: u64,
+    #[serde(default)]
+    pub kicks: u64,
+    #[serde(default)]
+    pub kick_backs: u64,
+    /// VH-TACTICS readouts (the fauna ledger; zero on the old tactic): tests begun, tests
+    /// that ended in a commitment, hunts given up (a test broken off or a chase given up),
+    /// strikes on a substituted young body, lunges that met a body before their prey.
+    #[serde(default)]
+    pub hound_tests: u64,
+    #[serde(default)]
+    pub test_commits: u64,
+    #[serde(default)]
+    pub give_ups: u64,
+    #[serde(default)]
+    pub substitutions: u64,
+    #[serde(default)]
+    pub lunges_blocked: u64,
+    /// Chases started on the calf and on an adult (ChaseStart events).
+    #[serde(default)]
+    pub calf_chases: u64,
+    #[serde(default)]
+    pub adult_chases: u64,
+    /// The pack's ChaseEnd events on the family by reason (`BrokeOff`, `Spent`, `Late`,
+    /// `Lost`, ...): under VH-TACTICS a value give-up or a test broken off logs `BrokeOff`, a
+    /// wounded or winded hound `Spent`, a stalled chase `Late`.
+    #[serde(default)]
+    pub ends: BTreeMap<String, u64>,
+    /// YOUNG-ROAM readouts (the loftstrider's session tally and the calf and its mother):
+    /// excursions started by goal (food, animal, place), ended by reason, the bleats at their
+    /// ends, the calf's ticks out on one and its mother's answering one, the farthest the calf
+    /// got from its mother, the seconds from each bleat until its mother was within the calf's
+    /// birth comfort (`young.follow_m`), and the calf's distance to its mother at each chase
+    /// started on it.
+    #[serde(default)]
+    pub excursions: [u64; 3],
+    #[serde(default)]
+    pub excursion_ends: BTreeMap<String, u64>,
+    #[serde(default)]
+    pub bleats: u64,
+    #[serde(default)]
+    pub explore_ticks: u64,
+    #[serde(default)]
+    pub answer_ticks: u64,
+    #[serde(default)]
+    pub calf_far_m: f64,
+    #[serde(default)]
+    pub reunions_s: Vec<f64>,
+    #[serde(default)]
+    pub calf_chase_from_mother_m: Vec<f64>,
+    /// For each reunion, how much nearer the bleat's point the mother came (her share of the
+    /// closing), metres.
+    #[serde(default)]
+    pub mother_approach_m: Vec<f64>,
 }
 impl Episode {
     /// Step once and read state/events. Does not infer giving up or death from positions.
@@ -555,10 +649,61 @@ impl Episode {
         self.tick += 1;
         let fauna = self.sim.fauna();
         let family: Vec<_> = self.adults.iter().copied().chain(self.calf).collect();
+        self.family_defend_ticks += family
+            .iter()
+            .filter(|&&id| matches!(fauna.steer_of(id), Some(cubarium_voxel_fauna::Steer::Defend)))
+            .count() as u64;
         self.family_flee_ticks += family
             .iter()
             .filter(|&&id| matches!(fauna.steer_of(id), Some(cubarium_voxel_fauna::Steer::Flee)))
             .count() as u64;
+        // YOUNG-ROAM: the calf's excursions, its bleats and its mother's coming.
+        {
+            let w = self.sim.world().config();
+            let ring = f64::from(w.width) * w.voxel_m;
+            let calf_mother = self.calf.and_then(|c| fauna.view().animal(c)).and_then(|c| c.mother);
+            if let Some(c) = self.calf {
+                if matches!(fauna.steer_of(c), Some(cubarium_voxel_fauna::Steer::Explore)) {
+                    self.roam.explore_ticks += 1;
+                }
+            }
+            if calf_mother.is_some_and(|m| matches!(fauna.steer_of(m), Some(cubarium_voxel_fauna::Steer::Answer))) {
+                self.roam.answer_ticks += 1;
+            }
+            let d = calf_to_mother(fauna, self.calf, ring);
+            if let Some(d) = d {
+                self.roam.far_m = self.roam.far_m.max(d);
+            }
+            // From the calf's bleat point to its mother, now.
+            let to_point = |x: f64, z: f64| -> Option<f64> {
+                let m = fauna.view().animal(calf_mother?)?;
+                let mut dx = (m.pose.x - x).rem_euclid(ring);
+                if dx > 0.5 * ring {
+                    dx -= ring;
+                }
+                Some(dx.hypot(m.pose.z - z))
+            };
+            let bleats = fauna.roam_tally(Founder::Loftstrider).bleats;
+            if bleats > self.roam.bleats_seen {
+                self.roam.bleats_seen = bleats;
+                if self.roam.bleat.is_none() {
+                    if let Some(c) = self.calf.and_then(|c| fauna.view().animal(c)) {
+                        let (x, z) = (c.pose.x, c.pose.z);
+                        if let Some(dm) = to_point(x, z) {
+                            self.roam.bleat = Some((self.tick, x, z, dm));
+                        }
+                    }
+                }
+            }
+            let comfort = fauna.view().config.founder(Founder::Loftstrider).young.follow_m;
+            if let (Some((at, x, z, dm)), Some(d)) = (self.roam.bleat, d) {
+                if d <= comfort {
+                    self.roam.reunions_s.push((self.tick - at) as f64 / f64::from(cubarium_voxel_fauna::TICK_HZ));
+                    self.roam.mother_approach_m.push(dm - to_point(x, z).unwrap_or(dm));
+                    self.roam.bleat = None;
+                }
+            }
+        }
         for &id in &self.hounds {
             if let Some(p) = fauna.percept(id) {
                 for t in p.tracks() {
@@ -596,6 +741,16 @@ impl Episode {
                     if pack == self.pack && family.contains(&target) =>
                 {
                     self.chases += 1;
+                    if self.calf == Some(target) {
+                        self.calf_chases += 1;
+                        let w = self.sim.world().config();
+                        let ring = f64::from(w.width) * w.voxel_m;
+                        if let Some(d) = calf_to_mother(self.sim.fauna(), self.calf, ring) {
+                            self.roam.chase_from_mother_m.push(d);
+                        }
+                    } else {
+                        self.adult_chases += 1;
+                    }
                     self.abandoned = false;
                 }
                 PackEvent::ChaseEnd {
@@ -604,6 +759,7 @@ impl Episode {
                     if why == ChaseEnd::BrokeOff {
                         self.tests += 1;
                     }
+                    *self.ends.entry(format!("{why:?}")).or_default() += 1;
                     self.abandoned = matches!(
                         why,
                         ChaseEnd::Late
@@ -630,17 +786,37 @@ impl Episode {
             .hounds
             .iter()
             .all(|&id| fauna.view().animal(id).is_none())
-            || (self.abandoned
-                && self.hounds.iter().all(|&id| {
-                    fauna.view().animal(id).is_none()
-                        || fauna.view().animal(id).is_some_and(|a| a.homing_ticks > 0)
-                }))
+            || (self.abandoned && self.hounds.iter().all(|&id| self.withdrawn(id)))
         {
             self.outcome = Some(Outcome::PackGaveUp);
         } else if self.tick >= self.limit {
             self.outcome = Some(Outcome::Timeout);
         }
         true
+    }
+    /// **A hound withdrawn from the family** (the give-up read): gone; or homeward
+    /// (`homing_ticks`); or, under VH-TACTICS, hunting no family member and in the rest after
+    /// a give-up (its memory's `gave_up_tick` within `rest_s`), at home or walked off.
+    fn withdrawn(&self, id: u64) -> bool {
+        let fauna = self.sim.fauna();
+        let view = fauna.view();
+        let Some(a) = view.animal(id) else { return true };
+        if a.homing_ticks > 0 {
+            return true;
+        }
+        let family: Vec<u64> = self.adults.iter().copied().chain(self.calf).collect();
+        let rest_s = view
+            .config
+            .founder(Founder::Chorister)
+            .pack
+            .map_or(0.0, |p| p.tactics.rest_s);
+        fauna.hound(id).is_some_and(|m| {
+            m.gave_up_tick > 0
+                && !m.target.is_some_and(|t| family.contains(&t))
+                && (view.tick.saturating_sub(m.gave_up_tick) as f64
+                    / f64::from(cubarium_voxel_fauna::TICK_HZ))
+                    < rest_s
+        })
     }
     pub fn done(&self) -> bool {
         self.outcome.is_some()
@@ -675,6 +851,29 @@ impl Episode {
             captures: None,
             kills: self.kills.len(),
             family_flee_ticks: self.family_flee_ticks,
+            family_defend_ticks: self.family_defend_ticks,
+            kicks: self.sim.fauna().view().ledger.kicks_landed_by_founder[Founder::Loftstrider.index()],
+            kick_backs: self.sim.fauna().view().ledger.kick_backs,
+            hound_tests: self.sim.fauna().view().ledger.hound_tests,
+            test_commits: self.sim.fauna().view().ledger.hound_test_commits,
+            give_ups: self.sim.fauna().view().ledger.hound_give_ups,
+            substitutions: self.sim.fauna().view().ledger.hound_substitutions,
+            lunges_blocked: self.sim.fauna().view().ledger.lunges_blocked,
+            calf_chases: self.calf_chases,
+            adult_chases: self.adult_chases,
+            ends: self.ends.clone(),
+            excursions: self.sim.fauna().roam_tally(Founder::Loftstrider).started,
+            excursion_ends: {
+                let t = self.sim.fauna().roam_tally(Founder::Loftstrider);
+                cubarium_voxel_fauna::roam::End::ALL.iter().map(|e| (e.name().to_string(), t.ended[e.index()])).collect()
+            },
+            bleats: self.sim.fauna().roam_tally(Founder::Loftstrider).bleats,
+            explore_ticks: self.roam.explore_ticks,
+            answer_ticks: self.roam.answer_ticks,
+            calf_far_m: self.roam.far_m,
+            reunions_s: self.roam.reunions_s.clone(),
+            calf_chase_from_mother_m: self.roam.chase_from_mother_m.clone(),
+            mother_approach_m: self.roam.mother_approach_m.clone(),
         }
     }
 }
@@ -767,6 +966,29 @@ mod tests {
             assert_eq!(body.age_ticks, other.age_ticks);
             assert_eq!(body.stomach, other.stomach);
         }
+    }
+    /// **The give-up read** (VH-TACTICS): a pack whose hounds give a hunt up on the first
+    /// sample (`give_up_value` above any value, `commit_value` below) ends the episode as
+    /// gave-up once every hound is withdrawn, with the give-ups on the row.
+    #[test]
+    fn a_pack_that_gives_up_ends_the_episode_as_gave_up() {
+        let mut cfg = fixture();
+        cfg.duration_s = 30.0;
+        cfg.distance_m = [2.0, 2.5];
+        let mut arm = cfg
+            .arms
+            .iter()
+            .find(|a| a.composition == Composition::Calf)
+            .cloned()
+            .expect("a lone-calf arm");
+        arm.sets = vec![
+            "fauna.founders.chorister.pack.tactics.give_up_value=1e9".into(),
+            "fauna.founders.chorister.pack.tactics.commit_value=-1e9".into(),
+        ];
+        let row = run(&cfg, 73, &arm).unwrap();
+        assert!(row.give_ups >= 1, "{row:?}");
+        assert_eq!(row.outcome, Outcome::PackGaveUp, "{row:?}");
+        assert_eq!(row.kills, 0);
     }
     #[test]
     fn harness_registry_covers_numeric_settings_and_refuses_invalid_input() {

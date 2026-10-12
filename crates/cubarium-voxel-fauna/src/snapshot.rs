@@ -183,7 +183,16 @@ use crate::{Fauna, FaunaConfig};
 //     `Vigil::{wound_seen, heard_from}`, `CallRecord::heading`, the vigil ledger's `calls` and
 //     `call_reactions`, the ledger's light, deep and deep-bout counters. The rest and call
 //     tables are named config.
-pub const SCHEMA: u32 = 82;
+// 83: VH-TACTICS (behaviour-AI §4, §11.4-§11.6) — `Fauna::hounds` (each Veilhound's tactical
+//     memory, `Hound`) and the ledger's `hound_tests`, `hound_test_commits`, `hound_give_ups`,
+//     `hound_substitutions` and `lunges_blocked` (a state layout change). `Pack::tactics`
+//     (`Tactics`) and `Hunter::lunge_blocks` are named config, not bumps.
+// 84: LS-DEFEND (behaviour-AI §3, §11.4-§11.6) — `Animal::stance`, `Track::stance`,
+//     `Vigil::{defend_held, defend_since}` (the defence layer's own hold) and the ledger's
+//     `defence_samples`, `kicks_landed_by_founder` and `kick_backs` (a state layout change).
+//     `FounderPhysiology::defence` (`Defence`) and the loftstrider's kick table are named
+//     config, not bumps.
+pub const SCHEMA: u32 = 84;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -641,6 +650,7 @@ mod tests {
             mother: None,
             intent: crate::IntentRecord::default(),
         kick: crate::kick::KickState::default(),
+        stance: 0,
             bite: crate::LastBite::default(),
         }
     }

@@ -37,7 +37,9 @@ def reduce(root, config):
     header = ['arm', 'episodes', 'calf_killed_n', 'calf_killed_share', 'adult_killed_n',
               'adult_killed_share', 'pack_gave_up_n', 'pack_gave_up_share', 'timeout_n',
               'timeout_share', 'median_time_s', 'hound_wounds', 'hound_deaths', 'calf_wounds',
-              'adult_wounds', 'encounters', 'tests', 'chases', 'kills', 'family_flee_ticks']
+              'adult_wounds', 'encounters', 'tests', 'chases', 'kills', 'family_flee_ticks',
+              'hound_tests', 'test_commits', 'give_ups', 'calf_chases', 'adult_chases',
+              'substitutions', 'lunges_blocked']
     lines = ['\t'.join(header)]
     for name, rows in rows_by_arm.items():
         atomic(root / f'{name}.jsonl', ''.join(json.dumps(r) + '\n' for r in rows))
@@ -46,7 +48,8 @@ def reduce(root, config):
             n = sum(r['outcome'] == outcome for r in rows)
             values += [n, n / len(rows)]
         values += [statistics.median(r['time_s'] for r in rows)]
-        values += [sum(r[k] for r in rows) for k in header[11:]]
+        # Rows from before VH-TACTICS lack its readouts: 0.
+        values += [sum(r.get(k, 0) for r in rows) for k in header[11:]]
         lines.append('\t'.join(map(str, values)))
     atomic(root / 'summary.tsv', '\n'.join(lines) + '\n')
     return True

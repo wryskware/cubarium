@@ -29,14 +29,15 @@ use crate::{Animal, Fauna, Founder};
 pub const MAX_CALL_KINDS: usize = 2;
 
 /// A lineage's call kinds (§2.1): the loftstrider's alarm snort and distress bleat, the
-/// Veilhound's hunt cue and regroup howl, the seedporter's alarm (later, primate-style), and
+/// Veilhound's hunt cue and regroup howl, the seedporter's alarm (later, primate-style) and
+/// its young's distress call (YOUNG-ROAM), and
 /// (CALLS-REST step 2) the frondgrazer's bolt alarm, a sensed kind ([`CallTable::sensed`]).
 pub fn kinds_of(founder: Founder) -> &'static [&'static str] {
     match founder {
         Founder::Browser => &["bolt_alarm"],
         Founder::Loftstrider => &["alarm_snort", "distress_bleat"],
         Founder::Chorister => &["hunt_cue", "regroup_howl"],
-        Founder::Seedporter => &["alarm"],
+        Founder::Seedporter => &["alarm", "distress"],
         _ => &[],
     }
 }
@@ -183,7 +184,20 @@ pub fn calls_of(founder: Founder) -> CallTable {
         Founder::Browser => CallTable { sensed: [true, false], heed: [Heed::Everyone, Heed::Nobody], ..d },
         // A hunt cue is quiet; a howl carries far.
         Founder::Chorister => CallTable { range_m: 60.0, loudness: [0.3, 1.0], ..d },
-        Founder::Seedporter => CallTable { range_m: 30.0, loudness: [1.0, 0.0], recognise_voice: true, ..d },
+        // YOUNG-ROAM: a young's distress call at an excursion's end (an infant marmoset's
+        // separation call); adults heed it for 15 s, its mother at once, and walk to it until
+        // in contact (0.5 m, its nursing radius); records keep 20 s as the loftstrider's.
+        Founder::Seedporter => CallTable {
+            range_m: 30.0,
+            loudness: [1.0, 0.7],
+            recognise_voice: true,
+            keep_s: 20.0,
+            heed: [Heed::Nobody, Heed::Adults],
+            heed_s: [0.0, 15.0],
+            stranger_delay_s: [0.0, 3.0],
+            arrive_m: 0.5,
+            ..d
+        },
         _ => d,
     }
 }
@@ -449,14 +463,13 @@ pub(crate) enum Reaction {
     Face { heading: f64 },
 }
 
-/// **The reaction** of body `i` to the calls it has heard (module note): the heeded record it
-/// acts on — a recognised voice first, then the later kind (a distress call over an alarm), then
-/// the freshest — younger than its kind's `heed_s`, and, for a voice it does not recognise,
-/// heard at least `stranger_delay_s` ago (`heard_from`: the tick its current heeding began, kept
-/// by the caller; 0 none). An alarm walks it to its nearest known kin, then stands it facing
-/// the call; a distress call walks it to where the call came from, until within `arrive_m`.
-/// Returns the reaction and the new `heard_from`.
-pub(crate) fn reaction(fauna: &Fauna, i: usize, heard_from: u64, ring: f64) -> (Option<Reaction>, u64) {
+/// **The heeded call** of body `i` (LS-DEFEND: shared by [`reaction`] and the loftstrider's
+/// defence): from its own records, the one it acts on — a recognised voice first, then the
+/// later kind (a distress call over an alarm), then the freshest — younger than its kind's
+/// `heed_s` and, for a voice it does not recognise, heard at least `stranger_delay_s` ago
+/// (`heard_from`: the tick its current heeding began; 0 none). Returns it and the new
+/// `heard_from` (0 when it heeds nothing).
+pub(crate) fn heeded(fauna: &Fauna, i: usize, heard_from: u64) -> (Option<CallRecord>, u64) {
     let a = &fauna.animals[i];
     let Some(f) = a.founder else { return (None, 0) };
     let t = fauna.config.founder(f).calls;
@@ -478,6 +491,22 @@ pub(crate) fn reaction(fauna: &Fauna, i: usize, heard_from: u64, ring: f64) -> (
         .into_iter()
         .filter(|r| r.relation != 0 || since >= t.stranger_delay_s[usize::from(r.kind)])
         .max_by(|p, q| (p.relation != 0).cmp(&(q.relation != 0)).then(p.kind.cmp(&q.kind)).then(p.tick.cmp(&q.tick)));
+    (best.copied(), from)
+}
+
+/// **The reaction** of body `i` to the calls it has heard (module note): the heeded record it
+/// acts on — a recognised voice first, then the later kind (a distress call over an alarm), then
+/// the freshest — younger than its kind's `heed_s`, and, for a voice it does not recognise,
+/// heard at least `stranger_delay_s` ago (`heard_from`: the tick its current heeding began, kept
+/// by the caller; 0 none). An alarm walks it to its nearest known kin, then stands it facing
+/// the call; a distress call walks it to where the call came from, until within `arrive_m`.
+/// Returns the reaction and the new `heard_from`.
+pub(crate) fn reaction(fauna: &Fauna, i: usize, heard_from: u64, ring: f64) -> (Option<Reaction>, u64) {
+    let a = &fauna.animals[i];
+    let Some(f) = a.founder else { return (None, 0) };
+    let t = fauna.config.founder(f).calls;
+    let now = fauna.tick;
+    let (best, from) = heeded(fauna, i, heard_from);
     let Some(r) = best else { return (None, from) };
     let (cx, cz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, r.x, r.z, ring);
     let out = if r.kind == 0 {

@@ -18,7 +18,8 @@ use crate::{Animal, Fauna};
 /// ([`crate::V3_ENCODING_RULE`]); `elevation` is the height difference over
 /// [`crate::HEIGHT_REFERENCE_M`], clamped; `heading_*` its heading relative to the observer's;
 /// `size` its length as `l / (l + own length)`; `fresh` `1 − age / subject_lost_s`; stance
-/// (guard, rush) reads 0 until a lineage has one.
+/// (guard, rush) as sight shows it ([`perception::stance`]: LS-DEFEND sets guard; no lineage
+/// shows a rush yet).
 pub const ROW_CHANNELS: [&str; 32] = [
     "valid",
     "body",
@@ -224,6 +225,8 @@ fn body_row(fauna: &Fauna, a: &Animal, frame: &Frame, t: &Track, range_m: f64, l
     r[9] = f64::from(t.moving);
     r[10] = f64::from(t.posture == posture::REST);
     r[11] = f64::from(t.posture == posture::ASLEEP || t.posture == posture::DOZE);
+    r[12] = f64::from(t.stance == perception::stance::GUARD);
+    r[13] = f64::from(t.stance == perception::stance::RUSH);
     r[14] = f64::from(t.lame);
     r[15] = level(t.size_m, own_length);
     r[16] = if lost_s > 0.0 { (1.0 - age_s / lost_s).clamp(0.0, 1.0) } else { 0.0 };

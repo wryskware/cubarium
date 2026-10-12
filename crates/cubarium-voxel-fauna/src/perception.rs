@@ -148,6 +148,23 @@ pub struct Track {
     /// perception's `lame_wound`.
     #[serde(default)]
     pub lame: bool,
+    /// **Its stance as seen** (LS-DEFEND, [`stance`]): read by eye only, [`stance::NONE`]
+    /// unless sight detected it.
+    #[serde(default)]
+    pub stance: u8,
+}
+
+/// **A body's stance** as a sighted observer reads it (behaviour-AI §2.1): `GUARD` for a
+/// loftstrider braced facing a threat; `RUSH` is the Veilhound's, reserved.
+pub mod stance {
+    pub const NONE: u8 = 0;
+    pub const GUARD: u8 = 1;
+    pub const RUSH: u8 = 2;
+}
+
+/// The stance sight shows of body `o`: its own, none asleep.
+pub fn stance_of(o: &Animal) -> u8 {
+    if o.state == crate::State::Asleep { stance::NONE } else { o.stance }
 }
 
 /// **A body's posture** as a sighted observer reads it (FEAR, [`posture_of`]).
@@ -517,6 +534,7 @@ pub(crate) fn sense_pair(
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(config, o) } else { posture::ACTIVE },
         lame: modes & SIGHT != 0 && o.wound >= pc.lame_wound,
+        stance: if modes & SIGHT != 0 { stance_of(o) } else { stance::NONE },
     })
 }
 
@@ -929,6 +947,7 @@ fn interim_track(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, o: &Animal, cl
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(&fauna.config, o) } else { posture::ACTIVE },
         lame: modes & SIGHT != 0 && o.wound >= fauna.config.perception.lame_wound,
+        stance: if modes & SIGHT != 0 { stance_of(o) } else { stance::NONE },
     }
 }
 

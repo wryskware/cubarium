@@ -59,6 +59,8 @@ fn config(judge_m: f64) -> FaunaConfig {
     pk.pack_radius_m = 6.0;
     pk.commit_m = 1e9; // no stalk: members rush from the commit
     pk.route_reach_fraction = 8.0 / (cruise * pk.chase_give_up_s);
+    // The old pack tactic's rules: VH-TACTICS off (the comparison arm).
+    crate::pack::tactics::old_tactic(&mut c);
     c
 }
 

@@ -266,36 +266,50 @@ pub(crate) fn nurse(fauna: &mut Fauna, view: &VoxelView<'_>) {
 /// its mother (a fresh kin track of her id) — `Some(None)` within `follow_m` of her (no pull,
 /// not even the troop's), else `Some(Some(pull))` toward her at `follow_pull`. `None` leaves
 /// the body to the troop's pull: not dependent, the follow off, or its mother not in sense.
+///
+/// YOUNG-ROAM: a weaned young (or one of a lineage that does not nurse) under its lineage's
+/// roaming leash ([`crate::roam::leash`]) is pulled the same way, at the leash's comfort for
+/// its age and its weight.
 pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
-    if !dependent(fauna, i) {
-        return None;
-    }
+    let (comfort, weight) = if dependent(fauna, i) {
+        let t = table_of(fauna, i)?;
+        if !(t.follow_m > 0.0) {
+            return None;
+        }
+        // SP-FOLLOW: with the leash on, the young is left to itself within it ([`mother_goal`]).
+        (if t.leash_m > 0.0 { t.leash_m.max(t.follow_m) } else { t.follow_m }, t.follow_pull.clamp(0.0, 1.0))
+    } else {
+        crate::roam::leash(fauna, i)?
+    };
     let a = &fauna.animals[i];
-    let t = table_of(fauna, i)?;
-    if !(t.follow_m > 0.0) {
-        return None;
-    }
-    // SP-FOLLOW: with the leash on, the young is left to itself within it ([`mother_goal`]).
-    let comfort = if t.leash_m > 0.0 { t.leash_m.max(t.follow_m) } else { t.follow_m };
-    let mother = crate::mother_body(&a)?;
-    let p = fauna.percept(a.id)?;
-    let fresh = 2 * fauna.config.perception.stagger_ticks();
-    let track = p
-        .tracks()
-        .iter()
-        .find(|tr| tr.class == class::KIN && tr.id == mother && fauna.tick.saturating_sub(tr.tick) <= fresh)?;
+    let track = mother_track(fauna, i)?;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, track.x, track.z, ring);
     let d = dx.hypot(dz);
-    Some((d > comfort).then(|| Pull { dx, dz, kin: 1, nearest_m: d, weight: t.follow_pull.clamp(0.0, 1.0) }))
+    Some((d > comfort).then(|| Pull { dx, dz, kin: 1, nearest_m: d, weight }))
+}
+
+/// **The sensed mother** (LS-DEFEND, behaviour-AI §11.6: the mother-follow primitive, any
+/// lineage and any age): a fresh kin track of body `i`'s recorded living mother in its own
+/// record, else `None` (no mother recorded, or not in its senses). The follow of a dependent
+/// young ([`mother_pull`]) and a loftstrider calf's run to its mother ([`crate::defend`])
+/// both read it.
+pub fn mother_track(fauna: &Fauna, i: usize) -> Option<crate::Track> {
+    let a = fauna.animals.get(i)?;
+    let mother = crate::mother_body(a)?;
+    let p = fauna.percept(a.id)?;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    p.tracks().iter().find(|tr| tr.class == class::KIN && tr.id == mother && fauna.tick.saturating_sub(tr.tick) <= fresh).copied()
 }
 
 /// Whether the body at `i` weighs body `o` as its mother on a remote sensing over its
 /// lineage's kin cap ([`crate::perception`]): a dependent young whose lineage follows
 /// ([`Nursing::follows`]), and `o` its mother.
+///
+/// YOUNG-ROAM: a young under its lineage's roaming leash weighs her too
+/// ([`crate::roam::progress`]).
 pub(crate) fn weighs_as_mother(fauna: &Fauna, i: usize, o: u64) -> bool {
     fauna.animals.get(i).is_some_and(|a| crate::mother_body(a) == Some(o))
-        && dependent(fauna, i)
-        && table_of(fauna, i).is_some_and(|t| t.follows())
+        && ((dependent(fauna, i) && table_of(fauna, i).is_some_and(|t| t.follows())) || crate::roam::progress(fauna, i).is_some())
 }
 
 /// **What a dependent young does about its mother** this controller sample ([`mother_goal`]).

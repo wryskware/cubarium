@@ -705,8 +705,15 @@ fn a_hungry_pack_only_pries_the_grazer_it_is_actually_targeting() {
         drawn_scent: false,
         season: Default::default(),
     });
-    for target in [None, Some(other_prey)] {
+    // VH-TACTICS (§11.6): each hound's own attack state, its tactics memory's target.
+    let aim = |f: &mut Fauna, target: Option<u64>| {
         f.pack_mut(pack_id).unwrap().target = target;
+        for &id in &members {
+            f.hounds.entry(id).or_default().target = target;
+        }
+    };
+    for target in [None, Some(other_prey)] {
+        aim(&mut f, target);
         for _ in 0..bound {
             f.tick += 1;
             crate::vigil::pry(&mut f, ring(&w));
@@ -726,7 +733,7 @@ fn a_hungry_pack_only_pries_the_grazer_it_is_actually_targeting() {
             "only hunters working this target count as pry workers"
         );
     }
-    f.pack_mut(pack_id).unwrap().target = Some(grazer);
+    aim(&mut f, Some(grazer));
     let mut opened = false;
     for _ in 0..bound {
         f.tick += 1;

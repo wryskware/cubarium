@@ -133,6 +133,8 @@ pub const SEEDPORTER: Menu = Menu {
         o("follow_mother", Required(Kin), Young),
         o("flee_to_trees", Optional(Threat), All),
         o("rest", Optional(Place(PlaceKind::RestSpot)), All),
+        // YOUNG-ROAM (§3.5): a weaned young's excursion.
+        o("explore", Optional(Place(PlaceKind::ExcursionGoal)), Young),
     ],
     spare: SPARE_INTENTS,
 };
@@ -148,6 +150,8 @@ pub const LOFTSTRIDER: Menu = Menu {
         o("guard", Required(Threat), Adult),
         o("move_off", Optional(Threat), All),
         o("rest", Optional(Place(PlaceKind::RestSpot)), All),
+        // YOUNG-ROAM (§3.5): a calf's excursion.
+        o("explore", Optional(Place(PlaceKind::ExcursionGoal)), Young),
     ],
     spare: SPARE_INTENTS,
 };
@@ -480,6 +484,13 @@ pub fn intent_mask(menu: &Menu, young: bool, fits: impl Fn(Fits) -> bool) -> Vec
 pub(crate) struct Teach {
     pub name: Option<&'static str>,
     pub subject: Subject,
+    /// A teacher that runs its own hold (VH-TACTICS, [`crate::HoundTeach`]): the intent it
+    /// held, recorded as held without a second hold over the proposal.
+    pub held: Option<&'static str>,
+    /// The call it made this sample (0 none, `k + 1` its lineage's kind `k`).
+    pub call: u8,
+    /// LS-DEFEND: it started an aimed kick this sample ([`crate::kick`]).
+    pub kick: bool,
 }
 
 /// The nearest track of `class` in body `id`'s record, as a body subject.
@@ -506,8 +517,9 @@ fn body_subject(fauna: &crate::Fauna, me: u64, id: u64) -> Subject {
 /// - seedporter: flight → `flee_to_trees`, roost, groom, its mother → `follow_mother`, the
 ///   herd pull → `stay_with_troop`, its own steering and the walks to food → `forage`, a
 ///   rest bout → `rest`;
-/// - loftstrider: flight standing (no forward) → `watch`, flight walking → `move_off`, the
-///   herd pull → `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
+/// - loftstrider: its defence layer's own labels ([`crate::defend::steer`]); else flight
+///   standing (no forward) → `watch`, flight walking → `move_off`, the herd pull →
+///   `stay_with_family`, its own steering → `graze`, a rest bout → `rest`;
 /// - Veilhound: the pack tactic's own reading ([`crate::Fauna::pack_hint`]: rest, den,
 ///   feed, stalk, drive — the flankers too —, else search); its own steering → `search`;
 /// - lanternjaw: the patrol → `patrol`, the carcass yield → `give_way`, at a carcass →
@@ -527,13 +539,14 @@ pub(crate) fn teacher_label(
     let a = &fauna.animals[i];
     let resting = a.rest_ticks > 0 || a.state == crate::State::Resting && actions == crate::Actions::REST;
     let still = actions.forward <= fauna.config.teachers.forage_stay_forward;
-    let t = |name: &'static str, subject: Subject| Teach { name: Some(name), subject };
+    let t = |name: &'static str, subject: Subject| Teach { name: Some(name), subject, ..Teach::default() };
     match founder {
         Founder::Seedporter => match src {
             S::Flee => t("flee_to_trees", nearest(fauna, a.id, class::THREAT)),
             S::Roost => t("roost", Subject::None),
             S::Groom => t("groom", Subject::None),
             S::Nurse => t("follow_mother", a.mother.map_or(Subject::None, |m| body_subject(fauna, a.id, m))),
+            S::Explore => t("explore", fauna.excursions.get(&a.id).map_or(Subject::None, crate::roam::subject)),
             S::Heuristic | S::Search | S::Leave | S::Fruit | S::Light if herded => {
                 t("stay_with_troop", nearest(fauna, a.id, class::KIN))
             }
@@ -542,6 +555,12 @@ pub(crate) fn teacher_label(
             _ => Teach::default(),
         },
         Founder::Loftstrider => match src {
+            // LS-DEFEND: the defence layer's own proposal, hold and call; under the hold of a
+            // calm intent, its proposal only.
+            _ if fauna.ls_teach.contains_key(&a.id) => fauna.ls_teach[&a.id],
+            S::Explore => t("explore", fauna.excursions.get(&a.id).map_or(Subject::None, crate::roam::subject)),
+            // YOUNG-ROAM: a mother walking to her own calf's bleat.
+            S::Answer => t("go_to_calf", Subject::None),
             S::Flee if still => t("watch", nearest(fauna, a.id, class::THREAT)),
             S::Flee => t("move_off", nearest(fauna, a.id, class::THREAT)),
             S::Heuristic | S::Search | S::Leave if herded => t("stay_with_family", nearest(fauna, a.id, class::KIN)),
@@ -550,6 +569,11 @@ pub(crate) fn teacher_label(
             _ => Teach::default(),
         },
         Founder::Chorister => match src {
+            // VH-TACTICS: the tactic's own proposal, hold and call.
+            S::Pack if fauna.hound_teach.contains_key(&a.id) => {
+                let h = fauna.hound_teach[&a.id];
+                Teach { name: Some(h.proposal), subject: h.subject, held: Some(h.held), call: h.call, kick: false }
+            }
             S::Pack => {
                 let name = fauna.pack_hint.get(&a.id).copied().unwrap_or("search");
                 let target = a.pack.and_then(|m| fauna.pack(m.pack)).and_then(|p| p.target);
@@ -567,7 +591,7 @@ pub(crate) fn teacher_label(
                     }),
                     _ => Subject::None,
                 };
-                Teach { name: Some(name), subject }
+                Teach { name: Some(name), subject, ..Teach::default() }
             }
             S::Heuristic | S::Search => t("search", Subject::None),
             _ => Teach::default(),
@@ -645,20 +669,42 @@ pub(crate) fn record(
     if ended.is_none() && rec.overridden != Override::None {
         ended = Some(EarlyEnd::Emergency);
     }
-    let mut probs = vec![0.0; menu.len()];
-    if let Some(p) = probs.get_mut(usize::from(rec.proposal)) {
-        *p = 1.0;
-    }
     let first = rec.sample_tick == 0 && rec.since_tick == 0;
-    let next = arbitrate(&knobs, valid, &probs, held, rec.hold_age_s(now), ended.is_some() || first);
-    if next != held || first {
-        rec.held = next as u8;
-        rec.since_tick = now;
-        rec.subject = if next == usize::from(rec.proposal) { rec.proposal_subject } else { Subject::None };
-    } else if next == usize::from(rec.proposal) {
-        rec.subject = rec.proposal_subject;
+    if let Some(k) = teach.held.and_then(|n| menu.index(n)) {
+        // A teacher that held its own intent (VH-TACTICS): recorded as it held it.
+        if k != held || first {
+            rec.since_tick = now;
+        }
+        rec.held = k as u8;
+        rec.subject = teach.subject;
+    } else {
+        let mut probs = vec![0.0; menu.len()];
+        if let Some(p) = probs.get_mut(usize::from(rec.proposal)) {
+            *p = 1.0;
+        }
+        let next = arbitrate(&knobs, valid, &probs, held, rec.hold_age_s(now), ended.is_some() || first);
+        if next != held || first {
+            rec.held = next as u8;
+            rec.since_tick = now;
+            rec.subject = if next == usize::from(rec.proposal) { rec.proposal_subject } else { Subject::None };
+        } else if next == usize::from(rec.proposal) {
+            rec.subject = rec.proposal_subject;
+        }
     }
     rec.ended = ended;
+    let mut executed = executed;
+    if teach.call > 0 {
+        executed.call = teach.call;
+    } else if executed.call == 0 {
+        // YOUNG-ROAM: a call its rules made this sample (a young's bleat at an excursion's
+        // end) is an executed action too.
+        let id = fauna.animals[i].id;
+        let n = crate::calls::kinds_of(founder).len();
+        if let Some(k) = (0..n).find(|&k| fauna.last_call.get(&(id, k as u8)) == Some(&now)) {
+            executed.call = k as u8 + 1;
+        }
+    }
+    executed.kick |= teach.kick;
     rec.executed = executed;
     rec.sample_tick = now;
     rec.last_wound = fauna.animals[i].wound;

@@ -657,10 +657,18 @@ pub struct FounderPhysiology {
     /// Read only by a menu lineage's two-layer brain; a heuristic or a plain brain ignores it.
     #[serde(default)]
     pub brain: crate::BrainArbitration,
-    /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): `None`, no kick, for every lineage
-    /// until LS-DEFEND turns the loftstrider's on.
+    /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): the loftstrider's (LS-DEFEND,
+    /// [`crate::kick::kick_of`]); `None`, no kick, for every other lineage.
     #[serde(default)]
     pub kick: Option<crate::kick::Kick>,
+    /// **Its family defence** (LS-DEFEND, [`crate::Defence`]): the threat-time intent layer.
+    /// On for the loftstrider, off for the rest.
+    #[serde(default)]
+    pub defence: crate::Defence,
+    /// **Its young's pace and roaming** (YOUNG-ROAM, [`crate::roam::Young`]): a young body's
+    /// pace by its own length, the loosening leash and excursions.
+    #[serde(default)]
+    pub young: crate::roam::Young,
     /// **Its calls and its hearing of them** (CONTRACTS, [`crate::calls::CallTable`]): no
     /// range for a lineage without call kinds.
     #[serde(default)]
@@ -921,6 +929,11 @@ pub struct Pack {
     /// A target dropped alive (broken off, late or lost) is not taken again for this, seconds.
     #[serde(default = "pack_shun_s")]
     pub shun_s: f64,
+    /// **VH-TACTICS** ([`crate::Tactics`]): the Veilhound hunts by its own senses — tests,
+    /// cuts off, intercepts, encircles, harries and gives up. On for the Veilhound; off runs
+    /// the old pack tactic above (the comparison arm).
+    #[serde(default)]
+    pub tactics: crate::Tactics,
 }
 
 fn pack_select_kin_m() -> f64 {
@@ -1115,6 +1128,7 @@ impl Pack {
         select_min_prospect: 0.1,
         break_off_below: 0.05,
         shun_s: 120.0,
+        tactics: crate::Tactics::VEILHOUND,
     };
 }
 
@@ -1772,6 +1786,14 @@ pub struct Hunter {
     /// Switches, so no registry row.
     #[serde(default)]
     pub prey_ashore_only: [bool; Founder::COUNT],
+    /// **Bodies block** (VH-TACTICS, behaviour-AI §11.4; a switch, no registry row): its
+    /// lunge contacts the first body along the jaw's sweep. A body before the prey that the
+    /// strike takes (on its list, in its window) takes it; any other — an adult loftstrider
+    /// between a hound and a calf, a packmate — blocks it. On for the Veilhound; off (today's)
+    /// for the rest, whose strike meets only its prey (the frondgrazer's HERD cover is its own
+    /// knob).
+    #[serde(default)]
+    pub lunge_blocks: bool,
 }
 
 fn ones_by_founder() -> [f64; Founder::COUNT] {
@@ -1825,6 +1847,7 @@ impl Hunter {
         prey_weight: [0.5, 0.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.25, 1.0],
         prey_juveniles_only: [false, true, false, false, false, false, false, true, false],
         prey_ashore_only: [false, false, false, false, false, true, false, false, false],
+        lunge_blocks: false,
     };
 
     /// Whether `prey`'s lineage is on its list.
@@ -2051,6 +2074,9 @@ impl FounderPhysiology {
         p.intent = crate::intent::intent_of(founder);
         p.calls = crate::calls::calls_of(founder);
         p.rest = crate::sleep::rest_of(founder);
+        p.defence = crate::defend::defence_of(founder);
+        p.young = crate::roam::young_of(founder);
+        p.kick = crate::kick::kick_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2184,6 +2210,8 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 brain: crate::BrainArbitration::default(),
                 kick: None,
+                defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2286,6 +2314,8 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 brain: crate::BrainArbitration::default(),
                 kick: None,
+                defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2433,6 +2463,8 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 brain: crate::BrainArbitration::default(),
                 kick: None,
+                defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2740,6 +2772,7 @@ impl FounderPhysiology {
                         prey_weight: [1.0; Founder::COUNT],
                         prey_juveniles_only: [false; Founder::COUNT],
                         prey_ashore_only: [false; Founder::COUNT],
+                        lunge_blocks: false,
                     }),
                     founding: Founding::Bodies,
                     founding_site: FoundingSite::AtFood,
@@ -2835,6 +2868,9 @@ impl FounderPhysiology {
                         prey_weight: [1.0; Founder::COUNT],
                         prey_juveniles_only: [false; Founder::COUNT],
                         prey_ashore_only: [false; Founder::COUNT],
+                        // VH-TACTICS: an adult between a hound and a calf takes or blocks
+                        // its lunge.
+                        lunge_blocks: true,
                         ..Hunter::LANTERNJAW
                     }),
                     diet: crate::Diet::only(crate::Food::Carrion),

@@ -382,6 +382,7 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
         for k in kicks {
+            fauna.ledger.kicks_landed_by_founder[k.by.index()] += 1;
             wound(fauna, flora, k.target, k.damage, k.by, Some(&view));
         }
     });
@@ -1425,8 +1426,9 @@ fn grow(fauna: &mut Fauna) -> Vec<u64> {
 /// **established** members plus itself exceed `group_max`:
 /// - a pack's group is its record; established is every member past independence (not a
 ///   pup), so pups at the den never count; the breeder never leaves;
-/// - a herding-young lineage's group is its herd ([`crate::herd_labels`]: chains within
-///   `herding.comfort_m`, x wrapping); established is every adult.
+/// - a herding lineage's group is its herd ([`crate::herd_labels`]: chains within
+///   `herding.comfort_m`, x wrapping), whatever `herding.young_only`; established is every
+///   adult.
 ///
 /// Candidates still to be judged are not established yet; one that stays counts for the
 /// candidates after it, so the order of a tick's arrivals cannot overfill a group.
@@ -1468,10 +1470,9 @@ fn disperse(
                 })
                 .count()
         } else {
-            if at != crate::DispersalAt::Adult
-                || !phys.herding.young_only
-                || phys.herding.comfort_m <= 0.0
-            {
+            // LS-DEFEND (§11.6): a herding lineage's group is its herd whether the pull is for
+            // the young only or for all ages (`herding.young_only` no longer gates it).
+            if at != crate::DispersalAt::Adult || phys.herding.comfort_m <= 0.0 {
                 continue;
             }
             let lineage: Vec<&Animal> =
@@ -1771,7 +1772,8 @@ pub(crate) fn controllers(
         let fv = &fv;
         let read = |i: usize, slot: &mut Option<&mut Box<dyn crate::Controller>>| -> Sensed {
             let founder = fauna.animals[i].founder.expect("a due founder");
-            let manifest = fauna.config.manifest(founder);
+            // YOUNG-ROAM: its resolved forward against its own cruise's reference.
+            let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
             let occupancy = if v2_cone[founder.index()] {
                 cone_occupancy
             } else {
@@ -2011,6 +2013,28 @@ pub(crate) fn controllers(
                 }
             }
         }
+        // YOUNG-ROAM (`crate::roam`): a leashed young's excursion, over its own steering and the
+        // herd pull; else a mother's walk to her own young's distress call. Flight, the defence
+        // layer and every reflex below still win.
+        if driven && prey {
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let m = fauna.animals[i].mobility;
+            let calm = matches!(src, crate::Steer::Heuristic | crate::Steer::Search | crate::Steer::Leave)
+                && m.mode == crate::MobilityMode::Ground
+                && m.climb.is_none();
+            let period_s = manifest.cadence_ticks().max(1) as f64 * DT;
+            if let Some(go) = crate::roam::excursion(fauna, i, calm, period_s, view.config.seed, ring) {
+                actions = go;
+                src = crate::Steer::Explore;
+                herded = false;
+            } else if calm {
+                if let Some((go, _)) = crate::roam::answer(fauna, i, ring) {
+                    actions = go;
+                    src = crate::Steer::Answer;
+                    herded = false;
+                }
+            }
+        }
         // AMPHIBIOUS-SNAIL: a body that retracts (its lineage's `retract_hold_s`) does so
         // instead of fleeing: a threat it sees or feels stops and closes it.
         let retracts = fauna.config.founder(founder).amphibious.is_some_and(|am| am.retract_hold_s > 0.0);
@@ -2028,6 +2052,9 @@ pub(crate) fn controllers(
             }
         }
         let mut fled = false;
+        // LS-DEFEND: the defence layer's aimed kick, started below once its steering stands.
+        let mut defend_kick = None;
+        fauna.ls_teach.remove(&id);
         if driven && hunters_here && !retracts && prey {
             if let Some(flee) = flee(fauna, i, view, &fv, predation_occupancy, actions) {
                 actions = flee;
@@ -2035,6 +2062,18 @@ pub(crate) fn controllers(
                 lift = 0.0;
                 fled = true;
                 src = crate::Steer::Flee;
+            }
+            // LS-DEFEND: the loftstrider's defence layer over its ground response, while it
+            // holds a defence intent (watch, move off, go to adults or calf, guard).
+            if crate::defend::on(&fauna.config, founder) {
+                if let Some((go, kick)) = crate::defend::steer(fauna, i, view) {
+                    defend_kick = kick;
+                    actions = go;
+                    lure = 0.0;
+                    lift = 0.0;
+                    fled = true;
+                    src = crate::Steer::Defend;
+                }
             }
         }
         // CALLS-REST step 5: about to rest, a body smelling hunters walks down their scent to
@@ -2278,6 +2317,7 @@ pub(crate) fn controllers(
             src = crate::Steer::Heuristic;
             fled = false;
             herded = false;
+            fauna.ls_teach.remove(&id);
         }
         // DROP: a body trapped off its route graph (no walking way back on, no glide) for its
         // lineage's `drop.after_s` jumps down; last, as it is the only way out.
@@ -2333,6 +2373,9 @@ pub(crate) fn controllers(
             let period = manifest.cadence_ticks().max(1);
             actions = pace(fauna, i, view.config.seed, src, actions, period);
         }
+        if let (Some(t), crate::Steer::Defend) = (defend_kick, src) {
+            crate::defend::kick_now(fauna, i, t);
+        }
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
         fauna.walk_commit(id, founder, src);
@@ -2382,6 +2425,14 @@ pub(crate) fn controllers(
                     crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
                 }
             }
+            // LS-DEFEND: the stance sight shows (§2.1): guard while the guard intent is held —
+            // a brain's held intent, or its defence layer's (never read off the record).
+            let guard = crate::intent::menu_of(founder).index("guard");
+            let guarding = match sensed[k].decision {
+                Some(_) => guard.is_some_and(|g| usize::from(fauna.animals[i].intent.held) == g),
+                None => fauna.ls_teach.get(&id).and_then(|t| t.held) == Some("guard"),
+            };
+            fauna.animals[i].stance = if guarding { crate::perception::stance::GUARD } else { crate::perception::stance::NONE };
             // The decision tap: the sample's inputs, the label before the hold and what was
             // held, for cloning (§10.2, §11.3).
             if let (Some(prep), true) = (sensed[k].prep.as_ref(), fauna.tap.is_some()) {
@@ -3211,7 +3262,8 @@ fn founder_act(
             a.age_ticks % founder.manifest().cadence_ticks() == 0,
         )
     };
-    let manifest = fauna.config.manifest(founder);
+    // YOUNG-ROAM: a young body walks and runs at its own length's pace.
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
     if (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Brain && fauna.animals[i].hunkered) || fauna.animals[i].mobility.retract_ticks > 0 {
@@ -3398,6 +3450,9 @@ fn founder_act(
             t => t,
         };
         if let Some(prey) = target {
+            if crate::pack::tactics::strike_rule(fauna, i).is_some_and(|r| r.target != Some(prey)) {
+                fauna.ledger.hound_substitutions += 1;
+            }
             start_strike(fauna, i, prey);
             return;
         }
@@ -3447,7 +3502,7 @@ fn flyer_act(
     use crate::{MobilityMode, PerchKind};
     let founder = fauna.animals[i].founder.expect("a founder body");
     let phys = *fauna.config.founder(founder);
-    let manifest = fauna.config.manifest(founder);
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let sc = phys.core;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
     let (asleep, mut held, lift_held, due) = {
@@ -3911,7 +3966,10 @@ pub(crate) fn prey_in_capsule(
     let window = crate::pack::window_body(fauna, i, ring);
     // D2b: a patroller strikes only a prey its attack choice accepts this window.
     let choosy = fauna.config.hunt.patrol && (a.founder == Some(crate::Founder::Lanternjaw) && fauna.controllers.layer(a.id) == crate::Layer::Heuristic);
+    // VH-TACTICS (§11.4): a tactics hound strikes its target, or a young body it substitutes.
+    let rule = crate::pack::tactics::strike_rule(fauna, i);
     let mut best: Option<(f64, u64)> = None;
+    let mut chosen: Option<(f64, u64)> = None;
     let mut projected = None;
     for o in &fauna.animals {
         if o.id == a.id
@@ -3919,6 +3977,7 @@ pub(crate) fn prey_in_capsule(
             || !crate::predation::is_prey_in_window(&fauna.config, a, o, window)
             || !meets_capsule(&fauna.config, view, a, geometry, h, jaw, tip, o)
             || (choosy && fauna.config.hunt.strike_chosen_only && !crate::hunt::accepts(&fauna.config, a, o, fauna.tick))
+            || rule.as_ref().is_some_and(|r| !r.allows(o.id))
         {
             continue;
         }
@@ -3939,11 +3998,39 @@ pub(crate) fn prey_in_capsule(
         }
         let (dx, dz) = crate::pose::wrapped_delta(jaw.0, jaw.1, o.pose.x, o.pose.z, ring);
         let d = dx * dx + dz * dz;
+        if rule.as_ref().is_some_and(|r| r.target == Some(o.id)) {
+            chosen = Some((d, o.id));
+        }
         if best.is_none_or(|(b, _)| d < b) {
             best = Some((d, o.id));
         }
     }
-    best.map(|(_, id)| id)
+    // Its target first; else the nearest substitute.
+    chosen.or(best).map(|(_, id)| id)
+}
+
+/// **Bodies block** (VH-TACTICS, §11.4): the first body a lunge's jaw sweep from `from` to
+/// `to` meets, if it is not `prey` and lies before it along the sweep — an adult standing
+/// between a hound and a calf. `None`: nothing comes before the prey.
+fn first_in_sweep(config: &crate::FaunaConfig, view: &VoxelView<'_>, fauna: &Fauna, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, from: (f64, f64), to: (f64, f64), prey: &Animal) -> Option<Animal> {
+    let ring = f64::from(view.config.width) * view.config.voxel_m;
+    let (sx, sz) = crate::pose::wrapped_delta(from.0, from.1, to.0, to.1, ring);
+    let len2 = sx * sx + sz * sz;
+    let along = |o: &Animal| {
+        let (ox, oz) = crate::pose::wrapped_delta(from.0, from.1, o.pose.x, o.pose.z, ring);
+        if len2 > 0.0 { (ox * sx + oz * sz) / len2 } else { 0.0 }
+    };
+    let at = along(prey);
+    fauna
+        .animals
+        .iter()
+        .filter(|o| o.id != a.id && o.id != prey.id && o.attached.is_none() && o.mobility.climb.is_none())
+        .filter(|o| meets_capsule(config, view, a, geometry, h, from, to, o))
+        .map(|o| (along(o), *o))
+        // Ahead of where the jaw's sweep began, short of the prey.
+        .filter(|(s, _)| *s > 0.0 && *s < at)
+        .min_by(|x, y| x.0.total_cmp(&y.0).then(x.1.id.cmp(&y.1.id)))
+        .map(|(_, o)| o)
 }
 
 /// Advance one lunge tick, on a copy when checking a prospective strike. The
@@ -4081,8 +4168,31 @@ fn strike_tick(
         .binary_search_by_key(&s.prey, |p| p.id)
         .ok()
         .map(|j| fauna.animals[j]);
+    // VH-TACTICS (§11.4): a lunge contacts the first body along its path. A body before the
+    // prey that the strike takes (its list and window) takes it; any other blocks it.
+    let mut blocked = false;
+    let prey = match prey {
+        Some(p) if h.lunge_blocks && meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p) => {
+            match first_in_sweep(&fauna.config, view, fauna, &a, &geometry, &h, jaw_from, jaw_to, &p) {
+                Some(b) => {
+                    let ring = f64::from(view.config.width) * view.config.voxel_m;
+                    let window = crate::pack::window_body(fauna, i, ring);
+                    fauna.ledger.lunges_blocked += 1;
+                    if crate::predation::is_prey_in_window(&fauna.config, &a, &b, window) {
+                        Some(b)
+                    } else {
+                        blocked = true;
+                        Some(p)
+                    }
+                }
+                None => Some(p),
+            }
+        }
+        p => p,
+    };
     if let Some(p) = prey {
-        let contact = meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p)
+        let contact = !blocked
+            && meets_capsule(&fauna.config, view, &a, &geometry, &h, jaw_from, jaw_to, &p)
             && (founder != crate::Founder::Seedporter || crate::is_prey_of(&fauna.config, &a, &p));
         if sp_miss_tap(&a, &p) {
             let pg = crate::body_of(&fauna.config, &p).unwrap();
@@ -4194,6 +4304,11 @@ fn strike_tick(
 /// juvenile, a rider, a lineage with no counter, or a jaw out of its reach.
 fn counter_answer(config: &crate::FaunaConfig, view: &VoxelView<'_>, striker: &Animal, jaw_to: (f64, f64), prey: &Animal) -> Option<Hit> {
     let pf = prey.founder?;
+    // LS-DEFEND (§3.3, one kick, one budget): a lineage with a kick answers a landed bite
+    // only through its kick-back ([`crate::kick::kick_back`]), never a second, free counter.
+    if config.founder(pf).kick.is_some() {
+        return None;
+    }
     let c = config.founder(pf).counter?;
     let sf = striker.founder?;
     if prey.attached.is_some() || prey.body < crate::effective_config(config, prey).birth_body || !(striker.body > 0.0) {
@@ -5501,6 +5616,7 @@ fn newborn(
         mother: None,
         intent: crate::IntentRecord::default(),
         kick: crate::kick::KickState::default(),
+        stance: 0,
         bite: crate::LastBite::default(),
     }
 }
@@ -7090,7 +7206,7 @@ mod hunt_escape_tests;
 mod traps_tests;
 
 /// Begin the common windup, used by walking and perched catchers.
-fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
+pub(crate) fn start_strike(fauna: &mut Fauna, i: usize, prey: u64) {
     let founder = fauna.animals[i].founder.expect("founder");
     let phys = *fauna.config.founder(founder);
     let h = phys.active_hunter().expect("a hunter");
