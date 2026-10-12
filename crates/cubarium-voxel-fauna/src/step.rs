@@ -1803,6 +1803,8 @@ fn controllers(
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
                     let brain = c.layer() == crate::Layer::Brain;
                     if menu_body && (brain || tap) {
+                        #[cfg(feature = "profile")]
+                        let _intent = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaIntent);
                         prep = Some(crate::subjects::decision_prep(fauna, i, founder));
                     }
                     let response = match prep.as_ref() {
@@ -2326,6 +2328,8 @@ fn controllers(
                     crate::intent::record_brain(fauna, i, src, &d, prep, executed);
                 }
                 _ => {
+                    #[cfg(feature = "profile")]
+                    let _intent = cubarium_voxel::profile::start(cubarium_voxel::profile::Phase::FaunaIntent);
                     let teach = if heuristic {
                         crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
                     } else {
