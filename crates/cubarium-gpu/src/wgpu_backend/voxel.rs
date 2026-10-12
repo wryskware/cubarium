@@ -1276,7 +1276,9 @@ impl VoxelRenderer {
         let world = world_group(&[]);
         let sky_world = world_group(&[11, 17, 18]);
         let sun_world = world_group(&[13]);
-        let walk_world = world_group(&[12]);
+        // Without model plants, binding 15 falls back to walk_depth too. Both
+        // descriptors must be replaced while that texture is a colour attachment.
+        let walk_world = world_group(&[12, 15]);
         let plant_world = world_group(&[15, 17]);
         let figure_world = world_group(&[16, 18]);
         if redraw {
