@@ -367,7 +367,7 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         let opened = Instant::now();
         let gpu = match prepared_gpu {
             Some(gpu) => gpu,
-            None => std::sync::Arc::new(Gpu::open().context("opening the GPU device for --sink gpu")?),
+            None => std::sync::Arc::new(crate::sink::gpu::open_device().context("opening the GPU device for --sink gpu")?),
         };
         eprintln!(
             "cubarium voxel: --sink gpu on {} ({:.0} KiB voxel buffers)",

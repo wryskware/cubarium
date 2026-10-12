@@ -71,7 +71,7 @@ pub(crate) fn shared_gpu() -> Result<Arc<Gpu>> {
     if let Some(gpu) = stored.as_ref() {
         return Ok(gpu.clone());
     }
-    let gpu = Arc::new(Gpu::open().context("opening the shared GPU device")?);
+    let gpu = Arc::new(crate::sink::gpu::open_device().context("opening the shared GPU device")?);
     *stored = Some(gpu.clone());
     Ok(gpu)
 }
@@ -89,6 +89,10 @@ impl Drop for WarmCompletion<'_> {
 
 /// The warm-up's thread, for [`stop`].
 static THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+#[cfg(test)]
+thread_local! {
+    static FAIL_WORKER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 /// [`stop`] was called: no further phase starts.
 static STOPPING: AtomicBool = AtomicBool::new(false);
 
@@ -127,8 +131,14 @@ pub fn start(key: String, cfg: &VoxelConfig, screen: (u32, u32)) -> bool {
         *s = State { key: Some(key.clone()), still: Phase::Running, all: Phase::Running, started: Some(Instant::now()) };
     }
     let cfg = cfg.clone();
+    #[cfg(test)]
+    let fail_worker = FAIL_WORKER.with(|flag| flag.replace(false));
     let spawned = std::thread::Builder::new().name("cubarium-pipeline-warm".into()).spawn(move || {
         let _completion = WarmCompletion(&WARM);
+        #[cfg(test)]
+        if fail_worker {
+            panic!("injected warm-up failure");
+        }
         let t0 = Instant::now();
         let mut lap = Instant::now();
         let finish = |kind: Pipelines| {
@@ -244,14 +254,15 @@ mod completion_tests {
     use super::*;
     #[test]
     fn failed_warmup_releases_the_first_live_world_waiter() {
-        let warm = Warm { state: Mutex::new(State { key: Some("injected".into()), still: Phase::Running, all: Phase::Running, started: None }), moved: Condvar::new() };
-        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _completion = WarmCompletion(&warm);
-            panic!("injected warm-up failure");
-        }));
-        assert!(failure.is_err());
-        assert_eq!(warm.state.lock().unwrap().still, Phase::Done);
-        assert_eq!(warm.state.lock().unwrap().all, Phase::Done);
-        wait_in(&warm, "injected", Pipelines::All, || panic!("a completed failed warm-up must never wait"));
+        FAIL_WORKER.with(|flag| flag.set(true));
+        assert!(start("injected".into(), &VoxelConfig::default(), (64, 64)));
+        let thread = THREAD.lock().unwrap().take().unwrap();
+        assert!(thread.join().is_err(), "the worker failed inside start");
+        assert_eq!(WARM.state.lock().unwrap().still, Phase::Done);
+        assert_eq!(WARM.state.lock().unwrap().all, Phase::Done);
+        wait("injected", Pipelines::All, || panic!("a completed failed warm-up must never wait"));
+        *WARM.state.lock().unwrap() = State {
+            key: None, still: Phase::Done, all: Phase::Done, started: None,
+        };
     }
 }

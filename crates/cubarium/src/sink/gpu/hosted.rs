@@ -1922,7 +1922,7 @@ mod tests {
 
     /// A GPU device opens here; a test needing one says so and passes without it.
     fn gpu_here() -> bool {
-        match cubarium_gpu::Gpu::open() {
+        match crate::sink::gpu::open_device() {
             Ok(_) => true,
             Err(e) => {
                 eprintln!("skipped: no GPU device: {e:#}");

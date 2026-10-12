@@ -59,7 +59,7 @@ impl GpuTarget {
         if kind == GpuTargetKind::Window && std::env::var_os("CUBARIUM_HIDDEN_LAUNCH").is_some() {
             anyhow::bail!("hidden window initialization failed; refusing a second fallback window");
         }
-        Ok((Arc::new(Gpu::open().context("opening the GPU device for --sink gpu")?), None))
+        Ok((Arc::new(crate::sink::gpu::open_device().context("opening the GPU device for --sink gpu")?), None))
     }
 
     pub fn open<S: FrameSource>(
