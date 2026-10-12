@@ -648,7 +648,7 @@ fn calm_of(config: &FaunaConfig, vg: &Vigilance, a: &Animal, t: &Track, ring: f6
         return false;
     }
     match t.posture {
-        posture::ASLEEP => true,
+        posture::ASLEEP | posture::DOZE => true,
         posture::REST => {
             let (dx, dz) = crate::pose::wrapped_delta(t.x, t.z, a.pose.x, a.pose.z, ring);
             // FEAR-2: awake in contact (within the predation table's `still_threat_near_m`),

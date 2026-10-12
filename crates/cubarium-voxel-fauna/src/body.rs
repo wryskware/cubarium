@@ -660,6 +660,10 @@ pub struct FounderPhysiology {
     /// range for a lineage without call kinds.
     #[serde(default)]
     pub calls: crate::calls::CallTable,
+    /// **Its rest physiology** (CALLS-REST, [`crate::sleep::RestTable`]): off (the whole rest
+    /// deep) but for the loftstrider and the Veilhound.
+    #[serde(default)]
+    pub rest: crate::sleep::RestTable,
     /// Young leaving an oversized pack or herd, with all matter returned
     /// to face litter. Defaults off, so old configs and saved worlds retain their rule.
     #[serde(default)]
@@ -2041,6 +2045,7 @@ impl FounderPhysiology {
         p.grooming = crate::groom::grooming_of(founder);
         p.intent = crate::intent::intent_of(founder);
         p.calls = crate::calls::calls_of(founder);
+        p.rest = crate::sleep::rest_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
         p.rhythm = crate::rhythm::rhythm_of(founder);
@@ -2174,6 +2179,7 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2274,6 +2280,7 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -2419,6 +2426,7 @@ impl FounderPhysiology {
                 intent: crate::IntentKnobs::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
+                rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
                 drop: crate::DropRule::default(),
                 wade: crate::WadeRule::default(),
@@ -6637,6 +6645,18 @@ impl SenseTable {
     /// The longest of its pairwise ranges at this light, metres.
     pub fn reach_m(&self, day: bool) -> f64 {
         self.sight_range_m(day).max(self.hearing_m).max(self.tremor_m)
+    }
+
+    /// This table in light rest (CALLS-REST, [`crate::sleep`]): its ranges at `share`.
+    pub fn resting(&self, share: f64) -> SenseTable {
+        let s = if share.is_finite() { share.max(0.0) } else { 1.0 };
+        SenseTable {
+            sight_m: self.sight_m * s,
+            sight_night_m: self.sight_night_m * s,
+            hearing_m: self.hearing_m * s,
+            tremor_m: self.tremor_m * s,
+            ..*self
+        }
     }
 
     /// This table as a body that has been still for `still_ticks` senses

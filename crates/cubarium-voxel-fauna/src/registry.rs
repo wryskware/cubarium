@@ -417,6 +417,19 @@ fn founder_rows() -> Vec<Row> {
         r("calls.stranger_delay_s.*", "s", nonneg, "CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first)"),
         r("calls.gather_m", "m", nonneg, "CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call"),
         r("calls.arrive_m", "m", nonneg, "CALLS-REST: a distress call's hearer walks to where it came from until within this"),
+        // Rest physiology (`sleep::RestTable`, CALLS-REST, behaviour-AI §3.4); `rest.light` is a
+        // switch: no row.
+        r("rest.rest_sense", "x awake ranges", nonneg, "CALLS-REST: in light rest it senses at this share of its sight, hearing and tremor ranges"),
+        r("rest.light_min_s", "s", nonneg, "CALLS-REST: at least this much light rest before a deep bout and between two"),
+        r("rest.deep_per_min", "/min", nonneg, "CALLS-REST: past light_min_s, a deep bout begins at this rate per minute of light rest"),
+        r("rest.deep_min_s", "s", nonneg, "CALLS-REST: a deep bout's shortest draw; giraffe deep sleep median 55 s"),
+        r("rest.deep_max_s", "s", nonneg, "CALLS-REST: a deep bout's longest draw; giraffe deep sleep mean ~2 min"),
+        r("rest.deep_alone_scale", "x rate", nonneg, "CALLS-REST: sleeps lighter: the deep-bout rate times this while it has seen no relative up or in light rest within kin_awake_s"),
+        r("rest.kin_awake_s", "s", nonneg, "CALLS-REST: a sight of a relative up or in light rest counts this long"),
+        r("rest.need_s", "s", nonneg, "CALLS-REST: the sleep-need ceiling: no deep bout for this long and it takes one at its next chance (0 none)"),
+        r("rest.rush_over_cruise", "x cruise", nonneg, "CALLS-REST: a body faster than this x its cruise is rushing; its footfall wakes this lineage's sleepers like a fleeing prey's (0: no)"),
+        r("rest.bed_scent", "x smell_min", nonneg, "CALLS-REST: a heuristic body about to rest walks down the hunter scent while it smells at least this x its smell floor (0: rests where it stands)"),
+        r("rest.bed_search_s", "s", nonneg, "CALLS-REST: the walk to a scent-free bed lasts at most this from the rest's onset"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),

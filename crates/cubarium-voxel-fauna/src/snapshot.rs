@@ -179,7 +179,11 @@ use crate::{Fauna, FaunaConfig};
 //     held intent, subject, hold start, executed actions, override; the kick's phase),
 //     `Fauna::heard` (call records), `Track::lame`, and the envelope's brains' memories
 //     (`Controller::memory`). The intent, kick and call tables are named config.
-pub const SCHEMA: u32 = 81;
+// 82: CALLS-REST (behaviour-AI §2.1, §3.4) — `Animal::doze` (light rest and deep bouts),
+//     `Vigil::{wound_seen, heard_from}`, `CallRecord::heading`, the vigil ledger's `calls` and
+//     `call_reactions`, the ledger's light, deep and deep-bout counters. The rest and call
+//     tables are named config.
+pub const SCHEMA: u32 = 82;
 
 #[derive(Serialize)]
 struct EnvelopeOut<'a> {
@@ -626,6 +630,7 @@ mod tests {
             pack: None,
             homing_ticks: 0,
             rest_ticks: 0,
+            doze: crate::sleep::Doze::default(),
             yielding: false,
             hunkered: false,
             stomach: crate::Stomach::default(),

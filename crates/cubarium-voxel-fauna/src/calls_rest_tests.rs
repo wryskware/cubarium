@@ -367,3 +367,148 @@ fn the_frondgrazers_manifest_has_no_calls_block() {
     let m = crate::FaunaConfig::default().manifest(GRAZER);
     assert!(m.modules.iter().all(|b| b.name != "Calls"));
 }
+
+// ------------------------------------------------------------------ step 3: rest physiology
+
+/// The loftstrider's senses cut to sight only, no still gain, at `sight_m`.
+fn sight_only(c: &mut FaunaConfig, sight_m: f64) {
+    let s = &mut c.founders[LS.index()].senses;
+    s.sight_m = sight_m;
+    s.sight_night_m = sight_m;
+    s.sight_still_fraction = 1.0;
+    s.hearing_m = 0.0;
+    s.tremor_m = 0.0;
+    s.still_gain = 1.0;
+}
+
+fn rest_table(c: &mut FaunaConfig) -> &mut crate::sleep::RestTable {
+    &mut c.founders[LS.index()].rest
+}
+
+/// A light rester senses a moving hound within `rest_sense` of its range and not beyond it; a
+/// deep sleeper senses nothing; awake, it sees the farther hound too.
+#[test]
+fn a_light_rester_senses_at_the_reduced_range_and_a_deep_sleeper_not_at_all() {
+    let world = world(41);
+    let mut c = config();
+    sight_only(&mut c, 5.0);
+    rest_table(&mut c).light = true;
+    rest_table(&mut c).rest_sense = 0.5;
+    let reduced = 5.0 * 0.5;
+    for (state, near_seen, far_seen) in [("awake", true, true), ("light", true, false), ("deep", false, false)] {
+        let mut f = Fauna::new(c.clone());
+        f.set_births_enabled(false);
+        let me = body(&mut f, &world, LS, 2.0, EAST, 0.0);
+        let speed = cruise(&f, VH);
+        let near = body(&mut f, &world, VH, 2.0 + 0.8 * reduced, WEST, speed);
+        let far = body(&mut f, &world, VH, 2.0 + 1.4 * reduced, WEST, speed);
+        if state != "awake" {
+            let a = animal_mut(&mut f, me);
+            a.state = crate::State::Asleep;
+            a.doze.light = state == "light";
+        }
+        sense(&mut f, &world);
+        let has = |id: u64| f.percept(me).is_some_and(|p| p.track(id).is_some());
+        assert_eq!((has(near), has(far)), (near_seen, far_seen), "{state}");
+    }
+}
+
+/// Lying down starts light rest; a deep bout begins only after `light_min_s`, lasts within
+/// `deep_min_s..deep_max_s`, then light rest again; and a body of a lineage without light rest
+/// is deep (blind) the whole rest.
+#[test]
+fn rest_starts_light_and_deep_bouts_come_after_the_light_minimum() {
+    let mut c = config();
+    let t = rest_table(&mut c);
+    t.light = true;
+    t.light_min_s = 2.0;
+    t.deep_per_min = 1e6;
+    t.deep_alone_scale = 1.0;
+    t.deep_min_s = 1.0;
+    t.deep_max_s = 1.5;
+    t.need_s = 0.0;
+    let world = world(42);
+    let mut f = Fauna::new(c.clone());
+    f.set_births_enabled(false);
+    let me = body(&mut f, &world, LS, 2.0, EAST, 0.0);
+    let i = f.animals.iter().position(|a| a.id == me).unwrap();
+    f.animals[i].state = crate::State::Asleep;
+    crate::sleep::step(&mut f, i, LS, false, 1);
+    assert!(crate::sleep::light_rest(&f.animals[i]), "lying down starts light");
+    let light_min = cubarium_voxel::ticks_at_least_one(2.0);
+    let (mut first_deep, mut deep_len) = (None, 0u64);
+    for k in 1..=4 * light_min {
+        f.tick += 1;
+        let began = crate::sleep::step(&mut f, i, LS, true, 1);
+        if began && first_deep.is_none() {
+            first_deep = Some(k);
+        }
+        if first_deep.is_some() && crate::sleep::deep_asleep(&f.animals[i]) {
+            deep_len += 1;
+        }
+        if first_deep.is_some() && crate::sleep::light_rest(&f.animals[i]) {
+            break;
+        }
+    }
+    let first = first_deep.expect("a deep bout");
+    assert!(first >= light_min, "not before the light minimum ({first} < {light_min})");
+    let (lo, hi) = (cubarium_voxel::ticks_at_least_one(1.0), cubarium_voxel::ticks_at_least_one(1.5));
+    assert!((lo..=hi).contains(&deep_len), "deep for {deep_len} ticks, drawn in {lo}..={hi}");
+    // Light rest off: asleep is deep.
+    let mut c = c;
+    rest_table(&mut c).light = false;
+    let mut f = Fauna::new(c);
+    f.set_births_enabled(false);
+    let me = body(&mut f, &world, LS, 2.0, EAST, 0.0);
+    let i = f.animals.iter().position(|a| a.id == me).unwrap();
+    f.animals[i].state = crate::State::Asleep;
+    assert!(crate::sleep::step(&mut f, i, LS, false, 1), "falling asleep is a deep bout");
+    assert!(crate::sleep::deep_asleep(&f.animals[i]));
+}
+
+/// **Sleeps lighter**: with `deep_alone_scale` 0, a light rester that has seen no relative up
+/// never goes deep, while one that saw a relative up within `kin_awake_s` does at the same
+/// rate and draws; the sight must be sight of a relative not in deep sleep. And the need
+/// ceiling puts even the lone one into a deep bout once `need_s` has passed.
+#[test]
+fn deep_bouts_are_rarer_with_no_relative_seen_awake_and_the_need_ceiling_still_brings_one() {
+    let world = world(43);
+    let mut c = config();
+    sight_only(&mut c, 5.0);
+    let t = rest_table(&mut c);
+    t.light = true;
+    t.rest_sense = 1.0;
+    t.light_min_s = 0.0;
+    t.deep_per_min = 600.0;
+    t.deep_alone_scale = 0.0;
+    t.kin_awake_s = 30.0;
+    t.need_s = 0.0;
+    let run = |c: FaunaConfig, kin: Option<&str>| -> u64 {
+        let mut f = Fauna::new(c);
+        f.set_births_enabled(false);
+        let me = body(&mut f, &world, LS, 2.0, EAST, 0.0);
+        if let Some(how) = kin {
+            let k = body(&mut f, &world, LS, 4.0, WEST, 0.0);
+            if how == "deep" {
+                animal_mut(&mut f, k).state = crate::State::Asleep;
+            }
+        }
+        sense(&mut f, &world);
+        let i = f.animals.iter().position(|a| a.id == me).unwrap();
+        f.animals[i].state = crate::State::Asleep;
+        let mut bouts = 0;
+        let mut was = false;
+        for _ in 0..200 {
+            f.tick += 1;
+            bouts += u64::from(crate::sleep::step(&mut f, i, LS, was, 7));
+            was = true;
+        }
+        bouts
+    };
+    assert_eq!(run(c.clone(), None), 0, "alone: no deep bout at scale 0");
+    assert_eq!(run(c.clone(), Some("deep")), 0, "a relative seen deep asleep is not one seen up");
+    assert!(run(c.clone(), Some("up")) > 0, "with a relative seen up it goes deep");
+    let mut c = c;
+    rest_table(&mut c).need_s = 2.0;
+    assert!(run(c, None) > 0, "the need ceiling");
+}

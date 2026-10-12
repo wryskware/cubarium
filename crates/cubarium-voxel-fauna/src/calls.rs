@@ -308,7 +308,8 @@ pub(crate) fn hear(fauna: &mut Fauna, view: &VoxelView<'_>) {
             if !(d <= reach) {
                 continue;
             }
-            let asleep = h.state == crate::State::Asleep;
+            // CALLS-REST: only deep sleep is hard of hearing; light rest hears as awake.
+            let asleep = crate::sleep::deep_asleep(h);
             if asleep && heard_loud < t.asleep_loudness {
                 continue;
             }

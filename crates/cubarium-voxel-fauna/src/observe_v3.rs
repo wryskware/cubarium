@@ -125,7 +125,7 @@ pub fn slot(t: &Track, frame: &Frame, range_m: f64, fresh_s: f64) -> [f64; 7] {
         c,
         proximity(d, range_m),
         f64::from(t.moving),
-        f64::from(t.posture == posture::REST || t.posture == posture::ASLEEP),
+        f64::from(t.posture == posture::REST || t.posture == posture::ASLEEP || t.posture == posture::DOZE),
         clamp01(1.0 - age_s / fresh_s),
     ]
 }

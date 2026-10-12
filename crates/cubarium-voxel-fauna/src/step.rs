@@ -1040,6 +1040,20 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         if let Some(b) = a.bout.as_mut() {
             b.kind = b.kind.max(kind);
         }
+        // CALLS-REST: the body's light-or-deep choice inside its rest ([`crate::sleep`]).
+        let began = crate::sleep::step(fauna, i, founder, was_asleep, seed);
+        let a = &fauna.animals[i];
+        let k = founder.index();
+        if a.state == State::Asleep {
+            if a.doze.light {
+                fauna.ledger.light_rest_ticks_by_founder[k] += 1;
+            } else {
+                fauna.ledger.deep_sleep_ticks_by_founder[k] += 1;
+            }
+        }
+        if began {
+            fauna.ledger.deep_bouts_by_founder[k] += 1;
+        }
     }
 }
 
@@ -5406,6 +5420,7 @@ fn newborn(
         pack: None,
         homing_ticks: 0,
         rest_ticks: 0,
+        doze: crate::sleep::Doze::default(),
         yielding: false,
         hunkered: false,
         // A newborn starts with an empty stomach and its eating latch off (repair 2
