@@ -33,6 +33,7 @@ fn main() -> Result<()> {
     let mut layout = RingLayout::RING_320;
     let mut zoom = 3u32;
     let mut seed = 1u64;
+    let mut frames = None;
     let mut it = std::env::args().skip(1);
     while let Some(flag) = it.next() {
         let mut value = || it.next().ok_or_else(|| anyhow!("{flag} wants a value"));
@@ -47,6 +48,11 @@ fn main() -> Result<()> {
             "--scale" => layout.scale = value()?.parse()?,
             "--zoom" => zoom = value()?.parse()?,
             "--seed" => seed = value()?.parse()?,
+            "--frames" => {
+                let count: u64 = value()?.parse()?;
+                anyhow::ensure!(count > 0, "--frames must be positive");
+                frames = Some(count);
+            }
             other => bail!("unknown flag {other}"),
         }
     }
@@ -58,10 +64,15 @@ fn main() -> Result<()> {
         layout,
         zoom,
         seed,
+        frames,
+        error: None,
         state: None,
         start: std::time::Instant::now(),
     };
     event_loop.run_app(&mut app)?;
+    if let Some(error) = app.error {
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -70,6 +81,8 @@ struct App {
     layout: RingLayout,
     zoom: u32,
     seed: u64,
+    frames: Option<u64>,
+    error: Option<anyhow::Error>,
     state: Option<State>,
     start: std::time::Instant,
 }
@@ -92,6 +105,7 @@ impl ApplicationHandler for App {
             Ok(state) => self.state = Some(state),
             Err(e) => {
                 eprintln!("could not open a window: {e:#}");
+                self.error = Some(e);
                 event_loop.exit();
             }
         }
@@ -104,6 +118,7 @@ impl ApplicationHandler for App {
             WindowEvent::Resized(_) => {
                 if let Err(e) = state.rebuild_swapchain() {
                     eprintln!("swapchain: {e:#}");
+                    self.error = Some(e);
                     event_loop.exit();
                 }
             }
@@ -111,6 +126,10 @@ impl ApplicationHandler for App {
                 let seconds = self.start.elapsed().as_secs_f64();
                 if let Err(e) = state.draw(&self.atlas, seconds) {
                     eprintln!("draw: {e:#}");
+                    self.error = Some(e);
+                    event_loop.exit();
+                } else if self.frames.is_some_and(|limit| state.frame >= limit) {
+                    println!("presented {} frames", state.frame);
                     event_loop.exit();
                 }
             }
