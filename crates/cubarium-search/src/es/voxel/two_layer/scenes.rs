@@ -142,7 +142,11 @@ fn up_a_stand(a: &cubarium_voxel_fauna::Animal) -> bool {
 /// - follow mother: the share of seconds the young is within its lineage's nursing leash
 ///   (`nursing.leash_m`, 3D) of its mother;
 /// - seedporter rest: the share of body-seconds resting or asleep;
-/// - feed: the share of the carcass's carrion eaten;
+/// - feed: the share of the seconds the lanternjaw wants food (its eating latch on) that it
+///   takes a bite ([`cubarium_voxel_fauna::State::Cropping`]). Not the share of the carcass
+///   eaten: the bite rate caps a 60 s scene at about an eighth of it and the full event stops
+///   the meal long before the carcass is gone (BRAIN-FIX step 1), so that read capped every
+///   arm, the rules included, at the same 0.125;
 /// - give way: the share of the seconds after a hound first comes within
 ///   `predation.carcass_yield_radius_m` that the young is alive and keeps beyond
 ///   `predation.still_threat_near_m` of every hound (where even a still hound is a threat).
@@ -161,10 +165,6 @@ pub fn competence(config: &mode_scenes::Config, scene: ModeScene, seed: u64, dri
         ModeScene::Groom => e.sim.fauna().view().animals.iter().find(|a| a.attached.map(|t| t.host) == e.others.first().copied()).map(|a| a.id),
         _ => None,
     };
-    let carrion = |sim: &cubarium_voxel_sim::Sim, site: cubarium_voxel_flora::Site| -> f64 {
-        sim.flora().view().ground.iter().find(|g| g.site == site).map_or(0.0, |g| g.carrion)
-    };
-    let carrion0 = e.site.map(|s| carrion(&e.sim, s)).unwrap_or(0.0);
     let (energy_start, deaths0) = tally(&e.sim, f);
     let leash = e.sim.fauna().config().founder(f).nursing.leash_m;
     let yield_m = e.sim.fauna().config().predation.carcass_yield_radius_m;
@@ -212,6 +212,12 @@ pub fn competence(config: &mode_scenes::Config, scene: ModeScene, seed: u64, dri
                     good += usize::from(matches!(a.state, cubarium_voxel_fauna::State::Resting | cubarium_voxel_fauna::State::Asleep));
                 }
             }
+            ModeScene::Feed => {
+                if let Some(a) = focal.first().filter(|a| a.eating) {
+                    seconds += 1;
+                    good += usize::from(a.state == cubarium_voxel_fauna::State::Cropping);
+                }
+            }
             ModeScene::GiveWay => {
                 let hounds: Vec<_> = e.others.iter().filter_map(|h| v.animal(*h)).collect();
                 let lj = e.focal.first().and_then(|id| v.animal(*id));
@@ -231,11 +237,7 @@ pub fn competence(config: &mode_scenes::Config, scene: ModeScene, seed: u64, dri
     let competence = match scene {
         ModeScene::Roost => e.focal.iter().filter_map(|id| v.animal(*id)).filter(|a| up_a_stand(a) && a.mobility.mode == cubarium_voxel_fauna::MobilityMode::Perched).count() as f64 / n,
         ModeScene::FleeToTrees => e.focal.iter().filter(|id| reached.contains(id) && v.animal(**id).is_some()).count() as f64 / n,
-        ModeScene::Feed => match e.site {
-            Some(s) if carrion0 > 0.0 => ((carrion0 - carrion(&e.sim, s)) / carrion0).clamp(0.0, 1.0),
-            _ => 0.0,
-        },
-        ModeScene::Groom | ModeScene::FollowMother | ModeScene::SeedporterRest | ModeScene::GiveWay => share(good, seconds),
+        ModeScene::Feed | ModeScene::Groom | ModeScene::FollowMother | ModeScene::SeedporterRest | ModeScene::GiveWay => share(good, seconds),
     };
     let (energy_end, deaths1) = tally(&e.sim, f);
     let focal = *e.focal.first().ok_or("a scene with no focal body")?;

@@ -5979,5 +5979,6 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `mode_scenes.young_age_s` | 60.0 | s | [0, inf) | BRAIN-NEXT mode scenes: the young's age at the start (follow mother) |
 | `mode_scenes.young_fullness` | 0.2 | fraction | [0, 1] | BRAIN-NEXT mode scenes: the young's reserve and stomach (follow mother) |
 | `mode_scenes.hunter_fullness` | 0.2 | fraction | [0, 1] | BRAIN-NEXT mode scenes: the lanternjaw's reserve and stomach at its carcass (feed, give way) |
-| `mode_scenes.carcass_organic` | 0.5 | kg | (0, inf) | BRAIN-NEXT mode scenes: the carcass's organic matter (feed, give way) |
+| `mode_scenes.host_fullness` | 0.2 | fraction | [0, 1] | BRAIN-FIX mode scenes: the groom scene's host's reserve and stomach (hungry: held still eating a carcass at its mouth) |
+| `mode_scenes.carcass_organic` | 0.5 | kg | (0, inf) | BRAIN-NEXT mode scenes: the carcass's organic matter (feed, give way; the groom scene's host's meal) |
 | `mode_scenes.big_distance_m` | 1.0 | m | [0, inf) | BRAIN-NEXT mode scenes: carcass to the Veilhound standing by it (give way) |

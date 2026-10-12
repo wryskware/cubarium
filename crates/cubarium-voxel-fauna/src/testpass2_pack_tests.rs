@@ -379,7 +379,7 @@ fn a_target_on_a_pillar_no_member_can_climb_is_broken_off_once_stalled_and_not_t
         a.site.y = SURFACE_Y + rise;
         a.pose.y_m = crate::surface_m(SURFACE_Y + rise, VOXEL_M);
     }
-    let mut c2 = fauna.config.clone();
+    let mut c2 = *fauna.config;
     c2.founders[CH.index()].pack.as_mut().unwrap().route_refresh_s = 0.0;
     fauna.replace_config(c2).unwrap();
     let m = fauna.config.manifest(CH);
@@ -394,7 +394,7 @@ fn a_target_on_a_pillar_no_member_can_climb_is_broken_off_once_stalled_and_not_t
     assert!(ends(&events, ChaseEnd::BrokeOff) >= 1, "broken off within {bound} ticks: {events:?}");
     assert!(fauna.ledger.pack_out_of_reach >= 1, "booked out of reach");
     let chases = fauna.ledger.pack_chases;
-    let mut c3 = fauna.config.clone();
+    let mut c3 = *fauna.config;
     c3.founders[CH.index()].pack.as_mut().unwrap().shun_s = 0.1;
     fauna.replace_config(c3).unwrap();
     step_s(&mut fauna, &world, &mut flora, 2.0, &mut events);

@@ -16,11 +16,14 @@
 //! - [`clone`]: trajectory records and the teacher-forced fit of both layers;
 //! - [`adapter`]: the brain behind the fauna's menu seam (`Controller::decide`, saves);
 //! - [`scenes`]: the staged mode scenes as recordings, closed-loop runs and competence
-//!   checks (BRAIN-NEXT).
+//!   checks (BRAIN-NEXT);
+//! - [`check`]: a brain beside its heuristic on matched starts — energy, holds and per-mode
+//!   competence (BRAIN-FIX), the trainer's readout every check.
 
 pub mod adapter;
 pub mod arbitration;
 pub mod brain;
+pub mod check;
 pub mod clone;
 pub mod file;
 pub mod net;

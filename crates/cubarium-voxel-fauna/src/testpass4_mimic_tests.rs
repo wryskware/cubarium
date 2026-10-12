@@ -133,7 +133,7 @@ fn a_catch_worth_exactly_its_minimum_gain_is_declined_and_a_hair_more_is_taken()
     let w = worth(&fauna.config, &h, &p);
     assert!(w > 0.0, "fixture: a catch that pays");
     for (gain, prey) in [(w, false), (w * (1.0 - 1e-9), true)] {
-        let mut c = fauna.config.clone();
+        let mut c = *fauna.config;
         c.founders[SP.index()].catch_gain_min = gain;
         assert_eq!(crate::is_prey_of(&c, &h, &p), prey, "gain floor {gain} against worth {w}");
     }
@@ -535,5 +535,5 @@ fn mimic_lineage_fields_survive_a_postcard_round_trip() {
             f.name()
         );
     }
-    assert_eq!(back.config, c);
+    assert_eq!(*back.config, c);
 }
