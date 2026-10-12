@@ -5,6 +5,7 @@
 use super::*;
 use crate::voxel::project::Projection;
 use cubarium_gpu::target::readback::ReadbackRing;
+use cubarium_gpu::FrameSource;
 use cubarium_voxel::{Command, Config};
 use cubarium_voxel_fauna::FaunaConfig;
 use cubarium_voxel_flora::FloraConfig;
