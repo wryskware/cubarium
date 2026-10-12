@@ -53,6 +53,9 @@ pub use groom::Grooming;
 pub mod nurse;
 /// CONTRACTS (behaviour-AI §11): intents, subjects and their records.
 pub mod intent;
+/// TWO-LAYER: a lineage's brain table (`fauna.founders.<lineage>.brain`).
+pub mod brain_knobs;
+pub use brain_knobs::BrainArbitration;
 /// CONTRACTS (behaviour-AI §11.1): slots and subject candidates.
 pub mod subjects;
 /// CONTRACTS (behaviour-AI §3.3, §11.4): the kick, one state machine with one budget.

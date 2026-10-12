@@ -652,6 +652,11 @@ pub struct FounderPhysiology {
     /// expiry and §11.1's bounded slots.
     #[serde(default)]
     pub intent: crate::IntentKnobs,
+    /// **Its two-layer brain's holding knobs** (TWO-LAYER, [`crate::BrainArbitration`]): the
+    /// top layer's rate, its hold, margin and temperature, and the time-in-intent scale.
+    /// Read only by a menu lineage's two-layer brain; a heuristic or a plain brain ignores it.
+    #[serde(default)]
+    pub brain: crate::BrainArbitration,
     /// **Its kick** (CONTRACTS, [`crate::kick::Kick`]): `None`, no kick, for every lineage
     /// until LS-DEFEND turns the loftstrider's on.
     #[serde(default)]
@@ -2172,6 +2177,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2272,6 +2278,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2417,6 +2424,7 @@ impl FounderPhysiology {
                 nursing: crate::Nursing::default(),
                 grooming: crate::Grooming::default(),
                 intent: crate::IntentKnobs::default(),
+                brain: crate::BrainArbitration::default(),
                 kick: None,
                 calls: crate::calls::CallTable::default(),
                 dispersal: crate::Dispersal::default(),
