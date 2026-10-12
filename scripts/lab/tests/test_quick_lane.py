@@ -50,6 +50,14 @@ class QuickLaneTests(unittest.TestCase):
     def state(self, job):
         return self.d.store.one("SELECT state, reason FROM tasks WHERE job=?", job)
 
+    def test_full_desktop_launches_a_source_archive_from_the_quick_pool(self):
+        self.full_desktop()
+        self.task("source", "run", threads=1, local_only=True, priority=10,
+                  produces={"source:abc": "source.tar"})
+        self.task("normal", "sim", submitted=2, threads=1)
+        self.d.schedule()
+        self.assertEqual(self.launched, [("source", "run", "desktop")])
+
     # (a) ------------------------------------------------------------------
     def test_full_desktop_launches_quick_from_its_pool_only(self):
         host = self.full_desktop()

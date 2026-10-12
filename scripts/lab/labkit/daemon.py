@@ -776,7 +776,10 @@ class Daemon:
         for row, task in rows:
             task.meta.setdefault("kind", row["jk"])
             # quick = true on the job spec applies to all its tasks; quick tasks get the time cap.
-            task.quick = bool(task.quick or json.loads(row["js"] or "{}").get("quick"))
+            # A source archive (a seconds-long `git archive`) takes the quick lane too, so a full
+            # desktop never holds the builds and the EC2 instance that wait on it.
+            task.quick = bool(task.quick or json.loads(row["js"] or "{}").get("quick")
+                              or any(key.startswith("source:") for key in task.produces or {}))
             if task.quick:
                 task.timeout_h = quick_timeout_h(task, quick_min)
         rows.sort(key=lambda item: item[0]["jp"] + item[1].priority, reverse=True)
