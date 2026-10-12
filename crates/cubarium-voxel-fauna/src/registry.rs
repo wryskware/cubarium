@@ -370,6 +370,8 @@ fn founder_rows() -> Vec<Row> {
         r("nursing.nurse_efficiency", "fraction", fraction, "SP-NURSE: the share of what she passes the young receives, the rest respired; milk synthesis is ~80 % efficient"),
         r("nursing.follow_m", "m", nonneg, "SP-NURSE: a dependent young sensing its mother beyond this drifts back toward her instead of the troop (0: troop only); inside the contact radius"),
         r("nursing.follow_pull", "fraction", fraction, "SP-NURSE: that drift's share of its walking turn; an infant keeps to its mother over its own foraging"),
+        r("nursing.leash_m", "m", nonneg, "SP-FOLLOW: a sated dependent young forages on its own within this of its mother and goes back past it; a hungry one goes to her as to food (0: drift only); young primates forage within a few metres of the mother"),
+        r("nursing.mother_memory_s", "s", nonneg, "SP-FOLLOW: out of its senses, a dependent young heads for where it last sensed its mother this long (0: only in sense); a separated infant searches where it lost her for minutes"),
         r("grooming.groom_radius_m", "m", nonneg, "SP-GROOM: contact to pick a troop-mate's larva (0 off); primates groom within arm's reach, about one body length"),
         r("grooming.groom_s", "s", nonneg, "SP-GROOM: continuous contact per larva (0 off); bouts take minutes, one parasite seconds to tens of seconds"),
         r("grooming.groom_seek_m", "m", nonneg, "SP-GROOM: notice infested kin within actual sight; primates approach nearby troop members to groom"),

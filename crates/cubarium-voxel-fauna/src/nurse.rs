@@ -20,9 +20,21 @@
 //!   more and neither is fed past its room.
 //! - **The follow** ([`mother_pull`]). While dependent, the young's group pull
 //!   ([`crate::herding::group_pull`]) targets its mother, when it senses her, instead of the
-//!   troop's mean, with the tighter comfort `follow_m` and the weight `follow_pull`. It reads
-//!   only the young's own percept record. Real infants are carried; carrying is a pose, and
-//!   poses are art, so it is not here.
+//!   troop's mean, with the tighter comfort `follow_m` (the leash `leash_m` when that is on)
+//!   and the weight `follow_pull`. It reads only the young's own percept record. Real infants
+//!   are carried; carrying is a pose, and poses are art, so it is not here.
+//! - **The mother as its food source** (SP-FOLLOW, [`mother_goal`]). The drift above only
+//!   leans a walking turn, so a young feeding, climbing, perched or on a fruit walk was never
+//!   drawn (an 8-seed check: about 1–2 % of dependent time in contact). With `leash_m` on, a
+//!   dependent young with reserve room (hungry) goes to its mother as it would go to fruit,
+//!   over its own foraging, by the fruit walk's route and climb (`step::glider::to_mother`),
+//!   so it reaches her up a tree too; in contact it holds still and nurses. A sated young
+//!   forages on its own within `leash_m` of her and goes back past it. Fleeing still wins.
+//! - **Its mother in its senses.** It weighs her on every remote sensing on top of its
+//!   lineage's `kin_tracks` (the seedporter weighs one: the nearest of its kind, usually its
+//!   twin, so its mother was almost never in its record), and it **remembers** where it last
+//!   sensed her for `mother_memory_s` ([`crate::Fauna::mother_seen`], session state), heading
+//!   there when she is out of its senses, until it gets there.
 //!
 //! **Never scored.** Nursing is no fitness or reward term; the ledger's `nursed_*` lines are
 //! readouts only.
@@ -60,6 +72,13 @@ pub struct Nursing {
     pub follow_m: f64,
     /// That drift's share of its walking turn (1: straight at its mother).
     pub follow_pull: f64,
+    /// **SP-FOLLOW**: a sated dependent young forages on its own within this of its mother
+    /// (3D), and goes back to her past it; a hungry one (reserve room) goes to her whatever
+    /// the distance. Metres; 0: off (the drift only).
+    pub leash_m: f64,
+    /// Out of its senses, the young heads for where it last sensed its mother for this long,
+    /// seconds; 0: only while it senses her.
+    pub mother_memory_s: f64,
 }
 
 impl Default for Nursing {
@@ -73,6 +92,8 @@ impl Default for Nursing {
             nurse_efficiency: 0.0,
             follow_m: 0.0,
             follow_pull: 0.0,
+            leash_m: 0.0,
+            mother_memory_s: 0.0,
         }
     }
 }
@@ -81,6 +102,12 @@ impl Nursing {
     /// Whether nursing is on at all.
     pub fn on(&self) -> bool {
         self.weaning_age_s > 0.0 && self.nurse_rate_per_s > 0.0
+    }
+
+    /// Whether a dependent young keeps to its mother at all: nursing on, and the drift or the
+    /// leash on.
+    pub fn follows(&self) -> bool {
+        self.on() && (self.follow_m > 0.0 || self.leash_m > 0.0)
     }
 }
 
@@ -99,7 +126,11 @@ impl Nursing {
 /// - `nurse_radius_m` 0.5: contact, one of its 0.5 m adult lengths centre to centre;
 /// - `follow_m` 0.4, inside the contact radius, so a young drifts back before it loses the
 ///   teat; `follow_pull` 0.8: an infant's keeping to its mother outweighs its own foraging
-///   turn (the troop's pull is 0.5).
+///   turn (the troop's pull is 0.5);
+/// - `leash_m` 3 (SP-FOLLOW): young primates forage within a few metres of their mother
+///   (six of its 0.5 m adult lengths, under the troop's 4 m comfort);
+/// - `mother_memory_s` 120: a separated infant searches where it lost its mother for
+///   minutes (twice the troop's one-minute memory: its mother is its whole food supply).
 ///
 /// **Budget** (SP-NEWBORN's measured numbers, before these were set): a mother conceives only
 /// full grown (a growing adult's reserve sits near 5 % of its cap, under the surplus floor), so
@@ -122,6 +153,8 @@ pub fn nursing_of(founder: Founder) -> Nursing {
             nurse_efficiency: 0.8,
             follow_m: 0.4,
             follow_pull: 0.8,
+            leash_m: 3.0,
+            mother_memory_s: 120.0,
         },
         _ => Nursing::default(),
     }
@@ -165,6 +198,11 @@ pub(crate) fn nurse(fauna: &mut Fauna, view: &VoxelView<'_>) {
         return;
     }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
+    // SP-FOLLOW: the memories of the departed go (a young's own is checked as it reads it).
+    if fauna.tick % 64 == 0 && !fauna.mother_seen.is_empty() {
+        let animals = &fauna.animals;
+        fauna.mother_seen.retain(|id, _| animals.binary_search_by_key(id, |a| a.id).is_ok());
+    }
     // (mother id, young index) for every dependent young, mothers grouped in id order.
     let mut young: Vec<(u64, usize)> = (0..fauna.animals.len())
         .filter(|&k| dependent(fauna, k))
@@ -234,6 +272,8 @@ pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
     if !(t.follow_m > 0.0) {
         return None;
     }
+    // SP-FOLLOW: with the leash on, the young is left to itself within it ([`mother_goal`]).
+    let comfort = if t.leash_m > 0.0 { t.leash_m.max(t.follow_m) } else { t.follow_m };
     let mother = a.mother?;
     let p = fauna.percept(a.id)?;
     let fresh = 2 * fauna.config.perception.stagger_ticks();
@@ -243,5 +283,77 @@ pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
         .find(|tr| tr.class == class::KIN && tr.id == mother && fauna.tick.saturating_sub(tr.tick) <= fresh)?;
     let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, track.x, track.z, ring);
     let d = dx.hypot(dz);
-    Some((d > t.follow_m).then(|| Pull { dx, dz, kin: 1, nearest_m: d, weight: t.follow_pull.clamp(0.0, 1.0) }))
+    Some((d > comfort).then(|| Pull { dx, dz, kin: 1, nearest_m: d, weight: t.follow_pull.clamp(0.0, 1.0) }))
+}
+
+/// Whether the body at `i` weighs body `o` as its mother on a remote sensing over its
+/// lineage's kin cap ([`crate::perception`]): a dependent young whose lineage follows
+/// ([`Nursing::follows`]), and `o` its mother.
+pub(crate) fn weighs_as_mother(fauna: &Fauna, i: usize, o: u64) -> bool {
+    fauna.animals.get(i).is_some_and(|a| a.mother == Some(o))
+        && dependent(fauna, i)
+        && table_of(fauna, i).is_some_and(|t| t.follows())
+}
+
+/// **What a dependent young does about its mother** this controller sample ([`mother_goal`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum MotherGoal {
+    /// In contact and hungry: it holds still beside her and nurses.
+    Hold,
+    /// It goes to her: where it senses her, or where it last did. Her centre on the ring and
+    /// her base height, metres, her base over the support under her, and that support face.
+    Go { x: f64, z: f64, y_m: f64, lift_m: f64, site: (u32, u32, u32) },
+}
+
+/// **The mother as its food source** (module note) for the body at `i`, `ring` the world's
+/// x circumference: `None` leaves it to its heuristic — not a dependent young, the leash
+/// off, its mother dead, out of its senses longer than `mother_memory_s`, or sated within
+/// `leash_m` of her (and sated in contact). It reads its own percept record and keeps the
+/// memory of her ([`crate::Fauna::mother_seen`]); reaching where it last sensed her without
+/// sensing her ends that memory.
+pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, ring: f64) -> Option<MotherGoal> {
+    let id = fauna.animals.get(i)?.id;
+    let t = match table_of(fauna, i) {
+        Some(t) if dependent(fauna, i) && t.leash_m > 0.0 => t,
+        _ => {
+            fauna.mother_seen.remove(&id);
+            return None;
+        }
+    };
+    let a = fauna.animals[i];
+    let mother = a.mother?;
+    if fauna.animals.binary_search_by_key(&mother, |b| b.id).is_err() {
+        fauna.mother_seen.remove(&id);
+        return None;
+    }
+    let now = fauna.tick;
+    let fresh = 2 * fauna.config.perception.stagger_ticks();
+    let seen = fauna
+        .percept(id)
+        .and_then(|p| p.tracks().iter().find(|tr| tr.class == class::KIN && tr.id == mother && now.saturating_sub(tr.tick) <= fresh).copied());
+    if let Some(tr) = seen {
+        fauna.mother_seen.insert(id, tr);
+    }
+    let memory = if t.mother_memory_s.is_finite() && t.mother_memory_s > 0.0 { cubarium_voxel::ticks_at_least_one(t.mother_memory_s) } else { 0 };
+    let m = *fauna.mother_seen.get(&id)?;
+    let sensed = now.saturating_sub(m.tick) <= fresh;
+    if !sensed && now.saturating_sub(m.tick) > memory {
+        fauna.mother_seen.remove(&id);
+        return None;
+    }
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, m.x, m.z, ring);
+    let d = dx.hypot(dz).hypot(m.y_m - a.pose.y_m);
+    let hungry = reserve_room(fauna, i) > 0.0;
+    if d <= t.nurse_radius_m {
+        if sensed {
+            return hungry.then_some(MotherGoal::Hold);
+        }
+        // Where it last sensed her, and she is not there.
+        fauna.mother_seen.remove(&id);
+        return None;
+    }
+    if !hungry && d <= t.leash_m {
+        return None;
+    }
+    Some(MotherGoal::Go { x: m.x, z: m.z, y_m: m.y_m, lift_m: m.lift_m, site: m.site })
 }

@@ -36,6 +36,9 @@ fn nursing() -> Nursing {
         nurse_efficiency: EFF,
         follow_m: 0.4,
         follow_pull: 0.8,
+        // The drift alone: SP-FOLLOW's walk to the mother is `follow_tests`'.
+        leash_m: 0.0,
+        mother_memory_s: 0.0,
     }
 }
 

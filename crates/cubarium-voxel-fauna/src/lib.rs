@@ -55,6 +55,8 @@ pub use nurse::Nursing;
 #[cfg(test)]
 mod nurse_tests;
 #[cfg(test)]
+mod follow_tests;
+#[cfg(test)]
 mod herding_tests;
 mod gait;
 pub use gait::Sprint;
@@ -4191,6 +4193,11 @@ pub struct Fauna {
     /// again, at most [`WALK_SHUN_SLOTS`]. Session state: not saved.
     #[serde(skip)]
     pub(crate) walk_shun: FxHashMap<u64, Vec<(u64, u64)>>,
+    /// SP-FOLLOW: per dependent young, its mother's track as it last sensed her
+    /// ([`nurse::mother_goal`]): where it heads when she is out of its senses. Session state,
+    /// not saved: after a load a young goes by what it senses until it senses her again.
+    #[serde(skip)]
+    pub(crate) mother_seen: FxHashMap<u64, Track>,
     /// EDGE: per body, the flight (its `Vigil::flee_tick`) in which it was cornered: the rest
     /// of that flight goes by its route graph. Session state: not saved.
     #[serde(skip)]
@@ -4313,11 +4320,14 @@ pub enum Steer {
     Host,
     /// SP-GROOM: approaching an infested troop-mate or holding grooming contact.
     Groom,
+    /// SP-FOLLOW: a dependent young going to its mother, or holding still in contact with her
+    /// to nurse ([`nurse::mother_goal`]).
+    Nurse,
 }
 
 impl Steer {
     /// Every source, in a fixed order for tables.
-    pub const ALL: [Steer; 19] = [
+    pub const ALL: [Steer; 20] = [
         Steer::Rest,
         Steer::Heuristic,
         Steer::Fruit,
@@ -4337,6 +4347,7 @@ impl Steer {
         Steer::Wade,
         Steer::Host,
         Steer::Groom,
+        Steer::Nurse,
     ];
 
     /// A short name for tables.
@@ -4361,6 +4372,7 @@ impl Steer {
             Steer::Wade => "wade",
             Steer::Host => "host",
             Steer::Groom => "groom",
+            Steer::Nurse => "nurse",
         }
     }
 }
@@ -4709,6 +4721,7 @@ impl Fauna {
             host_quests: std::collections::BTreeMap::new(),
             host_switch: HostSwitchTally::default(),
             walk_shun: FxHashMap::default(),
+            mother_seen: FxHashMap::default(),
             route_flee: FxHashMap::default(),
             forage: FxHashMap::default(),
             rove: FxHashMap::default(),

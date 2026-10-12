@@ -1992,6 +1992,108 @@ fn fruit_by_sight(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraV
     walk_to_stand(fauna, i, view, fv, &[((dx * dx + dz * dz).sqrt(), m.id, site)], range, 1.0, crate::Steer::Fruit).map(|(go, _)| go)
 }
 
+/// **SP-FOLLOW: the walk to its mother** ([`crate::nurse::MotherGoal::Go`]) for the glider at
+/// `i`, by the fruit walk's own machinery: her centre `(x, z)`, base height `y_m`, base over
+/// her support `lift_m` and support face `site`, as it senses or remembers her.
+///
+/// - **Off her support** (more than half a voxel up), the climbable stand whose stem or crown
+///   holds her is its target, as a fruiting one is: it walks to the stem by its route graph
+///   ([`walk_to_stand`]) and walking into it climbs it. Up a wall or a ledge with no stand,
+///   it walks to the face under her.
+/// - **On the ground** it walks to her face by its route graph, and straight at her once
+///   within its reach (its radius and a voxel).
+/// - **Climbing**: on her stand it climbs on; on any other (or a vine) it climbs down.
+/// - **Perched**: in her crown it holds still there (feeding), as near as a crown lets it;
+///   on another crown it turns to face her and then leaves it (a glide from height, else a
+///   climb down); on a wall or a ledge it goes.
+/// - **Gliding**, it steers toward her.
+///
+/// `None` when it can reach neither her stand nor her face.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn to_mother(
+    fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>,
+    x: f64, z: f64, y_m: f64, lift_m: f64, site: (u32, u32, u32),
+) -> Option<Actions> {
+    let a = fauna.animals[i];
+    let phys = *fauna.config.founder(a.founder?);
+    let glider = phys.glider?;
+    let c = view.config;
+    let v = c.voxel_m;
+    let ring = f64::from(c.width) * v;
+    let s = shape(&phys, a.body);
+    let (dx, dz) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, x, z, ring);
+    let dg = dx.hypot(dz);
+    // The stand she is up: a climbable one whose stem or crown holds her at her height.
+    let her_stand: Option<(f64, u64, Site)> = if lift_m > 0.5 * v {
+        let mut best: Option<(f64, u64, Site)> = None;
+        let mut consider = |st: &cubarium_voxel_flora::Stand| {
+            if !climbable(fv, st, &glider) {
+                return;
+            }
+            let Some((low, high)) = crown_span(fv, st.site) else { return };
+            let (sx, sz) = ((f64::from(st.site.x) + 0.5) * v, (f64::from(st.site.z) + 0.5) * v);
+            let (ex, ez) = crate::pose::wrapped_delta(sx, sz, x, z, ring);
+            let reach = (s.r + 0.5 * v).max(low.radius_m).max(high.radius_m) + v;
+            // From its foot (she may hang on the stem, eating) to its crown top.
+            let (bottom, top) = (crate::surface_m(st.site.y, v) - EPS, (high.cell + 1) as f64 * v + EPS);
+            let d = ex.hypot(ez);
+            if d <= reach && (bottom..=top).contains(&y_m) && best.is_none_or(|(b, id, _)| d < b || (d == b && st.id < id)) {
+                best = Some((d, st.id, st.site));
+            }
+        };
+        let col = ((x / v).floor() as i64).rem_euclid(i64::from(c.width));
+        let row = (z / v).floor().clamp(0.0, f64::from(c.depth.saturating_sub(1))) as u32;
+        match fv.stands_near(col, row, c.width, c.depth) {
+            Some(near) => near.iter().for_each(|&k| consider(&fv.stands[k as usize])),
+            None => fv.stands.iter().for_each(&mut consider),
+        }
+        best
+    } else {
+        None
+    };
+    let on_hers = |anchor: Option<PerchAnchor>| match anchor {
+        Some(PerchAnchor::Stand { site: st, .. }) => her_stand.is_some_and(|h| h.2 == st),
+        _ => false,
+    };
+    let toward = walk_toward(&a, dx, dz, 0.0);
+    let search = dg.max(phys.senses.sight_m);
+    match a.mobility.mode {
+        MobilityMode::Ground => {
+            if let Some((_, id, st)) = her_stand {
+                let (sx, sz) = ((f64::from(st.x) + 0.5) * v, (f64::from(st.z) + 0.5) * v);
+                let (ex, ez) = crate::pose::wrapped_delta(a.pose.x, a.pose.z, sx, sz, ring);
+                return walk_to_stand(fauna, i, view, fv, &[(ex.hypot(ez), id, st)], search, 0.0, crate::Steer::Nurse).map(|(go, _)| go);
+            }
+            if dg <= s.r + v {
+                return Some(toward);
+            }
+            let face = Site { x: site.0, y: site.1, z: site.2 };
+            let (go, _) = walk_target(fauna, i, view, fv, &[(dg, Fauna::walk_key_face(face), face)], search, 0.0)?;
+            fauna.walking_to(a.id, Fauna::walk_key_face(face), crate::Steer::Nurse);
+            Some(go)
+        }
+        MobilityMode::Climb => {
+            if !on_hers(a.mobility.perch.map(|p| p.anchor)) {
+                fauna.animals[i].mobility.falling = true;
+            }
+            Some(Actions { forward: 1.0, turn: 0.0, feed: 0.0 })
+        }
+        MobilityMode::Perched => match a.mobility.perch.map(|p| p.anchor) {
+            anchor @ Some(PerchAnchor::Stand { .. }) => {
+                if on_hers(anchor) {
+                    return Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 });
+                }
+                // Facing her within about 15° (the turn is twice the angle), it goes.
+                let aligned = toward.turn.abs() < 0.5;
+                Some(Actions { forward: if aligned { 1.0 } else { 0.0 }, turn: toward.turn, feed: 0.0 })
+            }
+            _ => Some(Actions { forward: 1.0, turn: toward.turn, feed: 0.0 }),
+        },
+        MobilityMode::Glide => Some(Actions { forward: 1.0, turn: toward.turn, feed: 0.0 }),
+        _ => None,
+    }
+}
+
 /// **The arboreal refuge** (S2, [`crate::vigil`]): a grounded glider walks to the nearest stand
 /// it can climb within `search_m` (walking into the stem climbs it); `None` with none.
 pub(super) fn refuge_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>, search_m: f64) -> Option<Actions> {

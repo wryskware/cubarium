@@ -1922,6 +1922,24 @@ fn controllers(
                 src = crate::Steer::Roost;
             }
         }
+        // SP-FOLLOW (`crate::nurse::mother_goal`): a dependent young goes to its mother as to
+        // food, over its own heuristic, the fruit walk, the herd and the roost (it roosts where
+        // she does), and holds still beside her to nurse; flight wins, as do the reflexes
+        // below (deep water, thirst, a trapped body's way out).
+        if driven && prey && !fled && fauna.config.founder(founder).glider.is_some() {
+            let ring = f64::from(view.config.width) * view.config.voxel_m;
+            let go = match crate::nurse::mother_goal(fauna, i, ring) {
+                Some(crate::nurse::MotherGoal::Hold) => Some(Actions { forward: 0.0, turn: 0.0, feed: 1.0 }),
+                Some(crate::nurse::MotherGoal::Go { x, z, y_m, lift_m, site }) => glider::to_mother(fauna, i, view, &fv, x, z, y_m, lift_m, site),
+                None => None,
+            };
+            if let Some(go) = go {
+                actions = go;
+                lure = 0.0;
+                lift = 0.0;
+                src = crate::Steer::Nurse;
+            }
+        }
         // Fed perching (the minimal gut's repair 3 item 8): a body whose controller rests
         // when fed (the bellwing's hover-sip teacher) and whose eating latch is off holds
         // still on its perch, or comes down onto what is below it, read from the latch.
@@ -2150,8 +2168,9 @@ fn controllers(
             rove::overridden(fauna, id);
         }
         // SP-GROOM: an available body approaches infested kin through its normal routes.
-        // Flight, a strike, and emergency feeding retain priority; escape routes also win.
-        if driven && !fled && !matches!(src, crate::Steer::Drop | crate::Steer::Wade) {
+        // Flight, a strike, and emergency feeding retain priority; escape routes also win, as
+        // does a dependent young's walk to its mother (SP-FOLLOW).
+        if driven && !fled && !matches!(src, crate::Steer::Drop | crate::Steer::Wade | crate::Steer::Nurse) {
             let day = crate::perception::is_day(&fauna.config, sky.clock_on, sky.daylight);
             if let Some(go) = crate::groom::steer(fauna, i, view, &fv, day) {
                 actions = go;
