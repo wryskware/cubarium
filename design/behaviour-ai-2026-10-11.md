@@ -41,7 +41,7 @@ Evidence:
 | 7 | Does a calf treat its own mother differently (the record exists: `Animal::mother`, SP-NURSE) | **bond both ways** (Wrysk, 2026-10-12: "lets do A"), plus his addition: "young loftstriders and non-infant seedporters should have some level of curiosity to stray from their parent and explore though, increasing the older they get" (§3.5) |
 | 8 | How often the pack should win | **a rare feast** (Wrysk, 2026-10-12: "(a) makes sense"): about one loftstrider a world-year, mostly strayed calves; an adult once in several years (lone, lame or old); a standoff every 1–2 h that usually ends with the pack giving up; a hound killed by kicks about once in a few years. A target the knobs are turned to bracket, not a gate (§6) |
 | 9 | Look of the new poses (kick, guard stance, calf tucked in, hound crouch) | when there is something to show |
-| 10 | How training compares animals, so the family benefit survives scoring (Astra review #1–3) | asked (§11.7) |
+| 10 | How training compares animals, so the family benefit survives scoring (Astra review #1–3) | **matched copies of the staged encounters, kept open** (Wrysk, 2026-10-12: "i guess (a) but hard to say and we might want to keep the options open or revise once we start training"). A staged scene runs twice from one start, one animal on `+ε` and `−ε`, all else identical; live windows keep today's per-body comparison for everyday skills. The comparison is a switch, not a commitment: the shared family variant and matched copies of whole live worlds stay available, and the first signal read decides whether to revise (§11.7) |
 
 ## 1. What happens today
 
@@ -574,7 +574,7 @@ Each one ships something visible and testable. Order:
 | 5 | **VH-TACTICS.** Veilhound intent layer and skills; tactical memory (§11.5); risk-aware target choice; privileged reads and feast travel removed (§11.2); strike identity; pry and attack accounting ported off the pack target | test, cut off, encircle, harry, give up | Opus high |
 | 6 | **YOUNG-ROAM.** Straying with age for loftstrider calves and post-weaning seedporters: the loosening leash, excursions, the distress bleat on losing sight (the seedporter's included) and the mother's response | calves that wander off and get called back | Opus medium |
 | 7 | **TWO-LAYER.** The brain of §10.1 with §11.3's timing; cloning with teacher forcing, alternative-mode examples and a closed-loop correction pass; per-mode competence checks; labels for the seedporter and lanternjaw first, then the loftstrider and Veilhound from 4–5, *explore* from 6 | brains that copy their rules mode by mode | Opus high (new architecture) |
-| 8 | **KIN-TRAIN.** The reward roster and estimator (§11.7), stage 1 perturbing only the top, staged-encounter episodes in the trainer, the noise and signal checks | training that can value a calf, and the signal read | Opus high (the estimator is new) |
+| 8 | **KIN-TRAIN.** The reward roster and estimator (§11.7), the comparison switch (matched copies over any saved start, shared family variant, per-body), stage 1 perturbing only the top, staged-encounter episodes in the trainer, the noise and signal checks | training that can value a calf, and the signal read | Opus high (the estimator is new) |
 | 9 | **BALANCE.** Engagement sweeps over §6's top knobs; the staged wide check; defaults chosen; report to Wrysk | his topic-8 target bracketed or a stated gap | Opus medium |
 
 Order:
@@ -669,7 +669,7 @@ Each body keeps its own antithetic variant. Its score is its own
 `(E_end − E_start + E_given)/body_ref`, as today, plus `r ×` each relative's own score over
 the same span. Who counts and how the scores are compared are fixed in §11.7: today's
 within-world z-scoring cancels the shared family term exactly (Astra review #1), so the
-comparison changes (topic 10).
+comparison changes (topic 10: matched copies of the staged encounters, kept open).
 - **Who counts as a relative.** Relatives come from `Animal::mother` (its calf, its mother,
   siblings sharing a mother) and from the pack record for packmates. The reward reads
   bookkeeping the animal never senses. That is allowed: only its behaviour must come from its
@@ -833,7 +833,7 @@ an already isolated prey). The heuristics add local memory:
   real elephant families. Sibling relations need a shared real mother id; founders with none
   are not siblings by accident.
 
-### 11.7 Reward roster and comparison [#1, #2, #3] (topic 10 asked)
+### 11.7 Reward roster and comparison [#1, #2, #3] (topic 10)
 
 - **Roster.**
   - Fixed at the start of the window or episode from true relations; a newborn joins its
@@ -850,12 +850,26 @@ an already isolated prey). The heuristics add local memory:
   normalising removes it, and the score becomes exactly own energy again. Antithetic twins
   are placed as ring neighbours (`window.rs:228-245`), so a mother and her calf often carry
   opposite signs of one perturbation.
-- **Comparison (proposed, topic 10):** matched copies. A scene is run twice from the same
-  start; one animal carries `+ε` in one copy and `−ε` in the other, and everything else is
-  identical. The difference in its kin-weighted score is then caused by its own variant,
+- **Comparison (Wrysk's call, topic 10):** matched copies. A scene is run twice from the
+  same start; one animal carries `+ε` in one copy and `−ε` in the other, and everything else
+  is identical. The difference in its kin-weighted score is then caused by its own variant,
   relatives included. Focal animal and sign rotate. It is cheap on the staged encounters
   (small scenes, at most 5 min). Live windows keep today's per-body comparison for everyday
   skills, where kin terms add little.
+- **Kept open** (his words: "we might want to keep the options open or revise once we start
+  training"). The comparison is a serde switch per lineage with three modes:
+  - `matched` (the default for staged encounters);
+  - `family` (one shared variant per family or pack, compared across worlds; topic 2's
+    fallback);
+  - `per_body`, z-scored as today (the default for live windows).
+  Matched copies are built over any saved start state, so matched copies of a whole live
+  window are the same machinery on a bigger scene: a cost choice, not new code.
+- **When to revisit**, read at KIN-TRAIN's first signal check and reported to Wrysk:
+  - matched differences for a lineage stay at the frozen-brain noise level: that lineage
+    switches to `family` (topic 2's fallback, already his call);
+  - staged-scene gains don't show in live worlds (calf and hound losses on matched live
+    seeds no better than the cloned brain's): a short trial of matched live windows, priced
+    and taken to him first (EC2 only via `lab approve`).
 - **Checks.** An algebraic check that a perturbation improving only a relative's energy
   survives the whole scorer. Readouts of raw own, relative and combined scores. Missing signs
   are never scored as zero returns.
