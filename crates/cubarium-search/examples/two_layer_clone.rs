@@ -72,7 +72,9 @@ const TICKS_PER_S: u64 = cubarium_voxel_fauna::TICK_HZ as u64;
 fn found(seed: u64, f: Founder, bodies: usize) -> Result<cubarium_voxel_sim::Sim, String> {
     let eco = EcologyParams::defaults();
     let (mut sim, _) = world::try_found_world(&world::training_config(), seed, eco.fauna().founder_counts(), &eco)?;
-    world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
+    let had = lineage_ids(&sim, f).len();
+    let placed = world::top_up(&mut sim, world::TopUp { founder: f, bodies, fullness: FULLNESS.get().copied().flatten() });
+    eprintln!("# seed {seed}: {had} {} founded, {placed} placed by the top-up", f.name());
     Ok(sim)
 }
 
