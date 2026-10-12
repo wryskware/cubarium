@@ -514,9 +514,9 @@ fn faces(t: &Track, x: f64, z: f64, deg: f64, ring: f64) -> bool {
     d > 1e-9 && angle_between(t.heading, dx.atan2(dz)) <= deg.to_radians()
 }
 
-/// Whether sight shows body `t` in guard stance. No lineage has one until LS-DEFEND: none.
-fn guarding(_t: &Track) -> bool {
-    false
+/// Whether sight shows body `t` in guard stance (LS-DEFEND: [`crate::perception::stance`]).
+fn guarding(t: &Track) -> bool {
+    t.modes & SIGHT != 0 && t.stance == crate::perception::stance::GUARD
 }
 
 /// Whether body `t` looks like a kicker to a hound of length `own_len`.

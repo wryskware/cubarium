@@ -645,6 +645,7 @@ mod tests {
             mother: None,
             intent: crate::IntentRecord::default(),
         kick: crate::kick::KickState::default(),
+        stance: 0,
             bite: crate::LastBite::default(),
         }
     }

@@ -1174,6 +1174,12 @@ pub struct Animal {
     /// Always ready for a lineage without one.
     #[serde(default)]
     pub kick: kick::KickState,
+    /// **Its stance** (LS-DEFEND, behaviour-AI §2.1: [`perception::stance`]): what a watcher's
+    /// sight shows of its posture beyond moving and resting — [`perception::stance::GUARD`]
+    /// while it holds the guard intent (braced, facing a threat). Set at its controller
+    /// samples; asleep it shows none.
+    #[serde(default)]
+    pub stance: u8,
     /// **The last bite's cell** (FEED-ROLLOUT round 2, the aiming framework,
     /// `design/handoffs/feed-rollout-2026-10-10.md`): where the food this body last took
     /// was — the crown cell of a stand's bite (`body::bitten_cell`), or the cell over a
@@ -5934,6 +5940,7 @@ impl Fauna {
             mother: None,
             intent: IntentRecord::default(),
             kick: kick::KickState::default(),
+            stance: 0,
             bite: LastBite::default(),
         };
         let mut animal = animal;

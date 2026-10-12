@@ -336,3 +336,140 @@ fn a_held_guard_ends_early_when_its_hound_is_no_longer_sensed() {
     assert!((f.tick - since) as f64 * crate::DT < f.config.founder(LS).intent.hold_s, "inside the hold");
     assert!(decide(&mut f, &w, adult).is_none(), "nothing to guard: the intent is masked, its hold ends early");
 }
+
+// ------------------------------------------------------------------ step 2: guard stance, spread, checks
+
+/// A rock wall `rise` voxels over the plain, on columns `x0..=x1`, rows `z0..=z1`.
+fn wall(w: &mut World, (x0, x1): (i64, i64), (z0, z1): (u32, u32), rise: u32) {
+    for x in x0..=x1 {
+        for z in z0..=z1 {
+            for y in SURFACE_Y + 1..=SURFACE_Y + rise {
+                w.apply(WorldCommand::SetMaterial { x, y, z, material: Material::Rock });
+            }
+        }
+    }
+}
+
+fn heading_to(f: &Fauna, from: u64, to: u64) -> f64 {
+    let (a, b) = (animal(f, from).pose, animal(f, to).pose);
+    let (dx, dz) = crate::pose::wrapped_delta(a.x, a.z, b.x, b.z, RING);
+    dx.atan2(dz)
+}
+
+#[test]
+fn two_adults_facing_two_hounds_from_different_sectors_do_not_both_face_the_same_one() {
+    let (w, mut f) = world(7);
+    let g = d(&f).guard_m;
+    let s = g / 6.0;
+    let a = strider(&mut f, &w, false, 20.0, MID_Z, EAST);
+    let b = strider(&mut f, &w, false, 20.0, MID_Z + 2.0 * s, EAST);
+    let h1 = hound(&mut f, &w, 20.0 + 3.0 * s, MID_Z + 0.5 * s, WEST);
+    let h2 = hound(&mut f, &w, 20.0 + 3.0 * s, MID_Z + 5.0 * s, WEST);
+    let dd = |x: u64, y: u64| dist((animal(&f, x).pose.x, animal(&f, x).pose.z), (animal(&f, y).pose.x, animal(&f, y).pose.z));
+    assert!(dd(a, h1) < dd(b, h1) && dd(b, h1) < dd(b, h2) && dd(b, h2) <= g && dd(a, h2) <= g, "the case: both hounds in reach, h1 nearest both, a nearest h1");
+    // Both turn to face h1, the nearest.
+    for id in [a, b] {
+        let h = heading_to(&f, id, h1);
+        animal_mut(&mut f, id).pose.heading_rad = h;
+    }
+    for id in [a, b] {
+        let other = if id == a { b } else { a };
+        sees(&mut f, id, &[(other, class::KIN, false), (h1, class::THREAT, true), (h2, class::THREAT, true)]);
+    }
+    decide(&mut f, &w, a).expect("a guards");
+    decide(&mut f, &w, b).expect("b guards");
+    assert_eq!(held(&f, a), Some("guard"));
+    assert_eq!(held(&f, b), Some("guard"));
+    let (ta, tb) = (f.ls_teach[&a].subject.body(), f.ls_teach[&b].subject.body());
+    assert_eq!(ta, Some(h1), "a, nearer h1, keeps it");
+    assert_eq!(tb, Some(h2), "b leaves h1 to a and faces h2");
+}
+
+#[test]
+fn a_calf_passes_over_an_adult_it_cannot_reach_safely() {
+    // The nearest adult across a hound: it takes the farther one whose way is clear.
+    let (w, mut f) = world(8);
+    let dd = d(&f);
+    let calf = strider(&mut f, &w, true, 10.0, MID_Z, EAST);
+    let near = strider(&mut f, &w, false, 14.0, MID_Z, WEST);
+    let other = strider(&mut f, &w, false, 10.0 - 5.0, MID_Z, EAST);
+    let vh = hound(&mut f, &w, 12.0, MID_Z + 0.5 * dd.cross_m, WEST);
+    sees(&mut f, calf, &[(near, class::KIN, false), (other, class::KIN, false), (vh, class::THREAT, true)]);
+    decide(&mut f, &w, calf).expect("defends");
+    assert_eq!(f.ls_teach[&calf].subject.body(), Some(other), "the way to the nearest crosses the hound");
+    // A rock wall it cannot step: the same.
+    let (mut w2, mut g) = world(9);
+    let calf = strider(&mut g, &w2, true, 10.0, MID_Z, EAST);
+    let near = strider(&mut g, &w2, false, 14.0, MID_Z, WEST);
+    let other = strider(&mut g, &w2, false, 4.0, MID_Z, EAST);
+    let vh = hound(&mut g, &w2, 10.0, MID_Z - 4.0, EAST);
+    let col = (12.0 / VOXEL_M) as i64;
+    wall(&mut w2, (col, col + 1), (0, D - 1), 8);
+    sees(&mut g, calf, &[(near, class::KIN, false), (other, class::KIN, false), (vh, class::THREAT, true)]);
+    decide(&mut g, &w2, calf).expect("defends");
+    assert_eq!(g.ls_teach[&calf].subject.body(), Some(other), "a wall between it and the nearest");
+}
+
+#[test]
+fn an_adult_guarding_shows_the_guard_stance_and_a_hound_sees_it() {
+    let (w, mut f) = world(10);
+    let mut flora = cubarium_voxel_flora::Flora::new(cubarium_voxel_flora::FloraConfig::default());
+    let g = d(&f).guard_m;
+    let adult = introduce(&mut f, &w, LS, StartingStores::FULL);
+    place(&mut f, adult, 20.0, MID_Z, EAST);
+    let teachers = f.config.teachers;
+    f.controllers.set(adult, crate::controller::heuristic(LS, teachers));
+    let vh = hound(&mut f, &w, 20.0 + 0.6 * g, MID_Z, WEST);
+    drive(&mut f, vh, 0.3, false);
+    assert_eq!(animal(&f, adult).stance, crate::perception::stance::NONE);
+    let mut guarded = false;
+    for _ in 0..(3.0 / crate::DT) as usize {
+        f.step(&w, &mut flora);
+        if animal(&f, adult).stance == crate::perception::stance::GUARD {
+            guarded = true;
+            break;
+        }
+    }
+    assert!(guarded, "a pressing hound inside guard_m: the guard stance");
+    // The hound's sight carries it at its next sensing.
+    let mut shown = false;
+    for _ in 0..(2.0 / crate::DT) as usize {
+        f.step(&w, &mut flora);
+        if f.percept(vh).and_then(|p| p.track(adult)).is_some_and(|t| t.stance == crate::perception::stance::GUARD) {
+            shown = true;
+            break;
+        }
+    }
+    assert!(shown, "the hound's track of it shows the guard stance");
+    // Asleep it shows none.
+    let mut a = animal(&f, adult);
+    a.state = crate::State::Asleep;
+    assert_eq!(crate::perception::stance_of(&a), crate::perception::stance::NONE);
+}
+
+#[test]
+fn the_hounds_target_value_reads_the_guard_stance() {
+    use crate::pack::tactics::{Hound, Me, assess};
+    let f = Fauna::new(config());
+    let pk = f.config.founder(CH).pack.expect("the Veilhound's pack table");
+    let tac = pk.tactics;
+    let ls_len = f.config.founder(LS).adult_length_m;
+    let me = Me { x: 10.0, z: MID_Z, len: f.config.founder(CH).adult_length_m, wound: 0.0, hunger: 0.5, spent: 0.0 };
+    let tr = |id: u64, x: f64, stance: u8| Track {
+        known: true, id, lineage: LS.index() as u8, class: class::PREY, modes: SIGHT, x, z: MID_Z, grounded: true,
+        size_m: ls_len, heading: WEST, stance, ..Track::default()
+    };
+    let target = tr(1, 14.0, crate::perception::stance::NONE);
+    let plain = [target, tr(2, 15.0, crate::perception::stance::NONE)];
+    let braced = [target, tr(2, 15.0, crate::perception::stance::GUARD)];
+    let mem = Hound::default();
+    let a = assess(&f.config, &tac, &pk, &me, &mem, &target, &plain, &[], f.tick, RING);
+    let b = assess(&f.config, &tac, &pk, &me, &mem, &target, &braced, &[], f.tick, RING);
+    assert!(b.p_kill <= a.p_kill && b.expected_kicks >= a.expected_kicks, "a guard in stance never helps the hound");
+    if tac.guard_factor < 1.0 {
+        assert!(b.p_kill < a.p_kill, "guard_factor below 1: the stance lowers p_kill");
+    }
+    if tac.kick_guard_gain > 0.0 && tac.kick_chance > 0.0 {
+        assert!(b.expected_kicks > a.expected_kicks, "kick_guard_gain: more kicks expected");
+    }
+}

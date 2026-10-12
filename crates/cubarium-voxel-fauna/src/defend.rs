@@ -303,7 +303,7 @@ fn nearest_pressing(s: &Scene, x: f64, z: f64, ring: f64) -> Option<(Threat, f64
 
 /// **Go to adults** (young, §3.1): run to the far side of an adult from the threat it fears
 /// and settle there. The adult: its mother first, the nearest after.
-fn go_to_adults(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
+fn go_to_adults(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
     if !s.young || s.adults.is_empty() {
         return None;
     }
@@ -315,9 +315,17 @@ fn go_to_adults(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan
     }
     let mut order: Vec<&Track> = s.adults.iter().collect();
     order.sort_by(|p, q| gap(me.pose.x, me.pose.z, p.x, p.z, ring).2.total_cmp(&gap(me.pose.x, me.pose.z, q.x, q.z, ring).2).then(p.id.cmp(&q.id)));
-    let k = *order.first()?;
-    let h = nearest_pressing(s, k.x, k.z, ring).map(|(t, _)| (t.x, t.z));
-    let (tx, tz) = calf_point(&fauna.config, d, s, k, h, ring);
+    // Each adult's far point; the first reachable and safe one (§11.5), else the first.
+    let point = |k: &Track| {
+        let h = nearest_pressing(s, k.x, k.z, ring).map(|(t, _)| (t.x, t.z));
+        calf_point(&fauna.config, d, s, k, h, ring)
+    };
+    let ok = |k: &Track| {
+        let p = point(k);
+        reachable(fauna, view, me, p, ring) && segment_safe(s, (me.pose.x, me.pose.z), p, d.cross_m, ring)
+    };
+    let k = *order.iter().find(|k| ok(k)).or(order.first())?;
+    let (tx, tz) = point(k);
     let (_, _, dist) = gap(me.pose.x, me.pose.z, tx, tz, ring);
     let act = if dist <= d.arrive_m { Actions { forward: 0.0, turn: 0.0, feed: 0.0 } } else { walk(me, tx, tz, 1.0, ring) };
     Some(Plan { name: "go_to_adults", score: d.w_go_to_adults, subject: track_subject(k), act })
@@ -385,7 +393,7 @@ fn go_to_calf(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> 
 
 /// **Guard** (adult, §3.1): a pressing threat within `guard_m` of it, or of the calf it
 /// stands by (the nearest it senses within `guard_m`): hold the guard point facing it.
-fn guard(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
+fn guard(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
     if s.young {
         return None;
     }
@@ -398,14 +406,40 @@ fn guard(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
         .min_by(|p, q| p.1.total_cmp(&q.1).then(p.0.id.cmp(&q.0.id)))
         .map(|(c, _)| *c);
     let near = |t: &Threat| t.pressing && (t.d <= d.guard_m || calf.is_some_and(|c| gap(c.x, c.z, t.x, t.z, ring).2 <= d.guard_m));
-    let h = s.threats.iter().filter(|t| near(t)).min_by(|p, q| p.d.total_cmp(&q.d).then(p.id.cmp(&q.id)))?;
+    let (rx, rz) = calf.map_or((me.pose.x, me.pose.z), |c| (c.x, c.z));
+    let mut hounds: Vec<&Threat> = s.threats.iter().filter(|t| near(t)).collect();
+    hounds.sort_by(|p, q| gap(rx, rz, p.x, p.z, ring).2.total_cmp(&gap(rx, rz, q.x, q.z, ring).2).then(p.id.cmp(&q.id)));
+    // Sector spread (§11.5): a hound that a grown kin is seen facing, and stands nearer to
+    // than it does, is that kin's; it faces the nearest one no other adult faces.
+    let taken = |h: &Threat| {
+        s.adults.iter().any(|k| {
+            let dk = gap(k.x, k.z, h.x, h.z, ring).2;
+            faces(k, h.x, h.z, d.facing_deg, ring) && (dk < h.d || (dk == h.d && k.id < me.id))
+        })
+    };
+    let h = *hounds.iter().find(|h| !taken(h)).or(hounds.first())?;
     let (gx, gz) = match calf {
-        Some(c) => guard_point(d, s, (c.x, c.z), radius_est(&fauna.config, &c), Some((h.x, h.z)), ring),
-        None => (me.pose.x, me.pose.z),
+        Some(c) => {
+            // Between the calf and its hound, never past the hound; where it cannot walk, it
+            // stands where it is.
+            let rc = radius_est(&fauna.config, &c);
+            let room = gap(c.x, c.z, h.x, h.z, ring).2 - s.radius;
+            let g = along(c.x, c.z, h.x, h.z, (rc + s.radius + d.guard_gap_m).min(room.max(0.0)), ring);
+            if reachable(fauna, view, me, g, ring) { g } else { (me.pose.x, me.pose.z) }
+        }
+        None => bunch_point(d, s, ring).filter(|g| reachable(fauna, view, me, *g, ring)).unwrap_or((me.pose.x, me.pose.z)),
     };
     let (_, _, off) = gap(me.pose.x, me.pose.z, gx, gz, ring);
     let act = if off > d.arrive_m { walk(me, gx, gz, 1.0, ring) } else { face(me, h.x, h.z, ring) };
     Some(Plan { name: "guard", score: d.w_guard, subject: threat_subject(h, fauna.tick), act })
+}
+
+/// **Adults bunch** (§3.1): a grown body with no calf to stand by keeps within `bunch_m` of its
+/// nearest grown kin: the point `bunch_m / 2` from that kin toward it, when farther.
+fn bunch_point(d: &Defence, s: &Scene, ring: f64) -> Option<(f64, f64)> {
+    let me = &s.me;
+    let (k, dk) = s.adults.iter().map(|k| (k, gap(me.pose.x, me.pose.z, k.x, k.z, ring).2)).min_by(|p, q| p.1.total_cmp(&q.1).then(p.0.id.cmp(&q.0.id)))?;
+    (dk > d.bunch_m).then(|| along(k.x, k.z, me.pose.x, me.pose.z, 0.5 * d.bunch_m, ring))
 }
 
 /// **Watch** (§3.1): a threat seen within `threat_m`: stand, face it.
@@ -447,12 +481,12 @@ fn move_off(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Option<Plan> {
 }
 
 /// Every defence plan scored this sample.
-pub(crate) fn plans(fauna: &Fauna, d: &Defence, s: &Scene, ring: f64) -> Vec<Plan> {
+pub(crate) fn plans(fauna: &Fauna, view: &VoxelView<'_>, d: &Defence, s: &Scene, ring: f64) -> Vec<Plan> {
     // A young body that knows no adult has no one to run to: its flight stands.
     if s.young && s.adults.is_empty() {
         return Vec::new();
     }
-    [go_to_adults(fauna, d, s, ring), go_to_calf(fauna, d, s, ring), guard(fauna, d, s, ring), move_off(fauna, d, s, ring), watch(fauna, d, s, ring)]
+    [go_to_adults(fauna, view, d, s, ring), go_to_calf(fauna, d, s, ring), guard(fauna, view, d, s, ring), move_off(fauna, d, s, ring), watch(fauna, d, s, ring)]
         .into_iter()
         .flatten()
         .collect()
@@ -484,7 +518,7 @@ pub(crate) fn steer(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> Option
     }
     let ring = f64::from(view.config.width) * view.config.voxel_m;
     let s = scene(fauna, i, view)?;
-    let ps = plans(fauna, &d, &s, ring);
+    let ps = plans(fauna, view, &d, &s, ring);
     let knobs = phys.intent;
     let n = LOFTSTRIDER.len();
     let now = fauna.tick;
@@ -537,20 +571,27 @@ fn called_now(fauna: &Fauna, id: u64, f: Founder) -> u8 {
     (0..crate::calls::kinds_of(f).len()).find(|&k| fauna.last_call.get(&(id, k as u8)) == Some(&fauna.tick)).map_or(0, |k| k as u8 + 1)
 }
 
-#[allow(dead_code)]
-fn seen(t: &Track) -> bool {
-    t.modes & SIGHT != 0
-}
-
-#[allow(dead_code)]
-fn bearing_ok(t: &Track, x: f64, z: f64, deg: f64, ring: f64) -> bool {
+/// Whether sight shows track `t` heading at `(x, z)` within `deg`.
+fn faces(t: &Track, x: f64, z: f64, deg: f64, ring: f64) -> bool {
     let (dx, dz, dd) = gap(t.x, t.z, x, z, ring);
-    dd > 1e-9 && angle_between(t.heading, dx.atan2(dz)) <= deg.to_radians()
+    t.modes & SIGHT != 0 && dd > 1e-9 && angle_between(t.heading, dx.atan2(dz)) <= deg.to_radians()
 }
 
-#[allow(dead_code)]
-fn segment_clear(s: &Scene, a: (f64, f64), b: (f64, f64), cross_m: f64, ring: f64) -> bool {
-    !s.threats.iter().any(|t| t.pressing && to_segment(a, b, (t.x, t.z), ring) <= cross_m)
+/// **A point checked as reachable** (§11.5): body `a` walks straight to `(x, z)` by its own
+/// motor's rule (footprint, steps, headroom, water) from where it stands.
+fn reachable(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, (x, z): (f64, f64), ring: f64) -> bool {
+    let (dx, dz, dd) = gap(a.pose.x, a.pose.z, x, z, ring);
+    dd <= 1e-6 || crate::vigil::walk_clear(fauna, view, a, (dx, dz))
+}
+
+/// **A way checked as safe** (§3.5, §11.5): the walk from `a` to `b` passes no pressing threat
+/// closer than `cross_m`, unless that threat is already as close to `a` (a way that runs
+/// from a chaser is not a way across a hunter).
+fn segment_safe(s: &Scene, a: (f64, f64), b: (f64, f64), cross_m: f64, ring: f64) -> bool {
+    !s.threats.iter().any(|t| {
+        let to_way = to_segment(a, b, (t.x, t.z), ring);
+        t.pressing && to_way <= cross_m && to_way < gap(a.0, a.1, t.x, t.z, ring).2 - 1e-9
+    })
 }
 
 #[cfg(test)]

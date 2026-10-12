@@ -2366,6 +2366,14 @@ fn controllers(
                     crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
                 }
             }
+            // LS-DEFEND: the stance sight shows (§2.1): guard while the guard intent is held —
+            // a brain's held intent, or its defence layer's (never read off the record).
+            let guard = crate::intent::menu_of(founder).index("guard");
+            let guarding = match sensed[k].decision {
+                Some(_) => guard.is_some_and(|g| usize::from(fauna.animals[i].intent.held) == g),
+                None => fauna.ls_teach.get(&id).and_then(|t| t.held) == Some("guard"),
+            };
+            fauna.animals[i].stance = if guarding { crate::perception::stance::GUARD } else { crate::perception::stance::NONE };
             // The decision tap: the sample's inputs, the label before the hold and what was
             // held, for cloning (§10.2, §11.3).
             if let (Some(prep), true) = (sensed[k].prep.as_ref(), fauna.tap.is_some()) {
@@ -5543,6 +5551,7 @@ fn newborn(
         mother: None,
         intent: crate::IntentRecord::default(),
         kick: crate::kick::KickState::default(),
+        stance: 0,
         bite: crate::LastBite::default(),
     }
 }
