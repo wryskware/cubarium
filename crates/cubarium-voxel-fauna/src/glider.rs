@@ -1992,8 +1992,9 @@ fn fruit_in_sight(fv: &FloraView<'_>, stand: &cubarium_voxel_flora::Stand, d3: f
 
 /// **NUTS: the check** ([`crate::treecheck`]): a hungry grounded glider that sees no food
 /// walks to the nearest host that may hold food it cannot see, within `check_search_m`, that
-/// it can climb and can walk to — a host it remembers holding food first, one it remembers
-/// empty not at all — and walking into the stem climbs it to the crown, where it looks.
+/// it can climb and can walk to — the one it is already walking to first, then a host it
+/// remembers holding food, one it remembers empty not at all — and walking into the stem
+/// climbs it to the crown, where it looks.
 /// `None` with the check off or no host to check.
 fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<'_>) -> Option<Actions> {
     let a = fauna.animals[i];
@@ -2007,7 +2008,8 @@ fn check_tree(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &FloraView<
         let f: &Fauna = fauna;
         stands_within(view, fv, &a, search, |s| climbable(fv, s, &glider) && crate::treecheck::may_hold_hidden_food(f, fv, s))
     };
-    let cands = crate::treecheck::order(&near, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
+    let aim = crate::treecheck::aim_of(fauna, a.id);
+    let cands = crate::treecheck::order(&near, aim, |host| crate::treecheck::recall(fauna, a.id, host, now, memory));
     let (go, k) = walk_to_stand(fauna, i, view, fv, &cands, search, 1.0, crate::Steer::Check)?;
     crate::treecheck::aim(fauna, a.id, cands[k].1);
     Some(go)

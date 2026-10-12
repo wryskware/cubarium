@@ -1976,7 +1976,7 @@ fn print_header() {
     // check walks set out on, crown visits, checks made, checks that found food, and the
     // bodies that made one.
     header.push_str(",nut_standing,nut_fell,fruit_eaten_seedporter_vaulttree");
-    header.push_str(",tree_check_walks,tree_visits,tree_checks,tree_checks_found,tree_checkers");
+    header.push_str(",tree_check_walks,tree_check_switches,tree_visits,tree_checks,tree_checks_found,tree_checkers");
     // ... the seedporters' climbs (cumulative) and the oldest check walk under way now, seconds
     // (a body steered by the check whose aimed host it has not reached).
     header.push_str(",sp_climbs,tree_check_oldest_s");
@@ -2273,7 +2273,7 @@ fn print_row(minute: u64, sim: &Sim, tick_ms: f64, patch_min: usize) {
         row.push(format!("{:.6}", l.fruit_fell[Plant::Vaulttree.index()]));
         row.push(format!("{:.6}", a.ledger.fruit_eaten_by_plant[Plant::Vaulttree.index()]));
         let t = sim.fauna().check_tally();
-        for n in [t.walks, t.visits, t.checks, t.found, t.checkers] {
+        for n in [t.walks, t.switches, t.visits, t.checks, t.found, t.checkers] {
             row.push(n.to_string());
         }
         row.push(a.ledger.climbs.to_string());

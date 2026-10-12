@@ -447,11 +447,14 @@ fn the_checks_order_drops_remembered_empty_trees_until_the_memory_lapses_and_put
     let recall_of = |seen: Vec<Checked>| move |host: u64| seen.iter().find(|c| c.host == host && now.saturating_sub(c.tick) < memory).copied();
     let ids = |v: Vec<(f64, u64, ())>| v.into_iter().map(|c| c.1).collect::<Vec<_>>();
     // Empty within the memory: dropped; lapsed: back, as unchecked.
-    assert_eq!(ids(order(&cands, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: false }]))), vec![9]);
-    assert_eq!(ids(order(&cands, recall_of(vec![Checked { host: 7, tick: now - memory, held_food: false }]))), vec![7, 9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: false }]))), vec![9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - memory, held_food: false }]))), vec![7, 9]);
     // Fed first, whichever id it carries.
-    assert_eq!(ids(order(&cands, recall_of(vec![Checked { host: 9, tick: now - 10, held_food: true }]))), vec![9, 7]);
-    assert_eq!(ids(order(&cands, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: true }]))), vec![7, 9]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 9, tick: now - 10, held_food: true }]))), vec![9, 7]);
+    assert_eq!(ids(order(&cands, None, recall_of(vec![Checked { host: 7, tick: now - 10, held_food: true }]))), vec![7, 9]);
+    // The tree it is walking to stays first, over a fed one; not if remembered empty.
+    assert_eq!(ids(order(&cands, Some(9), recall_of(vec![Checked { host: 7, tick: now - 10, held_food: true }]))), vec![9, 7]);
+    assert_eq!(ids(order(&cands, Some(9), recall_of(vec![Checked { host: 9, tick: now - 10, held_food: false }]))), vec![7]);
     // In the layer: a remembered-empty host is not offered within the memory, and is after it.
     let (w, flora, mut f, id, near, _) = two_trees(true);
     let host = stand_id(&flora, near);

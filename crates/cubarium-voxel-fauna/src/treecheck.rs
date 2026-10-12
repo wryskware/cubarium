@@ -49,11 +49,13 @@ pub struct TreeChecks {
 }
 
 /// **The tree checks' readout** per world (session state): check walks set out on (a new
-/// host aimed at), arrivals in a host crown (any), arrivals at the host a check walk aimed
-/// at, those that found food, and the bodies that made a first check.
+/// host aimed at), of those the ones that replaced an aim not reached, arrivals in a host
+/// crown (any), arrivals at the host a check walk aimed at, those that found food, and the
+/// bodies that made a first check.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CheckTally {
     pub walks: u64,
+    pub switches: u64,
     pub visits: u64,
     pub checks: u64,
     pub found: u64,
@@ -87,10 +89,11 @@ pub(crate) fn recall(fauna: &Fauna, id: u64, host: u64, now: u64, memory: u64) -
 }
 
 /// **The check's order** over `cands` (`(distance, host, …)`, nearest first): a host
-/// remembered empty within the memory is dropped; of the rest, those remembered holding food
-/// come first, then the unchecked (or forgotten), each nearest first. `recall` answers what
-/// the body remembers of a host.
-pub(crate) fn order<T: Copy>(cands: &[(f64, u64, T)], recall: impl Fn(u64) -> Option<Checked>) -> Vec<(f64, u64, T)> {
+/// remembered empty within the memory is dropped; of the rest, the host it is already
+/// walking to (`aim`) comes first, so a walk is not given up for another tree that drew
+/// level on the way; then those remembered holding food, then the unchecked (or forgotten),
+/// each nearest first. `recall` answers what the body remembers of a host.
+pub(crate) fn order<T: Copy>(cands: &[(f64, u64, T)], aim: Option<u64>, recall: impl Fn(u64) -> Option<Checked>) -> Vec<(f64, u64, T)> {
     let mut fed = Vec::new();
     let mut fresh = Vec::new();
     for &c in cands {
@@ -101,7 +104,16 @@ pub(crate) fn order<T: Copy>(cands: &[(f64, u64, T)], recall: impl Fn(u64) -> Op
         }
     }
     fed.extend(fresh);
+    if let Some(k) = aim.and_then(|h| fed.iter().position(|c| c.1 == h)) {
+        let c = fed.remove(k);
+        fed.insert(0, c);
+    }
     fed
+}
+
+/// The host body `id`'s check walk is taking it to, if any.
+pub(crate) fn aim_of(fauna: &Fauna, id: u64) -> Option<u64> {
+    fauna.tree_checks.get(&id)?.aim
 }
 
 /// A check walk for body `id` takes it to `host` this sample: a new aim is a walk set out on.
@@ -109,6 +121,7 @@ pub(crate) fn aim(fauna: &mut Fauna, id: u64, host: u64) {
     let now = fauna.tick;
     let m = fauna.tree_checks.entry(id).or_default();
     if m.aim != Some(host) {
+        fauna.check_tally.switches += u64::from(m.aim.is_some());
         m.aim = Some(host);
         m.aim_since = now;
         fauna.check_tally.walks += 1;
