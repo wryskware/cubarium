@@ -645,7 +645,7 @@ fn a_restored_brain_continues_identically() {
     let text = serde_json::to_string(&state).expect("serialise");
     let mut restored = net.brain(cfg, 0.1);
     restored
-        .restore(serde_json::from_str(&text).expect("deserialise"))
+        .restore_state(serde_json::from_str(&text).expect("deserialise"))
         .expect("restore");
     for s in &samples[17..] {
         assert_eq!(run(&mut original, s), run(&mut restored, s));

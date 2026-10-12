@@ -24,7 +24,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use cubarium_voxel_fauna::{Controller, Response};
+use cubarium_voxel_fauna::Response;
 
 use super::arbitration::{
     EarlyEnd, HoldChange, HoldView, IntentArbitration, ProposalView, Settle, settle,
@@ -278,7 +278,7 @@ impl TwoLayerBrain {
     }
 
     /// Continue from a saved state. Refuses a state of another shape by name.
-    pub fn restore(&mut self, state: BrainState) -> Result<(), String> {
+    pub fn restore_state(&mut self, state: BrainState) -> Result<(), String> {
         let s = &self.net.shape;
         if state.hidden.len() != s.hidden {
             return Err(format!(
@@ -554,11 +554,10 @@ impl TwoLayerBrain {
     }
 }
 
-impl Controller for TwoLayerBrain {
-    /// The observation-only seam: every named intent valid, no candidates, no early end.
-    /// For a plain brain this is today's GRU step exactly; the adapter (second half) calls
-    /// [`TwoLayerBrain::step`] with the fauna's full decision sample instead.
-    fn drive(&mut self, observation: &[f64]) -> Response {
+impl TwoLayerBrain {
+    /// The observation-only step: every named intent valid, no candidates, no early end.
+    /// For a plain brain this is today's GRU step exactly.
+    pub fn drive_plain(&mut self, observation: &[f64]) -> Response {
         let all = std::mem::take(&mut self.all_valid);
         self.step(&DecisionSample {
             observation,
@@ -570,7 +569,18 @@ impl Controller for TwoLayerBrain {
         Response::logits(&self.answer.action_logits)
     }
 
-    fn reset(&mut self) {
-        self.reset_state();
+    /// The held subject, if any.
+    pub fn held_subject(&self) -> Option<SubjectRef> {
+        self.state.held.and_then(|h| h.subject)
+    }
+
+    /// Re-mark the held subject to `subject` (the fauna re-marked it to another row's key,
+    /// §11.1). Nothing without a held subject; the hold's age is kept.
+    pub fn remark_subject(&mut self, subject: SubjectRef) {
+        if let Some(h) = self.state.held.as_mut()
+            && h.subject.is_some()
+        {
+            h.subject = Some(subject);
+        }
     }
 }
