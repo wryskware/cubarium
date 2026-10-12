@@ -27,7 +27,12 @@ impl PanelImage {
             pixel[3] = 255;
         }
         scanout.write_rgba(&latest)?;
-        Ok(Self { target, scanout, size, latest })
+        Ok(Self {
+            target,
+            scanout,
+            size,
+            latest,
+        })
     }
 
     pub fn export(&self) -> Result<OwnedFd> {
@@ -48,16 +53,25 @@ impl PanelImage {
 
     /// Append readback and submit the recorder's owned command encoder.
     pub fn submit(&mut self, gpu: &Gpu, encoder: wgpu::CommandEncoder) -> Result<()> {
-        ensure!(self.target.readback.can_submit(), "panel readback is still in flight");
-        ensure!(self.target.readback.submit(gpu, encoder, &self.target.texture, 0)?,
-            "panel readback refused a reserved frame");
+        ensure!(
+            self.target.readback.can_submit(),
+            "panel readback is still in flight"
+        );
+        ensure!(
+            self.target
+                .readback
+                .submit(gpu, encoder, &self.target.texture, 0)?,
+            "panel readback refused a reserved frame"
+        );
         Ok(())
     }
 
     /// Finish readback and the CPU copy before promising a finished buffer to DRM.
     pub fn wait(&mut self, gpu: &Gpu) -> Result<()> {
         let mut completed = None;
-        self.target.readback.drain(gpu, |_, rgba| completed = Some(rgba.to_vec()))?;
+        self.target
+            .readback
+            .drain(gpu, |_, rgba| completed = Some(rgba.to_vec()))?;
         let rgba = completed.ok_or_else(|| anyhow::anyhow!("panel frame was not submitted"))?;
         self.scanout.write_rgba(&rgba)?;
         self.latest = rgba;
@@ -71,7 +85,10 @@ impl PanelImage {
         frame: S::Frame<'_>,
         transform: PresentTransform,
     ) -> Result<f64> {
-        ensure!(source.frames_in_flight() < source.frame_capacity(), "renderer is at frame capacity");
+        ensure!(
+            source.frames_in_flight() < source.frame_capacity(),
+            "renderer is at frame capacity"
+        );
         let mut encoder = gpu.encoder("panel frame");
         let target = TargetSlot {
             view: &self.target.view,

@@ -18,12 +18,14 @@
 //! are four times that, which leaves a wrong colour, a lost pass or a shifted sprite
 //! nowhere to hide.
 
+#![forbid(unsafe_code)]
+
+use cubarium_gpu::Gpu;
 use cubarium_gpu::atlas::Atlas;
 use cubarium_gpu::render::Renderer;
 use cubarium_gpu::scene::RingLayout;
 use cubarium_gpu::synthetic::SyntheticWorld;
 use cubarium_gpu::target::{Headless, read_png, write_png};
-use cubarium_gpu::vk::Gpu;
 
 /// The instant the golden image is taken at, in presentation seconds.
 const AT: f64 = 7.5;
@@ -34,14 +36,14 @@ fn root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
-/// Render the synthetic ring at [`AT`]. `None` when this machine has no Vulkan device
+/// Render the synthetic ring at [`AT`]. `None` when this machine has no GPU device
 /// at all, which is not a failure of the renderer.
 fn render(layout: RingLayout) -> Option<Vec<u8>> {
     let atlas = Atlas::load(&root().join("../../assets/atelier")).expect("load assets/atelier");
-    let gpu = match Gpu::open(&[]) {
+    let gpu = match Gpu::open() {
         Ok(gpu) => gpu,
         Err(e) => {
-            eprintln!("no Vulkan device here ({e}); the golden image was not checked");
+            eprintln!("no GPU device here ({e}); the golden image was not checked");
             return None;
         }
     };
@@ -157,10 +159,10 @@ fn every_sprite_texel_covers_a_whole_scale_by_scale_block() {
     // The raster is kept entirely above the horizon and its fields are all zero, so the
     // background is the flat night floor and every other colour is the sprite's.
     let atlas = Atlas::load(&root().join("../../assets/atelier")).expect("load assets/atelier");
-    let gpu = match Gpu::open(&[]) {
+    let gpu = match Gpu::open() {
         Ok(gpu) => gpu,
         Err(e) => {
-            eprintln!("no Vulkan device here ({e}); the pixel grid was not checked");
+            eprintln!("no GPU device here ({e}); the pixel grid was not checked");
             return;
         }
     };

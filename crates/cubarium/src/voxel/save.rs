@@ -21,6 +21,7 @@ static SAVE_SIGNAL: OnceLock<Arc<AtomicBool>> = OnceLock::new();
 pub fn install_save_signal() {
     SAVE_SIGNAL.get_or_init(|| {
         let flag = Arc::new(AtomicBool::new(false));
+        #[cfg(unix)]
         if signal_hook::flag::register(signal_hook::consts::SIGUSR1, Arc::clone(&flag)).is_err() {
             eprintln!("cubarium voxel: could not install the SIGUSR1 save handler");
         }
@@ -73,6 +74,7 @@ mod tests {
 
     /// One `SIGUSR1` is one save request: taken once, then gone.
     #[test]
+    #[cfg(unix)]
     fn the_signal_flag_triggers_exactly_one_save() {
         install_save_signal();
         assert!(!take_save_signal());

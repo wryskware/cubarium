@@ -1,13 +1,13 @@
 //! The model pass's figures against each other, on the device: overlapping figures resolve
 //! per pixel by depth (the walk's convention, larger z farther), not by the order they are
-//! drawn in. Skips with a printed reason when there is no Vulkan device.
+//! drawn in. Skips with a printed reason when there is no GPU device.
 
+use crate::Gpu;
 use crate::figures::{
     CLASS_NONE, FigureFrame, FigureInstance, FigureTile, FigureVoxel, PaletteEntry, open_faces,
 };
 use crate::target::Headless;
-use crate::vk::Gpu;
-use crate::voxel::{VoxelRenderer, VoxelTextures, VoxelTexel, write_upload};
+use crate::voxel::{VoxelRenderer, VoxelTexel, VoxelTextures, write_upload};
 
 const UPRIGHT: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
@@ -23,7 +23,11 @@ fn block(dz: i8) -> Vec<FigureVoxel> {
         }
     }
     let open = open_faces(&cells);
-    cells.iter().zip(open).map(|(&c, o)| FigureVoxel::new(c, 0, CLASS_NONE, false, o, 0)).collect()
+    cells
+        .iter()
+        .zip(open)
+        .map(|(&c, o)| FigureVoxel::new(c, 0, CLASS_NONE, false, o, 0))
+        .collect()
 }
 
 fn tile(first: u32, pos: [f32; 3], palette: u32, dz: f32) -> FigureTile {
@@ -41,7 +45,14 @@ fn tile(first: u32, pos: [f32; 3], palette: u32, dz: f32) -> FigureTile {
 }
 
 fn figure(id: u64, a: FigureTile) -> FigureInstance {
-    FigureInstance { id, a, b: None, weight_b: 0.0, alpha: 1.0, highlight: 0.0 }
+    FigureInstance {
+        id,
+        a,
+        b: None,
+        weight_b: 0.0,
+        alpha: 1.0,
+        highlight: 0.0,
+    }
 }
 
 /// One headless frame of an empty world with `figures` drawn; `None` without a device.
@@ -50,18 +61,31 @@ fn draw(figures: Vec<FigureInstance>) -> Option<(Vec<u8>, u32)> {
 }
 
 fn draw_at(mut figures: Vec<FigureInstance>, first: usize) -> Option<(Vec<u8>, u32)> {
-    let gpu = match Gpu::open(&[]) {
+    let gpu = match Gpu::open() {
         Ok(gpu) => gpu,
         Err(e) => {
-            println!("skipped: no Vulkan device ({e:#})");
+            println!("skipped: no GPU device ({e:#})");
             return None;
         }
     };
     let params = crate::voxel::tests::params();
-    let mut r = VoxelRenderer::new(&gpu, params.clone(), &VoxelTextures::empty(params.s, params.rise)).unwrap();
+    let mut r = VoxelRenderer::new(
+        &gpu,
+        params.clone(),
+        &VoxelTextures::empty(params.s, params.rise),
+    )
+    .unwrap();
     let master = vec![VoxelTexel::default(); params.voxel_count()];
     assert!(r.stage([1; crate::voxel::SLOW_PLANES], |st| {
-        write_upload(&master, params.width, params.height, params.depth, st.owed, st.voxels, st.carried);
+        write_upload(
+            &master,
+            params.width,
+            params.height,
+            params.depth,
+            st.owed,
+            st.voxels,
+            st.carried,
+        );
         st.roof.fill(0);
         st.glyphs.fill(0);
         st.sky.fill(255);
@@ -80,8 +104,14 @@ fn draw_at(mut figures: Vec<FigureInstance>, first: usize) -> Option<(Vec<u8>, u
     r.set_figures(FigureFrame {
         figures,
         palette: vec![
-            PaletteEntry { base: [0.0, 0.8, 0.0], emit: None },
-            PaletteEntry { base: [0.8, 0.0, 0.0], emit: None },
+            PaletteEntry {
+                base: [0.0, 0.8, 0.0],
+                emit: None,
+            },
+            PaletteEntry {
+                base: [0.8, 0.0, 0.0],
+                emit: None,
+            },
         ],
         whole_pixels: true,
         supersample: 1,
@@ -120,8 +150,12 @@ fn overlapping_figures_resolve_per_pixel_by_depth_whichever_is_drawn_first() {
     // Anchors put the near figure first back to front, so only a per-pixel test shows it.
     let far = figure(1, tile(0, [21.0, 10.0, 8.0], 0, 0.0));
     let near = figure(2, tile(8, [20.0, 11.0, 10.0], 1, -4.0));
-    let Some((ab, w)) = draw(vec![far, near]) else { return };
-    let Some((ba, _)) = draw(vec![near, far]) else { return };
+    let Some((ab, w)) = draw(vec![far, near]) else {
+        return;
+    };
+    let Some((ba, _)) = draw(vec![near, far]) else {
+        return;
+    };
     assert_eq!(ab, ba, "the order the figures come in changes nothing");
     let (mut red, mut green) = (0, 0);
     for px in ab.chunks_exact(4) {
@@ -133,7 +167,13 @@ fn overlapping_figures_resolve_per_pixel_by_depth_whichever_is_drawn_first() {
     }
     // Both draw (the far block shows round the near one), and the near block is whole:
     // a 2×2×2 block at s 4, rise 2 is 8 px wide and 8 + 4 px tall.
-    assert!(green > 0, "the far figure shows where the near one does not cover it");
-    assert!(red >= 8 * 12, "the near figure is drawn whole over the far one: {red} px");
+    assert!(
+        green > 0,
+        "the far figure shows where the near one does not cover it"
+    );
+    assert!(
+        red >= 8 * 12,
+        "the near figure is drawn whole over the far one: {red} px"
+    );
     let _ = w;
 }

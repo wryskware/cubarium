@@ -9,16 +9,14 @@
 //! For captures of how a raster fills a window of a given size without opening one, and
 //! for the pass's cost at that size.
 
-use std::time::Instant;
-
+#![forbid(unsafe_code)]
 use anyhow::{Context, Result, bail};
-use ash::vk;
-use cubarium_gpu::present::WindowFit;
-use cubarium_gpu::render::framebuffer;
-use cubarium_gpu::vk::{Gpu, barrier};
-use cubarium_gpu::{PresentPass, TargetImage};
-
-const FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
+use cubarium_gpu::{
+    present::WindowFit,
+    wgpu_backend::{Gpu, PresentPass, headless::read_texture},
+};
+use std::time::Instant;
+const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 fn read_png(path: &str) -> Result<(u32, u32, Vec<u8>)> {
     let decoder = png::Decoder::new(std::io::BufReader::new(
@@ -63,132 +61,60 @@ fn main() -> Result<()> {
         _ => 0,
     };
 
-    let gpu = Gpu::open(&[])?;
-    let d = &gpu.device;
-    let pool = unsafe {
-        d.create_command_pool(
-            &vk::CommandPoolCreateInfo::default().queue_family_index(gpu.queue_family),
-            None,
-        )
-    }?;
-    let (raster, raster_mem) = gpu.image(
-        rw,
-        rh,
-        FORMAT,
-        vk::ImageTiling::OPTIMAL,
-        vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
-    )?;
-    let raster_view = gpu.view(raster, FORMAT)?;
-    let upload = gpu.host_buffer(pixels.len() as u64, vk::BufferUsageFlags::TRANSFER_SRC)?;
-    upload.write(&pixels);
-    let region = |w: u32, h: u32| {
-        vk::BufferImageCopy::default()
-            .image_subresource(
-                vk::ImageSubresourceLayers::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .layer_count(1),
-            )
-            .image_extent(vk::Extent3D {
-                width: w,
-                height: h,
-                depth: 1,
-            })
+    let gpu = Gpu::open()?;
+    let size = |w, h| wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
     };
-    gpu.one_shot(pool, |cb| unsafe {
-        barrier(
-            d,
-            cb,
-            raster,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        d.cmd_copy_buffer_to_image(
-            cb,
-            upload.buffer,
-            raster,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            &[region(rw, rh)],
-        );
-        barrier(
-            d,
-            cb,
-            raster,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
-    })?;
-    let sampler = unsafe {
-        d.create_sampler(
-            &vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(vk::Filter::NEAREST),
-            None,
-        )
-    }?;
-    let mut pass = PresentPass::new(&gpu, raster_view, sampler)?;
-    let (render_pass, pipeline) =
-        pass.entry(&gpu, FORMAT, vk::ImageLayout::TRANSFER_SRC_OPTIMAL)?;
-    let (target, target_mem) = gpu.image(
-        ww,
-        wh,
+    let raster = gpu.texture(
+        "window-fit raster",
+        size(rw, rh),
+        wgpu::TextureDimension::D2,
         FORMAT,
-        vk::ImageTiling::OPTIMAL,
-        vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-    )?;
-    let target_view = gpu.view(target, FORMAT)?;
-    let fb = framebuffer(d, render_pass, target_view, ww, wh)?;
-    let slot = TargetImage {
-        image: target,
-        view: target_view,
-        framebuffer: fb,
-    };
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    );
+    let view = raster.create_view(&Default::default());
+    let target = gpu.texture(
+        "window-fit output",
+        size(ww, wh),
+        wgpu::TextureDimension::D2,
+        FORMAT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+    );
+    let target_view = target.create_view(&Default::default());
+    let pass = PresentPass::new(&gpu, FORMAT);
     let fit = WindowFit::fit((rw, rh), (ww, wh), false);
-    eprintln!("window_fit: {rw}x{rh} into {ww}x{wh}: {fit:?}");
-    let readback = gpu.readback_buffer(u64::from(ww * wh * 4))?;
-    gpu.one_shot(pool, |cb| unsafe {
-        pass.record_push(d, cb, &slot, (ww, wh), fit.push(), render_pass, pipeline);
-        d.cmd_copy_image_to_buffer(
-            cb,
-            target,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            readback.buffer,
-            &[region(ww, wh)],
-        );
-    })?;
-    let out = unsafe { readback.bytes() }[..(ww * wh * 4) as usize].to_vec();
-    write_png(&args[3], ww, wh, &out)?;
-
+    let mut upload = gpu.encoder("window-fit upload");
+    gpu.upload_texture(
+        &mut upload,
+        &raster,
+        wgpu::Origin3d::ZERO,
+        size(rw, rh),
+        4,
+        &pixels,
+    )?;
+    gpu.queue.submit([upload.finish()]);
+    let run = |count: u32| -> Result<f64> {
+        let start = Instant::now();
+        let mut encoder = gpu.encoder("window-fit present");
+        for _ in 0..count {
+            pass.record(&gpu, &mut encoder, &view, &target_view, fit.push());
+        }
+        let submission = gpu.queue.submit([encoder.finish()]);
+        gpu.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(std::time::Duration::from_secs(30)),
+        })?;
+        Ok(start.elapsed().as_secs_f64() * 1e3)
+    };
+    run(1)?;
+    let pixels = read_texture(&gpu, &target)?;
+    write_png(&args[3], ww, wh, &pixels)?;
     if repeat > 0 {
-        // One warm-up, then `repeat` passes in one command buffer: the per-pass cost with
-        // the submit and the wait spread over all of them.
-        let run = |n: u32| -> Result<f64> {
-            let t = Instant::now();
-            gpu.one_shot(pool, |cb| unsafe {
-                for _ in 0..n {
-                    pass.record_push(d, cb, &slot, (ww, wh), fit.push(), render_pass, pipeline);
-                }
-            })?;
-            Ok(t.elapsed().as_secs_f64() * 1e3)
-        };
         run(repeat)?;
         let ms = run(repeat)? / f64::from(repeat);
         println!("present pass {rw}x{rh} -> {ww}x{wh}: {ms:.4} ms");
     }
-
-    unsafe {
-        d.device_wait_idle()?;
-        d.destroy_framebuffer(fb, None);
-        d.destroy_image_view(target_view, None);
-        d.destroy_image(target, None);
-        d.free_memory(target_mem, None);
-        d.destroy_image_view(raster_view, None);
-        d.destroy_image(raster, None);
-        d.free_memory(raster_mem, None);
-        d.destroy_sampler(sampler, None);
-        d.destroy_command_pool(pool, None);
-    }
-    pass.destroy(&gpu);
-    upload.destroy(&gpu);
-    readback.destroy(&gpu);
     Ok(())
 }

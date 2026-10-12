@@ -35,7 +35,7 @@ use cubarium_gpu::target::presenter::PresentSample;
 
 use anyhow::{Context, Result, bail};
 
-use cubarium_gpu::vk::Gpu;
+use cubarium_gpu::wgpu_backend::Gpu;
 use cubarium_gpu::voxel::{
     MAX_GLYPHS, MAX_STYLES, PART_ANIMAL_INTERIM, PART_NONE, POSE_ENTRIES, PLANE_GLOW, PLANE_GLYPHS, PLANE_ROOF,
     PLANE_CANOPY, PLANE_SKY, PLANE_STYLES, SLOW_PLANES, FrameClock, Pipelines, VoxelParams, VoxelRenderer, VoxelStaging, VoxelStyle, VoxelTexel, VoxelTextures,
@@ -176,12 +176,12 @@ impl Default for VoxelGpuSinkOptions {
 /// [`Offscreen`]: nowhere, for a host that records the renderer's frames itself (the
 /// hosted renderer, which reads its raster back on its own ring).
 pub trait SinkTarget {
-    fn destroy(&mut self, gpu: &Gpu);
+    fn destroy(&mut self, gpu: &Gpu, renderer: &mut VoxelRenderer);
 }
 
 impl SinkTarget for GpuTarget {
-    fn destroy(&mut self, gpu: &Gpu) {
-        GpuTarget::destroy(self, gpu);
+    fn destroy(&mut self, gpu: &Gpu, renderer: &mut VoxelRenderer) {
+        GpuTarget::destroy(self, gpu, renderer);
     }
 }
 
@@ -191,7 +191,7 @@ impl SinkTarget for GpuTarget {
 pub struct Offscreen;
 
 impl SinkTarget for Offscreen {
-    fn destroy(&mut self, _gpu: &Gpu) {}
+    fn destroy(&mut self, _gpu: &Gpu, _renderer: &mut VoxelRenderer) {}
 }
 
 /// `cubarium voxel --sink gpu`.
@@ -365,8 +365,8 @@ impl<T: SinkTarget> VoxelGpuSink<T> {
         let params = params_of(cfg, proj, options.roof_from_texture);
         let opened = Instant::now();
         let gpu = std::sync::Arc::new(
-            Gpu::open(options.target.instance_extensions())
-                .context("opening the Vulkan device for --sink gpu")?,
+            Gpu::open()
+                .context("opening the GPU device for --sink gpu")?,
         );
         eprintln!(
             "cubarium voxel: --sink gpu on {} ({:.0} KiB voxel buffers)",
@@ -1098,9 +1098,8 @@ impl VoxelGpuSink<GpuTarget> {
     /// Open the device and build the renderer for this world and projection.
     pub fn new(cfg: &VoxelConfig, proj: Projection, options: VoxelGpuSinkOptions) -> Result<VoxelGpuSink> {
         let kind = options.target;
-        // The panel is presented on its own thread: the queue submit and the fence wait
-        // are 8 ms the run loop has better things to do with. Every other target is
-        // unchanged (`sink/gpu/target.rs`).
+        // The panel presents on its own thread. Development-window rendering stays
+        // inside the host event loop's redraw callback on every platform.
         Self::build(cfg, proj, options, |gpu, renderer| {
             GpuTarget::open(kind, gpu, renderer, "cubarium — voxel strip (GPU)", true)
         })
@@ -1112,7 +1111,7 @@ impl VoxelGpuSink<GpuTarget> {
         anyhow::ensure!(self.frames == 0 && matches!(self.target, GpuTarget::Headless(_)),
             "set_headless_size needs a headless sink before its first frame");
         let sized = cubarium_gpu::target::Headless::with_size(&self.gpu, &self.renderer, size)?;
-        self.target.destroy(&self.gpu);
+        self.target.destroy(&self.gpu, &mut self.renderer);
         self.target = GpuTarget::Headless(Box::new(sized));
         Ok(())
     }
@@ -1296,13 +1295,13 @@ impl VoxelGpuSink<GpuTarget> {
             );
             web.finish()?;
         }
-        self.target.finish(&self.gpu)
+        self.target.finish(&self.gpu, &mut self.renderer)
     }
 }
 
 impl<T: SinkTarget> Drop for VoxelGpuSink<T> {
     fn drop(&mut self) {
-        self.target.destroy(&self.gpu);
+        self.target.destroy(&self.gpu, &mut self.renderer);
         self.renderer.destroy(&self.gpu);
     }
 }
@@ -3543,7 +3542,7 @@ mod tests {
     /// the widened plant IDs and that target size does not become world circumference.
     #[test]
     fn projected_plant_crop_matches_the_full_world_at_64_pixels() {
-        use cubarium_gpu::target::readback::ReadbackRing;
+        use cubarium_gpu::wgpu_backend::{FrameSource, ReadbackRing};
         let c = Config { width: 8, height: 10, depth: 3, ..Config::default() };
         let cfg = VoxelConfig {
             px_per_voxel: 16, textures: false, vine_tiles: false,
@@ -3561,17 +3560,17 @@ mod tests {
         let fauna = Fauna::new(FaunaConfig::default());
         let mut sink = match VoxelGpuSink::offscreen(&cfg, base, None) {
             Ok(s) => s,
-            Err(e) => { eprintln!("no Vulkan device: {e:#}"); return; }
+            Err(e) => { eprintln!("no GPU device: {e:#}"); return; }
         };
         assert!(sink.stage_world(&world, &plants, &fauna));
         let mut full = base;
         full.s *= 4; full.rise *= 4; full.base *= 4;
         full.raster_w *= 4; full.raster_h *= 4;
         let mut renderer = sink.projected_renderer(&cfg, full).unwrap();
-        let mut ring = ReadbackRing::new(sink.gpu.clone(), &renderer, renderer.raster_image(), 2).unwrap();
+        let mut ring = ReadbackRing::new(&sink.gpu, renderer.raster_size(), 2).unwrap();
         let mut reference = Vec::new();
-        ring.submit(&mut renderer, (), 0).unwrap();
-        ring.drain(&mut renderer, |_, bytes| reference.extend_from_slice(bytes)).unwrap();
+        ring.submit_source(&sink.gpu, &mut renderer, (), 0).unwrap();
+        ring.drain_source(&sink.gpu, &mut renderer, |_, bytes| reference.extend_from_slice(bytes)).unwrap();
         drop(ring);
         renderer.destroy(&sink.gpu);
         let mut crop = full;
@@ -3581,10 +3580,10 @@ mod tests {
         let y = full.base - 256;
         renderer.set_view_x(x); renderer.set_view_y(y, full.raster_h as u32);
         let y = renderer.view_y();
-        let mut ring = ReadbackRing::new(sink.gpu.clone(), &renderer, renderer.raster_image(), 2).unwrap();
+        let mut ring = ReadbackRing::new(&sink.gpu, renderer.raster_size(), 2).unwrap();
         let mut got = Vec::new();
-        ring.submit(&mut renderer, (), 1).unwrap();
-        ring.drain(&mut renderer, |_, bytes| got.extend_from_slice(bytes)).unwrap();
+        ring.submit_source(&sink.gpu, &mut renderer, (), 1).unwrap();
+        ring.drain_source(&sink.gpu, &mut renderer, |_, bytes| got.extend_from_slice(bytes)).unwrap();
         drop(ring);
         renderer.destroy(&sink.gpu);
         let mut worst = 0;

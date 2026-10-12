@@ -37,7 +37,7 @@ impl WorldRenderer {
         // to the screen (`CUBARIUM_GPU` still overrides).
         let adapter = RenderingServer::singleton().get_video_adapter_name().to_string();
         if !adapter.is_empty() {
-            cubarium_gpu::vk::prefer_device(&adapter);
+            cubarium_gpu::wgpu_backend::prefer_device(&adapter);
         }
         let options = HostedOptions {
             config: PathBuf::from(config.to_string()),

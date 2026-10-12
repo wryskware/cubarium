@@ -41,7 +41,7 @@ use cubarium_gpu::adapter::{MAX_POSES, PoseRef, ScratchFrame, Stamp, StampMask, 
 use cubarium_gpu::atlas::{Atlas, Clip as GpuClip, PlantClip};
 use cubarium_gpu::render::Renderer;
 use cubarium_gpu::scene::{Layer, RingLayout, Scene};
-use cubarium_gpu::vk::Gpu;
+use cubarium_gpu::wgpu_backend::{FrameSource, Gpu};
 
 use crate::art::{ArtPack, Band};
 use crate::art_present::{
@@ -60,6 +60,10 @@ use cube_proto::Raster;
 
 #[path = "gpu/target.rs"]
 mod target;
+#[path = "gpu/window_host.rs"]
+mod window_host;
+#[path = "gpu/window_target.rs"]
+mod window_target;
 pub use target::{GpuTarget, GpuTargetKind};
 
 #[path = "gpu/light.rs"]
@@ -72,6 +76,7 @@ pub mod pack_timer;
 mod sunvis;
 
 #[path = "gpu/wayland.rs"]
+#[cfg(target_os = "linux")]
 pub(crate) mod wayland;
 
 #[path = "gpu/voxel.rs"]
@@ -244,7 +249,7 @@ impl GpuSink {
         let atlas = Atlas::load(art)
             .with_context(|| format!("loading {} for the GPU atlas", art.display()))?;
         let gpu = std::sync::Arc::new(
-            Gpu::open(&[]).context("opening the Vulkan device for --sink gpu")?,
+            Gpu::open().context("opening the GPU device for --sink gpu")?,
         );
         eprintln!("cubarium: --sink gpu on {}", gpu.name);
         let mut renderer = Renderer::new(&gpu, &atlas, layout)?;
@@ -1421,13 +1426,13 @@ impl FrameSink for GpuSink {
         if let Some((web, _)) = self.web.as_mut() {
             web.finish()?;
         }
-        self.target.finish(&self.gpu)
+        self.target.finish(&self.gpu, &mut self.renderer)
     }
 }
 
 impl Drop for GpuSink {
     fn drop(&mut self) {
-        self.target.destroy(&self.gpu);
+        self.target.destroy(&self.gpu, &mut self.renderer);
         self.renderer.destroy(&self.gpu);
     }
 }

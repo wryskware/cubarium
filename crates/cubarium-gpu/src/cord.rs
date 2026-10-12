@@ -104,7 +104,12 @@ const JITTER_SALT: i32 = 79;
 pub const GAIN: f32 = 0.5;
 
 impl CordWave {
-    pub const NONE: CordWave = CordWave { period: 0.0, amplitude: 0.0, octaves: 1, ratios: WaveRatios::Jittered };
+    pub const NONE: CordWave = CordWave {
+        period: 0.0,
+        amplitude: 0.0,
+        octaves: 1,
+        ratios: WaveRatios::Jittered,
+    };
 
     /// The octave count as the uniform carries it (1..=15).
     pub fn octave_count(&self) -> u32 {
@@ -123,8 +128,17 @@ impl CordWave {
             WaveRatios::Octave => 1.0,
             WaveRatios::Jittered => JITTER_MEAN + JITTER_SPREAD,
         };
-        let f = |k: u32| if k == 0 { 1.0 } else { top * 2f32.powi(k as i32) };
-        (0..self.octave_count()).map(|k| GAIN.powi(k as i32) * f(k)).sum::<f32>() / self.gain_sum()
+        let f = |k: u32| {
+            if k == 0 {
+                1.0
+            } else {
+                top * 2f32.powi(k as i32)
+            }
+        };
+        (0..self.octave_count())
+            .map(|k| GAIN.powi(k as i32) * f(k))
+            .sum::<f32>()
+            / self.gain_sum()
     }
 
     /// As the uniform carries them: the period in quarter voxels, the amplitude in 32nds.
@@ -147,8 +161,12 @@ impl Default for DrapeCords {
 
 impl DrapeCords {
     /// Drape cells drawn as whole cubes.
-    pub const OFF: DrapeCords =
-        DrapeCords { width_px: 0, shape: CordShape::Straight, wander: 1.0, wave: CordWave::NONE };
+    pub const OFF: DrapeCords = DrapeCords {
+        width_px: 0,
+        shape: CordShape::Straight,
+        wander: 1.0,
+        wave: CordWave::NONE,
+    };
 
     pub fn on(&self) -> bool {
         self.width_px > 0
@@ -166,7 +184,10 @@ impl DrapeCords {
         let wave = ((p * 4.0) as u32) << 16 | ((a * 32.0) as u32) << 24;
         let jit = (self.wave.ratios == WaveRatios::Jittered) as u32;
         let low = shape as u32 | jit << 1 | self.wave.octave_count() << 4;
-        [self.width_px.min(255) as i32, (low | (self.wander_pct() as u32) << 8 | wave) as i32]
+        [
+            self.width_px.min(255) as i32,
+            (low | (self.wander_pct() as u32) << 8 | wave) as i32,
+        ]
     }
 
     fn wander_pct(&self) -> i32 {
@@ -225,7 +246,14 @@ impl DrapeCords {
         }
         let t = (dy as f32 + 0.5) / s as f32;
         if self.wave.on() {
-            return self.wave_covers(s, (x, y, z), t, dx as f32 + 0.5, self.amp(s, true), (0.0, 0.0));
+            return self.wave_covers(
+                s,
+                (x, y, z),
+                t,
+                dx as f32 + 0.5,
+                self.amp(s, true),
+                (0.0, 0.0),
+            );
         }
         let (a, b) = self.ends(s, x, y, z);
         self.covers(s, a, b, t, dx as f32 + 0.5)
@@ -272,7 +300,14 @@ impl DrapeCords {
     /// `cordWaveCentre`: the centre at `t` down cell `(x, y, z)`'s front face, moved by
     /// `shift` pixels at its top face and at its bottom face (the sway of each face relative
     /// to the cell's, [`swayed_join`]), linearly between.
-    pub fn wave_centre(&self, s: u32, (x, y, z): (i32, i32, i32), t: f32, amp: f32, shift: (f32, f32)) -> f32 {
+    pub fn wave_centre(
+        &self,
+        s: u32,
+        (x, y, z): (i32, i32, i32),
+        t: f32,
+        amp: f32,
+        shift: (f32, f32),
+    ) -> f32 {
         self.wave_at(s, x, z, y as f32 + 1.0 - t, amp) + shift.0 + (shift.1 - shift.0) * t
     }
 
@@ -281,7 +316,15 @@ impl DrapeCords {
     /// [`Self::covers`]: `width_px` pixels a row, widened where a row steps more than a
     /// pixel so the rows stay joined; the rows past a face are the next cell's, read from
     /// the same curve.
-    pub fn wave_covers(&self, s: u32, cell: (i32, i32, i32), t: f32, xp: f32, amp: f32, shift: (f32, f32)) -> bool {
+    pub fn wave_covers(
+        &self,
+        s: u32,
+        cell: (i32, i32, i32),
+        t: f32,
+        xp: f32,
+        amp: f32,
+        shift: (f32, f32),
+    ) -> bool {
         let dt = 1.0 / s as f32;
         let c = self.wave_centre(s, cell, t, amp, shift);
         let up = (c - self.wave_centre(s, cell, t - dt, amp, shift)).abs();
@@ -298,7 +341,9 @@ impl DrapeCords {
             return 0.5;
         }
         let (p, a) = self.wave.quantised();
-        let px = 0.5 * self.width_px as f32 + std::f32::consts::PI * a * self.wave.slope_factor() / p + 3.0;
+        let px = 0.5 * self.width_px as f32
+            + std::f32::consts::PI * a * self.wave.slope_factor() / p
+            + 3.0;
         (a + px / s as f32).max(0.5)
     }
 }
@@ -361,7 +406,12 @@ mod tests {
         for width_px in [1, 2] {
             for shape in [CordShape::Straight, CordShape::Eased] {
                 for wander in [0.0, 0.5, 1.0] {
-                    v.push(DrapeCords { width_px, shape, wander, wave: CordWave::NONE });
+                    v.push(DrapeCords {
+                        width_px,
+                        shape,
+                        wander,
+                        wave: CordWave::NONE,
+                    });
                 }
             }
         }
@@ -391,7 +441,10 @@ mod tests {
                     let down = row(&c, s, x, y, z, 0);
                     assert!(!up.is_empty() && !down.is_empty());
                     let touch = up.iter().any(|&a| down.iter().any(|&b| a.abs_diff(b) <= 1));
-                    assert!(touch, "{c:?} at {s} px, ({x}, {y}, {z}): {up:?} over {down:?}");
+                    assert!(
+                        touch,
+                        "{c:?} at {s} px, ({x}, {y}, {z}): {up:?} over {down:?}"
+                    );
                 }
             }
         }
@@ -406,7 +459,10 @@ mod tests {
                         let a = row(&c, s, x, y, z, dy);
                         let b = row(&c, s, x, y, z, dy + 1);
                         let touch = a.iter().any(|&p| b.iter().any(|&q| p.abs_diff(q) <= 1));
-                        assert!(touch, "{c:?} at {s} px, ({x}, {y}, {z}) rows {dy}: {a:?} / {b:?}");
+                        assert!(
+                            touch,
+                            "{c:?} at {s} px, ({x}, {y}, {z}) rows {dy}: {a:?} / {b:?}"
+                        );
                     }
                 }
             }
@@ -418,7 +474,12 @@ mod tests {
         for width_px in [1u32, 2] {
             for shape in [CordShape::Straight, CordShape::Eased] {
                 // Plumb (no wander): every row is exactly the width, whatever the scale.
-                let plumb = DrapeCords { width_px, shape, wander: 0.0, wave: CordWave::NONE };
+                let plumb = DrapeCords {
+                    width_px,
+                    shape,
+                    wander: 0.0,
+                    wave: CordWave::NONE,
+                };
                 for s in SCALES.into_iter().filter(|&s| s >= width_px) {
                     for (x, y, z) in positions() {
                         for dy in 0..s {
@@ -429,7 +490,12 @@ mod tests {
                 }
                 // Wandering: never narrower than the width, and a row less than a pixel from
                 // its neighbours is exactly the width.
-                let c = DrapeCords { width_px, shape, wander: 1.0, wave: CordWave::NONE };
+                let c = DrapeCords {
+                    width_px,
+                    shape,
+                    wander: 1.0,
+                    wave: CordWave::NONE,
+                };
                 for s in SCALES.into_iter().filter(|&s| s >= width_px) {
                     for (x, y, z) in positions() {
                         let (a, b) = c.ends(s, x, y, z);
@@ -455,13 +521,21 @@ mod tests {
     fn off_the_cord_a_drape_texel_is_not_the_cells_and_with_the_switch_off_every_texel_is() {
         for s in SCALES {
             for (x, y, z) in positions().take(50) {
-                let on = DrapeCords { width_px: 1, shape: CordShape::Straight, wander: 1.0, wave: CordWave::NONE };
-                let shown = (0..s).flat_map(|dy| (0..s).map(move |dx| (dx, dy)))
+                let on = DrapeCords {
+                    width_px: 1,
+                    shape: CordShape::Straight,
+                    wander: 1.0,
+                    wave: CordWave::NONE,
+                };
+                let shown = (0..s)
+                    .flat_map(|dy| (0..s).map(move |dx| (dx, dy)))
                     .filter(|&(dx, dy)| on.texel(s, x, y, z, dx, dy))
                     .count() as u32;
                 assert!(shown < s * s, "a cord leaves holes at {s} px");
                 assert!(shown >= s, "a cord crosses every row");
-                assert!((0..s).all(|dy| (0..s).all(|dx| DrapeCords::OFF.texel(s, x, y, z, dx, dy))));
+                assert!(
+                    (0..s).all(|dy| (0..s).all(|dx| DrapeCords::OFF.texel(s, x, y, z, dx, dy)))
+                );
             }
         }
     }
@@ -469,14 +543,21 @@ mod tests {
     #[test]
     fn a_swaying_join_is_at_one_screen_point_from_both_of_its_cells() {
         let s = 6;
-        let c = DrapeCords { width_px: 1, shape: CordShape::Eased, wander: 1.0, wave: CordWave::NONE };
+        let c = DrapeCords {
+            width_px: 1,
+            shape: CordShape::Eased,
+            wander: 1.0,
+            wave: CordWave::NONE,
+        };
         let (x, y, z) = (11, 5, 3);
         let join = c.ends(s, x, y + 1, z).1;
         // The face's weight lies between the two cells' weights; the tip is anything.
         let (w_upper, w_face, w_lower) = (0.42, 0.37, 0.31);
         for tip in [-0.75f32, -0.2, 0.0, 0.33, 0.75] {
             // Each box's left edge is where its cell's sway put it.
-            let screen = |w_cell: f32| (x as f32 + tip * w_cell) * s as f32 + swayed_join(s, join, tip, w_face, w_cell);
+            let screen = |w_cell: f32| {
+                (x as f32 + tip * w_cell) * s as f32 + swayed_join(s, join, tip, w_face, w_cell)
+            };
             let (a, b) = (screen(w_upper), screen(w_lower));
             assert!((a - b).abs() < 1e-4, "tip {tip}: {a} vs {b}");
         }
@@ -484,11 +565,29 @@ mod tests {
 
     #[test]
     fn the_uniform_carries_the_width_shape_and_wander() {
-        let mut c = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave: CordWave::NONE };
-        assert_eq!(c.uniform(), [2, 1 | 2 | (1 << 4) | (50 << 8)], "one octave without the wave");
-        c.wave = CordWave { period: 6.25, amplitude: 1.5, octaves: 3, ratios: WaveRatios::Octave };
+        let mut c = DrapeCords {
+            width_px: 2,
+            shape: CordShape::Eased,
+            wander: 0.5,
+            wave: CordWave::NONE,
+        };
+        assert_eq!(
+            c.uniform(),
+            [2, 1 | 2 | (1 << 4) | (50 << 8)],
+            "one octave without the wave"
+        );
+        c.wave = CordWave {
+            period: 6.25,
+            amplitude: 1.5,
+            octaves: 3,
+            ratios: WaveRatios::Octave,
+        };
         let w = c.uniform()[1] as u32;
-        assert_eq!(w & 0xFF0D, 1 | (50 << 8), "the wave leaves the shape and wander");
+        assert_eq!(
+            w & 0xFF0D,
+            1 | (50 << 8),
+            "the wave leaves the shape and wander"
+        );
         assert_eq!((w >> 4) & 15, 3, "the octave count");
         assert_eq!(w & 2, 0, "literal octaves");
         c.wave.ratios = WaveRatios::Jittered;
@@ -502,19 +601,40 @@ mod tests {
     fn waves() -> Vec<DrapeCords> {
         let mut v = Vec::new();
         for width_px in [1, 2] {
-            for (period, amplitude) in [(3.0, 0.5), (6.0, 1.0), (12.0, 2.0), (3.0, 2.0), (7.5, 0.2)] {
+            for (period, amplitude) in [(3.0, 0.5), (6.0, 1.0), (12.0, 2.0), (3.0, 2.0), (7.5, 0.2)]
+            {
                 for octaves in [1, 3, 5] {
                     for ratios in [WaveRatios::Octave, WaveRatios::Jittered] {
-                        let wave = CordWave { period, amplitude, octaves, ratios };
-                        v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+                        let wave = CordWave {
+                            period,
+                            amplitude,
+                            octaves,
+                            ratios,
+                        };
+                        v.push(DrapeCords {
+                            width_px,
+                            shape: CordShape::Eased,
+                            wander: 0.5,
+                            wave,
+                        });
                     }
                 }
             }
             // The defaults' neighbourhood: long periods with octaves.
             for period in [12.0, 24.0] {
                 for ratios in [WaveRatios::Octave, WaveRatios::Jittered] {
-                    let wave = CordWave { period, amplitude: 0.5, octaves: 3, ratios };
-                    v.push(DrapeCords { width_px, shape: CordShape::Eased, wander: 0.5, wave });
+                    let wave = CordWave {
+                        period,
+                        amplitude: 0.5,
+                        octaves: 3,
+                        ratios,
+                    };
+                    v.push(DrapeCords {
+                        width_px,
+                        shape: CordShape::Eased,
+                        wander: 0.5,
+                        wave,
+                    });
                 }
             }
         }
@@ -523,7 +643,13 @@ mod tests {
 
     /// The pixels of row `dy` of cell `(x, y, z)` on the waving cord as the plant pass draws
     /// it (no walk limit), over the reach either side, with each face's sway `shift`.
-    fn wave_row(c: &DrapeCords, s: u32, cell: (i32, i32, i32), dy: u32, shift: (f32, f32)) -> Vec<i32> {
+    fn wave_row(
+        c: &DrapeCords,
+        s: u32,
+        cell: (i32, i32, i32),
+        dy: u32,
+        shift: (f32, f32),
+    ) -> Vec<i32> {
         let r = (c.reach(s) * s as f32).ceil() as i32 + 2 * s as i32;
         let t = (dy as f32 + 0.5) / s as f32;
         (-r..s as i32 + r)
@@ -541,7 +667,10 @@ mod tests {
                         let a = c.amp(s, walk);
                         let up_end = c.wave_centre(s, upper, 1.0, a, (0.0, 0.0));
                         let low_top = c.wave_centre(s, lower, 0.0, a, (0.0, 0.0));
-                        assert!((up_end - low_top).abs() < 1e-3, "{c:?} at {s} px: {up_end} vs {low_top}");
+                        assert!(
+                            (up_end - low_top).abs() < 1e-3,
+                            "{c:?} at {s} px: {up_end} vs {low_top}"
+                        );
                     }
                     // Swaying: the face's shift is the upper's bottom and the lower's top.
                     let face = 0.7;
@@ -553,14 +682,18 @@ mod tests {
                     let up = wave_row(&c, s, upper, s - 1, (0.0, 0.0));
                     let down = wave_row(&c, s, lower, 0, (0.0, 0.0));
                     let touch = up.iter().any(|&p| down.iter().any(|&q| p.abs_diff(q) <= 1));
-                    assert!(touch, "{c:?} at {s} px, ({x}, {y}, {z}): {up:?} over {down:?}");
+                    assert!(
+                        touch,
+                        "{c:?} at {s} px, ({x}, {y}, {z}): {up:?} over {down:?}"
+                    );
                 }
             }
         }
     }
 
     #[test]
-    fn under_the_long_wave_a_row_less_than_a_pixel_from_its_neighbours_is_the_width_at_every_scale() {
+    fn under_the_long_wave_a_row_less_than_a_pixel_from_its_neighbours_is_the_width_at_every_scale()
+    {
         for c in waves() {
             for s in SCALES.into_iter().filter(|&s| s >= c.width_px) {
                 let a = c.amp(s, false);
@@ -591,7 +724,10 @@ mod tests {
                         for sh in [(0.0, 0.0), (-1.5, 1.5)] {
                             for dx in wave_row(&c, s, (x, y, z), dy, sh) {
                                 let off = (dx as f32 + 0.5) / s as f32 - 0.5;
-                                assert!(off.abs() <= c.reach(s), "{c:?} at {s} px: {dx} past the quad");
+                                assert!(
+                                    off.abs() <= c.reach(s),
+                                    "{c:?} at {s} px: {dx} past the quad"
+                                );
                                 if dx < 0 || dx >= s as i32 {
                                     outside += 1;
                                 }
@@ -636,7 +772,10 @@ mod tests {
                     }
                 }
                 // Scaled by the gains' sum, not by more: the swing comes near the amplitude.
-                assert!(most >= 0.5 * a, "{c:?} at {s} px: swings only {most} of {a}");
+                assert!(
+                    most >= 0.5 * a,
+                    "{c:?} at {s} px: swings only {most} of {a}"
+                );
             }
         }
     }
@@ -644,14 +783,31 @@ mod tests {
     #[test]
     fn one_octave_is_the_single_sine_and_more_octaves_add_finer_waves() {
         let s = 6;
-        let wave = CordWave { period: 12.0, amplitude: 0.5, octaves: 1, ratios: WaveRatios::Jittered };
-        let one = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave };
-        let three = DrapeCords { wave: CordWave { octaves: 3, ..one.wave }, ..one };
+        let wave = CordWave {
+            period: 12.0,
+            amplitude: 0.5,
+            octaves: 1,
+            ratios: WaveRatios::Jittered,
+        };
+        let one = DrapeCords {
+            width_px: 2,
+            shape: CordShape::Eased,
+            wander: 0.5,
+            wave,
+        };
+        let three = DrapeCords {
+            wave: CordWave {
+                octaves: 3,
+                ..one.wave
+            },
+            ..one
+        };
         let (x, z) = (17, 4);
         let mut differs = false;
         for i in 0..200 {
             let yw = i as f32 * 0.25;
-            let sine = s as f32 * (0.5 + 0.5 * (std::f32::consts::TAU * (yw / 12.0 + phase(x, z))).sin());
+            let sine =
+                s as f32 * (0.5 + 0.5 * (std::f32::consts::TAU * (yw / 12.0 + phase(x, z))).sin());
             assert!((one.wave_at(s, x, z, yw, 0.5) - sine).abs() < 1e-3);
             differs |= (three.wave_at(s, x, z, yw, 0.5) - sine).abs() > 0.1;
         }
@@ -665,19 +821,42 @@ mod tests {
     fn literal_octaves_repeat_every_period_and_jittered_ones_differ_strand_to_strand() {
         let s = 6;
         for period in [12.0, 24.0] {
-            let wave = CordWave { period, amplitude: 0.5, octaves: 3, ratios: WaveRatios::Octave };
-            let lit = DrapeCords { width_px: 2, shape: CordShape::Eased, wander: 0.5, wave };
-            let jit = DrapeCords { wave: CordWave { ratios: WaveRatios::Jittered, ..wave }, ..lit };
+            let wave = CordWave {
+                period,
+                amplitude: 0.5,
+                octaves: 3,
+                ratios: WaveRatios::Octave,
+            };
+            let lit = DrapeCords {
+                width_px: 2,
+                shape: CordShape::Eased,
+                wander: 0.5,
+                wave,
+            };
+            let jit = DrapeCords {
+                wave: CordWave {
+                    ratios: WaveRatios::Jittered,
+                    ..wave
+                },
+                ..lit
+            };
             for (x, _, z) in positions().take(20) {
                 for i in 0..40 {
                     let yw = i as f32 * 0.37;
-                    let (a, b) = (lit.wave_at(s, x, z, yw, 0.5), lit.wave_at(s, x, z, yw + period, 0.5));
+                    let (a, b) = (
+                        lit.wave_at(s, x, z, yw, 0.5),
+                        lit.wave_at(s, x, z, yw + period, 0.5),
+                    );
                     assert!((a - b).abs() < 1e-2, "literal octaves repeat: {a} vs {b}");
                 }
                 for k in 0..3 {
                     assert_eq!(lit.freq(x, z, k), (1u32 << k) as f32);
                     let f = jit.freq(x, z, k) / (1u32 << k) as f32;
-                    let ok = if k == 0 { f == 1.0 } else { (f - JITTER_MEAN).abs() <= JITTER_SPREAD + 1e-6 };
+                    let ok = if k == 0 {
+                        f == 1.0
+                    } else {
+                        (f - JITTER_MEAN).abs() <= JITTER_SPREAD + 1e-6
+                    };
                     assert!(ok, "octave {k}: {f}");
                 }
             }

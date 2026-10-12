@@ -3,159 +3,70 @@
 //!
 //! The fit's arithmetic is tested on the CPU in `present.rs`; this is the one check that
 //! the shader's window branch agrees with it — bars black, a whole upscale exactly the
-//! nearest one, and any other scale the area average of the raster under each pixel. `None` from a machine with no Vulkan device, which is not a failure of the pass.
+//! nearest one, and any other scale the area average of the raster under each pixel. `None` from a machine with no GPU device, which is not a failure of the pass.
 
-use ash::vk;
-use cubarium_gpu::render::framebuffer;
-use cubarium_gpu::vk::{Gpu, barrier};
-use cubarium_gpu::present::WindowFit;
-use cubarium_gpu::{PresentPass, TargetImage};
-
-const FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+#![forbid(unsafe_code)]
+use cubarium_gpu::{Gpu, PresentPass, present::WindowFit, wgpu_backend::headless::read_texture};
+const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// A 4 × 2 raster whose every texel is a different colour.
 fn raster_pixel(x: u32, y: u32) -> [u8; 4] {
-    [40 + 50 * x as u8, 30 + 100 * y as u8, 7 * (x + 4 * y) as u8 + 1, 255]
+    [
+        40 + 50 * x as u8,
+        30 + 100 * y as u8,
+        7 * (x + 4 * y) as u8 + 1,
+        255,
+    ]
 }
 
 /// Draw the 4 × 2 raster into a `window`-sized image through the present pass at `fit`,
 /// and read it back as RGBA rows.
 fn present(gpu: &Gpu, window: (u32, u32), fit: WindowFit) -> Vec<u8> {
-    let d = &gpu.device;
     let (rw, rh) = (4u32, 2u32);
-    let pool = unsafe {
-        d.create_command_pool(
-            &vk::CommandPoolCreateInfo::default().queue_family_index(gpu.queue_family),
-            None,
-        )
-    }
-    .unwrap();
-
-    // The raster: uploaded, then left where every frame leaves it.
-    let (raster, raster_mem) = gpu
-        .image(
-            rw,
-            rh,
-            FORMAT,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::SAMPLED | vk::ImageUsageFlags::TRANSFER_DST,
-        )
-        .unwrap();
-    let raster_view = gpu.view(raster, FORMAT).unwrap();
+    let extent = |w, h| wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    };
+    let raster = gpu.texture(
+        "window test raster",
+        extent(rw, rh),
+        wgpu::TextureDimension::D2,
+        FORMAT,
+        wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    );
+    let raster_view = raster.create_view(&Default::default());
+    let target = gpu.texture(
+        "window test output",
+        extent(window.0, window.1),
+        wgpu::TextureDimension::D2,
+        FORMAT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+    );
+    let view = target.create_view(&Default::default());
     let pixels: Vec<u8> = (0..rh)
         .flat_map(|y| (0..rw).flat_map(move |x| raster_pixel(x, y)))
         .collect();
-    let upload = gpu
-        .host_buffer(pixels.len() as u64, vk::BufferUsageFlags::TRANSFER_SRC)
-        .unwrap();
-    upload.write(&pixels);
-    let region = |w: u32, h: u32| {
-        vk::BufferImageCopy::default()
-            .image_subresource(
-                vk::ImageSubresourceLayers::default()
-                    .aspect_mask(vk::ImageAspectFlags::COLOR)
-                    .layer_count(1),
-            )
-            .image_extent(vk::Extent3D {
-                width: w,
-                height: h,
-                depth: 1,
-            })
-    };
-    gpu.one_shot(pool, |cb| unsafe {
-        barrier(
-            d,
-            cb,
-            raster,
-            vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-        );
-        d.cmd_copy_buffer_to_image(
-            cb,
-            upload.buffer,
-            raster,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            &[region(rw, rh)],
-        );
-        barrier(
-            d,
-            cb,
-            raster,
-            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-        );
-    })
+    let mut encoder = gpu.encoder("window test present");
+    gpu.upload_texture(
+        &mut encoder,
+        &raster,
+        wgpu::Origin3d::ZERO,
+        extent(rw, rh),
+        4,
+        &pixels,
+    )
     .unwrap();
-
-    let sampler = unsafe {
-        d.create_sampler(
-            &vk::SamplerCreateInfo::default()
-                .mag_filter(vk::Filter::NEAREST)
-                .min_filter(vk::Filter::NEAREST),
-            None,
-        )
-    }
-    .unwrap();
-    let mut pass = PresentPass::new(gpu, raster_view, sampler).unwrap();
-    let (render_pass, pipeline) = pass
-        .entry(gpu, FORMAT, vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
-        .unwrap();
-
-    // The "swapchain image".
-    let (target, target_mem) = gpu
-        .image(
-            window.0,
-            window.1,
-            FORMAT,
-            vk::ImageTiling::OPTIMAL,
-            vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC,
-        )
-        .unwrap();
-    let target_view = gpu.view(target, FORMAT).unwrap();
-    let fb = framebuffer(d, render_pass, target_view, window.0, window.1).unwrap();
-    let slot = TargetImage {
-        image: target,
-        view: target_view,
-        framebuffer: fb,
-    };
-    let readback = gpu
-        .readback_buffer(u64::from(window.0 * window.1 * 4))
-        .unwrap();
-    gpu.one_shot(pool, |cb| unsafe {
-        pass.record_push(d, cb, &slot, window, fit.push(), render_pass, pipeline);
-        d.cmd_copy_image_to_buffer(
-            cb,
-            target,
-            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-            readback.buffer,
-            &[region(window.0, window.1)],
-        );
-    })
-    .unwrap();
-    let out = unsafe { readback.bytes() }[..(window.0 * window.1 * 4) as usize].to_vec();
-
-    unsafe {
-        d.destroy_framebuffer(fb, None);
-        d.destroy_image_view(target_view, None);
-        d.destroy_image(target, None);
-        d.free_memory(target_mem, None);
-        d.destroy_image_view(raster_view, None);
-        d.destroy_image(raster, None);
-        d.free_memory(raster_mem, None);
-        d.destroy_sampler(sampler, None);
-        d.destroy_command_pool(pool, None);
-    }
-    pass.destroy(gpu);
-    upload.destroy(gpu);
-    readback.destroy(gpu);
-    out
+    PresentPass::new(gpu, FORMAT).record(gpu, &mut encoder, &raster_view, &view, fit.push());
+    gpu.queue.submit([encoder.finish()]);
+    read_texture(gpu, &target).unwrap()
 }
 
 fn open() -> Option<Gpu> {
-    match Gpu::open(&[]) {
+    match Gpu::open() {
         Ok(gpu) => Some(gpu),
         Err(e) => {
-            eprintln!("no Vulkan device here ({e}); the window's present pass was not checked");
+            eprintln!("no GPU device here ({e}); the window's present pass was not checked");
             None
         }
     }

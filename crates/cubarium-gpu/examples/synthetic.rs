@@ -12,13 +12,15 @@
 //! stopped; it is the spike's control path. The window lives in the standalone
 //! `crates/cubarium-gpu/window` crate.
 
+#![forbid(unsafe_code)]
+
 use anyhow::{Context, Result, bail};
+use cubarium_gpu::Gpu;
 use cubarium_gpu::atlas::Atlas;
 use cubarium_gpu::render::Renderer;
 use cubarium_gpu::scene::RingLayout;
 use cubarium_gpu::synthetic::SyntheticWorld;
 use cubarium_gpu::target::Headless;
-use cubarium_gpu::vk::Gpu;
 
 /// The world's tick rate, `design/architecture.md`'s 20 Hz.
 const TICK_HZ: f64 = 20.0;
@@ -99,9 +101,9 @@ fn main() -> Result<()> {
     );
     match args.target.as_str() {
         "headless" => headless(&args, &atlas),
-        #[cfg(feature = "scanout")]
+        #[cfg(all(feature = "scanout", target_os = "linux"))]
         "shim" => shim(&args, &atlas),
-        #[cfg(feature = "scanout")]
+        #[cfg(all(feature = "scanout", target_os = "linux"))]
         "kms" => kms(&args, &atlas),
         other => bail!("target {other} is not built into this binary"),
     }
@@ -114,8 +116,8 @@ fn present_seconds(tick: u64, f: f64) -> f64 {
 }
 
 fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
-    let gpu = Gpu::open(&[])?;
-    println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
+    let gpu = Gpu::open()?;
+    println!("device: {}", gpu.name);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
     // The synthetic scene is drawn the plan's way: one source texel per S x S block.
     renderer.art_scale = args.layout.scale as f32;
@@ -166,11 +168,11 @@ fn headless(args: &Args, atlas: &Atlas) -> Result<()> {
 }
 
 /// The board's production path: GS-2's dma-buf socket.
-#[cfg(feature = "scanout")]
+#[cfg(all(feature = "scanout", target_os = "linux"))]
 fn shim(args: &Args, atlas: &Atlas) -> Result<()> {
     use cubarium_gpu::target::ShimScanout;
-    let gpu = Gpu::open(&[])?;
-    println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
+    let gpu = Gpu::open()?;
+    println!("device: {}", gpu.name);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
     // The synthetic scene is drawn the plan's way: one source texel per S x S block.
     renderer.art_scale = args.layout.scale as f32;
@@ -230,11 +232,11 @@ fn shim(args: &Args, atlas: &Atlas) -> Result<()> {
 }
 
 /// The spike's control path: this process takes DRM master and flips.
-#[cfg(feature = "scanout")]
+#[cfg(all(feature = "scanout", target_os = "linux"))]
 fn kms(args: &Args, atlas: &Atlas) -> Result<()> {
     use cubarium_gpu::target::Scanout;
-    let gpu = Gpu::open(&[])?;
-    println!("device: {} (dma-buf: {})", gpu.name, gpu.has_dma_buf);
+    let gpu = Gpu::open()?;
+    println!("device: {}", gpu.name);
     let mut renderer = Renderer::new(&gpu, atlas, args.layout)?;
     // The synthetic scene is drawn the plan's way: one source texel per S x S block.
     renderer.art_scale = args.layout.scale as f32;

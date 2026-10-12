@@ -1,4 +1,5 @@
 //! Headless validation of the complete safe voxel pass chain.
+#![forbid(unsafe_code)]
 use anyhow::{Result, ensure};
 use cubarium_gpu::{
     figures::{CLASS_NONE, FigureFrame, FigureInstance, FigureTile, FigureVoxel, PaletteEntry},
@@ -82,6 +83,13 @@ fn main() -> Result<()> {
             }),
             "stage refused"
         );
+        if lit {
+            r.set_weather(cubarium_gpu::weather::Weather {
+                fog: 0.25,
+                ..cubarium_gpu::weather::Weather::CLEAR_NOON
+            });
+            r.set_clock(cubarium_gpu::voxel::FrameClock::default());
+        }
         let mut dropped = gpu.encoder("discarded voxel frame");
         r.record_frame(&gpu, &mut dropped, (), None)?;
         drop(dropped);

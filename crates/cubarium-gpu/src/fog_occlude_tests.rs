@@ -38,7 +38,7 @@ fn params(plants: bool) -> VoxelParams {
 }
 
 fn stage(r: &mut VoxelRenderer, plant: bool) {
-    let p = r.params.clone();
+    let p = r.params();
     let mut cells = vec![VoxelTexel::default(); p.voxel_count()];
     // A fogged bank behind the foreground block, across every test pixel's ray.
     for x in 0..p.width {
@@ -76,14 +76,14 @@ fn stage(r: &mut VoxelRenderer, plant: bool) {
 }
 
 fn draw(gpu: &Gpu, r: &mut VoxelRenderer, target: &mut Headless, fog: bool) -> Vec<u8> {
-    r.look = crate::weather::noon(&r.params);
-    r.look.sun = [0.0; 3];
-    r.look.sun_strength = 0.0;
-    r.look.fog = if fog { 1.0 } else { 0.0 };
-    r.look.fog_colour = [0.4, 0.25, 0.65];
-    r.look.fog_glow = 0.0;
+    let mut look = crate::weather::noon(&r.params());
+    look.sun = [0.0; 3];
+    look.sun_strength = 0.0;
+    look.fog = if fog { 1.0 } else { 0.0 };
+    look.fog_colour = [0.4, 0.25, 0.65];
+    look.fog_glow = 0.0;
+    r.force_look_for_test(look);
     r.set_fog_floor(10.0);
-    r.raster_current = false;
     target.draw(gpu, r, ()).unwrap();
     r.read_raster(gpu).unwrap()
 }
@@ -119,8 +119,8 @@ fn figure(alpha: f32) -> FigureFrame {
 
 #[test]
 fn a_foreground_block_and_its_soft_rim_keep_only_the_air_in_front() {
-    let Ok(gpu) = Gpu::open(&[]) else {
-        eprintln!("skipped: no Vulkan device");
+    let Ok(gpu) = Gpu::open() else {
+        eprintln!("skipped: no GPU device");
         return;
     };
     let p = params(false);
@@ -196,8 +196,8 @@ fn a_foreground_block_and_its_soft_rim_keep_only_the_air_in_front() {
 
 #[test]
 fn the_plant_pass_hides_the_fog_behind_its_front_face() {
-    let Ok(gpu) = Gpu::open(&[]) else {
-        eprintln!("skipped: no Vulkan device");
+    let Ok(gpu) = Gpu::open() else {
+        eprintln!("skipped: no GPU device");
         return;
     };
     let p = params(true);

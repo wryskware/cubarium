@@ -12,7 +12,6 @@ publish = false
 # in this direction.
 [dependencies]
 anyhow = { workspace = true }
-ash = "0.38"
 bytemuck = { version = "1", features = ["derive"] }
 png = { workspace = true }
 serde_json = "1"
@@ -26,8 +25,7 @@ rustix = { version = "1", features = ["event", "fs", "net"], optional = true }
 
 [features]
 default = ["scanout"]
-# The board: linear B8G8R8A8 images exported as dma-bufs, imported into KMS and
-# page-flipped at DP-1. Linux only; the crate builds without it everywhere.
+# Linux panel transport uses safe DRM buffers populated by GPU readback.
 scanout = ["dep:drm", "dep:rustix"]
 
 [[example]]

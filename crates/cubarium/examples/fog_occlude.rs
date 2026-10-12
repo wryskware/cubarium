@@ -51,7 +51,7 @@ fn main() -> Result<()> {
     let mut p = cubarium::sink::gpu::voxel::params_of(&cfg, proj, true);
     p.lit = true;
     p.effects.volumetric = false;
-    let gpu = Gpu::open(&[])?;
+    let gpu = Gpu::open()?;
     eprintln!(
         "device={}, case={case}, px={px}, raster={}x{}",
         gpu.name, p.raster_w, p.raster_h

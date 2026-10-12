@@ -13,10 +13,9 @@ publish = false
 
 [dependencies]
 anyhow = "1"
-ash = "0.38"
 cubarium-gpu = { path = "..", default-features = false }
-raw-window-handle = "0.6"
 winit = "0.30"
+wgpu = "=30.0.1"
 
 [profile.release]
 debug = 1

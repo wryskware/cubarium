@@ -56,7 +56,7 @@ pub fn draw_angle(
     // One headless device per capture/test process keeps repeated draws cheap and
     // avoids repeated driver teardown. Serialize access to its queue.
     static GPU: std::sync::OnceLock<Result<std::sync::Mutex<Gpu>, String>> = std::sync::OnceLock::new();
-    let gpu = GPU.get_or_init(|| Gpu::open(&[]).map(std::sync::Mutex::new).map_err(|e| e.to_string()))
+    let gpu = GPU.get_or_init(|| Gpu::open().map(std::sync::Mutex::new).map_err(|e| e.to_string()))
         .as_ref().map_err(|e| anyhow::anyhow!("{e}"))?
         .lock().map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut renderer =

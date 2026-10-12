@@ -931,6 +931,7 @@ fn desktop_screens(focused: bool) -> Option<(u32, u32)> {
         let out = std::process::Command::new(cmd).args(args).output().ok()?;
         out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     };
+    #[cfg(target_os = "linux")]
     if !focused
         && let Some(sizes) = crate::sink::gpu::wayland::physical_outputs()
     {

@@ -26,8 +26,6 @@ pack-profile = []
 [dependencies]
 # Byte views of `Pod` data with no `unsafe` (the pack's terrain compare).
 bytemuck = "1"
-# poll(2) for the Wayland target, with no `unsafe`.
-rustix = { version = "1", features = ["event"] }
 cube-proto = { workspace = true }
 cubarium-surface = { workspace = true }
 cubarium-render = { workspace = true }
@@ -55,16 +53,9 @@ clap = { workspace = true }
 rustc-hash = { workspace = true }
 rayon = "1"
 minifb = { workspace = true }
-# The development window's raw handles, which `minifb` 0.28 hands out as
-# raw-window-handle 0.6 types but does not re-export: the swapchain is made on them
-# (`sink/gpu/target.rs`). Already in the lockfile through `minifb`; nothing new resolves.
-raw-window-handle = "0.6"
-# The development window's own Wayland toplevel (`sink/gpu/wayland.rs`): title and app id
-# set before the first commit, configures acknowledged, and the event socket read without
-# blocking. The system backend shares libwayland with Vulkan WSI; dlopen keeps it
-# optional on the board. Modern bindings include surface v6 and fractional scale.
-wayland-client = { version = "0.31", features = ["system", "dlopen"] }
-wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# Owned, safe surface handles and events for the GPU development window.
+winit = "0.30"
+wgpu = "=30.0.1"
 png = { workspace = true }
 toml = "0.8"
 serde_json = "1"
@@ -80,6 +71,10 @@ workspace = true
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", features = ["fs", "event", "process", "thread"] }
 signal-hook = "0.3"
+
+# Physical monitor modes, queried without creating a Wayland surface.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = { version = "0.31", features = ["system", "dlopen"] }
 
 [dependencies.chrono]
 version = "0.4"

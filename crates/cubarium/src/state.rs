@@ -76,14 +76,14 @@ pub fn list_snapshots(dir: &Path) -> Vec<(u64, PathBuf)> {
 
 // --- Exclusive ownership of the state directory ------------------------------------
 
-/// An exclusive, non-blocking advisory lock (`flock(2)`) on `<state>/.lock`, held by an
-/// open handle for the whole run.
+/// Exclusive, non-blocking ownership of `<state>/.lock`, held by an open handle
+/// for the whole run: `flock(2)` on Unix, file sharing restrictions on Windows.
 ///
 /// Why an OS lock and not a pid file: a `LOCK` file holding a pid that the launcher
 /// checks against `/proc` has a check-then-create race — two launchers can both see an
 /// absent or dead owner and both start writing — and pid reuse makes liveness no proof
-/// of identity either. `flock` is acquired atomically by the kernel and released by the
-/// kernel when the owning process exits, however it exits, so a leftover `.lock` file is
+/// of identity either. Ownership is acquired atomically by the kernel and released
+/// when the owning process exits, however it exits, so a leftover `.lock` file is
 /// harmless and never needs deleting.
 ///
 /// The file's *content* is diagnostic only (pid and start stamp): nothing reads it to
@@ -101,15 +101,8 @@ impl StateLock {
     /// Lock `dir`, or return an error naming the directory. The directory must exist.
     pub fn acquire(dir: &Path) -> Result<StateLock> {
         let path = dir.join(LOCK_NAME);
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)
-            .with_context(|| format!("opening the state lock {}", path.display()))?;
-        match flock_exclusive_nonblocking(&file) {
-            Ok(()) => {}
+        let file = match open_lock_file(&path) {
+            Ok(file) => file,
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 anyhow::bail!(
                     "the state directory {} is already in use by another cubarium process \
@@ -123,7 +116,7 @@ impl StateLock {
                 return Err(anyhow::Error::new(e))
                     .with_context(|| format!("locking the state directory {}", dir.display()));
             }
-        }
+        };
         let mut lock = StateLock { path, file };
         lock.write_diagnostics();
         Ok(lock)
@@ -148,10 +141,28 @@ impl StateLock {
     }
 }
 
-/// `flock(fd, LOCK_EX | LOCK_NB)`. Contention arrives as [`io::ErrorKind::WouldBlock`].
-fn flock_exclusive_nonblocking(file: &File) -> io::Result<()> {
-    rustix::fs::flock(file, rustix::fs::FlockOperation::NonBlockingLockExclusive)
-        .map_err(Into::into)
+/// Opens and locks atomically with respect to other state-directory writers.
+#[cfg(unix)]
+fn open_lock_file(path: &Path) -> io::Result<File> {
+    let file = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path)?;
+    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive)?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+fn open_lock_file(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // Diagnostic readers remain possible. Another writer cannot open this file;
+    // cloned handles keep the same sharing restrictions until the last closes.
+    const FILE_SHARE_READ: u32 = 1;
+    OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .share_mode(FILE_SHARE_READ).open(path).map_err(|error| {
+            if error.raw_os_error() == Some(32) {
+                io::Error::new(io::ErrorKind::WouldBlock, error)
+            } else {
+                error
+            }
+        })
 }
 
 // --- What a state directory already holds -------------------------------------------

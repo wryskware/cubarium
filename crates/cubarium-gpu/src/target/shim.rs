@@ -36,8 +36,8 @@
 use std::io::{IoSlice, IoSliceMut};
 use std::mem::MaybeUninit;
 use std::os::unix::io::{AsFd, BorrowedFd, OwnedFd};
-use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -111,20 +111,33 @@ pub struct ShimScanout {
 impl ShimScanout {
     pub fn open<S: FrameSource>(gpu: &Gpu, src: &mut S, quarter_turns: u32) -> Result<Self> {
         let raster = src.raster_size();
-        let transform = PresentTransform::fit(raster, PANEL, quarter_turns, false)
-            .ok_or_else(|| anyhow!("a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
-                raster.0, raster.1, PANEL.0, PANEL.1))?;
+        let transform =
+            PresentTransform::fit(raster, PANEL, quarter_turns, false).ok_or_else(|| {
+                anyhow!(
+                    "a {}x{} raster does not fit {}x{} at {quarter_turns} quarter turn(s)",
+                    raster.0,
+                    raster.1,
+                    PANEL.0,
+                    PANEL.1
+                )
+            })?;
         // Hold exactly one connected socket: the daemon refuses a second client.
         let first = PanelImage::new(gpu, PANEL)?;
         let first_fd = first.export()?;
         let (socket, attached) = connect_when_free(first.pitch(), 0, first_fd.as_fd())?;
         let mut client = Self {
-            socket, slots: Vec::with_capacity(SLOTS),
-            free: attached.released | (1 << attached.slot), transform,
-            seq: 0, next: 0, last_presented: 0,
+            socket,
+            slots: Vec::with_capacity(SLOTS),
+            free: attached.released | (1 << attached.slot),
+            transform,
+            seq: 0,
+            next: 0,
+            last_presented: 0,
         };
         client.slots.push(Slot {
-            id: attached.slot, fd: first_fd, image: first,
+            id: attached.slot,
+            fd: first_fd,
+            image: first,
             recording: Arc::new(Mutex::new(None)),
         });
         for _ in 1..SLOTS {
@@ -132,45 +145,80 @@ impl ShimScanout {
             let fd = image.export()?;
             let id = client.attach(image.pitch(), fd.as_fd())?;
             client.free |= 1 << id;
-            client.slots.push(Slot { id, fd, image, recording: Arc::new(Mutex::new(None)) });
+            client.slots.push(Slot {
+                id,
+                fd,
+                image,
+                recording: Arc::new(Mutex::new(None)),
+            });
         }
-        println!("shim socket: {SLOTS} slots attached at {}x{} XR24 pitch {}, wgpu readback into DRM buffers",
-            PANEL.0, PANEL.1, client.slots[0].image.pitch());
+        println!(
+            "shim socket: {SLOTS} slots attached at {}x{} XR24 pitch {}, wgpu readback into DRM buffers",
+            PANEL.0,
+            PANEL.1,
+            client.slots[0].image.pitch()
+        );
         Ok(client)
     }
 
-    pub fn transform(&self) -> PresentTransform { self.transform }
+    pub fn transform(&self) -> PresentTransform {
+        self.transform
+    }
 
-    pub fn draw<S: FrameSource>(&mut self, gpu: &Gpu, src: &mut S, frame: S::Frame<'_>)
-        -> Result<(f64, f64, f64)>
-    {
+    pub fn draw<S: FrameSource>(
+        &mut self,
+        gpu: &Gpu,
+        src: &mut S,
+        frame: S::Frame<'_>,
+    ) -> Result<(f64, f64, f64)> {
         let waited = Instant::now();
         let index = self.take_free_slot()?;
         let start = Instant::now();
-        let ms = self.slots[index].image.draw(gpu, src, frame, self.transform)?;
+        let ms = self.slots[index]
+            .image
+            .draw(gpu, src, frame, self.transform)?;
         let submitted = Instant::now();
         self.present_slot(index)?;
-        Ok((ms, (submitted - start).as_secs_f64() * 1e3,
-            (start - waited).as_secs_f64() * 1e3))
+        Ok((
+            ms,
+            (submitted - start).as_secs_f64() * 1e3,
+            (start - waited).as_secs_f64() * 1e3,
+        ))
     }
 
-    pub fn read_presented<S: FrameSource>(&self, _gpu: &Gpu, _src: &S)
-        -> Result<(u32, u32, Vec<u8>)>
-    {
-        Ok((PANEL.0, PANEL.1, self.slots[self.last_presented].image.rgba().to_vec()))
+    pub fn read_presented<S: FrameSource>(
+        &self,
+        _gpu: &Gpu,
+        _src: &S,
+    ) -> Result<(u32, u32, Vec<u8>)> {
+        Ok((
+            PANEL.0,
+            PANEL.1,
+            self.slots[self.last_presented].image.rgba().to_vec(),
+        ))
     }
 
     pub fn record_slots(&self) -> Vec<SlotRecord> {
-        self.slots.iter().map(|s| SlotRecord {
-            view: s.image.view().clone(), recording: s.recording.clone(),
-        }).collect()
+        self.slots
+            .iter()
+            .map(|s| SlotRecord {
+                view: s.image.view().clone(),
+                recording: s.recording.clone(),
+            })
+            .collect()
     }
 
-    pub fn view_format(&self) -> wgpu::TextureFormat { wgpu::TextureFormat::Rgba8UnormSrgb }
+    pub fn view_format(&self) -> wgpu::TextureFormat {
+        wgpu::TextureFormat::Rgba8UnormSrgb
+    }
 
     pub fn submit_slot(&mut self, gpu: &Gpu, i: usize) -> Result<()> {
         let slot = &mut self.slots[i];
-        let encoder = slot.recording.lock().expect("slot recording mutex poisoned").take()
+        let encoder = slot
+            .recording
+            .lock()
+            .expect("slot recording mutex poisoned")
+            .take()
             .ok_or_else(|| anyhow!("slot {i} has no recording"))?;
         slot.image.submit(gpu, encoder)
     }
@@ -497,7 +545,11 @@ impl ShimPresenter {
             // one recorded, which is the only one the renderer's ring can give back.
             Next::Replace { .. } => {
                 if let Some(frame) = self.mail.reclaim() {
-                    self.slots[frame.slot].recording.lock().expect("slot recording mutex poisoned").take();
+                    self.slots[frame.slot]
+                        .recording
+                        .lock()
+                        .expect("slot recording mutex poisoned")
+                        .take();
                     src.frame_discarded();
                     self.free.push_front(frame.slot);
                 }
@@ -512,16 +564,24 @@ impl ShimPresenter {
         };
         let slot = &self.slots[index];
         let mut encoder = gpu.encoder("shim recorded frame");
-        if let Err(error) = src.record_frame(gpu, &mut encoder, frame, Some(TargetSlot {
-            view: &slot.view,
-            size: PANEL,
-            format: self.view_format,
-            transform: PresentPass::panel_transform(self.transform, PANEL),
-        })) {
+        if let Err(error) = src.record_frame(
+            gpu,
+            &mut encoder,
+            frame,
+            Some(TargetSlot {
+                view: &slot.view,
+                size: PANEL,
+                format: self.view_format,
+                transform: PresentPass::panel_transform(self.transform, PANEL),
+            }),
+        ) {
             self.free.push_front(index);
             return Err(error);
         }
-        *slot.recording.lock().expect("slot recording mutex poisoned") = Some(encoder);
+        *slot
+            .recording
+            .lock()
+            .expect("slot recording mutex poisoned") = Some(encoder);
         // What the frame did is the presenter's to report: a frame that redrew the world
         // and one that only put an already-drawn raster on a new slot cost very different
         // amounts, and which of the two the panel's rate is made of is the whole question.
@@ -575,7 +635,11 @@ impl ShimPresenter {
         }
         // Only a presenter failure can leave a posted frame unsubmitted.
         if let Some(frame) = self.mail.reclaim() {
-            self.slots[frame.slot].recording.lock().expect("slot recording mutex poisoned").take();
+            self.slots[frame.slot]
+                .recording
+                .lock()
+                .expect("slot recording mutex poisoned")
+                .take();
             src.frame_discarded();
         }
         if let Some(why) = failure {

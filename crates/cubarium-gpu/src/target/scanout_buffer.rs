@@ -30,10 +30,19 @@ pub struct ScanoutBuffer {
 impl ScanoutBuffer {
     /// Opens a DRM allocation client without taking DRM master from the shim.
     pub fn new(path: &Path, width: u32, height: u32) -> Result<Self> {
-        ensure!(width > 0 && height > 0, "scanout dimensions must be nonzero");
-        let card = Card(OpenOptions::new().read(true).write(true).open(path)
-            .with_context(|| format!("open DRM allocation client {}", path.display()))?);
-        let buffer = card.create_dumb_buffer((width, height), DrmFourcc::Xrgb8888, 32)
+        ensure!(
+            width > 0 && height > 0,
+            "scanout dimensions must be nonzero"
+        );
+        let card = Card(
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(path)
+                .with_context(|| format!("open DRM allocation client {}", path.display()))?,
+        );
+        let buffer = card
+            .create_dumb_buffer((width, height), DrmFourcc::Xrgb8888, 32)
             .context("allocate linear DRM scanout buffer")?;
         Ok(Self { card, buffer })
     }
@@ -44,7 +53,8 @@ impl ScanoutBuffer {
 
     pub fn export(&self) -> Result<OwnedFd> {
         let flags = rustix::fs::OFlags::CLOEXEC | rustix::fs::OFlags::RDWR;
-        self.card.buffer_to_prime_fd(self.buffer.handle(), flags.bits())
+        self.card
+            .buffer_to_prime_fd(self.buffer.handle(), flags.bits())
             .context("export DRM scanout allocation as dma-buf")
     }
 
@@ -52,23 +62,46 @@ impl ScanoutBuffer {
     pub fn write_rgba(&mut self, rgba: &[u8]) -> Result<()> {
         let (width, height) = self.buffer.size();
         let row_bytes = width as usize * 4;
-        ensure!(rgba.len() == row_bytes * height as usize, "wrong scanout readback size");
+        ensure!(
+            rgba.len() == row_bytes * height as usize,
+            "wrong scanout readback size"
+        );
         let pitch = self.buffer.pitch() as usize;
-        ensure!(pitch >= row_bytes, "DRM pitch is smaller than a scanout row");
-        let mut mapped = self.card.map_dumb_buffer(&mut self.buffer)
+        ensure!(
+            pitch >= row_bytes,
+            "DRM pitch is smaller than a scanout row"
+        );
+        let mut mapped = self
+            .card
+            .map_dumb_buffer(&mut self.buffer)
             .context("map DRM scanout allocation")?;
         copy_rows(rgba, &mut mapped, row_bytes, pitch, height as usize)
     }
 }
 
-fn copy_rows(rgba: &[u8], mapped: &mut [u8], row_bytes: usize, pitch: usize, rows: usize) -> Result<()> {
-    ensure!(row_bytes > 0 && row_bytes % 4 == 0 && pitch >= row_bytes, "invalid scanout stride");
-    ensure!(rgba.len() == row_bytes * rows && mapped.len() >= pitch * rows,
-        "scanout allocation does not cover the frame");
-    for (source, destination) in rgba.chunks_exact(row_bytes)
-        .zip(mapped.chunks_mut(pitch).take(rows)) {
-        for (pixel, target) in source.chunks_exact(4)
-            .zip(destination[..row_bytes].chunks_exact_mut(4)) {
+fn copy_rows(
+    rgba: &[u8],
+    mapped: &mut [u8],
+    row_bytes: usize,
+    pitch: usize,
+    rows: usize,
+) -> Result<()> {
+    ensure!(
+        row_bytes > 0 && row_bytes % 4 == 0 && pitch >= row_bytes,
+        "invalid scanout stride"
+    );
+    ensure!(
+        rgba.len() == row_bytes * rows && mapped.len() >= pitch * rows,
+        "scanout allocation does not cover the frame"
+    );
+    for (source, destination) in rgba
+        .chunks_exact(row_bytes)
+        .zip(mapped.chunks_mut(pitch).take(rows))
+    {
+        for (pixel, target) in source
+            .chunks_exact(4)
+            .zip(destination[..row_bytes].chunks_exact_mut(4))
+        {
             target.copy_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
         }
     }

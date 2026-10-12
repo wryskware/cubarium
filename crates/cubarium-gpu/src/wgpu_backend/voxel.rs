@@ -191,6 +191,12 @@ impl VoxelRenderer {
     }
 
     /// The look the next frame draws.
+    #[cfg(test)]
+    pub(crate) fn force_look_for_test(&mut self, look: crate::weather::Look) {
+        self.look = look;
+        self.raster_current = false;
+    }
+
     pub fn look(&self) -> crate::weather::Look {
         self.look
     }

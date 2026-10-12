@@ -4,13 +4,13 @@
 
 pub mod bloom;
 pub mod flat;
-pub mod headless;
 pub mod geometry;
+pub mod headless;
 pub mod shader;
 pub mod sunvis;
 pub mod timing;
-pub mod window;
 pub mod voxel;
+pub mod window;
 
 /// Renderer-neutral target for the shared last pass. The target owns submission
 /// and completion; a renderer records into its encoder without queue writes.
@@ -21,8 +21,7 @@ pub struct TargetSlot<'a> {
     pub transform: [f32; 8],
 }
 
-/// Safe replacement for the Vulkan frame boundary, available in parallel while
-/// the existing renderers are ported. Recorded frames retire in submission order.
+/// Shared safe frame boundary. Recorded frames retire in submission order.
 pub trait FrameSource {
     type Frame<'a>;
     fn raster_size(&self) -> (u32, u32);

@@ -234,22 +234,33 @@ impl WeatherEase {
     /// width in voxels, where the cloud drift wraps; `now_s` is the frame's sim time in
     /// seconds, unwrapped, which the lightning's flash is timed against.
     pub fn advance(&mut self, target: &Weather, dt: f32, width: u32, now_s: f64) -> Eased {
-        let dt = if dt.is_finite() { dt.clamp(0.0, 1.0) } else { 0.0 };
-        let storm = if target.rain == Rain::Downpour { 1.0 } else { 0.0 };
+        let dt = if dt.is_finite() {
+            dt.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let storm = if target.rain == Rain::Downpour {
+            1.0
+        } else {
+            0.0
+        };
         let modes = match target.rain {
             Rain::Clear => [0.0; 3],
             Rain::Drizzle => [1.0, 0.0, 0.0],
             Rain::Shower => [0.0, 1.0, 0.0],
             Rain::Downpour => [0.0, 0.0, 1.0],
         };
-        let rate = if target.rain == Rain::Clear { 0.0 } else { target.rain_m_per_s.max(0.0) };
+        let rate = if target.rain == Rain::Clear {
+            0.0
+        } else {
+            target.rain_m_per_s.max(0.0)
+        };
         let (flash, bolt) = match target.last_strike {
             Some(s) => strike_light(now_s - s.at_s, s.seed),
             None => (0.0, 0.0),
         };
         self.seconds = (self.seconds + f64::from(dt)).rem_euclid(TWINKLE_WRAP_S);
-        self.drift =
-            (self.drift + f64::from(dt) * CLOUD_DRIFT).rem_euclid(f64::from(width.max(1)));
+        self.drift = (self.drift + f64::from(dt) * CLOUD_DRIFT).rem_euclid(f64::from(width.max(1)));
         let next = match self.state {
             None => Eased {
                 day_phase: target.day_phase.rem_euclid(1.0),
@@ -293,7 +304,11 @@ impl WeatherEase {
                     }),
                     fog: {
                         let f = ease(s.fog, target.fog.clamp(0.0, 1.0), dt, FOG_TAU_S);
-                        if target.fog <= 0.0 && f < 1e-3 { 0.0 } else { f }
+                        if target.fog <= 0.0 && f < 1e-3 {
+                            0.0
+                        } else {
+                            f
+                        }
                     },
                     flash,
                     bolt,
@@ -666,9 +681,7 @@ impl Look {
     /// The light the fog sends the camera where the sun reaches it: its ambient light and
     /// the sun's share, as the shader adds them without volumetric light.
     pub fn fog_light(&self) -> [f32; 3] {
-        [0, 1, 2].map(|i| {
-            self.fog_colour[i] + self.fog_sun * self.sun_strength * self.sun_lean[i]
-        })
+        [0, 1, 2].map(|i| self.fog_colour[i] + self.fog_sun * self.sun_strength * self.sun_lean[i])
     }
 
     /// Whether `self` and `other` draw the same picture: equal, but for the drift and the
@@ -677,13 +690,24 @@ impl Look {
         if self.animated() || other.animated() {
             return self == other;
         }
-        Look { drift: 0.0, seconds: 0.0, ..*self } == Look { drift: 0.0, seconds: 0.0, ..*other }
+        Look {
+            drift: 0.0,
+            seconds: 0.0,
+            ..*self
+        } == Look {
+            drift: 0.0,
+            seconds: 0.0,
+            ..*other
+        }
     }
 }
 
 /// The look of a clear noon: today's picture.
 pub fn noon(p: &VoxelParams) -> Look {
-    look(&WeatherEase::default().advance(&Weather::CLEAR_NOON, 0.0, p.width, 0.0), p)
+    look(
+        &WeatherEase::default().advance(&Weather::CLEAR_NOON, 0.0, p.width, 0.0),
+        p,
+    )
 }
 
 /// The picture's weather and time of day for `e`, over the palette and the `[light]`
@@ -704,8 +728,16 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     // --- the sun (or the moon) ---
     let len = (p.sun[0] * p.sun[0] + p.sun[1] * p.sun[1] + p.sun[2] * p.sun[2]).sqrt();
     let have_sun = len > 0.0 && p.sun[1] > 0.0;
-    let noon_el = if have_sun { (p.sun[1] / len).asin() } else { 0.0 };
-    let az0 = if have_sun { p.sun[0].atan2(-p.sun[2]) } else { 0.0 };
+    let noon_el = if have_sun {
+        (p.sun[1] / len).asin()
+    } else {
+        0.0
+    };
+    let az0 = if have_sun {
+        p.sun[0].atan2(-p.sun[2])
+    } else {
+        0.0
+    };
     let place = |phase: f32, el_view: f32| -> [f32; 3] {
         let s = phase.rem_euclid(1.0) - 0.5;
         let u = (s.abs() / AZ_SWING).min(1.0);
@@ -745,7 +777,12 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
             p.light
         };
         let strength = fade(el_deg) * clouded;
-        (place(e.day_phase, e.sun_elevation), strength, lean, WARM_LEAN * warm * strength)
+        (
+            place(e.day_phase, e.sun_elevation),
+            strength,
+            lean,
+            WARM_LEAN * warm * strength,
+        )
     } else {
         let moon_el = -e.sun_elevation;
         let fade_moon = fade(moon_el.to_degrees()) * clouded;
@@ -772,7 +809,11 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
 
     // --- the sky ---
     let sky = lerp3(scale3(p.sky, NIGHT_SKY), p.sky, dl);
-    let night_horizon = lerp3(scale3(p.sky_horizon, NIGHT_HORIZON), scale3(srgb(DEEP_BLUE_SRGB), 0.02), 0.3);
+    let night_horizon = lerp3(
+        scale3(p.sky_horizon, NIGHT_HORIZON),
+        scale3(srgb(DEEP_BLUE_SRGB), 0.02),
+        0.3,
+    );
     let sky_horizon = lerp3(night_horizon, p.sky_horizon, dl);
     let mut haze = lerp3(scale3(p.haze_colour, NIGHT_HAZE), p.haze_colour, dl);
     if tw > 0.0 {
@@ -799,7 +840,11 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
 
     // --- the flat tier's tint and the lit tier's unlit water ---
     let tint = [0, 1, 2].map(|i| ambient_level * ambient[i] / day_hue[i].max(1e-6));
-    let tint = if dl >= 1.0 && tw == 0.0 && c == 0.0 && storm == 0.0 { [1.0; 3] } else { tint };
+    let tint = if dl >= 1.0 && tw == 0.0 && c == 0.0 && storm == 0.0 {
+        [1.0; 3]
+    } else {
+        tint
+    };
     // A flash lifts the flat tier's tint toward a cool white (nothing added without one, so
     // a clear noon's tint stays exactly one).
     let flash = e.flash.clamp(0.0, 1.0);
@@ -826,17 +871,29 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
     let day_sky = p.day_sky.srgb().map(|h| {
         let k = scale3(srgb(h), bright);
         let grey = [luma(k); 3];
-        lerp3(scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim), slate, STORM_SKY_SLATE * storm)
+        lerp3(
+            scale3(lerp3(k, grey, OVERCAST_SKY_GREY * c), dim),
+            slate,
+            STORM_SKY_SLATE * storm,
+        )
     });
     let [cloud_day, cloud_shade] = p.day_sky.cloud_srgb().map(|h| scale3(srgb(h), bright));
     let cloud_day = lerp3(cloud_day, srgb(STORM_CLOUD_SRGB), STORM_CLOUD * storm);
-    let cloud_shade = lerp3(cloud_shade, srgb(STORM_CLOUD_SHADE_SRGB), STORM_CLOUD * storm);
+    let cloud_shade = lerp3(
+        cloud_shade,
+        srgb(STORM_CLOUD_SHADE_SRGB),
+        STORM_CLOUD * storm,
+    );
 
     // --- rain, fog, lightning (checkpoint 2) ---
     let flash_colour = scale3(cool, FLASH_FILL * flash);
     let rain = e.rain.map(|r| r.clamp(0.0, 1.0));
     let rate = e.rain_rate.max(0.0) / R0;
-    let rings = if rate > 0.0 { 1.0 - (-RING_RATE * rate).exp() } else { 0.0 };
+    let rings = if rate > 0.0 {
+        1.0 - (-RING_RATE * rate).exp()
+    } else {
+        0.0
+    };
     // The streaks catch the light of the sky: brighter by day, never gone at night. By day
     // the palette's water surface toward its light; at night the ambient's own lavender
     // indigo at the same brightness, since the water's cyan laid a teal veil over a dark sky.
@@ -844,7 +901,11 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         let day_rain = lerp3(p.water_surface, lerp3(p.light, [1.0; 3], 0.5), RAIN_LIGHT);
         let night_hue = unit(lerp3(ambient, unit(srgb(FOG_LAVENDER_SRGB)), 0.5));
         // A storm leans it that way too, so a downpour's veil keeps the sky slate violet.
-        let c = lerp3(scale3(night_hue, luma(day_rain)), day_rain, dl * (1.0 - 0.6 * storm));
+        let c = lerp3(
+            scale3(night_hue, luma(day_rain)),
+            day_rain,
+            dl * (1.0 - 0.6 * storm),
+        );
         let lit = RAIN_FLOOR + (1.0 - RAIN_FLOOR) * ambient_level;
         [0, 1, 2].map(|i| c[i] * lit + RAIN_FLASH * flash_colour[i])
     };
@@ -896,7 +957,11 @@ pub fn look(e: &Eased, p: &VoxelParams) -> Look {
         flash,
         flash_colour,
         bolt: e.bolt.clamp(0.0, 1.0),
-        strike: if e.bolt > 0.0 || flash > 0.0 { e.strike } else { None },
+        strike: if e.bolt > 0.0 || flash > 0.0 {
+            e.strike
+        } else {
+            None
+        },
     }
 }
 
