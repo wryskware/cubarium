@@ -1,0 +1,4 @@
+# The ENGAGE adapter owns its fixed roster. batch.py's live census roster is unused.
+[required]
+animals = []
+plants = []
