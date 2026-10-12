@@ -5067,6 +5067,14 @@ impl Fauna {
         self.dry.set(founder, scope);
     }
 
+    /// **A staged scene's tree** (BRAIN-NEXT mode scenes): the least crown height a glider
+    /// lineage both climbs and is safe in from the ground hunter — what its roost and its
+    /// flight to the trees read. `None` for a lineage that does not glide.
+    pub fn refuge_crown_m(&self, founder: Founder) -> Option<f64> {
+        let g = self.config.founder(founder).glider?;
+        Some(g.climb_min_stand_m.max(step::refuge_height_m(&self.config)))
+    }
+
     pub fn force_own(&mut self, animal_id: u64, on: bool) {
         if on {
             self.forced_own.insert(animal_id);

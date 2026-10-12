@@ -309,6 +309,13 @@ impl Params {
             let values: Vec<_> = dump.iter().filter(|d| d.row.path == row.path).map(|d| d.value.as_str()).collect();
             md.push_str(&format!("| `{}` | {} | {} | {} | {} |\n", row.path, values.join(", "), row.unit, row.range, row.what));
         }
+        let table = crate::mode_scenes::registry();
+        let dump = table.dump(&crate::mode_scenes::Config::default())?;
+        md.push_str("\n**`mode_scenes.*`** (BRAIN-NEXT staged mode scenes; cloning and competence checks)\n\n| path | value | unit | range | what |\n| --- | --- | --- | --- | --- |\n");
+        for row in table.rows() {
+            let values: Vec<_> = dump.iter().filter(|d| d.row.path == row.path).map(|d| d.value.as_str()).collect();
+            md.push_str(&format!("| `{}` | {} | {} | {} | {} |\n", row.path, values.join(", "), row.unit, row.range, row.what));
+        }
         Ok(md)
     }
 

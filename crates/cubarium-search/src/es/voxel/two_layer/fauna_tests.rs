@@ -513,3 +513,27 @@ fn the_dry_teacher_labels_the_learners_states_with_intents_and_changes_nothing()
     let only: Vec<_> = records.into_iter().map(|(_, r)| r).collect();
     CloneSet::new(&shape, &arb, &only).expect("the records fit the shape");
 }
+
+/// BRAIN-NEXT step 3: a staged scene's teacher records carry its mode, and a two-layer brain
+/// runs in it with the dry teacher labelling every sample it reaches.
+#[test]
+fn a_staged_scene_records_its_mode_and_runs_a_brain_closed_loop() {
+    use cubarium_voxel_sim::mode_scenes::{Config, ModeScene};
+    let cfg = Config { duration_s: 10.0, ..Config::default() };
+    let scene = ModeScene::FleeToTrees;
+    let founder = scene.founder();
+    let shape = TwoLayerShape::menu_from_manifest(
+        &founder.manifest(),
+        MenuHeads { kick: false, call_kinds: 0, rest: false, top_hidden: 8, pointer_width: 6 },
+    );
+    let menu = founder.manifest().menu;
+    let k = menu.index(scene.intent()).unwrap();
+    let records = super::scenes::record(&cfg, scene, 1, &shape, 1).unwrap();
+    assert!(records.iter().all(|r| r.source == RecordSource::Teacher));
+    assert!(records.iter().flat_map(|r| &r.samples).any(|s| s.proposal.map(|p| p.intent) == Some(k)), "the scene's mode is labelled");
+    let net = Arc::new(TwoLayerNet::new(shape.clone(), initial_center(&shape, 3)).unwrap());
+    let driver = crate::es::voxel::EpisodeDriver::two_layer(net, cubarium_voxel_fauna::BrainArbitration::default(), founder);
+    let closed = super::scenes::closed_loop(&cfg, scene, 1, &driver, &shape, 1).unwrap();
+    assert!(!closed.is_empty());
+    assert!(closed.iter().flat_map(|r| &r.samples).all(|s| s.proposal.is_some()));
+}
