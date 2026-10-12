@@ -24,7 +24,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 #[cfg(unix)]
 use std::sync::Arc;
-#[cfg(unix)]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -44,8 +43,7 @@ const AUTOSAVE_SUFFIX: &str = " (autosave)";
 #[cfg(unix)]
 pub const QUIT_SAVE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// How long a `SIGUSR1` save may take.
-#[cfg(unix)]
+/// How long an explicit app save or `SIGUSR1` save may take.
 const SAVE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The shell's thumbnail, kept across a save.
