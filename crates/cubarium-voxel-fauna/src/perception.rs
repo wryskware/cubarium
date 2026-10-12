@@ -763,6 +763,8 @@ pub(crate) fn sense_pass(fauna: &mut Fauna, view: &VoxelView<'_>, clock_on: bool
     for (i, tracks, cost) in results {
         let (id, founder) = (fauna.animals[i].id, fauna.animals[i].founder.expect("a live lineage"));
         fold(fauna, id, founder, &tracks, None);
+        // CALLS-REST step 2: the sensed calls (the frondgrazer's bolt alarm) are heard here.
+        crate::calls::sense_alarms(fauna, id, founder);
         let l = &mut fauna.ledger;
         l.percept_sensings += 1;
         l.percept_pairs += cost.pairs;

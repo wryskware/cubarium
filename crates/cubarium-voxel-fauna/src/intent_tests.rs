@@ -643,7 +643,7 @@ fn two_calves_bleating_at_once_are_two_records_and_one_repeating_is_one() {
     // A caller cannot repeat within its cooldown; past it, a call from the same spot
     // refreshes its record rather than adding one.
     assert!(!calls::emit(&mut f, ia, 1));
-    f.tick += (f.config.founder(Founder::Loftstrider).calls.cooldown_s / crate::DT) as u64 + 1;
+    f.tick += (f.config.founder(Founder::Loftstrider).calls.cooldown_s[1] / crate::DT) as u64 + 1;
     assert!(calls::emit(&mut f, ia, 1));
     calls::hear(&mut f, &w.view());
     assert_eq!(calls::heard(&f, hearer).len(), 2);

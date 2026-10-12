@@ -6930,6 +6930,9 @@ mod lure_dusk_tests;
 #[path = "ground_response_tests.rs"]
 mod ground_response_tests;
 #[cfg(test)]
+#[path = "calls_rest_tests.rs"]
+mod calls_rest_tests;
+#[cfg(test)]
 #[path = "edge_tests.rs"]
 mod edge_tests;
 #[cfg(test)]

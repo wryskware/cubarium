@@ -27,6 +27,10 @@ pub fn registry() -> &'static Registry {
                 Alias { pattern: "fauna.founders.*.hunter.prey_juveniles_only".into(), names: founders.clone() },
                 Alias { pattern: "fauna.founders.*.hunter.prey_ashore_only".into(), names: founders },
                 Alias { pattern: "fauna.founders.*.calls.loudness".into(), names: vec!["first", "second"] },
+                Alias { pattern: "fauna.founders.*.calls.cooldown_s".into(), names: vec!["first", "second"] },
+                Alias { pattern: "fauna.founders.*.calls.trigger_m".into(), names: vec!["first", "second"] },
+                Alias { pattern: "fauna.founders.*.calls.heed_s".into(), names: vec!["first", "second"] },
+                Alias { pattern: "fauna.founders.*.calls.stranger_delay_s".into(), names: vec!["first", "second"] },
             ],
             Vec::new(),
         )
@@ -399,12 +403,20 @@ fn founder_rows() -> Vec<Row> {
         // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
         r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
         r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),
-        r("calls.cooldown_s", "s", nonneg, "CONTRACTS: a caller emits a kind at most once per this"),
+        r("calls.cooldown_s.*", "s", nonneg, "CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind)"),
         r("calls.records", "records", nonneg, "CONTRACTS: call records a hearer keeps"),
         r("calls.keep_s", "s", nonneg, "CONTRACTS: a call record is dropped this long after its call"),
         r("calls.refractory_s", "s", nonneg, "CONTRACTS: a call of a kind from near a record younger than this is ignored"),
         r("calls.dedup_m", "m", nonneg, "CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller)"),
         r("calls.asleep_loudness", "loudness", nonneg, "CONTRACTS: a sleeper records a call only at least this loud after occlusion"),
+        // CALLS-REST: the heuristics' calls and reactions; `heed` is a per-kind switch.
+        r("calls.trigger_m.*", "m", nonneg, "CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never"),
+        r("calls.calf_below", "x birth_body", fraction, "CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort"),
+        r("calls.alone_m", "m", nonneg, "CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never"),
+        r("calls.heed_s.*", "s", nonneg, "CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction"),
+        r("calls.stranger_delay_s.*", "s", nonneg, "CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first)"),
+        r("calls.gather_m", "m", nonneg, "CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call"),
+        r("calls.arrive_m", "m", nonneg, "CALLS-REST: a distress call's hearer walks to where it came from until within this"),
         // HUNKER (`Hunker`); `hunker.enabled` is a switch: no row.
         r("hunker.run_start_m", "m", nonneg, "HERD: run from a pressing hunter within this (herd_enabled)"),
         r("hunker.catch_m", "m", nonneg, "HERD: a moving faster hunter inside this catches it (0 off)"),

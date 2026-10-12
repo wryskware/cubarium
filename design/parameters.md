@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (3204 rows)
+**`fauna.*`** (3267 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1785,12 +1785,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.littershredder.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.littershredder.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.littershredder.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.littershredder.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.littershredder.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.littershredder.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.littershredder.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.littershredder.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.littershredder.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.littershredder.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.littershredder.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.littershredder.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.littershredder.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.littershredder.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.littershredder.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.littershredder.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.littershredder.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.littershredder.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.littershredder.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2116,12 +2123,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.frondgrazer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.frondgrazer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.frondgrazer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.frondgrazer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.frondgrazer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.frondgrazer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.frondgrazer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.frondgrazer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.frondgrazer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.frondgrazer.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.frondgrazer.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.frondgrazer.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.frondgrazer.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.frondgrazer.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.frondgrazer.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.frondgrazer.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.frondgrazer.hunker.run_start_m` | 8.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.frondgrazer.hunker.catch_m` | 3.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.frondgrazer.hunker.escape_probe_m` | 0.5 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2447,12 +2461,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.lanternjaw.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.lanternjaw.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.lanternjaw.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.lanternjaw.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.lanternjaw.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.lanternjaw.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.lanternjaw.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.lanternjaw.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.lanternjaw.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.lanternjaw.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.lanternjaw.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.lanternjaw.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.lanternjaw.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.lanternjaw.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.lanternjaw.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.lanternjaw.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.lanternjaw.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.lanternjaw.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.lanternjaw.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -2778,12 +2799,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.capgnawer.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.capgnawer.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.capgnawer.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.capgnawer.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.capgnawer.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.capgnawer.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.capgnawer.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.capgnawer.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.capgnawer.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.capgnawer.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.capgnawer.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.capgnawer.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.capgnawer.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.capgnawer.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.capgnawer.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.capgnawer.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.capgnawer.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.capgnawer.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.capgnawer.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3109,12 +3137,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.loftstrider.calls.range_m` | 40.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.loftstrider.calls.loudness.*` | 1.0, 0.7 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.loftstrider.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.loftstrider.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.loftstrider.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
-| `fauna.founders.loftstrider.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
+| `fauna.founders.loftstrider.calls.keep_s` | 20.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.loftstrider.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.loftstrider.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.loftstrider.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.loftstrider.calls.trigger_m.*` | 8.0, 6.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.loftstrider.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.loftstrider.calls.alone_m` | 6.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.loftstrider.calls.heed_s.*` | 10.0, 15.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.loftstrider.calls.stranger_delay_s.*` | 0.0, 3.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.loftstrider.calls.gather_m` | 2.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.loftstrider.calls.arrive_m` | 1.5 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.loftstrider.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.loftstrider.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.loftstrider.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3440,12 +3475,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.ripple-snail.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.ripple-snail.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.ripple-snail.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.ripple-snail.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.ripple-snail.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.ripple-snail.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.ripple-snail.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.ripple-snail.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.ripple-snail.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.ripple-snail.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.ripple-snail.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.ripple-snail.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.ripple-snail.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.ripple-snail.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.ripple-snail.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.ripple-snail.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.ripple-snail.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.ripple-snail.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.ripple-snail.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -3771,12 +3813,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.bellwing.calls.range_m` | 0.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.bellwing.calls.loudness.*` | 1.0, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.bellwing.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.bellwing.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.bellwing.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.bellwing.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.bellwing.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.bellwing.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.bellwing.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.bellwing.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.bellwing.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.bellwing.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.bellwing.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.bellwing.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.bellwing.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.bellwing.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.bellwing.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.bellwing.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.bellwing.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4102,12 +4151,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.seedporter.calls.range_m` | 30.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.seedporter.calls.loudness.*` | 1.0, 0.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.seedporter.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.seedporter.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.seedporter.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.seedporter.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.seedporter.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.seedporter.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.seedporter.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.seedporter.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.seedporter.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.seedporter.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.seedporter.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.seedporter.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.seedporter.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.seedporter.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.seedporter.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.seedporter.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.seedporter.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
@@ -4433,12 +4489,19 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.kick.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | CONTRACTS: a landed kick wounds damage x (size_kicker / size_target); ~a third off a grown hound at ratio 1.9 (topic 6) |
 | `fauna.founders.chorister.calls.range_m` | 60.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres |
 | `fauna.founders.chorister.calls.loudness.*` | 0.3, 1.0 | x range | [0, inf) |  | - | placeholder | CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion |
-| `fauna.founders.chorister.calls.cooldown_s` | 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits a kind at most once per this |
+| `fauna.founders.chorister.calls.cooldown_s.*` | 5.0, 5.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a caller emits each kind at most once per this (CALLS-REST: per kind) |
 | `fauna.founders.chorister.calls.records` | 4 | records | [0, inf) |  | - | placeholder | CONTRACTS: call records a hearer keeps |
 | `fauna.founders.chorister.calls.keep_s` | 10.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call record is dropped this long after its call |
 | `fauna.founders.chorister.calls.refractory_s` | 2.0 | s | [0, inf) |  | - | placeholder | CONTRACTS: a call of a kind from near a record younger than this is ignored |
 | `fauna.founders.chorister.calls.dedup_m` | 2.0 | m | [0, inf) |  | - | placeholder | CONTRACTS: calls of a kind from within this of a record's point refresh it (one caller) |
 | `fauna.founders.chorister.calls.asleep_loudness` | 0.5 | loudness | [0, inf) |  | - | placeholder | CONTRACTS: a sleeper records a call only at least this loud after occlusion |
+| `fauna.founders.chorister.calls.trigger_m.*` | 0.0, 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: the heuristic calls a kind at a pressing threat within this (the alarm: seen; the distress: a calf chased); 0 never |
+| `fauna.founders.chorister.calls.calf_below` | 0.5 | x birth_body | [0, 1] |  | - | placeholder | CALLS-REST: a young body under this share of the adult body is a calf: it bleats and does not snort |
+| `fauna.founders.chorister.calls.alone_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a calf with a pressing threat and no adult-sized kin known within this bleats; 0 never |
+| `fauna.founders.chorister.calls.heed_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a heeding hearer reacts while the call's record is younger than this; 0 no reaction |
+| `fauna.founders.chorister.calls.stranger_delay_s.*` | 0.0, 0.0 | s | [0, inf) |  | - | placeholder | CALLS-REST: a hearer that does not know the caller's voice reacts this long after first hearing it (the mother goes first) |
+| `fauna.founders.chorister.calls.gather_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: an alarm's hearer walks to its nearest known kin until within this, then stands head up facing the call |
+| `fauna.founders.chorister.calls.arrive_m` | 0.0 | m | [0, inf) |  | - | placeholder | CALLS-REST: a distress call's hearer walks to where it came from until within this |
 | `fauna.founders.chorister.hunker.run_start_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: run from a pressing hunter within this (herd_enabled) |
 | `fauna.founders.chorister.hunker.catch_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: a moving faster hunter inside this catches it (0 off) |
 | `fauna.founders.chorister.hunker.escape_probe_m` | 0.0 | m | [0, inf) |  | - | placeholder | HERD: motor walk distance checking a blocked escape (0 off) |
