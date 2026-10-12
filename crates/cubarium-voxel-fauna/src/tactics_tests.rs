@@ -935,3 +935,66 @@ fn a_prey_is_seen_running_only_from_the_hounds_track() {
     old_tactic(&mut f.config);
     assert_eq!(seen_running(&f, &a, &t), None);
 }
+
+// ------------------------------------------------------------------ VH-FIX: the lone calf is catchable
+
+/// **A lunge is timed to land** (VH-FIX step 1): a target in the capsule that stands is struck
+/// at once; one fleeing straight down the lunge's line faster than the lunge covers its reach
+/// (windup and lunge) is not — the lunge would end short — and one fleeing slower from near
+/// the jaw still is; a target outside the capsule is not the timing's business. Speeds are
+/// set from the config's strike numbers.
+#[test]
+fn a_lunge_is_timed_to_land_on_the_target_as_it_moves() {
+    let (_, _, f, [h, _], _) = lone_calf_scene();
+    let hunter = f.config.founder(CH).active_hunter().unwrap();
+    let geometry = f.config.founder(CH).body_at(animal(&f, h).body);
+    let (jaw, reach) = jaw_line(&f, h);
+    let lunge_pace = reach / (hunter.windup_s + hunter.lunge_s);
+    let calf_len = 0.5 * tac(&f).young_length_fraction * f.config.founder(LS).adult_length_m;
+    let at = |x: f64| Track { tick: f.tick, ..tr(9, LS, class::PREY, calf_len, (x, MID_Z), EAST) };
+    let lands = |t: &Track, v: f64| lunge_lands(&f.config, &animal(&f, h), &geometry, &hunter, t, (v, 0.0), f.tick, RING);
+    assert_eq!(lands(&at(jaw + 0.9 * reach), 0.0), Some(true), "a standing target in the capsule");
+    assert_eq!(lands(&at(jaw + 0.9 * reach), 2.0 * lunge_pace), Some(false), "fleeing faster than the lunge: held");
+    assert_eq!(lands(&at(jaw + 0.1 * reach), 0.5 * lunge_pace), Some(true), "fleeing slower, near the jaw: struck");
+    assert_eq!(lands(&at(jaw + 4.0 * reach + 4.0), 0.0), None, "out of the capsule");
+    // In the tactic's hands: the strike (feed) is held exactly when the lunge would miss.
+    let t = tac(&f);
+    let run = Actions { forward: 1.0, turn: 0.0, feed: 1.0 };
+    let mem = Hound { vel: [2.0 * lunge_pace, 0.0], ..Hound::default() };
+    let moving = Track { moving: true, ..at(jaw + 0.9 * reach) };
+    assert_eq!(timed(&f, &t, &animal(&f, h), &geometry, &hunter, &moving, &mem, RING, run).feed, 0.0, "held");
+    let off = Tactics { time_strikes: false, ..t };
+    assert_eq!(timed(&f, &off, &animal(&f, h), &geometry, &hunter, &moving, &mem, RING, run).feed, 1.0, "the switch off strikes at once");
+}
+
+/// **A lone calf in the open within a hound's reach is caught** (VH-FIX step 1, "Checks"): a
+/// calf running straight away at its cruise, a hungry hound a few metres behind it on open
+/// ground, every knob from the config except the commitment and value floors (set so the case
+/// does not hang on the value placeholders); within a few hundred ticks the calf is struck.
+#[test]
+fn a_lone_calf_in_the_open_within_a_hounds_reach_is_caught() {
+    let (w, mut flora, mut f, [h, mate], calf) = lone_calf_scene();
+    if let Some(p) = f.config.founders[CH.index()].pack.as_mut() {
+        p.tactics.commit_value = f64::MIN;
+        p.tactics.test_floor = f64::MIN;
+        p.tactics.give_up_value = f64::MIN;
+    }
+    // Its packmate is fed and rests at the den: one hound on the calf.
+    animal_mut(&mut f, mate).eating = false;
+    place(&mut f, mate, 1.0, MID_Z, EAST);
+    let (jaw, reach) = jaw_line(&f, h);
+    let hx = animal(&f, h).pose.x;
+    // The calf just beyond the capsule, running east at its cruise.
+    place(&mut f, calf, jaw + reach + 1.5, MID_Z, EAST);
+    drive(&mut f, calf, 1.0, false);
+    assert!(animal(&f, calf).pose.x - hx < f.config.founder(CH).pack.unwrap().close_in_m + reach);
+    let mut struck = false;
+    for _ in 0..400 {
+        f.step_with(&w, &mut flora, 1);
+        if f.view().animal(calf).is_none_or(|a| a.wound > 0.0) {
+            struck = true;
+            break;
+        }
+    }
+    assert!(struck, "the calf is struck: hound {:?}, calf {:?}", f.hounds.get(&h), f.view().animal(calf).map(|a| (a.pose, a.wound)));
+}

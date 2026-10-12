@@ -230,6 +230,17 @@ pub struct Tactics {
     /// **Strikes** (§11.4): a young body in the capsule whose one-hound `p_kill` is at least
     /// this may be struck in place of the target (an explicit substitution).
     pub substitute_p_kill: f64,
+    /// **Strike timing** (VH-FIX): with the target in its capsule, a hound strikes only when
+    /// the lunge it would start now lands on the target as it senses it moving (its sighting
+    /// carried on at its velocity estimate over the track's age, the windup and the lunge);
+    /// else it holds the strike and keeps closing. Off: it strikes whatever is in the capsule
+    /// at once (a body fleeing at the lunge's own pace is then never hit). A switch.
+    pub time_strikes: bool,
+    /// **Closing on a moving target** (VH-FIX): the last metres' approach ([`close_in`]) adds
+    /// the target's pace away from the hound, from its own velocity estimate, so it closes to
+    /// its stand on a fleeing body instead of trailing it where the approach's slowing matches
+    /// the body's pace. Off: the plain approach. A switch.
+    pub lead_close: bool,
     /// A carcass within this of where its target was last sensed, when the target is gone
     /// from its senses, is its kill. Metres.
     pub kill_site_m: f64,
@@ -336,6 +347,8 @@ impl Tactics {
         follow_m: 3.0,
         den_howl_s: 300.0,
         substitute_p_kill: 0.5,
+        time_strikes: true,
+        lead_close: true,
         kill_site_m: 2.0,
     };
 }
@@ -1654,9 +1667,10 @@ fn test_step(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &
             label(fauna, a.id, "test", subject);
             let top = crate::gait::sprint_forward(&fauna.config, founder);
             if let Some(act) = close_in(fauna, view, founder, &a, &t, geometry, h, pk, ring) {
-                return act;
+                return timed(fauna, tac, &a, geometry, h, &t, &mem, ring, act);
             }
-            walk_to(fauna, view, founder, &a, geometry, h, pk, (t.x, t.z), t.site.1, top, 0.0, 1.0)
+            let act = walk_to(fauna, view, founder, &a, geometry, h, pk, (t.x, t.z), t.site.1, top, 0.0, 1.0);
+            timed(fauna, tac, &a, geometry, h, &t, &mem, ring, act)
         }
     }
 }
@@ -1857,7 +1871,7 @@ fn chase(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, own: u64, tac: &Tact
         }
         _ => drive_step(fauna, i, view, own, pk, h, geometry, &t),
     };
-    Some(act)
+    Some(timed(fauna, tac, &a, geometry, h, &t, &memory(fauna, a.id), ring, act))
 }
 
 /// **Drive**: the old driver's chase on the target as this hound senses it — the last
@@ -1989,6 +2003,75 @@ pub(crate) fn strike_rule(fauna: &Fauna, i: usize) -> Option<StrikeRule> {
         .map(|t| t.id)
         .collect();
     Some(StrikeRule { target, substitutes })
+}
+
+/// **The last metres** (the pack's [`super::close_in`]) for a tactics hound: with
+/// [`Tactics::lead_close`] and the target seen moving, its forward gains the target's pace
+/// away from it (its own velocity estimate over cruise), up to its sprint, while it walks on
+/// the target (a pivot or a step off is left as it is).
+#[allow(clippy::too_many_arguments)]
+fn close_in(fauna: &mut Fauna, view: &VoxelView<'_>, founder: crate::Founder, a: &Animal, t: &Track, geometry: &crate::Body, h: &crate::Hunter, pk: &Pack, ring: f64) -> Option<Actions> {
+    let act = super::close_in(fauna, view, founder, a, t, geometry, h, pk, ring)?;
+    if !pk.tactics.lead_close || !t.moving || act.forward <= 0.0 {
+        return Some(act);
+    }
+    let mem = memory(fauna, a.id);
+    let (dx, dz, d) = gap(a.pose.x, a.pose.z, t.x, t.z, ring);
+    let away = if d > 1e-9 { (mem.vel[0] * dx + mem.vel[1] * dz) / d } else { 0.0 };
+    let cruise = fauna.config.manifest(founder).cruise_m_per_s;
+    if !(away > 0.0) || !(cruise > 0.0) {
+        return Some(act);
+    }
+    let top = crate::gait::sprint_forward(&fauna.config, founder);
+    Some(Actions { forward: (act.forward + away / cruise).min(top.max(act.forward)), ..act })
+}
+
+/// The horizontal distance from `p` to the segment `a → b`, on the ring.
+fn to_segment(a: (f64, f64), b: (f64, f64), p: (f64, f64), ring: f64) -> f64 {
+    let (bx, bz, _) = gap(a.0, a.1, b.0, b.1, ring);
+    let (px, pz, _) = gap(a.0, a.1, p.0, p.1, ring);
+    let len2 = bx * bx + bz * bz;
+    let k = if len2 > 0.0 { ((px * bx + pz * bz) / len2).clamp(0.0, 1.0) } else { 0.0 };
+    ((px - k * bx).powi(2) + (pz - k * bz).powi(2)).sqrt()
+}
+
+/// **Strike timing** (VH-FIX, [`Tactics::time_strikes`]): for hound `a` (body `geometry`,
+/// strike `h`) on target track `t` with its velocity estimate `vel` (its own sightings),
+/// `Some(lands)` when the target sits in its strike capsule as it senses it — the jaw's sweep
+/// from where it stands, `strike_reach` ahead — and `None` when it does not. `lands`: the
+/// sweep of a lunge begun now (the windup standing, then `strike_reach` forward) meets the
+/// target carried on at `vel` over the track's age, the windup and the lunge. Reads its own
+/// body and what it senses (the track's place, size and age).
+pub(crate) fn lunge_lands(config: &crate::FaunaConfig, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, t: &Track, vel: (f64, f64), now: u64, ring: f64) -> Option<bool> {
+    let Some(&pf) = crate::Founder::ALL.get(usize::from(t.lineage)) else { return None };
+    let pg = config.founder(pf).body_at(body_est(config, t));
+    let radii = geometry.footprint_radius() + pg.footprint_radius();
+    let (sin, cos) = a.pose.heading_rad.sin_cos();
+    let jaw = h.jaw_forward_length_fraction * geometry.length_m;
+    let reach = h.strike_reach_length_fraction * geometry.length_m;
+    let from = (a.pose.x + jaw * sin, a.pose.z + jaw * cos);
+    let to = (from.0 + reach * sin, from.1 + reach * cos);
+    if to_segment(from, to, (t.x, t.z), ring) > radii {
+        return None;
+    }
+    let lead = age_s(t, now) + h.windup_s + h.lunge_s;
+    let there = (t.x + vel.0 * lead, t.z + vel.1 * lead);
+    Some(to_segment(from, to, there, ring) <= radii)
+}
+
+/// [`lunge_lands`] applied to a tactics hound's actions: with the strike timed and its target
+/// in the capsule where a lunge now would miss, the strike is held (`feed` 0) and it keeps
+/// closing.
+#[allow(clippy::too_many_arguments)]
+fn timed(fauna: &Fauna, tac: &Tactics, a: &Animal, geometry: &crate::Body, h: &crate::Hunter, t: &Track, mem: &Hound, ring: f64, act: Actions) -> Actions {
+    if !tac.time_strikes || act.feed <= 0.0 || a.strike.is_some() {
+        return act;
+    }
+    let vel = if t.moving { (mem.vel[0], mem.vel[1]) } else { (0.0, 0.0) };
+    match lunge_lands(&fauna.config, a, geometry, h, t, vel, fauna.tick, ring) {
+        Some(false) => Actions { feed: 0.0, ..act },
+        _ => act,
+    }
 }
 
 /// **A prey seen running** (§2.1) for the stalk's rush: with tactics on, its track shows it

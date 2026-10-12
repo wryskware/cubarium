@@ -1545,7 +1545,7 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `flora.film_n_tissue` | 0.02 | mineral per org-unit | [0, inf) |  | - | placeholder | glassfilm: mineral per unit of film tissue, from the site's pool |
 | `flora.film_energy_density` | 2.0 | energy per org-unit | [0, inf) |  | - | placeholder | glassfilm: energy per unit of film tissue |
 
-**`fauna.*`** (4113 rows)
+**`fauna.*`** (4131 rows)
 
 | path | value | unit | range | search | grade | provenance | what |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2010,6 +2010,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.littershredder.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.littershredder.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.littershredder.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.littershredder.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.littershredder.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.littershredder.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.littershredder.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.littershredder.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -2442,6 +2444,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.frondgrazer.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.frondgrazer.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.frondgrazer.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.frondgrazer.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.frondgrazer.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.frondgrazer.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.frondgrazer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.frondgrazer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -2874,6 +2878,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.lanternjaw.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.lanternjaw.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.lanternjaw.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.lanternjaw.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.lanternjaw.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.lanternjaw.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.lanternjaw.counter.reach` | 0.5 | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.lanternjaw.counter.damage` | 0.7 | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -3306,6 +3312,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.capgnawer.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.capgnawer.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.capgnawer.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.capgnawer.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.capgnawer.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.capgnawer.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.capgnawer.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.capgnawer.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -3738,6 +3746,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.loftstrider.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.loftstrider.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.loftstrider.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.loftstrider.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.loftstrider.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.loftstrider.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.loftstrider.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.loftstrider.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -4170,6 +4180,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.ripple-snail.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.ripple-snail.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.ripple-snail.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.ripple-snail.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.ripple-snail.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.ripple-snail.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.ripple-snail.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.ripple-snail.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -4602,6 +4614,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.bellwing.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.bellwing.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.bellwing.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.bellwing.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.bellwing.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.bellwing.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.bellwing.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.bellwing.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -5034,6 +5048,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.seedporter.pack.tactics.follow_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.seedporter.pack.tactics.den_howl_s` | (absent) | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.seedporter.pack.tactics.substitute_p_kill` | (absent) | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.seedporter.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.seedporter.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.seedporter.pack.tactics.kill_site_m` | (absent) | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.seedporter.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.seedporter.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |
@@ -5466,6 +5482,8 @@ Every number of the voxel world's `Config`, the plants' `FloraConfig` and the an
 | `fauna.founders.chorister.pack.tactics.follow_m` | 3.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a call from within this is not worth walking to |
 | `fauna.founders.chorister.pack.tactics.den_howl_s` | 300.0 | s | [0, inf) |  | - | placeholder | VH-TACTICS: a hungry hound at its den howls at most this often (0: never) |
 | `fauna.founders.chorister.pack.tactics.substitute_p_kill` | 0.5 | chance | [0, 1] |  | - | placeholder | VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target |
+| `fauna.founders.chorister.pack.tactics.time_strikes` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once) |
+| `fauna.founders.chorister.pack.tactics.lead_close` | (absent) | switch | [0, 1] |  | - | placeholder | VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach) |
 | `fauna.founders.chorister.pack.tactics.kill_site_m` | 2.0 | m | [0, inf) |  | - | placeholder | VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill |
 | `fauna.founders.chorister.counter.reach` | (absent) | m | [0, inf) |  | - | placeholder | HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint |
 | `fauna.founders.chorister.counter.damage` | (absent) | wound at equal size | [0, inf) |  | - | placeholder | HUNT-ESCAPE: the answer wounds the attacker damage x (S_self / S_attacker) x (1 - its armour) |

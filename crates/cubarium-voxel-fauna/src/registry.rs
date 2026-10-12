@@ -644,6 +644,8 @@ fn founder_rows() -> Vec<Row> {
         r("pack.tactics.follow_m", "m", nonneg, "VH-TACTICS: a call from within this is not worth walking to").optional(),
         r("pack.tactics.den_howl_s", "s", nonneg, "VH-TACTICS: a hungry hound at its den howls at most this often (0: never)").optional(),
         r("pack.tactics.substitute_p_kill", "chance", fraction, "VH-TACTICS: a young body in the capsule with a one-hound p_kill of at least this may be struck in place of the target").optional(),
+        r("pack.tactics.time_strikes", "switch", fraction, "VH-FIX: with its target in the capsule, a hound strikes only when the lunge it would start now lands on the target as it senses it moving (false: at once)").optional(),
+        r("pack.tactics.lead_close", "switch", fraction, "VH-FIX: the last metres' approach adds a moving target's sensed pace away from the hound, so it closes on a fleeing body instead of trailing it (false: the plain approach)").optional(),
         r("pack.tactics.kill_site_m", "m", nonneg, "VH-TACTICS: a carcass within this of the target's last-known point, the target gone from its senses, is its kill").optional(),
         // The counter-strike (`Counter`, HUNT-ESCAPE): the lanternjaw's only, `None` on the others.
         r("counter.reach", "m", nonneg, "HUNT-ESCAPE: a grown body answers a strike whose jaw ends within this of its footprint").optional(),
