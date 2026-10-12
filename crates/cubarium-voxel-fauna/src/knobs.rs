@@ -935,6 +935,10 @@ pub struct PerceptionConfig {
     /// visit. Linear freshness; 0 disables recall. Ten minutes allows return trips
     /// while forgetting abandoned homes; a plausible untuned start.
     pub place_memory_fade_s: f64,
+    /// **A visible limp** (CONTRACTS, behaviour-AI §2.1): a body seen with a wound at or over
+    /// this reads lame on a sight track. A placeholder: a third of a death, where a grown
+    /// hound bitten once (0.36) limps.
+    pub lame_wound: f64,
 }
 
 impl Default for PerceptionConfig {
@@ -949,6 +953,7 @@ impl Default for PerceptionConfig {
             hearing_near_m: 0.5,
             give_up_s: 10.0,
             place_memory_fade_s: 600.0,
+            lame_wound: 0.3,
         }
     }
 }

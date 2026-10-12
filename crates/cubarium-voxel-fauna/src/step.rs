@@ -336,6 +336,8 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             }
         }
         act(fauna, &view, flora, seed, tick, &sky, &mut hits);
+        // CONTRACTS: the kicks' windups, contacts and recoveries (none without a kick table).
+        let kicks = crate::kick::advance(fauna, &view, seed);
         let ring = f64::from(view.config.width) * view.config.voxel_m;
         // HUNKER: the pack's work on its hunkered prey, before this tick's strikes land.
         crate::vigil::pry(fauna, ring);
@@ -356,6 +358,9 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
             let prey_founder = fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).ok().and_then(|j| fauna.animals[j].founder);
             let tapped = hit.by == crate::Founder::Seedporter && prey_founder == Some(crate::Founder::Bellwing) && sp_miss_enabled();
             apply_hit(fauna, flora, hit.prey, hit.damage, hit.by, Some(&view));
+            // CONTRACTS: a bite that landed may draw the bitten body's kick-back (its kick
+            // table's switch; no lineage has one by default).
+            crate::kick::kick_back(fauna, hit.prey, hit.striker);
             if tapped { eprintln!("SPMISS hit tick={} hunter={} prey={} damage={} killed={}", tick, hit.striker, hit.prey, hit.damage, fauna.animals.binary_search_by_key(&hit.prey, |a| a.id).is_err()); }
 
             if let (true, Some(f)) = (lure_kill, prey_founder) {
@@ -369,6 +374,9 @@ pub(crate) fn finish(fauna: &mut Fauna, world: &World, flora: &mut Flora, start:
                     crate::hunt::remember_kill(fauna, hit.striker, x, z, ring);
                 }
             }
+        }
+        for k in kicks {
+            wound(fauna, flora, k.target, k.damage, k.by, Some(&view));
         }
     });
     crate::groom::step(fauna, &view, flora);
@@ -960,19 +968,20 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         // ROOSTS (backlog §12): a glider under its own heuristic, about to fall asleep on a
         // perch, stays up while a better roost (a vaulttree crown, a vine-climbed ledge top)
         // is in reach of its budget and reserve — den rest's rule. One already asleep stays.
-        let rest = match rest {
-            Some(_) if crate::pack::must_walk_home(fauna, i, view) => None,
-            Some(_)
-                if phys.glider.is_some()
-                    && !downpour
-                    && fauna.animals[i].state != State::Asleep
-                    && (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic)
-                    && glider::better_roost(fauna, i, view, fv).is_some() =>
-            {
-                None
-            }
-            Some(r) => Some(r),
-            None => {
+        // CONTRACTS: rest through the action interface. A heuristic's rest decisions are its
+        // requests to stay up (the walk home, the better roost), unchanged; a brain's request
+        // to rest is granted when the body is free and not in an emergency. The rhythm stays
+        // the backstop.
+        let ask = match rest {
+            Some(_) => heuristic_rest_ask(fauna, i, view, fv, downpour),
+            None => fauna.rest_asks.get(&fauna.animals[i].id).copied().unwrap_or_default(),
+        };
+        fauna.animals[i].intent.executed.rest = ask;
+        let rest = match (rest, ask) {
+            (Some(_), crate::RestAsk::Stay) => None,
+            (Some(r), _) => Some(r),
+            (None, crate::RestAsk::Rest) if free && !emergency => Some(Rest::Sleep),
+            (None, _) => {
                 fauna.animals[i].homing_ticks = 0;
                 None
             }
@@ -1031,6 +1040,25 @@ fn circadian(fauna: &mut Fauna, view: &VoxelView<'_>, fv: &cubarium_voxel_flora:
         if let Some(b) = a.bout.as_mut() {
             b.kind = b.kind.max(kind);
         }
+    }
+}
+
+/// **A heuristic's rest request** when its rhythm would put it to rest (CONTRACTS): stay up
+/// while a pack adult must walk home to its den, or a glider under its own heuristic has a
+/// better roost in reach (unless in a downpour or already asleep); else no request.
+fn heuristic_rest_ask(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>, fv: &cubarium_voxel_flora::FloraView<'_>, downpour: bool) -> crate::RestAsk {
+    let founder = fauna.animals[i].founder.expect("a founder");
+    let phys = *fauna.config.founder(founder);
+    if crate::pack::must_walk_home(fauna, i, view)
+        || (phys.glider.is_some()
+            && !downpour
+            && fauna.animals[i].state != State::Asleep
+            && (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Heuristic)
+            && glider::better_roost(fauna, i, view, fv).is_some())
+    {
+        crate::RestAsk::Stay
+    } else {
+        crate::RestAsk::Default
     }
 }
 
@@ -1514,6 +1542,10 @@ struct Sensed {
     tapped: Option<Vec<f64>>,
     /// Body actions are held even when no tap records.
     body: crate::controller::BodyActions,
+    /// CONTRACTS: a menu brain's decision, and the decision sample's inputs (built for a
+    /// menu lineage's brain, or while the tap records a menu body).
+    decision: Option<crate::Decision>,
+    prep: Option<crate::subjects::DecisionPrep>,
 }
 
 /// The fewest due bodies one observation job takes.
@@ -1548,6 +1580,8 @@ fn controllers(
     // SENSES-CORE: the live lineages' remote senses, staggered by id, before any controller
     // of the tick reads a record.
     crate::perception::sense_pass(fauna, view, sky.clock_on, sky.daylight, threads);
+    // CONTRACTS: the calls emitted since the last tick, heard by their own range, asleep too.
+    crate::calls::hear(fauna, view);
     crate::places::refresh(fauna, view, &flora.view(), sky);
     let due: Vec<usize> = fauna
         .animals
@@ -1678,6 +1712,16 @@ fn controllers(
         s.index_light(view);
     }
     let ids: Vec<u64> = due.iter().map(|&i| fauna.animals[i].id).collect();
+    // CONTRACTS: a loaded brain's memory goes back to its controller before it samples.
+    if !fauna.brain_memory.is_empty() {
+        for &id in &ids {
+            if fauna.controllers.has(id) {
+                if let Some(m) = fauna.brain_memory.remove(&id) {
+                    fauna.controllers.restore(id, &m);
+                }
+            }
+        }
+    }
     let tap = fauna.tap.is_some();
     let mut table = std::mem::take(&mut fauna.controllers);
     let sensed: Vec<Sensed> = {
@@ -1721,9 +1765,25 @@ fn controllers(
                     .collect::<Vec<f64>>();
                 &masked
             };
+            // CONTRACTS: a menu lineage's brain decides with its intent mask and candidates; a
+            // plain lineage (and every heuristic) is driven exactly as before.
+            let menu_body = !manifest.menu.plain();
+            let mut decision = None;
+            let mut prep = None;
             let (resolved, seek, body_controlled, driven) = match slot.as_deref_mut() {
                 Some(c) if obs.iter().all(|v| v.is_finite()) => {
-                    let response = c.drive(seen);
+                    let brain = c.layer() == crate::Layer::Brain;
+                    if menu_body && (brain || tap) {
+                        prep = Some(crate::subjects::decision_prep(fauna, i, founder));
+                    }
+                    let response = match prep.as_ref() {
+                        Some(p) if brain => {
+                            let (r, d) = c.decide(seen, &p.input());
+                            decision = d;
+                            r
+                        }
+                        _ => c.drive(seen),
+                    };
                     {
                         let body_controlled = match response {
                             crate::Response::Body(_, _) => true,
@@ -1742,7 +1802,7 @@ fn controllers(
                 _ => (crate::controller::Resolved::default(), crate::Seek::Unknown, false, false),
             };
             let tapped = tap.then_some(obs);
-            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body }
+            Sensed { manifest, writes, actions: resolved.actions, lure: resolved.body.lure, lift: resolved.body.lift, seek, body_controlled, driven, tapped, body: resolved.body, decision, prep }
         };
         // Several jobs per worker: one body's observation can cost many another's (a
         // flyer's fan), and the pool evens that out as workers come free.
@@ -1822,6 +1882,8 @@ fn controllers(
         // below still wins; a layer that overrides a leg's steering ends it (below).
         // Brains share only LEADS-PAY here: brain_seek never requests no-signal search.
         let mut searched = None;
+        // CONTRACTS: the herd pull bent its walk (the intent record's label).
+        let mut herded = false;
         if driven && (forager || !heuristic) {
             let seek = sensed[k].seek;
             let ring = f64::from(view.config.width) * view.config.voxel_m;
@@ -1883,6 +1945,7 @@ fn controllers(
             let seek = fauna.controllers.seek(id);
             if let Some(go) = crate::herding::steer(fauna, i, actions, seek, ring) {
                 actions = go;
+                herded = true;
                 if src == crate::Steer::Search {
                     searched = Some(go);
                 }
@@ -2193,6 +2256,70 @@ fn controllers(
         fauna.steer.insert(id, src);
         // EDGE: a reflex walk overridden by a later layer is not the one held.
         fauna.walk_commit(id, founder, src);
+        // CONTRACTS: the intent record (records only; no rule reads it).
+        if driven {
+            let held_before = fauna.animals[i].intent;
+            match (sensed[k].decision, sensed[k].prep.as_ref()) {
+                (Some(d), Some(prep)) => {
+                    // The discrete actions: a rest request for the circadian stage, and a
+                    // kick at the subject (or the nearest threat it senses) when ready.
+                    if d.rest {
+                        fauna.rest_asks.insert(id, crate::RestAsk::Rest);
+                    } else {
+                        fauna.rest_asks.remove(&id);
+                    }
+                    let kicked = d.kick && {
+                        let target = d
+                            .subject
+                            .and_then(|r| prep.candidates.rows.get(r))
+                            .and_then(|c| c.subject.body())
+                            .or_else(|| fauna.percepts.get(&id).map(|p| p.best[usize::from(crate::perception::class::THREAT)]).filter(|t| t.known).map(|t| t.id));
+                        target.is_some_and(|t| crate::kick::request(fauna, i, t, crate::kick::Source::Aimed).is_ok())
+                    };
+                    // A call kind (none, or the lineage's kind `call − 1`) into the substrate.
+                    let called = d.call > 0 && crate::calls::emit(fauna, i, usize::from(d.call) - 1);
+                    let executed = crate::Executed {
+                        actions,
+                        kick: kicked,
+                        call: if called { d.call } else { 0 },
+                        rest: if d.rest { crate::RestAsk::Rest } else { crate::RestAsk::Default },
+                    };
+                    crate::intent::record_brain(fauna, i, src, &d, prep, executed);
+                }
+                _ => {
+                    let teach = if heuristic {
+                        crate::intent::teacher_label(fauna, i, founder, src, actions, herded, fauna.controllers.at_carcass(id))
+                    } else {
+                        crate::intent::Teach::default()
+                    };
+                    let valid = match sensed[k].prep.as_ref() {
+                        Some(p) => p.intent_mask.clone(),
+                        None => crate::intent::body_mask(fauna, i, founder),
+                    };
+                    let executed = crate::Executed { actions, ..crate::Executed::default() };
+                    crate::intent::record(fauna, i, founder, src, teach, &valid, executed);
+                }
+            }
+            // The decision tap: the sample's inputs, the label before the hold and what was
+            // held, for cloning (§10.2, §11.3).
+            if let (Some(prep), true) = (sensed[k].prep.as_ref(), fauna.tap.is_some()) {
+                let rec = fauna.animals[i].intent;
+                let sample = crate::TapDecision {
+                    tick: fauna.tick,
+                    prep: prep.clone(),
+                    held_before: held_before.held,
+                    proposal: rec.proposal,
+                    proposal_row: prep.candidates.row_of(rec.proposal_subject),
+                    held: rec.held,
+                    held_row: prep.candidates.row_of(rec.subject),
+                    executed: rec.executed,
+                    overridden: rec.overridden,
+                };
+                if let Some(t) = fauna.tap.as_mut() {
+                    t.push_decision(id, founder, sample);
+                }
+            }
+        }
         let a = &mut fauna.animals[i];
         a.founder_state.held = actions;
         a.founder_state.lure = if lure.is_finite() { lure.clamp(0.0, 1.0) } else { 0.0 };
@@ -5289,6 +5416,8 @@ fn newborn(
         bout: None,
         hunt: crate::HuntMemory::default(),
         mother: None,
+        intent: crate::IntentRecord::default(),
+        kick: crate::kick::KickState::default(),
         bite: crate::LastBite::default(),
     }
 }

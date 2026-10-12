@@ -144,6 +144,10 @@ pub struct Track {
     /// **FEAR**: its posture as seen ([`posture`]); [`posture::ACTIVE`] unless sight detected
     /// it (a posture is read by eye: a still body is neither heard nor felt).
     pub posture: u8,
+    /// **Lame as seen** (CONTRACTS): sight detected it with its wound at or over the
+    /// perception's `lame_wound`.
+    #[serde(default)]
+    pub lame: bool,
 }
 
 /// **A body's posture** as a sighted observer reads it (FEAR, [`posture_of`]).
@@ -507,6 +511,7 @@ pub(crate) fn sense_pair(
         tick,
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(config, o) } else { posture::ACTIVE },
+        lame: modes & SIGHT != 0 && o.wound >= pc.lame_wound,
     })
 }
 
@@ -610,7 +615,7 @@ fn sense_one(fauna: &Fauna, view: &VoxelView<'_>, bins: &Bins, day: bool, i: usi
     let sight_scale = if fauna.percepts.get(&b.id).is_some_and(|p| p.vigil.head_down(now)) { table.feeding_sight_fraction } else { 1.0 };
     // SP-FOLLOW: a dependent young weighs its mother over its kin cap
     // ([`crate::nurse::weighs_as_mother`]); `None` when it has none to weigh, or once weighed.
-    let mut mother = b.mother.filter(|&m| crate::nurse::weighs_as_mother(fauna, i, m) && cand.iter().any(|c| c.1 == m));
+    let mut mother = crate::mother_body(b).filter(|&m| crate::nurse::weighs_as_mother(fauna, i, m) && cand.iter().any(|c| c.1 == m));
     for &(_, oid, k, c) in &cand {
         if c == class::KIN && mother == Some(oid) {
             mother = None;
@@ -912,6 +917,7 @@ fn interim_track(fauna: &Fauna, view: &VoxelView<'_>, a: &Animal, o: &Animal, cl
         tick: fauna.tick,
         heading: o.pose.heading_rad,
         posture: if modes & SIGHT != 0 { posture_of(&fauna.config, o) } else { posture::ACTIVE },
+        lame: modes & SIGHT != 0 && o.wound >= fauna.config.perception.lame_wound,
     }
 }
 

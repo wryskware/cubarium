@@ -1113,6 +1113,7 @@ pub(crate) fn seed_pre_rolled_watched(
         // Every lineage left is founded as bodies ([`place_bodies`]), each arriving grown
         // and full ([`founder_arrival`]).
         let stores = vec![founder_arrival(&fauna.config().founding); want];
+        let births_before = fauna.view().ledger.births;
         let placed = place_bodies(
             world,
             flora,
@@ -1124,6 +1125,20 @@ pub(crate) fn seed_pre_rolled_watched(
             &mut taken,
             usize::MAX,
         );
+        // CONTRACTS (behaviour-AI §11.6): founders placed together are one family, recorded
+        // as sisters of a founding mother.
+        if phys.founding_together {
+            let ids: Vec<u64> = fauna
+                .view()
+                .animals
+                .iter()
+                .filter(|a| a.founder == Some(founder) && a.id >= births_before)
+                .map(|a| a.id)
+                .collect();
+            if let Some(&first) = ids.first() {
+                fauna.record_founding_family(&ids, first);
+            }
+        }
         seeded.founders[founder.index()] += placed.placed;
         seeded.litter_tiles += placed.litter_tiles;
         seeded.shortfall[founder.index()] = want.saturating_sub(seeded.founders[founder.index()]);

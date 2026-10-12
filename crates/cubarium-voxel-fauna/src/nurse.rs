@@ -175,7 +175,7 @@ pub fn dependent(fauna: &Fauna, i: usize) -> bool {
     let Some(a) = fauna.animals.get(i) else {
         return false;
     };
-    a.mother.is_some() && table_of(fauna, i).is_some_and(|t| (a.age_ticks as f64) * DT < t.weaning_age_s)
+    crate::mother_body(a).is_some() && table_of(fauna, i).is_some_and(|t| (a.age_ticks as f64) * DT < t.weaning_age_s)
 }
 
 /// The 3D distance between bodies `a` and `b`, metres, x wrapping on the ring.
@@ -209,7 +209,7 @@ pub(crate) fn nurse(fauna: &mut Fauna, view: &VoxelView<'_>) {
     // (mother id, young index) for every dependent young, mothers grouped in id order.
     let mut young: Vec<(u64, usize)> = (0..fauna.animals.len())
         .filter(|&k| dependent(fauna, k))
-        .filter_map(|k| fauna.animals[k].mother.map(|m| (m, k)))
+        .filter_map(|k| crate::mother_body(&fauna.animals[k]).map(|m| (m, k)))
         .collect();
     if young.is_empty() {
         return;
@@ -277,7 +277,7 @@ pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
     }
     // SP-FOLLOW: with the leash on, the young is left to itself within it ([`mother_goal`]).
     let comfort = if t.leash_m > 0.0 { t.leash_m.max(t.follow_m) } else { t.follow_m };
-    let mother = a.mother?;
+    let mother = crate::mother_body(&a)?;
     let p = fauna.percept(a.id)?;
     let fresh = 2 * fauna.config.perception.stagger_ticks();
     let track = p
@@ -293,7 +293,7 @@ pub fn mother_pull(fauna: &Fauna, i: usize, ring: f64) -> Option<Option<Pull>> {
 /// lineage's kin cap ([`crate::perception`]): a dependent young whose lineage follows
 /// ([`Nursing::follows`]), and `o` its mother.
 pub(crate) fn weighs_as_mother(fauna: &Fauna, i: usize, o: u64) -> bool {
-    fauna.animals.get(i).is_some_and(|a| a.mother == Some(o))
+    fauna.animals.get(i).is_some_and(|a| crate::mother_body(a) == Some(o))
         && dependent(fauna, i)
         && table_of(fauna, i).is_some_and(|t| t.follows())
 }
@@ -326,7 +326,7 @@ pub(crate) fn mother_goal(fauna: &mut Fauna, i: usize, view: &VoxelView<'_>) -> 
         }
     };
     let a = fauna.animals[i];
-    let mother = a.mother?;
+    let mother = crate::mother_body(&a)?;
     if fauna.animals.binary_search_by_key(&mother, |b| b.id).is_err() {
         fauna.mother_seen.remove(&id);
         return None;
