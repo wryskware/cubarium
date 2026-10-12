@@ -51,7 +51,7 @@ pub(crate) fn scene(hf: Founder, pf: Founder) -> (World, Fauna, u64, u64) {
 }
 
 pub(crate) fn rescale(fauna: &mut Fauna, founder: Founder, k: f64) {
-    let mut config = fauna.config.clone();
+    let mut config = *fauna.config;
     config.founders[founder.index()].scale_mass(k);
     fauna
         .replace_config(config)

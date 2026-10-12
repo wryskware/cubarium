@@ -22,7 +22,7 @@ fn pair(prey: Founder, seed: u64) -> (Fauna, u64, u64) {
 #[test]
 fn a_snail_in_water_is_not_taken_and_one_ashore_is() {
     let (mut fauna, lj, snail) = pair(Founder::RippleSnail, 61);
-    let c = fauna.config;
+    let c = *fauna.config;
     let h = c.founder(Founder::Lanternjaw).hunter.expect("the lanternjaw's table");
     assert!(h.prey_ashore_only[Founder::RippleSnail.index()], "fixture: the snail is ashore-only");
     animal_mut(&mut fauna, snail).mobility.ashore = true;
@@ -36,7 +36,7 @@ fn a_snail_in_water_is_not_taken_and_one_ashore_is() {
 #[test]
 fn an_adult_frondgrazer_is_not_taken_and_a_juvenile_is() {
     let (mut fauna, lj, grazer) = pair(Founder::Browser, 62);
-    let c = fauna.config;
+    let c = *fauna.config;
     let h = c.founder(Founder::Lanternjaw).hunter.expect("the lanternjaw's table");
     let core = crate::effective_config(&c, &animal(&fauna, grazer));
     let window = h.prey_max_ratio * animal(&fauna, lj).body;
@@ -57,7 +57,7 @@ fn an_adult_frondgrazer_is_not_taken_and_a_juvenile_is() {
 #[test]
 fn the_attack_chance_follows_the_prey_weight() {
     let (fauna, lj, cap) = pair(Founder::Capgnawer, 63);
-    let c = fauna.config;
+    let c = *fauna.config;
     let (a, o) = (animal(&fauna, lj), animal(&fauna, cap));
     let full = crate::attack_chance(&c, &a, &o);
     assert!(full > 0.0, "fixture: a capgnawer is worth attacking");

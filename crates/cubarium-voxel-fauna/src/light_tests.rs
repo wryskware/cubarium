@@ -307,7 +307,7 @@ fn a_bellwing_hovering_in_reach_is_takeable_and_one_above_reach_is_not() {
     let world = clock_off(13);
     let mut fauna = Fauna::new(config());
     let lj = lanternjaw(&mut fauna, &world, 5.0, LANE_Z, WEST, 0.0, false);
-    let c = fauna.config;
+    let c = *fauna.config;
     let h = c.founder(LJ).hunter.expect("a hunter");
     let band = h.jaw_band_height_fraction * crate::body_of(&c, &animal(&fauna, lj)).expect("a body").height_m;
     let bw = bellwing(&mut fauna, &world, 4.2, LANE_Z, 0.25 * band, WEST);

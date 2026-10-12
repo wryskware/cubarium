@@ -169,7 +169,7 @@ fn seedporter_warning_checkpoint_probe() {
             for bw_body in sizes(BW) {
                 for along in 1..=9 {
                     for side in [-0.25, 0.0, 0.25] {
-                        let mut c = saved.config.clone();
+                        let mut c = *saved.config;
                         for f in [SP, BW] { c.founders[f.index()].active = Activity::Always; }
                         c.founders[SP.index()].hunter.as_mut().unwrap().strike_warning_scale = warning;
                         let mut flora = Flora::new(FloraConfig::default());
