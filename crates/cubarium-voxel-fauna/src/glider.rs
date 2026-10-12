@@ -370,7 +370,7 @@ pub(super) fn glider_act(
     // GAIT: off its feet it does not sprint, and rests.
     crate::gait::rest(fauna, i, founder);
     let phys = *fauna.config.founder(founder);
-    let manifest = fauna.config.manifest(founder);
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
     let mut held = fauna.animals[i].founder_state.held;
     if mode == MobilityMode::Perched && !asleep && phys.catch_bellwings {
@@ -434,7 +434,7 @@ fn ground_tick(
 ) {
     let founder = fauna.animals[i].founder.expect("a founder body");
     let phys = *fauna.config.founder(founder);
-    let manifest = fauna.config.manifest(founder);
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let due = fauna.animals[i].age_ticks % founder.manifest().cadence_ticks() == 0;
     let held = fauna.animals[i].founder_state.held;
     let before = fauna.animals[i].pose;

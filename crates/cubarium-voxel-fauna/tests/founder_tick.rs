@@ -794,8 +794,10 @@ fn the_self_motion_channels_flow_from_resolved_motion() {
     assert_eq!(obs[0][5..8], [0.0, 0.0, 1.0], "initial feedback is zero");
     // One interval of full cruise = exactly the forward reference, unblocked (the
     // reference is the same distance the five sub-steps sum to, to float dust).
+    // YOUNG-ROAM: a young body's cruise, and so the reference, follow its length, which
+    // grows a little over the interval.
     assert!(
-        (obs[1][5] - 1.0).abs() < 1e-9,
+        (obs[1][5] - 1.0).abs() < 1e-4,
         "resolved forward, got {}",
         obs[1][5]
     );

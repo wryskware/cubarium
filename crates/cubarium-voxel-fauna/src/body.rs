@@ -665,6 +665,10 @@ pub struct FounderPhysiology {
     /// On for the loftstrider, off for the rest.
     #[serde(default)]
     pub defence: crate::Defence,
+    /// **Its young's pace and roaming** (YOUNG-ROAM, [`crate::roam::Young`]): a young body's
+    /// pace by its own length, the loosening leash and excursions.
+    #[serde(default)]
+    pub young: crate::roam::Young,
     /// **Its calls and its hearing of them** (CONTRACTS, [`crate::calls::CallTable`]): no
     /// range for a lineage without call kinds.
     #[serde(default)]
@@ -2071,6 +2075,7 @@ impl FounderPhysiology {
         p.calls = crate::calls::calls_of(founder);
         p.rest = crate::sleep::rest_of(founder);
         p.defence = crate::defend::defence_of(founder);
+        p.young = crate::roam::young_of(founder);
         p.kick = crate::kick::kick_of(founder);
         p.drop = crate::step::jump::drop_of(founder);
         p.wade = crate::step::jump::wade_of(founder);
@@ -2206,6 +2211,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2309,6 +2315,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),
@@ -2457,6 +2464,7 @@ impl FounderPhysiology {
                 brain: crate::BrainArbitration::default(),
                 kick: None,
                 defence: crate::Defence::default(),
+                young: crate::roam::Young::default(),
                 calls: crate::calls::CallTable::default(),
                 rest: crate::sleep::RestTable::default(),
                 dispersal: crate::Dispersal::default(),

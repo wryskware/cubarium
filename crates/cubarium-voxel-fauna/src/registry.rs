@@ -417,6 +417,8 @@ fn founder_rows() -> Vec<Row> {
         r("defence.w_go_to_calf", "logit", nonneg, "LS-DEFEND: go to calf's score (a distress call heeded, or a calf nearer a threat than any adult)"),
         r("defence.w_guard", "logit", nonneg, "LS-DEFEND: guard's score (a pressing threat within guard_m)"),
         r("defence.w_go_to_adults", "logit", nonneg, "LS-DEFEND: a young body's go-to-adults score (a threat sensed, or an alarm or distress heeded)"),
+        // YOUNG-ROAM (`roam::Young`, behaviour-AI §3.5).
+        r("young.pace_floor", "x adult cruise", fraction, "YOUNG-ROAM: a young body's cruise and sprint are its own length's (x (body/birth_body)^(1/3)), never under this fraction of the adult's (1: adult pace at any size); hoofed calves run with the herd at about half the adults' speed"),
         // Calls (`calls::CallTable`, CONTRACTS, behaviour-AI §11.2); `recognise_voice` is a switch.
         r("calls.range_m", "m", nonneg, "CONTRACTS: a call of loudness 1 is heard this far on open ground (0: no calls); hoofed and canid calls carry tens to hundreds of metres"),
         r("calls.loudness.*", "x range", nonneg, "CONTRACTS: each call kind's loudness (kinds_of order); through terrain x perception.occlusion"),

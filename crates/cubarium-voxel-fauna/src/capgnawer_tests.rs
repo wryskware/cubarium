@@ -229,7 +229,8 @@ fn a_young_capgnawer_smells_and_reaches_a_glowcap_metres_away() {
     let x0 = animal(&fauna, far).pose.x;
     let bites = |f: &Fauna| f.ledger.bites_by_founder_food[GNAWER.index()][Food::CapTissue.index()];
     let mut reached = None;
-    for t in 1..=300u32 {
+    // YOUNG-ROAM: a young walks at its own length's pace, slower than an adult.
+    for t in 1..=600u32 {
         fauna.step_with_senses(&world, &mut flora, 1, &mut senses);
         if bites(&fauna) > 0 {
             reached = Some(t);
@@ -237,7 +238,7 @@ fn a_young_capgnawer_smells_and_reaches_a_glowcap_metres_away() {
         }
     }
     let x1 = fauna.view().animal(far).map(|a| a.pose.x);
-    assert!(reached.is_some(), "no bite on the caps in 300 ticks (x {x0:.2} -> {x1:?}, the cap at {cap_x:.2})");
+    assert!(reached.is_some(), "no bite on the caps in 600 ticks (x {x0:.2} -> {x1:?}, the cap at {cap_x:.2})");
     assert_closes(&fauna, "after the walk to the caps");
 }
 

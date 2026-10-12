@@ -1761,7 +1761,8 @@ fn controllers(
         let fv = &fv;
         let read = |i: usize, slot: &mut Option<&mut Box<dyn crate::Controller>>| -> Sensed {
             let founder = fauna.animals[i].founder.expect("a due founder");
-            let manifest = fauna.config.manifest(founder);
+            // YOUNG-ROAM: its resolved forward against its own cruise's reference.
+            let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
             let occupancy = if v2_cone[founder.index()] {
                 cone_occupancy
             } else {
@@ -3210,7 +3211,8 @@ fn founder_act(
             a.age_ticks % founder.manifest().cadence_ticks() == 0,
         )
     };
-    let manifest = fauna.config.manifest(founder);
+    // YOUNG-ROAM: a young body walks and runs at its own length's pace.
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let phys = *fauna.config.founder(founder);
     let sc = phys.core;
     if (fauna.controllers.layer(fauna.animals[i].id) == crate::Layer::Brain && fauna.animals[i].hunkered) || fauna.animals[i].mobility.retract_ticks > 0 {
@@ -3449,7 +3451,7 @@ fn flyer_act(
     use crate::{MobilityMode, PerchKind};
     let founder = fauna.animals[i].founder.expect("a founder body");
     let phys = *fauna.config.founder(founder);
-    let manifest = fauna.config.manifest(founder);
+    let manifest = fauna.config.body_manifest(founder, fauna.animals[i].body);
     let sc = phys.core;
     fauna.ledger.founder_ticks_by_founder[founder.index()] += 1;
     let (asleep, mut held, lift_held, due) = {

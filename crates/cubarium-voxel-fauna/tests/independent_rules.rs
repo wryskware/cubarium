@@ -883,8 +883,10 @@ fn self_feedback_reports_the_previous_interval_only_and_starts_at_zero() {
 
     // Second sample: exactly the interval that was held, normalized against one controller
     // period of the manifest's cruise and yaw references.
+    // YOUNG-ROAM: a young body's cruise, and so the reference, follow its length, which
+    // grows a little over the interval.
     assert!(
-        close(samples[1][forward], 0.5, 1e-9),
+        close(samples[1][forward], 0.5, 1e-4),
         "resolved_forward was {} for a 0.5 cruise interval",
         samples[1][forward]
     );

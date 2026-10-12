@@ -67,6 +67,8 @@ pub mod sleep;
 /// LS-DEFEND (behaviour-AI §3): the loftstrider's family defence.
 pub mod defend;
 pub use defend::Defence;
+/// YOUNG-ROAM (behaviour-AI §3.5): young pace, the loosening leash and excursions.
+pub mod roam;
 #[cfg(test)]
 mod intent_tests;
 #[cfg(test)]
@@ -2696,6 +2698,18 @@ impl FaunaConfig {
             let p = self.founder(f);
             if p.founding == Founding::Clutches { 0 } else { p.founding_count }
         })
+    }
+
+    /// **The manifest a body of `body` runs** (YOUNG-ROAM): [`FaunaConfig::manifest`] with its
+    /// cruise, and so its sprint, at its own length ([`roam::pace_scale`]), and the forward
+    /// reference that follows cruise, so its resolved-forward feedback stays a share of its
+    /// own cruise. An adult's is the lineage's.
+    pub fn body_manifest(&self, founder: Founder, body: f64) -> Manifest {
+        let mut m = self.manifest(founder);
+        let scale = roam::pace_scale(self.founder(founder), body);
+        m.cruise_m_per_s *= scale;
+        m.forward_reference_m *= scale;
+        m
     }
 
     /// **The manifest the live body runs**: the founder's fixed [`Manifest`] with the
